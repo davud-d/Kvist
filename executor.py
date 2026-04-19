@@ -252,6 +252,21 @@ class SafeExecutor:
         except ValueError as error:
             raise ExecutorError("Выход за пределы workspace запрещен") from error
 
+        # Защита от symlink-атак: проверяем, что ни один компонент
+        # пути не является символической ссылкой, ведущей за пределы workspace.
+        current = self.workspace
+        relative_parts = candidate.relative_to(self.workspace).parts
+        for part in relative_parts:
+            current = current / part
+            if current.is_symlink():
+                real_target = current.resolve()
+                try:
+                    real_target.relative_to(self.workspace)
+                except ValueError:
+                    raise ExecutorError(
+                        "Символическая ссылка ведёт за пределы workspace — доступ запрещён"
+                    )
+
         return candidate
 
     def _resolve_dir(self, user_path: str | None) -> Path:

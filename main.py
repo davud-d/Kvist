@@ -34,7 +34,7 @@ def main() -> None:
         help="Путь к рабочей директории (по умолчанию: AGENT_WORKSPACE или ./workspace)",
     )
     args = cli.parse_args()
-    
+
     # .env — ищем рядом со скриптом, не зависим от cwd
     env_path = Path(__file__).resolve().parent / "API_KEYS.env"
     load_dotenv(env_path, override=True)
@@ -45,6 +45,7 @@ def main() -> None:
 
     if not api_key.startswith("sk-"):
         raise RuntimeError("OPENAI_API_KEY выглядит некорректно")
+        
 
     fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-4.1-mini")
     smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-4.1")

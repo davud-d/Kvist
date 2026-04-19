@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,6 +64,12 @@ _FORBIDDEN_OPERATORS: frozenset[str] = frozenset({
     ">", ">>", "<", "<<",
     "&",
 })
+
+# ---------------------------------------------------------------------------
+# Regex для обнаружения command substitution и опасных конструкций
+# внутри аргументов ($(…), `…`, ${…})
+# ---------------------------------------------------------------------------
+_SUBST_RE = re.compile(r"\$\(|`|\$\{")
 
 # ---------------------------------------------------------------------------
 # Разрешённые команды: общие и платформенные
@@ -244,8 +251,18 @@ class TerminalExecutor:
             if token in _FORBIDDEN_OPERATORS:
                 raise TerminalError(f"Shell-оператор '{token}' запрещён")
 
+            # Обнаружение command substitution внутри аргументов: $(…), `…`, ${…}
+            if _SUBST_RE.search(token):
+                raise TerminalError(
+                    "Command substitution ($(), ``, ${}) в аргументах запрещена"
+                )
+
             if self._is_absolute_path(token):
                 raise TerminalError("Абсолютные пути запрещены в аргументах")
+
+            # UNC-пути на Windows (\\server\share)
+            if token.startswith("\\\\"):
+                raise TerminalError("UNC-пути запрещены в аргументах")
 
             # Path traversal
             segments = [s for s in token.replace("\\", "/").split("/") if s]
@@ -296,10 +313,27 @@ class TerminalExecutor:
         env.update(overrides)
         return env
 
+    @staticmethod
+    def _escape_cmd_arg(arg: str) -> str:
+        """Экранирует спецсимволы CMD для безопасной передачи через cmd.exe /c."""
+        # Символы, которые CMD интерпретирует как операторы
+        _CMD_META = set('()%!^"<>&|')
+        if not any(ch in _CMD_META for ch in arg):
+            return arg
+        # Экранируем каждый метасимвол CMD с помощью ^
+        escaped = []
+        for ch in arg:
+            if ch in _CMD_META:
+                escaped.append("^")
+            escaped.append(ch)
+        return "".join(escaped)
+
     def _wrap_for_platform(self, command: list[str]) -> list[str]:
         """На Windows оборачивает CMD-встроенные команды через cmd.exe /c."""
         if self._is_windows and command[0].lower() in _WINDOWS_CMD_BUILTINS:
-            return ["cmd.exe", "/c"] + command
+            # Экранируем аргументы, чтобы предотвратить shell-инъекцию через & | && и т.д.
+            safe_args = [self._escape_cmd_arg(a) for a in command]
+            return ["cmd.exe", "/c"] + safe_args
         return command
 
     def _truncate(self, text: str) -> str:
