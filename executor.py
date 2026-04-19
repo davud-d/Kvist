@@ -283,18 +283,36 @@ class SafeExecutor:
 
     _ENV_PATTERN = re.compile(r"(^|[\\/])\.env(\.[a-zA-Z0-9_.-]*)?$|[a-zA-Z0-9_]*\.env$", re.IGNORECASE)
 
-    def _check_env_file(self, path: str) -> None:
+    def _is_env_file_path(self, path: str | Path) -> bool:
+        if isinstance(path, Path):
+            candidates = {path.as_posix(), path.name}
+            try:
+                candidates.add(self._relative_path(path))
+            except ValueError:
+                pass
+        else:
+            normalized = path.replace("\\", "/")
+            candidates = {path, normalized, normalized.rsplit("/", 1)[-1]}
+
+        return any(self._ENV_PATTERN.search(candidate) for candidate in candidates)
+
+    def _check_env_file(self, path: str | Path) -> None:
         """Блокирует любой доступ к .env файлам."""
-        if self._ENV_PATTERN.search(path):
+        if self._is_env_file_path(path):
             raise ExecutorError(
                 "⛔ НАРУШЕНИЕ ПРОТОКОЛА БЕЗОПАСНОСТИ: Попытка доступа к .env файлу запрещена. "
-                "Файлы *.env содержат секреты и не могут быть прочитаны агентом. "
-                "Если вам нужна информация о переменных окружения — спросите пользователя напрямую."
+                "Файлы *.env содержат секреты и недоступны агенту для чтения и изменения. "
+                "Если нужно обновить переменные окружения — попросите пользователя сделать это вручную."
             )
 
-    def _read_file(self, path: str) -> ExecutionResult:
+    def _guard_env_file_access(self, path: str) -> Path:
         self._check_env_file(path)
         target = self._resolve_path(path)
+        self._check_env_file(target)
+        return target
+
+    def _read_file(self, path: str) -> ExecutionResult:
+        target = self._guard_env_file_access(path)
 
         if not target.exists():
             raise ExecutorError(f"Файл не найден: {path}")
@@ -317,8 +335,7 @@ class SafeExecutor:
     def _read_multiple_files(self, paths: list[str]) -> ExecutionResult:
         files: list[dict[str, Any]] = []
         for path in paths:
-            self._check_env_file(path)
-            target = self._resolve_path(path)
+            target = self._guard_env_file_access(path)
             if not target.exists() or not target.is_file():
                 raise ExecutorError(f"Файл не найден: {path}")
             content, truncated = self._safe_read_text(target)
@@ -337,7 +354,7 @@ class SafeExecutor:
         )
 
     def _write_file(self, path: str, content: str) -> ExecutionResult:
-        target = self._resolve_path(path)
+        target = self._guard_env_file_access(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
@@ -351,7 +368,7 @@ class SafeExecutor:
         )
 
     def _append_file(self, path: str, content: str) -> ExecutionResult:
-        target = self._resolve_path(path)
+        target = self._guard_env_file_access(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("a", encoding="utf-8") as file:
             file.write(content)
@@ -372,7 +389,7 @@ class SafeExecutor:
         new_text: str,
         count: int = 1,
     ) -> ExecutionResult:
-        target = self._resolve_path(path)
+        target = self._guard_env_file_access(path)
 
         if not target.exists():
             raise ExecutorError(f"Файл не найден: {path}")

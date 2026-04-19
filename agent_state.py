@@ -7,9 +7,9 @@ from typing import Any
 
 @dataclass(slots=True)
 class AgentConfig:
-    fast_model: str = "gpt-5-4-mini"
+    fast_model: str = "gpt-5.4-mini"
     smart_model: str = "gpt-5.4"
-    planner_model: str = "gpt-4.1"
+    planner_model: str = "gpt-5.4"
     max_steps: int = 20
     stagnation_limit: int = 6
     max_consecutive_errors: int = 6
