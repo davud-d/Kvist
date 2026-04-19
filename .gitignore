@@ -1,0 +1,10 @@
+API_KEYS.env
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+workspace/
+agent_logs/
+.pytest_cache/
+.mypy_cache/
