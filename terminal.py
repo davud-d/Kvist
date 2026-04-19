@@ -40,13 +40,6 @@ _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
     "shutdown", "reboot", "poweroff",
     # Сетевые утилиты (могут утекать данные)
     "curl", "wget",
-    # Интерпретаторы (не запускать произвольный код)
-    "python", "python3", "py",
-    "node", "npm", "npx",
-    "pip", "pip3",
-    # Вложенные shell (обход sandbox)
-    "powershell", "pwsh", "cmd", "cmd.exe",
-    "bash", "sh", "zsh", "fish",
     # Удалённый доступ
     "nc", "ncat", "netcat",
     "ssh", "scp", "sftp", "telnet", "ftp",
@@ -54,6 +47,16 @@ _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
     "reg", "regedit",
     # Управление службами
     "net", "sc",
+})
+
+_RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
+    "python", "python3", "py",
+    "pytest", "pip", "pip3", "uv",
+    "node", "npm", "npx", "pnpm", "yarn",
+    "cmake", "ctest", "make",
+    "cargo", "go", "java", "javac", "dotnet",
+    "powershell", "pwsh", "cmd", "cmd.exe",
+    "bash", "sh", "zsh", "fish",
 })
 
 # ---------------------------------------------------------------------------
@@ -80,6 +83,30 @@ _COMMON_ALLOWED: dict[str, set[str] | None] = {
         "status", "diff", "rev-parse", "branch", "log",
         "show", "tag", "remote", "stash", "ls-files",
     },
+}
+
+_DEV_COMMON_ALLOWED: dict[str, set[str] | None] = {
+    "git": None,
+    "python": None,
+    "python3": None,
+    "py": None,
+    "pytest": None,
+    "pip": None,
+    "pip3": None,
+    "uv": None,
+    "node": None,
+    "npm": None,
+    "npx": None,
+    "pnpm": None,
+    "yarn": None,
+    "cmake": None,
+    "ctest": None,
+    "make": None,
+    "cargo": None,
+    "go": None,
+    "java": None,
+    "javac": None,
+    "dotnet": None,
 }
 
 _UNIX_ALLOWED: dict[str, set[str] | None] = {
@@ -113,10 +140,44 @@ _WINDOWS_ALLOWED: dict[str, set[str] | None] = {
     "whoami": None,
 }
 
+_DEV_UNIX_ALLOWED: dict[str, set[str] | None] = {
+    "bash": None,
+    "sh": None,
+}
+
+_DEV_WINDOWS_ALLOWED: dict[str, set[str] | None] = {
+    "cmd": None,
+    "cmd.exe": None,
+    "powershell": None,
+    "pwsh": None,
+    "where": None,
+    "type": None,
+    "dir": None,
+    "tree": None,
+    "hostname": None,
+    "whoami": None,
+}
+
 # CMD-встроенные команды (нет отдельного .exe, нужна обёртка cmd /c)
 _WINDOWS_CMD_BUILTINS: frozenset[str] = frozenset({
     "dir", "cd", "type", "echo", "set", "ver",
 })
+
+_WINDOWS_CMD_BUILTIN_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_.:\\\/\- ]+$")
+_CMD_DANGEROUS_INLINE_RE: re.Pattern[str] = re.compile(r"(?:&&|\|\||>>|[&|<>;])")
+_POWERSHELL_FILE_FLAGS: frozenset[str] = frozenset({"-file", "-f"})
+_POWERSHELL_COMMAND_FLAGS: frozenset[str] = frozenset({"-command", "-c"})
+_POWERSHELL_SAFE_FLAGS: frozenset[str] = frozenset({"-nologo", "-noninteractive", "-noprofile"})
+_POWERSHELL_SAFE_FLAGS_WITH_VALUE: frozenset[str] = frozenset({"-executionpolicy"})
+_SCRIPT_EXTENSIONS: dict[str, tuple[str, ...]] = {
+    "bash": (".sh",),
+    "sh": (".sh",),
+    "powershell": (".ps1",),
+    "pwsh": (".ps1",),
+    "cmd": (".bat", ".cmd"),
+    "cmd.exe": (".bat", ".cmd"),
+}
+_TERMINAL_PROFILES: frozenset[str] = frozenset({"restricted", "dev"})
 
 
 class TerminalExecutor:
@@ -138,6 +199,7 @@ class TerminalExecutor:
         workspace: Path,
         timeout: float = 15.0,
         max_output_chars: int = 12000,
+        profile: str = "dev",
         extra_allowed: dict[str, set[str] | None] | None = None,
         extra_forbidden: set[str] | None = None,
     ) -> None:
@@ -145,16 +207,20 @@ class TerminalExecutor:
         self.timeout = max(1.0, min(timeout, 30.0))
         self.max_output_chars = max(1000, min(max_output_chars, 200_000))
         self._is_windows = os.name == "nt"
+        normalized_profile = (profile or "dev").strip().lower()
+        if normalized_profile not in _TERMINAL_PROFILES:
+            normalized_profile = "dev"
+        self.profile = normalized_profile
 
         # Собираем allowlist: общие + платформенные + пользовательские
-        self._allowed: dict[str, set[str] | None] = dict(_COMMON_ALLOWED)
-        platform_cmds = _WINDOWS_ALLOWED if self._is_windows else _UNIX_ALLOWED
-        self._allowed.update(platform_cmds)
+        self._allowed = self._build_allowed_commands()
         if extra_allowed:
             self._allowed.update(extra_allowed)
 
         # Собираем forbidden
         self._forbidden: set[str] = set(_FORBIDDEN_EXECUTABLES)
+        if self.profile == "restricted":
+            self._forbidden.update(_RESTRICTED_EXTRA_FORBIDDEN)
         if extra_forbidden:
             self._forbidden.update(extra_forbidden)
 
@@ -236,6 +302,16 @@ class TerminalExecutor:
                 f"Допустимые: {', '.join(sorted(self._allowed))}"
             )
 
+        if executable in {"bash", "sh", "powershell", "pwsh", "cmd", "cmd.exe"}:
+            self._validate_shell_command(command, executable)
+        else:
+            self._validate_standard_command(command, executable)
+
+        # Лимит суммарной длины
+        if sum(len(t) for t in command) > 2000:
+            raise TerminalError("Команда слишком длинная")
+
+    def _validate_standard_command(self, command: list[str], executable: str) -> None:
         # Проверка подкоманд (для git и подобных)
         allowed_sub = self._allowed.get(executable)
         if allowed_sub is not None and len(command) > 1:
@@ -245,8 +321,82 @@ class TerminalExecutor:
                     f"Подкоманда '{command[1]}' не разрешена для '{command[0]}'"
                 )
 
-        # Проверка каждого аргумента
-        for token in command[1:]:
+        self._validate_common_tokens(command[1:])
+        self._validate_interpreter_inline_modes(command, executable)
+
+    def _validate_shell_command(self, command: list[str], executable: str) -> None:
+        if executable in {"bash", "sh"}:
+            if len(command) != 2:
+                raise TerminalError(f"Для '{command[0]}' разрешён только запуск script file внутри workspace")
+            self._validate_script_argument(command[1], executable)
+            return
+
+        if executable in {"powershell", "pwsh"}:
+            if len(command) < 3:
+                raise TerminalError(f"Для '{command[0]}' разрешён только режим -File <script.ps1>")
+
+            script_index: int | None = None
+            index = 1
+            while index < len(command):
+                token = command[index]
+                lowered = token.lower()
+                if lowered in _POWERSHELL_COMMAND_FLAGS:
+                    raise TerminalError(f"Inline-режим '{token}' запрещён для '{command[0]}'")
+                if lowered in _POWERSHELL_FILE_FLAGS:
+                    script_index = index + 1
+                    break
+                if lowered in _POWERSHELL_SAFE_FLAGS:
+                    index += 1
+                    continue
+                if lowered in _POWERSHELL_SAFE_FLAGS_WITH_VALUE:
+                    if index + 1 >= len(command):
+                        raise TerminalError(f"Для '{token}' требуется безопасное значение перед -File")
+                    self._validate_common_tokens([command[index + 1]])
+                    index += 2
+                    continue
+                raise TerminalError(f"Для '{command[0]}' разрешён только режим -File <script.ps1>")
+
+            if script_index is None or script_index >= len(command):
+                raise TerminalError(f"Для '{command[0]}' не указан script file после -File")
+
+            script = command[script_index]
+            self._validate_common_tokens(command[1:script_index])
+            self._validate_script_argument(script, executable)
+            self._validate_common_tokens(command[script_index + 1 :])
+            return
+
+        self._validate_windows_cmd_command(command)
+
+    def _validate_windows_cmd_command(self, command: list[str]) -> None:
+        if len(command) < 3 or command[1].lower() != "/c":
+            raise TerminalError(f"Для '{command[0]}' разрешён только режим /c <builtin|script>")
+
+        if len(command) != 3:
+            raise TerminalError(f"Для '{command[0]}' разрешён только один безопасный аргумент после /c")
+
+        payload = command[2].strip()
+        if not payload:
+            raise TerminalError("Пустая строка после /c запрещена")
+        if _CMD_DANGEROUS_INLINE_RE.search(payload):
+            raise TerminalError("Опасные shell-операторы в cmd /c запрещены")
+        if _SUBST_RE.search(payload):
+            raise TerminalError("Command substitution в cmd /c запрещена")
+
+        if self._looks_like_relative_script(payload, _SCRIPT_EXTENSIONS["cmd"]):
+            self._validate_script_argument(payload, "cmd")
+            return
+
+        builtin, separator, remainder = payload.partition(" ")
+        if builtin.lower() not in _WINDOWS_CMD_BUILTINS:
+            raise TerminalError(f"Для '{command[0]}' разрешены только builtin-команды CMD или .bat/.cmd из workspace")
+        if not separator:
+            return
+
+        if not _WINDOWS_CMD_BUILTIN_RE.fullmatch(remainder.strip()):
+            raise TerminalError("Аргументы builtin-команд CMD содержат недопустимые символы")
+
+    def _validate_common_tokens(self, tokens: list[str]) -> None:
+        for token in tokens:
             # Только точное совпадение с shell-оператором (не подстрока!)
             if token in _FORBIDDEN_OPERATORS:
                 raise TerminalError(f"Shell-оператор '{token}' запрещён")
@@ -269,9 +419,31 @@ class TerminalExecutor:
             if ".." in segments:
                 raise TerminalError("Path traversal (..) запрещён")
 
-        # Лимит суммарной длины
-        if sum(len(t) for t in command) > 2000:
-            raise TerminalError("Команда слишком длинная")
+    def _validate_interpreter_inline_modes(self, command: list[str], executable: str) -> None:
+        if executable in {"python", "python3", "py"} and any(arg == "-c" for arg in command[1:]):
+            raise TerminalError(f"Inline-режим '-c' запрещён для '{command[0]}'")
+        if executable == "node" and any(arg in {"-e", "--eval"} for arg in command[1:]):
+            raise TerminalError("Inline-режим '-e' запрещён для 'node'")
+
+    def _validate_script_argument(self, script: str, executable: str) -> None:
+        self._validate_common_tokens([script])
+        if not self._looks_like_relative_script(script, _SCRIPT_EXTENSIONS[executable]):
+            raise TerminalError(f"Для '{executable}' разрешён только относительный script file внутри workspace")
+
+    def _looks_like_relative_script(self, path_token: str, extensions: tuple[str, ...]) -> bool:
+        normalized = path_token.replace("\\", "/")
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized.lower().endswith(extensions)
+
+    def _build_allowed_commands(self) -> dict[str, set[str] | None]:
+        allowed: dict[str, set[str] | None] = dict(_COMMON_ALLOWED)
+        platform_cmds = _WINDOWS_ALLOWED if self._is_windows else _UNIX_ALLOWED
+        allowed.update(platform_cmds)
+        if self.profile == "dev":
+            allowed.update(_DEV_COMMON_ALLOWED)
+            allowed.update(_DEV_WINDOWS_ALLOWED if self._is_windows else _DEV_UNIX_ALLOWED)
+        return allowed
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
@@ -289,6 +461,9 @@ class TerminalExecutor:
         """Определяет рабочую директорию строго внутри workspace."""
         if not cwd:
             return self.workspace
+
+        if self._is_absolute_path(cwd) or cwd.startswith("\\\\"):
+            raise TerminalError("Абсолютные пути запрещены для cwd")
 
         candidate = (self.workspace / cwd).resolve()
         try:

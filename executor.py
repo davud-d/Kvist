@@ -76,10 +76,25 @@ class SafeExecutor:
         self.max_file_size_bytes = 256 * 1024
         self.max_writable_file_bytes = 2 * 1024 * 1024
 
+        terminal_profile = (os.getenv("AGENT_TERMINAL_PROFILE", "dev").strip().lower() or "dev")
+        terminal_timeout = self._read_float_env(
+            "AGENT_TERMINAL_TIMEOUT",
+            default=15.0,
+            min_value=1.0,
+            max_value=30.0,
+        )
+        self.max_output_chars = self._read_int_env(
+            "AGENT_TERMINAL_MAX_OUTPUT",
+            default=self.max_output_chars,
+            min_value=1000,
+            max_value=200_000,
+        )
+
         self._terminal = TerminalExecutor(
             workspace=self.workspace,
-            timeout=15.0,
+            timeout=terminal_timeout,
             max_output_chars=self.max_output_chars,
+            profile=terminal_profile,
         )
 
         self.ignored_dirs = {
