@@ -3,30 +3,26 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None  # type: ignore[assignment]
-
 from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageParam
-from rich import box
-from rich.align import Align
-from rich.console import Console, Group
-from rich.live import Live
-from rich.panel import Panel
-from rich.rule import Rule
-from rich.spinner import Spinner
-from rich.text import Text
+from rich.console import Console
+
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None  # type: ignore[assignment]
 
 from executor import SafeExecutor, ExecutorError
 from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
+from ui import AgentUI
+from deps import detect_dependency_versions
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
@@ -64,6 +60,10 @@ class AgentConfig:
     persist_logs: bool = True
     logs_dirname: str = "agent_logs"
     model_temperature: float = 0.1
+    max_retries: int = 3
+    retry_base_delay: float = 1.0
+    max_context_tokens: int = 120000
+    stream: bool = True
     verbose: bool = False
 
 
@@ -121,18 +121,33 @@ class LocalAgent:
         self._cache: dict[str, str] = {}
         self._state = RunState()
         self.console = Console()
-        self._live: Live | None = None
+        self._ui = AgentUI(console=self.console, verbose=self.config.verbose)
+        self._encoding = self._init_tiktoken_encoding()
 
     def run(self, user_goal: str) -> str:
         self._reset_run_state()
         self._state.plan_info = self._create_plan(user_goal)
-        self._state.dependency_versions = self._detect_dependency_versions()
-        self._print_plan(self._state.plan_info)
-        self._start_live_ui()
+        self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
+        self._ui.print_plan(self._state.plan_info)
+        return self._run_loop(user_goal, start_step=1)
+
+    def resume(self) -> str | None:
+        self._reset_run_state()
+        result = self._load_checkpoint()
+        if result is None:
+            return None
+        user_goal, last_step = result
+        self._ui.debug_print(
+            f"Восстановлено из checkpoint: цель='{user_goal}', шаг={last_step}, прогресс={self._state.progress}%"
+        )
+        return self._run_loop(user_goal, start_step=last_step + 1)
+
+    def _run_loop(self, user_goal: str, start_step: int) -> str:
+        self._ui.start_live()
 
         final_message = ""
         try:
-            for step in range(1, self.config.max_steps + 1):
+            for step in range(start_step, self.config.max_steps + 1):
                 early_stop_message = self._build_early_stop_message(step)
                 if early_stop_message:
                     final_message = early_stop_message
@@ -145,7 +160,7 @@ class LocalAgent:
                     command = parse_agent_command(raw_text)
                 except CommandValidationError as error:
                     self._register_parse_error(step, raw_text, str(error))
-                    self._update_live_ui(
+                    self._ui.update_live(
                         user_message="я уточняю формат шага и продолжаю работу",
                         status="исправляю формат ответа",
                         step=step,
@@ -158,7 +173,7 @@ class LocalAgent:
                 self._record_user_message(command.user_message)
 
                 if self._is_repeat_blocked(command):
-                    self._update_live_ui(
+                    self._ui.update_live(
                         user_message=command.user_message,
                         status="ищу другой рабочий шаг",
                         step=step,
@@ -168,7 +183,7 @@ class LocalAgent:
                     )
                     continue
 
-                self._print_step_header(step, command)
+                self._ui.print_step_header(step, command)
 
                 if command.action.type == "web_search":
                     web_error = self._prepare_web_search_command(user_goal, command)
@@ -179,7 +194,7 @@ class LocalAgent:
                             "error": web_error,
                         }
                         self._register_feedback(step, command, feedback)
-                        self._update_live_ui(
+                        self._ui.update_live(
                             user_message=command.user_message,
                             status="сработало ограничение web-поиска",
                             step=step,
@@ -198,7 +213,7 @@ class LocalAgent:
                             "error": fetch_error,
                         }
                         self._register_feedback(step, command, feedback)
-                        self._update_live_ui(
+                        self._ui.update_live(
                             user_message=command.user_message,
                             status="сработало ограничение чтения URL",
                             step=step,
@@ -208,7 +223,7 @@ class LocalAgent:
                         )
                         continue
 
-                self._update_live_ui(
+                self._ui.update_live(
                     user_message=command.user_message,
                     status="выполняю действие",
                     step=step,
@@ -224,7 +239,7 @@ class LocalAgent:
                 feedback = self._execute_command(command)
                 self._register_feedback(step, command, feedback)
 
-                self._update_live_ui(
+                self._ui.update_live(
                     user_message=command.user_message,
                     status="шаг завершен" if feedback.get("ok") else "получена ошибка",
                     step=step,
@@ -233,14 +248,17 @@ class LocalAgent:
                     is_error=not bool(feedback.get("ok")),
                 )
 
+                self._save_checkpoint(user_goal, step)
+
             if not final_message:
                 final_message = self._build_limit_reached_message()
         finally:
-            self._stop_live_ui()
+            self._ui.stop_live()
             self._persist_logs(user_goal)
+            self._clear_checkpoint()
 
         if not self.config.verbose:
-            self._print_final_ui(final_message)
+            self._ui.print_final(final_message, self._state.user_messages)
 
         return final_message
 
@@ -376,9 +394,10 @@ class LocalAgent:
         )
 
     def _call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        trimmed_prompt = self._trim_prompt_to_token_limit(system_prompt, user_prompt)
         messages: list[ChatCompletionMessageParam] = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": trimmed_prompt},
         ]
 
         models_to_try = [model]
@@ -401,22 +420,95 @@ class LocalAgent:
             if self.config.cache_enabled and cache_key in self._cache:
                 return self._cache[cache_key]
 
-            try:
-                response = self.client.chat.completions.create(
-                    model=current_model,
-                    messages=messages,
-                    temperature=self.config.model_temperature,
-                )
-                content = response.choices[0].message.content
-                if not content:
-                    raise RuntimeError("Модель вернула пустой ответ")
-                if self.config.cache_enabled:
-                    self._cache[cache_key] = content
-                return content
-            except Exception as error:
-                last_error = error
+            for attempt in range(1, self.config.max_retries + 1):
+                try:
+                    if self.config.stream:
+                        content = self._call_model_streaming(current_model, messages)
+                    else:
+                        response = self.client.chat.completions.create(
+                            model=current_model,
+                            messages=messages,
+                            temperature=self.config.model_temperature,
+                        )
+                        content = response.choices[0].message.content
+                    if not content:
+                        raise RuntimeError("Модель вернула пустой ответ")
+                    if self.config.cache_enabled:
+                        self._cache[cache_key] = content
+                    return content
+                except Exception as error:
+                    last_error = error
+                    if attempt < self.config.max_retries:
+                        delay = self.config.retry_base_delay * (2 ** (attempt - 1))
+                        self._ui.debug_print(
+                            f"Ошибка API ({current_model}, попытка {attempt}/{self.config.max_retries}): "
+                            f"{error}. Повтор через {delay:.1f}с"
+                        )
+                        time.sleep(delay)
 
         raise RuntimeError(f"Не удалось получить ответ модели: {last_error}")
+
+    def _call_model_streaming(
+        self,
+        model: str,
+        messages: list[ChatCompletionMessageParam],
+    ) -> str:
+        stream = self.client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=self.config.model_temperature,
+            stream=True,
+        )
+        chunks: list[str] = []
+        thought_shown = False
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                chunks.append(delta.content)
+                # Показываем мысль агента в реальном времени (verbose-режим)
+                if self.config.verbose and not thought_shown:
+                    partial = "".join(chunks)
+                    # Показать thought как только увидим его начало
+                    if '"thought"' in partial and len(partial) > 80:
+                        thought_shown = True
+                        print(f"  [streaming] {partial[:120]}...", flush=True)
+        return "".join(chunks)
+
+    @staticmethod
+    def _init_tiktoken_encoding():
+        if tiktoken is None:
+            return None
+        try:
+            return tiktoken.encoding_for_model("gpt-4o")
+        except Exception:
+            try:
+                return tiktoken.get_encoding("cl100k_base")
+            except Exception:
+                return None
+
+    def _count_tokens(self, text: str) -> int:
+        if self._encoding is None:
+            return len(text) // 4
+        return len(self._encoding.encode(text, disallowed_special=()))
+
+    def _trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> str:
+        system_tokens = self._count_tokens(system_prompt)
+        available = self.config.max_context_tokens - system_tokens - 500
+        if available <= 0:
+            available = 4000
+
+        prompt_tokens = self._count_tokens(user_prompt)
+        if prompt_tokens <= available:
+            return user_prompt
+
+        ratio = available / prompt_tokens
+        target_chars = int(len(user_prompt) * ratio * 0.95)
+        trimmed = user_prompt[:target_chars]
+        trimmed += "\n\n[КОНТЕКСТ ОБРЕЗАН: превышен лимит токенов. Действуй на основе доступных данных.]"
+        self._ui.debug_print(
+            f"Промпт обрезан: {prompt_tokens} токенов → ~{available} (лимит {self.config.max_context_tokens})"
+        )
+        return trimmed
 
     def _execute_command(self, command: AgentCommand) -> dict[str, Any]:
         try:
@@ -470,7 +562,7 @@ class LocalAgent:
                 "error": error_text,
             }
         )
-        self._debug_print(f"\n[Шаг {step}] Ошибка формата: {error_text}")
+        self._ui.debug_print(f"\n[Шаг {step}] Ошибка формата: {error_text}")
 
     def _register_feedback(
         self,
@@ -543,7 +635,7 @@ class LocalAgent:
             }
         )
 
-        self._debug_print(self._render_feedback(summary_line, feedback))
+        self._ui.debug_print(self._render_feedback(summary_line, feedback))
 
     def _update_state_from_success(
         self,
@@ -664,7 +756,7 @@ class LocalAgent:
                 "message": message,
             }
         )
-        self._debug_print(f"Результат: финальный ответ на шаге {step}")
+        self._ui.debug_print(f"Результат: финальный ответ на шаге {step}")
 
     def _plan_progress(self) -> int:
         if not self._state.plan_info or not self._state.plan_info.plan:
@@ -870,7 +962,7 @@ class LocalAgent:
                     },
                 }
             )
-            self._debug_print(f"Блокировка повтора: {command.action.type} {command.action.args}")
+            self._ui.debug_print(f"Блокировка повтора: {command.action.type} {command.action.args}")
             return True
 
         self._state.seen_actions[signature] = seen_count + 1
@@ -886,29 +978,6 @@ class LocalAgent:
             ensure_ascii=False,
             sort_keys=True,
         )
-
-    def _print_plan(self, plan_info: PlanInfo) -> None:
-        if not self.config.verbose:
-            return
-        print("\n[План]")
-        print(f"Цель: {plan_info.goal}")
-        print(f"Сложность: {plan_info.complexity}")
-        for index, item in enumerate(plan_info.plan, start=1):
-            print(f"{index}. {item}")
-        if plan_info.success_criteria:
-            print("Критерии успеха:")
-            for item in plan_info.success_criteria:
-                print(f"- {item}")
-
-    def _print_step_header(self, step: int, command: AgentCommand) -> None:
-        if not self.config.verbose:
-            return
-        print(f"\n[Шаг {step}]")
-        print(f"Этап: {command.plan_step}")
-        print(f"Мысль: {command.thought}")
-        print(f"Сообщение: {command.user_message}")
-        print(f"Действие: {command.action.type} {command.action.args}")
-        print(f"Заявленный прогресс: {command.progress}%")
 
     def _prefer_smart_model(self) -> bool:
         if not self._state.plan_info:
@@ -1061,172 +1130,6 @@ class LocalAgent:
         match = re.search(r"\d+(?:\.\d+){0,4}", raw_spec)
         return match.group(0) if match else ""
 
-    def _detect_dependency_versions(self) -> dict[str, str]:
-        versions: dict[str, str] = {}
-
-        for parser in (
-            self._parse_requirements_versions,
-            self._parse_pyproject_versions,
-            self._parse_poetry_lock_versions,
-            self._parse_uv_lock_versions,
-        ):
-            try:
-                for name, version in parser().items():
-                    if name and version:
-                        versions[name] = version
-            except Exception:
-                continue
-
-        return versions
-
-    def _parse_requirements_versions(self) -> dict[str, str]:
-        path = self.executor.workspace / "requirements.txt"
-        if not path.exists() or not path.is_file():
-            return {}
-
-        text = path.read_text(encoding="utf-8", errors="replace")
-        versions: dict[str, str] = {}
-        pattern = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?\s*([=<>!~]{1,2})\s*([^\s;]+)")
-        for line in text.splitlines():
-            clean = line.split("#", 1)[0].strip()
-            if not clean:
-                continue
-            match = pattern.match(clean)
-            if not match:
-                continue
-            name, operator, value = match.groups()
-            versions[self._normalize_package_name(name)] = f"{operator}{value}"
-
-        return versions
-
-    def _parse_pyproject_versions(self) -> dict[str, str]:
-        path = self.executor.workspace / "pyproject.toml"
-        if not path.exists() or not path.is_file() or tomllib is None:
-            return {}
-
-        try:
-            data = tomllib.loads(path.read_text(encoding="utf-8", errors="replace"))
-        except Exception:
-            return {}
-
-        versions: dict[str, str] = {}
-
-        project = data.get("project", {}) if isinstance(data, dict) else {}
-        dependencies = project.get("dependencies", []) if isinstance(project, dict) else []
-        if isinstance(dependencies, list):
-            for item in dependencies:
-                if not isinstance(item, str):
-                    continue
-                name, spec = self._parse_dependency_spec(item)
-                if name and spec:
-                    versions[name] = spec
-
-        optional = project.get("optional-dependencies", {}) if isinstance(project, dict) else {}
-        if isinstance(optional, dict):
-            for dep_list in optional.values():
-                if not isinstance(dep_list, list):
-                    continue
-                for item in dep_list:
-                    if not isinstance(item, str):
-                        continue
-                    name, spec = self._parse_dependency_spec(item)
-                    if name and spec:
-                        versions[name] = spec
-
-        tool = data.get("tool", {}) if isinstance(data, dict) else {}
-        poetry = tool.get("poetry", {}) if isinstance(tool, dict) else {}
-        poetry_dependencies = poetry.get("dependencies", {}) if isinstance(poetry, dict) else {}
-        if isinstance(poetry_dependencies, dict):
-            for raw_name, raw_spec in poetry_dependencies.items():
-                name = self._normalize_package_name(str(raw_name))
-                if name == "python":
-                    continue
-                if isinstance(raw_spec, str):
-                    spec = raw_spec.strip()
-                elif isinstance(raw_spec, dict):
-                    spec = str(raw_spec.get("version", "")).strip()
-                else:
-                    spec = ""
-                if name and spec:
-                    versions[name] = spec
-
-        return versions
-
-    def _parse_poetry_lock_versions(self) -> dict[str, str]:
-        path = self.executor.workspace / "poetry.lock"
-        if not path.exists() or not path.is_file():
-            return {}
-
-        text = path.read_text(encoding="utf-8", errors="replace")
-        versions: dict[str, str] = {}
-        blocks = text.split("[[package]]")
-        for block in blocks:
-            name_match = re.search(r"name\s*=\s*\"([^\"]+)\"", block)
-            version_match = re.search(r"version\s*=\s*\"([^\"]+)\"", block)
-            if not name_match or not version_match:
-                continue
-            name = self._normalize_package_name(name_match.group(1))
-            version = version_match.group(1).strip()
-            if name and version:
-                versions[name] = f"=={version}"
-
-        return versions
-
-    def _parse_uv_lock_versions(self) -> dict[str, str]:
-        path = self.executor.workspace / "uv.lock"
-        if not path.exists() or not path.is_file():
-            return {}
-
-        text = path.read_text(encoding="utf-8", errors="replace")
-        versions: dict[str, str] = {}
-
-        if tomllib is not None:
-            try:
-                data = tomllib.loads(text)
-                packages = data.get("package") if isinstance(data, dict) else None
-                if isinstance(packages, list):
-                    for item in packages:
-                        if not isinstance(item, dict):
-                            continue
-                        name = self._normalize_package_name(str(item.get("name", "")))
-                        version = str(item.get("version", "")).strip()
-                        if name and version:
-                            versions[name] = f"=={version}"
-                    if versions:
-                        return versions
-            except Exception:
-                pass
-
-        blocks = text.split("[[package]]")
-        for block in blocks:
-            name_match = re.search(r"name\s*=\s*\"([^\"]+)\"", block)
-            version_match = re.search(r"version\s*=\s*\"([^\"]+)\"", block)
-            if not name_match or not version_match:
-                continue
-            name = self._normalize_package_name(name_match.group(1))
-            version = version_match.group(1).strip()
-            if name and version:
-                versions[name] = f"=={version}"
-
-        return versions
-
-    def _parse_dependency_spec(self, raw: str) -> tuple[str, str]:
-        pattern = re.compile(
-            r"^\s*([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?\s*([=<>!~]{1,2})?\s*([^,;\s]+)?"
-        )
-        match = pattern.match(raw.strip())
-        if not match:
-            return "", ""
-
-        name, operator, value = match.groups()
-        normalized_name = self._normalize_package_name(name)
-        if operator and value:
-            return normalized_name, f"{operator}{value}"
-        return normalized_name, ""
-
-    def _normalize_package_name(self, name: str) -> str:
-        return name.strip().lower().replace("_", "-")
-
     def _format_dependency_versions_for_prompt(self) -> str:
         if not self._state.dependency_versions:
             return "версия не найдена в requirements.txt, pyproject.toml, poetry.lock, uv.lock"
@@ -1280,142 +1183,12 @@ class LocalAgent:
     def _normalize_message(self, text: str) -> str:
         return re.sub(r"\s+", " ", text).strip().casefold()
 
-    def _start_live_ui(self) -> None:
-        if self.config.verbose:
-            return
-
-        initial = self._render_live_panel(
-            user_message="я начинаю работу и собираю контекст",
-            status="подготовка",
-            step=0,
-            progress=0,
-            plan_step="инициализация",
-            is_error=False,
-        )
-        self._live = Live(
-            initial,
-            console=self.console,
-            refresh_per_second=8,
-            transient=True,
-        )
-        self._live.start()
-
-    def _stop_live_ui(self) -> None:
-        if self._live is None:
-            return
-        self._live.stop()
-        self._live = None
-
-    def _update_live_ui(
-        self,
-        user_message: str,
-        status: str,
-        step: int,
-        progress: int,
-        plan_step: str,
-        is_error: bool = False,
-    ) -> None:
-        if self.config.verbose or self._live is None:
-            return
-
-        panel = self._render_live_panel(
-            user_message=user_message,
-            status=status,
-            step=step,
-            progress=progress,
-            plan_step=plan_step,
-            is_error=is_error,
-        )
-        self._live.update(panel, refresh=True)
-
-    def _render_live_panel(
-        self,
-        user_message: str,
-        status: str,
-        step: int,
-        progress: int,
-        plan_step: str,
-        is_error: bool,
-    ) -> Panel:
-        if is_error:
-            status_style = "bright_red"
-        elif "заверш" in status:
-            status_style = "bright_green"
-        else:
-            status_style = "bright_yellow"
-
-        title_text = Text("Агент работает", style="bold bright_magenta")
-        spinner = Spinner("dots", text=Text("выполняю задачу", style="bright_cyan"))
-        message_text = Text(user_message or "я продолжаю выполнение", style="bold bright_cyan")
-        status_text = Text(f"Статус: {status}", style=status_style)
-        meta_text = Text(
-            f"Шаг {step} • Прогресс {max(0, min(progress, 100))}% • {plan_step}",
-            style="grey70",
-        )
-
-        content = Group(
-            Align.center(title_text),
-            spinner,
-            Text(""),
-            message_text,
-            status_text,
-            Text(""),
-            meta_text,
-        )
-
-        return Panel(
-            content,
-            box=box.ROUNDED,
-            border_style="bright_magenta",
-            padding=(1, 2),
-        )
-
-    def _print_final_ui(self, final_message: str) -> None:
-        history = self._unique_messages(self._state.user_messages)
-        if history:
-            history_text = "\n".join(f"{index}. {item}" for index, item in enumerate(history, start=1))
-        else:
-            history_text = "1. я выполнил задачу"
-
-        thoughts_panel = Panel(
-            Text(history_text, style="bright_cyan"),
-            title="> мысли и действия",
-            title_align="left",
-            border_style="bright_magenta",
-            box=box.ROUNDED,
-            padding=(1, 2),
-        )
-
-        final_panel = Panel(
-            Text(final_message, style="bright_green"),
-            title="Финальный ответ",
-            title_align="left",
-            border_style="bright_green",
-            box=box.ROUNDED,
-            padding=(1, 2),
-        )
-
-        self.console.print(thoughts_panel)
-        self.console.print(Rule(style="grey35"))
-        self.console.print(final_panel)
-
     def _record_user_message(self, message: str) -> None:
         clean = message.strip()
         if not clean:
             return
         self._state.user_messages.append(clean)
         del self._state.user_messages[:-80]
-
-    def _unique_messages(self, messages: list[str]) -> list[str]:
-        unique: list[str] = []
-        seen: set[str] = set()
-        for item in messages:
-            normalized = self._normalize_message(item)
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            unique.append(item.strip())
-        return unique
 
     def _parse_json_dict(self, text: str) -> dict[str, Any]:
         stripped = text.strip()
@@ -1456,10 +1229,6 @@ class LocalAgent:
             return
         items.append(value)
         del items[:-limit]
-
-    def _debug_print(self, message: str) -> None:
-        if self.config.verbose:
-            print(message)
 
     def _sanitize_for_log(self, value: Any, max_str_len: int = 300) -> Any:
         """Рекурсивная санация данных для логов: редактирование секретов, truncation строк."""
@@ -1512,3 +1281,96 @@ class LocalAgent:
             json.dumps(payload, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def _save_checkpoint(self, user_goal: str, step: int) -> None:
+        if not self.config.persist_logs:
+            return
+        logs_dir = self.executor.workspace / self.config.logs_dirname
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint = {
+            "goal": user_goal,
+            "step": step,
+            "progress": self._state.progress,
+            "summary": self._state.summary,
+            "files_read": self._state.files_read,
+            "files_changed": self._state.files_changed,
+            "recent_feedback": self._state.recent_feedback,
+            "recent_events": self._state.recent_events,
+            "error_history": self._state.error_history,
+            "error_patterns": self._state.error_patterns,
+            "seen_actions": self._state.seen_actions,
+            "completed_plan_steps": list(self._state.completed_plan_steps),
+            "user_messages": self._state.user_messages,
+            "dependency_versions": self._state.dependency_versions,
+            "web_facts": self._state.web_facts,
+            "web_sources": self._state.web_sources,
+            "consecutive_errors": self._state.consecutive_errors,
+            "stagnation_count": self._state.stagnation_count,
+            "parse_errors": self._state.parse_errors,
+            "pending_instruction": self._state.pending_instruction,
+            "last_action_signature": self._state.last_action_signature,
+        }
+        if self._state.plan_info:
+            checkpoint["plan_info"] = {
+                "goal": self._state.plan_info.goal,
+                "complexity": self._state.plan_info.complexity,
+                "plan": self._state.plan_info.plan,
+                "success_criteria": self._state.plan_info.success_criteria,
+                "risks": self._state.plan_info.risks,
+            }
+        ckpt_path = logs_dir / "checkpoint.json"
+        ckpt_path.write_text(
+            json.dumps(checkpoint, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+    def _load_checkpoint(self) -> tuple[str, int] | None:
+        logs_dir = self.executor.workspace / self.config.logs_dirname
+        ckpt_path = logs_dir / "checkpoint.json"
+        if not ckpt_path.exists():
+            return None
+        try:
+            data = json.loads(ckpt_path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+        if not isinstance(data, dict) or "goal" not in data:
+            return None
+
+        plan_data = data.get("plan_info")
+        if isinstance(plan_data, dict):
+            self._state.plan_info = PlanInfo(
+                goal=plan_data.get("goal", ""),
+                complexity=plan_data.get("complexity", "simple"),
+                plan=plan_data.get("plan", []),
+                success_criteria=plan_data.get("success_criteria", []),
+                risks=plan_data.get("risks", []),
+            )
+
+        self._state.progress = data.get("progress", 0)
+        self._state.summary = data.get("summary", "")
+        self._state.files_read = data.get("files_read", [])
+        self._state.files_changed = data.get("files_changed", [])
+        self._state.recent_feedback = data.get("recent_feedback", [])
+        self._state.recent_events = data.get("recent_events", [])
+        self._state.error_history = data.get("error_history", [])
+        self._state.error_patterns = data.get("error_patterns", {})
+        self._state.seen_actions = data.get("seen_actions", {})
+        self._state.completed_plan_steps = set(data.get("completed_plan_steps", []))
+        self._state.user_messages = data.get("user_messages", [])
+        self._state.dependency_versions = data.get("dependency_versions", {})
+        self._state.web_facts = data.get("web_facts", [])
+        self._state.web_sources = data.get("web_sources", [])
+        self._state.consecutive_errors = data.get("consecutive_errors", 0)
+        self._state.stagnation_count = data.get("stagnation_count", 0)
+        self._state.parse_errors = data.get("parse_errors", 0)
+        self._state.pending_instruction = data.get("pending_instruction", "")
+        self._state.last_action_signature = data.get("last_action_signature", "")
+
+        return data["goal"], data.get("step", 1)
+
+    def _clear_checkpoint(self) -> None:
+        logs_dir = self.executor.workspace / self.config.logs_dirname
+        ckpt_path = logs_dir / "checkpoint.json"
+        if ckpt_path.exists():
+            ckpt_path.unlink()

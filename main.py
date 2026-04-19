@@ -26,6 +26,24 @@ def safe_input(prompt: str) -> str:
     return data.decode("utf-8", errors="replace").strip()
 
 
+def multiline_input() -> str:
+    """Читает ввод пользователя. Поддерживает многострочный ввод через '\\' в конце строки."""
+    lines: list[str] = []
+    first_line = safe_input("\n> ")
+    if not first_line:
+        return ""
+    if not first_line.endswith("\\"):
+        return first_line
+    lines.append(first_line[:-1])
+    while True:
+        line = safe_input("... ")
+        if not line or not line.endswith("\\"):
+            lines.append(line)
+            break
+        lines.append(line[:-1])
+    return "\n".join(lines).strip()
+
+
 def main() -> None:
     cli = argparse.ArgumentParser(description="Локальный AI-агент")
     cli.add_argument(
@@ -47,8 +65,8 @@ def main() -> None:
         raise RuntimeError("OPENAI_API_KEY выглядит некорректно")
         
 
-    fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-4.1-mini")
-    smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-4.1")
+    fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-5.4-mini")
+    smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-5.4")
     planner_model = os.getenv("AGENT_PLANNER_MODEL", smart_model)
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "20"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
@@ -71,13 +89,22 @@ def main() -> None:
     console.print(
         f"[green]Fast model: {fast_model}[/green] | [bold yellow]Smart model: {smart_model}[/bold yellow] | Max steps: {max_steps} | Verbose: {verbose}"
     )
-    console.print("[red]Для выхода введи '/bye'.[/red]")    
+    console.print("[red]Для выхода введи '/bye'. Многострочный ввод: заверши строку символом '\\'.[/red]")
+    console.print("[dim]Команда '/resume' — продолжить прерванную задачу.[/dim]")
 
     while True:
-        user_goal = safe_input("\n> ")
+        user_goal = multiline_input()
         if user_goal.lower() == "/bye":
             console.print("[red]Выход.[/red]")
             break
+
+        if user_goal.lower() == "/resume":
+            result = agent.resume()
+            if result is None:
+                console.print("[yellow]Нет сохранённого checkpoint для продолжения.[/yellow]")
+            elif verbose:
+                print(f"\n[Финальный ответ]\n{result}")
+            continue
 
         if not user_goal:
             continue

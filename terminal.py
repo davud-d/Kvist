@@ -142,7 +142,7 @@ class TerminalExecutor:
         extra_forbidden: set[str] | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
-        self.timeout = max(1.0, min(timeout, 120.0))
+        self.timeout = max(1.0, min(timeout, 30.0))
         self.max_output_chars = max(1000, min(max_output_chars, 200_000))
         self._is_windows = os.name == "nt"
 
@@ -304,7 +304,7 @@ class TerminalExecutor:
     def _clamp_timeout(self, timeout: float | None) -> float:
         if timeout is None:
             return self.timeout
-        return max(1.0, min(timeout, 120.0))
+        return max(1.0, min(timeout, 30.0))
 
     def _build_env(self, overrides: dict[str, str] | None) -> dict[str, str] | None:
         if not overrides:

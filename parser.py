@@ -193,8 +193,8 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         if timeout is not None:
             if not isinstance(timeout, (int, float)):
                 raise CommandValidationError("'timeout' должен быть числом")
-            if timeout < 1 or timeout > 120:
-                raise CommandValidationError("'timeout' должен быть в диапазоне 1..120")
+            if timeout < 1 or timeout > 30:
+                raise CommandValidationError("'timeout' должен быть в диапазоне 1..30")
 
     elif action_type == "web_search":
         require_keys(args, {"query"})
