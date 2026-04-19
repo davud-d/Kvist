@@ -1,0 +1,71 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass(slots=True)
+class AgentConfig:
+    fast_model: str = "gpt-5-4-mini"
+    smart_model: str = "gpt-5.4"
+    planner_model: str = "gpt-4.1"
+    max_steps: int = 20
+    stagnation_limit: int = 6
+    max_consecutive_errors: int = 6
+    repeat_action_limit: int = 4
+    summary_recent_events: int = 8
+    recent_feedback_limit: int = 4
+    detailed_feedback_limit: int = 3
+    prompt_result_char_limit: int = 5000
+    prompt_value_char_limit: int = 1600
+    cache_enabled: bool = True
+    persist_logs: bool = True
+    logs_dirname: str = "agent_logs"
+    model_temperature: float = 0.1
+    max_retries: int = 3
+    retry_base_delay: float = 1.0
+    max_context_tokens: int = 120000
+    stream: bool = True
+    verbose: bool = False
+
+
+@dataclass(slots=True)
+class PlanInfo:
+    goal: str
+    complexity: str
+    plan: list[str]
+    success_criteria: list[str]
+    risks: list[str]
+
+
+@dataclass(slots=True)
+class RunState:
+    plan_info: PlanInfo | None = None
+    progress: int = 0
+    summary: str = ""
+    files_read: list[str] = field(default_factory=list)
+    files_changed: list[str] = field(default_factory=list)
+    recent_feedback: list[str] = field(default_factory=list)
+    recent_events: list[str] = field(default_factory=list)
+    recent_result_details: list[str] = field(default_factory=list)
+    error_history: list[str] = field(default_factory=list)
+    error_patterns: dict[str, int] = field(default_factory=dict)
+    seen_actions: dict[str, int] = field(default_factory=dict)
+    completed_plan_steps: set[str] = field(default_factory=set)
+    stalled_reasons: list[str] = field(default_factory=list)
+    step_logs: list[dict[str, Any]] = field(default_factory=list)
+    user_messages: list[str] = field(default_factory=list)
+    dependency_versions: dict[str, str] = field(default_factory=dict)
+    web_search_history: list[dict[str, Any]] = field(default_factory=list)
+    web_sources: list[str] = field(default_factory=list)
+    web_facts: list[str] = field(default_factory=list)
+    applied_facts: list[dict[str, str]] = field(default_factory=list)
+    consecutive_errors: int = 0
+    stagnation_count: int = 0
+    parse_errors: int = 0
+    pending_instruction: str = ""
+    last_action_signature: str = ""
+    last_progress: int = 0
+    last_web_query: str = ""
+    last_web_thought: str = ""

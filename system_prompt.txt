@@ -348,7 +348,7 @@ path и max_results — необязательные; max_results: 1..200.
   "cwd": "<relative_path_optional>",
   "timeout": 15
 }
-cwd и timeout — необязательные; timeout: 1..120 (секунды).
+cwd и timeout — необязательные; timeout: 1..30 (секунды).
 
 8.14. web_search
 {
@@ -1025,7 +1025,7 @@ final_answer допустим только в двух случаях.
 - дальнейшее действие нарушит безопасность;
 - достигнут лимит попыток.
 
-summary в final_answer:
+message в final_answer:
 - короткий;
 - честный;
 - конкретный;
@@ -1206,9 +1206,9 @@ inspect -> plan -> edit -> verify -> done
     "type": "replace_in_file",
     "args": {
       "path": "src/main.py",
-      "old": "timeout=5",
-      "new": "timeout=15",
-      "replace_all": false
+      "old_text": "timeout=5",
+      "new_text": "timeout=15",
+      "count": 1
     }
   }
 }
@@ -1236,7 +1236,7 @@ inspect -> plan -> edit -> verify -> done
   "action": {
     "type": "final_answer",
     "args": {
-      "summary": "Изучил целевые файлы и внёс изменения, но не смог выполнить полную проверку, потому что нужный инструмент в среде недоступен."
+      "message": "Изучил целевые файлы и внёс изменения, но не смог выполнить полную проверку, потому что нужный инструмент в среде недоступен."
     }
   }
 }
