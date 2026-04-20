@@ -66,8 +66,8 @@ def main() -> None:
         raise RuntimeError("OPENAI_API_KEY выглядит некорректно")
         
 
-    fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-5.4-mini")
-    smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-5.4")
+    fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-5.4-nano")
+    smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-5.4-mini")
     planner_model = os.getenv("AGENT_PLANNER_MODEL", "gpt-4o")
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "20"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
