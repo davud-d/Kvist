@@ -86,7 +86,6 @@ _COMMON_ALLOWED: dict[str, set[str] | None] = {
 }
 
 _DEV_COMMON_ALLOWED: dict[str, set[str] | None] = {
-    "git": None,
     "python": None,
     "python3": None,
     "py": None,
@@ -359,10 +358,12 @@ class TerminalExecutor:
             if script_index is None or script_index >= len(command):
                 raise TerminalError(f"Для '{command[0]}' не указан script file после -File")
 
+            if len(command) != script_index + 1:
+                raise TerminalError(f"Для '{command[0]}' разрешён только один script file после -File")
+
             script = command[script_index]
             self._validate_common_tokens(command[1:script_index])
             self._validate_script_argument(script, executable)
-            self._validate_common_tokens(command[script_index + 1 :])
             return
 
         self._validate_windows_cmd_command(command)
@@ -392,8 +393,14 @@ class TerminalExecutor:
         if not separator:
             return
 
-        if not _WINDOWS_CMD_BUILTIN_RE.fullmatch(remainder.strip()):
+        remainder_tokens = [token for token in remainder.split() if token]
+        if not remainder_tokens:
+            return
+
+        if not all(_WINDOWS_CMD_BUILTIN_RE.fullmatch(token) for token in remainder_tokens):
             raise TerminalError("Аргументы builtin-команд CMD содержат недопустимые символы")
+
+        self._validate_common_tokens(remainder_tokens)
 
     def _validate_common_tokens(self, tokens: list[str]) -> None:
         for token in tokens:

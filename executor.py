@@ -641,6 +641,13 @@ class SafeExecutor:
         cwd: str | None = None,
         timeout: float | None = None,
     ) -> ExecutionResult:
+        if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
+            raise ExecutorError("run_shell.command должен быть непустым массивом строк")
+        if cwd is not None and not isinstance(cwd, str):
+            raise ExecutorError("run_shell.cwd должен быть строкой")
+        if timeout is not None and not isinstance(timeout, (int, float)):
+            raise ExecutorError("run_shell.timeout должен быть числом")
+
         # Блокируем shell-команды, которые могут читать .env файлы
         cmd_str = " ".join(command)
         if self._ENV_PATTERN.search(cmd_str):
