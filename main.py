@@ -93,26 +93,30 @@ def main() -> None:
     console.print("[red]Для выхода введи '/bye'. Многострочный ввод: заверши строку символом '\\'.[/red]")
     console.print("[dim]Команда '/resume' — продолжить прерванную задачу.[/dim]")
 
-    while True:
-        user_goal = multiline_input()
-        if user_goal.lower() == "/bye":
-            console.print("[red]Выход.[/red]")
-            break
+    try:
+        while True:
+            user_goal = multiline_input()
+            if user_goal.lower() == "/bye":
+                console.print("[red]Выход.[/red]")
+                break
 
-        if user_goal.lower() == "/resume":
-            result = agent.resume()
-            if result is None:
-                console.print("[yellow]Нет сохранённого checkpoint для продолжения.[/yellow]")
-            elif verbose:
+            if user_goal.lower() == "/resume":
+                result = agent.resume()
+                if result is None:
+                    console.print("[yellow]Нет сохранённого checkpoint для продолжения.[/yellow]")
+                elif verbose:
+                    print(f"\n[Финальный ответ]\n{result}")
+                continue
+
+            if not user_goal:
+                continue
+
+            result = agent.run(user_goal)
+            if verbose:
                 print(f"\n[Финальный ответ]\n{result}")
-            continue
-
-        if not user_goal:
-            continue
-
-        result = agent.run(user_goal)
-        if verbose:
-            print(f"\n[Финальный ответ]\n{result}")
+    except KeyboardInterrupt:
+        console.print("\n[red]Прервано пользователем (Ctrl+C). \nВыход.[/red]")
+        sys.exit(130)
 
 
 if __name__ == "__main__":
