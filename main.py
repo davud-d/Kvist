@@ -68,7 +68,7 @@ def main() -> None:
 
     fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-5.4-mini")
     smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-5.4")
-    planner_model = os.getenv("AGENT_PLANNER_MODEL", smart_model)
+    planner_model = os.getenv("AGENT_PLANNER_MODEL", "gpt-4o")
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "20"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
@@ -86,7 +86,7 @@ def main() -> None:
     )
     agent = LocalAgent(client=client, executor=executor, config=config)
 
-    console.print("Локальный AI-агент DevAgent запущен. Напиши задачу.")
+    console.print("Локальный AI-агент DevAgentXD запущен. Напиши задачу.")
     console.print(
         f"[green]Fast model: {fast_model}[/green] | [bold yellow]Smart model: {smart_model}[/bold yellow] | Max steps: {max_steps} | Verbose: {verbose}"
     )

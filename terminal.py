@@ -29,8 +29,8 @@ class TerminalError(Exception):
 # Исполняемые файлы, запрещённые безусловно
 # ---------------------------------------------------------------------------
 _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
-    # Удаление
-    "rm", "rmdir", "del",
+    # Удаление / перемещение
+    "rm", "rmdir", "del", "mv",
     # Привилегии
     "sudo", "su", "runas",
     # Права / владение
@@ -47,6 +47,8 @@ _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
     "reg", "regedit",
     # Управление службами
     "net", "sc",
+    # Утечка переменных окружения
+    "env", "printenv", "set",
 })
 
 _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
@@ -90,8 +92,12 @@ _DEV_COMMON_ALLOWED: dict[str, set[str] | None] = {
     "python3": None,
     "py": None,
     "pytest": None,
-    "pip": None,
-    "pip3": None,
+    "pip": {
+        "install", "list", "show", "freeze", "check", "search", "uninstall",
+    },
+    "pip3": {
+        "install", "list", "show", "freeze", "check", "search", "uninstall",
+    },
     "uv": None,
     "node": None,
     "npm": None,
@@ -106,6 +112,8 @@ _DEV_COMMON_ALLOWED: dict[str, set[str] | None] = {
     "java": None,
     "javac": None,
     "dotnet": None,
+    "docker": None,
+    "rg": None,
 }
 
 _UNIX_ALLOWED: dict[str, set[str] | None] = {
@@ -124,6 +132,9 @@ _UNIX_ALLOWED: dict[str, set[str] | None] = {
     "diff": None,
     "sort": None,
     "uniq": None,
+    "sed": None,
+    "awk": None,
+    "test": None,
 }
 
 _WINDOWS_ALLOWED: dict[str, set[str] | None] = {
@@ -158,8 +169,9 @@ _DEV_WINDOWS_ALLOWED: dict[str, set[str] | None] = {
 }
 
 # CMD-встроенные команды (нет отдельного .exe, нужна обёртка cmd /c)
+# "set" намеренно исключён: утечка переменных окружения запрещена промптом (секция 22)
 _WINDOWS_CMD_BUILTINS: frozenset[str] = frozenset({
-    "dir", "cd", "type", "echo", "set", "ver",
+    "dir", "cd", "type", "echo", "ver",
 })
 
 _WINDOWS_CMD_BUILTIN_RE: re.Pattern[str] = re.compile(r"^[A-Za-z0-9_.:\\\/\- ]+$")
@@ -431,6 +443,10 @@ class TerminalExecutor:
             raise TerminalError(f"Inline-режим '-c' запрещён для '{command[0]}'")
         if executable == "node" and any(arg in {"-e", "--eval"} for arg in command[1:]):
             raise TerminalError("Inline-режим '-e' запрещён для 'node'")
+        if executable == "sed" and any(
+            arg == "-i" or arg.startswith("-i") or arg == "--in-place" for arg in command[1:]
+        ):
+            raise TerminalError("Инплейс-режим 'sed -i' запрещён: допустим только sed -n (чтение)")
 
     def _validate_script_argument(self, script: str, executable: str) -> None:
         self._validate_common_tokens([script])
@@ -544,3 +560,4 @@ def _unix_resource_limits() -> None:
         resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     except Exception:
         pass
+ 
