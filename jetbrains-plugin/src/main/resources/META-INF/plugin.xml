@@ -1,0 +1,31 @@
+<idea-plugin package="com.devagent.intellij">
+    <id>com.devagent.intellij</id>
+    <name>DevAgent Launcher</name>
+    <version>0.1.0</version>
+    <vendor>DevAgentXD</vendor>
+
+    <description><![CDATA[
+    Launches DevAgent directly inside the IDE Terminal for the current project.
+    ]]></description>
+
+    <idea-version since-build="253" />
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <notificationGroup id="DevAgent Notifications" displayType="BALLOON" isLogByDefault="false" />
+    </extensions>
+
+    <actions>
+        <action
+            id="com.devagent.intellij.RunDevAgentAction"
+            class="com.devagent.intellij.actions.RunDevAgentAction"
+            text="Run DevAgent"
+            description="Start DevAgent in the IDE Terminal"
+        >
+            <add-to-group group-id="MainToolbarRight" anchor="last" />
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+    </actions>
+</idea-plugin>
