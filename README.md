@@ -47,6 +47,8 @@ Or specify a custom workspace:
 python main.py --workspace ./workspace
 ```
 
+Relative paths passed to --workspace are resolved from the current directory of the terminal where the agent was started.
+
 ## Project Layout
 
 - `main.py` — CLI entry point

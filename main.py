@@ -19,6 +19,14 @@ from executor import SafeExecutor
 # Console for rich output (currently not used, but can be integrated later)
 console = Console()
 
+
+def resolve_workspace_path(raw_path: str | None) -> Path:
+    workspace_value = raw_path or os.getenv("AGENT_WORKSPACE") or "workspace"
+    candidate = Path(workspace_value).expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    return candidate.resolve()
+
 def safe_input(prompt: str) -> str:
     print(prompt, end="", flush=True)
     data = sys.stdin.buffer.readline()
@@ -50,7 +58,7 @@ def main() -> None:
     cli.add_argument(
         "--workspace", "-w",
         default=None,
-        help="Путь к рабочей директории (по умолчанию: AGENT_WORKSPACE или ./workspace)",
+        help="Путь к рабочей директории; относительные пути считаются от cwd запущенного терминала (по умолчанию: AGENT_WORKSPACE или ./workspace)",
     )
     args = cli.parse_args()
 
@@ -74,7 +82,7 @@ def main() -> None:
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
 
     client = OpenAI(api_key=api_key)
-    workspace_path = args.workspace or os.getenv("AGENT_WORKSPACE", "workspace")
+    workspace_path = resolve_workspace_path(args.workspace)
     executor = SafeExecutor(workspace=workspace_path)
     config = AgentConfig(
         fast_model=fast_model,
@@ -87,6 +95,7 @@ def main() -> None:
     agent = LocalAgent(client=client, executor=executor, config=config)
 
     console.print("Локальный AI-агент DevAgentXD запущен. Напиши задачу.")
+    console.print(f"[dim]Workspace: {executor.workspace}[/dim]")
     console.print(
         f"[green]Fast model: {fast_model}[/green] | [bold yellow]Smart model: {smart_model}[/bold yellow] | Max steps: {max_steps} | Verbose: {verbose}"
     )

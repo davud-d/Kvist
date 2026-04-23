@@ -47,6 +47,8 @@ python main.py
 python main.py --workspace ./workspace
 ```
 
+Относительные пути в --workspace вычисляются от текущей директории терминала, из которого был запущен агент.
+
 ## Структура
 
 - `main.py` — точка входа CLI
