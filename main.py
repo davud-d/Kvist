@@ -7,25 +7,25 @@ import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
 from rich.console import Console
 
 from agent import AgentConfig, LocalAgent
 from executor import SafeExecutor
+from user_config import load_api_key_or_bootstrap
 
 
-# Console for rich output (currently not used, but can be integrated later)
 console = Console()
 
 
-def resolve_workspace_path(raw_path: str | None) -> Path:
-    workspace_value = raw_path or os.getenv("AGENT_WORKSPACE") or "workspace"
-    candidate = Path(workspace_value).expanduser()
-    if not candidate.is_absolute():
-        candidate = Path.cwd() / candidate
-    return candidate.resolve()
+def resolve_workspace_path(raw_path: str) -> Path:
+    candidate = Path(raw_path).expanduser().resolve()
+    if not candidate.exists():
+        raise RuntimeError("Workspace path does not exist.")
+    if not candidate.is_dir():
+        raise RuntimeError("Workspace path must be a directory.")
+    return candidate
 
 def safe_input(prompt: str) -> str:
     print(prompt, end="", flush=True)
@@ -36,7 +36,7 @@ def safe_input(prompt: str) -> str:
 
 
 def multiline_input() -> str:
-    """Читает ввод пользователя. Поддерживает многострочный ввод через '\\' в конце строки."""
+    """Read user input. A trailing backslash enables multiline mode."""
     lines: list[str] = []
     first_line = safe_input("\n> ")
     if not first_line:
@@ -56,23 +56,11 @@ def multiline_input() -> str:
 def main() -> None:
     cli = argparse.ArgumentParser(description="Локальный AI-агент")
     cli.add_argument(
-        "--workspace", "-w",
-        default=None,
-        help="Путь к рабочей директории; относительные пути считаются от cwd запущенного терминала (по умолчанию: AGENT_WORKSPACE или ./workspace)",
+        "--workspace",
+        required=True,
+        help="Путь к рабочей директории проекта.",
     )
     args = cli.parse_args()
-
-    # .env — ищем рядом со скриптом, не зависим от cwd
-    env_path = Path(__file__).resolve().parent / "API_KEYS.env"
-    load_dotenv(env_path, override=True)
-
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("Не найден OPENAI_API_KEY")
-
-    if not api_key.startswith("sk-"):
-        raise RuntimeError("OPENAI_API_KEY выглядит некорректно")
-        
 
     fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-5.4-nano")
     smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-5.4-mini")
@@ -81,8 +69,14 @@ def main() -> None:
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
 
+    try:
+        workspace_path = resolve_workspace_path(args.workspace)
+        api_key = load_api_key_or_bootstrap(validation_model=fast_model)
+    except RuntimeError as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(2)
+
     client = OpenAI(api_key=api_key)
-    workspace_path = resolve_workspace_path(args.workspace)
     executor = SafeExecutor(workspace=workspace_path)
     config = AgentConfig(
         fast_model=fast_model,

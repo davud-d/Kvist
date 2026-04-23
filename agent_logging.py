@@ -18,6 +18,14 @@ _SECRET_RE = re.compile(
 )
 
 
+def get_logs_dir(self):
+    return self.executor.workspace / self.config.logs_dirname
+
+
+def get_state_path(self):
+    return self.executor.workspace / self.config.state_filename
+
+
 def sanitize_for_log(self, value: Any, max_str_len: int = 300) -> Any:
     if isinstance(value, str):
         sanitized = _SECRET_RE.sub("[REDACTED]", value)
@@ -37,7 +45,7 @@ def persist_logs(self, user_goal: str) -> None:
     if not self.config.persist_logs:
         return
 
-    logs_dir = self.executor.workspace / self.config.logs_dirname
+    logs_dir = get_logs_dir(self)
     logs_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "goal": user_goal,
@@ -74,8 +82,8 @@ def persist_logs(self, user_goal: str) -> None:
 def save_checkpoint(self, user_goal: str, step: int) -> None:
     if not self.config.persist_logs:
         return
-    logs_dir = self.executor.workspace / self.config.logs_dirname
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    state_path = get_state_path(self)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "goal": user_goal,
         "step": step,
@@ -107,20 +115,18 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
             "success_criteria": self._state.plan_info.success_criteria,
             "risks": self._state.plan_info.risks,
         }
-    ckpt_path = logs_dir / "checkpoint.json"
-    ckpt_path.write_text(
+    state_path.write_text(
         json.dumps(checkpoint, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
 def load_checkpoint(self) -> tuple[str, int] | None:
-    logs_dir = self.executor.workspace / self.config.logs_dirname
-    ckpt_path = logs_dir / "checkpoint.json"
-    if not ckpt_path.exists():
+    state_path = get_state_path(self)
+    if not state_path.exists():
         return None
     try:
-        data = json.loads(ckpt_path.read_text(encoding="utf-8"))
+        data = json.loads(state_path.read_text(encoding="utf-8"))
     except Exception:
         return None
 
@@ -161,7 +167,6 @@ def load_checkpoint(self) -> tuple[str, int] | None:
 
 
 def clear_checkpoint(self) -> None:
-    logs_dir = self.executor.workspace / self.config.logs_dirname
-    ckpt_path = logs_dir / "checkpoint.json"
-    if ckpt_path.exists():
-        ckpt_path.unlink()
+    state_path = get_state_path(self)
+    if state_path.exists():
+        state_path.unlink()

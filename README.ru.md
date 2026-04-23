@@ -15,39 +15,52 @@
 pip install -r requirements.txt
 ```
 
-2. Добавить ключ в `API_KEYS.env`:
+2. Для первого запуска `.env` не нужен.
 
-```env
-OPENAI_API_KEY=sk-...
+Если `~/.devagent/config.json` ещё не существует, агент спросит OpenAI API key в терминале, проверит его реальным запросом к OpenAI API и сохранит как JSON:
+
+```json
+{
+	"openai_api_key": "sk-..."
+}
 ```
+
+Расположение конфига:
+
+- Linux/macOS: `~/.devagent/config.json`
+- Windows: `C:\Users\<USERNAME>\.devagent\config.json`
 
 Необязательные параметры:
 
 ```env
-AGENT_FAST_MODEL=gpt-5.4-mini
-AGENT_SMART_MODEL=gpt-5.4
-AGENT_PLANNER_MODEL=gpt-5.4
+AGENT_FAST_MODEL=gpt-5.4-nano
+AGENT_SMART_MODEL=gpt-5.4-mini
+AGENT_PLANNER_MODEL=gpt-4o
 AGENT_MAX_STEPS=20
-AGENT_WORKSPACE=workspace
 AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
 ```
 
-По умолчанию `main.py` использует `gpt-5.4-mini` для обычных шагов и `gpt-5.4` для более качественного рассуждения. Если `AGENT_PLANNER_MODEL` не задан, планировщик тоже использует smart model.
+По умолчанию `main.py` использует `gpt-5.4-nano` для обычных шагов, `gpt-5.4-mini` для более качественного рассуждения и `gpt-4o` для планирования.
 
 ## Запуск
 
-```bash
-python main.py
-```
-
-Или с указанием рабочей директории:
+Поддерживается только один контракт запуска:
 
 ```bash
-python main.py --workspace ./workspace
+devagent --workspace "<project_path>"
 ```
 
-Относительные пути в --workspace вычисляются от текущей директории терминала, из которого был запущен агент.
+Аргумент `--workspace` обязателен. Путь должен уже существовать. Относительные пути вычисляются от текущей директории терминала и перед запуском приводятся к абсолютному пути.
+
+## Служебные файлы
+
+Внутри целевого проекта агент хранит:
+
+- `<project>/.devagent/logs/` для сохранённых логов запусков
+- `<project>/.devagent/state.json` для checkpoint и `/resume`
+
+Команда `/resume` продолжает работу из `<project>/.devagent/state.json`.
 
 ## Структура
 
@@ -63,4 +76,4 @@ python main.py --workspace ./workspace
 - `executor.py` — безопасный исполнитель в workspace
 - `parser.py` и `protocol.py` — парсинг команд и описание схемы протокола
 - `ui.py` — отрисовка терминального UI и live-статуса
-- `workspace/` — рабочая директория и логи
+- `<project>/.devagent/` — сохранённые логи и состояние продолжения

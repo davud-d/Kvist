@@ -15,39 +15,52 @@ Minimal local AI agent for working inside a sandboxed workspace.
 pip install -r requirements.txt
 ```
 
-2. Put your API key into `API_KEYS.env`:
+2. The first run does not require any `.env` file.
 
-```env
-OPENAI_API_KEY=sk-...
+If `~/.devagent/config.json` does not exist yet, the agent asks for your OpenAI API key in the terminal, validates it with a real OpenAI API request, and stores it as JSON:
+
+```json
+{
+	"openai_api_key": "sk-..."
+}
 ```
+
+Config location:
+
+- Linux/macOS: `~/.devagent/config.json`
+- Windows: `C:\Users\<USERNAME>\.devagent\config.json`
 
 Optional settings:
 
 ```env
-AGENT_FAST_MODEL=gpt-5.4-mini
-AGENT_SMART_MODEL=gpt-5.4
-AGENT_PLANNER_MODEL=gpt-5.4
+AGENT_FAST_MODEL=gpt-5.4-nano
+AGENT_SMART_MODEL=gpt-5.4-mini
+AGENT_PLANNER_MODEL=gpt-4o
 AGENT_MAX_STEPS=20
-AGENT_WORKSPACE=workspace
 AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
 ```
 
-By default, `main.py` uses `gpt-5.4-mini` for routine steps and `gpt-5.4` for higher-quality reasoning. If `AGENT_PLANNER_MODEL` is not set, the planner also uses the smart model.
+By default, `main.py` uses `gpt-5.4-nano` for routine steps, `gpt-5.4-mini` for higher-quality reasoning, and `gpt-4o` for planning.
 
 ## Run
 
-```bash
-python main.py
-```
-
-Or specify a custom workspace:
+Only one launch contract is supported:
 
 ```bash
-python main.py --workspace ./workspace
+devagent --workspace "<project_path>"
 ```
 
-Relative paths passed to --workspace are resolved from the current directory of the terminal where the agent was started.
+The `--workspace` argument is required. The path must already exist. Relative paths are resolved from the current terminal directory and converted to an absolute path before startup.
+
+## Runtime Files
+
+Inside the target project, the agent stores:
+
+- `<project>/.devagent/logs/` for persisted run logs
+- `<project>/.devagent/state.json` for checkpoint and `/resume`
+
+The `/resume` command restores execution from `<project>/.devagent/state.json`.
 
 ## Project Layout
 
@@ -63,4 +76,4 @@ Relative paths passed to --workspace are resolved from the current directory of 
 - `executor.py` — safe workspace executor
 - `parser.py` and `protocol.py` — command parsing and schema definitions
 - `ui.py` — terminal rendering and live status output
-- `workspace/` — working directory and logs
+- `<project>/.devagent/` — persisted logs and resume state
