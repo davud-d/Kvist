@@ -1,8 +1,7 @@
 # Secrets
-API_KEYS.env
 *.env
-.env
 .env.*
+*.env.*
 
 # Python
 __pycache__/
@@ -16,9 +15,8 @@ venv/
 dist/
 build/
 
-# Agent workspace & logs
-workspace/
-agent_logs/
+# DevAgent project state
+.devagent/
 
 # Testing / Linting
 .pytest_cache/
@@ -33,7 +31,3 @@ agent_logs/
 # OS
 .DS_Store
 Thumbs.db
-
-# Plugins storage specific to this project
-.devagent/logs/
-.devagent/state.json
