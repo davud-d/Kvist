@@ -1,5 +1,8 @@
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import java.io.File
+import java.util.Locale
 
 plugins {
     kotlin("jvm") version "2.2.21"
@@ -20,41 +23,85 @@ kotlin {
     jvmToolchain(21)
 }
 
-val validateDevAgentBinaries by tasks.registering {
-    group = "verification"
-    description = "Ensures that required DevAgent binaries exist before sandbox packaging tasks."
+val hostOsName = System.getProperty("os.name").lowercase(Locale.US)
 
-    doLast {
-        val missingFiles = listOf(
-            file("bin/win/devagent.exe"),
-            file("bin/linux/devagent.bin"),
-        ).filterNot { it.isFile }
+fun requiredBinariesForBuild(): List<File> = listOf(
+    file("bin/win/devagent.exe"),
+    file("bin/linux/devagent.bin"),
+)
 
-        if (missingFiles.isNotEmpty()) {
-            val message = buildString {
-                appendLine("Missing required DevAgent binaries:")
-                missingFiles.forEach { appendLine(" - ${it.invariantSeparatorsPath}") }
-                append("Put the real binaries into jetbrains-plugin/bin before running packaging tasks.")
-            }
+fun requiredBinariesForRunIde(): List<File> {
+    return when {
+        hostOsName.contains("win") -> listOf(file("bin/win/devagent.exe"))
+        hostOsName.contains("linux") -> listOf(file("bin/linux/devagent.bin"))
+        else -> emptyList()
+    }
+}
 
-            throw GradleException(message)
+fun validateBinarySet(files: List<File>, context: String) {
+    val missingFiles = files.filterNot { it.isFile }
+
+    if (missingFiles.isNotEmpty()) {
+        val message = buildString {
+            appendLine("Missing required DevAgent binaries for $context:")
+            missingFiles.forEach { appendLine(" - ${it.invariantSeparatorsPath}") }
+            append("Put the real binaries into jetbrains-plugin/bin before running this task.")
+        }
+
+        throw GradleException(message)
+    }
+}
+
+val devAgentSandboxBinaries = copySpec {
+    from("bin") {
+        exclude("**/.gitkeep", "linux/devagent.bin")
+        into("${project.name}/bin")
+    }
+
+    from("bin") {
+        include("linux/devagent.bin")
+        into("${project.name}/bin")
+        filePermissions {
+            unix("rwxr-xr-x")
         }
     }
 }
 
-tasks.named<Sync>("prepareSandbox") {
-    dependsOn(validateDevAgentBinaries)
+val validateHostDevAgentBinary by tasks.registering {
+    group = "verification"
+    description = "Ensures that the current host binary exists for local sandbox runs."
 
-    from("bin") {
-        exclude("**/.gitkeep")
-        into("${project.name}/bin")
+    doLast {
+        validateBinarySet(requiredBinariesForRunIde(), "the current host")
     }
 }
 
+val validateAllDevAgentBinaries by tasks.registering {
+    group = "verification"
+    description = "Ensures that all packaged DevAgent binaries exist for plugin distribution builds."
+
+    doLast {
+        validateBinarySet(requiredBinariesForBuild(), "plugin packaging")
+    }
+}
+
+tasks.named<Sync>("prepareSandbox") {
+    dependsOn(validateHostDevAgentBinary)
+    with(devAgentSandboxBinaries)
+}
+
 tasks.named("runIde") {
-    dependsOn(validateDevAgentBinaries)
+    dependsOn(validateHostDevAgentBinary)
 }
 
 tasks.named("buildPlugin") {
-    dependsOn(validateDevAgentBinaries)
+    dependsOn(validateAllDevAgentBinaries)
+}
+
+tasks.withType<AbstractArchiveTask>().configureEach {
+    filesMatching("**/bin/linux/devagent.bin") {
+        permissions {
+            unix("rwxr-xr-x")
+        }
+    }
 }

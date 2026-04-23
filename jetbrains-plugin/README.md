@@ -2,6 +2,12 @@
 
 Minimal IntelliJ Platform plugin that starts the DevAgent binary directly inside the IDE Terminal for the currently opened project.
 
+## Compatibility
+
+This MVP is intentionally pinned to IntelliJ Platform 2025.3.
+
+It uses the reworked Terminal API, which is the reason the plugin is limited to the 253 platform line.
+
 ## Supported platforms
 
 - Windows
@@ -16,7 +22,11 @@ Put the real binaries here before running sandbox or packaging tasks:
 - bin/win/devagent.exe
 - bin/linux/devagent.bin
 
-The build fails fast if any of these files is missing.
+Local sandbox runs only require the binary for the current host OS.
+
+Plugin distribution builds require both binaries.
+
+The Linux binary is packaged with execute permissions during the build.
 
 ## Build
 
