@@ -1,8 +1,9 @@
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
-import org.gradle.api.tasks.bundling.AbstractArchiveTask
+import org.gradle.api.tasks.bundling.Zip
 import java.io.File
 import java.util.Locale
+import java.util.zip.ZipFile
 
 plugins {
     kotlin("jvm") version "2.2.21"
@@ -24,6 +25,7 @@ kotlin {
 }
 
 val hostOsName = System.getProperty("os.name").lowercase(Locale.US)
+val pluginDistributionDirectoryName = project.name
 
 fun requiredBinariesForBuild(): List<File> = listOf(
     file("bin/win/devagent.exe"),
@@ -42,25 +44,29 @@ fun validateBinarySet(files: List<File>, context: String) {
     val missingFiles = files.filterNot { it.isFile }
 
     if (missingFiles.isNotEmpty()) {
-        val message = buildString {
-            appendLine("Missing required DevAgent binaries for $context:")
-            missingFiles.forEach { appendLine(" - ${it.invariantSeparatorsPath}") }
-            append("Put the real binaries into jetbrains-plugin/bin before running this task.")
-        }
-
-        throw GradleException(message)
+        throw GradleException(
+            buildString {
+                appendLine("Missing required DevAgent binaries for $context:")
+                missingFiles.forEach { appendLine(" - ${it.invariantSeparatorsPath}") }
+                appendLine("Expected files:")
+                appendLine(" - bin/win/devagent.exe")
+                append(" - bin/linux/devagent.bin")
+            }
+        )
     }
 }
 
 val devAgentSandboxBinaries = copySpec {
     from("bin") {
         exclude("**/.gitkeep", "linux/devagent.bin")
-        into("${project.name}/bin")
+        into("$pluginDistributionDirectoryName/bin")
+        includeEmptyDirs = false
     }
 
     from("bin") {
         include("linux/devagent.bin")
-        into("${project.name}/bin")
+        into("$pluginDistributionDirectoryName/bin")
+        includeEmptyDirs = false
         filePermissions {
             unix("rwxr-xr-x")
         }
@@ -94,14 +100,28 @@ tasks.named("runIde") {
     dependsOn(validateHostDevAgentBinary)
 }
 
-tasks.named("buildPlugin") {
+tasks.named<Zip>("buildPlugin") {
     dependsOn(validateAllDevAgentBinaries)
-}
 
-tasks.withType<AbstractArchiveTask>().configureEach {
-    filesMatching("**/bin/linux/devagent.bin") {
-        permissions {
-            unix("rwxr-xr-x")
+    doLast {
+        val archiveFile = archiveFile.get().asFile
+        val expectedEntries = listOf(
+            "$pluginDistributionDirectoryName/bin/win/devagent.exe",
+            "$pluginDistributionDirectoryName/bin/linux/devagent.bin",
+        )
+
+        val missingEntries = ZipFile(archiveFile).use { zipFile ->
+            expectedEntries.filter { expectedEntry -> zipFile.getEntry(expectedEntry) == null }
+        }
+
+        if (missingEntries.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("The plugin archive is missing required DevAgent binaries:")
+                    missingEntries.forEach { appendLine(" - $it") }
+                    append("Archive: ${archiveFile.invariantSeparatorsPath}")
+                }
+            )
         }
     }
 }

@@ -13,6 +13,7 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermission
 import kotlin.io.path.invariantSeparatorsPathString
 
 object DevAgentLauncher {
@@ -34,6 +35,10 @@ object DevAgentLauncher {
         }
 
         val launchSpec = prepareLaunch(project, notifyUser = true, logFailures = true) ?: return
+
+        if (!ensureBinaryReadyForLaunch(project, launchSpec)) {
+            return
+        }
 
         val terminalToolWindow = ToolWindowManager.getInstance(project)
             .getToolWindow(TerminalToolWindowFactory.TOOL_WINDOW_ID)
@@ -80,7 +85,7 @@ object DevAgentLauncher {
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
-                message = "This operating system is not supported.",
+                userMessage = "This operating system is not supported.",
             )
 
         val expectedBinaryPath = DevAgentBinaryResolver.expectedRelativeBinaryPath(operatingSystem).invariantSeparatorsPathString
@@ -89,16 +94,18 @@ object DevAgentLauncher {
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
-                message = "DevAgent binary was not found at $expectedBinaryPath.",
+                userMessage = "DevAgent binary was not found.",
+                logMessage = "DevAgent binary was not found at $expectedBinaryPath.",
             )
 
-        val validationError = validateBinary(binaryPath, operatingSystem, logFailures)
+        val validationError = validateBinary(binaryPath, logFailures)
         if (validationError != null) {
             return fail(
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
-                message = validationError,
+                userMessage = "Failed to start DevAgent.",
+                logMessage = validationError,
             )
         }
 
@@ -120,7 +127,8 @@ object DevAgentLauncher {
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
-                message = "Project directory is unavailable.",
+                userMessage = "Project path is unavailable.",
+                logMessage = "Project path is unavailable: basePath and guessProjectDir are empty.",
             )
 
         val projectPath = try {
@@ -131,7 +139,8 @@ object DevAgentLauncher {
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
-                message = "Project directory is not a local filesystem path.",
+                userMessage = "Project path is unavailable.",
+                logMessage = "Project path is unavailable: $rawProjectPath",
                 exception = exception,
             )
         }
@@ -141,7 +150,8 @@ object DevAgentLauncher {
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
-                message = "Project directory does not exist: ${projectPath.invariantSeparatorsPathString}.",
+                userMessage = "Project path is unavailable.",
+                logMessage = "Project path is unavailable: ${projectPath.invariantSeparatorsPathString} is not a directory.",
             )
         }
 
@@ -152,7 +162,7 @@ object DevAgentLauncher {
         return projectPath
     }
 
-    private fun validateBinary(binaryPath: Path, operatingSystem: SupportedOs, logFailures: Boolean): String? {
+    private fun validateBinary(binaryPath: Path, logFailures: Boolean): String? {
         if (!Files.isReadable(binaryPath)) {
             return "DevAgent binary is not readable: ${binaryPath.invariantSeparatorsPathString}."
         }
@@ -177,11 +187,72 @@ object DevAgentLauncher {
             return "DevAgent binary is empty: ${binaryPath.invariantSeparatorsPathString}."
         }
 
-        if (operatingSystem == SupportedOs.LINUX && !Files.isExecutable(binaryPath)) {
-            return "DevAgent binary is not executable. Rebuild the plugin so ${DevAgentBinaryResolver.expectedRelativeBinaryPath(operatingSystem).invariantSeparatorsPathString} is packaged with execute permissions."
+        return null
+    }
+
+    private fun ensureBinaryReadyForLaunch(project: Project, launchSpec: LaunchSpec): Boolean {
+        if (launchSpec.operatingSystem != SupportedOs.LINUX || Files.isExecutable(launchSpec.binaryPath)) {
+            return true
         }
 
-        return null
+        return try {
+            ensureLinuxBinaryExecutable(launchSpec.binaryPath)
+
+            if (!Files.isExecutable(launchSpec.binaryPath)) {
+                fail(
+                    project = project,
+                    notifyUser = true,
+                    logFailures = true,
+                    userMessage = "Failed to start DevAgent.",
+                    logMessage = "Failed to make DevAgent binary executable: ${launchSpec.binaryPath.invariantSeparatorsPathString}",
+                )
+                false
+            }
+            else {
+                true
+            }
+        }
+        catch (exception: IOException) {
+            fail(
+                project = project,
+                notifyUser = true,
+                logFailures = true,
+                userMessage = "Failed to start DevAgent.",
+                logMessage = "Failed to update execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
+                exception = exception,
+            )
+            false
+        }
+        catch (exception: SecurityException) {
+            fail(
+                project = project,
+                notifyUser = true,
+                logFailures = true,
+                userMessage = "Failed to start DevAgent.",
+                logMessage = "Failed to update execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
+                exception = exception,
+            )
+            false
+        }
+    }
+
+    private fun ensureLinuxBinaryExecutable(binaryPath: Path) {
+        try {
+            val permissions = Files.getPosixFilePermissions(binaryPath).toMutableSet()
+            permissions += setOf(
+                PosixFilePermission.OWNER_EXECUTE,
+                PosixFilePermission.GROUP_EXECUTE,
+                PosixFilePermission.OTHERS_EXECUTE,
+            )
+            Files.setPosixFilePermissions(binaryPath, permissions)
+            return
+        }
+        catch (_: UnsupportedOperationException) {
+        }
+
+        if (!binaryPath.toFile().setExecutable(true, false)) {
+            throw IOException("setExecutable returned false")
+        }
     }
 
     private fun handleLaunchFailure(project: Project, launchSpec: LaunchSpec, exception: RuntimeException) {
@@ -190,27 +261,28 @@ object DevAgentLauncher {
                 "command=${launchSpec.command.joinToString(" ")}",
             exception,
         )
-        DevAgentNotifications.error(project, "Failed to start DevAgent: ${exception.userFacingMessage()}.")
+        DevAgentNotifications.error(project, "Failed to start DevAgent.")
     }
 
     private fun fail(
         project: Project,
         notifyUser: Boolean,
         logFailures: Boolean,
-        message: String,
+        userMessage: String,
+        logMessage: String = userMessage,
         exception: Throwable? = null,
     ): LaunchSpec? {
         if (logFailures) {
             if (exception != null) {
-                LOG.warn(message, exception)
+                LOG.warn(logMessage, exception)
             }
             else {
-                LOG.warn(message)
+                LOG.warn(logMessage)
             }
         }
 
         if (notifyUser) {
-            DevAgentNotifications.error(project, message)
+            DevAgentNotifications.error(project, userMessage)
         }
 
         return null

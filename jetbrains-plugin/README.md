@@ -15,40 +15,49 @@ It uses the reworked Terminal API, which is the reason the plugin is limited to 
 
 macOS is intentionally unsupported in this MVP.
 
-## Binary placement
+## Binaries
 
-Put the real binaries here before running sandbox or packaging tasks:
+Put the real binaries here before running packaging or sandbox tasks:
 
 - bin/win/devagent.exe
 - bin/linux/devagent.bin
 
-Local sandbox runs only require the binary for the current host OS.
-
-Plugin distribution builds require both binaries.
-
-The Linux binary is packaged with execute permissions during the build.
+If any required binary is missing, the build fails with a clear error.
 
 ## Build
 
-Use JDK 21 and Gradle 8.13+.
+Use JDK 21.
 
 ```bash
-gradle buildPlugin
+./gradlew buildPlugin
 ```
+
+The plugin ZIP is created in build/distributions/.
 
 ## Run sandbox IDE
 
-Use JDK 21 and Gradle 8.13+.
-
 ```bash
-gradle runIde
+./gradlew runIde
 ```
 
-## MVP verification
+On Windows use gradlew.bat instead of ./gradlew.
 
-1. Put the real binaries into the bin directory.
-2. Start the sandbox IDE with gradle runIde.
-3. Open any project in the sandbox IDE.
-4. Click Run DevAgent in the main toolbar or use Tools | Run DevAgent.
-5. Confirm that the Terminal opens in the current project directory.
-6. Confirm that the started process is the platform binary with --workspace <project_path>.
+## Verify installed ZIP
+
+1. Build the plugin ZIP with ./gradlew buildPlugin.
+2. Open a clean IDE or the Gradle sandbox started by ./gradlew runIde.
+3. Install the ZIP from build/distributions/ using Settings | Plugins | gear icon | Install Plugin from Disk.
+4. Open any project.
+5. Run DevAgent from the toolbar or Tools menu.
+6. Confirm that the IDE Terminal starts:
+
+```text
+devagent --workspace "<project_path>"
+```
+
+## Supported operating systems
+
+- Windows
+- Linux
+
+macOS is intentionally unsupported.

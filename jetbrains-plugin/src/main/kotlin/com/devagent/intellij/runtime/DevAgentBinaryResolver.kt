@@ -36,7 +36,7 @@ object DevAgentBinaryResolver {
     }
 
     fun resolveBinaryPath(os: SupportedOs, logDetails: Boolean = true): Path? {
-        val pluginPath = resolvePluginPath(logDetails) ?: return null
+        val pluginPath = resolveInstalledPluginPath(logDetails) ?: return null
         val relativePath = expectedRelativeBinaryPath(os)
 
         val binaryPath = pluginPath.resolve(relativePath).normalize()
@@ -51,17 +51,17 @@ object DevAgentBinaryResolver {
         }
     }
 
-    private fun resolvePluginPath(logDetails: Boolean): Path? {
+    private fun resolveInstalledPluginPath(logDetails: Boolean): Path? {
         val descriptor = PluginManager.getPluginByClass(DevAgentBinaryResolver::class.java)
             ?: PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))
 
-        val pluginPath = descriptor?.pluginPath
+        val pluginPath = descriptor?.pluginPath?.normalize()?.takeIf { Files.isDirectory(it) }
         if (logDetails) {
             if (pluginPath != null) {
-                LOG.info("Resolved plugin installation path: ${pluginPath.invariantSeparatorsPathString}")
+                LOG.info("Resolved installed plugin path: ${pluginPath.invariantSeparatorsPathString}")
             }
             else {
-                LOG.warn("Failed to resolve plugin installation path for $PLUGIN_ID")
+                LOG.warn("Failed to resolve installed plugin path for $PLUGIN_ID")
             }
         }
 
