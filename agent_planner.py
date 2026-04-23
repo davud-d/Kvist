@@ -31,9 +31,9 @@ def create_plan(self, user_goal: str) -> PlanInfo:
         complexity = str(data.get("complexity", "simple")).strip().lower()
 
         if not isinstance(plan, list) or not plan:
-            raise ValueError("planner вернул пустой plan")
+            raise ValueError("planner returned empty plan")
         if not isinstance(success_criteria, list) or not success_criteria:
-            raise ValueError("planner вернул пустой success_criteria")
+            raise ValueError("planner returned empty success_criteria")
         if not isinstance(risks, list):
             risks = []
         if complexity not in {"simple", "complex"}:
@@ -60,19 +60,19 @@ def fallback_plan(self, user_goal: str) -> PlanInfo:
         goal=user_goal,
         complexity=complexity,
         plan=[
-            "изучить релевантные файлы и структуру",
-            "внести минимальные точные изменения",
-            "проверить результат и ошибки",
-            "дать итог по выполненной задаче",
+            "review relevant files and structure",
+            "make minimal precise changes",
+            "verify result and errors",
+            "summarize the completed task",
         ],
         success_criteria=[
-            "ключевые изменения внесены",
-            "ошибки не проигнорированы",
-            "результат проверен доступным способом",
+            "key changes applied",
+            "errors not ignored",
+            "result verified by available means",
         ],
         risks=[
-            "модель может зациклиться на одном действии",
-            "часть окружения может быть недоступна",
+            "model may loop on a single action",
+            "part of the environment may be unavailable",
         ],
     )
 
@@ -121,4 +121,4 @@ def parse_json_dict(self, text: str) -> dict[str, Any]:
         if isinstance(parsed, dict):
             return parsed
 
-    raise ValueError("Не удалось распарсить JSON-объект")
+    raise ValueError("Failed to parse JSON object")

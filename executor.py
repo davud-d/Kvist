@@ -254,21 +254,21 @@ class SafeExecutor:
                 extract_mode=args.get("extract_mode", "text"),
             )
 
-        raise ExecutorError(f"Неподдерживаемое действие: {action_type}")
+        raise ExecutorError(f"Unsupported action: {action_type}")
 
     def _resolve_path(self, user_path: str) -> Path:
         if not isinstance(user_path, str):
-            raise ExecutorError("Путь должен быть строкой")
+            raise ExecutorError("Path must be a string")
 
         candidate = (self.workspace / user_path).resolve()
 
         try:
             candidate.relative_to(self.workspace)
         except ValueError as error:
-            raise ExecutorError("Выход за пределы workspace запрещен") from error
+            raise ExecutorError("Access outside workspace is forbidden") from error
 
-        # Защита от symlink-атак: проверяем, что ни один компонент
-        # пути не является символической ссылкой, ведущей за пределы workspace.
+        # Symlink attack protection: verify that no path component
+        # is a symbolic link pointing outside the workspace.
         current = self.workspace
         relative_parts = candidate.relative_to(self.workspace).parts
         for part in relative_parts:
@@ -279,7 +279,7 @@ class SafeExecutor:
                     real_target.relative_to(self.workspace)
                 except ValueError:
                     raise ExecutorError(
-                        "Символическая ссылка ведёт за пределы workspace — доступ запрещён"
+                        "Symbolic link points outside workspace — access denied"
                     )
 
         return candidate
@@ -288,9 +288,9 @@ class SafeExecutor:
         safe_path = user_path or ""
         target = self._resolve_path(safe_path)
         if not target.exists():
-            raise ExecutorError(f"Путь не найден: {safe_path}")
+            raise ExecutorError(f"Path not found: {safe_path}")
         if not target.is_dir():
-            raise ExecutorError(f"Это не директория: {safe_path}")
+            raise ExecutorError(f"Not a directory: {safe_path}")
         return target
 
     def _relative_path(self, target: Path) -> str:
@@ -312,12 +312,12 @@ class SafeExecutor:
         return any(self._ENV_PATTERN.search(candidate) for candidate in candidates)
 
     def _check_env_file(self, path: str | Path) -> None:
-        """Блокирует любой доступ к .env файлам."""
+        """Blocks any access to .env files."""
         if self._is_env_file_path(path):
             raise ExecutorError(
-                "⛔ НАРУШЕНИЕ ПРОТОКОЛА БЕЗОПАСНОСТИ: Попытка доступа к .env файлу запрещена. "
-                "Файлы *.env содержат секреты и недоступны агенту для чтения и изменения. "
-                "Если нужно обновить переменные окружения — попросите пользователя сделать это вручную."
+                "\u26d4 SECURITY PROTOCOL VIOLATION: Attempted access to a .env file is forbidden. "
+                "*.env files contain secrets and are not accessible to the agent for reading or modification. "
+                "If you need to update environment variables, ask the user to do it manually."
             )
 
     def _guard_env_file_access(self, path: str) -> Path:
@@ -330,10 +330,10 @@ class SafeExecutor:
         target = self._guard_env_file_access(path)
 
         if not target.exists():
-            raise ExecutorError(f"Файл не найден: {path}")
+            raise ExecutorError(f"File not found: {path}")
 
         if not target.is_file():
-            raise ExecutorError(f"Это не файл: {path}")
+            raise ExecutorError(f"Not a file: {path}")
 
         content, truncated = self._safe_read_text(target)
 
@@ -352,7 +352,7 @@ class SafeExecutor:
         for path in paths:
             target = self._guard_env_file_access(path)
             if not target.exists() or not target.is_file():
-                raise ExecutorError(f"Файл не найден: {path}")
+                raise ExecutorError(f"File not found: {path}")
             content, truncated = self._safe_read_text(target)
             files.append(
                 {
@@ -407,15 +407,15 @@ class SafeExecutor:
         target = self._guard_env_file_access(path)
 
         if not target.exists():
-            raise ExecutorError(f"Файл не найден: {path}")
+            raise ExecutorError(f"File not found: {path}")
 
         if not target.is_file():
-            raise ExecutorError(f"Это не файл: {path}")
+            raise ExecutorError(f"Not a file: {path}")
 
         original_text = self._read_full_text(target)
         occurrences_found = original_text.count(old_text)
         if occurrences_found == 0:
-            raise ExecutorError("Фрагмент old_text не найден в файле")
+            raise ExecutorError("old_text fragment not found in file")
 
         occurrences_replaced = min(occurrences_found, count)
         updated_text = original_text.replace(old_text, new_text, count)
@@ -436,10 +436,10 @@ class SafeExecutor:
         target = self._resolve_path(path)
 
         if not target.exists():
-            raise ExecutorError(f"Путь не найден: {path}")
+            raise ExecutorError(f"Path not found: {path}")
 
         if not target.is_dir():
-            raise ExecutorError(f"Это не директория: {path}")
+            raise ExecutorError(f"Not a directory: {path}")
 
         items = []
         for item in sorted(target.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.lower())):
@@ -463,10 +463,10 @@ class SafeExecutor:
         target = self._resolve_path(path)
 
         if not target.exists():
-            raise ExecutorError(f"Путь не найден: {path}")
+            raise ExecutorError(f"Path not found: {path}")
 
         if not target.is_dir():
-            raise ExecutorError(f"Это не директория: {path}")
+            raise ExecutorError(f"Not a directory: {path}")
 
         max_depth = max(1, min(max_depth, 10))
         lines: list[str] = []
@@ -642,18 +642,18 @@ class SafeExecutor:
         timeout: float | None = None,
     ) -> ExecutionResult:
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
-            raise ExecutorError("run_shell.command должен быть непустым массивом строк")
+            raise ExecutorError("run_shell.command must be a non-empty array of strings")
         if cwd is not None and not isinstance(cwd, str):
-            raise ExecutorError("run_shell.cwd должен быть строкой")
+            raise ExecutorError("run_shell.cwd must be a string")
         if timeout is not None and not isinstance(timeout, (int, float)):
-            raise ExecutorError("run_shell.timeout должен быть числом")
+            raise ExecutorError("run_shell.timeout must be a number")
 
-        # Блокируем shell-команды, которые могут читать .env файлы
+        # Block shell commands that may read .env files
         cmd_str = " ".join(command)
         if self._ENV_PATTERN.search(cmd_str):
             raise ExecutorError(
-                "⛔ НАРУШЕНИЕ ПРОТОКОЛА БЕЗОПАСНОСТИ: Shell-команда пытается получить доступ к .env файлу. "
-                "Чтение *.env файлов категорически запрещено."
+                "\u26d4 SECURITY PROTOCOL VIOLATION: Shell command is attempting to access a .env file. "
+                "Reading *.env files is strictly forbidden."
             )
         try:
             result = self._terminal.run(command, cwd=cwd, timeout=timeout)
@@ -682,7 +682,7 @@ class SafeExecutor:
     ) -> ExecutionResult:
         normalized_query = query.strip()
         if not normalized_query:
-            raise ExecutorError("Пустой query для web_search")
+            raise ExecutorError("Empty query for web_search")
 
         requested = top_k if top_k is not None else self.web_max_results
         if max_results is not None:
@@ -698,7 +698,7 @@ class SafeExecutor:
 
         for provider in self._provider_order():
             if not self._provider_available(provider):
-                provider_errors.append(f"{provider}: не настроен")
+                provider_errors.append(f"{provider}: not configured")
                 continue
 
             try:
@@ -729,13 +729,13 @@ class SafeExecutor:
                     },
                 )
 
-            provider_errors.append(f"{provider}: нет подходящих результатов")
+            provider_errors.append(f"{provider}: no matching results")
 
         if not provider_errors:
-            raise ExecutorError("Не найден ни один доступный провайдер web_search")
+            raise ExecutorError("No available web_search provider found")
 
         raise ExecutorError(
-            "Не удалось выполнить web_search. " + " | ".join(provider_errors[-3:])
+            "Failed to execute web_search. " + " | ".join(provider_errors[-3:])
         )
 
     def _fetch_url(
@@ -746,16 +746,16 @@ class SafeExecutor:
     ) -> ExecutionResult:
         normalized_url = self._normalize_http_url(url)
         if not normalized_url:
-            raise ExecutorError("Некорректный URL")
+            raise ExecutorError("Invalid URL")
 
         parsed = urllib.parse.urlparse(normalized_url)
         host = (parsed.hostname or "").lower()
         if not self._is_allowed_domain(host):
-            raise ExecutorError("URL не входит в whitelist доверенных доменов")
+            raise ExecutorError("URL is not in the trusted domains whitelist")
 
         path = parsed.path.lower()
         if any(path.endswith(suffix) for suffix in self.disallowed_fetch_suffixes):
-            raise ExecutorError("Запрошенный URL указывает на бинарный или архивный файл")
+            raise ExecutorError("The requested URL points to a binary or archive file")
 
         safe_max_chars = self.max_fetch_chars_default if max_chars is None else max_chars
         safe_max_chars = max(500, min(safe_max_chars, self.max_fetch_chars_limit))
@@ -774,9 +774,9 @@ class SafeExecutor:
         content_type = headers.get("Content-Type", "")
         disposition = headers.get("Content-Disposition", "").lower()
         if "attachment" in disposition:
-            raise ExecutorError("Скачивание вложений запрещено")
+            raise ExecutorError("Downloading attachments is forbidden")
         if not self._is_text_like_content_type(content_type):
-            raise ExecutorError("Поддерживаются только text-подобные ответы")
+            raise ExecutorError("Only text-like responses are supported")
 
         decoded = self._decode_body(raw, content_type)
         title = normalized_url
@@ -841,11 +841,11 @@ class SafeExecutor:
             return self._search_tavily(query=query, top_k=top_k, freshness=freshness)
         if provider == "brave":
             return self._search_brave(query=query, top_k=top_k, freshness=freshness)
-        raise ExecutorError(f"Неизвестный провайдер поиска: {provider}")
+        raise ExecutorError(f"Unknown search provider: {provider}")
 
     def _search_searxng(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
         if not self.searxng_base_url:
-            raise ExecutorError("SEARXNG_BASE_URL не задан")
+            raise ExecutorError("SEARXNG_BASE_URL is not set")
 
         params: dict[str, Any] = {
             "q": query,
@@ -870,7 +870,7 @@ class SafeExecutor:
 
         raw_results = payload.get("results")
         if not isinstance(raw_results, list):
-            raise ExecutorError("SearXNG вернул невалидный формат результатов")
+            raise ExecutorError("SearXNG returned an invalid result format")
 
         mapped: list[dict[str, str]] = []
         for item in raw_results[: max(top_k * 3, top_k)]:
@@ -887,7 +887,7 @@ class SafeExecutor:
 
     def _search_tavily(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
         if not self.tavily_api_key:
-            raise ExecutorError("TAVILY_API_KEY не задан")
+            raise ExecutorError("TAVILY_API_KEY is not set")
 
         payload: dict[str, Any] = {
             "api_key": self.tavily_api_key,
@@ -914,7 +914,7 @@ class SafeExecutor:
         )
         raw_results = response.get("results")
         if not isinstance(raw_results, list):
-            raise ExecutorError("Tavily вернул невалидный формат результатов")
+            raise ExecutorError("Tavily returned an invalid result format")
 
         mapped: list[dict[str, str]] = []
         for item in raw_results:
@@ -931,7 +931,7 @@ class SafeExecutor:
 
     def _search_brave(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
         if not self.brave_api_key:
-            raise ExecutorError("BRAVE_SEARCH_API_KEY не задан")
+            raise ExecutorError("BRAVE_SEARCH_API_KEY is not set")
 
         params: dict[str, Any] = {
             "q": query,
@@ -958,11 +958,11 @@ class SafeExecutor:
 
         web_section = payload.get("web")
         if not isinstance(web_section, dict):
-            raise ExecutorError("Brave вернул невалидный формат")
+            raise ExecutorError("Brave returned an invalid format")
 
         raw_results = web_section.get("results")
         if not isinstance(raw_results, list):
-            raise ExecutorError("Brave вернул невалидный список результатов")
+            raise ExecutorError("Brave returned an invalid results list")
 
         mapped: list[dict[str, str]] = []
         for item in raw_results:
@@ -1103,9 +1103,9 @@ class SafeExecutor:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError as error:
-            raise ExecutorError("Провайдер вернул невалидный JSON") from error
+            raise ExecutorError("Provider returned invalid JSON") from error
         if not isinstance(parsed, dict):
-            raise ExecutorError("Провайдер вернул JSON не в формате объекта")
+            raise ExecutorError("Provider returned JSON that is not an object")
         return parsed
 
     def _http_request(
@@ -1139,20 +1139,20 @@ class SafeExecutor:
                     except ValueError:
                         content_length = 0
                     if content_length > max_bytes:
-                        raise ExecutorError("Ответ сервера превышает допустимый размер")
+                        raise ExecutorError("Server response exceeds the allowed size")
 
                 raw = response.read(max_bytes + 1)
                 if len(raw) > max_bytes:
-                    raise ExecutorError("Ответ сервера превышает допустимый размер")
+                    raise ExecutorError("Server response exceeds the allowed size")
 
                 return response.status, response.headers, raw
         except urllib.error.HTTPError as error:
-            raise ExecutorError(f"HTTP {error.code} при запросе к {url}") from error
+            raise ExecutorError(f"HTTP {error.code} when requesting {url}") from error
         except urllib.error.URLError as error:
             reason = getattr(error, "reason", error)
-            raise ExecutorError(f"Сетевая ошибка при запросе к {url}: {reason}") from error
+            raise ExecutorError(f"Network error when requesting {url}: {reason}") from error
         except TimeoutError as error:
-            raise ExecutorError(f"Таймаут при запросе к {url}") from error
+            raise ExecutorError(f"Timeout when requesting {url}") from error
 
     def _is_text_like_content_type(self, content_type: str) -> bool:
         lowered = content_type.lower()
@@ -1220,17 +1220,17 @@ class SafeExecutor:
         return max(min_value, min(value, max_value))
 
     def _read_full_text(self, target: Path) -> str:
-        """Читает файл целиком без truncation. Для операций записи/замены."""
+        """Reads the file in full without truncation. For write/replace operations."""
         size = target.stat().st_size
         if size > self.max_writable_file_bytes:
             raise ExecutorError(
-                f"Файл слишком большой для операции замены "
-                f"({size} байт, лимит {self.max_writable_file_bytes})"
+                f"File is too large for the replace operation "
+                f"({size} bytes, limit {self.max_writable_file_bytes})"
             )
         try:
             return target.read_text(encoding="utf-8")
         except UnicodeDecodeError as error:
-            raise ExecutorError(f"Файл не является UTF-8 текстом: {target.name}") from error
+            raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
 
     def _safe_read_text(self, target: Path) -> tuple[str, bool]:
         if target.stat().st_size > self.max_file_size_bytes:
@@ -1240,7 +1240,7 @@ class SafeExecutor:
         try:
             raw = target.read_text(encoding="utf-8")
         except UnicodeDecodeError as error:
-            raise ExecutorError(f"Файл не является UTF-8 текстом: {target.name}") from error
+            raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
 
         truncated = len(raw) > self.max_read_chars
         return self._truncate_text(raw, self.max_read_chars), truncated
@@ -1248,7 +1248,7 @@ class SafeExecutor:
     def _truncate_text(self, text: str, limit: int) -> str:
         if len(text) <= limit:
             return text
-        return text[:limit] + f"\n\n[TRUNCATED: показаны первые {limit} символов из {len(text)}]"
+        return text[:limit] + f"\n\n[TRUNCATED: showing first {limit} characters out of {len(text)}]"
 
     def _iter_files(self, base_dir: Path):
         for root, dirnames, filenames in os.walk(base_dir):

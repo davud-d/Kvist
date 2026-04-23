@@ -54,11 +54,11 @@ def multiline_input() -> str:
 
 
 def main() -> None:
-    cli = argparse.ArgumentParser(description="Локальный AI-агент")
+    cli = argparse.ArgumentParser(description="Local AI agent")
     cli.add_argument(
         "--workspace",
         required=True,
-        help="Путь к рабочей директории проекта.",
+        help="Path to the project workspace directory.",
     )
     args = cli.parse_args()
 
@@ -88,27 +88,27 @@ def main() -> None:
     )
     agent = LocalAgent(client=client, executor=executor, config=config)
 
-    console.print("Локальный AI-агент DevAgentXD запущен. Напиши задачу.")
+    console.print("Local AI agent DevAgentXD started. Enter your task.")
     console.print(f"[dim]Workspace: {executor.workspace}[/dim]")
     console.print(
         f"[green]Fast model: {fast_model}[/green] | [bold yellow]Smart model: {smart_model}[/bold yellow] | Max steps: {max_steps} | Verbose: {verbose}"
     )
-    console.print("[red]Для выхода введи '/bye'. Многострочный ввод: заверши строку символом '\\'.[/red]")
-    console.print("[dim]Команда '/resume' — продолжить прерванную задачу.[/dim]")
+    console.print("[red]Type '/bye' to exit. Multiline input: end a line with '\\'.[/red]")
+    console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
 
     try:
         while True:
             user_goal = multiline_input()
             if user_goal.lower() == "/bye":
-                console.print("[red]Выход.[/red]")
+                console.print("[red]Exiting.[/red]")
                 break
 
             if user_goal.lower() == "/resume":
                 result = agent.resume()
                 if result is None:
-                    console.print("[yellow]Нет сохранённого checkpoint для продолжения.[/yellow]")
+                    console.print("[yellow]No saved checkpoint to resume.[/yellow]")
                 elif verbose:
-                    print(f"\n[Финальный ответ]\n{result}")
+                    print(f"\n[Final Answer]\n{result}")
                 continue
 
             if not user_goal:
@@ -116,9 +116,9 @@ def main() -> None:
 
             result = agent.run(user_goal)
             if verbose:
-                print(f"\n[Финальный ответ]\n{result}")
+                print(f"\n[Final Answer]\n{result}")
     except KeyboardInterrupt:
-        console.print("\n[red]Прервано пользователем (Ctrl+C). \nВыход.[/red]")
+        console.print("\n[red]Interrupted by user (Ctrl+C). \nExiting.[/red]")
         sys.exit(130)
 
 

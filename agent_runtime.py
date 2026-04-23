@@ -34,11 +34,11 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             except CommandValidationError as error:
                 self._register_parse_error(step, raw_text, str(error))
                 self._ui.update_live(
-                    user_message="я уточняю формат шага и продолжаю работу",
-                    status="исправляю формат ответа",
+                    user_message="clarifying step format and continuing",
+                    status="fixing response format",
                     step=step,
                     progress=self._state.progress,
-                    plan_step="корректировка формата",
+                    plan_step="format correction",
                     is_error=True,
                 )
                 continue
@@ -48,7 +48,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             if self._is_repeat_blocked(command):
                 self._ui.update_live(
                     user_message=command.user_message,
-                    status="ищу другой рабочий шаг",
+                    status="looking for another working step",
                     step=step,
                     progress=self._state.progress,
                     plan_step=command.plan_step,
@@ -69,7 +69,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     self._register_feedback(step, command, feedback)
                     self._ui.update_live(
                         user_message=command.user_message,
-                        status="сработало ограничение web-поиска",
+                        status="web search limit reached",
                         step=step,
                         progress=self._state.progress,
                         plan_step=command.plan_step,
@@ -88,7 +88,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     self._register_feedback(step, command, feedback)
                     self._ui.update_live(
                         user_message=command.user_message,
-                        status="сработало ограничение чтения URL",
+                        status="URL read limit reached",
                         step=step,
                         progress=self._state.progress,
                         plan_step=command.plan_step,
@@ -98,7 +98,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             self._ui.update_live(
                 user_message=command.user_message,
-                status="выполняю действие",
+                status="executing action",
                 step=step,
                 progress=command.progress,
                 plan_step=command.plan_step,
@@ -114,7 +114,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             self._ui.update_live(
                 user_message=command.user_message,
-                status="шаг завершен" if feedback.get("ok") else "получена ошибка",
+                status="step completed" if feedback.get("ok") else "error received",
                 step=step,
                 progress=self._state.progress,
                 plan_step=command.plan_step,
@@ -153,17 +153,13 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
         return {
             "ok": False,
             "action_type": command.action.type,
-            "error": f"Неожиданная ошибка executor: {error}",
-        }
-
-    if result.ok:
-        return {
+                "error": f"Unexpected executor error: {error}",
             "ok": True,
             "action_type": result.action_type,
             "data": result.data,
         }
 
-    error_text = "Действие завершилось ошибкой"
+    error_text = "Action failed"
     if isinstance(result.data, dict):
         error_text = str(result.data.get("error") or error_text)
 
@@ -180,11 +176,11 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
 def register_parse_error(self, step: int, raw_text: str, error_text: str) -> None:
     self._state.parse_errors += 1
     self._state.consecutive_errors += 1
-    message = f"Невалидный ответ модели: {error_text}"
+    message = f"Invalid model response: {error_text}"
     self._record_error(message)
     self._state.pending_instruction = (
-        "Прошлый ответ был невалидным JSON. "
-        f"Ошибка: {error_text}. Верни строго один JSON-объект по схеме."
+        "The previous response was invalid JSON. "
+        f"Error: {error_text}. Return exactly one JSON object matching the schema."
     )
     self._state.step_logs.append(
         {
@@ -193,7 +189,7 @@ def register_parse_error(self, step: int, raw_text: str, error_text: str) -> Non
             "error": error_text,
         }
     )
-    self._ui.debug_print(f"\n[Шаг {step}] Ошибка формата: {error_text}")
+    self._ui.debug_print(f"\n[Step {step}] Format error: {error_text}")
 
 
 def register_feedback(
@@ -218,12 +214,12 @@ def register_feedback(
         error_text = str(
             feedback.get("error")
             or feedback.get("data", {}).get("stderr")
-            or "Неизвестная ошибка"
+            or "Unknown error"
         )
         self._record_error(error_text)
         self._state.pending_instruction = (
-            "Прошлое действие завершилось ошибкой. "
-            f"Ошибка: {error_text}. Не повторяй тот же шаг без новой идеи."
+            "The previous action failed. "
+            f"Error: {error_text}. Do not repeat the same step without a new idea."
         )
 
     self._update_progress(command, ok)
@@ -301,7 +297,7 @@ def update_state_from_success(
         if results:
             top = results[0]
             observation = (
-                f"Найден код по запросу '{data.get('query', '')}' в {top.get('path')}:{top.get('line')}"
+                f"Found code for query '{data.get('query', '')}' in {top.get('path')}:{top.get('line')}"
             )
             self._push_bounded(
                 self._state.recent_events,
@@ -313,7 +309,7 @@ def update_state_from_success(
         matches = data.get("matches", [])
         if matches:
             observation = (
-                f"Найдено файлов по шаблону '{data.get('pattern', '')}': {len(matches)}"
+                f"Found {len(matches)} files matching pattern '{data.get('pattern', '')}'"
             )
             self._push_bounded(
                 self._state.recent_events,
@@ -387,7 +383,7 @@ def register_final_answer(self, step: int, message: str) -> None:
             "message": message,
         }
     )
-    self._ui.debug_print(f"Результат: финальный ответ на шаге {step}")
+    self._ui.debug_print(f"Result: final answer at step {step}")
 
 
 def plan_progress(self) -> int:
@@ -410,55 +406,55 @@ def feedback_to_line(self, command: AgentCommand, feedback: dict[str, Any]) -> s
         data = feedback.get("data", {})
         if action_type == "read_file":
             path = data.get("path", "")
-            return f"ok: прочитан файл {path}"
+            return f"ok: read file {path}"
         if action_type == "read_multiple_files":
             count = len(data.get("files", []))
-            return f"ok: прочитано файлов {count}"
+            return f"ok: read {count} files"
         if action_type == "write_file":
             path = data.get("path", "")
-            return f"ok: записан файл {path}"
+            return f"ok: wrote file {path}"
         if action_type == "append_file":
             path = data.get("path", "")
-            return f"ok: дополнен файл {path}"
+            return f"ok: appended to file {path}"
         if action_type == "replace_in_file":
             path = data.get("path", "")
             count = data.get("occurrences_replaced", 0)
-            return f"ok: заменён фрагмент в {path}, замен {count}"
+            return f"ok: replaced fragment in {path}, replacements {count}"
         if action_type == "list_dir":
             count = len(data.get("items", []))
-            return f"ok: просмотрена директория, элементов {count}"
+            return f"ok: listed directory, items {count}"
         if action_type == "list_tree":
             truncated = bool(data.get("truncated"))
-            suffix = ", дерево обрезано" if truncated else ""
-            return f"ok: получено дерево файлов{suffix}"
+            suffix = ", tree truncated" if truncated else ""
+            return f"ok: got file tree{suffix}"
         if action_type == "find_files":
             count = len(data.get("matches", []))
-            return f"ok: найдено файлов {count}"
+            return f"ok: found {count} files"
         if action_type == "search_code":
             count = len(data.get("results", []))
-            return f"ok: найдено совпадений в коде {count}"
+            return f"ok: found {count} code matches"
         if action_type == "git_status":
-            return "ok: получен git status"
+            return "ok: got git status"
         if action_type == "git_diff":
-            return "ok: получен git diff"
+            return "ok: got git diff"
         if action_type == "run_shell":
             command_text = " ".join(data.get("command", []))
-            return f"ok: выполнена shell-команда {command_text}"
+            return f"ok: executed shell command {command_text}"
         if action_type == "web_search":
             provider = data.get("provider", "unknown")
             count = len(data.get("results", []))
-            return f"ok: web_search через {provider}, найдено источников {count}"
+            return f"ok: web_search via {provider}, found {count} sources"
         if action_type == "fetch_url":
             url = data.get("url", "")
             truncated = bool(data.get("truncated"))
-            suffix = ", контент обрезан" if truncated else ""
-            return f"ok: прочитан источник {url}{suffix}"
-        return f"ok: выполнено действие {action_type}"
+            suffix = ", content truncated" if truncated else ""
+            return f"ok: read source {url}{suffix}"
+        return f"ok: executed action {action_type}"
 
     error_text = str(
         feedback.get("error")
         or feedback.get("data", {}).get("stderr")
-        or "неизвестная ошибка"
+        or "unknown error"
     )
     return f"error: {action_type}: {error_text}"
 
@@ -475,7 +471,7 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
         payload["error"] = str(
             feedback.get("error")
             or feedback.get("data", {}).get("stderr")
-            or "неизвестная ошибка"
+            or "unknown error"
         )
         if feedback.get("data"):
             payload["data"] = self._compact_for_prompt(feedback.get("data", {}))
@@ -488,37 +484,37 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
     ok = bool(feedback.get("ok"))
     status = "OK" if ok else "ERROR"
     return (
-        f"Результат: {status}. {summary_line}. "
-        f"Прогресс: {self._state.progress}%. "
-        f"Стагнация: {self._state.stagnation_count}."
+        f"Result: {status}. {summary_line}. "
+        f"Progress: {self._state.progress}%. "
+        f"Stagnation: {self._state.stagnation_count}."
     )
 
 
 def build_early_stop_message(self, step: int) -> str | None:
     if self._state.consecutive_errors >= self.config.max_consecutive_errors:
         return (
-            "Агент остановлен. Слишком много ошибок подряд. "
-            f"Последние ошибки: {', '.join(self._state.error_history[-3:])}"
+            "Agent stopped. Too many consecutive errors. "
+            f"Last errors: {', '.join(self._state.error_history[-3:])}"
         )
 
     if self._state.stagnation_count >= self.config.stagnation_limit:
         return (
-            "Агент остановлен. Нет прогресса и есть признаки зацикливания. "
-            f"Последние действия: {', '.join(self._state.recent_feedback[-3:])}"
+            "Agent stopped. No progress detected, possible loop. "
+            f"Last actions: {', '.join(self._state.recent_feedback[-3:])}"
         )
 
     if step > self.config.max_steps:
-        return "Агент остановлен по лимиту шагов."
+        return "Agent stopped: step limit reached."
 
     return None
 
 
 def build_limit_reached_message(self) -> str:
-    errors = ", ".join(self._state.error_history[-3:]) or "нет"
+    errors = ", ".join(self._state.error_history[-3:]) or "none"
     return (
-        "Агент не завершил задачу за лимит шагов. "
-        f"Текущий прогресс: {self._state.progress}%. "
-        f"Последние ошибки: {errors}."
+        "Agent did not complete the task within the step limit. "
+        f"Current progress: {self._state.progress}%. "
+        f"Last errors: {errors}."
     )
 
 
@@ -527,8 +523,8 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
     seen_count = self._state.seen_actions.get(signature, 0)
     if seen_count >= self.config.repeat_action_limit:
         message = (
-            "Ты повторяешь уже бесполезное действие с теми же args. "
-            "Выбери другой шаг: другой файл, другой поиск, или честно заверши задачу."
+            "You are repeating a useless action with the same args. "
+            "Choose a different step: a different file, a different search, or honestly complete the task."
         )
         self._state.pending_instruction = message
         self._state.stagnation_count += 1
@@ -546,7 +542,7 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
                 },
             }
         )
-        self._ui.debug_print(f"Блокировка повтора: {command.action.type} {command.action.args}")
+        self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
         return True
 
     self._state.seen_actions[signature] = seen_count + 1

@@ -101,7 +101,7 @@ class LocalAgent:
             return None
         user_goal, last_step = result
         self._ui.debug_print(
-            f"Восстановлено из checkpoint: цель='{user_goal}', шаг={last_step}, прогресс={self._state.progress}%"
+            f"Restored from checkpoint: goal='{user_goal}', step={last_step}, progress={self._state.progress}%"
         )
         return self._run_loop(user_goal, start_step=last_step + 1)
 

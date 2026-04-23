@@ -15,7 +15,7 @@ from rich.text import Text
 
 
 class AgentUI:
-    """Отвечает за весь визуальный вывод агента: live-панель, финальный результат, verbose-логи."""
+    """Responsible for all visual output of the agent: live panel, final result, verbose logs."""
 
     def __init__(self, console: Console | None = None, verbose: bool = False) -> None:
         self.console = console or Console()
@@ -27,11 +27,11 @@ class AgentUI:
             return
 
         initial = self._render_live_panel(
-            user_message="я начинаю работу и собираю контекст",
-            status="подготовка",
+            user_message="I'm starting work and gathering context",
+            status="preparing",
             step=0,
             progress=0,
-            plan_step="инициализация",
+            plan_step="initialization",
             is_error=False,
         )
         self._live = Live(
@@ -73,36 +73,36 @@ class AgentUI:
     def print_plan(self, plan_info: Any) -> None:
         if not self.verbose:
             return
-        print("\n[План]")
-        print(f"Цель: {plan_info.goal}")
-        print(f"Сложность: {plan_info.complexity}")
+        print("\n[Plan]")
+        print(f"Goal: {plan_info.goal}")
+        print(f"Complexity: {plan_info.complexity}")
         for index, item in enumerate(plan_info.plan, start=1):
             print(f"{index}. {item}")
         if plan_info.success_criteria:
-            print("Критерии успеха:")
+            print("Success criteria:")
             for item in plan_info.success_criteria:
                 print(f"- {item}")
 
     def print_step_header(self, step: int, command: Any) -> None:
         if not self.verbose:
             return
-        print(f"\n[Шаг {step}]")
-        print(f"Этап: {command.plan_step}")
-        print(f"Мысль: {command.thought}")
-        print(f"Сообщение: {command.user_message}")
-        print(f"Действие: {command.action.type} {command.action.args}")
-        print(f"Заявленный прогресс: {command.progress}%")
+        print(f"\n[Step {step}]")
+        print(f"Stage: {command.plan_step}")
+        print(f"Thought: {command.thought}")
+        print(f"Message: {command.user_message}")
+        print(f"Action: {command.action.type} {command.action.args}")
+        print(f"Reported progress: {command.progress}%")
 
     def print_final(self, final_message: str, user_messages: list[str]) -> None:
         history = self._unique_messages(user_messages)
         if history:
             history_text = "\n".join(f"{index}. {item}" for index, item in enumerate(history, start=1))
         else:
-            history_text = "1. я выполнил задачу"
+            history_text = "1. I completed the task"
 
         thoughts_panel = Panel(
             Text(history_text, style="bright_cyan"),
-            title="> мысли и действия",
+            title="> thoughts and actions",
             title_align="left",
             border_style="bright_magenta",
             box=box.ROUNDED,
@@ -111,7 +111,7 @@ class AgentUI:
 
         final_panel = Panel(
             Text(final_message, style="bright_green"),
-            title="Финальный ответ",
+            title="Final Answer",
             title_align="left",
             border_style="bright_green",
             box=box.ROUNDED,
@@ -137,17 +137,17 @@ class AgentUI:
     ) -> Panel:
         if is_error:
             status_style = "bright_red"
-        elif "заверш" in status:
+        elif "complet" in status:
             status_style = "bright_green"
         else:
             status_style = "bright_yellow"
 
-        title_text = Text("Агент работает", style="bold bright_magenta")
-        spinner = Spinner("dots", text=Text("выполняю задачу", style="bright_cyan"))
-        message_text = Text(user_message or "я продолжаю выполнение", style="bold bright_cyan")
-        status_text = Text(f"Статус: {status}", style=status_style)
+        title_text = Text("Agent working", style="bold bright_magenta")
+        spinner = Spinner("dots", text=Text("executing task", style="bright_cyan"))
+        message_text = Text(user_message or "continuing execution", style="bold bright_cyan")
+        status_text = Text(f"Status: {status}", style=status_style)
         meta_text = Text(
-            f"Шаг {step} • Прогресс {max(0, min(progress, 100))}% • {plan_step}",
+            f"Step {step} • Progress {max(0, min(progress, 100))}% • {plan_step}",
             style="grey70",
         )
 
