@@ -1094,7 +1094,7 @@ Fallback для Python-инструментов:
 К запретным файлам и паттернам относятся:
 - .env
 - .env.*
-- API_KEYS.env
+- .devagent/config.json
 - *.pem
 - *.key
 - *.p12

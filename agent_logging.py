@@ -80,8 +80,6 @@ def persist_logs(self, user_goal: str) -> None:
 
 
 def save_checkpoint(self, user_goal: str, step: int) -> None:
-    if not self.config.persist_logs:
-        return
     state_path = get_state_path(self)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {

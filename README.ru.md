@@ -41,6 +41,8 @@ AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
 ```
 
+`AGENT_PERSIST_LOGS=0` отключает только сохранение run-логов. Checkpoint для `/resume` всё равно использует `<project>/.devagent/state.json`.
+
 По умолчанию `main.py` использует `gpt-5.4-nano` для обычных шагов, `gpt-5.4-mini` для более качественного рассуждения и `gpt-4o` для планирования.
 
 ## Запуск

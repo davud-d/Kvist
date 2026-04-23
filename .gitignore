@@ -33,3 +33,7 @@ agent_logs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Plugins storage specific to this project
+.devagent/logs/
+.devagent/state.json
