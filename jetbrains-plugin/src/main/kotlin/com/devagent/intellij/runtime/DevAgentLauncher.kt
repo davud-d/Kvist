@@ -8,7 +8,6 @@ import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
 import org.jetbrains.plugins.terminal.TerminalToolWindowFactory
-import org.jetbrains.plugins.terminal.startup.TerminalProcessType
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
@@ -58,7 +57,6 @@ object DevAgentLauncher {
             TerminalToolWindowTabsManager.getInstance(project)
                 .createTabBuilder()
                 .workingDirectory(launchSpec.projectPath.toString())
-                .processType(TerminalProcessType.NON_SHELL)
                 .tabName("DevAgent")
                 .requestFocus(true)
                 .shellCommand(launchSpec.command)
@@ -81,32 +79,39 @@ object DevAgentLauncher {
         val projectPath = resolveProjectPath(project, notifyUser, logFailures) ?: return null
 
         val operatingSystem = DevAgentBinaryResolver.currentOs()
-            ?: return fail(
-                project = project,
-                notifyUser = notifyUser,
-                logFailures = logFailures,
-                userMessage = "This operating system is not supported.",
-            )
+            ?: run {
+                fail(
+                    project = project,
+                    notifyUser = notifyUser,
+                    logFailures = logFailures,
+                    userMessage = "This operating system is not supported.",
+                )
+                return null
+            }
 
         val expectedBinaryPath = DevAgentBinaryResolver.expectedRelativeBinaryPath(operatingSystem).invariantSeparatorsPathString
         val binaryPath = DevAgentBinaryResolver.resolveBinaryPath(operatingSystem, logDetails = logFailures)
-            ?: return fail(
-                project = project,
-                notifyUser = notifyUser,
-                logFailures = logFailures,
-                userMessage = "DevAgent binary was not found.",
-                logMessage = "DevAgent binary was not found at $expectedBinaryPath.",
-            )
+            ?: run {
+                fail(
+                    project = project,
+                    notifyUser = notifyUser,
+                    logFailures = logFailures,
+                    userMessage = "DevAgent binary was not found.",
+                    logMessage = "DevAgent binary was not found at $expectedBinaryPath.",
+                )
+                return null
+            }
 
         val validationError = validateBinary(binaryPath, logFailures)
         if (validationError != null) {
-            return fail(
+            fail(
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
                 userMessage = "Failed to start DevAgent.",
                 logMessage = validationError,
             )
+            return null
         }
 
         if (logFailures) {
@@ -123,19 +128,22 @@ object DevAgentLauncher {
     private fun resolveProjectPath(project: Project, notifyUser: Boolean, logFailures: Boolean): Path? {
         val rawProjectPath = sequenceOf(project.guessProjectDir()?.path, project.basePath)
             .firstNotNullOfOrNull { it?.takeIf { candidate -> candidate.isNotBlank() } }
-            ?: return fail(
-                project = project,
-                notifyUser = notifyUser,
-                logFailures = logFailures,
-                userMessage = "Project path is unavailable.",
-                logMessage = "Project path is unavailable: basePath and guessProjectDir are empty.",
-            )
+            ?: run {
+                fail(
+                    project = project,
+                    notifyUser = notifyUser,
+                    logFailures = logFailures,
+                    userMessage = "Project path is unavailable.",
+                    logMessage = "Project path is unavailable: basePath and guessProjectDir are empty.",
+                )
+                return null
+            }
 
         val projectPath = try {
             Path.of(rawProjectPath).normalize()
         }
         catch (exception: InvalidPathException) {
-            return fail(
+            fail(
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
@@ -143,16 +151,18 @@ object DevAgentLauncher {
                 logMessage = "Project path is unavailable: $rawProjectPath",
                 exception = exception,
             )
+            return null
         }
 
         if (!Files.isDirectory(projectPath)) {
-            return fail(
+            fail(
                 project = project,
                 notifyUser = notifyUser,
                 logFailures = logFailures,
                 userMessage = "Project path is unavailable.",
                 logMessage = "Project path is unavailable: ${projectPath.invariantSeparatorsPathString} is not a directory.",
             )
+            return null
         }
 
         if (logFailures) {
@@ -271,7 +281,7 @@ object DevAgentLauncher {
         userMessage: String,
         logMessage: String = userMessage,
         exception: Throwable? = null,
-    ): LaunchSpec? {
+    ) {
         if (logFailures) {
             if (exception != null) {
                 LOG.warn(logMessage, exception)
@@ -284,8 +294,6 @@ object DevAgentLauncher {
         if (notifyUser) {
             DevAgentNotifications.error(project, userMessage)
         }
-
-        return null
     }
 
     private fun Throwable.userFacingMessage(): String {

@@ -27,7 +27,25 @@ build/
 .idea/
 *.swp
 *.swo
+.vscode/
+*.iml
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Build tools
+jetbrains-plugin/build-tools/
+jetbrains-plugin/jdk21.zip
+
+# Gradle
+jetbrains-plugin/.gradle/
+jetbrains-plugin/build/
+*.iml
+
+# Логи
+*.log
+
+# git
+.git/
+.gitignore

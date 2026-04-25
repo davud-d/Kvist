@@ -7,7 +7,7 @@ import java.util.zip.ZipFile
 
 plugins {
     kotlin("jvm") version "2.2.21"
-    id("org.jetbrains.intellij.platform") version "2.14.0"
+    id("org.jetbrains.intellij.platform")
 }
 
 group = providers.gradleProperty("group").get()
@@ -76,6 +76,7 @@ val devAgentSandboxBinaries = copySpec {
 val validateHostDevAgentBinary by tasks.registering {
     group = "verification"
     description = "Ensures that the current host binary exists for local sandbox runs."
+    notCompatibleWithConfigurationCache("Reads project-local binary files during task execution.")
 
     doLast {
         validateBinarySet(requiredBinariesForRunIde(), "the current host")
@@ -85,6 +86,7 @@ val validateHostDevAgentBinary by tasks.registering {
 val validateAllDevAgentBinaries by tasks.registering {
     group = "verification"
     description = "Ensures that all packaged DevAgent binaries exist for plugin distribution builds."
+    notCompatibleWithConfigurationCache("Reads project-local binary files during task execution.")
 
     doLast {
         validateBinarySet(requiredBinariesForBuild(), "plugin packaging")
