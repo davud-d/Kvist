@@ -10,6 +10,8 @@ from openai import AuthenticationError, OpenAI
 USER_CONFIG_DIRNAME = ".devagent"
 USER_CONFIG_FILENAME = "config.json"
 USER_CONFIG_KEY = "openai_api_key"
+LEGACY_USER_CONFIG_KEY = "OPENAI_API_KEY"
+USER_CONFIG_KEYS = (USER_CONFIG_KEY, LEGACY_USER_CONFIG_KEY)
 
 
 def get_user_config_path() -> Path:
@@ -52,7 +54,14 @@ def load_api_key(config_path: Path | None = None) -> str:
     if not isinstance(payload, dict):
         raise RuntimeError("User config is invalid.")
 
-    api_key = payload.get(USER_CONFIG_KEY)
+    api_key = next(
+        (
+            value
+            for key in USER_CONFIG_KEYS
+            if isinstance((value := payload.get(key)), str) and value.strip()
+        ),
+        None,
+    )
     if not isinstance(api_key, str) or not api_key.strip():
         raise RuntimeError("OpenAI API key is missing in user config.")
 
@@ -70,11 +79,7 @@ def prompt_api_key() -> str:
 def validate_api_key(api_key: str, model: str) -> None:
     client = OpenAI(api_key=api_key)
     try:
-        client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=1,
-        )
+        client.models.list()
     except AuthenticationError as error:
         raise RuntimeError("Invalid OpenAI API key.") from error
     except Exception as error:
