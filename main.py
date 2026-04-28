@@ -22,6 +22,8 @@ console = Console()
 def resolve_workspace_path(raw_path: str) -> Path:
     candidate = Path(raw_path).expanduser().resolve()
     if not candidate.exists():
+        candidate.mkdir(parents=True, exist_ok=True)
+    if not candidate.exists():
         raise RuntimeError("Workspace path does not exist.")
     if not candidate.is_dir():
         raise RuntimeError("Workspace path must be a directory.")

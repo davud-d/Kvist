@@ -153,7 +153,11 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
         return {
             "ok": False,
             "action_type": command.action.type,
-                "error": f"Unexpected executor error: {error}",
+            "error": f"Unexpected executor error: {type(error).__name__}: {error}",
+        }
+
+    if result.ok:
+        return {
             "ok": True,
             "action_type": result.action_type,
             "data": result.data,

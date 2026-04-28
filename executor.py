@@ -67,7 +67,7 @@ class ExecutionResult:
 
 class SafeExecutor:
     def __init__(self, workspace: str | Path) -> None:
-        self.workspace = Path(workspace).resolve()
+        self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
 
         self.max_read_chars = 20000
@@ -200,7 +200,7 @@ class SafeExecutor:
             )
 
         if action_type == "list_dir":
-            return self._list_dir(args["path"])
+            return self._list_dir(args.get("path", ""))
 
         if action_type == "list_tree":
             return self._list_tree(
@@ -256,16 +256,60 @@ class SafeExecutor:
 
         raise ExecutorError(f"Unsupported action: {action_type}")
 
-    def _resolve_path(self, user_path: str) -> Path:
+    def _normalize_user_path(self, user_path: str | None) -> str:
+        if user_path is None:
+            return ""
+        if not isinstance(user_path, str):
+            raise ExecutorError("Path must be a string")
+        return user_path
+
+    def _path_error_details(
+        self,
+        user_path: str,
+        target: Path | None = None,
+        error: BaseException | None = None,
+    ) -> str:
+        target = target or (self.workspace / user_path).resolve()
+        try:
+            exists = target.exists()
+        except OSError:
+            exists = False
+        try:
+            is_dir = target.is_dir()
+        except OSError:
+            is_dir = False
+
+        parts = [
+            f"path={user_path!r}",
+            f"resolved={str(target)!r}",
+            f"exists={exists}",
+            f"is_dir={is_dir}",
+            f"permission={'denied' if isinstance(error, PermissionError) else 'ok'}",
+        ]
+        if error is not None:
+            parts.append(f"exception={type(error).__name__}: {error}")
+        return ", ".join(parts)
+
+    def _resolve_path(self, user_path: str | None) -> Path:
+        user_path = self._normalize_user_path(user_path)
         if not isinstance(user_path, str):
             raise ExecutorError("Path must be a string")
 
-        candidate = (self.workspace / user_path).resolve()
+        try:
+            candidate = (self.workspace / user_path).resolve()
+        except OSError as error:
+            raise ExecutorError(
+                "Failed to resolve path: "
+                + self._path_error_details(user_path, error=error)
+            ) from error
 
         try:
             candidate.relative_to(self.workspace)
         except ValueError as error:
-            raise ExecutorError("Access outside workspace is forbidden") from error
+            raise ExecutorError(
+                "Access outside workspace is forbidden: "
+                + self._path_error_details(user_path, candidate, error)
+            ) from error
 
         # Symlink attack protection: verify that no path component
         # is a symbolic link pointing outside the workspace.
@@ -277,20 +321,31 @@ class SafeExecutor:
                 real_target = current.resolve()
                 try:
                     real_target.relative_to(self.workspace)
-                except ValueError:
+                except ValueError as error:
                     raise ExecutorError(
-                        "Symbolic link points outside workspace — access denied"
-                    )
+                        "Symbolic link points outside workspace - access denied: "
+                        + self._path_error_details(user_path, real_target, error)
+                    ) from error
 
         return candidate
 
     def _resolve_dir(self, user_path: str | None) -> Path:
-        safe_path = user_path or ""
+        safe_path = self._normalize_user_path(user_path)
         target = self._resolve_path(safe_path)
-        if not target.exists():
-            raise ExecutorError(f"Path not found: {safe_path}")
-        if not target.is_dir():
-            raise ExecutorError(f"Not a directory: {safe_path}")
+        try:
+            if not target.exists():
+                raise ExecutorError(
+                    "Path not found: " + self._path_error_details(safe_path, target)
+                )
+            if not target.is_dir():
+                raise ExecutorError(
+                    "Not a directory: " + self._path_error_details(safe_path, target)
+                )
+        except PermissionError as error:
+            raise ExecutorError(
+                "Permission denied while checking directory: "
+                + self._path_error_details(safe_path, target, error)
+            ) from error
         return target
 
     def _relative_path(self, target: Path) -> str:
@@ -432,17 +487,36 @@ class SafeExecutor:
             },
         )
 
-    def _list_dir(self, path: str) -> ExecutionResult:
+    def _list_dir(self, path: str | None) -> ExecutionResult:
+        path = self._normalize_user_path(path)
         target = self._resolve_path(path)
 
-        if not target.exists():
-            raise ExecutorError(f"Path not found: {path}")
-
-        if not target.is_dir():
-            raise ExecutorError(f"Not a directory: {path}")
+        try:
+            if not target.exists():
+                raise ExecutorError(
+                    "Path not found: " + self._path_error_details(path, target)
+                )
+            if not target.is_dir():
+                raise ExecutorError(
+                    "Not a directory: " + self._path_error_details(path, target)
+                )
+            entries = sorted(
+                target.iterdir(),
+                key=lambda entry: (not entry.is_dir(), entry.name.lower()),
+            )
+        except PermissionError as error:
+            raise ExecutorError(
+                "Permission denied while listing directory: "
+                + self._path_error_details(path, target, error)
+            ) from error
+        except OSError as error:
+            raise ExecutorError(
+                "Failed to list directory: "
+                + self._path_error_details(path, target, error)
+            ) from error
 
         items = []
-        for item in sorted(target.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.lower())):
+        for item in entries:
             items.append(
                 {
                     "name": item.name,
@@ -528,12 +602,24 @@ class SafeExecutor:
         base_dir = self._resolve_dir(path)
         matches: list[str] = []
 
-        for file_path in self._iter_files(base_dir):
-            relative = self._relative_path(file_path)
-            if fnmatch.fnmatch(file_path.name, pattern) or fnmatch.fnmatch(relative, pattern):
-                matches.append(relative)
-            if len(matches) >= 200:
-                break
+        try:
+            files = self._iter_files(base_dir)
+            for file_path in files:
+                relative = self._relative_path(file_path.resolve())
+                if fnmatch.fnmatch(file_path.name, pattern) or fnmatch.fnmatch(relative, pattern):
+                    matches.append(relative)
+                if len(matches) >= 200:
+                    break
+        except PermissionError as error:
+            raise ExecutorError(
+                "Permission denied while finding files: "
+                + self._path_error_details(path, base_dir, error)
+            ) from error
+        except OSError as error:
+            raise ExecutorError(
+                "Failed to find files: "
+                + self._path_error_details(path, base_dir, error)
+            ) from error
 
         return ExecutionResult(
             ok=True,
