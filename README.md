@@ -1,23 +1,31 @@
 # DagAI
 
-Minimal local AI agent for working inside a sandboxed workspace.
+DagAI is a local coding agent for one workspace at a time.
+
+I use it for the kind of repo work that is small but annoying: find where some
+setting is loaded, make a narrow patch, explain a dusty file, check why a
+dependency upgrade broke. It runs in the terminal, keeps its hands inside the
+workspace, and shows progress while it works.
+
+It is not an IDE and not a magic safety box. Read the diff before you trust it.
 
 ## Requirements
 
 - Python 3.11+
 - OpenAI API key
 
+The JetBrains plugin has a separate build path; see the note at the bottom.
+
 ## Setup
 
-1. Install dependencies:
+From the repo root:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-2. The first run does not require any `.env` file.
-
-If `~/.devagent/config.json` does not exist yet, the agent asks for your OpenAI API key in the terminal, validates it with a real OpenAI API request, and stores it as JSON:
+No `.env` is needed for the first run. If `~/.devagent/config.json` is missing,
+DagAI asks for an OpenAI API key, checks it against the API, then writes:
 
 ```json
 {
@@ -25,12 +33,52 @@ If `~/.devagent/config.json` does not exist yet, the agent asks for your OpenAI 
 }
 ```
 
-Config location:
+Config path:
 
 - Linux/macOS: `~/.devagent/config.json`
 - Windows: `C:\Users\<USERNAME>\.devagent\config.json`
 
-Optional settings:
+Old configs with `OPENAI_API_KEY` in that JSON still load.
+
+## Run
+
+From source:
+
+```bash
+python main.py --workspace "<project_path>"
+```
+
+With a built binary:
+
+```bash
+devagent --workspace "<project_path>"
+```
+
+`--workspace` is required. DagAI creates the folder if it is not there. I prefer
+passing an absolute path; relative paths work, but only relative to the terminal
+you launched from.
+
+Example tasks:
+
+```text
+> Find where settings are loaded and explain the flow
+```
+
+```text
+> Add validation for empty workspace paths and keep the error message short
+```
+
+Use `/bye` to exit. Use `/resume` if the last run was interrupted and a
+checkpoint exists.
+
+Multiline input is a bit old-school: end the line with `\`.
+
+```text
+> Refactor the parser so that \
+... validation errors include the action type
+```
+
+## Knobs worth knowing
 
 ```env
 AGENT_FAST_MODEL=gpt-5.4-nano
@@ -41,41 +89,58 @@ AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
 ```
 
-`AGENT_PERSIST_LOGS=0` disables persisted run logs only. Checkpoint state for `/resume` still uses `<project>/.devagent/state.json`.
+`AGENT_MAX_STEPS` is the one I change most often. Raise it when the agent keeps
+stopping one or two steps too early. `AGENT_VERBOSE=1` is useful when debugging
+DagAI itself, and noisy for normal use.
 
-By default, `main.py` uses `gpt-5.4-nano` for routine steps, `gpt-5.4-mini` for higher-quality reasoning, and `gpt-4o` for planning.
+`AGENT_PERSIST_LOGS=0` stops run logs, but `/resume` still uses
+`<project>/.devagent/state.json`.
 
-## Run
+Web search is deliberately limited. It is meant for external libraries, docs,
+release notes, pricing, limits, and other things that can go stale.
 
-Only one launch contract is supported:
-
-```bash
-devagent --workspace "<project_path>"
+```env
+SEARCH_PROVIDER=auto
+SEARXNG_BASE_URL=
+TAVILY_API_KEY=
+BRAVE_SEARCH_API_KEY=
 ```
 
-The `--workspace` argument is required. The path must already exist. Relative paths are resolved from the current terminal directory and converted to an absolute path before startup.
+## Files it creates
 
-## Runtime Files
+Inside the target project:
 
-Inside the target project, the agent stores:
+- `<project>/.devagent/logs/`
+- `<project>/.devagent/state.json`
 
-- `<project>/.devagent/logs/` for persisted run logs
-- `<project>/.devagent/state.json` for checkpoint and `/resume`
+The API key stays in your home directory config, not in the project.
 
-The `/resume` command restores execution from `<project>/.devagent/state.json`.
+## Sharp edges
 
-## Project Layout
+File access is kept inside the workspace. Shell commands go through an allowlist.
+There are size limits, output limits, and URL fetch blocks for obvious binary
+stuff.
 
-- `main.py` — CLI entry point
-- `agent.py` — `LocalAgent` composition layer that binds runtime, planning, model, logging, and UI helpers
-- `agent_state.py` — runtime config and mutable run state dataclasses
-- `agent_planner.py` — plan generation and fallback planning
-- `agent_runtime.py` — main execution loop, progress tracking, and feedback handling
-- `agent_context.py` — prompt/context assembly for each step
-- `agent_model.py` — model calls, retries, token accounting, and model selection
-- `agent_logging.py` — checkpoints and persisted run logs
-- `agent_web.py` — web-search and fetch guards plus extracted web facts
-- `executor.py` — safe workspace executor
-- `parser.py` and `protocol.py` — command parsing and schema definitions
-- `ui.py` — terminal rendering and live status output
-- `<project>/.devagent/` — persisted logs and resume state
+Still, this is a tool for supervised work. It can misunderstand the task or make
+the wrong edit confidently. Best workflow so far: ask for one contained change,
+inspect, then continue.
+
+Some internal error messages are still ugly. The runtime got attention first;
+the polish can wait.
+
+## Project layout
+
+- `main.py` starts the CLI and wires workspace, key loading, models, and UI.
+- `agent.py` glues the agent pieces together.
+- `agent_runtime.py` runs the step loop and checkpoints progress.
+- `executor.py` handles workspace-safe file, shell, git, and web actions.
+- `parser.py` and `protocol.py` validate model actions.
+- `terminal.py` has the command allowlist.
+- `agent_web.py` guards web search and URL reads.
+- `agent_logging.py` writes run logs and checkpoints.
+- `ui.py` renders terminal output.
+
+`jetbrains-plugin/` contains an IntelliJ Platform plugin that launches DagAI in
+the IDE terminal for the current project. It is pinned to IntelliJ Platform
+2025.3, supports Windows/Linux, and expects built binaries under
+`jetbrains-plugin/bin/` before packaging.

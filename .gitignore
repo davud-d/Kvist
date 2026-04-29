@@ -61,3 +61,5 @@ jetbrains-plugin/build/
 # Other
 push.py
 text_gitignore.txt
+workspace
+workspace/

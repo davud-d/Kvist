@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import getpass
 import json
 import sys
 from pathlib import Path
@@ -69,6 +70,9 @@ def load_api_key(config_path: Path | None = None) -> str:
 
 
 def prompt_api_key() -> str:
+    if sys.stdin.isatty():
+        return getpass.getpass("OpenAI API key: ").strip()
+
     print("OpenAI API key: ", end="", flush=True)
     data = sys.stdin.buffer.readline()
     if not data:
