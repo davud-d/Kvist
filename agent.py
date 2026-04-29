@@ -71,6 +71,7 @@ from agent_web import (
 )
 from executor import SafeExecutor
 from ui import AgentUI
+
 class LocalAgent:
     def __init__(
         self,

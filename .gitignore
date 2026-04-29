@@ -29,6 +29,7 @@ build/
 *.swo
 .vscode/
 *.iml
+.vscode
 
 # OS
 .DS_Store
@@ -43,9 +44,20 @@ jetbrains-plugin/.gradle/
 jetbrains-plugin/build/
 *.iml
 
-# Логи
+# Logs
 *.log
 
 # git
 .git/
 .gitignore
+
+# binary files
+*.bin
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Other
+push.py
+text_gitignore.txt
