@@ -1204,7 +1204,7 @@ class SafeExecutor:
         body: bytes | None = None,
     ) -> tuple[int, Any, bytes]:
         request_headers = {
-            "User-Agent": "dagai-local-agent/1.0",
+            "User-Agent": "devagentxd-local-agent/1.0",
             "Accept-Encoding": "identity",
         }
         request_headers.update(headers)

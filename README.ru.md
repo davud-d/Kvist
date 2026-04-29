@@ -1,6 +1,6 @@
-# DagAI
+# DevAgentXD
 
-DagAI — локальный coding agent для одного workspace за раз.
+DevAgentXD — локальный coding agent для одного workspace за раз.
 
 Я бы использовал его для мелкой, но надоедливой работы по репозиторию: найти,
 где грузится настройка, сделать узкую правку, объяснить старый файл, проверить,
@@ -25,7 +25,7 @@ pip install -r requirements.txt
 ```
 
 Для первого запуска `.env` не нужен. Если `~/.devagent/config.json` отсутствует,
-DagAI спросит OpenAI API key, проверит его через API и запишет:
+DevAgentXD спросит OpenAI API key, проверит его через API и запишет:
 
 ```json
 {
@@ -54,7 +54,7 @@ python main.py --workspace "<project_path>"
 devagent --workspace "<project_path>"
 ```
 
-`--workspace` обязателен. Если папки нет, DagAI её создаст. Я обычно передаю
+`--workspace` обязателен. Если папки нет, DevAgentXD её создаст. Я обычно передаю
 абсолютный путь: относительные пути тоже работают, но считаются от терминала,
 из которого был запуск.
 
@@ -91,7 +91,7 @@ AGENT_VERBOSE=0
 
 `AGENT_MAX_STEPS` я бы трогал первым. Поднимайте, если агент регулярно
 останавливается за шаг-два до результата. `AGENT_VERBOSE=1` полезен при отладке
-самого DagAI, в обычной работе быстро надоедает.
+самого DevAgentXD, в обычной работе быстро надоедает.
 
 `AGENT_PERSIST_LOGS=0` отключает run-логи, но `/resume` всё равно использует
 `<project>/.devagent/state.json`.
@@ -139,6 +139,6 @@ API key остаётся в домашнем конфиге, а не в прое
 - `agent_logging.py` пишет run-логи и checkpoint.
 - `ui.py` рисует вывод в терминале.
 
-`jetbrains-plugin/` содержит IntelliJ Platform plugin: он запускает DagAI в IDE
+`jetbrains-plugin/` содержит IntelliJ Platform plugin: он запускает DevAgentXD в IDE
 Terminal для текущего проекта. Плагин прибит к IntelliJ Platform 2025.3,
 поддерживает Windows/Linux и ждёт собранные бинарники в `jetbrains-plugin/bin/`.
