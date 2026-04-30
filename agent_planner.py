@@ -11,12 +11,26 @@ _PROMPT_DIR = Path(__file__).resolve().parent
 PLANNER_PROMPT = (_PROMPT_DIR / "planner_prompt.txt").read_text(encoding="utf-8").strip()
 
 
+def detect_request_language(text: str) -> str:
+    cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
+    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
+    return "ru" if cyrillic > latin else "en"
+
+
 def create_plan(self, user_goal: str) -> PlanInfo:
-    prompt = (
-        "Задача пользователя:\n"
-        f"{user_goal}\n\n"
-        "Собери короткий план, критерии успеха и оцени сложность."
-    )
+    language = detect_request_language(user_goal)
+    if language == "ru":
+        prompt = (
+            "Задача пользователя:\n"
+            f"{user_goal}\n\n"
+            "Собери короткий план, критерии успеха и оцени сложность."
+        )
+    else:
+        prompt = (
+            "User task:\n"
+            f"{user_goal}\n\n"
+            "Build a short plan, success criteria, and estimate complexity"
+        )
 
     try:
         raw = self._call_model(
