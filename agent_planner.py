@@ -18,7 +18,7 @@ def detect_request_language(text: str) -> str:
 
 
 def create_plan(self, user_goal: str) -> PlanInfo:
-    language = detect_request_language(user_goal)
+    language = self._state.task_language or detect_request_language(user_goal)
     if language == "ru":
         prompt = (
             "Задача пользователя:\n"
@@ -69,7 +69,28 @@ def create_plan(self, user_goal: str) -> PlanInfo:
 
 
 def fallback_plan(self, user_goal: str) -> PlanInfo:
+    language = self._state.task_language or detect_request_language(user_goal)
     complexity = "complex" if self._is_complex_goal(user_goal) else "simple"
+    if language == "ru":
+        return PlanInfo(
+            goal=user_goal,
+            complexity=complexity,
+            plan=[
+                "изучить нужные файлы и структуру",
+                "внести минимальные точные изменения",
+                "проверить результат и ошибки",
+                "кратко описать выполненную задачу",
+            ],
+            success_criteria=[
+                "ключевые изменения применены",
+                "ошибки не проигнорированы",
+                "результат проверен доступным способом",
+            ],
+            risks=[
+                "модель может зациклиться на одном действии",
+                "часть окружения может быть недоступна",
+            ],
+        )
     return PlanInfo(
         goal=user_goal,
         complexity=complexity,

@@ -14,6 +14,8 @@ def detect_request_language(text: str) -> str:
 _RUNTIME_TEXT = {
     "ru": {
         "step": "Шаг",
+        "task_language": "Язык задачи",
+        "task_language_name": "русский",
         "user_task": "Задача пользователя",
         "plan_goal": "Цель по плану",
         "complexity": "Сложность",
@@ -37,9 +39,15 @@ _RUNTIME_TEXT = {
             "Опирайся на подробные данные как на источник истины. "
             "Выбери следующее действие так, чтобы продвинуть задачу и не повторять тупиковые шаги."
         ),
+        "language_instruction": (
+            "Публичные JSON-поля thought, user_message и final_answer.args.message пиши только на русском. "
+            "Если видишь normalized_error, используй его для следующего шага; raw_error не копируй в публичный ответ."
+        ),
     },
     "en": {
         "step": "Step",
+        "task_language": "Task language",
+        "task_language_name": "English",
         "user_task": "User task",
         "plan_goal": "Plan goal",
         "complexity": "Complexity",
@@ -63,13 +71,17 @@ _RUNTIME_TEXT = {
             "Use detailed data as the source of truth. Choose the next action so it moves "
             "the task forward and does not repeat dead-end steps."
         ),
+        "language_instruction": (
+            "Write public JSON fields thought, user_message, and final_answer.args.message only in English. "
+            "If normalized_error is present, use it for the next step; do not copy raw_error into public text."
+        ),
     },
 }
 
 
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     assert self._state.plan_info is not None
-    language = detect_request_language(user_goal)
+    language = self._state.task_language or detect_request_language(user_goal)
     text = _RUNTIME_TEXT[language]
 
     plan_text = "\n".join(
@@ -103,6 +115,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
 
     return (
         f"{text['step']}: {step}\n"
+        f"{text['task_language']}: {text['task_language_name']}\n\n"
         f"{text['user_task']}:\n{user_goal}\n\n"
         f"{text['plan_goal']}:\n{self._state.plan_info.goal}\n\n"
         f"{text['complexity']}: {self._state.plan_info.complexity}\n"
@@ -120,6 +133,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['recent_details']}:\n{detailed_results or text['none']}\n\n"
         f"{text['repeated_errors']}:\n{repeated_errors or text['none']}\n\n"
         f"{text['additional_instruction']}:\n{pending_instruction}\n\n"
+        f"{text['language_instruction']}\n\n"
         f"{text['truth_instruction']}"
     )
 

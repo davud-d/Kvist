@@ -42,6 +42,7 @@ class PlanInfo:
 
 @dataclass(slots=True)
 class RunState:
+    task_language: str = ""
     plan_info: PlanInfo | None = None
     progress: int = 0
     summary: str = ""

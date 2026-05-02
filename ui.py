@@ -9,13 +9,12 @@ from rich.align import Align
 from rich.console import Console, Group
 from rich.live import Live
 from rich.panel import Panel
-from rich.rule import Rule
 from rich.spinner import Spinner
 from rich.text import Text
 
 
 class AgentUI:
-    """Responsible for all visual output of the agent: live panel, final result, verbose logs."""
+    """Responsible for all visual output of the agent."""
 
     def __init__(self, console: Console | None = None, verbose: bool = False) -> None:
         self.console = console or Console()
@@ -27,17 +26,18 @@ class AgentUI:
             return
 
         initial = self._render_live_panel(
-            user_message="I'm starting work and gathering context",
+            user_message="Analyzing task",
             status="preparing",
             step=0,
             progress=0,
             plan_step="initialization",
             is_error=False,
         )
+
         self._live = Live(
             initial,
             console=self.console,
-            refresh_per_second=8,
+            refresh_per_second=10,
             transient=True,
         )
         self._live.start()
@@ -45,6 +45,7 @@ class AgentUI:
     def stop_live(self) -> None:
         if self._live is None:
             return
+
         self._live.stop()
         self._live = None
 
@@ -68,16 +69,20 @@ class AgentUI:
             plan_step=plan_step,
             is_error=is_error,
         )
+
         self._live.update(panel, refresh=True)
 
     def print_plan(self, plan_info: Any) -> None:
         if not self.verbose:
             return
+
         print("\n[Plan]")
         print(f"Goal: {plan_info.goal}")
         print(f"Complexity: {plan_info.complexity}")
+
         for index, item in enumerate(plan_info.plan, start=1):
             print(f"{index}. {item}")
+
         if plan_info.success_criteria:
             print("Success criteria:")
             for item in plan_info.success_criteria:
@@ -86,6 +91,7 @@ class AgentUI:
     def print_step_header(self, step: int, command: Any) -> None:
         if not self.verbose:
             return
+
         print(f"\n[Step {step}]")
         print(f"Stage: {command.plan_step}")
         print(f"Thought: {command.thought}")
@@ -93,22 +99,7 @@ class AgentUI:
         print(f"Action: {command.action.type} {command.action.args}")
         print(f"Reported progress: {command.progress}%")
 
-    def print_final(self, final_message: str, user_messages: list[str]) -> None:
-        history = self._unique_messages(user_messages)
-        if history:
-            history_text = "\n".join(f"{index}. {item}" for index, item in enumerate(history, start=1))
-        else:
-            history_text = "1. I completed the task"
-
-        thoughts_panel = Panel(
-            Text(history_text, style="bright_cyan"),
-            title="> thoughts and actions",
-            title_align="left",
-            border_style="bright_magenta",
-            box=box.ROUNDED,
-            padding=(1, 2),
-        )
-
+    def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
         final_panel = Panel(
             Text(final_message, style="bright_green"),
             title="Final Answer",
@@ -118,8 +109,6 @@ class AgentUI:
             padding=(1, 2),
         )
 
-        self.console.print(thoughts_panel)
-        self.console.print(Rule(style="grey35"))
         self.console.print(final_panel)
 
     def debug_print(self, message: str) -> None:
@@ -135,50 +124,76 @@ class AgentUI:
         plan_step: str,
         is_error: bool,
     ) -> Panel:
-        if is_error:
-            status_style = "bright_red"
-        elif "complet" in status:
-            status_style = "bright_green"
-        else:
-            status_style = "bright_yellow"
+        light_symbol, light_style, state_label = self._status_light(status, is_error)
+        public_message = self._clean_public_status(user_message)
+        safe_progress = max(0, min(progress, 100))
 
-        title_text = Text("Agent working", style="bold bright_magenta")
-        spinner = Spinner("dots", text=Text("executing task", style="bright_cyan"))
-        message_text = Text(user_message or "continuing execution", style="bold bright_cyan")
-        status_text = Text(f"Status: {status}", style=status_style)
+        title = Text.assemble(
+            (f"{light_symbol} ", light_style),
+            ("DevAgentXD", "bold bright_white"),
+            (f" • {state_label}", "grey70"),
+        )
+
+        spinner_text = "fixing step" if state_label == "adjusting" else "executing task"
+
+        spinner = Spinner(
+            "dots",
+            text=Text(spinner_text, style=light_style),
+        )
+
+        message_text = Text(public_message, style="bold bright_cyan")
         meta_text = Text(
-            f"Step {step} • Progress {max(0, min(progress, 100))}% • {plan_step}",
+            f"Step {step} • Progress {safe_progress}% • {plan_step}",
             style="grey70",
         )
 
         content = Group(
-            Align.center(title_text),
-            spinner,
+            Align.left(spinner),
             Text(""),
             message_text,
-            status_text,
             Text(""),
             meta_text,
         )
 
         return Panel(
             content,
+            title=title,
+            title_align="left",
             box=box.ROUNDED,
-            border_style="bright_magenta",
+            border_style=light_style,
             padding=(1, 2),
         )
 
-    @staticmethod
-    def _normalize_message(text: str) -> str:
-        return re.sub(r"\s+", " ", text).strip().casefold()
+    def _status_light(self, status: str, is_error: bool) -> tuple[str, str, str]:
+        normalized = status.casefold()
 
-    def _unique_messages(self, messages: list[str]) -> list[str]:
-        unique: list[str] = []
-        seen: set[str] = set()
-        for item in messages:
-            normalized = self._normalize_message(item)
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            unique.append(item.strip())
-        return unique
+        attention_words = (
+            "error",
+            "failed",
+            "failure",
+            "fixing",
+            "blocked",
+            "limit",
+            "invalid",
+            "retry",
+            "repeat",
+            "correction",
+            "wrong",
+        )
+
+        if is_error or any(word in normalized for word in attention_words):
+            return "●", "bright_yellow", "adjusting"
+
+        return "●", "bright_green", "working"
+
+    @staticmethod
+    def _clean_public_status(text: str) -> str:
+        cleaned = re.sub(r"\s+", " ", text).strip()
+
+        if not cleaned:
+            return "Working on the task"
+
+        if len(cleaned) <= 160:
+            return cleaned
+
+        return cleaned[:157].rstrip() + "..."

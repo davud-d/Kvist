@@ -43,6 +43,23 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 )
                 continue
 
+            language_error = self._command_language_error(command)
+            if language_error:
+                self._register_language_error(step, command, language_error)
+                self._ui.update_live(
+                    user_message=(
+                        "Исправляю язык ответа модели и повторяю шаг"
+                        if self._state.task_language == "ru"
+                        else "Fixing the model response language and retrying the step"
+                    ),
+                    status="fixing response language",
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step="language correction",
+                    is_error=True,
+                )
+                continue
+
             self._record_user_message(command.user_message)
 
             if self._is_repeat_blocked(command):
@@ -61,11 +78,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             if command.action.type == "web_search":
                 web_error = self._prepare_web_search_command(user_goal, command)
                 if web_error:
-                    feedback = {
-                        "ok": False,
-                        "action_type": "web_search",
-                        "error": web_error,
-                    }
+                    feedback = self._build_error_feedback("web_search", web_error)
                     self._register_feedback(step, command, feedback)
                     self._ui.update_live(
                         user_message=command.user_message,
@@ -80,11 +93,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             if command.action.type == "fetch_url":
                 fetch_error = self._prepare_fetch_url_command(command)
                 if fetch_error:
-                    feedback = {
-                        "ok": False,
-                        "action_type": "fetch_url",
-                        "error": fetch_error,
-                    }
+                    feedback = self._build_error_feedback("fetch_url", fetch_error)
                     self._register_feedback(step, command, feedback)
                     self._ui.update_live(
                         user_message=command.user_message,
@@ -114,7 +123,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             self._ui.update_live(
                 user_message=command.user_message,
-                status="step completed" if feedback.get("ok") else "error received",
+                status="continuing" if feedback.get("ok") else "error received",
                 step=step,
                 progress=self._state.progress,
                 plan_step=command.plan_step,
@@ -144,17 +153,10 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
     try:
         result = self.executor.execute(command)
     except ExecutorError as error:
-        return {
-            "ok": False,
-            "action_type": command.action.type,
-            "error": str(error),
-        }
+        return self._build_error_feedback(command.action.type, str(error))
     except Exception as error:
-        return {
-            "ok": False,
-            "action_type": command.action.type,
-            "error": f"Unexpected executor error: {type(error).__name__}: {error}",
-        }
+        raw_error = f"Unexpected executor error: {type(error).__name__}: {error}"
+        return self._build_error_feedback(command.action.type, raw_error)
 
     if result.ok:
         return {
@@ -167,25 +169,152 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
     if isinstance(result.data, dict):
         error_text = str(result.data.get("error") or error_text)
 
-    payload: dict[str, Any] = {
-        "ok": False,
-        "action_type": result.action_type,
-        "error": error_text,
-    }
+    payload = self._build_error_feedback(result.action_type, error_text)
     if isinstance(result.data, dict):
         payload["data"] = result.data
     return payload
 
 
+def build_error_feedback(
+    self,
+    action_type: str,
+    raw_error: str,
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "action_type": action_type,
+        "error": raw_error,
+        "raw_error": raw_error,
+        "normalized_error": self._normalize_error_for_model(raw_error),
+    }
+
+
+def command_language_error(self, command: AgentCommand) -> str | None:
+    language = self._state.task_language
+    checks = [
+        ("thought", command.thought),
+        ("user_message", command.user_message),
+    ]
+    if command.action.type == "final_answer":
+        checks.append(("final_answer.message", str(command.action.args.get("message", ""))))
+
+    for field_name, value in checks:
+        if not _matches_task_language(value, language):
+            if language == "ru":
+                return f"Поле {field_name} написано не на русском языке."
+            return f"Field {field_name} is not written in English."
+    return None
+
+
+def register_language_error(
+    self,
+    step: int,
+    command: AgentCommand,
+    error_text: str,
+) -> None:
+    self._state.parse_errors += 1
+    self._state.consecutive_errors += 1
+    self._record_error(error_text)
+    if self._state.task_language == "ru":
+        self._state.pending_instruction = (
+            f"{error_text} Предыдущий шаг отклонён и не исполнялся. "
+            "Повтори тот же смысл шага, но напиши публичные JSON-поля thought, "
+            "user_message и final_answer.args.message только на русском языке."
+        )
+    else:
+        self._state.pending_instruction = (
+            f"{error_text} The previous step was rejected and was not executed. "
+            "Retry the same intended step, but write public JSON fields thought, "
+            "user_message, and final_answer.args.message only in English."
+        )
+    self._state.step_logs.append(
+        {
+            "step": step,
+            "status": "language_error",
+            "error": error_text,
+            "command": {
+                "thought": command.thought,
+                "plan_step": command.plan_step,
+                "progress": command.progress,
+                "user_message": command.user_message,
+                "action": {
+                    "type": command.action.type,
+                    "args": command.action.args,
+                },
+            },
+        }
+    )
+    self._ui.debug_print(f"\n[Step {step}] Language error: {error_text}")
+
+
+def normalize_error_for_model(self, raw_error: str) -> str:
+    error = str(raw_error).strip() or "Unknown error"
+    if self._state.task_language != "ru":
+        return error
+
+    mappings = (
+        ("File not found: ", "Файл не найден: "),
+        ("Not a file: ", "Путь не является файлом: "),
+        ("Path not found: ", "Путь не найден: "),
+        ("Not a directory: ", "Путь не является директорией: "),
+        ("Unsupported action: ", "Неподдерживаемое действие: "),
+        ("Unexpected executor error: ", "Неожиданная ошибка executor: "),
+        ("Network error when requesting ", "Сетевая ошибка при запросе "),
+        ("Timeout when requesting ", "Таймаут при запросе "),
+    )
+    for prefix, translated in mappings:
+        if error.startswith(prefix):
+            return translated + error[len(prefix):]
+
+    exact = {
+        "Action failed": "Действие не выполнено.",
+        "Unknown error": "Неизвестная ошибка.",
+        "Invalid URL": "Некорректный URL.",
+        "Empty query for web_search": "Пустой запрос для web_search.",
+        "old_text fragment not found in file": "Фрагмент old_text не найден в файле.",
+        "Path must be a string": "Путь должен быть строкой.",
+        "run_shell.command must be a non-empty array of strings": (
+            "run_shell.command должен быть непустым списком строк."
+        ),
+    }
+    if error in exact:
+        return exact[error]
+    if error.startswith("HTTP "):
+        return "HTTP-ошибка при выполнении запроса."
+    return "Действие не выполнено. Подробности сохранены в raw_error."
+
+
+def feedback_error_for_model(self, feedback: dict[str, Any]) -> str:
+    normalized = feedback.get("normalized_error")
+    if isinstance(normalized, str) and normalized.strip():
+        return normalized.strip()
+    raw = (
+        feedback.get("raw_error")
+        or feedback.get("error")
+        or feedback.get("data", {}).get("stderr")
+        or "Unknown error"
+    )
+    return self._normalize_error_for_model(str(raw))
+
+
 def register_parse_error(self, step: int, raw_text: str, error_text: str) -> None:
     self._state.parse_errors += 1
     self._state.consecutive_errors += 1
-    message = f"Invalid model response: {error_text}"
+    if self._state.task_language == "ru":
+        message = f"Невалидный ответ модели: {error_text}"
+    else:
+        message = "Invalid model response."
     self._record_error(message)
-    self._state.pending_instruction = (
-        "The previous response was invalid JSON. "
-        f"Error: {error_text}. Return exactly one JSON object matching the schema."
-    )
+    if self._state.task_language == "ru":
+        self._state.pending_instruction = (
+            "Предыдущий ответ был невалидным JSON. "
+            f"Ошибка: {error_text}. Верни ровно один JSON-объект по схеме."
+        )
+    else:
+        self._state.pending_instruction = (
+            "The previous response was invalid JSON. "
+            "Return exactly one JSON object matching the schema."
+        )
     self._state.step_logs.append(
         {
             "step": step,
@@ -215,16 +344,18 @@ def register_feedback(
         self._update_state_from_success(command, feedback)
     else:
         self._state.consecutive_errors += 1
-        error_text = str(
-            feedback.get("error")
-            or feedback.get("data", {}).get("stderr")
-            or "Unknown error"
-        )
+        error_text = self._feedback_error_for_model(feedback)
         self._record_error(error_text)
-        self._state.pending_instruction = (
-            "The previous action failed. "
-            f"Error: {error_text}. Do not repeat the same step without a new idea."
-        )
+        if self._state.task_language == "ru":
+            self._state.pending_instruction = (
+                "Предыдущее действие не выполнено. "
+                f"normalized_error: {error_text}. Не повторяй тот же шаг без новой идеи."
+            )
+        else:
+            self._state.pending_instruction = (
+                "The previous action failed. "
+                f"normalized_error: {error_text}. Do not repeat the same step without a new idea."
+            )
 
     self._update_progress(command, ok)
     if not ok:
@@ -455,11 +586,7 @@ def feedback_to_line(self, command: AgentCommand, feedback: dict[str, Any]) -> s
             return f"ok: read source {url}{suffix}"
         return f"ok: executed action {action_type}"
 
-    error_text = str(
-        feedback.get("error")
-        or feedback.get("data", {}).get("stderr")
-        or "unknown error"
-    )
+    error_text = self._feedback_error_for_model(feedback)
     return f"error: {action_type}: {error_text}"
 
 
@@ -472,13 +599,7 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
     if feedback.get("ok"):
         payload["data"] = self._compact_for_prompt(feedback.get("data", {}))
     else:
-        payload["error"] = str(
-            feedback.get("error")
-            or feedback.get("data", {}).get("stderr")
-            or "unknown error"
-        )
-        if feedback.get("data"):
-            payload["data"] = self._compact_for_prompt(feedback.get("data", {}))
+        payload["normalized_error"] = self._feedback_error_for_model(feedback)
 
     serialized = json.dumps(payload, ensure_ascii=False, indent=2)
     return self._truncate_for_prompt(serialized, self.config.prompt_result_char_limit)
@@ -487,27 +608,46 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
 def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
     ok = bool(feedback.get("ok"))
     status = "OK" if ok else "ERROR"
+    raw_suffix = ""
+    if not ok:
+        raw_error = str(feedback.get("raw_error") or feedback.get("error") or "").strip()
+        normalized_error = self._feedback_error_for_model(feedback)
+        if raw_error and raw_error != normalized_error:
+            raw_suffix = f" Raw error: {raw_error}."
     return (
         f"Result: {status}. {summary_line}. "
         f"Progress: {self._state.progress}%. "
         f"Stagnation: {self._state.stagnation_count}."
+        f"{raw_suffix}"
     )
 
 
 def build_early_stop_message(self, step: int) -> str | None:
     if self._state.consecutive_errors >= self.config.max_consecutive_errors:
+        if self._state.task_language == "ru":
+            return (
+                "Агент остановлен: слишком много ошибок подряд. "
+                f"Последние ошибки: {', '.join(self._state.error_history[-3:])}"
+            )
         return (
             "Agent stopped. Too many consecutive errors. "
             f"Last errors: {', '.join(self._state.error_history[-3:])}"
         )
 
     if self._state.stagnation_count >= self.config.stagnation_limit:
+        if self._state.task_language == "ru":
+            return (
+                "Агент остановлен: прогресс не меняется, возможен цикл. "
+                f"Последние действия: {', '.join(self._state.recent_feedback[-3:])}"
+            )
         return (
             "Agent stopped. No progress detected, possible loop. "
             f"Last actions: {', '.join(self._state.recent_feedback[-3:])}"
         )
 
     if step > self.config.max_steps:
+        if self._state.task_language == "ru":
+            return "Агент остановлен: достигнут лимит шагов."
         return "Agent stopped: step limit reached."
 
     return None
@@ -515,6 +655,13 @@ def build_early_stop_message(self, step: int) -> str | None:
 
 def build_limit_reached_message(self) -> str:
     errors = ", ".join(self._state.error_history[-3:]) or "none"
+    if self._state.task_language == "ru":
+        errors = ", ".join(self._state.error_history[-3:]) or "нет"
+        return (
+            "Агент не завершил задачу в пределах лимита шагов. "
+            f"Текущий прогресс: {self._state.progress}%. "
+            f"Последние ошибки: {errors}."
+        )
     return (
         "Agent did not complete the task within the step limit. "
         f"Current progress: {self._state.progress}%. "
@@ -526,10 +673,16 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
     signature = self._action_signature(command)
     seen_count = self._state.seen_actions.get(signature, 0)
     if seen_count >= self.config.repeat_action_limit:
-        message = (
-            "You are repeating a useless action with the same args. "
-            "Choose a different step: a different file, a different search, or honestly complete the task."
-        )
+        if self._state.task_language == "ru":
+            message = (
+                "Ты повторяешь бесполезное действие с теми же аргументами. "
+                "Выбери другой шаг: другой файл, другой поиск или честно заверши задачу."
+            )
+        else:
+            message = (
+                "You are repeating a useless action with the same args. "
+                "Choose a different step: a different file, a different search, or honestly complete the task."
+            )
         self._state.pending_instruction = message
         self._state.stagnation_count += 1
         self._state.step_logs.append(
@@ -587,3 +740,13 @@ def push_bounded(self, items: list[str], value: str, limit: int) -> None:
         return
     items.append(value)
     del items[:-limit]
+
+
+def _matches_task_language(text: str, language: str) -> bool:
+    if language not in {"ru", "en"}:
+        return True
+    cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
+    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
+    if language == "ru":
+        return cyrillic > 0
+    return cyrillic <= latin

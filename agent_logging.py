@@ -49,6 +49,7 @@ def persist_logs(self, user_goal: str) -> None:
     logs_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "goal": user_goal,
+        "task_language": self._state.task_language,
         "plan": {
             "goal": self._state.plan_info.goal if self._state.plan_info else "",
             "complexity": self._state.plan_info.complexity if self._state.plan_info else "",
@@ -84,6 +85,7 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
     state_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "goal": user_goal,
+        "task_language": self._state.task_language,
         "step": step,
         "progress": self._state.progress,
         "summary": self._state.summary,
@@ -142,6 +144,7 @@ def load_checkpoint(self) -> tuple[str, int] | None:
         )
 
     self._state.progress = data.get("progress", 0)
+    self._state.task_language = str(data.get("task_language") or "")
     self._state.summary = data.get("summary", "")
     self._state.files_read = data.get("files_read", [])
     self._state.files_changed = data.get("files_changed", [])

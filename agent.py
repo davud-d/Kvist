@@ -8,6 +8,7 @@ from agent_context import (
     build_runtime_prompt,
     build_summary,
     compact_for_prompt,
+    detect_request_language,
     format_dependency_versions_for_prompt,
     format_web_facts_for_prompt,
     truncate_for_prompt,
@@ -37,11 +38,15 @@ from agent_planner import (
 from agent_runtime import (
     action_signature,
     build_early_stop_message,
+    build_error_feedback,
     build_limit_reached_message,
+    command_language_error,
     execute_command,
+    feedback_error_for_model,
     feedback_to_detail,
     feedback_to_line,
     is_repeat_blocked,
+    normalize_error_for_model,
     plan_progress,
     push_bounded,
     push_unique,
@@ -49,6 +54,7 @@ from agent_runtime import (
     record_user_message,
     register_feedback,
     register_final_answer,
+    register_language_error,
     register_parse_error,
     render_feedback,
     reset_run_state,
@@ -90,6 +96,7 @@ class LocalAgent:
 
     def run(self, user_goal: str) -> str:
         self._reset_run_state()
+        self._state.task_language = detect_request_language(user_goal)
         self._state.plan_info = self._create_plan(user_goal)
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
         self._ui.print_plan(self._state.plan_info)
@@ -101,6 +108,8 @@ class LocalAgent:
         if result is None:
             return None
         user_goal, last_step = result
+        if not self._state.task_language:
+            self._state.task_language = detect_request_language(user_goal)
         self._ui.debug_print(
             f"Restored from checkpoint: goal='{user_goal}', step={last_step}, progress={self._state.progress}%"
         )
@@ -130,7 +139,12 @@ class LocalAgent:
     _prefer_smart_model = prefer_smart_model
 
     _execute_command = execute_command
+    _build_error_feedback = build_error_feedback
+    _command_language_error = command_language_error
+    _feedback_error_for_model = feedback_error_for_model
+    _normalize_error_for_model = normalize_error_for_model
     _register_parse_error = register_parse_error
+    _register_language_error = register_language_error
     _register_feedback = register_feedback
     _update_state_from_success = update_state_from_success
     _update_progress = update_progress
@@ -163,4 +177,3 @@ class LocalAgent:
     _save_checkpoint = save_checkpoint
     _load_checkpoint = load_checkpoint
     _clear_checkpoint = clear_checkpoint
-

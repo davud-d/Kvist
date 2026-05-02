@@ -140,10 +140,19 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
     ratio = available / prompt_tokens
     target_chars = int(len(user_prompt) * ratio * 0.95)
     trimmed = user_prompt[:target_chars]
-    trimmed += "\n\n[КОНТЕКСТ ОБРЕЗАН: превышен лимит токенов. Действуй на основе доступных данных.]"
-    self._ui.debug_print(
-        f"Промпт обрезан: {prompt_tokens} токенов → ~{available} (лимит {self.config.max_context_tokens})"
-    )
+    if getattr(self._state, "task_language", "") == "ru":
+        trimmed += "\n\n[КОНТЕКСТ ОБРЕЗАН: превышен лимит токенов. Действуй на основе доступных данных.]"
+        debug_message = (
+            f"Промпт обрезан: {prompt_tokens} токенов → ~{available} "
+            f"(лимит {self.config.max_context_tokens})"
+        )
+    else:
+        trimmed += "\n\n[CONTEXT TRUNCATED: token limit exceeded. Act on the available data.]"
+        debug_message = (
+            f"Prompt truncated: {prompt_tokens} tokens -> ~{available} "
+            f"(limit {self.config.max_context_tokens})"
+        )
+    self._ui.debug_print(debug_message)
     return trimmed
 
 
