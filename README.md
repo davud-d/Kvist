@@ -85,21 +85,21 @@ Multiline input is a bit old-school: end the line with `\`.
 When DevAgentXD asks for the API key, typed characters are invisible. That is
 expected; keep typing and press Enter.
 
-![DevAgentXD first launch with hidden API key input](Preview/start.png)
+![DevAgentXD first launch with hidden API key input](preview/start.png)
 
 ### Agent at work
 
 The agent prints what it is doing while it inspects files, thinks through the
 next step, and applies small changes.
 
-![DevAgentXD working in the terminal](Preview/working.png)
+![DevAgentXD working in the terminal](preview/working.png)
 
 ### Final report
 
 At the end, DevAgentXD summarizes what happened: actions, reasoning notes, and
 the result the user should check.
 
-![DevAgentXD final report in the terminal](Preview/end.png)
+![DevAgentXD final report in the terminal](preview/end.png)
 
 ## Knobs worth knowing
 
