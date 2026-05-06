@@ -69,6 +69,7 @@ class SafeExecutor:
     def __init__(self, workspace: str | Path) -> None:
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
+        self.internal_agent_dirname = ".devagent"
 
         self.max_read_chars = 20000
         self.max_output_chars = 12000
@@ -105,6 +106,7 @@ class SafeExecutor:
             "node_modules",
             ".mypy_cache",
             ".pytest_cache",
+            self.internal_agent_dirname,
         }
 
         self.allowed_web_domains = {
@@ -327,6 +329,8 @@ class SafeExecutor:
                         + self._path_error_details(user_path, real_target, error)
                     ) from error
 
+        self._guard_internal_agent_path(user_path, candidate)
+
         return candidate
 
     def _resolve_dir(self, user_path: str | None) -> Path:
@@ -351,7 +355,53 @@ class SafeExecutor:
     def _relative_path(self, target: Path) -> str:
         return target.relative_to(self.workspace).as_posix()
 
+    _INTERNAL_PATH_TOKEN_RE = re.compile(
+        r"(?<![A-Za-z0-9_.-])(?:\./)?\.devagent(?:[\\/]|$)",
+        re.IGNORECASE,
+    )
+
     _ENV_PATTERN = re.compile(r"(^|[\\/])\.env(\.[a-zA-Z0-9_.-]*)?$|[a-zA-Z0-9_]*\.env$", re.IGNORECASE)
+
+    def _normalize_relative_like_path(self, value: str | Path) -> str:
+        if isinstance(value, Path):
+            try:
+                return self._relative_path(value.resolve())
+            except ValueError:
+                return value.as_posix()
+
+        normalized = value.replace("\\", "/").strip()
+        while normalized.startswith("./"):
+            normalized = normalized[2:]
+        return normalized.lstrip("/")
+
+    def _is_internal_agent_path(self, value: str | Path) -> bool:
+        normalized = self._normalize_relative_like_path(value)
+        internal = self.internal_agent_dirname.casefold()
+        folded = normalized.casefold()
+        return folded == internal or folded.startswith(f"{internal}/")
+
+    def _raise_internal_access_denied(self, path: str | Path) -> None:
+        normalized = self._normalize_relative_like_path(path)
+        shown_path = normalized or self.internal_agent_dirname
+        raise ExecutorError(
+            f"Permission denied: access to internal agent directory is forbidden: {shown_path}"
+        )
+
+    def _guard_internal_agent_path(self, path: str | Path, target: Path | None = None) -> None:
+        if self._is_internal_agent_path(path):
+            self._raise_internal_access_denied(path)
+        if target is not None and self._is_internal_agent_path(target):
+            self._raise_internal_access_denied(target)
+
+    def _sanitize_internal_paths_in_text(self, text: str) -> str:
+        if not text:
+            return text
+        sanitized_lines = [
+            line
+            for line in text.splitlines()
+            if not self._INTERNAL_PATH_TOKEN_RE.search(line)
+        ]
+        return "\n".join(sanitized_lines)
 
     def _is_env_file_path(self, path: str | Path) -> bool:
         if isinstance(path, Path):
@@ -504,6 +554,7 @@ class SafeExecutor:
                 target.iterdir(),
                 key=lambda entry: (not entry.is_dir(), entry.name.lower()),
             )
+            entries = [entry for entry in entries if not self._is_internal_agent_path(entry)]
         except PermissionError as error:
             raise ExecutorError(
                 "Permission denied while listing directory: "
@@ -680,13 +731,16 @@ class SafeExecutor:
             result = self._terminal.run(["git", "status", "--short", "--branch"])
         except TerminalError as exc:
             raise ExecutorError(str(exc))
+
+        stdout = self._sanitize_internal_paths_in_text(result.stdout)
+        stderr = self._sanitize_internal_paths_in_text(result.stderr)
         return ExecutionResult(
             ok=result.returncode == 0,
             action_type="git_status",
             data={
                 "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "stdout": stdout,
+                "stderr": stderr,
             },
         )
 
@@ -710,14 +764,16 @@ class SafeExecutor:
             result = self._terminal.run(command)
         except TerminalError as exc:
             raise ExecutorError(str(exc))
+        stdout = self._sanitize_internal_paths_in_text(result.stdout)
+        stderr = self._sanitize_internal_paths_in_text(result.stderr)
         return ExecutionResult(
             ok=result.returncode == 0,
             action_type="git_diff",
             data={
                 "returncode": result.returncode,
                 "command": command,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "stdout": stdout,
+                "stderr": stderr,
             },
         )
 
@@ -733,6 +789,13 @@ class SafeExecutor:
             raise ExecutorError("run_shell.cwd must be a string")
         if timeout is not None and not isinstance(timeout, (int, float)):
             raise ExecutorError("run_shell.timeout must be a number")
+
+        if cwd is not None:
+            self._guard_internal_agent_path(cwd)
+
+        for token in command[1:]:
+            if self._INTERNAL_PATH_TOKEN_RE.search(token.replace("\\", "/")):
+                self._raise_internal_access_denied(token)
 
         # Block shell commands that may read .env files
         cmd_str = " ".join(command)
@@ -752,8 +815,8 @@ class SafeExecutor:
             data={
                 "command": result.command,
                 "returncode": result.returncode,
-                "stdout": result.stdout,
-                "stderr": result.stderr,
+                "stdout": self._sanitize_internal_paths_in_text(result.stdout),
+                "stderr": self._sanitize_internal_paths_in_text(result.stderr),
                 "timed_out": result.timed_out,
             },
         )

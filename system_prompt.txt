@@ -1134,6 +1134,9 @@ It is CATEGORICALLY FORBIDDEN to read, open, search by content, quote, copy, sho
 Forbidden files and patterns include:
 - .env
 - .env.*
+- .devagent/
+- .devagent/logs/*
+- .devagent/state.json
 - .devagent/config.json
 - *.pem
 - *.key

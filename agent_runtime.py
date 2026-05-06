@@ -257,6 +257,7 @@ def normalize_error_for_model(self, raw_error: str) -> str:
         ("Not a file: ", "Путь не является файлом: "),
         ("Path not found: ", "Путь не найден: "),
         ("Not a directory: ", "Путь не является директорией: "),
+        ("Permission denied: ", "Отказано в доступе: "),
         ("Unsupported action: ", "Неподдерживаемое действие: "),
         ("Unexpected executor error: ", "Неожиданная ошибка executor: "),
         ("Network error when requesting ", "Сетевая ошибка при запросе "),
