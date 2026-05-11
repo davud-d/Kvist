@@ -50,6 +50,7 @@ def persist_logs(self, user_goal: str) -> None:
     payload = {
         "goal": user_goal,
         "task_language": self._state.task_language,
+        "create_goal": self._state.create_goal,
         "plan": {
             "goal": self._state.plan_info.goal if self._state.plan_info else "",
             "complexity": self._state.plan_info.complexity if self._state.plan_info else "",
@@ -61,6 +62,10 @@ def persist_logs(self, user_goal: str) -> None:
         "summary": self._state.summary,
         "files_read": self._state.files_read,
         "files_changed": self._state.files_changed,
+        "required_artifacts": self._state.required_artifacts,
+        "missing_artifacts": self._state.missing_artifacts,
+        "verification_evidence": self._state.verification_evidence,
+        "completion_blockers": self._state.completion_blockers,
         "errors": self._state.error_history,
         "user_messages": self._state.user_messages,
         "web_research": {
@@ -86,11 +91,17 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
     checkpoint = {
         "goal": user_goal,
         "task_language": self._state.task_language,
+        "create_goal": self._state.create_goal,
         "step": step,
         "progress": self._state.progress,
         "summary": self._state.summary,
         "files_read": self._state.files_read,
         "files_changed": self._state.files_changed,
+        "required_artifacts": self._state.required_artifacts,
+        "missing_artifacts": self._state.missing_artifacts,
+        "verification_evidence": self._state.verification_evidence,
+        "completion_blockers": self._state.completion_blockers,
+        "required_next_actions": self._state.required_next_actions,
         "recent_feedback": self._state.recent_feedback,
         "recent_events": self._state.recent_events,
         "error_history": self._state.error_history,
@@ -104,6 +115,7 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
         "consecutive_errors": self._state.consecutive_errors,
         "stagnation_count": self._state.stagnation_count,
         "parse_errors": self._state.parse_errors,
+        "read_only_streak": self._state.read_only_streak,
         "pending_instruction": self._state.pending_instruction,
         "last_action_signature": self._state.last_action_signature,
     }
@@ -145,9 +157,15 @@ def load_checkpoint(self) -> tuple[str, int] | None:
 
     self._state.progress = data.get("progress", 0)
     self._state.task_language = str(data.get("task_language") or "")
+    self._state.create_goal = bool(data.get("create_goal", False))
     self._state.summary = data.get("summary", "")
     self._state.files_read = data.get("files_read", [])
     self._state.files_changed = data.get("files_changed", [])
+    self._state.required_artifacts = data.get("required_artifacts", [])
+    self._state.missing_artifacts = data.get("missing_artifacts", [])
+    self._state.verification_evidence = data.get("verification_evidence", [])
+    self._state.completion_blockers = data.get("completion_blockers", [])
+    self._state.required_next_actions = data.get("required_next_actions", [])
     self._state.recent_feedback = data.get("recent_feedback", [])
     self._state.recent_events = data.get("recent_events", [])
     self._state.error_history = data.get("error_history", [])
@@ -161,6 +179,7 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.consecutive_errors = data.get("consecutive_errors", 0)
     self._state.stagnation_count = data.get("stagnation_count", 0)
     self._state.parse_errors = data.get("parse_errors", 0)
+    self._state.read_only_streak = data.get("read_only_streak", 0)
     self._state.pending_instruction = data.get("pending_instruction", "")
     self._state.last_action_signature = data.get("last_action_signature", "")
 

@@ -67,7 +67,7 @@ def main() -> None:
     fast_model = os.getenv("AGENT_FAST_MODEL", "gpt-5.4-nano")
     smart_model = os.getenv("AGENT_SMART_MODEL", "gpt-5.4-mini")
     planner_model = os.getenv("AGENT_PLANNER_MODEL", "gpt-4o")
-    max_steps = int(os.getenv("AGENT_MAX_STEPS", "20"))
+    max_steps = int(os.getenv("AGENT_MAX_STEPS", "40"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
 

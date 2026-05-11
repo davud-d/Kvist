@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 from typing import Any
 
 from agent_state import RunState
@@ -14,11 +16,25 @@ _READ_ONLY_ACTIONS = {
     "list_tree", "find_files", "search_code",
 }
 
+_WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
+_VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
+
+_ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
+_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search|изуч|найт|прочит|анализ|обзор")
+_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|fix|edit|change|add|setup|configure|scaffold|созд|настро|реализ|исправ|добав|измен|структур")
+_PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|валид|провер|запуск|синтакс|компил|import")
+_VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|uv\s+run|node\s+--check")
+
 
 def run_loop(self, user_goal: str, start_step: int) -> str:
     self._ui.start_live()
 
     final_message = ""
+    create_goal = _is_create_goal(user_goal)
+    self._state.create_goal = create_goal
+    if not self._state.required_artifacts:
+        self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
+    self._refresh_completion_requirements()
     try:
         for step in range(start_step, self.config.max_steps + 1):
             early_stop_message = self._build_early_stop_message(step)
@@ -62,7 +78,41 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             self._record_user_message(command.user_message)
 
+            followup_error = self._required_followup_error(command)
+            if followup_error:
+                self._state.stagnation_count += 1
+                self._state.pending_instruction = followup_error
+                self._state.step_logs.append(
+                    {
+                        "step": step,
+                        "status": "blocked_for_corrective_action",
+                        "reason": followup_error,
+                        "required_next_actions": self._state.required_next_actions,
+                        "command": {
+                            "thought": command.thought,
+                            "plan_step": command.plan_step,
+                            "progress": command.progress,
+                            "user_message": command.user_message,
+                            "action": {
+                                "type": command.action.type,
+                                "args": command.action.args,
+                            },
+                        },
+                    }
+                )
+                self._ui.update_live(
+                    user_message=command.user_message,
+                    status="corrective action required",
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step=command.plan_step,
+                    is_error=True,
+                )
+                continue
+
             if self._is_repeat_blocked(command):
+                if create_goal and not self._state.files_changed:
+                    self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
                 self._ui.update_live(
                     user_message=command.user_message,
                     status="looking for another working step",
@@ -114,12 +164,56 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             )
 
             if command.action.type == "final_answer":
+                self._refresh_completion_requirements(force_enforcement=True)
+                if self._state.completion_blockers:
+                    error_text = " ".join(self._state.completion_blockers)
+                    self._state.consecutive_errors += 1
+                    self._record_error(error_text)
+                    self._state.step_logs.append(
+                        {
+                            "step": step,
+                            "status": "blocked_final_answer",
+                            "reason": error_text,
+                            "command": {
+                                "thought": command.thought,
+                                "plan_step": command.plan_step,
+                                "progress": command.progress,
+                                "user_message": command.user_message,
+                                "action": {
+                                    "type": command.action.type,
+                                    "args": command.action.args,
+                                },
+                            },
+                        }
+                    )
+                    self._ui.update_live(
+                        user_message=(
+                            "Переход к исправляющему действию вместо преждевременного завершения"
+                            if self._state.task_language == "ru"
+                            else "Switching to a corrective action instead of stopping too early"
+                        ),
+                        status="final answer blocked",
+                        step=step,
+                        progress=self._state.progress,
+                        plan_step=command.plan_step,
+                        is_error=True,
+                    )
+                    continue
                 final_message = str(command.action.args["message"])
                 self._register_final_answer(step, final_message)
                 break
 
             feedback = self._execute_command(command)
             self._register_feedback(step, command, feedback)
+
+            if (
+                create_goal
+                and not self._state.files_changed
+                and feedback.get("ok")
+                and command.action.type in _READ_ONLY_ACTIONS
+                and self._state.read_only_streak >= 2
+            ):
+                self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
 
             self._ui.update_live(
                 user_message=command.user_message,
@@ -343,8 +437,14 @@ def register_feedback(
         self._state.consecutive_errors = 0
         self._state.pending_instruction = ""
         self._update_state_from_success(command, feedback)
+        if command.action.type in _READ_ONLY_ACTIONS:
+            self._state.read_only_streak += 1
+        else:
+            self._state.read_only_streak = 0
     else:
         self._state.consecutive_errors += 1
+        if command.action.type in _WRITE_ACTIONS:
+            self._state.read_only_streak = 0
         error_text = self._feedback_error_for_model(feedback)
         self._record_error(error_text)
         if self._state.task_language == "ru":
@@ -405,9 +505,7 @@ def update_state_from_success(
 ) -> None:
     action_type = command.action.type
     data = feedback.get("data", {})
-
-    if command.plan_step in (self._state.plan_info.plan if self._state.plan_info else []):
-        self._state.completed_plan_steps.add(command.plan_step)
+    self._update_completed_plan_steps(command, data)
 
     if action_type == "read_file":
         path = str(data.get("path", "")).strip()
@@ -494,22 +592,23 @@ def update_state_from_success(
         if fact:
             self._push_unique(self._state.web_facts, fact, limit=20)
 
+    self._update_verification_evidence(command, data)
+    self._refresh_completion_requirements()
+
 
 def update_progress(self, command: AgentCommand, ok: bool) -> None:
     plan_progress = self._plan_progress()
     target_progress = max(self._state.progress, plan_progress)
 
     if ok:
-        if command.action.type in {"write_file", "append_file", "replace_in_file"}:
-            target_progress = max(target_progress, command.progress)
-        else:
-            target_progress = max(target_progress, min(command.progress, 99))
+        target_progress = max(target_progress, min(command.progress, _progress_ceiling(self._state, command.action.type)))
 
     self._state.last_progress = self._state.progress
     self._state.progress = max(0, min(target_progress, 99))
 
 
 def register_final_answer(self, step: int, message: str) -> None:
+    self._refresh_completion_requirements()
     self._state.progress = 100
     self._state.step_logs.append(
         {
@@ -570,8 +669,12 @@ def feedback_to_line(self, command: AgentCommand, feedback: dict[str, Any]) -> s
             count = len(data.get("results", []))
             return f"ok: found {count} code matches"
         if action_type == "git_status":
+            if data.get("fallback_used"):
+                return "ok: git status fallback used"
             return "ok: got git status"
         if action_type == "git_diff":
+            if data.get("fallback_used"):
+                return "ok: git diff fallback used"
             return "ok: got git diff"
         if action_type == "run_shell":
             command_text = " ".join(data.get("command", []))
@@ -656,18 +759,25 @@ def build_early_stop_message(self, step: int) -> str | None:
 
 def build_limit_reached_message(self) -> str:
     errors = ", ".join(self._state.error_history[-3:]) or "none"
+    blockers = ", ".join(self._state.completion_blockers[-3:])
     if self._state.task_language == "ru":
         errors = ", ".join(self._state.error_history[-3:]) or "нет"
-        return (
+        message = (
             "Агент не завершил задачу в пределах лимита шагов. "
             f"Текущий прогресс: {self._state.progress}%. "
             f"Последние ошибки: {errors}."
         )
-    return (
+        if blockers:
+            message += f" Блокеры: {blockers}."
+        return message
+    message = (
         "Agent did not complete the task within the step limit. "
         f"Current progress: {self._state.progress}%. "
         f"Last errors: {errors}."
     )
+    if blockers:
+        message += f" Blockers: {blockers}."
+    return message
 
 
 def is_repeat_blocked(self, command: AgentCommand) -> bool:
@@ -743,6 +853,112 @@ def push_bounded(self, items: list[str], value: str, limit: int) -> None:
     del items[:-limit]
 
 
+def update_completed_plan_steps(self, command: AgentCommand, data: dict[str, Any]) -> None:
+    plan_info = self._state.plan_info
+    if not plan_info:
+        return
+
+    touched_paths = {
+        str(data.get("path", "")).strip(),
+        str(command.action.args.get("path", "")).strip(),
+    }
+    touched_paths = {path for path in touched_paths if path}
+
+    for item in plan_info.plan:
+        if item in self._state.completed_plan_steps:
+            continue
+        normalized = item.casefold()
+        if any(path.casefold() in normalized for path in touched_paths):
+            self._state.completed_plan_steps.add(item)
+            break
+        if _plan_item_matches_action(normalized, command.action.type, self._state.files_changed):
+            self._state.completed_plan_steps.add(item)
+            break
+
+
+def update_verification_evidence(self, command: AgentCommand, data: dict[str, Any]) -> None:
+    action_type = command.action.type
+    evidence: str | None = None
+
+    if action_type in {"git_status", "git_diff"}:
+        if data.get("fallback_used"):
+            self._push_bounded(
+                self._state.recent_events,
+                "Git unavailable, use fallback verification"
+                if self._state.task_language != "ru"
+                else "Git недоступен, используй fallback-проверку",
+                self.config.summary_recent_events,
+            )
+            if self._state.files_changed:
+                self._set_required_next_actions(
+                    _VERIFY_ONLY_ACTIONS,
+                    _build_git_fallback_instruction(self._state.task_language),
+                )
+            return
+        evidence = action_type
+    elif action_type == "run_shell":
+        command_text = " ".join(str(part) for part in data.get("command", []))
+        if data.get("returncode") == 0 and _VERIFY_SHELL_RE.search(command_text):
+            evidence = f"run_shell: {command_text}"
+    elif action_type in {"list_tree", "find_files"}:
+        if self._state.create_goal or self._state.files_changed:
+            evidence = action_type
+    elif action_type == "read_file":
+        path = str(data.get("path", "")).strip()
+        if path and path in self._state.files_changed:
+            evidence = f"read_file: {path}"
+
+    if evidence:
+        self._push_unique(self._state.verification_evidence, evidence, limit=12)
+
+
+def refresh_completion_requirements(self, force_enforcement: bool = False) -> None:
+    blockers, required_actions = _compute_completion_status(self)
+    self._state.missing_artifacts = _missing_required_artifacts(self)
+    self._state.completion_blockers = blockers
+
+    if blockers:
+        self._state.required_next_actions = required_actions
+
+    if blockers and force_enforcement:
+        self._set_required_next_actions(
+            required_actions,
+            _build_completion_blocker_instruction(
+                self._state.task_language,
+                blockers,
+                required_actions,
+            ),
+        )
+        return
+
+    if (
+        self._state.create_goal
+        and not self._state.files_changed
+        and self._state.read_only_streak >= 2
+    ):
+        self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
+        return
+
+    if not blockers:
+        self._state.required_next_actions = []
+
+
+def required_followup_error(self, command: AgentCommand) -> str | None:
+    required_actions = set(self._state.required_next_actions)
+    if not required_actions or command.action.type in required_actions:
+        return None
+    return _build_required_action_error(
+        self._state.task_language,
+        self._state.required_next_actions,
+        self._state.completion_blockers,
+    )
+
+
+def set_required_next_actions(self, actions: set[str] | list[str], message: str) -> None:
+    self._state.required_next_actions = sorted(set(actions))
+    self._state.pending_instruction = message
+
+
 def _matches_task_language(text: str, language: str) -> bool:
     if language not in {"ru", "en"}:
         return True
@@ -751,3 +967,176 @@ def _matches_task_language(text: str, language: str) -> bool:
     if language == "ru":
         return cyrillic > 0
     return cyrillic <= latin
+
+
+def _is_create_goal(user_goal: str) -> bool:
+    lowered = user_goal.casefold()
+    markers = (
+        "создай",
+        "создать",
+        "сгенерируй",
+        "инициализируй",
+        "собери проект",
+        "create ",
+        "build ",
+        "generate ",
+        "scaffold",
+        "bootstrap",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _build_create_guidance(language: str) -> str:
+    if language == "ru":
+        return (
+            "Это CREATE-задача. Не зацикливайся на inspect и не делай final_answer без изменений. "
+            "Выбери путь внутри workspace и переходи к write_file или append_file, затем проверь результат фактами."
+        )
+    return (
+        "This is a CREATE task. Do not loop on inspect and do not use final_answer without changes. "
+        "Choose a path inside the workspace and move to write_file or append_file, then verify with facts."
+    )
+
+
+def _build_premature_final_answer_error(language: str) -> str:
+    if language == "ru":
+        return "Нельзя завершать CREATE-задачу без созданных или изменённых файлов."
+    return "A CREATE task cannot finish without created or changed files."
+
+
+def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
+    candidates: list[str] = []
+    for match in _ARTIFACT_RE.findall(user_goal):
+        cleaned = match.strip().strip(".,:;()[]{}\"'")
+        if "/" not in cleaned and "." not in cleaned:
+            continue
+        if cleaned.startswith("http://") or cleaned.startswith("https://"):
+            continue
+        candidates.append(cleaned)
+
+    if plan_info:
+        for item in plan_info.plan:
+            for match in _ARTIFACT_RE.findall(item):
+                cleaned = match.strip().strip(".,:;()[]{}\"'")
+                if "/" in cleaned or "." in cleaned:
+                    candidates.append(cleaned)
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        value = candidate.replace("\\", "/")
+        while value.startswith("./"):
+            value = value[2:]
+        value = value.lstrip("/")
+        if not value or value in {".", ".."}:
+            continue
+        folded = value.casefold()
+        if folded in seen:
+            continue
+        seen.add(folded)
+        normalized.append(value)
+    return normalized[:24]
+
+
+def _missing_required_artifacts(self) -> list[str]:
+    missing: list[str] = []
+    workspace = Path(self.executor.workspace)
+    for artifact in self._state.required_artifacts:
+        is_dir = artifact.endswith("/")
+        target = workspace / artifact.rstrip("/")
+        if is_dir and not target.is_dir():
+            missing.append(artifact)
+        elif not is_dir and not target.exists():
+            missing.append(artifact)
+    return missing
+
+
+def _compute_completion_status(self) -> tuple[list[str], list[str]]:
+    blockers: list[str] = []
+    required_actions: set[str] = set()
+    missing = _missing_required_artifacts(self)
+
+    if self._state.create_goal and not self._state.files_changed:
+        blockers.append(_build_premature_final_answer_error(self._state.task_language))
+        required_actions.update(_WRITE_ACTIONS)
+
+    if missing:
+        blockers.append(_build_missing_artifacts_error(self._state.task_language, missing))
+        required_actions.update(_WRITE_ACTIONS)
+
+    if self._state.files_changed and not self._state.verification_evidence:
+        blockers.append(_build_missing_verification_error(self._state.task_language))
+        required_actions.update(_VERIFY_ONLY_ACTIONS)
+
+    return blockers, sorted(required_actions)
+
+
+def _progress_ceiling(state: RunState, action_type: str) -> int:
+    if action_type in _WRITE_ACTIONS:
+        return 80
+    if action_type in {"git_status", "git_diff", "run_shell"}:
+        return 99 if state.files_changed else 35
+    if action_type in {"list_tree", "find_files", "read_file"}:
+        return 99 if state.files_changed else 25
+    if action_type in {"read_multiple_files", "list_dir", "search_code", "web_search", "fetch_url"}:
+        return 25
+    return 40
+
+
+def _plan_item_matches_action(item: str, action_type: str, files_changed: list[str]) -> bool:
+    if action_type in _WRITE_ACTIONS:
+        return bool(_PLAN_EDIT_RE.search(item))
+    if action_type in {"read_file", "read_multiple_files", "list_dir", "list_tree", "find_files", "search_code", "web_search", "fetch_url"}:
+        if files_changed and _PLAN_VERIFY_RE.search(item):
+            return True
+        return bool(_PLAN_INSPECT_RE.search(item))
+    if action_type in {"git_status", "git_diff", "run_shell"}:
+        return bool(_PLAN_VERIFY_RE.search(item))
+    return False
+
+
+def _build_missing_artifacts_error(language: str, missing: list[str]) -> str:
+    joined = ", ".join(missing[:8])
+    if language == "ru":
+        return f"Нельзя завершать задачу: отсутствуют обязательные артефакты: {joined}."
+    return f"Task cannot finish: required artifacts are still missing: {joined}."
+
+
+def _build_missing_verification_error(language: str) -> str:
+    if language == "ru":
+        return "Нельзя завершать задачу без проверки изменений: нужна структура, синтаксис, импорт или запуск."
+    return "Task cannot finish without verification of the changes: structure, syntax, import, or run evidence is required."
+
+
+def _build_completion_blocker_instruction(language: str, blockers: list[str], actions: list[str]) -> str:
+    action_text = ", ".join(actions) or "none"
+    blocker_text = " ".join(blockers)
+    if language == "ru":
+        return (
+            f"final_answer запрещён. Блокеры: {blocker_text} "
+            f"Следующий шаг обязан быть corrective action через одно из действий: {action_text}."
+        )
+    return (
+        f"final_answer is forbidden. Blockers: {blocker_text} "
+        f"The next step must be a corrective action using one of: {action_text}."
+    )
+
+
+def _build_required_action_error(language: str, actions: list[str], blockers: list[str]) -> str:
+    action_text = ", ".join(actions)
+    blocker_text = " ".join(blockers)
+    if language == "ru":
+        return f"Нужно исправляющее действие. Разрешены: {action_text}. Блокеры: {blocker_text}"
+    return f"A corrective action is required. Allowed next actions: {action_text}. Blockers: {blocker_text}"
+
+
+def _build_git_fallback_instruction(language: str) -> str:
+    if language == "ru":
+        return (
+            "Git недоступен или репозиторий неинициализирован. Не считай задачу проваленной: "
+            "переходи к list_tree, read_file, find_files или run_shell для проверки структуры, синтаксиса и запуска."
+        )
+    return (
+        "Git is unavailable or the repo is not initialized. Do not fail the task: "
+        "switch to list_tree, read_file, find_files, or run_shell to verify structure, syntax, and execution."
+    )

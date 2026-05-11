@@ -43,11 +43,17 @@ class PlanInfo:
 @dataclass(slots=True)
 class RunState:
     task_language: str = ""
+    create_goal: bool = False
     plan_info: PlanInfo | None = None
     progress: int = 0
     summary: str = ""
     files_read: list[str] = field(default_factory=list)
     files_changed: list[str] = field(default_factory=list)
+    required_artifacts: list[str] = field(default_factory=list)
+    missing_artifacts: list[str] = field(default_factory=list)
+    verification_evidence: list[str] = field(default_factory=list)
+    completion_blockers: list[str] = field(default_factory=list)
+    required_next_actions: list[str] = field(default_factory=list)
     recent_feedback: list[str] = field(default_factory=list)
     recent_events: list[str] = field(default_factory=list)
     recent_result_details: list[str] = field(default_factory=list)
@@ -66,6 +72,7 @@ class RunState:
     consecutive_errors: int = 0
     stagnation_count: int = 0
     parse_errors: int = 0
+    read_only_streak: int = 0
     pending_instruction: str = ""
     last_action_signature: str = ""
     last_progress: int = 0

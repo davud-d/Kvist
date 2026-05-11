@@ -23,6 +23,10 @@ _RUNTIME_TEXT = {
         "plan": "План",
         "completed_steps": "Выполненные пункты плана",
         "success_criteria": "Критерии успеха",
+        "required_artifacts": "Обязательные артефакты",
+        "missing_artifacts": "Ещё отсутствуют",
+        "verification_evidence": "Подтверждённые проверки",
+        "completion_blockers": "Блокеры завершения",
         "dependency_versions": "Известные версии зависимостей",
         "web_facts": "Короткие внешние факты",
         "compressed_state": "Сжатое состояние",
@@ -38,6 +42,10 @@ _RUNTIME_TEXT = {
         "truth_instruction": (
             "Опирайся на подробные данные как на источник истины. "
             "Выбери следующее действие так, чтобы продвинуть задачу и не повторять тупиковые шаги."
+        ),
+        "completion_instruction": (
+            "Если есть блокеры завершения, final_answer запрещён. "
+            "Если проверка выявила пробел, следующий шаг обязан быть corrective action, а не описанием проблемы."
         ),
         "language_instruction": (
             "Публичные JSON-поля thought, user_message и final_answer.args.message пиши только на русском. "
@@ -55,6 +63,10 @@ _RUNTIME_TEXT = {
         "plan": "Plan",
         "completed_steps": "Completed plan steps",
         "success_criteria": "Success criteria",
+        "required_artifacts": "Required artifacts",
+        "missing_artifacts": "Still missing",
+        "verification_evidence": "Verified checks",
+        "completion_blockers": "Completion blockers",
         "dependency_versions": "Known dependency versions",
         "web_facts": "Short external facts",
         "compressed_state": "Compressed state",
@@ -70,6 +82,10 @@ _RUNTIME_TEXT = {
         "truth_instruction": (
             "Use detailed data as the source of truth. Choose the next action so it moves "
             "the task forward and does not repeat dead-end steps."
+        ),
+        "completion_instruction": (
+            "If completion blockers exist, final_answer is forbidden. "
+            "If verification finds a gap, the next step must be a corrective action, not a summary of the problem."
         ),
         "language_instruction": (
             "Write public JSON fields thought, user_message, and final_answer.args.message only in English. "
@@ -108,6 +124,10 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     files_read = ", ".join(self._state.files_read[-8:]) or text["none"]
     files_changed = ", ".join(self._state.files_changed[-8:]) or text["none"]
     completed_steps = ", ".join(sorted(self._state.completed_plan_steps)) or text["none"]
+    required_artifacts = ", ".join(self._state.required_artifacts[-12:]) or text["none"]
+    missing_artifacts = ", ".join(self._state.missing_artifacts[-12:]) or text["none"]
+    verification_evidence = "\n".join(f"- {item}" for item in self._state.verification_evidence[-6:]) or text["none"]
+    completion_blockers = "\n".join(f"- {item}" for item in self._state.completion_blockers[-6:]) or text["none"]
     pending_instruction = self._state.pending_instruction or text["none"]
     summary = self._build_summary(language)
     dependency_versions = self._format_dependency_versions_for_prompt(language)
@@ -123,6 +143,10 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['plan']}:\n{plan_text}\n\n"
         f"{text['completed_steps']}: {completed_steps}\n\n"
         f"{text['success_criteria']}:\n{success_text}\n\n"
+        f"{text['required_artifacts']}: {required_artifacts}\n"
+        f"{text['missing_artifacts']}: {missing_artifacts}\n\n"
+        f"{text['verification_evidence']}:\n{verification_evidence}\n\n"
+        f"{text['completion_blockers']}:\n{completion_blockers}\n\n"
         f"{text['dependency_versions']}:\n{dependency_versions}\n\n"
         f"{text['web_facts']}:\n{web_facts}\n\n"
         f"{text['compressed_state']}:\n{summary or text['no_context']}\n\n"
@@ -134,6 +158,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['repeated_errors']}:\n{repeated_errors or text['none']}\n\n"
         f"{text['additional_instruction']}:\n{pending_instruction}\n\n"
         f"{text['language_instruction']}\n\n"
+        f"{text['completion_instruction']}\n\n"
         f"{text['truth_instruction']}"
     )
 
@@ -212,6 +237,20 @@ def build_summary(self, language: str = "en") -> str:
         label = "Изменено" if language == "ru" else "Changed"
         parts.append(f"{label}: " + ", ".join(self._state.files_changed[-6:]))
 
+    if self._state.required_artifacts:
+        if language == "ru":
+            parts.append(f"Обязательных артефактов: {len(self._state.required_artifacts)}")
+        else:
+            parts.append(f"Required artifacts: {len(self._state.required_artifacts)}")
+
+    if self._state.missing_artifacts:
+        label = "Не хватает" if language == "ru" else "Missing"
+        parts.append(f"{label}: " + ", ".join(self._state.missing_artifacts[-6:]))
+
+    if self._state.verification_evidence:
+        label = "Проверки" if language == "ru" else "Verification"
+        parts.append(f"{label}: " + " | ".join(self._state.verification_evidence[-3:]))
+
     if self._state.dependency_versions:
         if language == "ru":
             parts.append(f"Версий зависимостей найдено: {len(self._state.dependency_versions)}")
@@ -229,6 +268,10 @@ def build_summary(self, language: str = "en") -> str:
     if self._state.error_history:
         label = "Ошибки" if language == "ru" else "Errors"
         parts.append(f"{label}: " + " | ".join(self._state.error_history[-3:]))
+
+    if self._state.completion_blockers:
+        label = "Блокеры" if language == "ru" else "Blockers"
+        parts.append(f"{label}: " + " | ".join(self._state.completion_blockers[-3:]))
 
     if parts:
         return "\n".join(parts)

@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from agent_state import PlanInfo
+from parser import CommandValidationError, load_single_json_object
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 PLANNER_PROMPT = (_PROMPT_DIR / "planner_prompt.txt").read_text(encoding="utf-8").strip()
@@ -133,27 +133,11 @@ def is_complex_goal(self, user_goal: str) -> bool:
 
 
 def parse_json_dict(self, text: str) -> dict[str, Any]:
-    stripped = text.strip()
-    candidates = [stripped]
+    try:
+        parsed = load_single_json_object(text)
+    except CommandValidationError as error:
+        raise ValueError(str(error)) from error
 
-    if stripped.startswith("```") and stripped.endswith("```"):
-        lines = stripped.splitlines()
-        inner = "\n".join(lines[1:-1]).strip()
-        candidates.append(inner)
-
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start != -1 and end != -1 and start < end:
-        candidates.append(stripped[start : end + 1])
-
-    for candidate in candidates:
-        cleaned = candidate.replace("“", '"').replace("”", '"')
-        try:
-            parsed = json.loads(cleaned)
-        except json.JSONDecodeError:
-            cleaned = cleaned.replace(",}", "}").replace(",]", "]")
-            parsed = json.loads(cleaned)
-        if isinstance(parsed, dict):
-            return parsed
-
-    raise ValueError("Failed to parse JSON object")
+    if not isinstance(parsed, dict):
+        raise ValueError("Planner response must be a JSON object")
+    return parsed

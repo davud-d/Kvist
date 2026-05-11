@@ -730,7 +730,17 @@ class SafeExecutor:
         try:
             result = self._terminal.run(["git", "status", "--short", "--branch"])
         except TerminalError as exc:
-            raise ExecutorError(str(exc))
+            return ExecutionResult(
+                ok=True,
+                action_type="git_status",
+                data={
+                    "returncode": None,
+                    "stdout": "",
+                    "stderr": self._sanitize_internal_paths_in_text(str(exc)),
+                    "fallback_used": True,
+                    "git_available": False,
+                },
+            )
 
         stdout = self._sanitize_internal_paths_in_text(result.stdout)
         stderr = self._sanitize_internal_paths_in_text(result.stderr)
@@ -741,6 +751,8 @@ class SafeExecutor:
                 "returncode": result.returncode,
                 "stdout": stdout,
                 "stderr": stderr,
+                "fallback_used": False,
+                "git_available": result.returncode == 0,
             },
         )
 
@@ -763,7 +775,22 @@ class SafeExecutor:
         try:
             result = self._terminal.run(command)
         except TerminalError as exc:
-            raise ExecutorError(str(exc))
+            fallback_data: dict[str, Any] = {
+                "returncode": None,
+                "command": command,
+                "stdout": "",
+                "stderr": self._sanitize_internal_paths_in_text(str(exc)),
+                "fallback_used": True,
+                "git_available": False,
+            }
+            if path:
+                fallback_data["path_exists"] = resolved.exists()
+                fallback_data["path_is_file"] = resolved.is_file()
+            return ExecutionResult(
+                ok=True,
+                action_type="git_diff",
+                data=fallback_data,
+            )
         stdout = self._sanitize_internal_paths_in_text(result.stdout)
         stderr = self._sanitize_internal_paths_in_text(result.stderr)
         return ExecutionResult(
@@ -774,6 +801,8 @@ class SafeExecutor:
                 "command": command,
                 "stdout": stdout,
                 "stderr": stderr,
+                "fallback_used": False,
+                "git_available": result.returncode == 0,
             },
         )
 

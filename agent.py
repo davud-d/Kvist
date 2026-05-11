@@ -48,6 +48,7 @@ from agent_runtime import (
     is_repeat_blocked,
     normalize_error_for_model,
     plan_progress,
+    refresh_completion_requirements,
     push_bounded,
     push_unique,
     record_error,
@@ -57,10 +58,14 @@ from agent_runtime import (
     register_language_error,
     register_parse_error,
     render_feedback,
+    required_followup_error,
     reset_run_state,
     run_loop,
+    set_required_next_actions,
+    update_completed_plan_steps,
     update_progress,
     update_state_from_success,
+    update_verification_evidence,
 )
 from deps import detect_dependency_versions
 from agent_state import AgentConfig, PlanInfo, RunState
@@ -150,6 +155,7 @@ class LocalAgent:
     _update_progress = update_progress
     _register_final_answer = register_final_answer
     _plan_progress = plan_progress
+    _refresh_completion_requirements = refresh_completion_requirements
     _record_error = record_error
     _feedback_to_line = feedback_to_line
     _feedback_to_detail = feedback_to_detail
@@ -159,8 +165,12 @@ class LocalAgent:
     _is_repeat_blocked = is_repeat_blocked
     _action_signature = action_signature
     _record_user_message = record_user_message
+    _required_followup_error = required_followup_error
+    _set_required_next_actions = set_required_next_actions
+    _update_completed_plan_steps = update_completed_plan_steps
     _push_unique = push_unique
     _push_bounded = push_bounded
+    _update_verification_evidence = update_verification_evidence
 
     _prepare_web_search_command = prepare_web_search_command
     _prepare_fetch_url_command = prepare_fetch_url_command

@@ -33,8 +33,31 @@ class CommandValidationError(Exception):
     pass
 
 
+def load_single_json_object(text: str) -> Any:
+    last_error: str | None = None
+    decoder = json.JSONDecoder()
+
+    for candidate in _json_candidates(text):
+        for sanitized in _sanitized_candidates(candidate):
+            try:
+                parsed, end = decoder.raw_decode(sanitized)
+            except json.JSONDecodeError as error:
+                last_error = str(error)
+                continue
+
+            if sanitized[end:].strip():
+                last_error = "JSON must contain exactly one object and no trailing text"
+                continue
+
+            return parsed
+
+    if last_error is None:
+        raise CommandValidationError("Не удалось найти JSON-объект в ответе модели")
+    raise CommandValidationError(f"Невалидный JSON: {last_error}")
+
+
 def parse_agent_command(text: str) -> AgentCommand:
-    raw = _load_json_object(text)
+    raw = load_single_json_object(text)
 
     if not isinstance(raw, dict):
         raise CommandValidationError("Корневой объект должен быть JSON-объектом")
@@ -285,36 +308,16 @@ def require_optional_str(data: dict[str, Any], key: str) -> None:
         raise CommandValidationError(f"'{key}' должен быть строкой")
 
 
-def _load_json_object(text: str) -> Any:
-    last_error: json.JSONDecodeError | None = None
-
-    for candidate in _json_candidates(text):
-        for sanitized in _sanitized_candidates(candidate):
-            try:
-                return json.loads(sanitized)
-            except json.JSONDecodeError as error:
-                last_error = error
-
-    if last_error is None:
-        raise CommandValidationError("Не удалось найти JSON-объект в ответе модели")
-
-    raise CommandValidationError(f"Невалидный JSON: {last_error}")
-
-
 def _json_candidates(text: str) -> Iterable[str]:
     stripped = text.strip()
     if stripped:
         yield stripped
 
-    for chunk in FENCE_RE.findall(text):
-        cleaned = chunk.strip()
+    fenced = FENCE_RE.fullmatch(stripped)
+    if fenced is not None:
+        cleaned = fenced.group(1).strip()
         if cleaned:
             yield cleaned
-
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end != -1 and start < end:
-        yield text[start : end + 1].strip()
 
 
 def _sanitized_candidates(text: str) -> Iterable[str]:
