@@ -24,6 +24,7 @@ from agent_model import (
     call_action_model,
     call_model,
     call_model_streaming,
+    _create_json_completion,
     count_tokens,
     init_tiktoken_encoding,
     prefer_smart_model,
@@ -138,6 +139,7 @@ class LocalAgent:
     _call_action_model = call_action_model
     _call_model = call_model
     _call_model_streaming = call_model_streaming
+    _create_json_completion = _create_json_completion
     _init_tiktoken_encoding = staticmethod(init_tiktoken_encoding)
     _count_tokens = count_tokens
     _trim_prompt_to_token_limit = trim_prompt_to_token_limit

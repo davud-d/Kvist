@@ -27,6 +27,8 @@ _RUNTIME_TEXT = {
         "missing_artifacts": "Ещё отсутствуют",
         "verification_evidence": "Подтверждённые проверки",
         "completion_blockers": "Блокеры завершения",
+        "allowed_next_actions": "Сейчас разрешены следующие действия",
+        "forbidden_next_actions": "Сейчас запрещены следующие действия",
         "dependency_versions": "Известные версии зависимостей",
         "web_facts": "Короткие внешние факты",
         "compressed_state": "Сжатое состояние",
@@ -67,6 +69,8 @@ _RUNTIME_TEXT = {
         "missing_artifacts": "Still missing",
         "verification_evidence": "Verified checks",
         "completion_blockers": "Completion blockers",
+        "allowed_next_actions": "Allowed next actions now",
+        "forbidden_next_actions": "Forbidden next actions now",
         "dependency_versions": "Known dependency versions",
         "web_facts": "Short external facts",
         "compressed_state": "Compressed state",
@@ -129,6 +133,27 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     verification_evidence = "\n".join(f"- {item}" for item in self._state.verification_evidence[-6:]) or text["none"]
     completion_blockers = "\n".join(f"- {item}" for item in self._state.completion_blockers[-6:]) or text["none"]
     pending_instruction = self._state.pending_instruction or text["none"]
+    allowed_next_actions = ", ".join(self._state.required_next_actions) or text["none"]
+    forbidden_next_actions = text["none"]
+    if self._state.required_next_actions:
+        forbidden = sorted({
+            "final_answer",
+            "read_file",
+            "read_multiple_files",
+            "write_file",
+            "append_file",
+            "replace_in_file",
+            "list_dir",
+            "list_tree",
+            "find_files",
+            "search_code",
+            "git_status",
+            "git_diff",
+            "run_shell",
+            "web_search",
+            "fetch_url",
+        } - set(self._state.required_next_actions))
+        forbidden_next_actions = ", ".join(forbidden) or text["none"]
     summary = self._build_summary(language)
     dependency_versions = self._format_dependency_versions_for_prompt(language)
     web_facts = self._format_web_facts_for_prompt(language)
@@ -147,6 +172,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['missing_artifacts']}: {missing_artifacts}\n\n"
         f"{text['verification_evidence']}:\n{verification_evidence}\n\n"
         f"{text['completion_blockers']}:\n{completion_blockers}\n\n"
+        f"{text['allowed_next_actions']}: {allowed_next_actions}\n"
+        f"{text['forbidden_next_actions']}: {forbidden_next_actions}\n\n"
         f"{text['dependency_versions']}:\n{dependency_versions}\n\n"
         f"{text['web_facts']}:\n{web_facts}\n\n"
         f"{text['compressed_state']}:\n{summary or text['no_context']}\n\n"

@@ -21,9 +21,23 @@ _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "fin
 
 _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
 _PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search|изуч|найт|прочит|анализ|обзор")
-_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|fix|edit|change|add|setup|configure|scaffold|созд|настро|реализ|исправ|добав|измен|структур")
+_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold|созд|настро|реализ|исправ|добав|измен|структур|интегр|разраб|улучш")
 _PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|валид|провер|запуск|синтакс|компил|import")
+_PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final|опис|отчет|отчёт|докум|результ|итог")
 _VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|uv\s+run|node\s+--check")
+_SEMANTIC_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")
+
+_PLAN_STOPWORDS = {
+    "и", "или", "для", "что", "как", "это", "при", "без", "над", "под", "про", "через",
+    "with", "from", "into", "over", "under", "about", "this", "that", "then", "than",
+    "создать", "создай", "сделать", "сделай", "добавить", "добавь", "реализовать", "реализуй",
+    "разработать", "улучшить", "проверить", "подготовить", "изучить", "определить", "создан", "сделан",
+}
+
+_HIGH_SIGNAL_TERMS = {
+    "crm", "ux", "ui", "api", "sdk", "sql", "db", "bot", "админ", "админк", "оплат",
+    "уведо", "менед", "катал", "букет", "заказ", "telegr", "telegram", "admin", "payme", "reply",
+}
 
 
 def run_loop(self, user_goal: str, start_step: int) -> str:
@@ -80,12 +94,23 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             followup_error = self._required_followup_error(command)
             if followup_error:
+                blocked_signature = self._action_signature(command)
+                blocked_count = self._state.seen_actions.get(blocked_signature, 0) + 1
+                self._state.seen_actions[blocked_signature] = blocked_count
+                self._state.last_action_signature = blocked_signature
                 self._state.stagnation_count += 1
                 self._state.pending_instruction = followup_error
+                if blocked_count >= 2:
+                    self._state.pending_instruction = _build_strict_next_action_instruction(
+                        self._state.task_language,
+                        self._state.required_next_actions,
+                        self._state.missing_artifacts,
+                    )
                 self._state.step_logs.append(
                     {
                         "step": step,
                         "status": "blocked_for_corrective_action",
+                        "blocked_count": blocked_count,
                         "reason": followup_error,
                         "required_next_actions": self._state.required_next_actions,
                         "command": {
@@ -447,7 +472,17 @@ def register_feedback(
             self._state.read_only_streak = 0
         error_text = self._feedback_error_for_model(feedback)
         self._record_error(error_text)
-        if self._state.task_language == "ru":
+        if (
+            command.action.type == "replace_in_file"
+            and error_text == "Фрагмент old_text не найден в файле."
+        ):
+            failed_path = str(command.action.args.get("path", "")).strip()
+            if failed_path:
+                self._set_required_next_actions(
+                    {"read_file", "replace_in_file", "append_file", "write_file"},
+                    _build_read_before_patch_instruction(self._state.task_language, failed_path),
+                )
+        elif self._state.task_language == "ru":
             self._state.pending_instruction = (
                 "Предыдущее действие не выполнено. "
                 f"normalized_error: {error_text}. Не повторяй тот же шаг без новой идеи."
@@ -608,6 +643,8 @@ def update_progress(self, command: AgentCommand, ok: bool) -> None:
 
 
 def register_final_answer(self, step: int, message: str) -> None:
+    for item in _report_plan_steps(self):
+        self._state.completed_plan_steps.add(item)
     self._refresh_completion_requirements()
     self._state.progress = 100
     self._state.step_logs.append(
@@ -813,6 +850,49 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
         self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
         return True
 
+    if command.action.type == "write_file":
+        path = str(command.action.args.get("path", "")).strip()
+        if path:
+            target_signature = f"write_target::{path.casefold()}"
+            target_seen = self._state.seen_actions.get(target_signature, 0)
+            if target_seen >= self.config.repeat_action_limit + 1:
+                target_exists = (Path(self.executor.workspace) / path).exists()
+                if target_exists:
+                    self._set_required_next_actions(
+                        {"read_file", "replace_in_file", "append_file", "write_file"},
+                        _build_read_before_patch_instruction(self._state.task_language, path),
+                    )
+                if self._state.task_language == "ru":
+                    message = (
+                        f"Ты слишком много раз подряд переписываешь {path}. "
+                        "Сначала прочитай этот файл, перейди к другому обязательному артефакту или проверь текущий результат."
+                    )
+                else:
+                    message = (
+                        f"You are rewriting {path} too many times in a row. "
+                        "Read the file first, switch to another required artifact, or verify the current result."
+                    )
+                self._state.pending_instruction = message
+                self._state.stagnation_count += 1
+                self._state.step_logs.append(
+                    {
+                        "status": "repeat_write_target_blocked",
+                        "path": path,
+                        "command": {
+                            "plan_step": command.plan_step,
+                            "progress": command.progress,
+                            "user_message": command.user_message,
+                            "action": {
+                                "type": command.action.type,
+                                "args": command.action.args,
+                            },
+                        },
+                    }
+                )
+                self._ui.debug_print(f"Repeat write target blocked: {path}")
+                return True
+            self._state.seen_actions[target_signature] = target_seen + 1
+
     self._state.seen_actions[signature] = seen_count + 1
     self._state.last_action_signature = signature
     return False
@@ -864,16 +944,122 @@ def update_completed_plan_steps(self, command: AgentCommand, data: dict[str, Any
     }
     touched_paths = {path for path in touched_paths if path}
 
-    for item in plan_info.plan:
-        if item in self._state.completed_plan_steps:
+    matched_items = _collect_matching_plan_items(
+        command,
+        data,
+        plan_info.plan,
+        self._state.completed_plan_steps,
+        touched_paths,
+        self._state.files_changed,
+    )
+    for item in matched_items:
+        self._state.completed_plan_steps.add(item)
+
+
+def _collect_matching_plan_items(
+    command: AgentCommand,
+    data: dict[str, Any],
+    plan_items: list[str],
+    completed_items: set[str],
+    touched_paths: set[str],
+    files_changed: list[str],
+) -> list[str]:
+    evidence_text = _build_plan_evidence_text(command, data, touched_paths)
+    semantic_matches: list[str] = []
+    fallback_match: str | None = None
+
+    for item in plan_items:
+        if item in completed_items:
             continue
         normalized = item.casefold()
+        action_match = _plan_item_matches_action(normalized, command.action.type, files_changed)
         if any(path.casefold() in normalized for path in touched_paths):
-            self._state.completed_plan_steps.add(item)
-            break
-        if _plan_item_matches_action(normalized, command.action.type, self._state.files_changed):
-            self._state.completed_plan_steps.add(item)
-            break
+            semantic_matches.append(item)
+            continue
+        if _plan_item_matches_paths(normalized, touched_paths):
+            semantic_matches.append(item)
+            continue
+        if action_match and _plan_item_semantically_matches(normalized, evidence_text):
+            semantic_matches.append(item)
+            continue
+        if action_match:
+            fallback_match = item
+            if command.action.type not in _WRITE_ACTIONS:
+                break
+
+    if semantic_matches:
+        return semantic_matches
+    return [fallback_match] if fallback_match else []
+
+
+def _build_plan_evidence_text(command: AgentCommand, data: dict[str, Any], touched_paths: set[str]) -> str:
+    parts = [
+        command.thought,
+        command.user_message,
+        command.plan_step,
+        str(command.action.type),
+        " ".join(sorted(touched_paths)),
+    ]
+
+    for key in ("path", "query", "pattern", "url"):
+        value = command.action.args.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+
+    for key in ("content", "new_text", "old_text"):
+        value = command.action.args.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value[:4000])
+
+    for key in ("path", "query", "pattern", "url", "content", "title"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            parts.append(value[:4000])
+
+    return "\n".join(part for part in parts if part)
+
+
+def _plan_item_semantically_matches(item: str, evidence_text: str) -> bool:
+    if not evidence_text.strip():
+        return False
+
+    item_terms = _extract_semantic_terms(item)
+    if not item_terms:
+        return False
+
+    evidence_terms = _extract_semantic_terms(evidence_text)
+    if not evidence_terms:
+        return False
+
+    matched = item_terms & evidence_terms
+    if len(matched) >= 2:
+        return True
+    return bool(matched & _HIGH_SIGNAL_TERMS)
+
+
+def _extract_semantic_terms(text: str) -> set[str]:
+    terms: set[str] = set()
+    for raw_token in _SEMANTIC_TOKEN_RE.findall(text):
+        lowered = raw_token.casefold().replace("ё", "е")
+        if lowered in _PLAN_STOPWORDS:
+            continue
+        normalized = _normalize_semantic_token(lowered)
+        if not normalized:
+            continue
+        terms.add(normalized)
+    return terms
+
+
+def _normalize_semantic_token(token: str) -> str:
+    if token in {"ux", "ui", "crm", "api", "sdk", "sql", "db"}:
+        return token
+    if len(token) <= 2:
+        return ""
+    if len(token) >= 9:
+        return token[:6]
+    if len(token) >= 6:
+        return token[:5]
+    return token
 
 
 def update_verification_evidence(self, command: AgentCommand, data: dict[str, Any]) -> None:
@@ -917,9 +1103,6 @@ def refresh_completion_requirements(self, force_enforcement: bool = False) -> No
     self._state.missing_artifacts = _missing_required_artifacts(self)
     self._state.completion_blockers = blockers
 
-    if blockers:
-        self._state.required_next_actions = required_actions
-
     if blockers and force_enforcement:
         self._set_required_next_actions(
             required_actions,
@@ -939,7 +1122,11 @@ def refresh_completion_requirements(self, force_enforcement: bool = False) -> No
         self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
         return
 
+    keep_explicit_restriction = bool(self._state.required_next_actions and self._state.pending_instruction)
+
     if not blockers:
+        self._state.required_next_actions = []
+    elif not keep_explicit_restriction:
         self._state.required_next_actions = []
 
 
@@ -1055,10 +1242,22 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
     blockers: list[str] = []
     required_actions: set[str] = set()
     missing = _missing_required_artifacts(self)
+    remaining_plan_steps = _remaining_plan_steps(self)
+    actionable_remaining_plan_steps = [
+        item for item in remaining_plan_steps
+        if not _PLAN_REPORT_RE.search(item.casefold())
+    ]
 
     if self._state.create_goal and not self._state.files_changed:
         blockers.append(_build_premature_final_answer_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
+
+    if actionable_remaining_plan_steps:
+        blockers.append(_build_incomplete_plan_error(self._state.task_language, actionable_remaining_plan_steps))
+        if all(_PLAN_VERIFY_RE.search(item.casefold()) for item in actionable_remaining_plan_steps):
+            required_actions.update(_VERIFY_ONLY_ACTIONS)
+        else:
+            required_actions.update(_WRITE_ACTIONS)
 
     if missing:
         blockers.append(_build_missing_artifacts_error(self._state.task_language, missing))
@@ -1083,6 +1282,23 @@ def _progress_ceiling(state: RunState, action_type: str) -> int:
     return 40
 
 
+def _remaining_plan_steps(self) -> list[str]:
+    plan_info = self._state.plan_info
+    if not plan_info:
+        return []
+    return [
+        item for item in plan_info.plan
+        if item not in self._state.completed_plan_steps
+    ]
+
+
+def _report_plan_steps(self) -> list[str]:
+    return [
+        item for item in _remaining_plan_steps(self)
+        if _PLAN_REPORT_RE.search(item.casefold())
+    ]
+
+
 def _plan_item_matches_action(item: str, action_type: str, files_changed: list[str]) -> bool:
     if action_type in _WRITE_ACTIONS:
         return bool(_PLAN_EDIT_RE.search(item))
@@ -1095,11 +1311,42 @@ def _plan_item_matches_action(item: str, action_type: str, files_changed: list[s
     return False
 
 
+def _plan_item_matches_paths(item: str, touched_paths: set[str]) -> bool:
+    for path in touched_paths:
+        lowered = path.casefold()
+        parts = [part for part in lowered.split("/") if part]
+        if lowered.startswith("handlers/") and "handlers/" in item:
+            return True
+        if lowered.startswith("keyboards/") and "keyboards/" in item:
+            return True
+        if lowered.startswith("db/") and "db/" in item:
+            return True
+        if lowered == "main.py" and "main.py" in item:
+            return True
+        if len(parts) >= 2:
+            parent = parts[0] + "/"
+            if parent in item:
+                return True
+    return False
+
+
 def _build_missing_artifacts_error(language: str, missing: list[str]) -> str:
     joined = ", ".join(missing[:8])
     if language == "ru":
         return f"Нельзя завершать задачу: отсутствуют обязательные артефакты: {joined}."
     return f"Task cannot finish: required artifacts are still missing: {joined}."
+
+
+def _build_incomplete_plan_error(language: str, remaining_steps: list[str]) -> str:
+    preview = "; ".join(remaining_steps[:3])
+    if len(remaining_steps) > 3:
+        if language == "ru":
+            preview += f"; ещё {len(remaining_steps) - 3}"
+        else:
+            preview += f"; {len(remaining_steps) - 3} more"
+    if language == "ru":
+        return f"Нельзя завершать задачу: план ещё не выполнен полностью. Осталось: {preview}."
+    return f"Task cannot finish: the execution plan is not complete yet. Remaining: {preview}."
 
 
 def _build_missing_verification_error(language: str) -> str:
@@ -1128,6 +1375,45 @@ def _build_required_action_error(language: str, actions: list[str], blockers: li
     if language == "ru":
         return f"Нужно исправляющее действие. Разрешены: {action_text}. Блокеры: {blocker_text}"
     return f"A corrective action is required. Allowed next actions: {action_text}. Blockers: {blocker_text}"
+
+
+def _build_strict_next_action_instruction(
+    language: str,
+    actions: list[str],
+    missing_artifacts: list[str],
+) -> str:
+    action_text = ", ".join(actions) or "none"
+    first_artifact = missing_artifacts[0] if missing_artifacts else ""
+    if language == "ru":
+        message = (
+            f"Ты снова выбрал запрещённый тип действия. Следующий action.type обязан быть одним из: {action_text}. "
+            "Не используй inspect/read/list_tree/find/search/final_answer на этом шаге. "
+            "Для CREATE-задачи сразу переходи к изменению файлов внутри workspace."
+        )
+        if first_artifact:
+            message += f" Начни с артефакта: {first_artifact}."
+        return message
+
+    message = (
+        f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
+        "Do not use inspect/read/list_tree/find/search/final_answer on the next step. "
+        "For a CREATE task, switch directly to changing files inside the workspace."
+    )
+    if first_artifact:
+        message += f" Start with artifact: {first_artifact}."
+    return message
+
+
+def _build_read_before_patch_instruction(language: str, path: str) -> str:
+    if language == "ru":
+        return (
+            f"Хватит переписывать {path} вслепую. Сначала выполни read_file для {path}, "
+            "потом делай replace_in_file, append_file или один осознанный write_file по фактическому содержимому."
+        )
+    return (
+        f"Stop rewriting {path} blindly. Read {path} first, then use replace_in_file, "
+        "append_file, or one deliberate write_file based on the actual content."
+    )
 
 
 def _build_git_fallback_instruction(language: str) -> str:

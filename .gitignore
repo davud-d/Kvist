@@ -64,3 +64,5 @@ text_gitignore.txt
 workspace
 workspace/
 package_script.py
+build-plugin.sh
+*/build-plugin.sh

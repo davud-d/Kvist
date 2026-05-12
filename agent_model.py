@@ -60,10 +60,9 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                 if self.config.stream:
                     content = self._call_model_streaming(current_model, messages)
                 else:
-                    response = self.client.chat.completions.create(
+                    response = self._create_json_completion(
                         model=current_model,
                         messages=messages,
-                        temperature=self.config.model_temperature,
                     )
                     content = response.choices[0].message.content
                 if not content:
@@ -89,10 +88,9 @@ def call_model_streaming(
     model: str,
     messages: list[ChatCompletionMessageParam],
 ) -> str:
-    stream = self.client.chat.completions.create(
+    stream = self._create_json_completion(
         model=model,
         messages=messages,
-        temperature=self.config.model_temperature,
         stream=True,
     )
     chunks: list[str] = []
@@ -107,6 +105,37 @@ def call_model_streaming(
                     thought_shown = True
                     print(f"  [streaming] {partial[:120]}...", flush=True)
     return "".join(chunks)
+
+
+def _create_json_completion(
+    self,
+    model: str,
+    messages: list[ChatCompletionMessageParam],
+    stream: bool = False,
+):
+    request_kwargs = {
+        "model": model,
+        "messages": messages,
+        "temperature": self.config.model_temperature,
+        "response_format": {"type": "json_object"},
+    }
+    if stream:
+        request_kwargs["stream"] = True
+
+    try:
+        return self.client.chat.completions.create(**request_kwargs)
+    except Exception as error:
+        if not _supports_plain_json_fallback(error):
+            raise
+
+    fallback_kwargs = {
+        "model": model,
+        "messages": messages,
+        "temperature": self.config.model_temperature,
+    }
+    if stream:
+        fallback_kwargs["stream"] = True
+    return self.client.chat.completions.create(**fallback_kwargs)
 
 
 def init_tiktoken_encoding():
@@ -139,7 +168,16 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
 
     ratio = available / prompt_tokens
     target_chars = int(len(user_prompt) * ratio * 0.95)
-    trimmed = user_prompt[:target_chars]
+    head_chars = max(1200, target_chars // 2)
+    tail_chars = max(800, target_chars - head_chars)
+    if head_chars + tail_chars >= len(user_prompt):
+        trimmed = user_prompt[:target_chars]
+    else:
+        trimmed = (
+            user_prompt[:head_chars]
+            + "\n\n[...PROMPT MIDDLE TRUNCATED TO PRESERVE RECENT STATE...]\n\n"
+            + user_prompt[-tail_chars:]
+        )
     if getattr(self._state, "task_language", "") == "ru":
         trimmed += "\n\n[КОНТЕКСТ ОБРЕЗАН: превышен лимит токенов. Действуй на основе доступных данных.]"
         debug_message = (
@@ -168,3 +206,16 @@ def prefer_smart_model(self) -> bool:
     if self._state.stagnation_count > 0:
         return True
     return False
+
+
+def _supports_plain_json_fallback(error: Exception) -> bool:
+    message = str(error).casefold()
+    markers = (
+        "response_format",
+        "json_object",
+        "unsupported",
+        "not supported",
+        "unknown parameter",
+        "extra inputs are not permitted",
+    )
+    return any(marker in message for marker in markers)

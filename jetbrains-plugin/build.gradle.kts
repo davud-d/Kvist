@@ -57,15 +57,15 @@ fun validateBinarySet(files: List<File>, context: String) {
 }
 
 val devAgentSandboxBinaries = copySpec {
-    from("bin") {
-        exclude("**/.gitkeep", "linux/devagent.bin")
-        into("$pluginDistributionDirectoryName/bin")
+    from("bin/win") {
+        exclude("**/.gitkeep")
+        into("$pluginDistributionDirectoryName/bin/win")
         includeEmptyDirs = false
     }
 
-    from("bin") {
-        include("linux/devagent.bin")
-        into("$pluginDistributionDirectoryName/bin")
+    from("bin/linux") {
+        include("devagent.bin")
+        into("$pluginDistributionDirectoryName/bin/linux")
         includeEmptyDirs = false
         filePermissions {
             unix("rwxr-xr-x")

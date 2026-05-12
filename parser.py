@@ -26,6 +26,8 @@ ALLOWED_ACTIONS = {
     "fetch_url",
 }
 
+ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
+
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
@@ -51,6 +53,12 @@ def load_single_json_object(text: str) -> Any:
 
             return parsed
 
+    for candidate in _json_candidates(text):
+        for sanitized in _sanitized_candidates(candidate):
+            parsed = _extract_embedded_json_object(decoder, sanitized)
+            if parsed is not _JSON_NOT_FOUND:
+                return parsed
+
     if last_error is None:
         raise CommandValidationError("Не удалось найти JSON-объект в ответе модели")
     raise CommandValidationError(f"Невалидный JSON: {last_error}")
@@ -75,6 +83,11 @@ def parse_agent_command(text: str) -> AgentCommand:
 
     if not isinstance(plan_step, str) or not plan_step.strip():
         raise CommandValidationError("Поле 'plan_step' должно быть непустой строкой")
+
+    if plan_step.strip() not in ALLOWED_PLAN_STEPS:
+        raise CommandValidationError(
+            "Поле 'plan_step' должно быть одним из: inspect, plan, edit, verify, done"
+        )
 
     if not isinstance(progress, int):
         raise CommandValidationError("Поле 'progress' должно быть целым числом")
@@ -132,13 +145,13 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_keys(args, {"path", "content"})
         require_only_allowed_keys(args, {"path", "content"})
         require_str(args, "path")
-        require_str(args, "content")
+        require_text(args, "content")
 
     elif action_type == "append_file":
         require_keys(args, {"path", "content"})
         require_only_allowed_keys(args, {"path", "content"})
         require_str(args, "path")
-        require_str(args, "content")
+        require_text(args, "content")
 
     elif action_type == "replace_in_file":
         require_keys(args, {"path", "old_text", "new_text"})
@@ -302,6 +315,12 @@ def require_str(data: dict[str, Any], key: str) -> None:
         raise CommandValidationError(f"'{key}' должен быть непустой строкой")
 
 
+def require_text(data: dict[str, Any], key: str) -> None:
+    value = data.get(key)
+    if not isinstance(value, str):
+        raise CommandValidationError(f"'{key}' должен быть строкой")
+
+
 def require_optional_str(data: dict[str, Any], key: str) -> None:
     value = data.get(key)
     if value is not None and not isinstance(value, str):
@@ -316,6 +335,11 @@ def _json_candidates(text: str) -> Iterable[str]:
     fenced = FENCE_RE.fullmatch(stripped)
     if fenced is not None:
         cleaned = fenced.group(1).strip()
+        if cleaned:
+            yield cleaned
+
+    for fenced_match in FENCE_RE.finditer(text):
+        cleaned = fenced_match.group(1).strip()
         if cleaned:
             yield cleaned
 
@@ -335,3 +359,19 @@ def _sanitized_candidates(text: str) -> Iterable[str]:
 
     yield cleaned
     yield re.sub(r",(\s*[}\]])", r"\1", cleaned)
+
+
+_JSON_NOT_FOUND = object()
+
+
+def _extract_embedded_json_object(decoder: json.JSONDecoder, text: str) -> Any:
+    for index, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            parsed, _end = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return _JSON_NOT_FOUND

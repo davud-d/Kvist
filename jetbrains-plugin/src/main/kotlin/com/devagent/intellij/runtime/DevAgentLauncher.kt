@@ -8,11 +8,11 @@ import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.terminal.frontend.toolwindow.TerminalToolWindowTabsManager
 import org.jetbrains.plugins.terminal.TerminalToolWindowFactory
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
-import java.nio.file.attribute.PosixFilePermission
 import kotlin.io.path.invariantSeparatorsPathString
 
 object DevAgentLauncher {
@@ -23,8 +23,16 @@ object DevAgentLauncher {
         val binaryPath: Path,
         val operatingSystem: SupportedOs,
     ) {
-        val command: List<String>
+        val binaryCommand: List<String>
             get() = listOf(binaryPath.toString(), "--workspace", projectPath.toString())
+
+        val command: List<String>
+            get() = if (operatingSystem == SupportedOs.LINUX) {
+                linuxShellCommand(binaryCommand)
+            }
+            else {
+                binaryCommand
+            }
     }
 
     fun launch(project: Project?) {
@@ -205,22 +213,8 @@ object DevAgentLauncher {
             return true
         }
 
-        return try {
-            ensureLinuxBinaryExecutable(launchSpec.binaryPath)
-
-            if (!Files.isExecutable(launchSpec.binaryPath)) {
-                fail(
-                    project = project,
-                    notifyUser = true,
-                    logFailures = true,
-                    userMessage = "Failed to start DevAgent.",
-                    logMessage = "Failed to make DevAgent binary executable: ${launchSpec.binaryPath.invariantSeparatorsPathString}",
-                )
-                false
-            }
-            else {
-                true
-            }
+        val chmodResult = try {
+            runLinuxChmod(launchSpec.binaryPath)
         }
         catch (exception: IOException) {
             fail(
@@ -231,39 +225,102 @@ object DevAgentLauncher {
                 logMessage = "Failed to update execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
                 exception = exception,
             )
-            false
+            null
         }
-        catch (exception: SecurityException) {
+        catch (exception: InterruptedException) {
+            Thread.currentThread().interrupt()
             fail(
                 project = project,
                 notifyUser = true,
                 logFailures = true,
                 userMessage = "Failed to start DevAgent.",
-                logMessage = "Failed to update execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
+                logMessage = "Interrupted while updating execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
                 exception = exception,
             )
-            false
+            null
         }
-    }
 
-    private fun ensureLinuxBinaryExecutable(binaryPath: Path) {
-        try {
-            val permissions = Files.getPosixFilePermissions(binaryPath).toMutableSet()
-            permissions += setOf(
-                PosixFilePermission.OWNER_EXECUTE,
-                PosixFilePermission.GROUP_EXECUTE,
-                PosixFilePermission.OTHERS_EXECUTE,
+        if (chmodResult == null) {
+            return false
+        }
+
+        if (chmodResult.exitCode != 0 || !Files.isExecutable(launchSpec.binaryPath)) {
+            val suffix = chmodResult.output
+                .takeIf { it.isNotBlank() }
+                ?.let { ": $it" }
+                .orEmpty()
+            fail(
+                project = project,
+                notifyUser = true,
+                logFailures = true,
+                userMessage = "Failed to start DevAgent.",
+                logMessage = "Failed to make DevAgent binary executable with chmod +x: ${launchSpec.binaryPath.invariantSeparatorsPathString}$suffix",
             )
-            Files.setPosixFilePermissions(binaryPath, permissions)
-            return
-        }
-        catch (_: UnsupportedOperationException) {
+            return false
         }
 
-        if (!binaryPath.toFile().setExecutable(true, false)) {
-            throw IOException("setExecutable returned false")
+        LOG.info("Updated execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString} using chmod +x")
+        return true
+    }
+
+    private fun linuxShellCommand(binaryCommand: List<String>): List<String> {
+        // DevAgent renders a TUI inside the IDE terminal, so Linux launches must avoid
+        // interactive shell startup files that can dump banners, prompts, or auto-started
+        // tools into stdout before the UI is ready.
+        val shellPath = System.getenv("SHELL")?.trim().orEmpty().ifBlank { null } ?: return binaryCommand
+        val commandString = binaryCommand.joinToString(" ") { quoteForShell(it) }
+        val shellName = try {
+            Path.of(shellPath).fileName?.toString()
+        }
+        catch (_: InvalidPathException) {
+            null
+        }
+
+        return when (shellName) {
+            "fish" -> listOf(shellPath, "--no-config", "-c", commandString)
+            "bash" -> listOf(shellPath, "--noprofile", "--norc", "-c", commandString)
+            "zsh" -> listOf(shellPath, "-f", "-c", commandString)
+            else -> binaryCommand
         }
     }
+
+    private fun quoteForShell(argument: String): String {
+        val escaped = buildString(argument.length + 8) {
+            for (character in argument) {
+                when (character) {
+                    '\\' -> append("\\\\")
+                    '"' -> append("\\\"")
+                    '$' -> append("\\$")
+                    '`' -> append("\\`")
+                    else -> append(character)
+                }
+            }
+        }
+        return "\"$escaped\""
+    }
+
+    private fun runLinuxChmod(binaryPath: Path): ChmodResult {
+        val process = ProcessBuilder("chmod", "+x", binaryPath.toString())
+            .redirectErrorStream(true)
+            .start()
+
+        val output = ByteArrayOutputStream().use { buffer ->
+            process.inputStream.use { input ->
+                input.copyTo(buffer)
+            }
+            buffer.toString(Charsets.UTF_8).trim()
+        }
+
+        return ChmodResult(
+            exitCode = process.waitFor(),
+            output = output,
+        )
+    }
+
+    private data class ChmodResult(
+        val exitCode: Int,
+        val output: String,
+    )
 
     private fun handleLaunchFailure(project: Project, launchSpec: LaunchSpec, exception: RuntimeException) {
         LOG.warn(

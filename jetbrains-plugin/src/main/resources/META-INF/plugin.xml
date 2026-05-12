@@ -22,6 +22,7 @@
             id="com.devagent.intellij.RunDevAgentAction"
             class="com.devagent.intellij.actions.RunDevAgentAction"
             text="Run DevAgent"
+            icon="/icons/devagent.svg"
             description="Start DevAgent in the IDE Terminal"
         >
             <add-to-group group-id="MainToolbarRight" anchor="last" />
