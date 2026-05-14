@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+import time
 
 from openai import OpenAI
 
@@ -54,6 +55,8 @@ def multiline_input() -> str:
         lines.append(line[:-1])
     return "\n".join(lines).strip()
 
+def sleep(seconnds: int):
+    time.sleep(seconnds)
 
 def main() -> None:
     cli = argparse.ArgumentParser(description="Local AI agent")
@@ -90,13 +93,16 @@ def main() -> None:
     )
     agent = LocalAgent(client=client, executor=executor, config=config)
 
-    console.print("Local AI agent DevAgentXD started. Enter your task.")
+    console.print("[dim]Local AI agent [/dim]DevAgentXD [dim]started. [/dim]")
     console.print(f"[dim]Workspace: {executor.workspace}[/dim]")
+    sleep(1)
     console.print(
-        f"[green]Fast model: {fast_model}[/green] | [bold yellow]Smart model: {smart_model}[/bold yellow] | Max steps: {max_steps} | Verbose: {verbose}"
+        f"[green]Fast model: {fast_model}[/green] | [bold yellow]Smart model: {smart_model}[/bold yellow] | [blue]Planner model: {planner_model}[/blue] | Max steps: {max_steps} | Verbose: {verbose}"
     )
     console.print("[red]Type '/bye' to exit. Multiline input: end a line with '\\'.[/red]")
     console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
+    sleep(2)
+    console.print("[dim]Enter your task.[/dim]")
 
     try:
         while True:

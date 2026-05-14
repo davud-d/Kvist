@@ -24,15 +24,87 @@ Put the real binaries here before running packaging or sandbox tasks:
 
 If any required binary is missing, the build fails with a clear error.
 
+The plugin ZIP always expects both files to exist.
+
+The helper scripts below rebuild only the binary for the current host OS:
+
+- Linux host -> refreshes `bin/linux/devagent.bin`
+- Windows host -> refreshes `bin/win/devagent.exe`
+
+So for a full distributable ZIP, keep the binary for the other OS in `bin/` as well.
+
 ## Build
 
 Use JDK 21.
+
+You also need Python with project dependencies installed and `PyInstaller` available in that environment.
+
+## Quick build with OS-specific scripts
+
+These scripts do the fast path for local packaging:
+
+1. build the DevAgent binary for the current OS with `PyInstaller`
+2. copy it into `jetbrains-plugin/bin/...`
+3. refresh the IntelliJ sandbox copy if it already exists
+4. run the Gradle plugin build
+
+Run them from the `jetbrains-plugin/` directory.
+
+### Linux
+
+```bash
+./build-plugin.sh
+```
+
+What it updates:
+
+- `bin/linux/devagent.bin`
+- `build/distributions/*.zip`
+
+### Windows (PowerShell)
+
+```powershell
+.\build-plugin.ps1
+```
+
+What it updates:
+
+- `bin/win/devagent.exe`
+- `build\distributions\*.zip`
+
+### Windows (Command Prompt)
+
+```bat
+build-plugin.bat
+```
+
+Use this if you prefer plain `cmd.exe` instead of PowerShell.
+
+## Manual Gradle build
 
 ```bash
 ./gradlew buildPlugin
 ```
 
 The plugin ZIP is created in build/distributions/.
+
+On Windows use `gradlew.bat buildPlugin` instead.
+
+This Gradle-only path does not rebuild the DevAgent executable. It just packages whatever is already present in `bin/win/` and `bin/linux/`.
+
+## Typical workflows
+
+### Fast local Linux build
+
+1. Make sure `bin/win/devagent.exe` is already present.
+2. Run `./build-plugin.sh`.
+3. Pick the ZIP from `build/distributions/`.
+
+### Fast local Windows build
+
+1. Make sure `bin/linux/devagent.bin` is already present.
+2. Run `.\build-plugin.ps1` or `build-plugin.bat`.
+3. Pick the ZIP from `build\distributions\`.
 
 ## Run sandbox IDE
 

@@ -24,7 +24,7 @@ if defined JAVA_HOME if not exist "%JAVA_EXE%" (
 
 "%JAVA_EXE%" ^
   -Dfile.encoding=UTF-8 ^
-  -Xmx64m ^
+  -Xmx64m ^Й
   -Xms64m ^
   -Dorg.gradle.appname=gradlew ^
   -classpath "%CLASSPATH%" ^
