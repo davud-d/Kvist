@@ -19,7 +19,7 @@ from typing import Any
 # Flip this to True when you need debug performance logging.
 # In normal operation this MUST be False.
 # ──────────────────────────────────────────────────────────────────────
-DEBUG_LOGGING: bool = False
+DEBUG_LOGGING: bool = True
 _FLUSH_THRESHOLD = 10  # flush buffer every N records
 _MAX_ERROR_LEN = 300   # truncate error strings in log entries
 

@@ -509,6 +509,9 @@ class SafeExecutor:
         new_text: str,
         count: int = 1,
     ) -> ExecutionResult:
+        if not old_text:
+            raise ExecutorError("old_text parameter cannot be empty")
+
         target = self._guard_env_file_access(path)
 
         if not target.exists():
@@ -688,12 +691,18 @@ class SafeExecutor:
         path: str = "",
         max_results: int = 20,
     ) -> ExecutionResult:
-        base_dir = self._resolve_dir(path)
         query_folded = query.casefold()
         results: list[dict[str, Any]] = []
         safe_limit = max(1, min(max_results, self.max_search_results))
 
-        for file_path in self._iter_files(base_dir):
+        target = self._resolve_path(path) if path else self.workspace
+        if target.is_file():
+            files_to_search = [target]
+        else:
+            base_dir = self._resolve_dir(path)
+            files_to_search = self._iter_files(base_dir)
+
+        for file_path in files_to_search:
             if self._ENV_PATTERN.search(file_path.name):
                 continue
             try:
@@ -1411,17 +1420,14 @@ class SafeExecutor:
             raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
 
     def _safe_read_text(self, target: Path) -> tuple[str, bool]:
-        if target.stat().st_size > self.max_file_size_bytes:
-            raw = target.read_text(encoding="utf-8", errors="replace")
-            return self._truncate_text(raw, self.max_read_chars), True
-
         try:
-            raw = target.read_text(encoding="utf-8")
-        except UnicodeDecodeError as error:
-            raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
+            raw = target.read_text(encoding="utf-8", errors="replace")
+        except OSError as error:
+            raise ExecutorError(f"Failed to read file: {target.name}") from error
 
+        size_exceeded = target.stat().st_size > self.max_file_size_bytes
         truncated = len(raw) > self.max_read_chars
-        return self._truncate_text(raw, self.max_read_chars), truncated
+        return self._truncate_text(raw, self.max_read_chars), size_exceeded or truncated
 
     def _truncate_text(self, text: str, limit: int) -> str:
         if len(text) <= limit:

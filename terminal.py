@@ -558,6 +558,12 @@ def _unix_resource_limits() -> None:
         )
         resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-    except Exception:
+    except ImportError:
         pass
+    except Exception:
+        import sys
+        print(
+            "[TerminalExecutor] Failed to set resource limits",
+            file=sys.stderr,
+        )
  

@@ -47,7 +47,7 @@ def create_plan(self, user_goal: str) -> PlanInfo:
 
     try:
         raw = self._call_model(
-            model=self.config.planner_model,
+            model=self.config.fast_model,
             system_prompt=PLANNER_PROMPT,
             user_prompt=prompt,
         )

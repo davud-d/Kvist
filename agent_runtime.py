@@ -851,11 +851,6 @@ def build_early_stop_message(self, step: int) -> str | None:
             f"Last actions: {', '.join(self._state.recent_feedback[-3:])}"
         )
 
-    if step > self.config.max_steps:
-        if self._state.task_language == "ru":
-            return "Агент остановлен: достигнут лимит шагов."
-        return "Agent stopped: step limit reached."
-
     return None
 
 
@@ -896,34 +891,37 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
     signature = self._action_signature(command)
     seen_count = self._state.seen_actions.get(signature, 0)
     if seen_count >= self.config.repeat_action_limit:
-        if self._state.task_language == "ru":
-            message = (
-                "Ты повторяешь бесполезное действие с теми же аргументами. "
-                "Выбери другой шаг: другой файл, другой поиск или честно заверши задачу."
-            )
+        if command.action.type in self._state.required_next_actions:
+            pass # allow it
         else:
-            message = (
-                "You are repeating a useless action with the same args. "
-                "Choose a different step: a different file, a different search, or honestly complete the task."
-            )
-        self._state.pending_instruction = message
-        self._state.stagnation_count += 1
-        self._state.step_logs.append(
-            {
-                "status": "repeat_blocked",
-                "command": {
-                    "plan_step": command.plan_step,
-                    "progress": command.progress,
-                    "user_message": command.user_message,
-                    "action": {
-                        "type": command.action.type,
-                        "args": command.action.args,
+            if self._state.task_language == "ru":
+                message = (
+                    "Ты повторяешь бесполезное действие с теми же аргументами. "
+                    "Выбери другой шаг: другой файл, другой поиск или честно заверши задачу."
+                )
+            else:
+                message = (
+                    "You are repeating a useless action with the same args. "
+                    "Choose a different step: a different file, a different search, or honestly complete the task."
+                )
+            self._state.pending_instruction = message
+            self._state.stagnation_count += 1
+            self._state.step_logs.append(
+                {
+                    "status": "repeat_blocked",
+                    "command": {
+                        "plan_step": command.plan_step,
+                        "progress": command.progress,
+                        "user_message": command.user_message,
+                        "action": {
+                            "type": command.action.type,
+                            "args": command.action.args,
+                        },
                     },
-                },
-            }
-        )
-        self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
-        return True
+                }
+            )
+            self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
+            return True
 
     if command.action.type == "write_file":
         path = str(command.action.args.get("path", "")).strip()
