@@ -136,6 +136,9 @@ Provider notes:
 - `FreeFlow LLM` does not guarantee the same native JSON mode as the official
 	OpenAI SDK, so DevAgentXD falls back to plain completions there.
 - For `FreeFlow LLM`, all default roles now use `gemini-3.1-pro-preview`.
+- **⚠️ `FreeFlow LLM` is currently in beta testing and remains very unstable.**
+  Expect intermittent failures, timeouts, and inconsistent responses. Use
+  `OpenAI` if you need reliable results.
 
 `AGENT_PERSIST_LOGS=0` stops run logs, but `/resume` still uses
 `<project>/.devagent/state.json`.
