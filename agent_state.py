@@ -46,6 +46,8 @@ class PlanInfo:
 @dataclass(slots=True)
 class RunState:
     task_language: str = ""
+    system_os: str = ""
+    system_shell: str = ""
     create_goal: bool = False
     plan_info: PlanInfo | None = None
     selected_action_role: str = ""

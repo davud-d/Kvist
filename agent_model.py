@@ -121,6 +121,11 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                     chunks_per_second=getattr(self, "_last_chunks_per_second", None),
                     ok=True,
                 )
+                
+                # interval API request
+                if self.config.api_request_interval > 0:
+                    time.sleep(self.config.api_request_interval)
+
                 return content
             except Exception as error:
                 total_duration = time.monotonic() - request_start
@@ -265,46 +270,41 @@ def count_tokens(self, text: str) -> int:
 
 
 def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> str:
-    # Dynamic token limit for free APIs
-    max_tokens = 6000 if self.config.provider == "freeflow" else self.config.max_context_tokens
+    # Hard-limit for free APIs (11000 tokens) leaves room for the model's response
+    max_tokens = 11000 if self.config.provider == "freeflow" else self.config.max_context_tokens
     
     system_tokens = self._count_tokens(system_prompt)
-    available = max_tokens - system_tokens - 500
-    if available <= 0:
-        available = 4000
-
     prompt_tokens = self._count_tokens(user_prompt)
-    if prompt_tokens <= available:
+
+    # If system and user fit - return as is
+    if system_tokens + prompt_tokens <= max_tokens:
         return user_prompt
+
+    # Calculate the remainder. If the system prompt took everything, give the user a hard minimum of 600 tokens,
+    # so that the request flies even if we slightly exceed the limit (retry will work).
+    available = max_tokens - system_tokens
+    if available < 600:
+        available = 600
 
     ratio = available / prompt_tokens
     target_chars = int(len(user_prompt) * ratio * 0.95)
-    head_chars = max(1200, target_chars // 2)
-    tail_chars = max(800, target_chars - head_chars)
+    
+    head_chars = max(400, target_chars // 2)
+    tail_chars = max(400, target_chars - head_chars)
     
     if head_chars + tail_chars >= len(user_prompt):
         trimmed = user_prompt[:target_chars]
     else:
         trimmed = (
             user_prompt[:head_chars]
-            + "\n\n[...PROMPT MIDDLE TRUNCATED TO PRESERVE RECENT STATE...]\n\n"
+            + "\n\n[...PROMPT MIDDLE TRUNCATED TO FIT PROVIDER LIMITS...]\n\n"
             + user_prompt[-tail_chars:]
         )
     
-    if getattr(self._state, "task_language", "") == "ru":
-        trimmed += "\n\n[КОНТЕКСТ ОБРЕЗАН: превышен лимит токенов. Действуй на основе доступных данных.]"
-        debug_message = (
-            f"Промпт обрезан: {prompt_tokens} токенов -> ~{available} "
-            f"(лимит {max_tokens})"
-        )
-    else:
-        trimmed += "\n\n[CONTEXT TRUNCATED: token limit exceeded. Act on the available data.]"
-        debug_message = (
-            f"Prompt truncated: {prompt_tokens} tokens -> ~{available} "
-            f"(limit {max_tokens})"
-        )
-    self._ui.debug_print(debug_message)
-    return trimmed
+    msg = "\n\n[КОНТЕКСТ ОБРЕЗАН: лимит токенов.]" if getattr(self._state, "task_language", "") == "ru" else "\n\n[CONTEXT TRUNCATED]"
+    
+    self._ui.debug_print(f"Промпт обрезан: sys={system_tokens}, user={prompt_tokens} -> выделено {available} (лимит {max_tokens})")
+    return trimmed + msg
 
 
 def prefer_smart_model(self) -> bool:

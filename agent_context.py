@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from language_utils import detect_request_language
+from system_context import current_time_context
 
 
 _RUNTIME_TEXT = {
@@ -156,7 +157,16 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     dependency_versions = self._format_dependency_versions_for_prompt(language)
     web_facts = self._format_web_facts_for_prompt(language)
 
+    current_time = current_time_context()["current_time"]
+    system_block = (
+        f"System environment:\n"
+        f"- OS: {self._state.system_os}\n"
+        f"- Shell: {self._state.system_shell}\n"
+        f"- Current datetime: {current_time}\n\n"
+    )
+
     return (
+        system_block +
         f"{text['step']}: {step}\n"
         f"{text['task_language']}: {text['task_language_name']}\n\n"
         f"{text['user_task']}:\n{user_goal}\n\n"

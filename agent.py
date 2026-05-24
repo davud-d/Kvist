@@ -85,6 +85,7 @@ from agent_web import (
 )
 from executor import SafeExecutor
 from performance_logger import PerfLogger
+from system_context import current_os_context, current_shell_context, current_time_context
 from ui import AgentUI
 
 class LocalAgent:
@@ -108,6 +109,8 @@ class LocalAgent:
     def run(self, user_goal: str) -> str:
         self._reset_run_state()
         self._state.task_language = detect_request_language(user_goal)
+        self._state.system_os = current_os_context()
+        self._state.system_shell = current_shell_context()
         self._state.plan_info = self._create_plan(user_goal)
         self._select_action_model_for_run()
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
