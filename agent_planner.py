@@ -5,16 +5,29 @@ from pathlib import Path
 from typing import Any
 
 from agent_state import PlanInfo
+from language_utils import detect_request_language
 from parser import CommandValidationError, load_single_json_object
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 PLANNER_PROMPT = (_PROMPT_DIR / "planner_prompt.txt").read_text(encoding="utf-8").strip()
 
 
-def detect_request_language(text: str) -> str:
-    cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
-    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
-    return "ru" if cyrillic > latin else "en"
+def _reset_client_disabled_backends(agent_self: Any) -> None:
+    """Clear any disabled-backend state on the LLM client.
+
+    The planner runs as a best-effort step before the main action loop.  If a
+    backend fails during planning (e.g. an invalid API key triggers an auth
+    error), the shared ``FreeFlowCompatibleClient`` instance records that backend
+    as disabled.  This side-effect must not propagate into the action loop,
+    which should still get a fair chance to try every configured backend.
+    """
+    try:
+        client = getattr(agent_self, "client", None)
+        disabled = getattr(client, "_disabled_backends", None)
+        if isinstance(disabled, set):
+            disabled.clear()
+    except Exception:
+        pass
 
 
 def create_plan(self, user_goal: str) -> PlanInfo:
@@ -65,6 +78,11 @@ def create_plan(self, user_goal: str) -> PlanInfo:
             risks=[str(item).strip() for item in risks if str(item).strip()],
         )
     except Exception:
+        # Reset any backend-disabled state that the planner call may have set so
+        # that the action model loop gets a clean slate.  The planner is a
+        # best-effort step: its failures must not permanently poison the shared
+        # LLM client for the rest of the run.
+        _reset_client_disabled_backends(self)
         return self._fallback_plan(user_goal)
 
 

@@ -92,6 +92,74 @@ On Windows use `gradlew.bat buildPlugin` instead.
 
 This Gradle-only path does not rebuild the DevAgent executable. It just packages whatever is already present in `bin/win/` and `bin/linux/`.
 
+## Manual build by operating system
+
+Use this path if you do not want to use the helper scripts and prefer running each step yourself.
+
+Important:
+
+- build the executable on the target OS itself
+- keep the binary for the other supported OS in `bin/` as well if you want a distributable ZIP
+- run the PyInstaller step from the repository root, not from `jetbrains-plugin/`
+
+### Manual build on Linux
+
+1. From the repository root, build the Linux executable with PyInstaller:
+
+```bash
+python -m PyInstaller devagent.spec
+```
+
+2. Copy the result into the plugin directory:
+
+```bash
+install -Dm755 dist/devagent jetbrains-plugin/bin/linux/devagent.bin
+```
+
+3. Make sure the Windows binary is already present:
+
+- `jetbrains-plugin/bin/win/devagent.exe`
+
+4. Build the plugin ZIP:
+
+```bash
+cd jetbrains-plugin
+./gradlew clean buildPlugin
+```
+
+Result:
+
+- `jetbrains-plugin/build/distributions/*.zip`
+
+### Manual build on Windows
+
+1. From the repository root, build the Windows executable with PyInstaller:
+
+```powershell
+python -m PyInstaller devagent.spec
+```
+
+2. Copy the result into the plugin directory:
+
+```powershell
+Copy-Item dist\devagent.exe jetbrains-plugin\bin\win\devagent.exe -Force
+```
+
+3. Make sure the Linux binary is already present:
+
+- `jetbrains-plugin/bin/linux/devagent.bin`
+
+4. Build the plugin ZIP:
+
+```powershell
+cd jetbrains-plugin
+.\gradlew.bat clean buildPlugin
+```
+
+Result:
+
+- `jetbrains-plugin\build\distributions\*.zip`
+
 ## Typical workflows
 
 ### Fast local Linux build

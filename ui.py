@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import re
+import sys
+import time
 from typing import Any
 
 from rich import box
@@ -16,10 +18,11 @@ from rich.text import Text
 class AgentUI:
     """Responsible for all visual output of the agent."""
 
-    def __init__(self, console: Console | None = None, verbose: bool = False) -> None:
+    def __init__(self, console: Console | None = None, verbose: bool = False, perf_logger: Any = None) -> None:
         self.console = console or Console()
         self.verbose = verbose
         self._live: Live | None = None
+        self._perf_logger = perf_logger
 
     def start_live(self) -> None:
         if self.verbose:
@@ -70,7 +73,12 @@ class AgentUI:
             is_error=is_error,
         )
 
+        render_start = time.monotonic()
         self._live.update(panel, refresh=True)
+        render_duration_ms = (time.monotonic() - render_start) * 1000
+
+        if self._perf_logger is not None:
+            self._perf_logger.log_render(render_duration_ms=render_duration_ms)
 
     def print_plan(self, plan_info: Any) -> None:
         if not self.verbose:
@@ -100,6 +108,7 @@ class AgentUI:
         print(f"Reported progress: {command.progress}%")
 
     def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
+        _ = user_messages
         final_panel = Panel(
             Text(final_message, style="bright_green"),
             title="Final Answer",
@@ -114,6 +123,127 @@ class AgentUI:
     def debug_print(self, message: str) -> None:
         if self.verbose:
             print(message)
+
+    def choose_option(
+        self,
+        title: str,
+        options: list[dict[str, str]],
+        current_value: str,
+        help_text: str = "↑/↓ — выбрать, Enter — подтвердить, Esc — отменить",
+    ) -> str | None:
+        if not options:
+            return None
+        if not sys.stdin.isatty():
+            return None
+
+        values = [item["value"] for item in options]
+        index = values.index(current_value) if current_value in values else 0
+
+        while True:
+            self.console.clear()
+            self.console.print(
+                Panel(
+                    Text(help_text, style="grey70"),
+                    title=title,
+                    title_align="left",
+                    border_style="bright_cyan",
+                    box=box.ROUNDED,
+                    padding=(1, 2),
+                )
+            )
+
+            rows: list[Text] = []
+            for option_index, option in enumerate(options):
+                is_selected = option_index == index
+                prefix = "❯ " if is_selected else "  "
+                row = Text()
+                row.append(prefix, style="bright_green" if is_selected else "grey50")
+                row.append(
+                    option["label"],
+                    style="bold bright_green" if is_selected else "white",
+                )
+                description = option.get("description", "").strip()
+                if description:
+                    row.append(f" — {description}", style="grey70")
+                rows.append(row)
+
+            self.console.print(
+                Panel(
+                    Group(*rows),
+                    border_style="grey50",
+                    box=box.ROUNDED,
+                    padding=(0, 1),
+                )
+            )
+
+            pressed = self._read_menu_key()
+            if pressed == "up":
+                index = (index - 1) % len(options)
+                continue
+            if pressed == "down":
+                index = (index + 1) % len(options)
+                continue
+            if pressed == "enter":
+                self.console.clear()
+                return options[index]["value"]
+            if pressed in {"escape", "interrupt"}:
+                self.console.clear()
+                return None
+
+    @staticmethod
+    def _read_menu_key() -> str:
+        if sys.platform == "win32":
+            import msvcrt
+
+            while True:
+                key = msvcrt.getwch()
+                if key in {"\x00", "\xe0"}:
+                    extended = msvcrt.getwch()
+                    if extended == "H":
+                        return "up"
+                    if extended == "P":
+                        return "down"
+                    continue
+                if key in {"\r", "\n"}:
+                    return "enter"
+                if key == "\x1b":
+                    return "escape"
+                if key == "\x03":
+                    return "interrupt"
+                if key.lower() == "k":
+                    return "up"
+                if key.lower() == "j":
+                    return "down"
+
+        import termios
+        import tty
+
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            while True:
+                key = sys.stdin.read(1)
+                if key in {"\r", "\n"}:
+                    return "enter"
+                if key == "\x03":
+                    return "interrupt"
+                if key == "\x1b":
+                    next_char = sys.stdin.read(1)
+                    if next_char == "[":
+                        final_char = sys.stdin.read(1)
+                        if final_char == "A":
+                            return "up"
+                        if final_char == "B":
+                            return "down"
+                        continue
+                    return "escape"
+                if key.lower() == "k":
+                    return "up"
+                if key.lower() == "j":
+                    return "down"
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     def _render_live_panel(
         self,

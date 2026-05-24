@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -57,7 +58,49 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 break
 
             prompt = self._build_runtime_prompt(user_goal, step)
-            raw_text = self._call_action_model(prompt)
+            self._current_step = step
+            loop_pre = time.monotonic()
+            try:
+                raw_text = self._call_action_model(prompt)
+            except Exception as error:
+                error_text = str(error).strip() or type(error).__name__
+                self._state.consecutive_errors += 1
+                self._record_error(error_text)
+                self._state.step_logs.append(
+                    {
+                        "step": step,
+                        "status": "model_error",
+                        "error": error_text,
+                    }
+                )
+                self._ui.update_live(
+                    user_message=(
+                        "Модель вернула ошибку, пробую продолжить или корректно остановиться"
+                        if self._state.task_language == "ru"
+                        else "The model returned an error; retrying or stopping safely"
+                    ),
+                    status="model error",
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step="model request",
+                    is_error=True,
+                )
+                if _is_terminal_model_error(error_text):
+                    normalized = self._normalize_error_for_model(error_text)
+                    if self._state.task_language == "ru":
+                        final_message = f"Агент остановлен: модель недоступна. {normalized}"
+                    else:
+                        final_message = f"Agent stopped: the model is unavailable. {normalized}"
+                    break
+                loop_post = time.monotonic()
+                model_duration = getattr(self, "_last_model_duration", loop_post - loop_pre)
+                lag_ms = ((loop_post - loop_pre) - model_duration) * 1000
+                self._perf_logger.log_event_loop_lag(
+                    lag_ms=lag_ms,
+                    step=step,
+                    context="model_call_error",
+                )
+                continue
 
             try:
                 command = parse_agent_command(raw_text)
@@ -97,7 +140,6 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 blocked_signature = self._action_signature(command)
                 blocked_count = self._state.seen_actions.get(blocked_signature, 0) + 1
                 self._state.seen_actions[blocked_signature] = blocked_count
-                self._state.last_action_signature = blocked_signature
                 self._state.stagnation_count += 1
                 self._state.pending_instruction = followup_error
                 if blocked_count >= 2:
@@ -256,6 +298,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     finally:
         self._ui.stop_live()
         self._persist_logs(user_goal)
+        self._perf_logger.flush()
         self._clear_checkpoint()
 
     if not self.config.verbose:
@@ -368,8 +411,29 @@ def register_language_error(
 
 def normalize_error_for_model(self, raw_error: str) -> str:
     error = str(raw_error).strip() or "Unknown error"
+    lowered = error.casefold()
+    
+    is_overloaded = any(m in lowered for m in ("all providers exhausted", "rate limit", "too many requests", "high demand", "503"))
+    
     if self._state.task_language != "ru":
+        if is_overloaded:
+            return "Provider rate limit or high demand reached. Try again later or switch the provider."
+        if "invalid api key" in lowered:
+            return "Provider API key is invalid. Check the configured key for the selected backend."
+        if "no healthy backend available for model" in lowered:
+            return "The backend required by the selected model is unavailable or misconfigured. Choose another model or fix the backend key."
+        if "is not found for api version" in lowered or "not supported for generatecontent" in lowered:
+            return "The selected model is not supported by this provider backend. Pick a model that matches the backend."
         return error
+
+    if is_overloaded:
+        return "Достигнут лимит запросов или провайдер перегружен. Повторите позже или переключите провайдера."
+    if "invalid api key" in lowered:
+        return "Некорректный API key провайдера. Проверьте ключ для выбранного backend."
+    if "no healthy backend available for model" in lowered:
+        return "Backend, нужный для выбранной модели, недоступен или настроен неверно. Выберите другую модель или исправьте ключ backend."
+    if "is not found for api version" in lowered or "not supported for generatecontent" in lowered:
+        return "Выбранная модель не поддерживается этим backend провайдера. Выберите модель под нужный backend."
 
     mappings = (
         ("File not found: ", "Файл не найден: "),
@@ -765,14 +829,15 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
 
 def build_early_stop_message(self, step: int) -> str | None:
     if self._state.consecutive_errors >= self.config.max_consecutive_errors:
+        errors = _summarize_recent_errors(self)
         if self._state.task_language == "ru":
             return (
                 "Агент остановлен: слишком много ошибок подряд. "
-                f"Последние ошибки: {', '.join(self._state.error_history[-3:])}"
+                f"Последние ошибки: {errors}"
             )
         return (
             "Agent stopped. Too many consecutive errors. "
-            f"Last errors: {', '.join(self._state.error_history[-3:])}"
+            f"Last errors: {errors}"
         )
 
     if self._state.stagnation_count >= self.config.stagnation_limit:
@@ -795,10 +860,9 @@ def build_early_stop_message(self, step: int) -> str | None:
 
 
 def build_limit_reached_message(self) -> str:
-    errors = ", ".join(self._state.error_history[-3:]) or "none"
+    errors = _summarize_recent_errors(self)
     blockers = ", ".join(self._state.completion_blockers[-3:])
     if self._state.task_language == "ru":
-        errors = ", ".join(self._state.error_history[-3:]) or "нет"
         message = (
             "Агент не завершил задачу в пределах лимита шагов. "
             f"Текущий прогресс: {self._state.progress}%. "
@@ -815,6 +879,17 @@ def build_limit_reached_message(self) -> str:
     if blockers:
         message += f" Blockers: {blockers}."
     return message
+
+
+def _summarize_recent_errors(self) -> str:
+    items: list[str] = []
+    for raw_error in self._state.error_history[-5:]:
+        normalized = self._normalize_error_for_model(raw_error)
+        if normalized not in items:
+            items.append(normalized)
+    if not items:
+        return "нет" if self._state.task_language == "ru" else "none"
+    return ", ".join(items[:3])
 
 
 def is_repeat_blocked(self, command: AgentCommand) -> bool:
@@ -1159,8 +1234,17 @@ def _matches_task_language(text: str, language: str) -> bool:
 def _is_create_goal(user_goal: str) -> bool:
     lowered = user_goal.casefold()
     markers = (
+        "сделай",
+        "сделать",
         "создай",
         "создать",
+        "напиши",
+        "написать",
+        "разработай",
+        "разработать",
+        "построй",
+        "построить",
+        "реализуй",
         "сгенерируй",
         "инициализируй",
         "собери проект",
@@ -1189,6 +1273,12 @@ def _build_premature_final_answer_error(language: str) -> str:
     if language == "ru":
         return "Нельзя завершать CREATE-задачу без созданных или изменённых файлов."
     return "A CREATE task cannot finish without created or changed files."
+
+
+def _build_missing_implementation_error(language: str) -> str:
+    if language == "ru":
+        return "Нельзя завершать задачу без изменений: план требует создать или изменить файлы."
+    return "Task cannot finish without changes: the plan requires creating or editing files."
 
 
 def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
@@ -1225,6 +1315,23 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
     return normalized[:24]
 
 
+def _is_terminal_model_error(error_text: str) -> bool:
+    lowered = str(error_text).casefold()
+    markers = (
+        "quota",
+        "resource_exhausted",
+        "invalid api key",
+        "authentication",
+        "unauthorized",
+        "decommissioned",
+        "no longer supported",
+        "no healthy backend available for model",
+        "is not found for api version",
+        "not supported for generatecontent",
+        "does not exist",
+        "not found",
+    )
+    return any(marker in lowered for marker in markers)
 def _missing_required_artifacts(self) -> list[str]:
     missing: list[str] = []
     workspace = Path(self.executor.workspace)
@@ -1252,6 +1359,13 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
         blockers.append(_build_premature_final_answer_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
+    if (
+        not self._state.files_changed
+        and _plan_requires_file_changes(self)
+    ):
+        blockers.append(_build_missing_implementation_error(self._state.task_language))
+        required_actions.update(_WRITE_ACTIONS)
+
     if actionable_remaining_plan_steps:
         blockers.append(_build_incomplete_plan_error(self._state.task_language, actionable_remaining_plan_steps))
         if all(_PLAN_VERIFY_RE.search(item.casefold()) for item in actionable_remaining_plan_steps):
@@ -1268,6 +1382,13 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
         required_actions.update(_VERIFY_ONLY_ACTIONS)
 
     return blockers, sorted(required_actions)
+
+
+def _plan_requires_file_changes(self) -> bool:
+    plan_info = self._state.plan_info
+    if not plan_info or not plan_info.plan:
+        return self._state.create_goal
+    return any(_PLAN_EDIT_RE.search(item.casefold()) for item in plan_info.plan)
 
 
 def _progress_ceiling(state: RunState, action_type: str) -> int:

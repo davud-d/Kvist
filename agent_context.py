@@ -4,11 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-
-def detect_request_language(text: str) -> str:
-    cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
-    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
-    return "ru" if cyrillic > latin else "en"
+from language_utils import detect_request_language
 
 
 _RUNTIME_TEXT = {
@@ -19,6 +15,7 @@ _RUNTIME_TEXT = {
         "user_task": "Задача пользователя",
         "plan_goal": "Цель по плану",
         "complexity": "Сложность",
+        "execution_model": "Модель выполнения",
         "current_progress": "Текущий прогресс",
         "plan": "План",
         "completed_steps": "Выполненные пункты плана",
@@ -61,6 +58,7 @@ _RUNTIME_TEXT = {
         "user_task": "User task",
         "plan_goal": "Plan goal",
         "complexity": "Complexity",
+        "execution_model": "Execution model",
         "current_progress": "Current progress",
         "plan": "Plan",
         "completed_steps": "Completed plan steps",
@@ -164,6 +162,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['user_task']}:\n{user_goal}\n\n"
         f"{text['plan_goal']}:\n{self._state.plan_info.goal}\n\n"
         f"{text['complexity']}: {self._state.plan_info.complexity}\n"
+        f"{text['execution_model']}: {self._state.selected_action_role or 'n/a'} / {self._state.selected_action_model or 'n/a'}\n"
         f"{text['current_progress']}: {self._state.progress}%\n\n"
         f"{text['plan']}:\n{plan_text}\n\n"
         f"{text['completed_steps']}: {completed_steps}\n\n"

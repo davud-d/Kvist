@@ -12,7 +12,7 @@ DevAgentXD это локальный coding agent для одного workspace 
 ## Что нужно
 
 - Python 3.11+
-- OpenAI API key
+- OpenAI API key или ключ совместимого провайдера для FreeFlow
 
 JetBrains-плагин собирается отдельно; короткая заметка есть внизу.
 
@@ -25,10 +25,14 @@ pip install -r requirements.txt
 ```
 
 Для первого запуска `.env` не нужен. Если `~/.devagent/config.json` отсутствует,
-DevAgentXD спросит OpenAI API key, проверит его через API и запишет:
+DevAgentXD спросит ключ для активного провайдера и сохранит имя провайдера в тот
+же файл.
+
+Пример:
 
 ```json
 {
+	"llm_provider": "openai",
 	"openai_api_key": "sk-..."
 }
 ```
@@ -39,6 +43,10 @@ DevAgentXD спросит OpenAI API key, проверит его через API
 - Windows: `C:\Users\<USERNAME>\.devagent\config.json`
 
 Старый вариант с `OPENAI_API_KEY` внутри этого JSON тоже читается.
+
+Если переключиться на `FreeFlow LLM`, DevAgentXD сохранит выбранный провайдер и
+при необходимости может держать там же `gemini_api_key` или `groq_api_key`.
+Выбранные модели тоже сохраняются в этом же конфиге отдельно для каждого провайдера.
 
 ## Запуск
 
@@ -69,7 +77,9 @@ devagent --workspace "<project_path>"
 ```
 
 Выход — `/bye`. Если прошлый запуск оборвался и checkpoint успел сохраниться,
-`/resume` попробует продолжить.
+`/resume` попробует продолжить. Команда `/provider` открывает выбор провайдера
+через стрелки на клавиатуре. Команда `/models` так же позволяет стрелками
+выбрать `fast`, `smart` и `planner` модели для текущего провайдера.
 
 Многострочный ввод чуть старомодный: поставьте `\` в конце строки.
 
@@ -104,9 +114,10 @@ devagent --workspace "<project_path>"
 ## Настройки, которые полезно знать
 
 ```env
-AGENT_FAST_MODEL=gpt-5.4-nano
-AGENT_SMART_MODEL=gpt-5.4-mini
-AGENT_PLANNER_MODEL=gpt-4o
+AGENT_LLM_PROVIDER=openai
+AGENT_FAST_MODEL=gpt-5-mini
+AGENT_SMART_MODEL=gpt-5
+AGENT_PLANNER_MODEL=gpt-5
 AGENT_MAX_STEPS=20
 AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
@@ -115,6 +126,16 @@ AGENT_VERBOSE=0
 `AGENT_MAX_STEPS` я бы трогал первым. Поднимайте, если агент регулярно
 останавливается за шаг-два до результата. `AGENT_VERBOSE=1` полезен при отладке
 самого DevAgentXD, в обычной работе быстро надоедает.
+
+По провайдерам:
+
+- `OpenAI` остаётся самым безопасным вариантом для строгого JSON-режима.
+- Для `OpenAI` по умолчанию используются модели семейства `GPT-5`, с авто-fallback
+	на `GPT-4.1`, если у ключа нет доступа к `GPT-5`.
+- `FreeFlow LLM` подключён как опциональный провайдер для моделей Gemini/Groq.
+- У `FreeFlow LLM` нет такой же гарантии native JSON mode, как у официального
+	OpenAI SDK, поэтому здесь используется fallback на обычные completions.
+- Для `FreeFlow LLM` по умолчанию все роли используют `gemini-3.1-pro-preview`.
 
 `AGENT_PERSIST_LOGS=0` отключает run-логи, но `/resume` всё равно использует
 `<project>/.devagent/state.json`.

@@ -51,6 +51,8 @@ def persist_logs(self, user_goal: str) -> None:
         "goal": user_goal,
         "task_language": self._state.task_language,
         "create_goal": self._state.create_goal,
+        "selected_action_role": self._state.selected_action_role,
+        "selected_action_model": self._state.selected_action_model,
         "plan": {
             "goal": self._state.plan_info.goal if self._state.plan_info else "",
             "complexity": self._state.plan_info.complexity if self._state.plan_info else "",
@@ -92,6 +94,8 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
         "goal": user_goal,
         "task_language": self._state.task_language,
         "create_goal": self._state.create_goal,
+        "selected_action_role": self._state.selected_action_role,
+        "selected_action_model": self._state.selected_action_model,
         "step": step,
         "progress": self._state.progress,
         "summary": self._state.summary,
@@ -158,6 +162,8 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.progress = data.get("progress", 0)
     self._state.task_language = str(data.get("task_language") or "")
     self._state.create_goal = bool(data.get("create_goal", False))
+    self._state.selected_action_role = str(data.get("selected_action_role") or "")
+    self._state.selected_action_model = str(data.get("selected_action_model") or "")
     self._state.summary = data.get("summary", "")
     self._state.files_read = data.get("files_read", [])
     self._state.files_changed = data.get("files_changed", [])

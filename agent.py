@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from openai import OpenAI
+from typing import Any
+
 from rich.console import Console
 
 from agent_context import (
@@ -28,6 +29,7 @@ from agent_model import (
     count_tokens,
     init_tiktoken_encoding,
     prefer_smart_model,
+    select_action_model_for_run,
     trim_prompt_to_token_limit,
 )
 from agent_planner import (
@@ -69,7 +71,7 @@ from agent_runtime import (
     update_verification_evidence,
 )
 from deps import detect_dependency_versions
-from agent_state import AgentConfig, PlanInfo, RunState
+from agent_state import AgentConfig, RunState
 from agent_web import (
     append_known_version_to_query,
     contains_package_token,
@@ -82,12 +84,13 @@ from agent_web import (
     summarize_search_results,
 )
 from executor import SafeExecutor
+from performance_logger import PerfLogger
 from ui import AgentUI
 
 class LocalAgent:
     def __init__(
         self,
-        client: OpenAI,
+        client: Any,
         executor: SafeExecutor,
         config: AgentConfig | None = None,
     ) -> None:
@@ -97,15 +100,21 @@ class LocalAgent:
         self._cache: dict[str, str] = {}
         self._state = RunState()
         self.console = Console()
-        self._ui = AgentUI(console=self.console, verbose=self.config.verbose)
+        self._perf_logger = PerfLogger(executor.workspace)
+        self._ui = AgentUI(console=self.console, verbose=self.config.verbose, perf_logger=self._perf_logger)
         self._encoding = self._init_tiktoken_encoding()
+        self._current_step = 0
 
     def run(self, user_goal: str) -> str:
         self._reset_run_state()
         self._state.task_language = detect_request_language(user_goal)
         self._state.plan_info = self._create_plan(user_goal)
+        self._select_action_model_for_run()
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
         self._ui.print_plan(self._state.plan_info)
+        self._ui.debug_print(
+            f"Execution model selected: role={self._state.selected_action_role}, model={self._state.selected_action_model}"
+        )
         return self._run_loop(user_goal, start_step=1)
 
     def resume(self) -> str | None:
@@ -116,8 +125,13 @@ class LocalAgent:
         user_goal, last_step = result
         if not self._state.task_language:
             self._state.task_language = detect_request_language(user_goal)
+        if not self._state.selected_action_model:
+            self._select_action_model_for_run()
         self._ui.debug_print(
             f"Restored from checkpoint: goal='{user_goal}', step={last_step}, progress={self._state.progress}%"
+        )
+        self._ui.debug_print(
+            f"Execution model restored: role={self._state.selected_action_role}, model={self._state.selected_action_model}"
         )
         return self._run_loop(user_goal, start_step=last_step + 1)
 
@@ -144,6 +158,7 @@ class LocalAgent:
     _count_tokens = count_tokens
     _trim_prompt_to_token_limit = trim_prompt_to_token_limit
     _prefer_smart_model = prefer_smart_model
+    _select_action_model_for_run = select_action_model_for_run
 
     _execute_command = execute_command
     _build_error_feedback = build_error_feedback

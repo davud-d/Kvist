@@ -7,9 +7,10 @@ from typing import Any
 
 @dataclass(slots=True)
 class AgentConfig:
-    fast_model: str = "gpt-5.4-mini"
-    smart_model: str = "gpt-5.4"
-    planner_model: str = "gpt-5.4"
+    provider: str = "openai"
+    fast_model: str = "gpt-5-mini"
+    smart_model: str = "gpt-5-mini"
+    planner_model: str = "gpt-5-mini"
     max_steps: int = 20
     stagnation_limit: int = 6
     max_consecutive_errors: int = 6
@@ -27,8 +28,10 @@ class AgentConfig:
     max_retries: int = 3
     retry_base_delay: float = 1.0
     max_context_tokens: int = 120000
+    runtime_model_fallbacks_enabled: bool = False
     stream: bool = True
     verbose: bool = False
+    api_request_interval: float = 2.5
 
 
 @dataclass(slots=True)
@@ -45,6 +48,8 @@ class RunState:
     task_language: str = ""
     create_goal: bool = False
     plan_info: PlanInfo | None = None
+    selected_action_role: str = ""
+    selected_action_model: str = ""
     progress: int = 0
     summary: str = ""
     files_read: list[str] = field(default_factory=list)
