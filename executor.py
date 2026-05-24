@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from protocol import AgentCommand
-from terminal import TerminalExecutor, TerminalError
+from terminal import TerminalExecutor, TerminalError, is_hitl_active
 
 
 class ExecutorError(Exception):
@@ -169,6 +169,10 @@ class SafeExecutor:
             ".mp4",
             ".avi",
         }
+
+    def set_hitl_callbacks(self, suspend_fn, resume_fn):
+        """Register UI callbacks for HITL prompts: suspend Live display during input."""
+        TerminalExecutor.set_hitl_callbacks(suspend_fn, resume_fn)
 
     def execute(self, command: AgentCommand) -> ExecutionResult:
         action_type = command.action.type
@@ -852,6 +856,17 @@ class SafeExecutor:
             result = self._terminal.run(command, cwd=cwd, timeout=timeout)
         except TerminalError as exc:
             raise ExecutorError(str(exc))
+
+        if result.denied:
+            return ExecutionResult(
+                ok=False,
+                action_type="run_shell",
+                data={
+                    "command": result.command,
+                    "error": result.stderr,
+                    "denied": True,
+                },
+            )
 
         return ExecutionResult(
             ok=result.returncode == 0,

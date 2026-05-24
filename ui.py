@@ -14,6 +14,8 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
+from terminal import is_hitl_active
+
 
 class AgentUI:
     """Responsible for all visual output of the agent."""
@@ -25,7 +27,7 @@ class AgentUI:
         self._perf_logger = perf_logger
 
     def start_live(self) -> None:
-        if self.verbose:
+        if self.verbose or is_hitl_active():
             return
 
         initial = self._render_live_panel(
@@ -61,7 +63,7 @@ class AgentUI:
         plan_step: str,
         is_error: bool = False,
     ) -> None:
-        if self.verbose or self._live is None:
+        if self.verbose or self._live is None or is_hitl_active():
             return
 
         panel = self._render_live_panel(

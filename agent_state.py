@@ -25,13 +25,13 @@ class AgentConfig:
     logs_dirname: str = ".devagent/logs"
     state_filename: str = ".devagent/state.json"
     model_temperature: float = 0.1
-    max_retries: int = 3
-    retry_base_delay: float = 1.0
+    max_retries: int = 2
+    retry_base_delay: float = 2.0
     max_context_tokens: int = 120000
     runtime_model_fallbacks_enabled: bool = False
     stream: bool = True
     verbose: bool = False
-    api_request_interval: float = 2.5
+    api_request_interval: float = 3.0
 
 
 @dataclass(slots=True)

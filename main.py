@@ -227,6 +227,11 @@ def main() -> None:
             verbose=verbose,
             language_hint=session_language,
         )
+        # Wire HITL callbacks: pause/resume Live TUI during security prompts
+        executor.set_hitl_callbacks(
+            suspend_fn=agent._ui.stop_live,
+            resume_fn=agent._ui.start_live,
+        )
     except RuntimeError as error:
         print(str(error), file=sys.stderr)
         sys.exit(2)
@@ -281,6 +286,11 @@ def main() -> None:
                     console.print(f"[red]{error}[/red]")
                     continue
 
+                executor.set_hitl_callbacks(
+                    suspend_fn=agent._ui.stop_live,
+                    resume_fn=agent._ui.start_live,
+                )
+
                 console.print(
                     f"[green]Provider changed to {provider_label(config.provider)}.[/green]"
                 )
@@ -332,6 +342,11 @@ def main() -> None:
                 except RuntimeError as error:
                     console.print(f"[red]{error}[/red]")
                     continue
+
+                executor.set_hitl_callbacks(
+                    suspend_fn=agent._ui.stop_live,
+                    resume_fn=agent._ui.start_live,
+                )
 
                 save_models_for_provider(config.provider, selected_models)
                 console.print("[green]Models updated.[/green]")

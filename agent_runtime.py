@@ -100,6 +100,11 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     step=step,
                     context="model_call_error",
                 )
+                # Cooldown to avoid burning through all steps on transient API failures
+                cooldown = self.config.retry_base_delay * (2 ** min(self._state.consecutive_errors, 4))
+                if any(m in error_text.casefold() for m in ("rate limit", "too many requests", "high demand", "503")):
+                    cooldown = max(cooldown, 10.0)
+                time.sleep(cooldown)
                 continue
 
             try:

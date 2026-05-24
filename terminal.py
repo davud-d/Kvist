@@ -5,9 +5,33 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+# ── Global HITL lock ─────────────────────────────────────────────
+# Prevents background TUI rendering while the user is typing y/N.
+_hitl_lock = threading.Lock()
+_hitl_active = False
+
+
+def is_hitl_active() -> bool:
+    """True if a Human-in-the-Loop prompt is currently waiting for input."""
+    with _hitl_lock:
+        return _hitl_active
+
+
+def _enter_hitl() -> None:
+    global _hitl_active
+    with _hitl_lock:
+        _hitl_active = True
+
+
+def _exit_hitl() -> None:
+    global _hitl_active
+    with _hitl_lock:
+        _hitl_active = False
 
 
 @dataclass(slots=True)
@@ -19,6 +43,7 @@ class TerminalResult:
     stdout: str
     stderr: str
     timed_out: bool = False
+    denied: bool = False
 
 
 class TerminalError(Exception):
@@ -205,6 +230,20 @@ class TerminalExecutor:
     - CREATE_NO_WINDOW на Windows
     """
 
+    # Human-in-the-Loop callbacks — set by SafeExecutor at init time.
+    _hitl_suspend_fn: Callable[[], None] | None = None
+    _hitl_resume_fn: Callable[[], None] | None = None
+
+    @classmethod
+    def set_hitl_callbacks(
+        cls,
+        suspend_fn: Callable[[], None],
+        resume_fn: Callable[[], None],
+    ) -> None:
+        """Register UI pause/resume hooks for HITL prompts."""
+        cls._hitl_suspend_fn = suspend_fn
+        cls._hitl_resume_fn = resume_fn
+
     def __init__(
         self,
         workspace: Path,
@@ -248,7 +287,33 @@ class TerminalExecutor:
         timeout: float | None = None,
     ) -> TerminalResult:
         """Выполнить команду безопасно в рамках workspace."""
-        self._validate(command)
+        try:
+            self._validate(command)
+        except TerminalError as validation_error:
+            if not self._request_user_approval(command, str(validation_error)):
+                return TerminalResult(
+                    command=command,
+                    returncode=-1,
+                    stdout="",
+                    stderr=(
+                        "Error: Command execution denied by user for security reasons. "
+                        "Find an alternative way to solve the task without this command."
+                    ),
+                    denied=True,
+                )
+            # User approved — proceed with relaxed validation (skip allowlist check)
+            return self._run_unvalidated(command, cwd, env_overrides, timeout)
+
+        return self._run_unvalidated(command, cwd, env_overrides, timeout)
+
+    def _run_unvalidated(
+        self,
+        command: list[str],
+        cwd: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> TerminalResult:
+        """Выполнить уже проверенную (или одобренную пользователем) команду."""
         work_dir = self._resolve_cwd(cwd)
         effective_timeout = self._clamp_timeout(timeout)
         env = self._build_env(env_overrides)
@@ -293,6 +358,78 @@ class TerminalExecutor:
             stderr=self._truncate(proc.stderr or ""),
             timed_out=False,
         )
+
+    @classmethod
+    def _request_user_approval(cls, command: list[str], error_message: str) -> bool:
+        """Интерактивный запрос разрешения (Human-in-the-Loop).
+
+        Выводит панель предупреждения через rich, затем запрашивает
+        y/N через стандартный input(). После получения ответа полностью
+        стирает панель и строку ввода из терминала через ANSI-escape.
+
+        Перед вводом:
+        - останавливает фоновый Live TUI (через suspend callback)
+        - устанавливает глобальный HITL-флаг (блокирует update_live)
+
+        После ввода:
+        - стирает панель + строку ввода (ANSI \033[F\033[K × N)
+        - снимает HITL-флаг
+        - возобновляет Live TUI (через resume callback)
+
+        Если stdin не является TTY (тесты, CI, пайпы) — выбрасывает
+        исходную ошибку валидации.
+        """
+        import sys
+
+        if not sys.stdin.isatty():
+            raise TerminalError(error_message)
+
+        from rich.console import Console
+        from rich.panel import Panel
+
+        # Останавливаем фоновую отрисовку TUI
+        if cls._hitl_suspend_fn is not None:
+            cls._hitl_suspend_fn()
+
+        _enter_hitl()
+        try:
+            console = Console()
+            command_str = " ".join(command)
+
+            panel_content = (
+                f"[bold red]⚠️  DANGEROUS COMMAND DETECTED[/bold red]\n\n"
+                f"[bold]Command:[/bold] [yellow]{command_str}[/yellow]\n"
+                f"[bold]Reason:[/bold] {error_message}\n\n"
+                f"[dim]This command does not match the security allowlist.\n"
+                f"The agent is attempting to run it. Proceed only if you trust this action.[/dim]"
+            )
+            panel = Panel(
+                panel_content,
+                border_style="red",
+                title="[bold]Security Check — Human-in-the-Loop[/bold]",
+                title_align="left",
+                padding=(1, 2),
+            )
+            console.print(panel)
+
+            try:
+                choice = input("Allow execution? [y/N]: ").strip().lower()
+            except EOFError:
+                raise TerminalError(error_message)
+
+            # Стираем панель + строку ввода из терминала
+            # Панель ~12 строк + 1 строка input = 13; 20 — безопасный запас
+            _HITL_CLEAR_LINES = 20
+            for _ in range(_HITL_CLEAR_LINES):
+                sys.stdout.write("\033[F\033[K")
+            sys.stdout.flush()
+
+            return choice in ("y", "yes")
+        finally:
+            _exit_hitl()
+            # Возобновляем фоновую отрисовку TUI
+            if cls._hitl_resume_fn is not None:
+                cls._hitl_resume_fn()
 
     # ------------------------------------------------------------------
     # Валидация
