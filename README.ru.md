@@ -136,6 +136,9 @@ AGENT_VERBOSE=0
 - У `FreeFlow LLM` нет такой же гарантии native JSON mode, как у официального
 	OpenAI SDK, поэтому здесь используется fallback на обычные completions.
 - Для `FreeFlow LLM` по умолчанию все роли используют `gemini-3.1-pro-preview`.
+- **⚠️ `FreeFlow LLM` сейчас находится в бета-тестировании и остаётся очень
+  нестабильным.** Возможны периодические сбои, таймауты и непоследовательные
+  ответы. Используйте `OpenAI`, если нужна стабильная работа.
 
 `AGENT_PERSIST_LOGS=0` отключает run-логи, но `/resume` всё равно использует
 `<project>/.devagent/state.json`.
