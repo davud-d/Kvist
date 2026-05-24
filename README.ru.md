@@ -176,15 +176,46 @@ API key остаётся в домашнем конфиге, а не в прое
 
 ## Структура проекта
 
+Ядро:
+
 - `main.py` запускает CLI и связывает workspace, ключ, модели и UI.
 - `agent.py` склеивает части агента.
 - `agent_runtime.py` ведёт цикл шагов и checkpoint.
+- `agent_state.py` хранит `AgentConfig` и runtime-датаклассы (`PlanInfo` и т.д.).
+- `agent_model.py` вызывает action-модель, стриминг, подсчёт токенов и fallback моделей.
+- `agent_planner.py` запускает опциональный шаг планирования перед основным циклом.
+- `agent_context.py` собирает контекст для каждого шага с локализованными метками.
+
+Исполнение и парсинг:
+
 - `executor.py` отвечает за безопасные действия с файлами, shell, git и web.
 - `parser.py` и `protocol.py` проверяют действия модели.
-- `terminal.py` хранит allowlist команд.
+- `terminal.py` хранит allowlist shell-команд.
 - `agent_web.py` ограничивает web search и чтение URL.
-- `agent_logging.py` пишет run-логи и checkpoint.
+
+LLM и провайдеры:
+
+- `llm_clients.py` настраивает клиенты OpenAI и FreeFlow, списки моделей и fallback-цепочки.
+- `user_config.py` читает/пишет `~/.devagent/config.json`, запрашивает ключи и выбор провайдера.
+
+Утилиты:
+
+- `context_utils.py` sliding-window тример контекста для истории сообщений.
+- `render_throttle.py` неблокирующий throttle для потокового вывода.
+- `language_utils.py` определяет язык запроса пользователя и подбирает локализованные строки.
+- `deps.py` сканирует файлы зависимостей workspace для получения версий.
+- `performance_logger.py` структурированный JSONL-логгер для `.devagent/logs/debug/`.
+
+UI и сборка:
+
 - `ui.py` рисует вывод в терминале.
+- `agent_logging.py` пишет run-логи и checkpoint.
+- `package_script.py` скрипт сборки через PyInstaller.
+
+Дополнительно:
+
+- `system_prompt.txt` системный промпт для action-модели.
+- `planner_prompt.txt` системный промпт для planner-модели.
 
 `jetbrains-plugin/` содержит IntelliJ Platform plugin: он запускает DevAgentXD в IDE
 Terminal для текущего проекта. Плагин прибит к IntelliJ Platform 2025.3,

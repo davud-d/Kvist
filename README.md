@@ -177,15 +177,46 @@ the polish can wait.
 
 ## Project layout
 
+Core:
+
 - `main.py` starts the CLI and wires workspace, key loading, models, and UI.
 - `agent.py` glues the agent pieces together.
 - `agent_runtime.py` runs the step loop and checkpoints progress.
+- `agent_state.py` holds `AgentConfig` and runtime dataclasses (`PlanInfo`, etc.).
+- `agent_model.py` calls the action LLM, handles streaming, token counting, and model fallback.
+- `agent_planner.py` runs the optional planning step before the main action loop.
+- `agent_context.py` builds the per-step context prompt with localized labels.
+
+Execution and parsing:
+
 - `executor.py` handles workspace-safe file, shell, git, and web actions.
 - `parser.py` and `protocol.py` validate model actions.
-- `terminal.py` has the command allowlist.
+- `terminal.py` has the shell command allowlist.
 - `agent_web.py` guards web search and URL reads.
-- `agent_logging.py` writes run logs and checkpoints.
+
+LLM and provider wiring:
+
+- `llm_clients.py` configures OpenAI and FreeFlow clients, model lists, and fallback chains.
+- `user_config.py` reads/writes `~/.devagent/config.json`, handles key prompts and provider selection.
+
+Utilities:
+
+- `context_utils.py` sliding-window context trimmer for message history.
+- `render_throttle.py` non-blocking render throttle for streaming chunk output.
+- `language_utils.py` detects the user's request language and picks localized strings.
+- `deps.py` scans workspace dependency files for pinned versions.
+- `performance_logger.py` structured JSONL debug logger for `.devagent/logs/debug/`.
+
+UI and packaging:
+
 - `ui.py` renders terminal output.
+- `agent_logging.py` writes run logs and checkpoints.
+- `package_script.py` PyInstaller build helper.
+
+Extras:
+
+- `system_prompt.txt` action-model system prompt.
+- `planner_prompt.txt` planner-model system prompt.
 
 `jetbrains-plugin/` contains an IntelliJ Platform plugin that launches DevAgentXD in
 the IDE terminal for the current project. It is pinned to IntelliJ Platform
