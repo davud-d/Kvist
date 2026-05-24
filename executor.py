@@ -475,6 +475,12 @@ class SafeExecutor:
 
     def _write_file(self, path: str, content: str) -> ExecutionResult:
         target = self._guard_env_file_access(path)
+        content_bytes = content.encode("utf-8")
+        if len(content_bytes) > self.max_file_size_bytes:
+            raise ExecutorError(
+                f"File size ({len(content_bytes)} bytes) exceeds limit "
+                f"({self.max_file_size_bytes} bytes)"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
@@ -483,7 +489,7 @@ class SafeExecutor:
             action_type="write_file",
             data={
                 "path": path,
-                "bytes_written": len(content.encode("utf-8")),
+                "bytes_written": len(content_bytes),
             },
         )
 
