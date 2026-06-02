@@ -120,12 +120,6 @@ goal:
 - no details the user did not ask for
 - written in the language of the user's request
 
-Examples for a Russian user request:
-- "Исправить ошибку запуска CLI-агента"
-- "Создать Python-скрипт для очистки папки загрузок"
-- "Улучшить системный промпт планировщика"
-- "Проверить и починить сборку JetBrains-плагина"
-
 Examples for an English user request:
 - "Fix the CLI agent startup error"
 - "Create a Python script for cleaning the Downloads folder"

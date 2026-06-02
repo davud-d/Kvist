@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Кроссплатформенный терминальный модуль для безопасного запуска процессов."""
+"""Cross-platform terminal module for safe process execution."""
 from __future__ import annotations
 
 import os
@@ -36,7 +36,7 @@ def _exit_hitl() -> None:
 
 @dataclass(slots=True)
 class TerminalResult:
-    """Результат выполнения команды в терминале."""
+    """Result of a terminal command execution."""
 
     command: list[str]
     returncode: int
@@ -47,32 +47,32 @@ class TerminalResult:
 
 
 class TerminalError(Exception):
-    """Ошибка валидации или запуска команды в терминале."""
+    """Terminal command validation or execution error."""
 
 
 # ---------------------------------------------------------------------------
-# Исполняемые файлы, запрещённые безусловно
+# Executables that are unconditionally forbidden
 # ---------------------------------------------------------------------------
 _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
-    # Удаление / перемещение
+    # Deletion / moving
     "rm", "rmdir", "del", "mv",
-    # Привилегии
+    # Privilege escalation
     "sudo", "su", "runas",
-    # Права / владение
+    # Permissions / ownership
     "chmod", "chown", "icacls", "takeown",
-    # Разрушительные системные
+    # Destructive system commands
     "mkfs", "format", "dd",
     "shutdown", "reboot", "poweroff",
-    # Сетевые утилиты (могут утекать данные)
+    # Network utilities (can exfiltrate data)
     "curl", "wget",
-    # Удалённый доступ
+    # Remote access
     "nc", "ncat", "netcat",
     "ssh", "scp", "sftp", "telnet", "ftp",
-    # Реестр Windows
+    # Windows registry
     "reg", "regedit",
-    # Управление службами
+    # Service management
     "net", "sc",
-    # Утечка переменных окружения
+    # Environment variable leakage
     "env", "printenv", "set",
 })
 
@@ -87,7 +87,7 @@ _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
 })
 
 # ---------------------------------------------------------------------------
-# Shell-операторы, запрещённые как отдельные аргументы
+# Shell operators forbidden as standalone arguments
 # ---------------------------------------------------------------------------
 _FORBIDDEN_OPERATORS: frozenset[str] = frozenset({
     ";", "&&", "||", "|",
@@ -96,14 +96,14 @@ _FORBIDDEN_OPERATORS: frozenset[str] = frozenset({
 })
 
 # ---------------------------------------------------------------------------
-# Regex для обнаружения command substitution и опасных конструкций
-# внутри аргументов ($(…), `…`, ${…})
+# Regex for detecting command substitution and dangerous constructs
+# inside arguments ($(…), `…`, ${…})
 # ---------------------------------------------------------------------------
 _SUBST_RE = re.compile(r"\$\(|`|\$\{")
 
 # ---------------------------------------------------------------------------
-# Разрешённые команды: общие и платформенные
-# Значение — набор допустимых подкоманд; None = любые аргументы.
+# Allowed commands: common and platform-specific
+# Value is a set of permitted subcommands; None = any arguments.
 # ---------------------------------------------------------------------------
 _COMMON_ALLOWED: dict[str, set[str] | None] = {
     "git": {
@@ -193,8 +193,8 @@ _DEV_WINDOWS_ALLOWED: dict[str, set[str] | None] = {
     "whoami": None,
 }
 
-# CMD-встроенные команды (нет отдельного .exe, нужна обёртка cmd /c)
-# "set" намеренно исключён: утечка переменных окружения запрещена промптом (секция 22)
+# CMD built-in commands (no separate .exe, need cmd /c wrapper)
+# "set" intentionally excluded: environment variable leakage is prohibited by prompt (section 22)
 _WINDOWS_CMD_BUILTINS: frozenset[str] = frozenset({
     "dir", "cd", "type", "echo", "ver",
 })
@@ -217,17 +217,17 @@ _TERMINAL_PROFILES: frozenset[str] = frozenset({"restricted", "dev"})
 
 
 class TerminalExecutor:
-    """Кроссплатформенный безопасный запуск процессов внутри workspace.
+    """Cross-platform safe process execution within workspace.
 
-    Возможности:
-    - allowlist команд с платформенными профилями
-    - валидация аргументов без ложных срабатываний
-    - запрет опасных команд и shell-операторов
-    - рабочая директория строго внутри workspace
-    - env overrides для дочерних процессов
-    - настраиваемый timeout и лимит stdout/stderr
-    - ресурсные лимиты на Unix (CPU, память, файлы)
-    - CREATE_NO_WINDOW на Windows
+    Capabilities:
+    - Command allowlists with platform profiles
+    - Argument validation without false positives
+    - Blocking dangerous commands and shell operators
+    - Working directory strictly within workspace
+    - Env overrides for child processes
+    - Configurable timeout and stdout/stderr limits
+    - Resource limits on Unix (CPU, memory, files)
+    - CREATE_NO_WINDOW on Windows
     """
 
     # Human-in-the-Loop callbacks — set by SafeExecutor at init time.
@@ -262,12 +262,12 @@ class TerminalExecutor:
             normalized_profile = "dev"
         self.profile = normalized_profile
 
-        # Собираем allowlist: общие + платформенные + пользовательские
+        # Build allowlist: common + platform-specific + user-provided
         self._allowed = self._build_allowed_commands()
         if extra_allowed:
             self._allowed.update(extra_allowed)
 
-        # Собираем forbidden
+        # Build forbidden set
         self._forbidden: set[str] = set(_FORBIDDEN_EXECUTABLES)
         if self.profile == "restricted":
             self._forbidden.update(_RESTRICTED_EXTRA_FORBIDDEN)
@@ -276,7 +276,7 @@ class TerminalExecutor:
 
     @property
     def allowed_commands(self) -> list[str]:
-        """Отсортированный список разрешённых команд."""
+        """Sorted list of allowed commands."""
         return sorted(self._allowed)
 
     def run(
@@ -286,7 +286,7 @@ class TerminalExecutor:
         env_overrides: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> TerminalResult:
-        """Выполнить команду безопасно в рамках workspace."""
+        """Execute a command safely within workspace."""
         try:
             self._validate(command)
         except TerminalError as validation_error:
@@ -313,7 +313,7 @@ class TerminalExecutor:
         env_overrides: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> TerminalResult:
-        """Выполнить уже проверенную (или одобренную пользователем) команду."""
+        """Execute an already validated (or user-approved) command."""
         work_dir = self._resolve_cwd(cwd)
         effective_timeout = self._clamp_timeout(timeout)
         env = self._build_env(env_overrides)
@@ -343,13 +343,13 @@ class TerminalExecutor:
                 command=command,
                 returncode=-1,
                 stdout="",
-                stderr=f"Таймаут: команда не завершилась за {effective_timeout} сек",
+                stderr=f"Timeout: command did not complete within {effective_timeout} sec",
                 timed_out=True,
             )
         except FileNotFoundError:
-            raise TerminalError(f"Исполняемый файл не найден: {command[0]}")
+            raise TerminalError(f"Executable not found: {command[0]}")
         except OSError as exc:
-            raise TerminalError(f"Ошибка запуска процесса: {exc}")
+            raise TerminalError(f"Process launch error: {exc}")
 
         return TerminalResult(
             command=command,
@@ -361,23 +361,23 @@ class TerminalExecutor:
 
     @classmethod
     def _request_user_approval(cls, command: list[str], error_message: str) -> bool:
-        """Интерактивный запрос разрешения (Human-in-the-Loop).
+        """Interactive approval prompt (Human-in-the-Loop).
 
-        Выводит панель предупреждения через rich, затем запрашивает
-        y/N через стандартный input(). После получения ответа полностью
-        стирает панель и строку ввода из терминала через ANSI-escape.
+        Displays a warning panel via rich, then prompts for
+        y/N via standard input(). After receiving the answer, fully
+        clears the panel and input line from the terminal via ANSI escapes.
 
-        Перед вводом:
-        - останавливает фоновый Live TUI (через suspend callback)
-        - устанавливает глобальный HITL-флаг (блокирует update_live)
+        Before input:
+        - Pauses background Live TUI (via suspend callback)
+        - Sets global HITL flag (blocks update_live)
 
-        После ввода:
-        - стирает панель + строку ввода (ANSI \033[F\033[K × N)
-        - снимает HITL-флаг
-        - возобновляет Live TUI (через resume callback)
+        After input:
+        - Clears panel + input line (ANSI \\033[F\\033[K × N)
+        - Clears HITL flag
+        - Resumes Live TUI (via resume callback)
 
-        Если stdin не является TTY (тесты, CI, пайпы) — выбрасывает
-        исходную ошибку валидации.
+        If stdin is not a TTY (tests, CI, pipes) — raises the original
+        validation error.
         """
         import sys
 
@@ -387,7 +387,7 @@ class TerminalExecutor:
         from rich.console import Console
         from rich.panel import Panel
 
-        # Останавливаем фоновую отрисовку TUI
+        # Pause background TUI rendering
         if cls._hitl_suspend_fn is not None:
             cls._hitl_suspend_fn()
 
@@ -417,8 +417,8 @@ class TerminalExecutor:
             except EOFError:
                 raise TerminalError(error_message)
 
-            # Стираем панель + строку ввода из терминала
-            # Панель ~12 строк + 1 строка input = 13; 20 — безопасный запас
+            # Clear panel + input line from terminal
+            # Panel ~12 lines + 1 input line = 13; 20 is a safe margin
             _HITL_CLEAR_LINES = 20
             for _ in range(_HITL_CLEAR_LINES):
                 sys.stdout.write("\033[F\033[K")
@@ -427,27 +427,27 @@ class TerminalExecutor:
             return choice in ("y", "yes")
         finally:
             _exit_hitl()
-            # Возобновляем фоновую отрисовку TUI
+            # Resume background TUI rendering
             if cls._hitl_resume_fn is not None:
                 cls._hitl_resume_fn()
 
     # ------------------------------------------------------------------
-    # Валидация
+    # Validation
     # ------------------------------------------------------------------
 
     def _validate(self, command: list[str]) -> None:
         if not command:
-            raise TerminalError("Пустая команда")
+            raise TerminalError("Empty command")
 
         executable = command[0].lower()
 
         if executable in self._forbidden:
-            raise TerminalError(f"Команда '{command[0]}' запрещена")
+            raise TerminalError(f"Command '{command[0]}' is forbidden")
 
         if executable not in self._allowed:
             raise TerminalError(
-                f"Команда '{command[0]}' не разрешена. "
-                f"Допустимые: {', '.join(sorted(self._allowed))}"
+                f"Command '{command[0]}' is not allowed. "
+                f"Allowed: {', '.join(sorted(self._allowed))}"
             )
 
         if executable in {"bash", "sh", "powershell", "pwsh", "cmd", "cmd.exe"}:
@@ -455,18 +455,18 @@ class TerminalExecutor:
         else:
             self._validate_standard_command(command, executable)
 
-        # Лимит суммарной длины
+        # Total length limit
         if sum(len(t) for t in command) > 2000:
-            raise TerminalError("Команда слишком длинная")
+            raise TerminalError("Command too long")
 
     def _validate_standard_command(self, command: list[str], executable: str) -> None:
-        # Проверка подкоманд (для git и подобных)
+        # Subcommand validation (for git and similar)
         allowed_sub = self._allowed.get(executable)
         if allowed_sub is not None and len(command) > 1:
             sub = command[1].lstrip("-")
             if sub and sub not in allowed_sub:
                 raise TerminalError(
-                    f"Подкоманда '{command[1]}' не разрешена для '{command[0]}'"
+                    f"Subcommand '{command[1]}' is not allowed for '{command[0]}'"
                 )
 
         self._validate_common_tokens(command[1:])
@@ -475,13 +475,13 @@ class TerminalExecutor:
     def _validate_shell_command(self, command: list[str], executable: str) -> None:
         if executable in {"bash", "sh"}:
             if len(command) != 2:
-                raise TerminalError(f"Для '{command[0]}' разрешён только запуск script file внутри workspace")
+                raise TerminalError(f"For '{command[0]}' only script file execution within workspace is allowed")
             self._validate_script_argument(command[1], executable)
             return
 
         if executable in {"powershell", "pwsh"}:
             if len(command) < 3:
-                raise TerminalError(f"Для '{command[0]}' разрешён только режим -File <script.ps1>")
+                raise TerminalError(f"For '{command[0]}' only -File <script.ps1> mode is allowed")
 
             script_index: int | None = None
             index = 1
@@ -489,7 +489,7 @@ class TerminalExecutor:
                 token = command[index]
                 lowered = token.lower()
                 if lowered in _POWERSHELL_COMMAND_FLAGS:
-                    raise TerminalError(f"Inline-режим '{token}' запрещён для '{command[0]}'")
+                    raise TerminalError(f"Inline mode '{token}' is forbidden for '{command[0]}'")
                 if lowered in _POWERSHELL_FILE_FLAGS:
                     script_index = index + 1
                     break
@@ -498,17 +498,17 @@ class TerminalExecutor:
                     continue
                 if lowered in _POWERSHELL_SAFE_FLAGS_WITH_VALUE:
                     if index + 1 >= len(command):
-                        raise TerminalError(f"Для '{token}' требуется безопасное значение перед -File")
+                        raise TerminalError(f"Flag '{token}' requires a safe value before -File")
                     self._validate_common_tokens([command[index + 1]])
                     index += 2
                     continue
-                raise TerminalError(f"Для '{command[0]}' разрешён только режим -File <script.ps1>")
+                raise TerminalError(f"For '{command[0]}' only -File <script.ps1> mode is allowed")
 
             if script_index is None or script_index >= len(command):
-                raise TerminalError(f"Для '{command[0]}' не указан script file после -File")
+                raise TerminalError(f"No script file specified after -File for '{command[0]}'")
 
             if len(command) != script_index + 1:
-                raise TerminalError(f"Для '{command[0]}' разрешён только один script file после -File")
+                raise TerminalError(f"Only one script file is allowed after -File for '{command[0]}'")
 
             script = command[script_index]
             self._validate_common_tokens(command[1:script_index])
@@ -519,18 +519,18 @@ class TerminalExecutor:
 
     def _validate_windows_cmd_command(self, command: list[str]) -> None:
         if len(command) < 3 or command[1].lower() != "/c":
-            raise TerminalError(f"Для '{command[0]}' разрешён только режим /c <builtin|script>")
+            raise TerminalError(f"For '{command[0]}' only /c <builtin|script> mode is allowed")
 
         if len(command) != 3:
-            raise TerminalError(f"Для '{command[0]}' разрешён только один безопасный аргумент после /c")
+            raise TerminalError(f"Only one safe argument is allowed after /c for '{command[0]}'")
 
         payload = command[2].strip()
         if not payload:
-            raise TerminalError("Пустая строка после /c запрещена")
+            raise TerminalError("Empty string after /c is forbidden")
         if _CMD_DANGEROUS_INLINE_RE.search(payload):
-            raise TerminalError("Опасные shell-операторы в cmd /c запрещены")
+            raise TerminalError("Dangerous shell operators in cmd /c are forbidden")
         if _SUBST_RE.search(payload):
-            raise TerminalError("Command substitution в cmd /c запрещена")
+            raise TerminalError("Command substitution in cmd /c is forbidden")
 
         if self._looks_like_relative_script(payload, _SCRIPT_EXTENSIONS["cmd"]):
             self._validate_script_argument(payload, "cmd")
@@ -538,7 +538,7 @@ class TerminalExecutor:
 
         builtin, separator, remainder = payload.partition(" ")
         if builtin.lower() not in _WINDOWS_CMD_BUILTINS:
-            raise TerminalError(f"Для '{command[0]}' разрешены только builtin-команды CMD или .bat/.cmd из workspace")
+            raise TerminalError(f"For '{command[0]}' only CMD builtins or .bat/.cmd from workspace are allowed")
         if not separator:
             return
 
@@ -547,48 +547,48 @@ class TerminalExecutor:
             return
 
         if not all(_WINDOWS_CMD_BUILTIN_RE.fullmatch(token) for token in remainder_tokens):
-            raise TerminalError("Аргументы builtin-команд CMD содержат недопустимые символы")
+            raise TerminalError("CMD builtin arguments contain invalid characters")
 
         self._validate_common_tokens(remainder_tokens)
 
     def _validate_common_tokens(self, tokens: list[str]) -> None:
         for token in tokens:
-            # Только точное совпадение с shell-оператором (не подстрока!)
+            # Exact match only with shell operator (not substring!)
             if token in _FORBIDDEN_OPERATORS:
-                raise TerminalError(f"Shell-оператор '{token}' запрещён")
+                raise TerminalError(f"Shell operator '{token}' is forbidden")
 
-            # Обнаружение command substitution внутри аргументов: $(…), `…`, ${…}
+            # Detect command substitution inside arguments: $(…), `…`, ${…}
             if _SUBST_RE.search(token):
                 raise TerminalError(
-                    "Command substitution ($(), ``, ${}) в аргументах запрещена"
+                    "Command substitution ($(), ``, ${}) in arguments is forbidden"
                 )
 
             if self._is_absolute_path(token):
-                raise TerminalError("Абсолютные пути запрещены в аргументах")
+                raise TerminalError("Absolute paths are forbidden in arguments")
 
-            # UNC-пути на Windows (\\server\share)
+            # UNC paths on Windows (\\server\share)
             if token.startswith("\\\\"):
-                raise TerminalError("UNC-пути запрещены в аргументах")
+                raise TerminalError("UNC paths are forbidden in arguments")
 
             # Path traversal
             segments = [s for s in token.replace("\\", "/").split("/") if s]
             if ".." in segments:
-                raise TerminalError("Path traversal (..) запрещён")
+                raise TerminalError("Path traversal (..) is forbidden")
 
     def _validate_interpreter_inline_modes(self, command: list[str], executable: str) -> None:
         if executable in {"python", "python3", "py"} and any(arg == "-c" for arg in command[1:]):
-            raise TerminalError(f"Inline-режим '-c' запрещён для '{command[0]}'")
+            raise TerminalError(f"Inline mode '-c' is forbidden for '{command[0]}'")
         if executable == "node" and any(arg in {"-e", "--eval"} for arg in command[1:]):
-            raise TerminalError("Inline-режим '-e' запрещён для 'node'")
+            raise TerminalError("Inline mode '-e' is forbidden for 'node'")
         if executable == "sed" and any(
             arg == "-i" or arg.startswith("-i") or arg == "--in-place" for arg in command[1:]
         ):
-            raise TerminalError("Инплейс-режим 'sed -i' запрещён: допустим только sed -n (чтение)")
+            raise TerminalError("In-place mode 'sed -i' is forbidden: only sed -n (read-only) is allowed")
 
     def _validate_script_argument(self, script: str, executable: str) -> None:
         self._validate_common_tokens([script])
         if not self._looks_like_relative_script(script, _SCRIPT_EXTENSIONS[executable]):
-            raise TerminalError(f"Для '{executable}' разрешён только относительный script file внутри workspace")
+            raise TerminalError(f"For '{executable}' only relative script file within workspace is allowed")
 
     def _looks_like_relative_script(self, path_token: str, extensions: tuple[str, ...]) -> bool:
         normalized = path_token.replace("\\", "/")
@@ -606,11 +606,11 @@ class TerminalExecutor:
         return allowed
 
     # ------------------------------------------------------------------
-    # Вспомогательные методы
+    # Helper methods
     # ------------------------------------------------------------------
 
     def _is_absolute_path(self, token: str) -> bool:
-        """Абсолютный путь: Unix (/..., ~/...) или Windows (C:\\...)."""
+        """Absolute path: Unix (/..., ~/...) or Windows (C:\\...)."""
         if token.startswith("/") or token.startswith("~"):
             return True
         if len(token) >= 3 and token[1] == ":" and token[2] in ("/", "\\"):
@@ -618,21 +618,21 @@ class TerminalExecutor:
         return False
 
     def _resolve_cwd(self, cwd: str | None) -> Path:
-        """Определяет рабочую директорию строго внутри workspace."""
+        """Resolves working directory strictly within workspace."""
         if not cwd:
             return self.workspace
 
         if self._is_absolute_path(cwd) or cwd.startswith("\\\\"):
-            raise TerminalError("Абсолютные пути запрещены для cwd")
+            raise TerminalError("Absolute paths are forbidden for cwd")
 
         candidate = (self.workspace / cwd).resolve()
         try:
             candidate.relative_to(self.workspace)
         except ValueError:
-            raise TerminalError("Рабочая директория выходит за пределы workspace")
+            raise TerminalError("Working directory is outside workspace")
 
         if not candidate.is_dir():
-            raise TerminalError(f"Рабочая директория не найдена: {cwd}")
+            raise TerminalError(f"Working directory not found: {cwd}")
 
         return candidate
 
@@ -650,12 +650,12 @@ class TerminalExecutor:
 
     @staticmethod
     def _escape_cmd_arg(arg: str) -> str:
-        """Экранирует спецсимволы CMD для безопасной передачи через cmd.exe /c."""
-        # Символы, которые CMD интерпретирует как операторы
+        """Escapes CMD special characters for safe passing through cmd.exe /c."""
+        # Characters that CMD interprets as operators
         _CMD_META = set('()%!^"<>&|')
         if not any(ch in _CMD_META for ch in arg):
             return arg
-        # Экранируем каждый метасимвол CMD с помощью ^
+        # Escape each CMD metacharacter with ^
         escaped = []
         for ch in arg:
             if ch in _CMD_META:
@@ -664,9 +664,9 @@ class TerminalExecutor:
         return "".join(escaped)
 
     def _wrap_for_platform(self, command: list[str]) -> list[str]:
-        """На Windows оборачивает CMD-встроенные команды через cmd.exe /c."""
+        """On Windows wraps CMD built-in commands through cmd.exe /c."""
         if self._is_windows and command[0].lower() in _WINDOWS_CMD_BUILTINS:
-            # Экранируем аргументы, чтобы предотвратить shell-инъекцию через & | && и т.д.
+            # Escape arguments to prevent shell injection via & | && etc.
             safe_args = [self._escape_cmd_arg(a) for a in command]
             return ["cmd.exe", "/c"] + safe_args
         return command
@@ -676,14 +676,14 @@ class TerminalExecutor:
             return text
         return (
             text[: self.max_output_chars]
-            + f"\n[TRUNCATED: показаны первые {self.max_output_chars} из {len(text)} символов]"
+            + f"\n[TRUNCATED: showing first {self.max_output_chars} of {len(text)} characters]"
         )
 
 
 def _unix_resource_limits() -> None:
-    """Ограничения ресурсов для дочерних процессов на Unix.
+    """Resource limits for child processes on Unix.
 
-    Вызывается как preexec_fn — выполняется в дочернем процессе до exec.
+    Called as preexec_fn — runs in the child process before exec.
     """
     try:
         import resource
@@ -703,4 +703,3 @@ def _unix_resource_limits() -> None:
             "[TerminalExecutor] Failed to set resource limits",
             file=sys.stderr,
         )
- 

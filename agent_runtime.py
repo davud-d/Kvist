@@ -21,23 +21,20 @@ _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
 _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
-_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search|изуч|найт|прочит|анализ|обзор")
-_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold|созд|настро|реализ|исправ|добав|измен|структур|интегр|разраб|улучш")
-_PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|валид|провер|запуск|синтакс|компил|import")
-_PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final|опис|отчет|отчёт|докум|результ|итог")
+_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search")
+_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold")
+_PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch")
+_PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final")
 _VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|uv\s+run|node\s+--check")
-_SEMANTIC_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")
+_SEMANTIC_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 _PLAN_STOPWORDS = {
-    "и", "или", "для", "что", "как", "это", "при", "без", "над", "под", "про", "через",
     "with", "from", "into", "over", "under", "about", "this", "that", "then", "than",
-    "создать", "создай", "сделать", "сделай", "добавить", "добавь", "реализовать", "реализуй",
-    "разработать", "улучшить", "проверить", "подготовить", "изучить", "определить", "создан", "сделан",
 }
 
 _HIGH_SIGNAL_TERMS = {
-    "crm", "ux", "ui", "api", "sdk", "sql", "db", "bot", "админ", "админк", "оплат",
-    "уведо", "менед", "катал", "букет", "заказ", "telegr", "telegram", "admin", "payme", "reply",
+    "crm", "ux", "ui", "api", "sdk", "sql", "db", "bot",
+    "telegr", "telegram", "admin", "payme", "reply",
 }
 
 
@@ -74,11 +71,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     }
                 )
                 self._ui.update_live(
-                    user_message=(
-                        "Модель вернула ошибку, пробую продолжить или корректно остановиться"
-                        if self._state.task_language == "ru"
-                        else "The model returned an error; retrying or stopping safely"
-                    ),
+                    user_message="The model returned an error; retrying or stopping safely",
                     status="model error",
                     step=step,
                     progress=self._state.progress,
@@ -87,10 +80,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 )
                 if _is_terminal_model_error(error_text):
                     normalized = self._normalize_error_for_model(error_text)
-                    if self._state.task_language == "ru":
-                        final_message = f"Агент остановлен: модель недоступна. {normalized}"
-                    else:
-                        final_message = f"Agent stopped: the model is unavailable. {normalized}"
+                    final_message = f"Agent stopped: the model is unavailable. {normalized}"
                     break
                 loop_post = time.monotonic()
                 model_duration = getattr(self, "_last_model_duration", loop_post - loop_pre)
@@ -125,11 +115,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             if language_error:
                 self._register_language_error(step, command, language_error)
                 self._ui.update_live(
-                    user_message=(
-                        "Исправляю язык ответа модели и повторяю шаг"
-                        if self._state.task_language == "ru"
-                        else "Fixing the model response language and retrying the step"
-                    ),
+                    user_message="Fixing the model response language and retrying the step",
                     status="fixing response language",
                     step=step,
                     progress=self._state.progress,
@@ -259,11 +245,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                         }
                     )
                     self._ui.update_live(
-                        user_message=(
-                            "Переход к исправляющему действию вместо преждевременного завершения"
-                            if self._state.task_language == "ru"
-                            else "Switching to a corrective action instead of stopping too early"
-                        ),
+                        user_message="Switching to a corrective action instead of stopping too early",
                         status="final answer blocked",
                         step=step,
                         progress=self._state.progress,
@@ -367,8 +349,6 @@ def command_language_error(self, command: AgentCommand) -> str | None:
 
     for field_name, value in checks:
         if not _matches_task_language(value, language):
-            if language == "ru":
-                return f"Поле {field_name} написано не на русском языке."
             return f"Field {field_name} is not written in English."
     return None
 
@@ -382,18 +362,11 @@ def register_language_error(
     self._state.parse_errors += 1
     self._state.consecutive_errors += 1
     self._record_error(error_text)
-    if self._state.task_language == "ru":
-        self._state.pending_instruction = (
-            f"{error_text} Предыдущий шаг отклонён и не исполнялся. "
-            "Повтори тот же смысл шага, но напиши публичные JSON-поля thought, "
-            "user_message и final_answer.args.message только на русском языке."
-        )
-    else:
-        self._state.pending_instruction = (
-            f"{error_text} The previous step was rejected and was not executed. "
-            "Retry the same intended step, but write public JSON fields thought, "
-            "user_message, and final_answer.args.message only in English."
-        )
+    self._state.pending_instruction = (
+        f"{error_text} The previous step was rejected and was not executed. "
+        "Retry the same intended step, but write public JSON fields thought, "
+        "user_message, and final_answer.args.message only in English."
+    )
     self._state.step_logs.append(
         {
             "step": step,
@@ -420,57 +393,15 @@ def normalize_error_for_model(self, raw_error: str) -> str:
     
     is_overloaded = any(m in lowered for m in ("all providers exhausted", "rate limit", "too many requests", "high demand", "503"))
     
-    if self._state.task_language != "ru":
-        if is_overloaded:
-            return "Provider rate limit or high demand reached. Try again later or switch the provider."
-        if "invalid api key" in lowered:
-            return "Provider API key is invalid. Check the configured key for the selected backend."
-        if "no healthy backend available for model" in lowered:
-            return "The backend required by the selected model is unavailable or misconfigured. Choose another model or fix the backend key."
-        if "is not found for api version" in lowered or "not supported for generatecontent" in lowered:
-            return "The selected model is not supported by this provider backend. Pick a model that matches the backend."
-        return error
-
     if is_overloaded:
-        return "Достигнут лимит запросов или провайдер перегружен. Повторите позже или переключите провайдера."
+        return "Provider rate limit or high demand reached. Try again later or switch the provider."
     if "invalid api key" in lowered:
-        return "Некорректный API key провайдера. Проверьте ключ для выбранного backend."
+        return "Provider API key is invalid. Check the configured key for the selected backend."
     if "no healthy backend available for model" in lowered:
-        return "Backend, нужный для выбранной модели, недоступен или настроен неверно. Выберите другую модель или исправьте ключ backend."
+        return "The backend required by the selected model is unavailable or misconfigured. Choose another model or fix the backend key."
     if "is not found for api version" in lowered or "not supported for generatecontent" in lowered:
-        return "Выбранная модель не поддерживается этим backend провайдера. Выберите модель под нужный backend."
-
-    mappings = (
-        ("File not found: ", "Файл не найден: "),
-        ("Not a file: ", "Путь не является файлом: "),
-        ("Path not found: ", "Путь не найден: "),
-        ("Not a directory: ", "Путь не является директорией: "),
-        ("Permission denied: ", "Отказано в доступе: "),
-        ("Unsupported action: ", "Неподдерживаемое действие: "),
-        ("Unexpected executor error: ", "Неожиданная ошибка executor: "),
-        ("Network error when requesting ", "Сетевая ошибка при запросе "),
-        ("Timeout when requesting ", "Таймаут при запросе "),
-    )
-    for prefix, translated in mappings:
-        if error.startswith(prefix):
-            return translated + error[len(prefix):]
-
-    exact = {
-        "Action failed": "Действие не выполнено.",
-        "Unknown error": "Неизвестная ошибка.",
-        "Invalid URL": "Некорректный URL.",
-        "Empty query for web_search": "Пустой запрос для web_search.",
-        "old_text fragment not found in file": "Фрагмент old_text не найден в файле.",
-        "Path must be a string": "Путь должен быть строкой.",
-        "run_shell.command must be a non-empty array of strings": (
-            "run_shell.command должен быть непустым списком строк."
-        ),
-    }
-    if error in exact:
-        return exact[error]
-    if error.startswith("HTTP "):
-        return "HTTP-ошибка при выполнении запроса."
-    return "Действие не выполнено. Подробности сохранены в raw_error."
+        return "The selected model is not supported by this provider backend. Pick a model that matches the backend."
+    return error
 
 
 def feedback_error_for_model(self, feedback: dict[str, Any]) -> str:
@@ -489,21 +420,12 @@ def feedback_error_for_model(self, feedback: dict[str, Any]) -> str:
 def register_parse_error(self, step: int, raw_text: str, error_text: str) -> None:
     self._state.parse_errors += 1
     self._state.consecutive_errors += 1
-    if self._state.task_language == "ru":
-        message = f"Невалидный ответ модели: {error_text}"
-    else:
-        message = "Invalid model response."
+    message = "Invalid model response."
     self._record_error(message)
-    if self._state.task_language == "ru":
-        self._state.pending_instruction = (
-            "Предыдущий ответ был невалидным JSON. "
-            f"Ошибка: {error_text}. Верни ровно один JSON-объект по схеме."
-        )
-    else:
-        self._state.pending_instruction = (
-            "The previous response was invalid JSON. "
-            "Return exactly one JSON object matching the schema."
-        )
+    self._state.pending_instruction = (
+        "The previous response was invalid JSON. "
+        "Return exactly one JSON object matching the schema."
+    )
     self._state.step_logs.append(
         {
             "step": step,
@@ -543,7 +465,7 @@ def register_feedback(
         self._record_error(error_text)
         if (
             command.action.type == "replace_in_file"
-            and error_text == "Фрагмент old_text не найден в файле."
+            and error_text == "old_text fragment not found in file."
         ):
             failed_path = str(command.action.args.get("path", "")).strip()
             if failed_path:
@@ -551,11 +473,6 @@ def register_feedback(
                     {"read_file", "replace_in_file", "append_file", "write_file"},
                     _build_read_before_patch_instruction(self._state.task_language, failed_path),
                 )
-        elif self._state.task_language == "ru":
-            self._state.pending_instruction = (
-                "Предыдущее действие не выполнено. "
-                f"normalized_error: {error_text}. Не повторяй тот же шаг без новой идеи."
-            )
         else:
             self._state.pending_instruction = (
                 "The previous action failed. "
@@ -696,6 +613,21 @@ def update_state_from_success(
         if fact:
             self._push_unique(self._state.web_facts, fact, limit=20)
 
+    elif action_type == "delegate_task":
+        target_role = str(data.get("target_role", "")).strip()
+        task = str(data.get("task", "")).strip()
+        results = data.get("results", [])
+        succeeded = sum(1 for r in results if r.get("ok"))
+        observation = (
+            f"Delegated to {target_role}: '{task[:80]}' — "
+            f"{succeeded}/{len(results)} commands succeeded"
+        )
+        self._push_bounded(
+            self._state.recent_events,
+            observation,
+            self.config.summary_recent_events,
+        )
+
     self._update_verification_evidence(command, data)
     self._refresh_completion_requirements()
 
@@ -794,6 +726,10 @@ def feedback_to_line(self, command: AgentCommand, feedback: dict[str, Any]) -> s
             truncated = bool(data.get("truncated"))
             suffix = ", content truncated" if truncated else ""
             return f"ok: read source {url}{suffix}"
+        if action_type == "delegate_task":
+            target_role = data.get("target_role", "unknown")
+            results_count = len(data.get("results", []))
+            return f"ok: delegated to {target_role}, {results_count} commands executed"
         return f"ok: executed action {action_type}"
 
     error_text = self._feedback_error_for_model(feedback)
@@ -835,22 +771,12 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
 def build_early_stop_message(self, step: int) -> str | None:
     if self._state.consecutive_errors >= self.config.max_consecutive_errors:
         errors = _summarize_recent_errors(self)
-        if self._state.task_language == "ru":
-            return (
-                "Агент остановлен: слишком много ошибок подряд. "
-                f"Последние ошибки: {errors}"
-            )
         return (
             "Agent stopped. Too many consecutive errors. "
             f"Last errors: {errors}"
         )
 
     if self._state.stagnation_count >= self.config.stagnation_limit:
-        if self._state.task_language == "ru":
-            return (
-                "Агент остановлен: прогресс не меняется, возможен цикл. "
-                f"Последние действия: {', '.join(self._state.recent_feedback[-3:])}"
-            )
         return (
             "Agent stopped. No progress detected, possible loop. "
             f"Last actions: {', '.join(self._state.recent_feedback[-3:])}"
@@ -862,15 +788,6 @@ def build_early_stop_message(self, step: int) -> str | None:
 def build_limit_reached_message(self) -> str:
     errors = _summarize_recent_errors(self)
     blockers = ", ".join(self._state.completion_blockers[-3:])
-    if self._state.task_language == "ru":
-        message = (
-            "Агент не завершил задачу в пределах лимита шагов. "
-            f"Текущий прогресс: {self._state.progress}%. "
-            f"Последние ошибки: {errors}."
-        )
-        if blockers:
-            message += f" Блокеры: {blockers}."
-        return message
     message = (
         "Agent did not complete the task within the step limit. "
         f"Current progress: {self._state.progress}%. "
@@ -888,7 +805,7 @@ def _summarize_recent_errors(self) -> str:
         if normalized not in items:
             items.append(normalized)
     if not items:
-        return "нет" if self._state.task_language == "ru" else "none"
+        return "none"
     return ", ".join(items[:3])
 
 
@@ -899,16 +816,10 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
         if command.action.type in self._state.required_next_actions:
             pass # allow it
         else:
-            if self._state.task_language == "ru":
-                message = (
-                    "Ты повторяешь бесполезное действие с теми же аргументами. "
-                    "Выбери другой шаг: другой файл, другой поиск или честно заверши задачу."
-                )
-            else:
-                message = (
-                    "You are repeating a useless action with the same args. "
-                    "Choose a different step: a different file, a different search, or honestly complete the task."
-                )
+            message = (
+                "You are repeating a useless action with the same args. "
+                "Choose a different step: a different file, a different search, or honestly complete the task."
+            )
             self._state.pending_instruction = message
             self._state.stagnation_count += 1
             self._state.step_logs.append(
@@ -940,16 +851,10 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
                         {"read_file", "replace_in_file", "append_file", "write_file"},
                         _build_read_before_patch_instruction(self._state.task_language, path),
                     )
-                if self._state.task_language == "ru":
-                    message = (
-                        f"Ты слишком много раз подряд переписываешь {path}. "
-                        "Сначала прочитай этот файл, перейди к другому обязательному артефакту или проверь текущий результат."
-                    )
-                else:
-                    message = (
-                        f"You are rewriting {path} too many times in a row. "
-                        "Read the file first, switch to another required artifact, or verify the current result."
-                    )
+                message = (
+                    f"You are rewriting {path} too many times in a row. "
+                    "Read the file first, switch to another required artifact, or verify the current result."
+                )
                 self._state.pending_instruction = message
                 self._state.stagnation_count += 1
                 self._state.step_logs.append(
@@ -1118,7 +1023,7 @@ def _plan_item_semantically_matches(item: str, evidence_text: str) -> bool:
 def _extract_semantic_terms(text: str) -> set[str]:
     terms: set[str] = set()
     for raw_token in _SEMANTIC_TOKEN_RE.findall(text):
-        lowered = raw_token.casefold().replace("ё", "е")
+        lowered = raw_token.casefold()
         if lowered in _PLAN_STOPWORDS:
             continue
         normalized = _normalize_semantic_token(lowered)
@@ -1148,9 +1053,7 @@ def update_verification_evidence(self, command: AgentCommand, data: dict[str, An
         if data.get("fallback_used"):
             self._push_bounded(
                 self._state.recent_events,
-                "Git unavailable, use fallback verification"
-                if self._state.task_language != "ru"
-                else "Git недоступен, используй fallback-проверку",
+                "Git unavailable, use fallback verification",
                 self.config.summary_recent_events,
             )
             if self._state.files_changed:
@@ -1230,27 +1133,13 @@ def _matches_task_language(text: str, language: str) -> bool:
     cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
     latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
     if language == "ru":
-        return cyrillic > 0
+        return True
     return cyrillic <= latin
 
 
 def _is_create_goal(user_goal: str) -> bool:
     lowered = user_goal.casefold()
     markers = (
-        "сделай",
-        "сделать",
-        "создай",
-        "создать",
-        "напиши",
-        "написать",
-        "разработай",
-        "разработать",
-        "построй",
-        "построить",
-        "реализуй",
-        "сгенерируй",
-        "инициализируй",
-        "собери проект",
         "create ",
         "build ",
         "generate ",
@@ -1261,11 +1150,6 @@ def _is_create_goal(user_goal: str) -> bool:
 
 
 def _build_create_guidance(language: str) -> str:
-    if language == "ru":
-        return (
-            "Это CREATE-задача. Не зацикливайся на inspect и не делай final_answer без изменений. "
-            "Выбери путь внутри workspace и переходи к write_file или append_file, затем проверь результат фактами."
-        )
     return (
         "This is a CREATE task. Do not loop on inspect and do not use final_answer without changes. "
         "Choose a path inside the workspace and move to write_file or append_file, then verify with facts."
@@ -1273,33 +1157,51 @@ def _build_create_guidance(language: str) -> str:
 
 
 def _build_premature_final_answer_error(language: str) -> str:
-    if language == "ru":
-        return "Нельзя завершать CREATE-задачу без созданных или изменённых файлов."
     return "A CREATE task cannot finish without created or changed files."
 
 
 def _build_missing_implementation_error(language: str) -> str:
-    if language == "ru":
-        return "Нельзя завершать задачу без изменений: план требует создать или изменить файлы."
     return "Task cannot finish without changes: the plan requires creating or editing files."
 
 
 def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
+    # Requirement: only from user_goal, not from plan_info.plan
     candidates: list[str] = []
+    
+    # Extensions to consider as artifacts
+    valid_extensions = {
+        ".py", ".txt", ".json", ".md", ".toml", ".yaml", ".yml", ".xml",
+        ".kt", ".java", ".cpp", ".h", ".hpp", ".sh", ".ps1", ".bat"
+    }
+    
+    # Domains and versions to ignore
+    ignored_patterns = [
+        r"^python\.org/?$", r"^docs\.python\.org/?$",
+        r"^\d+\.x$", r"^\d+\.\d+(\.\d+)?$"
+    ]
+    ignored_re = re.compile("|".join(ignored_patterns), re.IGNORECASE)
+
     for match in _ARTIFACT_RE.findall(user_goal):
         cleaned = match.strip().strip(".,:;()[]{}\"'")
-        if "/" not in cleaned and "." not in cleaned:
+        if not cleaned:
             continue
+            
+        # Ignore URLs
         if cleaned.startswith("http://") or cleaned.startswith("https://"):
             continue
+            
+        # Must be a path with / or have a valid extension
+        has_slash = "/" in cleaned
+        ext = Path(cleaned).suffix.lower()
+        
+        if not (has_slash or ext in valid_extensions):
+            continue
+            
+        # Ignore domains and versions
+        if ignored_re.match(cleaned):
+            continue
+            
         candidates.append(cleaned)
-
-    if plan_info:
-        for item in plan_info.plan:
-            for match in _ARTIFACT_RE.findall(item):
-                cleaned = match.strip().strip(".,:;()[]{}\"'")
-                if "/" in cleaned or "." in cleaned:
-                    candidates.append(cleaned)
 
     normalized: list[str] = []
     seen: set[str] = set()
@@ -1456,37 +1358,23 @@ def _plan_item_matches_paths(item: str, touched_paths: set[str]) -> bool:
 
 def _build_missing_artifacts_error(language: str, missing: list[str]) -> str:
     joined = ", ".join(missing[:8])
-    if language == "ru":
-        return f"Нельзя завершать задачу: отсутствуют обязательные артефакты: {joined}."
     return f"Task cannot finish: required artifacts are still missing: {joined}."
 
 
 def _build_incomplete_plan_error(language: str, remaining_steps: list[str]) -> str:
     preview = "; ".join(remaining_steps[:3])
     if len(remaining_steps) > 3:
-        if language == "ru":
-            preview += f"; ещё {len(remaining_steps) - 3}"
-        else:
-            preview += f"; {len(remaining_steps) - 3} more"
-    if language == "ru":
-        return f"Нельзя завершать задачу: план ещё не выполнен полностью. Осталось: {preview}."
+        preview += f"; {len(remaining_steps) - 3} more"
     return f"Task cannot finish: the execution plan is not complete yet. Remaining: {preview}."
 
 
 def _build_missing_verification_error(language: str) -> str:
-    if language == "ru":
-        return "Нельзя завершать задачу без проверки изменений: нужна структура, синтаксис, импорт или запуск."
     return "Task cannot finish without verification of the changes: structure, syntax, import, or run evidence is required."
 
 
 def _build_completion_blocker_instruction(language: str, blockers: list[str], actions: list[str]) -> str:
     action_text = ", ".join(actions) or "none"
     blocker_text = " ".join(blockers)
-    if language == "ru":
-        return (
-            f"final_answer запрещён. Блокеры: {blocker_text} "
-            f"Следующий шаг обязан быть corrective action через одно из действий: {action_text}."
-        )
     return (
         f"final_answer is forbidden. Blockers: {blocker_text} "
         f"The next step must be a corrective action using one of: {action_text}."
@@ -1496,8 +1384,6 @@ def _build_completion_blocker_instruction(language: str, blockers: list[str], ac
 def _build_required_action_error(language: str, actions: list[str], blockers: list[str]) -> str:
     action_text = ", ".join(actions)
     blocker_text = " ".join(blockers)
-    if language == "ru":
-        return f"Нужно исправляющее действие. Разрешены: {action_text}. Блокеры: {blocker_text}"
     return f"A corrective action is required. Allowed next actions: {action_text}. Blockers: {blocker_text}"
 
 
@@ -1508,16 +1394,6 @@ def _build_strict_next_action_instruction(
 ) -> str:
     action_text = ", ".join(actions) or "none"
     first_artifact = missing_artifacts[0] if missing_artifacts else ""
-    if language == "ru":
-        message = (
-            f"Ты снова выбрал запрещённый тип действия. Следующий action.type обязан быть одним из: {action_text}. "
-            "Не используй inspect/read/list_tree/find/search/final_answer на этом шаге. "
-            "Для CREATE-задачи сразу переходи к изменению файлов внутри workspace."
-        )
-        if first_artifact:
-            message += f" Начни с артефакта: {first_artifact}."
-        return message
-
     message = (
         f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
         "Do not use inspect/read/list_tree/find/search/final_answer on the next step. "
@@ -1529,11 +1405,6 @@ def _build_strict_next_action_instruction(
 
 
 def _build_read_before_patch_instruction(language: str, path: str) -> str:
-    if language == "ru":
-        return (
-            f"Хватит переписывать {path} вслепую. Сначала выполни read_file для {path}, "
-            "потом делай replace_in_file, append_file или один осознанный write_file по фактическому содержимому."
-        )
     return (
         f"Stop rewriting {path} blindly. Read {path} first, then use replace_in_file, "
         "append_file, or one deliberate write_file based on the actual content."
@@ -1541,11 +1412,6 @@ def _build_read_before_patch_instruction(language: str, path: str) -> str:
 
 
 def _build_git_fallback_instruction(language: str) -> str:
-    if language == "ru":
-        return (
-            "Git недоступен или репозиторий неинициализирован. Не считай задачу проваленной: "
-            "переходи к list_tree, read_file, find_files или run_shell для проверки структуры, синтаксиса и запуска."
-        )
     return (
         "Git is unavailable or the repo is not initialized. Do not fail the task: "
         "switch to list_tree, read_file, find_files, or run_shell to verify structure, syntax, and execution."

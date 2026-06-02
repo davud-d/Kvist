@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from language_utils import choose_localized_text
+
 from openai import AuthenticationError, OpenAI
 
 from llm_clients import FREEFLOW_PROVIDER, OPENAI_PROVIDER, normalize_provider
@@ -20,6 +20,7 @@ USER_CONFIG_KEYS = (USER_CONFIG_KEY, LEGACY_USER_CONFIG_KEY)
 LLM_PROVIDER_KEY = "llm_provider"
 LLM_MODELS_KEY = "llm_models"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
+FALLBACK_LLM_PROVIDER = FREEFLOW_PROVIDER
 GEMINI_API_KEY_KEY = "gemini_api_key"
 GROQ_API_KEY_KEY = "groq_api_key"
 
@@ -166,19 +167,9 @@ def ensure_provider_credentials(
         if not secret:
             if normalized_provider == FREEFLOW_PROVIDER:
                 raise RuntimeError(
-                    choose_localized_text(
-                        f"Для FreeFlow LLM нужен {_SECRET_LABELS.get(key_name, key_name)}.",
-                        f"{_SECRET_LABELS.get(key_name, key_name)} is required for FreeFlow LLM.",
-                        language_hint,
-                    )
+                    f"{_SECRET_LABELS.get(key_name, key_name)} is required for FreeFlow LLM."
                 )
-            raise RuntimeError(
-                choose_localized_text(
-                    "Нужен OpenAI API key.",
-                    "OpenAI API key is required.",
-                    language_hint,
-                )
-            )
+            raise RuntimeError("OpenAI API key is required.")
 
         secret = secret.strip()
         if key_name == USER_CONFIG_KEY:
@@ -188,6 +179,31 @@ def ensure_provider_credentials(
 
     save_user_config(payload, config_path)
     return collected
+
+def get_saved_provider_or_none(config_path: Path | None = None) -> str | None:
+    payload = load_user_config(config_path)
+    raw_provider = payload.get(LLM_PROVIDER_KEY)
+    if not isinstance(raw_provider, str) or not raw_provider.strip():
+        return None
+    return normalize_provider(raw_provider)
+
+
+def prompt_provider_choice() -> str:
+    print("Select LLM provider:")
+    print("1. OpenAI")
+    print("2. FreeFlow LLM (Gemini/Groq)")
+
+    while True:
+        choice = input("> ").strip().lower()
+
+        if choice in {"1", "openai", "o"}:
+            return OPENAI_PROVIDER
+
+        if choice in {"2", "freeflow", "free", "f"}:
+            return FREEFLOW_PROVIDER
+
+        print("Enter 1 for OpenAI or 2 for FreeFlow LLM.")
+
 
 
 def load_available_credentials(
@@ -224,21 +240,9 @@ def validate_api_key(api_key: str, model: str, language_hint: str | None = None)
     try:
         client.models.list()
     except AuthenticationError as error:
-        raise RuntimeError(
-            choose_localized_text(
-                "Некорректный OpenAI API key.",
-                "Invalid OpenAI API key.",
-                language_hint,
-            )
-        ) from error
+        raise RuntimeError("Invalid OpenAI API key.") from error
     except Exception as error:
-        raise RuntimeError(
-            choose_localized_text(
-                "Не удалось проверить OpenAI API key.",
-                "Failed to validate OpenAI API key.",
-                language_hint,
-            )
-        ) from error
+        raise RuntimeError("Failed to validate OpenAI API key.") from error
 
 
 def _resolve_secret(payload: dict[str, object], key_name: str) -> str | None:

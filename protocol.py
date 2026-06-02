@@ -21,6 +21,7 @@ ActionType = Literal[
     "run_shell",
     "web_search",
     "fetch_url",
+    "delegate_task",
 ]
 
 

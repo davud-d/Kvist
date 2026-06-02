@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+"""
+This module configures LLM clients and model lists for DevAgentXD.
+
+The defaults and model options have been updated to reflect the most recent
+officially supported model IDs from OpenAI, Google Gemini, Groq and DeepSeek.
+Please do not modify these IDs without verifying them against official
+documentation; see MODEL_UPDATE_REPORT.md for details and sources.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -8,159 +17,164 @@ from typing import Any
 from language_utils import choose_localized_text
 from openai import OpenAI
 
+# Provider names.
 OPENAI_PROVIDER = "openai"
 FREEFLOW_PROVIDER = "freeflow"
 SUPPORTED_LLM_PROVIDERS = (OPENAI_PROVIDER, FREEFLOW_PROVIDER)
 
+# API key environment keys.
 OPENAI_API_KEY_KEY = "openai_api_key"
 GEMINI_API_KEY_KEY = "gemini_api_key"
 GROQ_API_KEY_KEY = "groq_api_key"
 MODEL_ROLES = ("fast", "smart", "planner")
 
-_MODEL_DEFAULTS = {
+# Default models per provider.
+_MODEL_DEFAULTS: dict[str, dict[str, str]] = {
     OPENAI_PROVIDER: {
-        "fast": "gpt-5-mini",
-        "smart": "gpt-5-mini",
-        "planner": "gpt-5-mini",
+        # Use the latest stable GPT-5.4 mini across roles for better quality and lower cost.
+        # See OpenAI chat completions model list for available GPT-5.4 variants.
+        "fast": "gpt-5.4-mini",
+        "smart": "gpt-5.4-mini",
+        "planner": "gpt-5.4-mini",
     },
     FREEFLOW_PROVIDER: {
-        "fast": "gemini-3.1-pro-preview",
-        "smart": "gemini-3.1-pro-preview",
-        "planner": "gemini-3.1-pro-preview",
+        # Default all roles to Gemini 3.5 Flash - Google's newest Flash model with long context.
+        "fast": "gemini-3.5-flash",
+        "smart": "gemini-3.5-flash",
+        "planner": "gemini-3.5-flash",
     },
 }
 
+# Environment variable keys for overriding models per role.
 _MODEL_ENV_KEYS = {
     "fast": "AGENT_FAST_MODEL",
     "smart": "AGENT_SMART_MODEL",
     "planner": "AGENT_PLANNER_MODEL",
 }
 
-_MODEL_OPTIONS = {
+# Model options presented to the user when selecting models.
+_MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
     OPENAI_PROVIDER: [
+        # Updated OpenAI models: prefer GPT-5.4 variants according to the official API model list.
+        {
+            "value": "gpt-5.4-nano",
+            "label": "GPT-5.4 Nano",
+            "description": "The fastest and lightest GPT-5.4 variant",
+        },
+        {
+            "value": "gpt-5.4-mini",
+            "label": "GPT-5.4 Mini",
+            "description": "Fast GPT-5.4 for everyday tasks",
+        },
+        {
+            "value": "gpt-5.4",
+            "label": "GPT-5.4",
+            "description": "Current powerful OpenAI model for complex tasks",
+        },
+        {
+            "value": "gpt-5-mini",
+            "label": "GPT-5 Mini (legacy)",
+            "description": "Previous GPT-5 model; used as fallback",
+        },
         {
             "value": "gpt-5-nano",
-            "label": "GPT-5 Nano",
-            "description": "Самый быстрый и лёгкий вариант GPT-5",
-        },
-        {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini",
-            "description": "Быстрый GPT-5 для повседневных шагов",
-        },
-        {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini (was GPT-5)",
-            "description": "Основная сильная модель OpenAI",
-        },
-        {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini (was GPT-4.1 Mini)",
-            "description": "Надёжный fallback, если GPT-5 недоступен",
-        },
-        {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini (was GPT-4.1)",
-            "description": "Сильный fallback для smart/planner",
-        },
-        {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini (was GPT-4o Mini)",
-            "description": "Быстрый мультимодальный fallback",
-        },
-        {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini (was GPT-4o)",
-            "description": "Сильная мультимодальная fallback-модель",
+            "label": "GPT-5 Nano (legacy)",
+            "description": "Legacy fast GPT-5 variant; used as fallback",
         },
     ],
     FREEFLOW_PROVIDER: [
+        # FreeFlow/Groq/Gemini model options updated from official provider docs.
+        {
+            "value": "gemini-3.5-flash",
+            "label": "Gemini 3.5 Flash",
+            "description": "New Google Flash model with 1M context",
+        },
         {
             "value": "gemini-3.1-pro-preview",
             "label": "Gemini 3.1 Pro Preview",
-            "description": "Текущий дефолт для сложных задач",
+            "description": "Complex tasks: advanced reasoning",
+        },
+        {
+            "value": "gemini-3.1-flash-lite",
+            "label": "Gemini 3.1 Flash Lite",
+            "description": "Lightweight and cost-effective Flash version",
         },
         {
             "value": "gemini-3-flash-preview",
             "label": "Gemini 3 Flash Preview",
-            "description": "Быстрее и дешевле, чем Pro",
+            "description": "Previous Flash preview version",
         },
         {
             "value": "llama-3.3-70b-versatile",
             "label": "Llama 3.3 70B Versatile",
-            "description": "Сильная Groq-модель общего назначения",
-        },
-        {
-            "value": "llama-3.3-70b-versatile",
-            "label": "Llama 3.3 70B Versatile (was 3.1)",
-            "description": "Стабильный Groq fallback",
+            "description": "Deep versatile Groq-hosted Meta model",
         },
         {
             "value": "llama-3.1-8b-instant",
             "label": "Llama 3.1 8B Instant",
-            "description": "Очень быстрый Groq-вариант",
+            "description": "Fast Groq-hosted variant with low latency",
         },
         {
-            "value": "gpt-oss-120b",
+            "value": "openai/gpt-oss-120b",
             "label": "GPT-OSS 120B",
-            "description": "Усиленный reasoning через Groq",
+            "description": "Open source OpenAI model with large context",
         },
         {
-            "value": "deepseek-r1-distill-qwen-32b",
-            "label": "DeepSeek R1 Distill Qwen 32B",
-            "description": "Reasoning fallback через Groq",
-        },
-        {
-            "value": "qwen-3-32b",
+            "value": "qwen/qwen3-32b",
             "label": "Qwen 3 32B",
-            "description": "Сильная универсальная Groq-модель",
+            "description": "Groq-supported Qwen 3 model",
         },
         {
-            "value": "qwen-2.5-coder-32b",
-            "label": "Qwen 2.5 Coder 32B",
-            "description": "Хороша для кодогенерации",
+            "value": "deepseek-v4-flash",
+            "label": "DeepSeek V4 Flash",
+            "description": "New fast DeepSeek variant; successor to DeepSeek Chat",
         },
         {
-            "value": "llama-3.2-3b-preview",
-            "label": "Llama 3.2 3B Preview",
-            "description": "Легкий быстрый preview-вариант",
-        },
-        {
-            "value": "llama-3.3-70b-versatile",
-            "label": "Llama 3.3 70B Versatile (was ALLaM 2 7B)",
-            "description": "Дополнительный Groq fallback",
-        },
-        {
-            "value": "deepseek-chat",
-            "label": "DeepSeek Chat",
-            "description": "DeepSeek chat модель",
+            "value": "deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "description": "Advanced DeepSeek version; replaces DeepSeek Reasoner",
         },
     ],
 }
 
-_OPENAI_ROLE_FALLBACKS = {
-    "fast": ("gpt-5-mini", "gpt-5-nano"),
-    "smart": ("gpt-5-mini", "gpt-5-nano"),
-    "planner": ("gpt-5-mini", "gpt-5-nano"),
+# Fallback chains for each role within OpenAI. Try latest models first; fall back to legacy ones.
+_OPENAI_ROLE_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "fast": ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"),
+    "smart": ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"),
+    "planner": ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"),
 }
 
-_OPENAI_GENERIC_FALLBACKS = ("gpt-5-mini", "gpt-5-nano")
-
-_FREEFLOW_GENERIC_FALLBACKS = (
-    "gemini-3.1-pro-preview",
-    "gemini-3-flash-preview",
-    "llama-3.3-70b-versatile",
-    "deepseek-chat",
+# Generic OpenAI fallback chain (used when role-specific fallbacks are unavailable).
+_OPENAI_GENERIC_FALLBACKS: tuple[str, ...] = (
+    "gpt-5.4-mini",
+    "gpt-5.4-nano",
+    "gpt-5-mini",
+    "gpt-5-nano",
 )
 
-_DEPRECATED_FREEFLOW_MODELS = {
+# Generic FreeFlow fallback chain. Order matters: try Gemini first, then Llama, then DeepSeek.
+_FREEFLOW_GENERIC_FALLBACKS: tuple[str, ...] = (
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
+    "llama-3.3-70b-versatile",
+    "deepseek-v4-flash",
+)
+
+# Set of models that are no longer supported by FreeFlow providers.
+_DEPRECATED_FREEFLOW_MODELS: set[str] = {
     "mixtral-8x7b-32768",
     "llama-3.1-70b-versatile",
     "allam-2-7b",
     "deepseek-r1-distill-llama-70b",
+    # Additional deprecated models based on official deprecation notices.
+    "deepseek-chat",
+    "deepseek-r1-distill-qwen-32b",
+    "qwen-2.5-coder-32b",
+    "llama-3.2-3b-preview",
 }
 
-_FREEFLOW_MODEL_ALIASES = {
+# Aliases map common misspellings and legacy names to current model IDs.
+_FREEFLOW_MODEL_ALIASES: dict[str, str] = {
     "gemini 2.5 flash": "gemini-3-flash-preview",
     "gemini-2.5 flash": "gemini-3-flash-preview",
     "gemini 3 flash": "gemini-3-flash-preview",
@@ -171,24 +185,42 @@ _FREEFLOW_MODEL_ALIASES = {
     "gemini-3.1 pro preview": "gemini-3.1-pro-preview",
     "mixtral-8x7b-32768": "llama-3.3-70b-versatile",
     "allam-2-7b": "llama-3.3-70b-versatile",
-    "deepseek-r1-distill-llama-70b": "gpt-oss-120b",
+    "deepseek-r1-distill-llama-70b": "openai/gpt-oss-120b",
+    # Map legacy DeepSeek and Qwen aliases to current model IDs.
+    "deepseek chat": "deepseek-v4-flash",
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek reasoner": "deepseek-v4-pro",
+    "deepseek-reasoner": "deepseek-v4-pro",
+    "qwen-3-32b": "qwen/qwen3-32b",
+    "qwen 3 32b": "qwen/qwen3-32b",
+    "qwen-2.5 coder 32b": "qwen/qwen3-32b",
+    "gpt-oss-120b": "openai/gpt-oss-120b",
 }
 
-_FREEFLOW_GROQ_PREFIXES = (
+# Prefixes used to determine whether a model is a Groq backend. Namespaced prefixes allow
+# for proper routing of OSS and Qwen models. Note: the tuple form allows startswith() checks.
+_FREEFLOW_GROQ_PREFIXES: tuple[str, ...] = (
     "llama-",
     "mixtral-",
     "gemma",
+    # Accept both bare and namespaced Qwen models.
     "qwen",
+    "qwen/",
+    # Accept both bare and namespaced OpenAI OSS models.
+    "openai/",
     "deepseek",
     "moonshotai/",
 )
 
 
 class UnsupportedProviderFeatureError(RuntimeError):
+    """Raised when a requested provider feature is unsupported by the backend."""
+
     pass
 
 
 def normalize_provider(provider: str | None) -> str:
+    """Return a normalized provider name or default to OpenAI."""
     candidate = str(provider or "").strip().lower()
     if candidate in SUPPORTED_LLM_PROVIDERS:
         return candidate
@@ -196,10 +228,12 @@ def normalize_provider(provider: str | None) -> str:
 
 
 def provider_label(provider: str) -> str:
+    """Return a human‑friendly label for a provider."""
     return "FreeFlow LLM" if normalize_provider(provider) == FREEFLOW_PROVIDER else "OpenAI"
 
 
 def normalize_model_name(provider: str, model: str) -> str:
+    """Normalize a model name by applying aliases for FreeFlow models."""
     candidate = str(model or "").strip()
     if not candidate:
         return candidate
@@ -209,6 +243,7 @@ def normalize_model_name(provider: str, model: str) -> str:
 
 
 def infer_freeflow_backend(model: str) -> str | None:
+    """Infer the backend (gemini or groq) for a given FreeFlow model."""
     candidate = normalize_model_name(FREEFLOW_PROVIDER, model).casefold()
     if candidate.startswith("gemini-"):
         return "gemini"
@@ -218,6 +253,7 @@ def infer_freeflow_backend(model: str) -> str | None:
 
 
 def is_model_supported_by_provider(provider: str, model: str) -> bool:
+    """Check whether the provider supports the given model."""
     normalized_provider = normalize_provider(provider)
     if normalized_provider == OPENAI_PROVIDER:
         return True
@@ -225,6 +261,7 @@ def is_model_supported_by_provider(provider: str, model: str) -> bool:
 
 
 def is_model_deprecated(provider: str, model: str) -> bool:
+    """Return True if the given model is marked as deprecated for the provider."""
     normalized_provider = normalize_provider(provider)
     normalized_model = normalize_model_name(normalized_provider, model)
     if normalized_provider != FREEFLOW_PROVIDER:
@@ -237,6 +274,7 @@ def resolve_models_for_provider(
     saved_models: dict[str, str] | None = None,
     language_hint: str | None = None,
 ) -> tuple[dict[str, str], list[str]]:
+    """Resolve configured models for each role, applying defaults and deprecation checks."""
     normalized_provider = normalize_provider(provider)
     defaults = _MODEL_DEFAULTS[normalized_provider]
     resolved: dict[str, str] = {}
@@ -282,6 +320,7 @@ def resolve_openai_accessible_models(
     requested_models: dict[str, str],
     language_hint: str | None = None,
 ) -> tuple[dict[str, str], list[str]]:
+    """Filter requested models down to those actually accessible for the given OpenAI API key."""
     client = OpenAI(api_key=api_key)
     available_models = {
         str(getattr(item, "id", "")).strip()
@@ -313,6 +352,7 @@ def resolve_openai_accessible_models(
 
 
 def fallback_models_for_provider(provider: str) -> tuple[str, ...]:
+    """Return the generic fallback chain for a provider."""
     normalized_provider = normalize_provider(provider)
     if normalized_provider == OPENAI_PROVIDER:
         return _OPENAI_GENERIC_FALLBACKS
@@ -324,6 +364,7 @@ def fallback_candidates_for_model(
     model: str,
     allow_runtime_fallbacks: bool = False,
 ) -> tuple[str, ...]:
+    """Return fallback candidates for a specific model, optionally including runtime fallbacks."""
     normalized_provider = normalize_provider(provider)
     normalized_model = normalize_model_name(normalized_provider, model)
     candidates: list[str] = []
@@ -354,10 +395,12 @@ def fallback_candidates_for_model(
 
 
 def provider_supports_streaming(provider: str) -> bool:
+    """Return True if the provider supports streaming responses."""
     return normalize_provider(provider) == OPENAI_PROVIDER
 
 
 def configured_freeflow_backends(credentials: dict[str, str]) -> tuple[str, ...]:
+    """Determine which FreeFlow backends have keys configured."""
     backends: list[str] = []
     if str(credentials.get(GEMINI_API_KEY_KEY, "")).strip():
         backends.append("gemini")
@@ -367,6 +410,7 @@ def configured_freeflow_backends(credentials: dict[str, str]) -> tuple[str, ...]
 
 
 def required_backends_for_models(models: dict[str, str] | list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Return the set of backends required by the given models."""
     values: list[str]
     if isinstance(models, dict):
         values = [str(value).strip() for value in models.values()]
@@ -387,6 +431,7 @@ def validate_model_selection(
     credentials: dict[str, str],
     language_hint: str | None = None,
 ) -> list[str]:
+    """Validate a set of selected models against the provider and configured backends."""
     normalized_provider = normalize_provider(provider)
     issues: list[str] = []
 
@@ -439,11 +484,13 @@ def validate_model_selection(
 
 
 def get_model_options(provider: str) -> list[dict[str, str]]:
+    """Return a deep copy of the model options list for the given provider."""
     normalized_provider = normalize_provider(provider)
     return [dict(item) for item in _MODEL_OPTIONS.get(normalized_provider, [])]
 
 
 def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    """Return which secret keys must be configured for the given provider and models."""
     normalized_provider = normalize_provider(provider)
     if normalized_provider == OPENAI_PROVIDER:
         return (OPENAI_API_KEY_KEY,)
@@ -465,6 +512,7 @@ def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[s
 
 
 def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool = False) -> Any:
+    """Instantiate an LLM client for the given provider using provided credentials."""
     normalized_provider = normalize_provider(provider)
     if normalized_provider == OPENAI_PROVIDER:
         api_key = credentials.get(OPENAI_API_KEY_KEY, "").strip()
@@ -481,6 +529,7 @@ def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool 
 
 
 def _configure_freeflow_logging(verbose: bool) -> None:
+    """Configure logging for the FreeFlow client."""
     freeflow_logger = logging.getLogger("freeflow_llm")
     freeflow_logger.setLevel(logging.INFO if verbose else logging.ERROR)
     freeflow_logger.propagate = False
@@ -550,9 +599,9 @@ class FreeFlowCompatibleClient:
         verbose: bool = False,
     ) -> None:
         try:
-            from freeflow_llm import FreeFlowClient
-            from freeflow_llm.providers.gemini import GeminiProvider
-            from freeflow_llm.providers.groq import GroqProvider
+            from freeflow_llm import FreeFlowClient  # type: ignore
+            from freeflow_llm.providers.gemini import GeminiProvider  # type: ignore
+            from freeflow_llm.providers.groq import GroqProvider  # type: ignore
         except ImportError as error:
             raise RuntimeError(
                 "FreeFlow LLM is not installed. Install dependency 'freeflow-llm'."
@@ -606,10 +655,7 @@ class FreeFlowCompatibleClient:
             ]
             if compatible:
                 return compatible
-            # The preferred backend is configured but currently disabled (e.g. auth
-            # failure recorded earlier in this session).  If no other backend is
-            # available either, raise a clear error; otherwise fall through so the
-            # caller can try a different backend.
+            # The preferred backend is configured but currently disabled (e.g. auth failure).
             is_configured = preferred_backend in {
                 backend_name for backend_name, _provider in self._providers
             }

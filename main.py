@@ -15,7 +15,7 @@ from rich.console import Console
 
 from agent import AgentConfig, LocalAgent
 from executor import SafeExecutor
-from language_utils import choose_localized_text, detect_request_language
+from language_utils import detect_request_language
 from llm_clients import (
     create_llm_client,
     configured_freeflow_backends,
@@ -37,13 +37,24 @@ from user_config import (
     ensure_provider_credentials,
     get_saved_models,
     get_saved_provider,
+    get_saved_provider_or_none,
     load_available_credentials,
+    prompt_provider_choice,
     save_models_for_provider,
 )
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.shortcuts import CompleteStyle
 
+from slash_commands import SlashCommandCompleter, normalize_slash_command
 
 console = Console()
-session = PromptSession(history=InMemoryHistory())
+session = PromptSession(
+    history=InMemoryHistory(),
+    completer=SlashCommandCompleter(),
+    complete_while_typing=True,
+    complete_style=CompleteStyle.MULTI_COLUMN,
+    auto_suggest=AutoSuggestFromHistory(),
+)
 
 
 def resolve_workspace_path(raw_path: str) -> Path:
@@ -72,6 +83,21 @@ def sleep(seconnds: int):
     time.sleep(seconnds)
 
 
+def resolve_startup_provider(provider_override: str | None = None) -> str:
+    if provider_override:
+        return normalize_provider(provider_override)
+
+    env_provider = os.getenv("AGENT_LLM_PROVIDER")
+    if env_provider:
+        return normalize_provider(env_provider)
+
+    saved_provider = get_saved_provider_or_none()
+    if saved_provider:
+        return saved_provider
+
+    return prompt_provider_choice()
+
+
 def build_agent(
     executor: SafeExecutor,
     max_steps: int,
@@ -81,9 +107,7 @@ def build_agent(
     models_override: dict[str, str] | None = None,
     language_hint: str | None = None,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
-    provider = normalize_provider(
-        provider_override or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider()
-    )
+    provider = resolve_startup_provider(provider_override)
     models, warnings = resolve_models_for_provider(
         provider,
         models_override or get_saved_models(provider),
@@ -113,20 +137,12 @@ def build_agent(
         warnings.extend(access_warnings)
     elif not provider_supports_streaming(provider):
         warnings.append(
-            choose_localized_text(
-                "Для FreeFlow LLM streaming отключён: библиотека нестабильно обрабатывает stream-ответы.",
-                "For FreeFlow LLM, streaming is disabled: the library handles stream responses unstably.",
-                language_hint,
-            )
+            "For FreeFlow LLM, streaming is disabled: the library handles stream responses unstably."
         )
         freeflow_backends = configured_freeflow_backends(credentials)
         if len(freeflow_backends) <= 1:
             warnings.append(
-                choose_localized_text(
-                    "Fallback FreeFlow между провайдерами недоступен: настройте ключи и Gemini, и Groq.",
-                    "FreeFlow fallback across providers is unavailable: configure both Gemini and Groq keys.",
-                    language_hint,
-                )
+                "FreeFlow fallback across providers is unavailable: configure both Gemini and Groq keys."
             )
     client = create_llm_client(provider=provider, credentials=credentials, verbose=verbose)
     config = AgentConfig(
@@ -156,18 +172,18 @@ def print_runtime_banner(config: AgentConfig, max_steps: int, verbose: bool, war
 def choose_provider(current_provider: str, verbose: bool) -> str | None:
     ui = AgentUI(console=console, verbose=verbose)
     return ui.choose_option(
-        title="Выбор LLM-провайдера",
+        title="Select LLM Provider",
         current_value=current_provider,
         options=[
             {
                 "value": "openai",
                 "label": "OpenAI",
-                "description": "Строгий JSON-режим и GPT-модели",
+                "description": "Strict JSON mode with GPT models",
             },
             {
                 "value": "freeflow",
                 "label": "FreeFlow LLM",
-                "description": "Gemini/Groq через FreeFlow, JSON — best effort",
+                "description": "Gemini/Groq via FreeFlow, JSON — best effort",
             },
         ],
     )
@@ -189,10 +205,10 @@ def choose_models(provider: str, current_models: dict[str, str], verbose: bool) 
 
     for role in MODEL_ROLES:
         chosen = ui.choose_option(
-            title=f"Выбор модели для {role_labels[role]}",
+            title=f"Select model for {role_labels[role]}",
             current_value=selected.get(role, options[0]["value"]),
             options=options,
-            help_text="↑/↓ — выбрать модель, Enter — подтвердить, Esc — отменить всё",
+            help_text="↑/↓ — select model, Enter — confirm, Esc — cancel all",
         )
         if chosen is None:
             return None
@@ -244,12 +260,14 @@ def main() -> None:
     console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
     console.print("[dim]Command '/provider' — switch the LLM provider.[/dim]")
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
+    console.print("[dim]Command /about — to get more info about agent.[/dim]")
     sleep(2)
     console.print("[dim]Enter your task.[/dim]")
 
     try:
         while True:
             user_goal = multiline_input()
+            user_goal = normalize_slash_command(user_goal)
             if user_goal and not user_goal.startswith("/"):
                 session_language = detect_request_language(user_goal, fallback=session_language)
             if user_goal.lower() == "/bye":
@@ -355,8 +373,41 @@ def main() -> None:
 
             if not user_goal:
                 continue
+            
+            if user_goal.lower() == "/about" or user_goal.lower() == "/info" or user_goal.lower() == "/help":
+                console.print("[green]This is DevAgentXD: open-source AI agent for Windows/Linux. [/green]")
+                console.print('''[red] 
+Support: 
+  Linux: Yes
+  Windows: Yes
+  macOS: Untested (or Experimental)
+                [/red]''')
+                console.print("[dim]\nDevAgentXD by Davud, © 2026 [/dim]")
+                console.print("[dim] Author: Davud [/dim]")
+                console.print("[dim] LICENCE: MIT [/dim]")
+                console.print("[dim] Repository: [blue]https://github.com/davud-d/DevAgentXD[/blue] [/dim]")
+                console.print("[dim] Release Version: 1.0 [/dim]")
+                console.print("[orange]\nThank you for using DevAgentXD [/orange]")
+                continue
 
-            result = agent.run(user_goal)
+            from role_router import route_role_decision_with_llm, route_role
+            try:
+                decision = route_role_decision_with_llm(
+                    user_goal=user_goal,
+                    client=agent.client,
+                    model=config.fast_model,
+                )
+            except Exception:
+                detected_role = route_role(user_goal)
+                decision = None
+            if decision is not None:
+                detected_role = decision.role
+            role_colors = {"coder": "green", "devops": "magenta", "chat": "cyan"}
+            role_color = role_colors.get(detected_role, "white")
+            source_tag = f" ({decision.source})" if decision else ""
+            console.print(f"[{role_color}]⚡ Role: {detected_role}{source_tag}[/{role_color}]")
+
+            result = agent.run(user_goal, routed_role=detected_role)
             if verbose:
                 print(f"\n[Final Answer]\n{result}")
     except KeyboardInterrupt:

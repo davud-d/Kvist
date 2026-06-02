@@ -24,6 +24,7 @@ ALLOWED_ACTIONS = {
     "run_shell",
     "web_search",
     "fetch_url",
+    "delegate_task",
 }
 
 ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
@@ -60,15 +61,15 @@ def load_single_json_object(text: str) -> Any:
                 return parsed
 
     if last_error is None:
-        raise CommandValidationError("Не удалось найти JSON-объект в ответе модели")
-    raise CommandValidationError(f"Невалидный JSON: {last_error}")
+        raise CommandValidationError("Could not find a JSON object in the model response")
+    raise CommandValidationError(f"Invalid JSON: {last_error}")
 
 
 def parse_agent_command(text: str) -> AgentCommand:
     raw = load_single_json_object(text)
 
     if not isinstance(raw, dict):
-        raise CommandValidationError("Корневой объект должен быть JSON-объектом")
+        raise CommandValidationError("Root object must be a JSON object")
 
     require_only_allowed_keys(raw, {"thought", "plan_step", "progress", "user_message", "action"})
 
@@ -79,36 +80,36 @@ def parse_agent_command(text: str) -> AgentCommand:
     action = raw.get("action")
 
     if not isinstance(thought, str) or not thought.strip():
-        raise CommandValidationError("Поле 'thought' должно быть непустой строкой")
+        raise CommandValidationError("Field 'thought' must be a non-empty string")
 
     if not isinstance(plan_step, str) or not plan_step.strip():
-        raise CommandValidationError("Поле 'plan_step' должно быть непустой строкой")
+        raise CommandValidationError("Field 'plan_step' must be a non-empty string")
 
     if plan_step.strip() not in ALLOWED_PLAN_STEPS:
         raise CommandValidationError(
-            "Поле 'plan_step' должно быть одним из: inspect, plan, edit, verify, done"
+            "Field 'plan_step' must be one of: inspect, plan, edit, verify, done"
         )
 
     if not isinstance(progress, int):
-        raise CommandValidationError("Поле 'progress' должно быть целым числом")
+        raise CommandValidationError("Field 'progress' must be an integer")
 
     if progress < 0 or progress > 100:
-        raise CommandValidationError("Поле 'progress' должно быть в диапазоне 0..100")
+        raise CommandValidationError("Field 'progress' must be in range 0..100")
 
     if not isinstance(user_message, str) or not user_message.strip():
-        raise CommandValidationError("Поле 'user_message' должно быть непустой строкой")
+        raise CommandValidationError("Field 'user_message' must be a non-empty string")
 
     if not isinstance(action, dict):
-        raise CommandValidationError("Поле 'action' должно быть объектом")
+        raise CommandValidationError("Field 'action' must be an object")
 
     action_type = action.get("type")
     args = action.get("args")
 
     if action_type not in ALLOWED_ACTIONS:
-        raise CommandValidationError(f"Недопустимый action.type: {action_type!r}")
+        raise CommandValidationError(f"Invalid action.type: {action_type!r}")
 
     if not isinstance(args, dict):
-        raise CommandValidationError("Поле 'action.args' должно быть объектом")
+        raise CommandValidationError("Field 'action.args' must be an object")
 
     validate_action_args(str(action_type), args)
 
@@ -137,9 +138,9 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_only_allowed_keys(args, {"paths"})
         paths = args["paths"]
         if not isinstance(paths, list) or not paths:
-            raise CommandValidationError("'paths' должен быть непустым списком строк")
+            raise CommandValidationError("'paths' must be a non-empty list of strings")
         if not all(isinstance(item, str) and item.strip() for item in paths):
-            raise CommandValidationError("'paths' должен содержать только непустые строки")
+            raise CommandValidationError("'paths' must contain only non-empty strings")
 
     elif action_type == "write_file":
         require_keys(args, {"path", "content"})
@@ -160,13 +161,13 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_str(args, "old_text")
         new_text = args.get("new_text")
         if not isinstance(new_text, str):
-            raise CommandValidationError("'new_text' должен быть строкой")
+            raise CommandValidationError("'new_text' must be a string")
         count = args.get("count")
         if count is not None:
             if not isinstance(count, int):
-                raise CommandValidationError("'count' должен быть целым числом")
+                raise CommandValidationError("'count' must be an integer")
             if count < 1 or count > 1000:
-                raise CommandValidationError("'count' должен быть в диапазоне 1..1000")
+                raise CommandValidationError("'count' must be in range 1..1000")
 
     elif action_type == "list_dir":
         require_keys(args, {"path"})
@@ -180,9 +181,9 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         max_depth = args.get("max_depth")
         if max_depth is not None:
             if not isinstance(max_depth, int):
-                raise CommandValidationError("'max_depth' должен быть целым числом")
+                raise CommandValidationError("'max_depth' must be an integer")
             if max_depth < 1 or max_depth > 10:
-                raise CommandValidationError("'max_depth' должен быть в диапазоне 1..10")
+                raise CommandValidationError("'max_depth' must be in range 1..10")
 
     elif action_type == "find_files":
         require_keys(args, {"pattern"})
@@ -198,9 +199,9 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         max_results = args.get("max_results")
         if max_results is not None:
             if not isinstance(max_results, int):
-                raise CommandValidationError("'max_results' должен быть целым числом")
+                raise CommandValidationError("'max_results' must be an integer")
             if max_results < 1 or max_results > 200:
-                raise CommandValidationError("'max_results' должен быть в диапазоне 1..200")
+                raise CommandValidationError("'max_results' must be in range 1..200")
 
     elif action_type == "git_status":
         if args:
@@ -212,25 +213,25 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_optional_str(args, "ref")
         staged = args.get("staged")
         if staged is not None and not isinstance(staged, bool):
-            raise CommandValidationError("'staged' должен быть логическим значением")
+            raise CommandValidationError("'staged' must be a boolean")
 
     elif action_type == "run_shell":
         require_keys(args, {"command"})
         require_only_allowed_keys(args, {"command", "cwd", "timeout"})
         command = args["command"]
         if not isinstance(command, list):
-            raise CommandValidationError("'command' должен быть списком строк")
+            raise CommandValidationError("'command' must be a list of strings")
         if not command:
-            raise CommandValidationError("'command' не должен быть пустым")
+            raise CommandValidationError("'command' must not be empty")
         if not all(isinstance(x, str) and x for x in command):
-            raise CommandValidationError("'command' должен содержать только непустые строки")
+            raise CommandValidationError("'command' must contain only non-empty strings")
         require_optional_str(args, "cwd")
         timeout = args.get("timeout")
         if timeout is not None:
             if not isinstance(timeout, (int, float)):
-                raise CommandValidationError("'timeout' должен быть числом")
+                raise CommandValidationError("'timeout' must be a number")
             if timeout < 1 or timeout > 30:
-                raise CommandValidationError("'timeout' должен быть в диапазоне 1..30")
+                raise CommandValidationError("'timeout' must be in range 1..30")
 
     elif action_type == "web_search":
         require_keys(args, {"query"})
@@ -243,30 +244,30 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         top_k = args.get("top_k")
         if top_k is not None:
             if not isinstance(top_k, int):
-                raise CommandValidationError("'top_k' должен быть целым числом")
+                raise CommandValidationError("'top_k' must be an integer")
             if top_k < 1 or top_k > 50:
-                raise CommandValidationError("'top_k' должен быть в диапазоне 1..50")
+                raise CommandValidationError("'top_k' must be in range 1..50")
 
         max_results = args.get("max_results")
         if max_results is not None:
             if not isinstance(max_results, int):
-                raise CommandValidationError("'max_results' должен быть целым числом")
+                raise CommandValidationError("'max_results' must be an integer")
             if max_results < 1 or max_results > 50:
-                raise CommandValidationError("'max_results' должен быть в диапазоне 1..50")
+                raise CommandValidationError("'max_results' must be in range 1..50")
 
         domain_filter = args.get("domain_filter")
         if domain_filter is not None:
             if not isinstance(domain_filter, list) or not domain_filter:
-                raise CommandValidationError("'domain_filter' должен быть непустым списком строк")
+                raise CommandValidationError("'domain_filter' must be a non-empty list of strings")
             if not all(isinstance(item, str) and item.strip() for item in domain_filter):
-                raise CommandValidationError("'domain_filter' должен содержать только непустые строки")
+                raise CommandValidationError("'domain_filter' must contain only non-empty strings")
 
         freshness = args.get("freshness")
         if freshness is not None:
             if not isinstance(freshness, str):
-                raise CommandValidationError("'freshness' должен быть строкой")
+                raise CommandValidationError("'freshness' must be a string")
             if freshness not in {"any", "day", "week", "month"}:
-                raise CommandValidationError("'freshness' должен быть одним из: any, day, week, month")
+                raise CommandValidationError("'freshness' must be one of: any, day, week, month")
 
     elif action_type == "fetch_url":
         require_keys(args, {"url"})
@@ -276,55 +277,74 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         url = str(args.get("url", "")).strip()
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"}:
-            raise CommandValidationError("'url' должен использовать схему http или https")
+            raise CommandValidationError("'url' must use http or https scheme")
         if not parsed.netloc:
-            raise CommandValidationError("'url' должен содержать домен")
+            raise CommandValidationError("'url' must contain a domain")
 
         max_chars = args.get("max_chars")
         if max_chars is not None:
             if not isinstance(max_chars, int):
-                raise CommandValidationError("'max_chars' должен быть целым числом")
+                raise CommandValidationError("'max_chars' must be an integer")
             if max_chars < 500 or max_chars > 50000:
-                raise CommandValidationError("'max_chars' должен быть в диапазоне 500..50000")
+                raise CommandValidationError("'max_chars' must be in range 500..50000")
 
         extract_mode = args.get("extract_mode")
         if extract_mode is not None:
             if not isinstance(extract_mode, str):
-                raise CommandValidationError("'extract_mode' должен быть строкой")
+                raise CommandValidationError("'extract_mode' must be a string")
             if extract_mode not in {"text", "markdown"}:
-                raise CommandValidationError("'extract_mode' должен быть одним из: text, markdown")
+                raise CommandValidationError("'extract_mode' must be one of: text, markdown")
+
+    elif action_type == "delegate_task":
+        require_keys(args, {"target_role", "task"})
+        require_only_allowed_keys(args, {"target_role", "task", "commands"})
+        require_str(args, "target_role")
+        target_role = str(args["target_role"]).strip()
+        if target_role not in {"coder", "devops", "chat"}:
+            raise CommandValidationError(
+                "'target_role' must be one of: coder, devops, chat"
+            )
+        require_str(args, "task")
+        commands = args.get("commands")
+        if commands is not None:
+            if not isinstance(commands, list):
+                raise CommandValidationError("'commands' must be a list of strings")
+            if not all(isinstance(c, str) and c.strip() for c in commands):
+                raise CommandValidationError(
+                    "'commands' must contain only non-empty strings"
+                )
 
 
 def require_keys(data: dict[str, Any], required: set[str]) -> None:
     missing = required - set(data.keys())
     if missing:
         raise CommandValidationError(
-            f"Отсутствуют обязательные поля: {', '.join(sorted(missing))}"
+            f"Missing required fields: {', '.join(sorted(missing))}"
         )
 
 
 def require_only_allowed_keys(data: dict[str, Any], allowed: set[str]) -> None:
     extra = set(data.keys()) - allowed
     if extra:
-        raise CommandValidationError(f"Лишние поля: {', '.join(sorted(extra))}")
+        raise CommandValidationError(f"Extra fields: {', '.join(sorted(extra))}")
 
 
 def require_str(data: dict[str, Any], key: str) -> None:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
-        raise CommandValidationError(f"'{key}' должен быть непустой строкой")
+        raise CommandValidationError(f"'{key}' must be a non-empty string")
 
 
 def require_text(data: dict[str, Any], key: str) -> None:
     value = data.get(key)
     if not isinstance(value, str):
-        raise CommandValidationError(f"'{key}' должен быть строкой")
+        raise CommandValidationError(f"'{key}' must be a string")
 
 
 def require_optional_str(data: dict[str, Any], key: str) -> None:
     value = data.get(key)
     if value is not None and not isinstance(value, str):
-        raise CommandValidationError(f"'{key}' должен быть строкой")
+        raise CommandValidationError(f"'{key}' must be a string")
 
 
 def _json_candidates(text: str) -> Iterable[str]:
@@ -346,10 +366,10 @@ def _json_candidates(text: str) -> Iterable[str]:
 
 def _sanitized_candidates(text: str) -> Iterable[str]:
     replacements = {
-        "“": '"',
-        "”": '"',
-        "‘": "'",
-        "’": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2018": "'",
+        "\u2019": "'",
         "\u00a0": " ",
     }
 

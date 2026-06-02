@@ -10,10 +10,10 @@ from protocol import AgentCommand
 def prepare_web_search_command(self, user_goal: str, command: AgentCommand) -> str | None:
     query = str(command.action.args.get("query", "")).strip()
     if not query:
-        return "Пустой query для web_search"
+        return "Empty query for web_search"
 
     if not self._is_web_topic(user_goal=user_goal, query=query):
-        return "web_search разрешен только для задач по внешним библиотекам и актуальным API/релизам"
+        return "web_search is only allowed for tasks involving external libraries and current API/releases"
 
     if "top_k" not in command.action.args and "max_results" not in command.action.args:
         command.action.args["top_k"] = 5
@@ -29,7 +29,7 @@ def prepare_web_search_command(self, user_goal: str, command: AgentCommand) -> s
         normalized_query == self._state.last_web_query
         and normalized_thought == self._state.last_web_thought
     ):
-        return "Повтор одинакового web_search подряд без новой гипотезы запрещен"
+        return "Repeating identical web_search without a new hypothesis is forbidden"
 
     self._state.last_web_query = normalized_query
     self._state.last_web_thought = normalized_thought
@@ -39,9 +39,9 @@ def prepare_web_search_command(self, user_goal: str, command: AgentCommand) -> s
 def prepare_fetch_url_command(self, command: AgentCommand) -> str | None:
     url = str(command.action.args.get("url", "")).strip()
     if not url:
-        return "Пустой url для fetch_url"
+        return "Empty url for fetch_url"
     if not re.match(r"^https?://", url, re.IGNORECASE):
-        return "fetch_url поддерживает только http/https URL"
+        return "fetch_url only supports http/https URLs"
     if "max_chars" not in command.action.args:
         command.action.args["max_chars"] = 12000
     return None
@@ -67,25 +67,6 @@ def is_web_topic(self, user_goal: str, query: str) -> bool:
         "pricing",
         "limit",
         "status",
-        "документац",
-        "внешн",
-        "библиотек",
-        "sdk",
-        "фреймвор",
-        "деприк",
-        "deprecated",
-        "migration",
-        "миграц",
-        "release",
-        "changelog",
-        "сигнатур",
-        "import",
-        "attribute",
-        "breaking",
-        "верси",
-        "лимит",
-        "цена",
-        "статус",
     )
 
     if any(keyword in text for keyword in keywords):
@@ -145,7 +126,7 @@ def extract_fact_from_content(self, url: str, title: str, content: str) -> str:
     snippet = snippet[:260]
     label = title or url
     if not label:
-        label = "Источник"
+        label = "Source"
     return f"{label}: {snippet}" if snippet else label
 
 

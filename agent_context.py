@@ -4,54 +4,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from language_utils import detect_request_language
 from system_context import current_time_context
 
 
 _RUNTIME_TEXT = {
-    "ru": {
-        "step": "Шаг",
-        "task_language": "Язык задачи",
-        "task_language_name": "русский",
-        "user_task": "Задача пользователя",
-        "plan_goal": "Цель по плану",
-        "complexity": "Сложность",
-        "execution_model": "Модель выполнения",
-        "current_progress": "Текущий прогресс",
-        "plan": "План",
-        "completed_steps": "Выполненные пункты плана",
-        "success_criteria": "Критерии успеха",
-        "required_artifacts": "Обязательные артефакты",
-        "missing_artifacts": "Ещё отсутствуют",
-        "verification_evidence": "Подтверждённые проверки",
-        "completion_blockers": "Блокеры завершения",
-        "allowed_next_actions": "Сейчас разрешены следующие действия",
-        "forbidden_next_actions": "Сейчас запрещены следующие действия",
-        "dependency_versions": "Известные версии зависимостей",
-        "web_facts": "Короткие внешние факты",
-        "compressed_state": "Сжатое состояние",
-        "read_files": "Прочитанные файлы",
-        "changed_files": "Изменённые файлы",
-        "recent_observations": "Последние полезные наблюдения",
-        "recent_results": "Последние результаты действий",
-        "recent_details": "Подробные данные последних действий",
-        "repeated_errors": "Повторяющиеся ошибки",
-        "additional_instruction": "Дополнительная инструкция",
-        "none": "нет",
-        "no_context": "Пока нет накопленного контекста.",
-        "truth_instruction": (
-            "Опирайся на подробные данные как на источник истины. "
-            "Выбери следующее действие так, чтобы продвинуть задачу и не повторять тупиковые шаги."
-        ),
-        "completion_instruction": (
-            "Если есть блокеры завершения, final_answer запрещён. "
-            "Если проверка выявила пробел, следующий шаг обязан быть corrective action, а не описанием проблемы."
-        ),
-        "language_instruction": (
-            "Публичные JSON-поля thought, user_message и final_answer.args.message пиши только на русском. "
-            "Если видишь normalized_error, используй его для следующего шага; raw_error не копируй в публичный ответ."
-        ),
-    },
     "en": {
         "step": "Step",
         "task_language": "Task language",
@@ -100,8 +56,7 @@ _RUNTIME_TEXT = {
 
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     assert self._state.plan_info is not None
-    language = self._state.task_language or detect_request_language(user_goal)
-    text = _RUNTIME_TEXT[language]
+    text = _RUNTIME_TEXT["en"]
 
     plan_text = "\n".join(
         f"{index + 1}. {item}"
@@ -153,9 +108,9 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             "fetch_url",
         } - set(self._state.required_next_actions))
         forbidden_next_actions = ", ".join(forbidden) or text["none"]
-    summary = self._build_summary(language)
-    dependency_versions = self._format_dependency_versions_for_prompt(language)
-    web_facts = self._format_web_facts_for_prompt(language)
+    summary = self._build_summary("en")
+    dependency_versions = self._format_dependency_versions_for_prompt("en")
+    web_facts = self._format_web_facts_for_prompt("en")
 
     current_time = current_time_context()["current_time"]
     system_block = (
@@ -201,8 +156,6 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
 
 def format_dependency_versions_for_prompt(self, language: str = "en") -> str:
     if not self._state.dependency_versions:
-        if language == "ru":
-            return "версия не найдена в requirements.txt, pyproject.toml, poetry.lock, uv.lock"
         return "version not found in requirements.txt, pyproject.toml, poetry.lock, uv.lock"
 
     lines = []
@@ -210,16 +163,13 @@ def format_dependency_versions_for_prompt(self, language: str = "en") -> str:
     for package, version in items[:20]:
         lines.append(f"- {package}: {version}")
     if len(items) > 20:
-        if language == "ru":
-            lines.append(f"- ... ещё {len(items) - 20}")
-        else:
-            lines.append(f"- ... {len(items) - 20} more")
+        lines.append(f"- ... {len(items) - 20} more")
     return "\n".join(lines)
 
 
 def format_web_facts_for_prompt(self, language: str = "en") -> str:
     if not self._state.web_facts:
-        return "нет" if language == "ru" else "none"
+        return "none"
     return "\n".join(f"- {item}" for item in self._state.web_facts[-6:])
 
 
@@ -256,59 +206,40 @@ def build_summary(self, language: str = "en") -> str:
     parts = []
 
     if self._state.plan_info:
-        if language == "ru":
-            parts.append(
-                f"Плановых шагов выполнено: {len(self._state.completed_plan_steps)}/{len(self._state.plan_info.plan)}"
-            )
-        else:
-            parts.append(
-                f"Completed plan steps: {len(self._state.completed_plan_steps)}/{len(self._state.plan_info.plan)}"
-            )
+        parts.append(
+            f"Completed plan steps: {len(self._state.completed_plan_steps)}/{len(self._state.plan_info.plan)}"
+        )
 
     if self._state.files_read:
-        label = "Прочитано" if language == "ru" else "Read"
-        parts.append(f"{label}: " + ", ".join(self._state.files_read[-6:]))
+        parts.append(f"Read: " + ", ".join(self._state.files_read[-6:]))
 
     if self._state.files_changed:
-        label = "Изменено" if language == "ru" else "Changed"
-        parts.append(f"{label}: " + ", ".join(self._state.files_changed[-6:]))
+        parts.append(f"Changed: " + ", ".join(self._state.files_changed[-6:]))
 
     if self._state.required_artifacts:
-        if language == "ru":
-            parts.append(f"Обязательных артефактов: {len(self._state.required_artifacts)}")
-        else:
-            parts.append(f"Required artifacts: {len(self._state.required_artifacts)}")
+        parts.append(f"Required artifacts: {len(self._state.required_artifacts)}")
 
     if self._state.missing_artifacts:
-        label = "Не хватает" if language == "ru" else "Missing"
-        parts.append(f"{label}: " + ", ".join(self._state.missing_artifacts[-6:]))
+        parts.append(f"Missing: " + ", ".join(self._state.missing_artifacts[-6:]))
 
     if self._state.verification_evidence:
-        label = "Проверки" if language == "ru" else "Verification"
-        parts.append(f"{label}: " + " | ".join(self._state.verification_evidence[-3:]))
+        parts.append(f"Verification: " + " | ".join(self._state.verification_evidence[-3:]))
 
     if self._state.dependency_versions:
-        if language == "ru":
-            parts.append(f"Версий зависимостей найдено: {len(self._state.dependency_versions)}")
-        else:
-            parts.append(f"Dependency versions found: {len(self._state.dependency_versions)}")
+        parts.append(f"Dependency versions found: {len(self._state.dependency_versions)}")
 
     if self._state.web_facts:
-        label = "Web-факты" if language == "ru" else "Web facts"
-        parts.append(f"{label}: " + " | ".join(self._state.web_facts[-2:]))
+        parts.append(f"Web facts: " + " | ".join(self._state.web_facts[-2:]))
 
     if self._state.recent_events:
-        label = "Наблюдения" if language == "ru" else "Observations"
-        parts.append(f"{label}: " + " | ".join(self._state.recent_events[-4:]))
+        parts.append(f"Observations: " + " | ".join(self._state.recent_events[-4:]))
 
     if self._state.error_history:
-        label = "Ошибки" if language == "ru" else "Errors"
-        parts.append(f"{label}: " + " | ".join(self._state.error_history[-3:]))
+        parts.append(f"Errors: " + " | ".join(self._state.error_history[-3:]))
 
     if self._state.completion_blockers:
-        label = "Блокеры" if language == "ru" else "Blockers"
-        parts.append(f"{label}: " + " | ".join(self._state.completion_blockers[-3:]))
+        parts.append(f"Blockers: " + " | ".join(self._state.completion_blockers[-3:]))
 
     if parts:
         return "\n".join(parts)
-    return "Контекст ещё не накоплен." if language == "ru" else "Context has not accumulated yet."
+    return "Context has not accumulated yet."

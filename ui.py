@@ -131,7 +131,7 @@ class AgentUI:
         title: str,
         options: list[dict[str, str]],
         current_value: str,
-        help_text: str = "↑/↓ — выбрать, Enter — подтвердить, Esc — отменить",
+        help_text: str = "↑/↓ — select, Enter — confirm, Esc — cancel",
     ) -> str | None:
         if not options:
             return None

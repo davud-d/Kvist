@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from agent_state import PlanInfo
-from language_utils import detect_request_language
 from parser import CommandValidationError, load_single_json_object
 
 _PROMPT_DIR = Path(__file__).resolve().parent
@@ -31,19 +30,11 @@ def _reset_client_disabled_backends(agent_self: Any) -> None:
 
 
 def create_plan(self, user_goal: str) -> PlanInfo:
-    language = self._state.task_language or detect_request_language(user_goal)
-    if language == "ru":
-        prompt = (
-            "Задача пользователя:\n"
-            f"{user_goal}\n\n"
-            "Собери короткий план, критерии успеха и оцени сложность."
-        )
-    else:
-        prompt = (
-            "User task:\n"
-            f"{user_goal}\n\n"
-            "Build a short plan, success criteria, and estimate complexity"
-        )
+    prompt = (
+        "User task:\n"
+        f"{user_goal}\n\n"
+        "Build a short plan, success criteria, and estimate complexity"
+    )
 
     try:
         raw = self._call_model(
@@ -87,28 +78,7 @@ def create_plan(self, user_goal: str) -> PlanInfo:
 
 
 def fallback_plan(self, user_goal: str) -> PlanInfo:
-    language = self._state.task_language or detect_request_language(user_goal)
     complexity = "complex" if self._is_complex_goal(user_goal) else "simple"
-    if language == "ru":
-        return PlanInfo(
-            goal=user_goal,
-            complexity=complexity,
-            plan=[
-                "изучить нужные файлы и структуру",
-                "внести минимальные точные изменения",
-                "проверить результат и ошибки",
-                "кратко описать выполненную задачу",
-            ],
-            success_criteria=[
-                "ключевые изменения применены",
-                "ошибки не проигнорированы",
-                "результат проверен доступным способом",
-            ],
-            risks=[
-                "модель может зациклиться на одном действии",
-                "часть окружения может быть недоступна",
-            ],
-        )
     return PlanInfo(
         goal=user_goal,
         complexity=complexity,
@@ -133,19 +103,18 @@ def fallback_plan(self, user_goal: str) -> PlanInfo:
 def is_complex_goal(self, user_goal: str) -> bool:
     lowered = user_goal.casefold()
     keywords = (
-        "архитект",
-        "рефактор",
+        "architect",
+        "refactor",
         "production",
-        "продакш",
-        "система",
-        "агент",
-        "несколько файлов",
-        "проект",
-        "анализ",
-        "память",
-        "планирован",
-        "улучш",
-        "апгрейд",
+        "system",
+        "agent",
+        "multiple files",
+        "project",
+        "analysis",
+        "memory",
+        "planning",
+        "improv",
+        "upgrade",
     )
     return len(user_goal) > 180 or any(keyword in lowered for keyword in keywords)
 

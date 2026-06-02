@@ -260,7 +260,75 @@ class SafeExecutor:
                 extract_mode=args.get("extract_mode", "text"),
             )
 
+        if action_type == "delegate_task":
+            return self._handle_delegation(args)
+
         raise ExecutorError(f"Unsupported action: {action_type}")
+
+    def _handle_delegation(self, args: dict[str, Any]) -> ExecutionResult:
+        """Handle delegate_task: execute delegated commands in current runtime.
+
+        This runs commands from the delegation within the same runtime loop,
+        collecting results. Commands go through the standard terminal
+        validation (including HITL approval for dangerous ones).
+        """
+        target_role = str(args["target_role"]).strip()
+        task = str(args["task"]).strip()
+        commands = args.get("commands", [])
+
+        results: list[dict[str, Any]] = []
+
+        if not commands:
+            # Delegation without commands = informational handoff
+            return ExecutionResult(
+                ok=True,
+                action_type="delegate_task",
+                data={
+                    "target_role": target_role,
+                    "task": task,
+                    "note": "Delegation registered. No commands to execute.",
+                    "results": [],
+                },
+            )
+
+        for command_str in commands:
+            parts = command_str.split()
+            if not parts:
+                results.append({
+                    "command": command_str,
+                    "ok": False,
+                    "error": "Empty command string",
+                })
+                continue
+
+            try:
+                terminal_result = self._terminal.run(parts)
+                results.append({
+                    "command": command_str,
+                    "ok": terminal_result.returncode == 0,
+                    "returncode": terminal_result.returncode,
+                    "stdout": terminal_result.stdout,
+                    "stderr": terminal_result.stderr,
+                    "denied": terminal_result.denied,
+                })
+            except TerminalError as error:
+                results.append({
+                    "command": command_str,
+                    "ok": False,
+                    "error": str(error),
+                })
+
+        all_ok = all(r.get("ok", False) for r in results)
+
+        return ExecutionResult(
+            ok=all_ok,
+            action_type="delegate_task",
+            data={
+                "target_role": target_role,
+                "task": task,
+                "results": results,
+            },
+        )
 
     def _normalize_user_path(self, user_path: str | None) -> str:
         if user_path is None:

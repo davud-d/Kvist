@@ -45,6 +45,7 @@ class PlanInfo:
 
 @dataclass(slots=True)
 class RunState:
+    current_agent_role: str = "coder"
     task_language: str = ""
     system_os: str = ""
     system_shell: str = ""

@@ -19,17 +19,54 @@ try:
 except ImportError:
     tiktoken = None  # type: ignore[assignment]
 
-_PROMPT_DIR = Path(__file__).resolve().parent
-SYSTEM_PROMPT = (_PROMPT_DIR / "system_prompt.txt").read_text(encoding="utf-8").strip()
+_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
+
+_PROMPT_CACHE: dict[str, str] = {}
+
+_ROLE_PROMPT_FILES: dict[str, str] = {
+    "coder": "coder_prompt.txt",
+    "devops": "devops_prompt.txt",
+    "chat": "chat_prompt.txt",
+}
+
+
+def _load_role_prompt(role: str) -> str:
+    """Load and cache system prompt for the given role."""
+    if role in _PROMPT_CACHE:
+        return _PROMPT_CACHE[role]
+    filename = _ROLE_PROMPT_FILES.get(role, "coder_prompt.txt")
+    text = (_PROMPT_DIR / filename).read_text(encoding="utf-8").strip()
+    _PROMPT_CACHE[role] = text
+    return text
+
+
+# Backward-compatible alias: loads coder prompt lazily.
+def _get_system_prompt() -> str:
+    return _load_role_prompt("coder")
+
+
+# Keep module-level name for any external imports; evaluated lazily.
+class _LazyPrompt:
+    """Lazy proxy so SYSTEM_PROMPT resolves on first access, not import time."""
+    _value: str | None = None
+    def __str__(self) -> str:
+        if self._value is None:
+            self._value = _get_system_prompt()
+        return self._value
+
+
+SYSTEM_PROMPT: str | _LazyPrompt = _LazyPrompt()
 
 
 def call_action_model(self, prompt: str) -> str:
     preferred_model = str(getattr(self._state, "selected_action_model", "")).strip()
     if not preferred_model:
         preferred_model = self._select_action_model_for_run()
+    role = getattr(self._state, "current_agent_role", "coder")
+    system_prompt = _load_role_prompt(role)
     return self._call_model(
         model=preferred_model,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_prompt=prompt,
     )
 
@@ -100,7 +137,7 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                     content = response.choices[0].message.content
                 total_duration = time.monotonic() - request_start
                 if not content:
-                    raise RuntimeError("Модель вернула пустой ответ")
+                    raise RuntimeError("Model returned an empty response")
                 if self.config.cache_enabled:
                     self._cache[cache_key] = content
                 # ── log successful API request ───────────────────
@@ -151,7 +188,7 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                     error_msg_lowered = str(error).casefold()
                     if any(m in error_msg_lowered for m in ("rate limit", "too many requests", "429", "quota", "high demand", "exhausted", "503")):
                         delay = max(delay, 15.0 * attempt)
-                    self._ui.debug_print(f"Ошибка API. Повтор через {delay:.1f}с")
+                    self._ui.debug_print(f"API error. Retrying in {delay:.1f}s")
                     sleep_start = time.monotonic()
                     time.sleep(delay)
                     actual_sleep = (time.monotonic() - sleep_start) * 1000
@@ -163,7 +200,7 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                         context="retry_sleep",
                     )
 
-    raise RuntimeError(f"Не удалось получить ответ модели: {last_error}")
+    raise RuntimeError(f"Failed to get model response: {last_error}")
 
 
 def call_model_streaming(
@@ -301,9 +338,9 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
             + user_prompt[-tail_chars:]
         )
     
-    msg = "\n\n[КОНТЕКСТ ОБРЕЗАН: лимит токенов.]" if getattr(self._state, "task_language", "") == "ru" else "\n\n[CONTEXT TRUNCATED]"
+    msg = "\n\n[CONTEXT TRUNCATED]"
     
-    self._ui.debug_print(f"Промпт обрезан: sys={system_tokens}, user={prompt_tokens} -> выделено {available} (лимит {max_tokens})")
+    self._ui.debug_print(f"Prompt trimmed: sys={system_tokens}, user={prompt_tokens} -> available {available} (limit {max_tokens})")
     return trimmed + msg
 
 

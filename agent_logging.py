@@ -49,6 +49,7 @@ def persist_logs(self, user_goal: str) -> None:
     logs_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "goal": user_goal,
+        "current_agent_role": self._state.current_agent_role,
         "task_language": self._state.task_language,
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
@@ -92,6 +93,7 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
     state_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "goal": user_goal,
+        "current_agent_role": self._state.current_agent_role,
         "task_language": self._state.task_language,
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
@@ -160,6 +162,7 @@ def load_checkpoint(self) -> tuple[str, int] | None:
         )
 
     self._state.progress = data.get("progress", 0)
+    self._state.current_agent_role = str(data.get("current_agent_role") or "coder")
     self._state.task_language = str(data.get("task_language") or "")
     self._state.create_goal = bool(data.get("create_goal", False))
     self._state.selected_action_role = str(data.get("selected_action_role") or "")
