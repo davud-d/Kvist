@@ -213,10 +213,13 @@ UI and packaging:
 - `agent_logging.py` writes run logs and checkpoints.
 - `package_script.py` PyInstaller build helper.
 
-Extras:
+Prompts:
 
-- `system_prompt.txt` action-model system prompt.
-- `planner_prompt.txt` planner-model system prompt.
+- `prompts/coder_prompt.txt` system prompt for the coder role.
+- `prompts/devops_prompt.txt` system prompt for the devops role.
+- `prompts/chat_prompt.txt` system prompt for the chat role.
+- `prompts/router_prompt.txt` system prompt for the router role.
+- `prompts/planner_prompt.txt` system prompt for the planner model.
 
 `jetbrains-plugin/` contains an IntelliJ Platform plugin that launches DevAgentXD in
 the IDE terminal for the current project. It is pinned to IntelliJ Platform

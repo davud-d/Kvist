@@ -40,24 +40,6 @@ def _load_role_prompt(role: str) -> str:
     return text
 
 
-# Backward-compatible alias: loads coder prompt lazily.
-def _get_system_prompt() -> str:
-    return _load_role_prompt("coder")
-
-
-# Keep module-level name for any external imports; evaluated lazily.
-class _LazyPrompt:
-    """Lazy proxy so SYSTEM_PROMPT resolves on first access, not import time."""
-    _value: str | None = None
-    def __str__(self) -> str:
-        if self._value is None:
-            self._value = _get_system_prompt()
-        return self._value
-
-
-SYSTEM_PROMPT: str | _LazyPrompt = _LazyPrompt()
-
-
 def call_action_model(self, prompt: str) -> str:
     preferred_model = str(getattr(self._state, "selected_action_model", "")).strip()
     if not preferred_model:

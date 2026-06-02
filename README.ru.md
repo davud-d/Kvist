@@ -212,10 +212,13 @@ UI и сборка:
 - `agent_logging.py` пишет run-логи и checkpoint.
 - `package_script.py` скрипт сборки через PyInstaller.
 
-Дополнительно:
+Промпты:
 
-- `system_prompt.txt` системный промпт для action-модели.
-- `planner_prompt.txt` системный промпт для planner-модели.
+- `prompts/coder_prompt.txt` системный промпт для роли coder.
+- `prompts/devops_prompt.txt` системный промпт для роли devops.
+- `prompts/chat_prompt.txt` системный промпт для роли chat.
+- `prompts/router_prompt.txt` системный промпт для роутера ролей.
+- `prompts/planner_prompt.txt` системный промпт для planner-модели.
 
 `jetbrains-plugin/` содержит IntelliJ Platform plugin: он запускает DevAgentXD в IDE
 Terminal для текущего проекта. Плагин прибит к IntelliJ Platform 2025.3,
