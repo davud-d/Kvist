@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('system_prompt.txt', '.'), ('planner_prompt.txt', '.')],
+    datas=[('prompts', 'prompts')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
