@@ -61,13 +61,26 @@ class SlashCommandCompleter(Completer):
 
 def normalize_slash_command(raw: str) -> str:
     text = raw.strip()
+
     if not text.startswith("/"):
         return text
 
-    command = text[1:].split(maxsplit=1)[0].casefold()
+    body = text[1:].strip()
+
+    # The user entered only "/"
+    # Do not crash. Let main.py show help or simply continue input.
+    if not body:
+        return "/help"
+
+    parts = body.split(maxsplit=1)
+    command = parts[0].casefold()
+    args = parts[1] if len(parts) > 1 else ""
 
     for item in SLASH_COMMANDS:
-        if command == item.name.casefold() or command in {a.casefold() for a in item.aliases}:
-            return "/" + item.name
+        aliases = {alias.casefold() for alias in item.aliases}
+
+        if command == item.name.casefold() or command in aliases:
+            normalized = "/" + item.name
+            return f"{normalized} {args}".strip()
 
     return text
