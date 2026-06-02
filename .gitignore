@@ -81,4 +81,5 @@ SOUL.md
 TOOLS.md
 USER.md
 .openclaw/
+.claude/
 pytest.ini

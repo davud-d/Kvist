@@ -8,8 +8,11 @@ from agent_state import PlanInfo
 from parser import CommandValidationError, load_single_json_object
 
 _PROMPT_DIR = Path(__file__).resolve().parent
-PLANNER_PROMPT = (_PROMPT_DIR / "planner_prompt.txt").read_text(encoding="utf-8").strip()
 
+try:
+    PLANNER_PROMPT = (_PROMPT_DIR / "prompt" / "planner.txt").read_text(encoding="utf-8").strip()
+except FileNotFoundError:
+    raise FileNotFoundError("Could not find the planner prompt.")
 
 def _reset_client_disabled_backends(agent_self: Any) -> None:
     """Clear any disabled-backend state on the LLM client.

@@ -63,6 +63,14 @@ class RouteDecision:
 # Priority: devops → coder → chat (most specific → most general)
 
 _DIRECT_DEVOPS_PATTERNS: tuple[tuple[str, str], ...] = (
+    # Russian: service status / inspection
+    ("проверь\\s+.*(?:статус|состояние).*\\b(?:systemd|systemctl|nginx|apache|docker|сервис\\w*|служб\\w*|демон\\w*)\\b", "service status"),
+    ("(?:статус|состояние)\\s+.*\\b(?:systemd|systemctl|nginx|apache|docker|сервис\\w*|служб\\w*|демон\\w*)\\b", "service status"),
+
+    # English: service status / inspection
+    ("check\\s+.*(?:status|state).*\\b(?:systemd|systemctl|service\\w*|daemon\\w*|nginx|apache|docker)\\b", "service status"),
+    ("(?:status|state)\\s+.*\\b(?:systemd|systemctl|service\\w*|daemon\\w*|nginx|apache|docker)\\b", "service status"),
+
     # Russian
     ("разверни.*(?:docker|сервер|vps|проект|приложени)", "deploy action"),
     ("задеплой", "deploy action"),
@@ -87,7 +95,7 @@ _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
     ("прочитай\\s.*\\.py\\b", "read project file"),
     ("запусти\\s.*тесты?", "run tests"),
     ("собери\\s.*(?:проект|project)", "build project"),
-    ("проверь\\s.*(?:git|статус|diff)", "git check"),
+    ("проверь\\s+.*(?:\\bgit\\b|git\\s+status|git\\s+diff|\\bdiff\\b)", "git check"),
     # English: creation verbs + artifact
     ("(?:create|write|make|generate|code|develop)\\s.*(?:script|file|bot|README|readme|program|app|code|module)", "create artifact"),
     ("fix\\s.*(?:bug|error|issue|problem)", "fix action"),
