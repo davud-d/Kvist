@@ -36,10 +36,10 @@ def _load_router_prompt() -> str:
     return _ROUTER_PROMPT_CACHE
 
 
-# ── RouteDecision dataclass ──────────────────────────────────────
+# ── RoleRouteResult dataclass ──────────────────────────────────
 
 @dataclass
-class RouteDecision:
+class RoleRouteResult:
     """Observable routing result — shows exactly where the role came from.
 
     Attributes:
@@ -57,6 +57,10 @@ class RouteDecision:
     matched_rule: str = ""
     error: str = ""
     model: str = ""
+
+
+# Backward-compatible alias
+RouteDecision = RoleRouteResult
 
 
 # ── Direct deterministic rules (before LLM) ──────────────────────
@@ -255,8 +259,8 @@ def route_role_decision_with_llm(
     client: Any,
     model: str,
     temperature: float = 0.0,
-) -> RouteDecision:
-    """Determines role with full observability (RouteDecision).
+) -> RoleRouteResult:
+    """Determines role with full observability (RoleRouteResult).
 
     Priority:
       1. direct devops action
@@ -266,13 +270,13 @@ def route_role_decision_with_llm(
       5. keyword fallback
       6. default
 
-    Returns a RouteDecision with role + source + metadata.
+    Returns a RoleRouteResult with role + source + metadata.
     """
     # ── Step 1–3: Direct deterministic rules ──────────────────
     direct = _match_direct_rule(user_goal)
     if direct is not None:
         direct_role, rule_label, rule_pattern = direct
-        return RouteDecision(
+        return RoleRouteResult(
             role=direct_role,
             source="direct",
             matched_rule=f"{rule_label}: {rule_pattern}",
@@ -280,7 +284,7 @@ def route_role_decision_with_llm(
         )
 
     # ── Step 4: LLM router ────────────────────────────────────
-    decision = RouteDecision(source="default", model=model)
+    decision = RoleRouteResult(source="default", model=model)
     system_prompt = _load_router_prompt()
     messages = [
         {"role": "system", "content": system_prompt},
