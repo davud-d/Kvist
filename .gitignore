@@ -1,3 +1,6 @@
+# Agent testing workspace
+.agent-workspace/
+
 # Secrets
 *.env
 .env.*
@@ -23,13 +26,11 @@ build/
 .mypy_cache/
 
 # IDE
-*.vscode
 .idea/
 *.swp
 *.swo
 .vscode/
 *.iml
-.vscode
 
 # OS
 .DS_Store
@@ -48,7 +49,6 @@ jetbrains-plugin/build/
 jetbrains-plugin/out/
 jetbrains-plugin/bin/linux/devagent.bin
 jetbrains-plugin/bin/win/devagent.exe
-*.iml
 
 # Logs
 *.log
@@ -59,8 +59,6 @@ jetbrains-plugin/bin/win/devagent.exe
 *.dll
 *.so
 *.dylib
-dist/
-build/
 
 # Other
 push.py
@@ -83,4 +81,5 @@ TOOLS.md
 USER.md
 .openclaw/
 .claude/
-pytest.inikernel.txt
+pytest.ini
+DevAgentXD.zip

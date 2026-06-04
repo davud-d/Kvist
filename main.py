@@ -79,8 +79,8 @@ def multiline_input() -> str:
     ).strip()
 
 
-def sleep(seconnds: int):
-    time.sleep(seconnds)
+def sleep(seconds: int):
+    time.sleep(seconds)
 
 
 def resolve_startup_provider(provider_override: str | None = None) -> str:
