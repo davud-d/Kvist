@@ -72,7 +72,6 @@ project/
 kernel.xml
 kernel.txt
 logs.xml
-tests/
 AGENTS.md
 HEARTBEAT.md
 IDENTITY.md
