@@ -10,7 +10,12 @@ from pathlib import Path
 
 from openai import AuthenticationError, OpenAI
 
-from llm_clients import FREEFLOW_PROVIDER, OPENAI_PROVIDER, normalize_provider
+from llm_clients import (
+    FREEFLOW_PROVIDER, OPENAI_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
+    ANTHROPIC_PROVIDER,
+    CUSTOM_PROVIDER_PREFIX, is_custom_provider, extract_custom_provider_name,
+    normalize_provider,
+)
 
 USER_CONFIG_DIRNAME = ".devagent"
 USER_CONFIG_FILENAME = "config.json"
@@ -19,21 +24,38 @@ LEGACY_USER_CONFIG_KEY = "OPENAI_API_KEY"
 USER_CONFIG_KEYS = (USER_CONFIG_KEY, LEGACY_USER_CONFIG_KEY)
 LLM_PROVIDER_KEY = "llm_provider"
 LLM_MODELS_KEY = "llm_models"
+ROLE_SELECTION_KEY = "role_selection"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
 FALLBACK_LLM_PROVIDER = FREEFLOW_PROVIDER
 GEMINI_API_KEY_KEY = "gemini_api_key"
 GROQ_API_KEY_KEY = "groq_api_key"
+OMNIROUTE_API_KEY_KEY = "omniroute_api_key"
+OMNIROUTE_BASE_URL_KEY = "omniroute_base_url"
+OPENROUTER_API_KEY_KEY = "openrouter_api_key"
+OPENROUTER_BASE_URL_KEY = "openrouter_base_url"
+ANTHROPIC_API_KEY_KEY = "anthropic_api_key"
+ANTHROPIC_BASE_URL_KEY = "anthropic_base_url"
+CUSTOM_PROVIDERS_KEY = "custom_providers"
 
 _ENV_KEY_ALIASES = {
     USER_CONFIG_KEY: ("OPENAI_API_KEY",),
     GEMINI_API_KEY_KEY: ("GEMINI_API_KEY",),
     GROQ_API_KEY_KEY: ("GROQ_API_KEY",),
+    OMNIROUTE_API_KEY_KEY: ("OMNIROUTE_API_KEY",),
+    OMNIROUTE_BASE_URL_KEY: ("OMNIROUTE_BASE_URL",),
+    OPENROUTER_API_KEY_KEY: ("OPENROUTER_API_KEY",),
+    OPENROUTER_BASE_URL_KEY: ("OPENROUTER_BASE_URL",),
+    ANTHROPIC_API_KEY_KEY: ("ANTHROPIC_API_KEY",),
+    ANTHROPIC_BASE_URL_KEY: ("ANTHROPIC_BASE_URL",),
 }
 
 _SECRET_LABELS = {
     USER_CONFIG_KEY: "OpenAI API key",
     GEMINI_API_KEY_KEY: "Gemini API key",
     GROQ_API_KEY_KEY: "Groq API key",
+    OMNIROUTE_API_KEY_KEY: "OmniRoute API key",
+    OPENROUTER_API_KEY_KEY: "OpenRouter API key",
+    ANTHROPIC_API_KEY_KEY: "Anthropic API key",
 }
 
 
@@ -143,12 +165,29 @@ def save_models_for_provider(
     save_user_config(payload, config_path)
 
 
+def get_saved_role(config_path: Path | None = None) -> str | None:
+    """Get the saved role selection, or None if not set (auto mode)."""
+    payload = load_user_config(config_path)
+    role = payload.get(ROLE_SELECTION_KEY)
+    if isinstance(role, str) and role.strip():
+        return role.strip()
+    return None
+
+
+def save_role_selection(role: str, config_path: Path | None = None) -> None:
+    """Save the role selection. Use 'auto' for automatic role detection."""
+    payload = load_user_config(config_path)
+    payload[ROLE_SELECTION_KEY] = role.strip()
+    save_user_config(payload, config_path)
+
+
 def ensure_provider_credentials(
     provider: str,
     validation_model: str,
     required_keys: tuple[str, ...] = (),
     config_path: Path | None = None,
     language_hint: str | None = None,
+    skip_validation: bool = False,
 ) -> dict[str, str]:
     normalized_provider = normalize_provider(provider)
     payload = load_user_config(config_path)
@@ -169,13 +208,53 @@ def ensure_provider_credentials(
                 raise RuntimeError(
                     f"{_SECRET_LABELS.get(key_name, key_name)} is required for FreeFlow LLM."
                 )
+            if normalized_provider == OMNIROUTE_PROVIDER:
+                raise RuntimeError(
+                    f"{_SECRET_LABELS.get(key_name, key_name)} is required for OmniRoute."
+                )
+            if normalized_provider == OPENROUTER_PROVIDER:
+                raise RuntimeError(
+                    f"{_SECRET_LABELS.get(key_name, key_name)} is required for OpenRouter."
+                )
+            if normalized_provider == ANTHROPIC_PROVIDER:
+                raise RuntimeError(
+                    f"{_SECRET_LABELS.get(key_name, key_name)} is required for Anthropic."
+                )
             raise RuntimeError("OpenAI API key is required.")
 
         secret = secret.strip()
-        if key_name == USER_CONFIG_KEY:
+        # Only validate OpenAI keys through the default OpenAI endpoint
+        if key_name == USER_CONFIG_KEY and normalized_provider == OPENAI_PROVIDER and not skip_validation:
             validate_api_key(secret, validation_model, language_hint=language_hint)
         payload[key_name] = secret
         collected[key_name] = secret
+
+    # Load base URL for OmniRoute and OpenRouter (non-secret)
+    if normalized_provider == OMNIROUTE_PROVIDER:
+        base_url = _resolve_secret(payload, OMNIROUTE_BASE_URL_KEY)
+        if base_url:
+            collected[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
+            payload[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
+    elif normalized_provider == OPENROUTER_PROVIDER:
+        base_url = _resolve_secret(payload, OPENROUTER_BASE_URL_KEY)
+        if base_url:
+            collected[OPENROUTER_BASE_URL_KEY] = base_url.strip()
+            payload[OPENROUTER_BASE_URL_KEY] = base_url.strip()
+    elif normalized_provider == ANTHROPIC_PROVIDER:
+        base_url = _resolve_secret(payload, ANTHROPIC_BASE_URL_KEY)
+        if base_url:
+            collected[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
+            payload[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
+
+    # Custom providers: credentials are stored in provider config, not as separate keys
+    if is_custom_provider(normalized_provider):
+        name = extract_custom_provider_name(normalized_provider)
+        info = get_custom_provider_by_name(name, config_path)
+        if info:
+            if info.get("base_url"):
+                collected["base_url"] = info["base_url"].strip()
+            if info.get("api_key"):
+                collected["api_key"] = info["api_key"].strip()
 
     save_user_config(payload, config_path)
     return collected
@@ -191,7 +270,10 @@ def get_saved_provider_or_none(config_path: Path | None = None) -> str | None:
 def prompt_provider_choice() -> str:
     print("Select LLM provider:")
     print("1. OpenAI")
-    print("2. FreeFlow LLM (Gemini/Groq)")
+    print("2. Anthropic (Claude)")
+    print("3. FreeFlow LLM (Gemini/Groq)")
+    print("4. OmniRoute")
+    print("5. OpenRouter")
 
     while True:
         choice = input("> ").strip().lower()
@@ -199,10 +281,19 @@ def prompt_provider_choice() -> str:
         if choice in {"1", "openai", "o"}:
             return OPENAI_PROVIDER
 
-        if choice in {"2", "freeflow", "free", "f"}:
+        if choice in {"2", "anthropic", "claude", "ant", "a"}:
+            return ANTHROPIC_PROVIDER
+
+        if choice in {"3", "freeflow", "free", "f"}:
             return FREEFLOW_PROVIDER
 
-        print("Enter 1 for OpenAI or 2 for FreeFlow LLM.")
+        if choice in {"4", "omniroute", "omni", "or"}:
+            return OMNIROUTE_PROVIDER
+
+        if choice in {"5", "openrouter", "openroute", "openrt", "router"}:
+            return OPENROUTER_PROVIDER
+
+        print("Enter 1-5: OpenAI, Anthropic, FreeFlow, OmniRoute, OpenRouter.")
 
 
 
@@ -260,3 +351,84 @@ def _resolve_secret(payload: dict[str, object], key_name: str) -> str | None:
         if env_value:
             return env_value
     return None
+
+
+# ── Custom provider CRUD ───────────────────────────────────────────────────
+
+
+def get_custom_providers(config_path: Path | None = None) -> dict[str, dict]:
+    """Return all saved custom provider configurations.
+
+    Returns a dict keyed by provider name (without the 'custom:' prefix).
+    """
+    payload = load_user_config(config_path)
+    providers = payload.get(CUSTOM_PROVIDERS_KEY)
+    if not isinstance(providers, dict):
+        return {}
+    # Filter valid entries
+    result: dict[str, dict] = {}
+    for name, info in providers.items():
+        if isinstance(info, dict) and isinstance(info.get("base_url"), str) and info["base_url"].strip():
+            result[name] = {
+                "label": str(info.get("label", name)).strip(),
+                "protocol": str(info.get("protocol", "openai")).strip(),
+                "base_url": info["base_url"].strip(),
+                "api_key": str(info.get("api_key", "")).strip(),
+                "models": _normalize_provider_models(info.get("models")),
+            }
+    return result
+
+
+def get_custom_provider_by_name(name: str, config_path: Path | None = None) -> dict | None:
+    """Return a single custom provider configuration by name, or None."""
+    providers = get_custom_providers(config_path)
+    return providers.get(name)
+
+
+def save_custom_provider(name: str, provider_config: dict, config_path: Path | None = None) -> None:
+    """Save or update a custom provider configuration.
+
+    ``provider_config`` must have keys: ``label``, ``base_url``, ``api_key``, ``models``.
+    """
+    if not name or not name.strip():
+        raise ValueError("Custom provider name cannot be empty")
+    name = name.strip()
+    payload = load_user_config(config_path)
+    all_providers = payload.get(CUSTOM_PROVIDERS_KEY)
+    if not isinstance(all_providers, dict):
+        all_providers = {}
+    all_providers[name] = {
+        "label": str(provider_config.get("label", name)).strip(),
+        "protocol": str(provider_config.get("protocol", "openai")).strip(),
+        "base_url": str(provider_config.get("base_url", "")).strip(),
+        "api_key": str(provider_config.get("api_key", "")).strip(),
+        "models": _normalize_provider_models(provider_config.get("models")),
+    }
+    payload[CUSTOM_PROVIDERS_KEY] = all_providers
+    save_user_config(payload, config_path)
+
+
+def delete_custom_provider(name: str, config_path: Path | None = None) -> bool:
+    """Delete a custom provider. Returns True if it was deleted, False if not found."""
+    if not name:
+        return False
+    payload = load_user_config(config_path)
+    all_providers = payload.get(CUSTOM_PROVIDERS_KEY)
+    if not isinstance(all_providers, dict) or name not in all_providers:
+        return False
+    del all_providers[name]
+    payload[CUSTOM_PROVIDERS_KEY] = all_providers
+    save_user_config(payload, config_path)
+    return True
+
+
+def _normalize_provider_models(models: object) -> dict[str, str]:
+    """Normalize a models dict from config to {role: model_id}."""
+    if not isinstance(models, dict):
+        return {}
+    result: dict[str, str] = {}
+    for role in ("fast", "smart", "planner"):
+        value = models.get(role)
+        if isinstance(value, str) and value.strip():
+            result[role] = value.strip()
+    return result

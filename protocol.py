@@ -22,6 +22,7 @@ ActionType = Literal[
     "web_search",
     "fetch_url",
     "delegate_task",
+    "report_to_user",
 ]
 
 
@@ -38,3 +39,4 @@ class AgentCommand:
     progress: int
     user_message: str
     action: Action
+    step_summary: str = ""

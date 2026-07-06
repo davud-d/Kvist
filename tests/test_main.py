@@ -48,3 +48,51 @@ def test_choose_provider_delegates_to_ui(monkeypatch):
 
     monkeypatch.setattr(main, "AgentUI", FakeUI)
     assert main.choose_provider("openai", False) == "openai"
+
+
+def test_choose_session_creates_normalized_named_session(monkeypatch):
+    created = []
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def choose_option(self, **kwargs):
+            return "__new__"
+
+        def prompt_text(self, **kwargs):
+            return "Feature_One"
+
+    agent = SimpleNamespace(
+        current_session="default",
+        _list_sessions=lambda: [],
+        new_session=created.append,
+    )
+    monkeypatch.setattr(main, "AgentUI", FakeUI)
+
+    assert main.choose_session(agent, False) == "feature_one"
+    assert created == ["feature_one"]
+
+
+def test_choose_session_rejects_path_like_name(monkeypatch):
+    created = []
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def choose_option(self, **kwargs):
+            return "__new__"
+
+        def prompt_text(self, **kwargs):
+            return "../outside"
+
+    agent = SimpleNamespace(
+        current_session="default",
+        _list_sessions=lambda: [],
+        new_session=created.append,
+    )
+    monkeypatch.setattr(main, "AgentUI", FakeUI)
+
+    assert main.choose_session(agent, False) is None
+    assert created == []

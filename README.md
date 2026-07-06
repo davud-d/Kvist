@@ -139,9 +139,11 @@ Provider notes:
 - **⚠️ `FreeFlow LLM` is currently in beta testing and remains very unstable.**
   Expect intermittent failures, timeouts, and inconsistent responses. Use
   `OpenAI` if you need reliable results.
+- `OmniRoute` is a local OpenAI-compatible gateway for routing requests to multiple
+  LLM providers. See the OmniRoute section below for setup details.
 
-`AGENT_PERSIST_LOGS=0` stops run logs, but `/resume` still uses
-`<project>/.devagent/state.json`.
+`AGENT_PERSIST_LOGS=0` stops run logs, but sessions and `/resume` still use
+`<project>/.devagent/sessions/<name>.json`.
 
 Web search is deliberately limited. It is meant for external libraries, docs,
 release notes, pricing, limits, and other things that can go stale.
@@ -153,12 +155,94 @@ TAVILY_API_KEY=
 BRAVE_SEARCH_API_KEY=
 ```
 
+## OmniRoute
+
+OmniRoute is a local OpenAI-compatible gateway that routes requests to multiple LLM providers.
+
+**DevAgentXD does not ship default OmniRoute models.** You must enter exact OmniRoute model ids manually because OmniRoute providers and models are dynamic.
+
+### Setup
+
+1. Start OmniRoute locally (default: `http://localhost:20128`)
+2. Get your API key from OmniRoute Dashboard → Endpoints
+3. Select OmniRoute as provider when starting DevAgentXD
+4. Enter exact model ids for each role
+
+### Configuration
+
+Example `~/.devagent/config.json`:
+
+```json
+{
+  "llm_provider": "omniroute",
+  "omniroute_api_key": "YOUR_KEY",
+  "omniroute_base_url": "http://localhost:20128/v1",
+  "llm_models": {
+    "omniroute": {
+      "fast": "kr/claude-haiku-4.5",
+      "smart": "kr/claude-sonnet-4.5",
+      "planner": "kr/claude-sonnet-4.5"
+    }
+  }
+}
+```
+
+Environment variables:
+
+```bash
+AGENT_LLM_PROVIDER=omniroute
+OMNIROUTE_API_KEY=...
+OMNIROUTE_BASE_URL=http://localhost:20128/v1
+AGENT_FAST_MODEL=kr/claude-haiku-4.5
+AGENT_SMART_MODEL=kr/claude-sonnet-4.5
+AGENT_PLANNER_MODEL=kr/claude-sonnet-4.5
+```
+
+### Model ID Format
+
+OmniRoute model ids typically follow `provider/model` format:
+
+```text
+kr/claude-sonnet-4.5
+kr/claude-haiku-4.5
+if/qwen3-coder-plus
+```
+
+You can also use combo/router names without slashes or type `auto` for OmniRoute auto routing (only if intentional).
+
+### Manual Model Input
+
+When you select OmniRoute or run `/models`:
+
+1. DevAgentXD asks for exact model id for each role (fast, smart, planner)
+2. Enter the model id manually
+3. Validation checks format (no whitespace, no URLs, proper `provider/model` structure)
+4. Models are saved to config for future sessions
+
+### Troubleshooting
+
+**"OmniRoute endpoint is unavailable"**
+- Check that OmniRoute is running
+- Verify base URL is `http://localhost:20128/v1`
+
+**"OmniRoute authentication failed"**
+- Check API key from Dashboard → Endpoints
+
+**"OmniRoute model or endpoint was not found"**
+- Verify exact model id (e.g., `kr/claude-sonnet-4.5`)
+- Check that the provider is connected in OmniRoute
+
+**"OmniRoute returned 400 bad_request"**
+- Usually means bad model id, unsupported request shape, broken provider transform, or upstream provider rejected the request
+- Try another exact model id or check OmniRoute logs
+
 ## Files it creates
 
 Inside the target project:
 
 - `<project>/.devagent/logs/`
-- `<project>/.devagent/state.json`
+- `<project>/.devagent/sessions/<name>.json`
+- `<project>/.devagent/active_session.json`
 
 The API key stays in your home directory config, not in the project.
 

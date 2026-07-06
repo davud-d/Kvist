@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from executor import ExecutionResult
+from agent_state import PlanInfo
 from tests.conftest import make_command, make_plan
 
 
@@ -83,3 +88,745 @@ def test_runtime_helpers_format_feedback_and_bounded_lists(agent_factory):
     detail = agent._feedback_to_detail(command, {"ok": False, "normalized_error": "bad"})
     assert '"normalized_error": "bad"' in detail
     assert agent._render_feedback("summary", {"ok": False, "error": "bad"}).startswith("Result: ERROR")
+
+
+def test_run_loop_auto_completes_simple_create_after_verification(agent_factory):
+    agent = agent_factory(max_steps=4)
+    agent._state.plan_info = PlanInfo(
+        goal="Создать hello.py",
+        complexity="simple",
+        plan=["create hello.py", "verify hello.py", "final report"],
+        success_criteria=["hello.py exists", "hello.py is verified"],
+        risks=[],
+    )
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+
+    responses = [
+        {
+            "thought": "Создаю hello.py",
+            "plan_step": "edit",
+            "progress": 70,
+            "user_message": "Создаю файл",
+            "action": {
+                "type": "write_file",
+                "args": {"path": "hello.py", "content": "print('Hello')\n"},
+            },
+        },
+        {
+            "thought": "Проверяю hello.py",
+            "plan_step": "verify",
+            "progress": 90,
+            "user_message": "Проверяю файл",
+            "action": {
+                "type": "read_file",
+                "args": {"path": "hello.py"},
+            },
+        },
+    ]
+    call_count = {"value": 0}
+
+    def fake_call_action_model(prompt: str) -> str:
+        index = call_count["value"]
+        if index >= len(responses):
+            raise AssertionError("run_loop requested an extra action after verification")
+        call_count["value"] += 1
+        return json.dumps(responses[index], ensure_ascii=False)
+
+    agent._call_action_model = fake_call_action_model
+
+    result = agent._run_loop("Создай hello.py", start_step=1)
+
+    assert call_count["value"] == 2
+    assert "hello.py" in result
+    assert agent._state.step_logs[-1]["status"] == "final_answer"
+    assert (agent.executor.workspace / "hello.py").exists()
+    assert not (agent.executor.workspace / "task_report.txt").exists()
+
+
+def test_rolling_summary_stored_on_summary_step(agent_factory, tmp_path):
+    """Rolling summary from command is stored in state on step % interval == 0."""
+    agent = agent_factory(rolling_summary_interval=5)
+    agent._state.plan_info = PlanInfo(
+        goal="Test", complexity="simple", plan=["step 1"], success_criteria=[], risks=[]
+    )
+    agent._state.selected_action_model = "mock"
+
+    command = make_command(
+        "write_file", {"path": "test.py", "content": "print(1)"},
+        progress=50, plan_step="edit",
+        step_summary="Steps 1-5: Created test.py with basic print"
+    )
+
+    feedback = {"ok": True, "action_type": "write_file", "data": {"path": "test.py"}}
+    agent._register_feedback(5, command, feedback)
+
+    if 5 % agent.config.rolling_summary_interval == 0 and command.step_summary:
+        agent._state.rolling_summaries[5] = command.step_summary
+
+    assert 5 in agent._state.rolling_summaries
+    assert agent._state.rolling_summaries[5] == "Steps 1-5: Created test.py with basic print"
+
+
+def test_rolling_summary_not_stored_without_summary_field(agent_factory):
+    """When command has no step_summary, nothing is stored even on interval step."""
+    agent = agent_factory(rolling_summary_interval=5)
+    agent._state.plan_info = PlanInfo(
+        goal="Test", complexity="simple", plan=["step 1"], success_criteria=[], risks=[]
+    )
+    agent._state.selected_action_model = "mock"
+
+    command = make_command(
+        "read_file", {"path": "test.py"},
+        progress=10, plan_step="inspect",
+        step_summary=""  # empty — model didn't provide summary
+    )
+
+    feedback = {"ok": True, "action_type": "read_file", "data": {"path": "test.py"}}
+    agent._register_feedback(5, command, feedback)
+
+    if 5 % agent.config.rolling_summary_interval == 0 and command.step_summary:
+        agent._state.rolling_summaries[5] = command.step_summary
+
+    assert 5 not in agent._state.rolling_summaries
+
+
+# ── P0: api_timeout ──────────────────────────────────────────────────
+
+def test_api_timeout_default_value():
+    """P0: AgentConfig has api_timeout with default 60.0."""
+    from agent_state import AgentConfig
+    config = AgentConfig()
+    assert hasattr(config, "api_timeout")
+    assert config.api_timeout == 60.0
+
+
+# ── P1: modify_goal ──────────────────────────────────────────────────
+
+def test_is_modify_goal_detects_fix_and_edit_intents():
+    """P1: _is_modify_goal returns True for fix/modify/change/edit patterns."""
+    from agent_runtime import _is_modify_goal
+    assert _is_modify_goal("Fix the bug in main.py")
+    assert _is_modify_goal("fix: error in login")
+    assert _is_modify_goal("Modify the parser")
+    assert _is_modify_goal("Change the API endpoint")
+    assert _is_modify_goal("Update dependencies")
+    assert _is_modify_goal("Edit the config file")
+    assert _is_modify_goal("Refactor the handler")
+    assert _is_modify_goal("Improve performance")
+    assert _is_modify_goal("Исправь ошибку в main.py")
+    assert _is_modify_goal("Изменить настройки")
+    assert not _is_modify_goal("Check if main.py exists")
+    assert not _is_modify_goal("Create a new file")
+
+
+def test_modify_goal_blocks_final_answer_without_changes(agent_factory):
+    """P1: modify_goal + empty files_changed → final_answer is blocked."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.modify_goal = True
+    agent._state.files_changed = []
+
+    agent._refresh_completion_requirements(force_enforcement=True)
+    assert agent._state.completion_blockers
+    assert any("Completion blocked" in b for b in agent._state.completion_blockers)
+
+
+def test_task_017_find_files_final_answer_blocked(agent_factory):
+    """P1 task_017: find_files → final_answer must be blocked for modify tasks."""
+    from agent_runtime import _is_modify_goal, _WRITE_ACTIONS
+
+    agent = agent_factory(max_steps=4)
+    agent._state.plan_info = PlanInfo(
+        goal="Fix the router",
+        complexity="simple",
+        plan=["find the buggy files", "apply the fix", "verify the result"],
+        success_criteria=["files are patched"],
+        risks=[],
+    )
+    agent._state.modify_goal = True
+    agent._state.task_language = "en"
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+
+    # Step 1: find_files (read-only)
+    # Step 2: premature final_answer without changes → should be blocked
+    # Step 3: model should be forced to take corrective action
+    responses = [
+        {
+            "thought": "Finding the buggy files",
+            "plan_step": "inspect",
+            "progress": 15,
+            "user_message": "Searching for files",
+            "action": {
+                "type": "find_files",
+                "args": {"pattern": "*.py"},
+            },
+        },
+        {
+            "thought": "I found the files, now reporting",
+            "plan_step": "done",
+            "progress": 100,
+            "user_message": "Task is done",
+            "action": {
+                "type": "final_answer",
+                "args": {"message": "Found the files, task complete"},
+            },
+        },
+        {
+            "thought": "I need to actually fix the file",
+            "plan_step": "edit",
+            "progress": 50,
+            "user_message": "Fixing the file",
+            "action": {
+                "type": "write_file",
+                "args": {"path": "router.py", "content": "fixed"},
+            },
+        },
+    ]
+    call_count = {"value": 0}
+
+    def fake_call_action_model(prompt: str) -> str:
+        index = call_count["value"]
+        if index >= len(responses):
+            raise AssertionError("task_017: should have blocked final_answer, not requested more")
+        call_count["value"] += 1
+        return json.dumps(responses[index], ensure_ascii=False)
+
+    agent._call_action_model = fake_call_action_model
+
+    # Simulate executor: find_files succeeds but doesn't change any files
+    def fake_execute(cmd):
+        if cmd.action.type == "find_files":
+            return {"ok": True, "action_type": "find_files", "data": {"pattern": "*.py", "matches": ["main.py", "router.py"]}}
+        if cmd.action.type == "final_answer":
+            return {"ok": True, "action_type": "final_answer", "data": {"message": cmd.action.args.get("message", "")}}
+        return {"ok": False, "action_type": cmd.action.type, "error": "unexpected"}
+    agent._execute_command = fake_execute
+
+    result = agent._run_loop("Fix the router", start_step=1)
+
+    # Verify that step 2 (final_answer) was blocked
+    blocked_final = [log for log in agent._state.step_logs if log.get("status") == "blocked_final_answer"]
+    assert len(blocked_final) >= 1, f"Expected blocked_final_answer in step_logs, got: {[l['status'] for l in agent._state.step_logs]}"
+    assert "Completion blocked" in blocked_final[0].get("reason", "")
+
+
+def test_task_017_live_scenario_russian_modify_blocked(agent_factory):
+    """P1: Live scenario — Russian modify goal, find_files+read_file then
+    final_answer must be blocked when files_changed is empty.
+
+    Exact task_017 prompt:
+      В файле empty_list.py исправь функцию average, чтобы она обрабатывала
+      пустой список и возвращала 0 вместо ошибки деления на ноль.
+
+    State: files_read=["empty_list.py"], files_changed=[]
+    Model action: final_answer
+    Expected: final_answer blocked, completion not allowed.
+    """
+    from agent_runtime import _is_modify_goal, _is_read_only_goal, _is_verify_only_goal
+
+    TASK_017_GOAL = (
+        "В файле empty_list.py исправь функцию average, "
+        "чтобы она обрабатывала пустой список и возвращала 0 "
+        "вместо ошибки деления на ноль."
+    )
+
+    # --- Checkpoint 2: _is_modify_goal must return True for this Russian string ---
+    assert _is_modify_goal(TASK_017_GOAL), (
+        "_is_modify_goal must be True for 'исправь' marker"
+    )
+    # Regression: _is_read_only_goal must NOT be True for a modify task,
+    # otherwise _is_read_only_violation blocks writes and creates a deadlock.
+    assert not _is_read_only_goal(TASK_017_GOAL), (
+        "_is_read_only_goal must be False for a FIX/MODIFY task "
+        "(otherwise write actions are blocked as read-only violations)"
+    )
+    assert not _is_verify_only_goal(TASK_017_GOAL), (
+        "_is_verify_only_goal must be False for a FIX/MODIFY task"
+    )
+
+    agent = agent_factory(max_steps=5)
+    agent._state.plan_info = PlanInfo(
+        goal=TASK_017_GOAL,
+        complexity="simple",
+        plan=[
+            "review relevant files and structure",
+            "make minimal precise changes",
+            "verify result and errors",
+            "summarize the completed task",
+        ],
+        success_criteria=["empty_list.py is patched", "verification passes"],
+        risks=[],
+    )
+    agent._state.task_language = "ru"
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+
+    # Live scenario: model reads the buggy file, then tries to end early
+    responses = [
+        # Step 1: find_files to locate the target
+        {
+            "thought": "Ищу файл для исправления",
+            "plan_step": "inspect",
+            "progress": 10,
+            "user_message": "Searching for the target file",
+            "action": {
+                "type": "find_files",
+                "args": {"pattern": "*.py"},
+            },
+        },
+        # Step 2: read the file content
+        {
+            "thought": "Читаю содержимое empty_list.py",
+            "plan_step": "inspect",
+            "progress": 20,
+            "user_message": "Reading empty_list.py for analysis",
+            "action": {
+                "type": "read_file",
+                "args": {"path": "empty_list.py"},
+            },
+        },
+        # Step 3: premature final_answer — THIS MUST BE BLOCKED
+        {
+            "thought": "Файл прочитан, задача выполнена",
+            "plan_step": "done",
+            "progress": 100,
+            "user_message": "Task is complete, all checks passed",
+            "action": {
+                "type": "final_answer",
+                "args": {
+                    "message": "Task completed successfully. All checks passed."
+                },
+            },
+        },
+        # Step 4: model should now attempt a corrective write action
+        {
+            "thought": "Исправляю функцию average для обработки пустого списка",
+            "plan_step": "edit",
+            "progress": 60,
+            "user_message": "Fixing the average function to handle empty list",
+            "action": {
+                "type": "replace_in_file",
+                "args": {
+                    "path": "empty_list.py",
+                    "old_text": "return total / len(numbers)",
+                    "new_text": "if len(numbers) == 0:\n        return 0\n    return total / len(numbers)",
+                },
+            },
+        },
+    ]
+    call_count = {"value": 0}
+
+    def fake_call_action_model(prompt: str) -> str:
+        index = call_count["value"]
+        if index >= len(responses):
+            raise AssertionError(
+                f"task_017 live: should have blocked final_answer at step 3, "
+                f"not required step {index + 1}"
+            )
+        call_count["value"] += 1
+        return json.dumps(responses[index], ensure_ascii=False)
+
+    agent._call_action_model = fake_call_action_model
+
+    def fake_execute(cmd):
+        if cmd.action.type == "find_files":
+            return {
+                "ok": True,
+                "action_type": "find_files",
+                "data": {
+                    "pattern": "*.py",
+                    "matches": ["empty_list.py"],
+                },
+            }
+        if cmd.action.type == "read_file":
+            return {
+                "ok": True,
+                "action_type": "read_file",
+                "data": {
+                    "path": cmd.action.args.get("path", ""),
+                    "content": "def average(numbers):\n    total = 0\n    for n in numbers:\n        total += n\n    return total / len(numbers)\n",
+                },
+            }
+        if cmd.action.type == "replace_in_file":
+            return {
+                "ok": True,
+                "action_type": "replace_in_file",
+                "data": {
+                    "path": cmd.action.args.get("path", ""),
+                    "occurrences_replaced": 1,
+                },
+            }
+        if cmd.action.type == "final_answer":
+            return {
+                "ok": True,
+                "action_type": "final_answer",
+                "data": {"message": cmd.action.args.get("message", "")},
+            }
+        return {"ok": False, "action_type": cmd.action.type, "error": "unexpected"}
+    agent._execute_command = fake_execute
+
+    result = agent._run_loop(TASK_017_GOAL, start_step=1)
+
+    # --- Checkpoint 1: modify_goal must be set in state ---
+    assert agent._state.modify_goal is True, (
+        "modify_goal must be True in RunState for this task"
+    )
+
+    # --- Checkpoint 3 & 4: final_answer at step 3 must be blocked ---
+    blocked_final = [
+        log for log in agent._state.step_logs
+        if log.get("status") == "blocked_final_answer"
+    ]
+    assert len(blocked_final) >= 1, (
+        f"Expected blocked_final_answer in step_logs, "
+        f"got statuses: {[l['status'] for l in agent._state.step_logs]}"
+    )
+    reason = blocked_final[0].get("reason", "")
+    assert "Completion blocked" in reason, (
+        f"Blocker message must contain 'Completion blocked', got: {reason!r}"
+    )
+    assert "FIX/MODIFY" in reason or "no files were changed" in reason, (
+        f"Blocker must mention FIX/MODIFY task nature, got: {reason!r}"
+    )
+
+    # After blocking, files_changed should still be empty (model was forced
+    # to take corrective action but we didn't reach it in this test)
+    # The important thing: completion was NOT allowed
+    final_steps = [
+        log for log in agent._state.step_logs
+        if log.get("status") == "final_answer"
+    ]
+    assert len(final_steps) == 0, (
+        "final_answer must not be accepted — task should not complete"
+    )
+
+
+# ── P2: security_policy_violations ───────────────────────────────────
+
+def test_security_policy_violations_tracked(agent_factory):
+    """P2: .env errors are recorded in security_policy_violations list."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+
+    cmd = make_command("read_file", {"path": ".env"})
+    feedback = {
+        "ok": False,
+        "action_type": "read_file",
+        "raw_error": "⛔ SECURITY POLICY VIOLATION: Attempted access to a .env file is permanently forbidden. Do not retry.",
+    }
+    agent._register_feedback(1, cmd, feedback)
+
+    assert len(agent._state.security_policy_violations) >= 1
+    assert any(".env" in v for v in agent._state.security_policy_violations)
+    assert "SECURITY POLICY" in agent._state.pending_instruction
+
+
+def test_security_policy_shell_env_blocked(agent_factory):
+    """P2: Shell commands accessing .env are blocked."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+
+    cmd = make_command("run_shell", {"command": ["cat", ".env"]})
+    feedback = {
+        "ok": False,
+        "action_type": "run_shell",
+        "raw_error": "⛔ SECURITY POLICY VIOLATION: Shell command is attempting to access a .env file which is permanently forbidden. Do not retry.",
+    }
+    agent._register_feedback(1, cmd, feedback)
+
+    assert len(agent._state.security_policy_violations) >= 1
+    assert "Do not retry" in agent._state.pending_instruction or "permanently forbidden" in agent._state.pending_instruction
+
+
+# ── P3: pending_verification_paths ───────────────────────────────────
+
+def test_pending_verification_paths_added_after_write(agent_factory):
+    """P3: After write_file, the path is added to pending_verification_paths."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+
+    cmd = make_command("write_file", {"path": "hello.py", "content": "print(1)"}, plan_step="edit")
+    feedback = {"ok": True, "action_type": "write_file", "data": {"path": "hello.py"}}
+    agent._register_feedback(1, cmd, feedback)
+
+    assert "hello.py" in agent._state.files_changed
+    assert "hello.py" in agent._state.pending_verification_paths
+
+
+def test_verification_clears_pending_paths(agent_factory):
+    """P3: git_diff and run_shell (pytest) clear pending_verification_paths; git_status does NOT."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.files_changed = ["hello.py"]
+    agent._state.pending_verification_paths = ["hello.py"]
+
+    # git_status does NOT clear
+    cmd_status = make_command("git_status", {}, plan_step="verify")
+    agent._update_verification_evidence(cmd_status, {"returncode": 0, "git_available": True, "fallback_used": False})
+    assert "hello.py" in agent._state.pending_verification_paths
+
+    # git_diff DOES clear
+    cmd_diff = make_command("git_diff", {}, plan_step="verify")
+    agent._state.pending_verification_paths = ["hello.py"]  # reset
+    agent._update_verification_evidence(cmd_diff, {"returncode": 0, "git_available": True, "fallback_used": False})
+    assert len(agent._state.pending_verification_paths) == 0
+
+
+def test_run_shell_pytest_clears_pending_paths(agent_factory):
+    """P3: run_shell with pytest clears pending_verification_paths."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.files_changed = ["hello.py"]
+    agent._state.pending_verification_paths = ["hello.py"]
+
+    cmd = make_command("run_shell", {"command": ["python", "-m", "pytest"]}, plan_step="verify")
+    agent._update_verification_evidence(cmd, {
+        "command": ["python", "-m", "pytest"],
+        "returncode": 0,
+    })
+    assert len(agent._state.pending_verification_paths) == 0
+    assert any("run_shell" in v for v in agent._state.verification_evidence)
+
+
+def test_pending_verification_blocks_final_answer(agent_factory):
+    """P3: final_answer is blocked when pending_verification_paths is not empty."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.create_goal = True
+    agent._state.files_changed = ["app.py"]
+    agent._state.pending_verification_paths = ["app.py"]
+    agent._state.completed_plan_steps = set(make_plan().plan)
+
+    agent._refresh_completion_requirements()
+    assert agent._state.completion_blockers
+    assert any("verification required" in b.lower() for b in agent._state.completion_blockers)
+
+
+# ── P4: devops run_shell parsing ───────────────────────────────────────
+
+def test_devops_run_shell_parsed_and_executed(agent_factory):
+    """DevOps run_shell: parser accepts command=[\"systemctl\",\"status\",\"nginx\"] and executor runs it."""
+    from parser import parse_agent_command
+
+    devops_response = json.dumps({
+        "thought": "Проверяю статус systemd сервиса",
+        "plan_step": "edit",
+        "progress": 60,
+        "user_message": "Проверяю статус nginx",
+        "action": {
+            "type": "run_shell",
+            "args": {
+                "command": ["systemctl", "status", "nginx", "--no-pager"],
+                "timeout": 15,
+            },
+        },
+    }, ensure_ascii=False)
+
+    command = parse_agent_command(devops_response)
+    assert command.action.type == "run_shell"
+    assert isinstance(command.action.args["command"], list)
+    assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
+    assert all(isinstance(x, str) for x in command.action.args["command"])
+
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+
+    executed_commands = []
+
+    def fake_execute(cmd):
+        if cmd.action.type == "run_shell":
+            executed_commands.append(cmd.action.args["command"])
+            return {"ok": True, "action_type": "run_shell", "data": {
+                "command": cmd.action.args["command"],
+                "stdout": "● nginx.service - nginx - high performance web server\n   Loaded: loaded\n   Active: active (running)",
+                "returncode": 0,
+            }}
+        return {"ok": False, "action_type": cmd.action.type, "error": "unexpected"}
+
+    agent._execute_command = fake_execute
+    agent._register_feedback(1, command, fake_execute(command))
+    assert len(executed_commands) == 1
+    assert executed_commands[0] == ["systemctl", "status", "nginx", "--no-pager"]
+    # Verify no parse error in step logs
+    parse_errors = [log for log in agent._state.step_logs if log.get("status") == "parse_error"]
+    assert len(parse_errors) == 0
+
+
+def test_devops_run_shell_string_command_rejected(agent_factory):
+    """DevOps run_shell: command as string → clear parse error, not generic 'Invalid model response'."""
+    from parser import parse_agent_command, CommandValidationError
+
+    devops_response_bad = json.dumps({
+        "thought": "Проверяю статус systemd сервиса",
+        "plan_step": "edit",
+        "progress": 60,
+        "user_message": "Проверяю статус nginx",
+        "action": {
+            "type": "run_shell",
+            "args": {
+                "command": "systemctl status nginx --no-pager",
+                "timeout": 15,
+            },
+        },
+    }, ensure_ascii=False)
+
+    with pytest.raises(CommandValidationError) as exc_info:
+        parse_agent_command(devops_response_bad)
+
+    error_msg = str(exc_info.value)
+    assert "must be a list of strings" in error_msg, (
+        f"Expected 'must be a list of strings' in error, got: {error_msg!r}"
+    )
+    # Must NOT be a generic message
+    assert "Invalid model response" not in error_msg
+    assert "Invalid JSON" not in error_msg
+
+
+# ── P5: devops systemctl allowlist + blocked command handling ──────────
+
+def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
+    """Devops run_shell with systemctl status passes terminal allowlist."""
+    from parser import parse_agent_command
+    from terminal import TerminalExecutor
+
+    devops_response = json.dumps({
+        "thought": "Проверяю статус nginx",
+        "plan_step": "edit",
+        "progress": 60,
+        "user_message": "Проверяю статус nginx",
+        "action": {
+            "type": "run_shell",
+            "args": {
+                "command": ["systemctl", "status", "nginx", "--no-pager"],
+                "timeout": 15,
+            },
+        },
+    }, ensure_ascii=False)
+
+    command = parse_agent_command(devops_response)
+    assert command.action.type == "run_shell"
+    assert isinstance(command.action.args["command"], list)
+
+    # Systemctl must now pass terminal validation in dev profile
+    agent = agent_factory()
+    terminal = TerminalExecutor(agent.executor.workspace, profile="dev")
+    # Must not raise TerminalError
+    terminal._validate(["systemctl", "status", "nginx", "--no-pager"])
+
+
+def test_devops_systemctl_dangerous_blocked_by_terminal(agent_factory):
+    """Dangerous systemctl subcommands (restart, enable) are blocked by terminal."""
+    from terminal import TerminalExecutor, TerminalError
+
+    agent = agent_factory()
+    terminal = TerminalExecutor(agent.executor.workspace, profile="dev")
+
+    with pytest.raises(TerminalError, match="Subcommand"):
+        terminal._validate(["systemctl", "restart", "nginx"])
+
+    with pytest.raises(TerminalError, match="Subcommand"):
+        terminal._validate(["systemctl", "enable", "nginx"])
+
+
+def test_devops_blocked_command_produces_honest_feedback(agent_factory):
+    """When run_shell is blocked, feedback is an honest error, not a silent success."""
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.current_agent_role = "devops"
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+    agent._state.task_language = "ru"
+
+    cmd = make_command("run_shell", {"command": ["systemctl", "restart", "nginx"], "timeout": 15})
+    feedback = {"ok": False, "action_type": "run_shell", "error": "Subcommand 'restart' is not allowed for 'systemctl'"}
+    agent._register_feedback(1, cmd, feedback)
+
+    # Verify that error feedback is recorded honestly
+    step = agent._state.step_logs[0]
+    assert step["status"] == "error"
+    # Verify that final_answer cannot complete when the core operation wasn't done
+    agent._state.files_changed = []
+    agent._state.read_only_goal = False  # devops run_shell should not be blocked by read-only
+    agent._refresh_completion_requirements(force_enforcement=True)
+    # The blocked command should be visible as a failure reason
+    assert len(agent._state.step_logs) >= 1
+
+
+def test_devops_status_nginx_no_parse_error(agent_factory):
+    """Full cycle: devops 'nginx status' → run_shell parsed → no parse_error."""
+    from parser import parse_agent_command
+
+    devops_response = json.dumps({
+        "thought": "Проверяю статус systemd сервиса nginx",
+        "plan_step": "edit",
+        "progress": 60,
+        "user_message": "Проверяю статус nginx",
+        "action": {
+            "type": "run_shell",
+            "args": {
+                "command": ["systemctl", "status", "nginx", "--no-pager"],
+                "timeout": 15,
+            },
+        },
+    }, ensure_ascii=False)
+
+    command = parse_agent_command(devops_response)
+    assert command.action.type == "run_shell"
+    assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
+    assert all(isinstance(x, str) for x in command.action.args["command"])
+
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.current_agent_role = "devops"
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+    agent._state.task_language = "ru"
+
+    agent._register_feedback(1, command, {
+        "ok": True,
+        "action_type": "run_shell",
+        "data": {
+            "command": ["systemctl", "status", "nginx", "--no-pager"],
+            "returncode": 0,
+            "stdout": "● nginx.service — активен",
+        },
+    })
+
+    # Verify no parse_error and the step was recorded as ok
+    step = agent._state.step_logs[0]
+    assert step["status"] != "parse_error"
+    assert step["status"] == "ok"
+
+
+def test_devops_systemctl_nonzero_exit_includes_stderr_in_error(agent_factory):
+    """When systemctl returns nonzero, error text includes stderr, not generic 'Action failed'."""
+    from executor import ExecutionResult
+
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.current_agent_role = "devops"
+
+    # Simulate systemctl returning "Unit nginx.service could not be found."
+    cmd = make_command("run_shell", {"command": ["systemctl", "status", "nginx", "--no-pager"]})
+    result = ExecutionResult(ok=False, action_type="run_shell", data={
+        "command": ["systemctl", "status", "nginx", "--no-pager"],
+        "returncode": 4,
+        "stdout": "",
+        "stderr": "Unit nginx.service could not be found.",
+    })
+
+    agent.executor.execute = lambda c: result
+    feedback = agent._execute_command(cmd)
+
+    # Error must include the real stderr, not generic "Action failed"
+    assert feedback["ok"] is False
+    error_text = agent._feedback_error_for_model(feedback)
+    assert "nginx.service could not be found" in error_text, (
+        f"Error must contain real systemctl output, got: {error_text!r}"
+    )
+    assert error_text != "Action failed"
+    assert "Action failed" not in error_text

@@ -22,7 +22,7 @@ def test_terminal_allows_common_read_only_command(tmp_path):
         (["python", "-c", "print(1)"], "Inline mode"),
         (["echo", "$(whoami)"], "Command substitution"),
         (["cat", "../secret"], "Path traversal"),
-        (["cat", "/etc/passwd"], "Absolute paths"),
+        (["echo", "/etc/passwd"], "Absolute paths"),
         (["sed", "-i", "s/a/b/", "file"], "In-place"),
     ],
 )
@@ -53,3 +53,63 @@ def test_terminal_clamps_timeout_and_truncates_output(tmp_path):
     assert executor._clamp_timeout(0.1) == 1.0
     assert executor._clamp_timeout(99) == 30.0
     assert "[TRUNCATED" in executor._truncate("x" * 1001)
+
+
+# ── DevOps systemctl allowlist ──────────────────────────────────────
+
+def test_systemctl_status_allowed_in_dev_profile(tmp_path):
+    """systemctl status nginx --no-pager passes terminal validation."""
+    executor = TerminalExecutor(tmp_path, profile="dev")
+    # Must not raise TerminalError
+    executor._validate(["systemctl", "status", "nginx", "--no-pager"])
+
+
+def test_systemctl_is_active_allowed(tmp_path):
+    """systemctl is-active nginx passes terminal validation."""
+    executor = TerminalExecutor(tmp_path, profile="dev")
+    executor._validate(["systemctl", "is-active", "nginx"])
+
+
+def test_systemctl_is_enabled_allowed(tmp_path):
+    """systemctl is-enabled nginx passes terminal validation."""
+    executor = TerminalExecutor(tmp_path, profile="dev")
+    executor._validate(["systemctl", "is-enabled", "nginx"])
+
+
+def test_systemctl_list_units_allowed(tmp_path):
+    """systemctl list-units --type=service passes terminal validation."""
+    executor = TerminalExecutor(tmp_path, profile="dev")
+    executor._validate(["systemctl", "list-units", "--type=service"])
+
+
+def test_systemctl_list_unit_files_allowed(tmp_path):
+    """systemctl list-unit-files nginx.service passes terminal validation."""
+    executor = TerminalExecutor(tmp_path, profile="dev")
+    executor._validate(["systemctl", "list-unit-files", "nginx.service"])
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["systemctl", "start", "nginx"],
+        ["systemctl", "stop", "nginx"],
+        ["systemctl", "restart", "nginx"],
+        ["systemctl", "reload", "nginx"],
+        ["systemctl", "enable", "nginx"],
+        ["systemctl", "disable", "nginx"],
+        ["systemctl", "daemon-reload"],
+        ["systemctl", "mask", "nginx"],
+    ],
+)
+def test_systemctl_dangerous_subcommands_blocked(tmp_path, command):
+    """Dangerous systemctl subcommands are blocked by subcommand validator."""
+    executor = TerminalExecutor(tmp_path, profile="dev")
+    with pytest.raises(TerminalError, match="Subcommand"):
+        executor._validate(command)
+
+
+def test_systemctl_blocked_in_restricted_profile(tmp_path):
+    """systemctl is NOT available in restricted profile (dev tools not loaded)."""
+    executor = TerminalExecutor(tmp_path, profile="restricted")
+    with pytest.raises(TerminalError, match="not allowed"):
+        executor._validate(["systemctl", "status", "nginx", "--no-pager"])

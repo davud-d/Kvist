@@ -19,6 +19,8 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("new", "Reset the session"),
     SlashCommand("provider", "Switch LLM provider"),
     SlashCommand("models", "Select fast/smart/planner models"),
+    SlashCommand("role", "Select agent role (auto/coder/devops/chat)"),
+    SlashCommand("session", "Manage and switch sessions"),
     SlashCommand("resume", "Resume last checkpoint"),
     SlashCommand("bye", "Exit DevAgentXD", aliases=("exit", "quit")),
 )

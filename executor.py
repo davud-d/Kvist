@@ -263,6 +263,14 @@ class SafeExecutor:
         if action_type == "delegate_task":
             return self._handle_delegation(args)
 
+        if action_type == "report_to_user":
+            # Handled in run_loop before reaching executor; defensive no-op
+            return ExecutionResult(
+                ok=True,
+                action_type="report_to_user",
+                data={"handled_by": "run_loop"},
+            )
+
         raise ExecutorError(f"Unsupported action: {action_type}")
 
     def _handle_delegation(self, args: dict[str, Any]) -> ExecutionResult:

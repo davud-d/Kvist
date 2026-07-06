@@ -25,6 +25,7 @@ ALLOWED_ACTIONS = {
     "web_search",
     "fetch_url",
     "delegate_task",
+    "report_to_user",
 }
 
 ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
@@ -71,13 +72,14 @@ def parse_agent_command(text: str) -> AgentCommand:
     if not isinstance(raw, dict):
         raise CommandValidationError("Root object must be a JSON object")
 
-    require_only_allowed_keys(raw, {"thought", "plan_step", "progress", "user_message", "action"})
+    require_only_allowed_keys(raw, {"thought", "plan_step", "progress", "user_message", "action", "step_summary"})
 
     thought = raw.get("thought")
     plan_step = raw.get("plan_step")
     progress = raw.get("progress")
     user_message = raw.get("user_message")
     action = raw.get("action")
+    step_summary = raw.get("step_summary")
 
     if not isinstance(thought, str) or not thought.strip():
         raise CommandValidationError("Field 'thought' must be a non-empty string")
@@ -99,6 +101,9 @@ def parse_agent_command(text: str) -> AgentCommand:
     if not isinstance(user_message, str) or not user_message.strip():
         raise CommandValidationError("Field 'user_message' must be a non-empty string")
 
+    if step_summary is not None and not isinstance(step_summary, str):
+        raise CommandValidationError("Field 'step_summary' must be a string")
+
     if not isinstance(action, dict):
         raise CommandValidationError("Field 'action' must be an object")
 
@@ -119,6 +124,7 @@ def parse_agent_command(text: str) -> AgentCommand:
         progress=progress,
         user_message=user_message.strip(),
         action=Action(type=action_type, args=args),
+        step_summary=step_summary.strip() if isinstance(step_summary, str) else "",
     )
 
 
@@ -313,6 +319,14 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
                 raise CommandValidationError(
                     "'commands' must contain only non-empty strings"
                 )
+
+    elif action_type == "report_to_user":
+        require_keys(args, {"summary", "result"})
+        require_only_allowed_keys(args, {"summary", "result", "issues"})
+        require_str(args, "summary")
+        require_str(args, "result")
+        if "issues" in args:
+            require_text(args, "issues")
 
 
 def require_keys(data: dict[str, Any], required: set[str]) -> None:

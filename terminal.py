@@ -54,26 +54,17 @@ class TerminalError(Exception):
 # Executables that are unconditionally forbidden
 # ---------------------------------------------------------------------------
 _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
-    # Deletion / moving
-    "rm", "rmdir", "del", "mv",
+    # Deletion
+    "rm", "rmdir", "del",
     # Privilege escalation
     "sudo", "su", "runas",
-    # Permissions / ownership
-    "chmod", "chown", "icacls", "takeown",
     # Destructive system commands
     "mkfs", "format", "dd",
     "shutdown", "reboot", "poweroff",
-    # Network utilities (can exfiltrate data)
-    "curl", "wget",
     # Remote access
-    "nc", "ncat", "netcat",
     "ssh", "scp", "sftp", "telnet", "ftp",
     # Windows registry
     "reg", "regedit",
-    # Service management
-    "net", "sc",
-    # Environment variable leakage
-    "env", "printenv", "set",
 })
 
 _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
@@ -90,8 +81,8 @@ _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
 # Shell operators forbidden as standalone arguments
 # ---------------------------------------------------------------------------
 _FORBIDDEN_OPERATORS: frozenset[str] = frozenset({
-    ";", "&&", "||", "|",
-    ">", ">>", "<", "<<",
+    ";", "&&", "||",
+    ">", ">>",
     "&",
 })
 
@@ -139,6 +130,14 @@ _DEV_COMMON_ALLOWED: dict[str, set[str] | None] = {
     "dotnet": None,
     "docker": None,
     "rg": None,
+    "systemctl": {
+        "status",
+        "is-active",
+        "is-enabled",
+        "list-units",
+        "list-unit-files",
+        "show",
+    },
 }
 
 _UNIX_ALLOWED: dict[str, set[str] | None] = {
@@ -175,9 +174,24 @@ _WINDOWS_ALLOWED: dict[str, set[str] | None] = {
     "whoami": None,
 }
 
+# Commands where absolute paths are safe in arguments (read-only inspection)
+_ABSOLUTE_PATH_SAFE_COMMANDS: frozenset[str] = frozenset({
+    "cat", "ls", "grep", "head", "tail", "wc", "file", "find",
+    "sed", "awk", "sort", "uniq",
+})
+
 _DEV_UNIX_ALLOWED: dict[str, set[str] | None] = {
     "bash": None,
     "sh": None,
+    "hostnamectl": None,
+    "lscpu": None,
+    "free": None,
+    "df": None,
+    "lsblk": None,
+    "lsusb": None,
+    "lspci": None,
+    "sysctl": None,
+    "lshw": None,
 }
 
 _DEV_WINDOWS_ALLOWED: dict[str, set[str] | None] = {
@@ -319,6 +333,10 @@ class TerminalExecutor:
         env = self._build_env(env_overrides)
         actual_command = self._wrap_for_platform(command)
 
+        # Auto-detect pipe usage: if command contains "|", run via sh -c
+        if "|" in actual_command:
+            actual_command = ["sh", "-c", " ".join(actual_command)]
+
         kwargs: dict[str, Any] = {
             "cwd": work_dir,
             "capture_output": True,
@@ -338,6 +356,25 @@ class TerminalExecutor:
 
         try:
             proc = subprocess.run(actual_command, **kwargs)
+        except UnicodeDecodeError:
+            # Rare: output contains broken UTF-8 even with errors="replace"
+            kwargs["encoding"] = "utf-8"
+            kwargs["errors"] = "surrogateescape"
+            proc = subprocess.run(actual_command, **kwargs)
+            # Decode safely: replace surrogates with replacement chars
+            stdout_raw = proc.stdout or ""
+            stderr_raw = proc.stderr or ""
+            if isinstance(stdout_raw, str):
+                stdout_raw = stdout_raw.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+            if isinstance(stderr_raw, str):
+                stderr_raw = stderr_raw.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
+            return TerminalResult(
+                command=command,
+                returncode=proc.returncode,
+                stdout=self._truncate(stdout_raw),
+                stderr=self._truncate(stderr_raw),
+                timed_out=False,
+            )
         except subprocess.TimeoutExpired:
             return TerminalResult(
                 command=command,
@@ -469,7 +506,7 @@ class TerminalExecutor:
                     f"Subcommand '{command[1]}' is not allowed for '{command[0]}'"
                 )
 
-        self._validate_common_tokens(command[1:])
+        self._validate_common_tokens(command[1:], executable)
         self._validate_interpreter_inline_modes(command, executable)
 
     def _validate_shell_command(self, command: list[str], executable: str) -> None:
@@ -551,7 +588,7 @@ class TerminalExecutor:
 
         self._validate_common_tokens(remainder_tokens)
 
-    def _validate_common_tokens(self, tokens: list[str]) -> None:
+    def _validate_common_tokens(self, tokens: list[str], executable: str = "") -> None:
         for token in tokens:
             # Exact match only with shell operator (not substring!)
             if token in _FORBIDDEN_OPERATORS:
@@ -563,7 +600,7 @@ class TerminalExecutor:
                     "Command substitution ($(), ``, ${}) in arguments is forbidden"
                 )
 
-            if self._is_absolute_path(token):
+            if self._is_absolute_path(token) and executable.casefold() not in _ABSOLUTE_PATH_SAFE_COMMANDS:
                 raise TerminalError("Absolute paths are forbidden in arguments")
 
             # UNC paths on Windows (\\server\share)

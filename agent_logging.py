@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 from agent_state import PlanInfo
@@ -16,14 +17,179 @@ _SECRET_RE = re.compile(
     r"|xox[baprs]-[a-zA-Z0-9\-]{10,}",
     re.ASCII,
 )
+_SESSION_VERSION = 1
+_SESSION_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z", re.ASCII)
 
 
 def get_logs_dir(self):
     return self.executor.workspace / self.config.logs_dirname
 
 
-def get_state_path(self):
-    return self.executor.workspace / self.config.state_filename
+def is_valid_session_name(session_name: object) -> bool:
+    return (
+        isinstance(session_name, str)
+        and _SESSION_NAME_RE.fullmatch(session_name) is not None
+    )
+
+
+def get_state_path(self, session_name: str = "default"):
+    if not is_valid_session_name(session_name):
+        raise ValueError(f"Invalid session name: {session_name!r}")
+    return self.executor.workspace / ".devagent" / "sessions" / f"{session_name}.json"
+
+
+def get_active_session_path(self):
+    return self.executor.workspace / ".devagent" / "active_session.json"
+
+
+def get_sessions_dir(self):
+    return self.executor.workspace / ".devagent" / "sessions"
+
+
+def _read_json_object(path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json_object(path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    temp_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temp_path.replace(path)
+
+
+def _session_checkpoint(data: dict[str, Any]) -> dict[str, Any] | None:
+    checkpoint = data.get("checkpoint")
+    if isinstance(checkpoint, dict) and "goal" in checkpoint:
+        return checkpoint
+    # Backward compatibility with the original flat checkpoint format.
+    if "goal" in data:
+        return data
+    return None
+
+
+def _serializable_chat_history(self) -> list[dict[str, Any]]:
+    history = getattr(self, "_chat_history", [])
+    if not isinstance(history, list):
+        return []
+    return [
+        {key: value for key, value in message.items() if key in ("role", "content")}
+        for message in history
+        if isinstance(message, dict)
+    ]
+
+
+def _session_document(
+    self,
+    checkpoint: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "version": _SESSION_VERSION,
+        "session": getattr(self, "current_session", "default"),
+        "updated_at": time.time(),
+        "session_history": getattr(self, "_session_history", []),
+        "chat_history": _serializable_chat_history(self),
+        "checkpoint": checkpoint,
+    }
+
+
+def save_active_session(self, name: str | None = None) -> None:
+    session = name or getattr(self, "current_session", "default")
+    if not is_valid_session_name(session):
+        raise ValueError(f"Invalid session name: {session!r}")
+    _write_json_object(
+        get_active_session_path(self),
+        {"session": session, "updated_at": time.time()},
+    )
+
+
+def load_active_session(self) -> str:
+    marker = _read_json_object(get_active_session_path(self))
+    saved_name = marker.get("session")
+    if is_valid_session_name(saved_name):
+        if saved_name == "default" or get_state_path(self, saved_name).is_file():
+            return saved_name
+
+    sessions_dir = get_sessions_dir(self)
+    if not sessions_dir.exists():
+        return "default"
+    candidates = [
+        path
+        for path in sessions_dir.glob("*.json")
+        if path.is_file() and is_valid_session_name(path.stem)
+    ]
+    if not candidates:
+        return "default"
+    try:
+        return max(candidates, key=lambda path: path.stat().st_mtime_ns).stem
+    except OSError:
+        return "default"
+
+
+def list_sessions(self) -> list[str]:
+    sessions_dir = get_sessions_dir(self)
+    if not sessions_dir.exists():
+        return []
+    return sorted(
+        p.stem for p in sessions_dir.glob("*.json")
+        if p.is_file() and p.stat().st_size > 0 and is_valid_session_name(p.stem)
+    )
+
+
+def delete_session(self, name: str) -> bool:
+    path = get_state_path(self, name)
+    if path.exists():
+        path.unlink()
+        marker = _read_json_object(get_active_session_path(self))
+        if marker.get("session") == name:
+            save_active_session(self, "default")
+        return True
+    return False
+
+
+def save_session(self) -> None:
+    session = getattr(self, "current_session", "default")
+    state_path = get_state_path(self, session)
+    existing = _read_json_object(state_path)
+    _write_json_object(
+        state_path,
+        _session_document(self, checkpoint=_session_checkpoint(existing)),
+    )
+    save_active_session(self, session)
+
+
+def load_session(self) -> bool:
+    session = getattr(self, "current_session", "default")
+    data = _read_json_object(get_state_path(self, session))
+    if not data:
+        self._session_history = []
+        if hasattr(self, "_chat_history"):
+            del self._chat_history
+        return False
+
+    saved_history = data.get("session_history")
+    self._session_history = saved_history if isinstance(saved_history, list) else []
+
+    saved_chat = data.get("chat_history")
+    if isinstance(saved_chat, list) and saved_chat:
+        self._chat_history = [
+            message
+            for message in saved_chat
+            if isinstance(message, dict)
+            and message.get("role") in ("system", "user", "assistant")
+            and isinstance(message.get("content"), str)
+        ]
+    elif hasattr(self, "_chat_history"):
+        del self._chat_history
+    return True
 
 
 def sanitize_for_log(self, value: Any, max_str_len: int = 300) -> Any:
@@ -89,7 +255,8 @@ def persist_logs(self, user_goal: str) -> None:
 
 
 def save_checkpoint(self, user_goal: str, step: int) -> None:
-    state_path = get_state_path(self)
+    session = getattr(self, "current_session", "default")
+    state_path = get_state_path(self, session)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "goal": user_goal,
@@ -133,22 +300,30 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
             "success_criteria": self._state.plan_info.success_criteria,
             "risks": self._state.plan_info.risks,
         }
-    state_path.write_text(
-        json.dumps(checkpoint, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    _write_json_object(
+        state_path,
+        _session_document(self, checkpoint=checkpoint),
     )
+    save_active_session(self, session)
 
 
 def load_checkpoint(self) -> tuple[str, int] | None:
-    state_path = get_state_path(self)
-    if not state_path.exists():
-        return None
-    try:
-        data = json.loads(state_path.read_text(encoding="utf-8"))
-    except Exception:
+    session = getattr(self, "current_session", "default")
+    session_data = _read_json_object(get_state_path(self, session))
+    if not session_data:
         return None
 
-    if not isinstance(data, dict) or "goal" not in data:
+    # Histories are session data, not checkpoint data, and must survive
+    # completed tasks as well as interrupted ones.
+    saved_history = session_data.get("session_history")
+    if isinstance(saved_history, list):
+        self._session_history = saved_history
+    saved_chat = session_data.get("chat_history")
+    if isinstance(saved_chat, list) and saved_chat:
+        self._chat_history = saved_chat
+
+    data = _session_checkpoint(session_data)
+    if data is None:
         return None
 
     plan_data = data.get("plan_info")
@@ -192,10 +367,20 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.pending_instruction = data.get("pending_instruction", "")
     self._state.last_action_signature = data.get("last_action_signature", "")
 
+    # The legacy flat format stored histories inside the checkpoint.
+    if "checkpoint" not in session_data:
+        legacy_history = data.get("session_history")
+        if isinstance(legacy_history, list):
+            self._session_history = legacy_history
+        legacy_chat = data.get("chat_history")
+        if isinstance(legacy_chat, list) and legacy_chat:
+            self._chat_history = legacy_chat
+
     return data["goal"], data.get("step", 1)
 
 
 def clear_checkpoint(self) -> None:
-    state_path = get_state_path(self)
-    if state_path.exists():
-        state_path.unlink()
+    session = getattr(self, "current_session", "default")
+    state_path = get_state_path(self, session)
+    _write_json_object(state_path, _session_document(self, checkpoint=None))
+    save_active_session(self, session)

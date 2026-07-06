@@ -98,13 +98,14 @@ def agent_factory(tmp_path):
     return build
 
 
-def make_command(action_type: str, args: dict, progress: int = 10, plan_step: str = "inspect") -> AgentCommand:
+def make_command(action_type: str, args: dict, progress: int = 10, plan_step: str = "inspect", step_summary: str = "") -> AgentCommand:
     return AgentCommand(
         thought="Inspecting current state",
         plan_step=plan_step,
         progress=progress,
         user_message="Working on the task",
         action=Action(type=action_type, args=args),
+        step_summary=step_summary,
     )
 
 

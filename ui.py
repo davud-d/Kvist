@@ -16,6 +16,15 @@ from rich.text import Text
 
 from terminal import is_hitl_active
 
+try:
+    from prompt_toolkit import prompt as pt_prompt
+    from prompt_toolkit.styles import Style as PtStyle
+    _PROMPT_TOOLKIT_AVAILABLE = True
+except ImportError:
+    pt_prompt = None  # type: ignore[assignment]
+    PtStyle = None  # type: ignore[assignment]
+    _PROMPT_TOOLKIT_AVAILABLE = False
+
 
 class AgentUI:
     """Responsible for all visual output of the agent."""
@@ -25,6 +34,7 @@ class AgentUI:
         self.verbose = verbose
         self._live: Live | None = None
         self._perf_logger = perf_logger
+        self._spinner_cache: dict[tuple[str, str], Spinner] = {}
 
     def start_live(self) -> None:
         if self.verbose or is_hitl_active():
@@ -59,8 +69,8 @@ class AgentUI:
         user_message: str,
         status: str,
         step: int,
-        progress: int,
-        plan_step: str,
+        progress: int = 0,
+        plan_step: str = "working",
         is_error: bool = False,
     ) -> None:
         if self.verbose or self._live is None or is_hitl_active():
@@ -75,12 +85,13 @@ class AgentUI:
             is_error=is_error,
         )
 
-        render_start = time.monotonic()
-        self._live.update(panel, refresh=True)
-        render_duration_ms = (time.monotonic() - render_start) * 1000
-
         if self._perf_logger is not None:
+            render_start = time.monotonic()
+            self._live.update(panel, refresh=True)
+            render_duration_ms = (time.monotonic() - render_start) * 1000
             self._perf_logger.log_render(render_duration_ms=render_duration_ms)
+        else:
+            self._live.update(panel, refresh=True)
 
     def print_plan(self, plan_info: Any) -> None:
         if not self.verbose:
@@ -126,19 +137,38 @@ class AgentUI:
         if self.verbose:
             print(message)
 
+    def print_result(self, message: str) -> None:
+        """Print a success/result message (backward-compatible)."""
+        self.console.print(f"[bright_green]{message}[/bright_green]")
+
+    def print_error(self, message: str) -> None:
+        """Print an error message (backward-compatible)."""
+        self.console.print(f"[bright_yellow]{message}[/bright_yellow]")
+
     def choose_option(
         self,
         title: str,
-        options: list[dict[str, str]],
-        current_value: str,
+        options: list[str] | list[dict[str, str]],
+        current_value: str = "",
         help_text: str = "↑/↓ — select, Enter — confirm, Esc — cancel",
     ) -> str | None:
         if not options:
             return None
-        if not sys.stdin.isatty():
-            return None
 
-        values = [item["value"] for item in options]
+        # Normalize options to list of dicts (handle legacy list-of-strings)
+        if isinstance(options[0], str):
+            normalized_options = [{"value": opt, "label": opt} for opt in options if isinstance(opt, str)]
+        else:
+            normalized_options = [opt for opt in options if isinstance(opt, dict)]
+
+        if not sys.stdin.isatty():
+            # Non-TTY: return current_value if it matches an option, else first option
+            values = [item["value"] for item in normalized_options]
+            if current_value and current_value in values:
+                return current_value
+            return values[0] if values else None
+
+        values = [item["value"] for item in normalized_options]
         index = values.index(current_value) if current_value in values else 0
 
         while True:
@@ -155,7 +185,7 @@ class AgentUI:
             )
 
             rows: list[Text] = []
-            for option_index, option in enumerate(options):
+            for option_index, option in enumerate(normalized_options):
                 is_selected = option_index == index
                 prefix = "❯ " if is_selected else "  "
                 row = Text()
@@ -180,17 +210,128 @@ class AgentUI:
 
             pressed = self._read_menu_key()
             if pressed == "up":
-                index = (index - 1) % len(options)
+                index = (index - 1) % len(normalized_options)
                 continue
             if pressed == "down":
-                index = (index + 1) % len(options)
+                index = (index + 1) % len(normalized_options)
                 continue
             if pressed == "enter":
                 self.console.clear()
-                return options[index]["value"]
+                return normalized_options[index]["value"]
             if pressed in {"escape", "interrupt"}:
                 self.console.clear()
                 return None
+
+    def prompt_text(
+        self,
+        title: str,
+        current_value: str = "",
+        help_text: str = "",
+    ) -> str | None:
+        """Prompt user for text input. Returns None if stdin is not TTY or user cancelled.
+
+        Uses prompt_toolkit for full line editing (arrow keys, Ctrl+A/E, etc.)
+        when available; falls back to built-in input().
+        """
+        if not sys.stdin.isatty():
+            return current_value if current_value else None
+
+        self.console.clear()
+
+        # Build panel content
+        content_parts: list[Text | str] = []
+        if help_text:
+            content_parts.append(Text(help_text, style="grey70"))
+            content_parts.append("")
+
+        if current_value:
+            content_parts.append(Text(f"Current: {current_value}", style="bright_yellow"))
+            content_parts.append("")
+
+        content_parts.append(Text("Enter value (Esc to cancel):", style="white"))
+
+        self.console.print(
+            Panel(
+                Group(*content_parts),
+                title=title,
+                title_align="left",
+                border_style="bright_cyan",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+
+        try:
+            if _PROMPT_TOOLKIT_AVAILABLE:
+                user_input = pt_prompt(
+                    "> ",
+                    default=current_value if current_value else "",
+                    style=PtStyle.from_dict({"": "#ffffff"}),
+                ).strip()
+                self.console.clear()
+                return user_input if user_input else (current_value or None)
+            else:
+                user_input = input("> ").strip()
+                self.console.clear()
+                return user_input if user_input else (current_value or None)
+        except (KeyboardInterrupt, EOFError):
+            self.console.clear()
+            return None
+
+    def prompt_secret(
+        self,
+        title: str,
+        current_value: str = "",
+        help_text: str = "",
+    ) -> str | None:
+        """Prompt user for SECRET text input (masked).
+
+        Uses prompt_toolkit with is_password=True for hidden input
+        while preserving full line editing (arrow keys, etc.).
+        Returns None if stdin is not TTY or user cancelled.
+        """
+        if not sys.stdin.isatty():
+            return None
+
+        if not _PROMPT_TOOLKIT_AVAILABLE:
+            from getpass import getpass
+            return getpass("> ").strip() or None
+
+        self.console.clear()
+
+        content_parts: list[Text | str] = []
+        if help_text:
+            content_parts.append(Text(help_text, style="grey70"))
+            content_parts.append("")
+
+        if current_value:
+            content_parts.append(Text("Current: *** (already configured)", style="bright_yellow"))
+            content_parts.append("")
+
+        content_parts.append(Text("Enter value (input hidden, Esc to cancel):", style="white"))
+
+        self.console.print(
+            Panel(
+                Group(*content_parts),
+                title=title,
+                title_align="left",
+                border_style="bright_cyan",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
+
+        try:
+            user_input = pt_prompt(
+                "> ",
+                is_password=True,
+                style=PtStyle.from_dict({"": "#ffffff"}),
+            ).strip()
+            self.console.clear()
+            return user_input
+        except (KeyboardInterrupt, EOFError):
+            self.console.clear()
+            return None
 
     @staticmethod
     def _read_menu_key() -> str:
@@ -267,11 +408,14 @@ class AgentUI:
         )
 
         spinner_text = "fixing step" if state_label == "adjusting" else "executing task"
-
-        spinner = Spinner(
-            "dots",
-            text=Text(spinner_text, style=light_style),
-        )
+        spinner_key = (spinner_text, light_style)
+        spinner = self._spinner_cache.get(spinner_key)
+        if spinner is None:
+            spinner = Spinner(
+                "dots",
+                text=Text(spinner_text, style=light_style),
+            )
+            self._spinner_cache[spinner_key] = spinner
 
         message_text = Text(public_message, style="bold bright_cyan")
         meta_text = Text(

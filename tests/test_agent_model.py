@@ -27,13 +27,13 @@ def test_count_tokens_falls_back_without_encoding(agent_factory):
 def test_trim_prompt_to_token_limit_keeps_head_and_tail(agent_factory):
     agent = agent_factory(max_context_tokens=20)
     agent._count_tokens = lambda text: len(text)
-    prompt = "a" * 1000 + "TAIL"
+    prompt = "HEAD" + "b" * 1000
 
     trimmed = agent._trim_prompt_to_token_limit("system", prompt)
 
-    assert "PROMPT MIDDLE TRUNCATED" in trimmed
-    assert "TAIL" in trimmed
-    assert trimmed.endswith("[CONTEXT TRUNCATED]")
+    assert "CONTEXT TRIMMED BY PRIORITY" in trimmed
+    assert "HEAD" in trimmed
+    assert trimmed.endswith("[CONTEXT TRIMMED BY PRIORITY]")
 
 
 def test_call_model_uses_cache_and_non_streaming_completion(agent_factory, monkeypatch):

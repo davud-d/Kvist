@@ -15,10 +15,17 @@ from agent_context import (
 )
 from agent_logging import (
     clear_checkpoint,
+    delete_session,
+    is_valid_session_name,
+    list_sessions,
+    load_active_session,
     load_checkpoint,
+    load_session,
     persist_logs,
     sanitize_for_log,
+    save_active_session,
     save_checkpoint,
+    save_session,
 )
 from agent_model import (
     call_action_model,
@@ -28,6 +35,8 @@ from agent_model import (
     count_tokens,
     init_tiktoken_encoding,
     prefer_smart_model,
+    safe_extract_completion_content,
+    safe_extract_stream_delta,
     select_action_model_for_run,
     trim_prompt_to_token_limit,
 )
@@ -42,6 +51,7 @@ from agent_runtime import (
     build_early_stop_message,
     build_error_feedback,
     build_limit_reached_message,
+    build_auto_completion_message,
     command_language_error,
     execute_command,
     feedback_error_for_model,
@@ -68,6 +78,8 @@ from agent_runtime import (
     update_progress,
     update_state_from_success,
     update_verification_evidence,
+    _is_report_artifact_blocked,
+    _is_read_only_violation,
 )
 from deps import detect_dependency_versions
 from agent_state import AgentConfig, RunState
@@ -108,6 +120,70 @@ class LocalAgent:
         self._ui = AgentUI(console=self.console, verbose=self.config.verbose, perf_logger=self._perf_logger)
         self._encoding = self._init_tiktoken_encoding()
         self._current_step = 0
+        self.current_session = load_active_session(self)
+        self._session_history: list[dict[str, Any]] = []
+        load_session(self)
+
+    def _add_to_session_history(self, user_goal: str, role: str, result: str) -> None:
+        """Record a completed run in session history for context."""
+        # Collect key technical outputs from this run
+        outputs: list[str] = []
+        for log_entry in self._state.step_logs[-10:]:
+            if log_entry.get("status") == "ok":
+                action_type = log_entry.get("command", {}).get("action", {}).get("type", "")
+                if action_type == "run_shell":
+                    stdout = log_entry.get("feedback", {}).get("data", {}).get("stdout", "")
+                    if stdout:
+                        outputs.append(stdout[:300])
+                elif action_type == "final_answer":
+                    outputs.append(log_entry.get("message", "")[:200])
+
+        entry = {
+            "goal": user_goal,
+            "role": role,
+            "result": result[:200],
+        }
+        if outputs:
+            entry["outputs"] = outputs
+        self._session_history.append(entry)
+        # Keep last 10 entries
+        if len(self._session_history) > 10:
+            self._session_history = self._session_history[-10:]
+        self.save_session()
+
+    def new_session(self, name: str | None = None) -> None:
+        """Reset to a fresh session — saves current, clears state, chat history, and checkpoint."""
+        if name is not None and not is_valid_session_name(name):
+            raise ValueError(f"Invalid session name: {name!r}")
+        if name is not None and name != self.current_session:
+            self.save_session()
+            self.current_session = name
+        self._clear_checkpoint()
+        self._reset_run_state()
+        self._session_history = []
+        if hasattr(self, "_chat_history"):
+            del self._chat_history
+        self.save_session()
+
+    def _save_session_marker(self) -> None:
+        """Keep compatibility with callers that create an empty session marker."""
+        self.save_session()
+
+    def switch_session(self, name: str) -> None:
+        """Save current session and switch to another named session."""
+        if not is_valid_session_name(name):
+            raise ValueError(f"Invalid session name: {name!r}")
+        if name == self.current_session:
+            return
+        self.save_session()
+        self.current_session = name
+        self._reset_run_state()
+        if not self._load_session():
+            self._session_history = []
+            if hasattr(self, "_chat_history"):
+                del self._chat_history
+            self.save_session()
+        self._save_active_session()
 
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
         self._reset_run_state()
@@ -129,7 +205,9 @@ class LocalAgent:
 
         # ── Chat mode: lightweight path, no JSON protocol ────────
         if self._state.current_agent_role == "chat":
-            return self._run_chat(user_goal)
+            result = self._run_chat(user_goal)
+            self._add_to_session_history(user_goal, "chat", result)
+            return result
 
         # ── Standard path (coder / devops): single run_loop ──────
         self._state.plan_info = self._create_plan(user_goal)
@@ -137,7 +215,9 @@ class LocalAgent:
             self._select_action_model_for_run()
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
         self._ui.print_plan(self._state.plan_info)
-        return self._run_loop(user_goal, start_step=1)
+        result = self._run_loop(user_goal, start_step=1)
+        self._add_to_session_history(user_goal, self._state.current_agent_role, result)
+        return result
 
     def resume(self) -> str | None:
         self._reset_run_state()
@@ -155,7 +235,9 @@ class LocalAgent:
         self._ui.debug_print(
             f"Execution model restored: tier={self._state.selected_action_role}, model={self._state.selected_action_model}"
         )
-        return self._run_loop(user_goal, start_step=last_step + 1)
+        result = self._run_loop(user_goal, start_step=last_step + 1)
+        self._add_to_session_history(user_goal, self._state.current_agent_role, result)
+        return result
 
     _reset_run_state = reset_run_state
     _run_loop = run_loop
@@ -201,6 +283,7 @@ class LocalAgent:
     _render_feedback = render_feedback
     _build_early_stop_message = build_early_stop_message
     _build_limit_reached_message = build_limit_reached_message
+    _build_auto_completion_message = build_auto_completion_message
     _is_repeat_blocked = is_repeat_blocked
     _action_signature = action_signature
     _record_user_message = record_user_message
@@ -210,6 +293,8 @@ class LocalAgent:
     _push_unique = push_unique
     _push_bounded = push_bounded
     _update_verification_evidence = update_verification_evidence
+    _is_report_artifact_blocked = _is_report_artifact_blocked
+    _is_read_only_violation = _is_read_only_violation
 
     _prepare_web_search_command = prepare_web_search_command
     _prepare_fetch_url_command = prepare_fetch_url_command
@@ -226,6 +311,11 @@ class LocalAgent:
     _save_checkpoint = save_checkpoint
     _load_checkpoint = load_checkpoint
     _clear_checkpoint = clear_checkpoint
+    save_session = save_session
+    _load_session = load_session
+    _save_active_session = save_active_session
+    _list_sessions = list_sessions
+    _delete_session = delete_session
 
     # ── Role routing ─────────────────────────────────────────────
 
@@ -245,50 +335,100 @@ class LocalAgent:
 
     def _run_chat(self, user_goal: str) -> str:
         """Lightweight chat mode: direct markdown streaming, no JSON protocol."""
-        from agent_model import _load_role_prompt
+        from agent_model import _load_role_prompt, safe_extract_completion_content
         from context_utils import trim_history
+        from llm_clients import fallback_candidates_for_model
 
         system_prompt = _load_role_prompt("chat")
 
         # Initialize chat history if it doesn't exist
         if not hasattr(self, "_chat_history"):
             self._chat_history = [{"role": "system", "content": system_prompt}]
-        
+
         # Add new call messages (from user, system, and function calls)
-        self._chat_history.append({"role": "user", "content": user_goal})
+        # Inject session history context
+        session_context = ""
+        if hasattr(self, "_session_history") and self._session_history:
+            history_lines = [
+                "(Before you respond: here is what happened earlier in this session. "
+                "Use this context to understand what the user is referring to. "
+                "The 'outputs' field contains actual command results, NOT descriptions.)",
+            ]
+            for entry in self._session_history[-5:]:
+                history_lines.append(
+                    f"- [{entry['role']}] Asked: \"{entry['goal']}\""
+                )
+                for output in entry.get("outputs", []):
+                    history_lines.append(f"    Output: {output}")
+            session_context = "\n".join(history_lines) + "\n\n---\n\n"
+
+        self._chat_history.append({"role": "user", "content": session_context + user_goal})
 
         # Trim history to keep only last 10 messages + system prompt
         self._chat_history = trim_history(self._chat_history, max_recent=10)
 
-        try:
-            if self.config.stream:
-                content = self._stream_chat_response(self._chat_history)
-            else:
-                response = self.client.chat.completions.create(
-                    model=self.config.fast_model,
-                    messages=self._chat_history,
-                )
-                content = response.choices[0].message.content or ""
-                
-                # Safe extraction for freeflow (if using non-streaming branch)
-                if hasattr(response, "content"):
-                    content = response.content
-                
-                self.console.print(Markdown(content))
-            
-            # Save model response to history
-            self._chat_history.append({"role": "assistant", "content": content})
-            return content
-            
-        except Exception as error:
-            error_msg = f"Chat error: {error}"
-            self.console.print(f"[red]{error_msg}[/red]")
-            return error_msg
+        content = ""
+        last_error: Exception | None = None
 
-    def _stream_chat_response(self, messages: list) -> str:
+        # Build model list: fast model first, then fallback candidates
+        models_to_try: list[str] = [self.config.fast_model]
+        try:
+            fallbacks = fallback_candidates_for_model(
+                self.config.provider,
+                self.config.fast_model,
+                allow_runtime_fallbacks=True,
+            )
+            for fb in fallbacks:
+                if fb not in models_to_try:
+                    models_to_try.append(fb)
+        except Exception:
+            pass
+
+        for attempt, model in enumerate(models_to_try):
+            try:
+                if self.config.stream:
+                    content = self._stream_chat_response(self._chat_history, model=model)
+                else:
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=self._chat_history,
+                    )
+                    content = safe_extract_completion_content(
+                        response, self.config.provider, model
+                    )
+                    self.console.print(Markdown(content))
+
+                # Save model response to history and return
+                if content:
+                    self._chat_history.append({"role": "assistant", "content": content})
+                    return content
+
+                # Empty content (but no exception) — try next model
+                last_error = RuntimeError("Model returned empty content")
+                continue
+
+            except Exception as error:
+                last_error = error
+                if attempt < len(models_to_try) - 1:
+                    self._ui.debug_print(
+                        f"Chat attempt {attempt + 1} failed ({error}), trying fallback..."
+                    )
+                continue
+
+        # All models exhausted — show friendly error, don't crash REPL
+        error_detail = f": {last_error}" if last_error else ""
+        fallback_msg = (
+            f"The model did not return a response{error_detail}. "
+            "Try again, or use /provider to switch to a different provider."
+        )
+        self.console.print(f"[yellow]{fallback_msg}[/yellow]")
+        return fallback_msg
+
+    def _stream_chat_response(self, messages: list, model: str | None = None) -> str:
         """Stream chat response as markdown directly to console."""
+        stream_model = model or self.config.fast_model
         stream = self.client.chat.completions.create(
-            model=self.config.fast_model,
+            model=stream_model,
             messages=messages,
             stream=True,
         )
@@ -302,8 +442,8 @@ class LocalAgent:
                 text = ""
                 
                 # 1. OpenAI variant (strict objects with attributes)
-                if hasattr(chunk, "choices") and chunk.choices:
-                    delta = chunk.choices[0].delta
+                delta = safe_extract_stream_delta(chunk)
+                if delta is not None:
                     text = getattr(delta, "content", "") if not isinstance(delta, dict) else delta.get("content", "")
                 
                 # 2. freeflow-llm variant (raw dicts)

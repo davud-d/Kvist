@@ -90,6 +90,7 @@ def test_validate_action_args_accepts_valid_shapes(action_type, args):
         ("search_code", {"query": "x", "max_results": 201}, "range 1..200"),
         ("run_shell", {"command": [], "timeout": 1}, "must not be empty"),
         ("run_shell", {"command": ["python"], "timeout": 31}, "range 1..30"),
+        ("run_shell", {"command": "systemctl status nginx", "timeout": 15}, "must be a list of strings"),
         ("web_search", {"query": "x", "freshness": "year"}, "freshness"),
         ("fetch_url", {"url": "file:///tmp/x"}, "http or https"),
         ("delegate_task", {"target_role": "root", "task": "x"}, "target_role"),
@@ -98,3 +99,71 @@ def test_validate_action_args_accepts_valid_shapes(action_type, args):
 def test_validate_action_args_rejects_edge_cases(action_type, args, error):
     with pytest.raises(CommandValidationError, match=error):
         validate_action_args(action_type, args)
+
+
+def test_parse_agent_command_accepts_optional_step_summary():
+    command = parse_agent_command(
+        '{"thought":"Think","plan_step":"inspect","progress":10,'
+        '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}},'
+        '"step_summary":"Read ui.py, found auth bug on line 42"}'
+    )
+    assert command.step_summary == "Read ui.py, found auth bug on line 42"
+
+
+def test_parse_agent_command_accepts_missing_step_summary():
+    command = parse_agent_command(
+        '{"thought":"Think","plan_step":"inspect","progress":10,'
+        '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}}}'
+    )
+    assert command.step_summary == ""
+
+
+def test_parse_agent_command_rejects_non_string_step_summary():
+    import json
+
+    payload = {**valid_payload("read_file", {"path": "ui.py"}), "step_summary": 123}
+    with pytest.raises(CommandValidationError, match="step_summary"):
+        parse_agent_command(json.dumps(payload))
+
+
+def test_devops_run_shell_accepts_list_command():
+    """DevOps run_shell: parser must accept command as list[str]."""
+    payload = {
+        "thought": "Проверяю статус systemd сервиса",
+        "plan_step": "edit",
+        "progress": 60,
+        "user_message": "Проверяю статус nginx",
+        "action": {
+            "type": "run_shell",
+            "args": {
+                "command": ["systemctl", "status", "nginx", "--no-pager"],
+                "timeout": 15,
+            },
+        },
+    }
+    import json
+    command = parse_agent_command(json.dumps(payload))
+    assert command.action.type == "run_shell"
+    assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
+    assert isinstance(command.action.args["command"], list)
+    assert all(isinstance(x, str) for x in command.action.args["command"])
+
+
+def test_devops_run_shell_rejects_string_command_with_clear_error():
+    """DevOps run_shell: if command is a string, the error message must mention 'list of strings'."""
+    payload = {
+        "thought": "Проверяю статус systemd сервиса",
+        "plan_step": "edit",
+        "progress": 60,
+        "user_message": "Проверяю статус nginx",
+        "action": {
+            "type": "run_shell",
+            "args": {
+                "command": "systemctl status nginx --no-pager",
+                "timeout": 15,
+            },
+        },
+    }
+    import json
+    with pytest.raises(CommandValidationError, match="must be a list of strings"):
+        parse_agent_command(json.dumps(payload))

@@ -139,9 +139,11 @@ AGENT_VERBOSE=0
 - **⚠️ `FreeFlow LLM` сейчас находится в бета-тестировании и остаётся очень
   нестабильным.** Возможны периодические сбои, таймауты и непоследовательные
   ответы. Используйте `OpenAI`, если нужна стабильная работа.
+- `OmniRoute` — это локальный OpenAI-совместимый gateway для маршрутизации запросов
+  к нескольким LLM-провайдерам. См. раздел OmniRoute ниже для настройки.
 
-`AGENT_PERSIST_LOGS=0` отключает run-логи, но `/resume` всё равно использует
-`<project>/.devagent/state.json`.
+`AGENT_PERSIST_LOGS=0` отключает run-логи, но сессии и `/resume` всё равно
+используют `<project>/.devagent/sessions/<имя>.json`.
 
 Web search тут специально ограничен. Он нужен для внешних библиотек,
 документации, релизов, цен, лимитов и прочих вещей, которые могут устареть.
@@ -153,12 +155,94 @@ TAVILY_API_KEY=
 BRAVE_SEARCH_API_KEY=
 ```
 
+## OmniRoute
+
+OmniRoute — это локальный OpenAI-совместимый gateway, который маршрутизирует запросы к нескольким LLM-провайдерам.
+
+**DevAgentXD не поставляется с моделями по умолчанию для OmniRoute.** Вы должны вручную вводить точные model ids для OmniRoute, потому что провайдеры и модели OmniRoute динамические.
+
+### Настройка
+
+1. Запустите OmniRoute локально (по умолчанию: `http://localhost:20128`)
+2. Получите API key из OmniRoute Dashboard → Endpoints
+3. Выберите OmniRoute как провайдера при запуске DevAgentXD
+4. Введите точные model ids для каждой роли
+
+### Конфигурация
+
+Пример `~/.devagent/config.json`:
+
+```json
+{
+  "llm_provider": "omniroute",
+  "omniroute_api_key": "ВАШ_КЛЮЧ",
+  "omniroute_base_url": "http://localhost:20128/v1",
+  "llm_models": {
+    "omniroute": {
+      "fast": "kr/claude-haiku-4.5",
+      "smart": "kr/claude-sonnet-4.5",
+      "planner": "kr/claude-sonnet-4.5"
+    }
+  }
+}
+```
+
+Переменные окружения:
+
+```bash
+AGENT_LLM_PROVIDER=omniroute
+OMNIROUTE_API_KEY=...
+OMNIROUTE_BASE_URL=http://localhost:20128/v1
+AGENT_FAST_MODEL=kr/claude-haiku-4.5
+AGENT_SMART_MODEL=kr/claude-sonnet-4.5
+AGENT_PLANNER_MODEL=kr/claude-sonnet-4.5
+```
+
+### Формат Model ID
+
+Model ids для OmniRoute обычно следуют формату `provider/model`:
+
+```text
+kr/claude-sonnet-4.5
+kr/claude-haiku-4.5
+if/qwen3-coder-plus
+```
+
+Вы также можете использовать имена combo/router без слешей или ввести `auto` для авто-маршрутизации OmniRoute (только если намеренно).
+
+### Ручной ввод моделей
+
+Когда вы выбираете OmniRoute или запускаете `/models`:
+
+1. DevAgentXD запрашивает точный model id для каждой роли (fast, smart, planner)
+2. Введите model id вручную
+3. Валидация проверяет формат (без пробелов, без URL, правильная структура `provider/model`)
+4. Модели сохраняются в конфиг для будущих сессий
+
+### Устранение проблем
+
+**"OmniRoute endpoint is unavailable"**
+- Проверьте, что OmniRoute запущен
+- Проверьте, что base URL — `http://localhost:20128/v1`
+
+**"OmniRoute authentication failed"**
+- Проверьте API key из Dashboard → Endpoints
+
+**"OmniRoute model or endpoint was not found"**
+- Проверьте точный model id (например, `kr/claude-sonnet-4.5`)
+- Проверьте, что провайдер подключен в OmniRoute
+
+**"OmniRoute returned 400 bad_request"**
+- Обычно означает неправильный model id, неподдерживаемую форму запроса, сломанную трансформацию провайдера или upstream провайдер отклонил запрос
+- Попробуйте другой точный model id или проверьте логи OmniRoute
+
 ## Что появляется на диске
 
 Внутри целевого проекта:
 
 - `<project>/.devagent/logs/`
-- `<project>/.devagent/state.json`
+- `<project>/.devagent/sessions/<имя>.json`
+- `<project>/.devagent/active_session.json`
 
 API key остаётся в домашнем конфиге, а не в проекте.
 

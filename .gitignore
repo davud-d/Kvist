@@ -82,3 +82,5 @@ USER.md
 .claude/
 pytest.ini
 DevAgentXD.zip
+reports/
+memory/

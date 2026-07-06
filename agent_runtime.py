@@ -20,13 +20,57 @@ _READ_ONLY_ACTIONS = {
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
+_REPORT_ARTIFACT_PATTERNS = {
+    "report.txt",
+    "final_report.txt",
+    "task_report.txt",
+    "task_completion_report.txt",
+    ".test_report.txt",
+    "summary.txt",
+    "status.txt",
+    "completion_report.txt",
+}
+_REPORT_ARTIFACT_EXTENSIONS = {".txt", ".md", ".json", ".log"}
+_REPORT_ARTIFACT_KEYWORDS = (
+    "report",
+    "summary",
+    "completion",
+    "status",
+    "verification",
+    "verify",
+    "results",
+    "result",
+    "отчет",
+    "отчёт",
+    "сводк",
+    "резюм",
+    "итог",
+)
+_SAFE_READ_ONLY_SHELLS = {"ls", "pwd", "cat", "head", "tail", "sed", "rg", "grep", "find"}
+_SAFE_READ_ONLY_GIT_SUBCOMMANDS = {"status", "diff", "show", "log"}
+_READ_ONLY_SHELL_DENYLIST = {
+    "pytest",
+    "compileall",
+    "py_compile",
+    "touch",
+    "mkdir",
+    "cp",
+    "mv",
+    "rm",
+    "git add",
+    "git apply",
+}
+
 _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
-_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search")
-_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold")
-_PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch")
-_PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final")
-_VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|uv\s+run|node\s+--check")
+_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search|провер|прочит|просмотр|найти|структур|поиск")
+_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold|созда|запис|измен|обнов|добав|исправ")
+_PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|провер|запуст|компил|синтакс|импорт")
+_PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final|отчет|отчёт|сводк|резюм|итог|вывест|отображ|показ|результат|представ|вывод")
+_VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|python(?:3)?\s+\S+\.py(?:\s|$)|uv\s+run|node\s+--check")
 _SEMANTIC_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
+_PLAN_STRUCTURE_INSPECT_RE = re.compile(r"structure|directory|workspace|tree|структур|директор|дерев|корне")
+_PLAN_EXISTS_RE = re.compile(r"^(if\s+.+\s+exists\b|если\s+.+\s+существ)")
+_PLAN_NOT_EXISTS_RE = re.compile(r"^(if\s+.+\s+(does not exist|is missing)\b|если\s+.+\s+не\s+существ)")
 
 _PLAN_STOPWORDS = {
     "with", "from", "into", "over", "under", "about", "this", "that", "then", "than",
@@ -37,16 +81,104 @@ _HIGH_SIGNAL_TERMS = {
     "telegr", "telegram", "admin", "payme", "reply",
 }
 
+_SYSTEMD_UNIT_NOT_FOUND_RE = re.compile(
+    r"Unit\s+\S+\.service\s+could\s+not\s+be\s+found",
+    re.IGNORECASE,
+)
+
+_SERVICE_INSPECTION_GOAL_RE = re.compile(
+    r"(?:статус|status|покажи|show|провер|check|посмотри|look)\s+.{0,30}(?:сервис|service|systemd)",
+    re.IGNORECASE,
+)
+
+
+def _build_report_context(self, user_goal: str, summary: str, result: str, issues: str) -> str:
+    """Build a structured JSON context block for the chat reporter."""
+    state = self._state
+    context = {
+        "user_goal": user_goal,
+        "role": state.current_agent_role or "coder",
+        "summary": summary,
+        "result": result,
+        "issues": issues,
+        "files_created": [f for f in state.files_changed if f not in state.files_read] or state.files_changed,
+        "files_changed": state.files_changed,
+        "files_read": state.files_read,
+        "commands_run": [e for e in state.recent_events[-20:] if "run_shell" in e or "executed" in e],
+        "plan_steps": state.plan_info.plan if state.plan_info else [],
+        "errors": state.error_history[-5:] if state.error_history else [],
+    }
+    return json.dumps(context, ensure_ascii=False, indent=2)
+
+
+def _render_report(self, context: str) -> str:
+    """Call the chat model to render a report from agent context. Streams markdown to console."""
+    from rich.live import Live
+    from rich.markdown import Markdown
+    from agent_model import _load_role_prompt, call_model, safe_extract_stream_delta, _create_json_completion
+
+    report_prompt = _load_role_prompt("report")
+    stream_model = self.config.fast_model
+
+    if not getattr(self.config, "stream", True):
+        raw = call_model(self, model=stream_model, system_prompt=report_prompt, user_prompt=context)
+        self._ui.console.print(Markdown(raw))
+        return raw
+
+    messages = [
+        {"role": "system", "content": report_prompt},
+        {"role": "user", "content": context},
+    ]
+    stream = _create_json_completion(self, stream_model, messages, stream=True)
+    chunks: list[str] = []
+    last_update = __import__("time").monotonic()
+
+    with Live(Markdown(""), console=self._ui.console, refresh_per_second=15) as live:
+        for chunk in stream:
+            text = ""
+            delta = safe_extract_stream_delta(chunk)
+            if delta is not None:
+                text = getattr(delta, "content", "") if not isinstance(delta, dict) else delta.get("content", "")
+            elif isinstance(chunk, dict):
+                if "choices" in chunk and chunk["choices"]:
+                    text = chunk["choices"][0].get("delta", {}).get("content", "")
+                else:
+                    text = chunk.get("content", "")
+            elif hasattr(chunk, "content"):
+                text = chunk.content
+            elif isinstance(chunk, str):
+                text = chunk
+
+            if text:
+                chunks.append(text)
+                now = __import__("time").monotonic()
+                if now - last_update > 0.1:
+                    live.update(Markdown("".join(chunks)))
+                    last_update = now
+
+        live.update(Markdown("".join(chunks)))
+
+    return "".join(chunks)
+
 
 def run_loop(self, user_goal: str, start_step: int) -> str:
     self._ui.start_live()
 
     final_message = ""
     create_goal = _is_create_goal(user_goal)
+    modify_goal = _is_modify_goal(user_goal)
+    read_only_goal = _is_read_only_goal(user_goal)
+    verify_only_goal = _is_verify_only_goal(user_goal)
+    self._state.user_goal = user_goal
     self._state.create_goal = create_goal
-    if not self._state.required_artifacts:
+    self._state.modify_goal = modify_goal
+    self._state.read_only_goal = read_only_goal
+    self._state.verify_only_goal = verify_only_goal
+    if not self._state.required_artifacts and not read_only_goal:
         self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
     self._refresh_completion_requirements()
+    steps_since_checkpoint = 0
+    report_rendered = False
     try:
         for step in range(start_step, self.config.max_steps + 1):
             early_stop_message = self._build_early_stop_message(step)
@@ -90,10 +222,14 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     step=step,
                     context="model_call_error",
                 )
-                # Cooldown to avoid burning through all steps on transient API failures
+                # Cooldown to avoid burning through all steps on transient API failures.
+                # Skip if the model layer already exhausted its own retries (avoid double-sleep).
+                retries_exhausted = getattr(self, "_retries_exhausted", False)
+                if retries_exhausted:
+                    continue
                 cooldown = self.config.retry_base_delay * (2 ** min(self._state.consecutive_errors, 4))
-                if any(m in error_text.casefold() for m in ("rate limit", "too many requests", "high demand", "503")):
-                    cooldown = max(cooldown, 10.0)
+                if any(m in error_text.casefold() for m in ("rate limit", "too many requests", "high demand", "503", "timeout")):
+                    cooldown = 5.0
                 time.sleep(cooldown)
                 continue
 
@@ -181,6 +317,31 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 )
                 continue
 
+            # Block report artifacts when task is complete
+            if self._is_report_artifact_blocked(command):
+                # Task is complete, force final_answer instead of creating report
+                final_message = self._build_auto_completion_message()
+                self._register_final_answer(step, final_message)
+                break
+
+            # Block write actions for read-only tasks
+            if self._is_read_only_violation(command):
+                feedback = {
+                    "ok": False,
+                    "action_type": command.action.type,
+                    "result": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
+                }
+                self._register_feedback(step, command, feedback)
+                self._ui.update_live(
+                    user_message="Read-only task violation blocked",
+                    status="corrective action required",
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step=command.plan_step,
+                    is_error=True,
+                )
+                continue
+
             self._ui.print_step_header(step, command)
 
             if command.action.type == "web_search":
@@ -221,6 +382,31 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 plan_step=command.plan_step,
             )
 
+            # Completion guard: if task is ready, only allow final_answer
+            if self._state.completion_ready and command.action.type not in ("final_answer", "report_to_user"):
+                # Provide corrective feedback and give model one more chance
+                corrective_feedback = {
+                    "ok": False,
+                    "action_type": command.action.type,
+                    "result": "Task is already verified and complete. You must use final_answer or report_to_user now. No further actions are permitted.",
+                }
+                self._register_feedback(step, command, corrective_feedback)
+                self._ui.update_live(
+                    user_message="Task is complete, requiring final_answer",
+                    status="completion enforced",
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step=command.plan_step,
+                    is_error=False,
+                )
+                # If model ignores this twice, force final_answer
+                if self._state.seen_actions.get("completion_ready_violations", 0) >= 1:
+                    final_message = self._build_auto_completion_message()
+                    self._register_final_answer(step, final_message)
+                    break
+                self._state.seen_actions["completion_ready_violations"] = self._state.seen_actions.get("completion_ready_violations", 0) + 1
+                continue
+
             if command.action.type == "final_answer":
                 self._refresh_completion_requirements(force_enforcement=True)
                 if self._state.completion_blockers:
@@ -257,8 +443,55 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 self._register_final_answer(step, final_message)
                 break
 
+            if command.action.type == "report_to_user":
+                self._refresh_completion_requirements(force_enforcement=True)
+                if self._state.completion_blockers:
+                    error_text = " ".join(self._state.completion_blockers)
+                    self._state.consecutive_errors += 1
+                    self._record_error(error_text)
+                    self._state.pending_instruction = (
+                        f"Task is not complete. Blockers: {error_text}. "
+                        "Fix the remaining issues before reporting."
+                    )
+                    self._ui.update_live(
+                        user_message="Report blocked — task not complete",
+                        status="report blocked",
+                        step=step,
+                        progress=self._state.progress,
+                        plan_step=command.plan_step,
+                        is_error=True,
+                    )
+                    continue
+                # Collect context and hand off to chat reporter
+                summary = str(command.action.args.get("summary", ""))
+                tech_result = str(command.action.args.get("result", ""))
+                issues = str(command.action.args.get("issues", ""))
+                context = _build_report_context(self, user_goal, summary, tech_result, issues)
+                report_text = _render_report(self, context)
+                final_message = report_text or tech_result or summary
+                self._register_final_answer(step, final_message)
+                report_rendered = True
+                break
+
             feedback = self._execute_command(command)
             self._register_feedback(step, command, feedback)
+
+            # Store rolling summary on interval steps (every Nth step)
+            if (
+                step % self.config.rolling_summary_interval == 0
+                and command.step_summary
+            ):
+                self._state.rolling_summaries[step] = command.step_summary
+
+            # Immediate completion check: if task just became ready, finish now
+            if (
+                self._state.completion_ready
+                and feedback.get("ok")
+                and (self._state.create_goal or self._state.verify_only_goal)
+            ):
+                final_message = self._build_auto_completion_message()
+                self._register_final_answer(step, final_message)
+                break
 
             if (
                 create_goal
@@ -278,7 +511,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 is_error=not bool(feedback.get("ok")),
             )
 
-            self._save_checkpoint(user_goal, step)
+            steps_since_checkpoint += 1
+            if steps_since_checkpoint >= 5 or command.action.type in ("final_answer", "report_to_user"):
+                steps_since_checkpoint = 0
+                self._save_checkpoint(user_goal, step)
 
         if not final_message:
             final_message = self._build_limit_reached_message()
@@ -288,7 +524,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         self._perf_logger.flush()
         self._clear_checkpoint()
 
-    if not self.config.verbose:
+    if not self.config.verbose and not report_rendered:
         self._ui.print_final(final_message, self._state.user_messages)
 
     return final_message
@@ -317,6 +553,14 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
     error_text = "Action failed"
     if isinstance(result.data, dict):
         error_text = str(result.data.get("error") or error_text)
+        # Prefer stderr/stdout output from the actual command over generic error
+        if error_text == "Action failed":
+            stderr = str(result.data.get("stderr", "")).strip()
+            stdout = str(result.data.get("stdout", "")).strip()
+            if stderr:
+                error_text = stderr
+            elif stdout:
+                error_text = stdout
 
     payload = self._build_error_feedback(result.action_type, error_text)
     if isinstance(result.data, dict):
@@ -344,8 +588,8 @@ def command_language_error(self, command: AgentCommand) -> str | None:
         ("thought", command.thought),
         ("user_message", command.user_message),
     ]
-    if command.action.type == "final_answer":
-        checks.append(("final_answer.message", str(command.action.args.get("message", ""))))
+    if command.action.type in ("final_answer", "report_to_user"):
+        checks.append((f"{command.action.type}.message", str(command.action.args.get("message", "") or command.action.args.get("result", ""))))
 
     for field_name, value in checks:
         if not _matches_task_language(value, language):
@@ -458,12 +702,55 @@ def register_feedback(
         else:
             self._state.read_only_streak = 0
     else:
-        self._state.consecutive_errors += 1
+        error_text = self._feedback_error_for_model(feedback)
+
+        # ── Terminal condition: systemctl service not found ──
+        terminal_not_found = (
+            self._state.current_agent_role == "devops"
+            and command.action.type == "run_shell"
+            and _is_service_not_found_error(error_text)
+        )
+
+        if not terminal_not_found:
+            self._state.consecutive_errors += 1
         if command.action.type in _WRITE_ACTIONS:
             self._state.read_only_streak = 0
-        error_text = self._feedback_error_for_model(feedback)
         self._record_error(error_text)
-        if (
+
+        # Track security policy violations (.env access attempts)
+        raw_error = str(feedback.get("raw_error") or feedback.get("error") or "")
+        if "SECURITY PROTOCOL" in raw_error or "SECURITY POLICY" in raw_error or ".env" in raw_error:
+            self._push_unique(
+                self._state.security_policy_violations,
+                raw_error[:200],
+                limit=10,
+            )
+            # Ensure .env errors are permanently blocked: override pending instruction
+            self._state.pending_instruction = (
+                "SECURITY POLICY: Access to .env files is permanently forbidden. "
+                "Do not retry this action. Choose a completely different approach "
+                "that does not involve .env files."
+            )
+        elif terminal_not_found:
+            service_name = _extract_service_name_from_not_found(error_text)
+            # Treat not-found as valid verification — the command DID answer the question
+            self._state.consecutive_errors = 0
+            self._push_unique(
+                self._state.verification_evidence,
+                f"systemctl_status: {service_name} not found",
+                limit=12,
+            )
+            # Mark related plan inspection steps as completed
+            self._update_completed_plan_steps(command, feedback.get("data", {}))
+            self._state.pending_instruction = (
+                f"TERMINAL CONDITION: systemctl reports that {service_name} service "
+                "is not found on this system. This IS the answer — the service unit "
+                "does not exist. Do NOT run grep, list-unit-files, is-active, "
+                "or any other systemctl command. Do NOT repeat status. "
+                "Give final_answer or report_to_user with an honest message: "
+                f"'Service {service_name} not found: the systemd unit does not exist on this system.'"
+            )
+        elif (
             command.action.type == "replace_in_file"
             and error_text == "old_text fragment not found in file."
         ):
@@ -480,7 +767,11 @@ def register_feedback(
             )
 
     self._update_progress(command, ok)
-    if not ok:
+    if not ok and not (
+        self._state.current_agent_role == "devops"
+        and command.action.type == "run_shell"
+        and _is_service_not_found_error(self._feedback_error_for_model(feedback))
+    ):
         self._state.stagnation_count += 1
     elif self._state.progress > previous_progress:
         self._state.stagnation_count = 0
@@ -540,6 +831,7 @@ def update_state_from_success(
     elif action_type in {"write_file", "append_file", "replace_in_file"}:
         path = str(data.get("path", "")).strip()
         self._push_unique(self._state.files_changed, path)
+        self._push_unique(self._state.pending_verification_paths, path)
         if self._state.web_facts:
             self._state.applied_facts.append({
                 "path": path,
@@ -776,7 +1068,11 @@ def build_early_stop_message(self, step: int) -> str | None:
             f"Last errors: {errors}"
         )
 
-    if self._state.stagnation_count >= self.config.stagnation_limit:
+    # Terminal condition: service not found — don't kill, let model give final_answer
+    if (
+        self._state.stagnation_count >= self.config.stagnation_limit
+        and "TERMINAL CONDITION" not in (self._state.pending_instruction or "")
+    ):
         return (
             "Agent stopped. No progress detected, possible loop. "
             f"Last actions: {', '.join(self._state.recent_feedback[-3:])}"
@@ -798,6 +1094,18 @@ def build_limit_reached_message(self) -> str:
     return message
 
 
+def build_auto_completion_message(self) -> str:
+    """Build automatic completion message when task is verified but model doesn't call final_answer."""
+    files_summary = ", ".join(self._state.files_changed[:5])
+    if len(self._state.files_changed) > 5:
+        files_summary += f" and {len(self._state.files_changed) - 5} more"
+
+    if self._state.files_changed:
+        return f"Task completed successfully. Modified files: {files_summary}. Verification confirmed."
+    else:
+        return "Task completed successfully. All checks passed."
+
+
 def _summarize_recent_errors(self) -> str:
     items: list[str] = []
     for raw_error in self._state.error_history[-5:]:
@@ -812,6 +1120,38 @@ def _summarize_recent_errors(self) -> str:
 def is_repeat_blocked(self, command: AgentCommand) -> bool:
     signature = self._action_signature(command)
     seen_count = self._state.seen_actions.get(signature, 0)
+    # DevOps run_shell: warn early on repeated identical commands
+    if (
+        self._state.current_agent_role == "devops"
+        and command.action.type == "run_shell"
+        and seen_count >= 2
+    ):
+        if command.action.type not in self._state.required_next_actions:
+            command_text = " ".join(command.action.args.get("command", []))
+            message = (
+                f"Do not repeat the same systemctl query [{command_text}]. "
+                "Summarize the result or try a more specific read-only query. "
+                "If the unit is not found, stop and report honestly."
+            )
+            self._state.pending_instruction = message
+            self._state.stagnation_count += 1
+            self._state.step_logs.append(
+                {
+                    "status": "repeat_blocked",
+                    "command": {
+                        "plan_step": command.plan_step,
+                        "progress": command.progress,
+                        "user_message": command.user_message,
+                        "action": {
+                            "type": command.action.type,
+                            "args": command.action.args,
+                        },
+                    },
+                }
+            )
+            self._ui.debug_print(f"DevOps repeat blocked: {command_text}")
+            return True
+
     if seen_count >= self.config.repeat_action_limit:
         if command.action.type in self._state.required_next_actions:
             pass # allow it
@@ -1048,6 +1388,7 @@ def _normalize_semantic_token(token: str) -> str:
 def update_verification_evidence(self, command: AgentCommand, data: dict[str, Any]) -> None:
     action_type = command.action.type
     evidence: str | None = None
+    cleared_paths: list[str] = []
 
     if action_type in {"git_status", "git_diff"}:
         if data.get("fallback_used"):
@@ -1063,17 +1404,42 @@ def update_verification_evidence(self, command: AgentCommand, data: dict[str, An
                 )
             return
         evidence = action_type
+        # git_diff counts as verification, git_status does NOT
+        if action_type == "git_diff":
+            cleared_paths = list(self._state.pending_verification_paths)
+            self._state.pending_verification_paths.clear()
     elif action_type == "run_shell":
         command_text = " ".join(str(part) for part in data.get("command", []))
-        if data.get("returncode") == 0 and _VERIFY_SHELL_RE.search(command_text):
-            evidence = f"run_shell: {command_text}"
-    elif action_type in {"list_tree", "find_files"}:
-        if self._state.create_goal or self._state.files_changed:
-            evidence = action_type
+        if data.get("returncode") == 0:
+            # For devops, any successful run_shell is verification evidence
+            if self._state.current_agent_role == "devops" or _VERIFY_SHELL_RE.search(command_text):
+                evidence = f"run_shell: {command_text}"
+                cleared_paths = list(self._state.pending_verification_paths)
+                self._state.pending_verification_paths.clear()
+    elif action_type in {"list_dir", "list_tree", "find_files", "search_code"}:
+        if self._state.create_goal or self._state.files_changed or self._state.verify_only_goal:
+            if action_type == "find_files":
+                if self._state.verify_only_goal and not (self._state.create_goal or self._state.files_changed):
+                    pattern = str(data.get("pattern") or command.action.args.get("pattern", "")).strip()
+                    evidence = f"find_files: {pattern}" if pattern else "find_files"
+                else:
+                    evidence = "find_files"
+            else:
+                evidence = action_type
+        # search_code counts as verification
+        if action_type == "search_code" and self._state.pending_verification_paths:
+            cleared_paths = list(self._state.pending_verification_paths)
+            self._state.pending_verification_paths.clear()
     elif action_type == "read_file":
-        path = str(data.get("path", "")).strip()
-        if path and path in self._state.files_changed:
-            evidence = f"read_file: {path}"
+        if self._state.files_changed or self._state.verify_only_goal:
+            path = str(data.get("path", "")).strip()
+            if path:
+                evidence = f"read_file: {path}"
+                # read_file of a changed file counts as verification
+                for pv_path in list(self._state.pending_verification_paths):
+                    if pv_path in path or path in pv_path:
+                        self._state.pending_verification_paths.remove(pv_path)
+                        cleared_paths.append(pv_path)
 
     if evidence:
         self._push_unique(self._state.verification_evidence, evidence, limit=12)
@@ -1083,6 +1449,13 @@ def refresh_completion_requirements(self, force_enforcement: bool = False) -> No
     blockers, required_actions = _compute_completion_status(self)
     self._state.missing_artifacts = _missing_required_artifacts(self)
     self._state.completion_blockers = blockers
+
+    # Set completion_ready flag: task is ready when no blockers and verification exists
+    self._state.completion_ready = (
+        len(blockers) == 0
+        and len(self._state.verification_evidence) > 0
+        and (len(self._state.files_changed) > 0 or not self._state.create_goal)
+    )
 
     if blockers and force_enforcement:
         self._set_required_next_actions(
@@ -1122,6 +1495,49 @@ def required_followup_error(self, command: AgentCommand) -> str | None:
     )
 
 
+def _is_report_artifact_blocked(self, command: AgentCommand) -> bool:
+    """Block report-like artifact creation unless the user explicitly requested it."""
+    if command.action.type not in _WRITE_ACTIONS:
+        return False
+
+    path = str(command.action.args.get("path", "")).strip().lower()
+    if not path:
+        return False
+
+    if not _looks_like_report_artifact_path(path):
+        return False
+
+    if _user_explicitly_requested_report_artifact(self, path):
+        return False
+
+    return True
+
+
+def _is_read_only_violation(self, command: AgentCommand) -> bool:
+    """Block write actions for read-only/verify tasks."""
+    if not self._state.read_only_goal:
+        return False
+
+    # DevOps role: run_shell is always allowed — it's the primary devops tool
+    if self._state.current_agent_role == "devops":
+        if command.action.type == "run_shell":
+            return False
+        # Still block file writes for devops read-only tasks
+        if command.action.type in _WRITE_ACTIONS:
+            return True
+        return False
+
+    # Block write actions
+    if command.action.type in _WRITE_ACTIONS:
+        return True
+
+    if command.action.type == "run_shell":
+        command_parts = command.action.args.get("command", [])
+        return not _is_safe_read_only_shell_command(command_parts)
+
+    return False
+
+
 def set_required_next_actions(self, actions: set[str] | list[str], message: str) -> None:
     self._state.required_next_actions = sorted(set(actions))
     self._state.pending_instruction = message
@@ -1137,6 +1553,21 @@ def _matches_task_language(text: str, language: str) -> bool:
     return cyrillic <= latin
 
 
+def _token_match(word: str, text: str) -> bool:
+    """Return True if `word` appears as a standalone token in `text`.
+
+    Uses word-boundary regex where ``_`` (underscore) is treated as a
+    *continuation* character so that short markers like ``list``, ``find``,
+    ``show`` do NOT match inside filenames like ``empty_list.py`` or
+    ``find_files.sh`` but DO match standalone English usage like
+    ``"list files"`` or ``"find the bug"``.
+    """
+    # Word boundary: not preceded/followed by [a-zA-Z_] so underscore
+    # keeps the preceding/following letter attached to the token.
+    pattern = r"(?<![a-zA-Z_])" + re.escape(word) + r"(?![a-zA-Z_])"
+    return bool(re.search(pattern, text))
+
+
 def _is_create_goal(user_goal: str) -> bool:
     lowered = user_goal.casefold()
     markers = (
@@ -1145,23 +1576,134 @@ def _is_create_goal(user_goal: str) -> bool:
         "generate ",
         "scaffold",
         "bootstrap",
+        "создай",
+        "сгенерируй",
     )
     return any(marker in lowered for marker in markers)
 
 
+def _is_modify_goal(user_goal: str) -> bool:
+    """Detect fix/modify/change/update/edit intent from user goal."""
+    lowered = user_goal.casefold()
+    markers = (
+        "fix ",
+        "fix:",
+        "modify ",
+        "change ",
+        "update ",
+        "edit ",
+        "refactor ",
+        "improve ",
+        "enhance ",
+        "исправь",
+        "исправить",
+        "измени",
+        "изменить",
+        "обнови",
+        "обновить",
+        "отредактируй",
+        "отредактировать",
+        "переделай",
+        "доработай",
+    )
+    return any(marker in lowered for marker in markers)
+
+
+def _is_read_only_goal(user_goal: str) -> bool:
+    """Detect read-only/verify intent from user goal."""
+    if _is_create_goal(user_goal):
+        return False
+    # A FIX/MODIFY task is never read-only, even if it mentions filenames
+    # like empty_list.py whose substrings match short markers ("list").
+    if _is_modify_goal(user_goal):
+        return False
+
+    lowered = user_goal.casefold()
+
+    # Russian patterns
+    ru_patterns = (
+        "проверь",
+        "есть ли",
+        "найди",
+        "покажи",
+        "посмотри",
+        "выведи",
+        "какой",
+        "какая",
+        "какое",
+        "какие",
+        "сколько",
+        "git status",
+        "git diff",
+    )
+
+    # English patterns — short single-word markers use word-boundary
+    # matching via _token_match to avoid false positives on filenames
+    # (e.g. "list" must not trigger inside "empty_list.py").
+    en_token_markers = {"find", "show", "inspect", "list"}
+    en_phrase_patterns = (
+        "check if",
+        "check whether",
+        "git status",
+        "git diff",
+    )
+
+    if any(pattern in lowered for pattern in ru_patterns + en_phrase_patterns):
+        return True
+    return any(_token_match(marker, lowered) for marker in en_token_markers)
+
+
+def _is_verify_only_goal(user_goal: str) -> bool:
+    """Detect short verify/check tasks that should end after one factual confirmation."""
+    if _is_create_goal(user_goal):
+        return False
+    # A FIX/MODIFY task is never verify-only.
+    if _is_modify_goal(user_goal):
+        return False
+
+    lowered = user_goal.casefold()
+    ru_patterns = (
+        "проверь",
+        "есть ли",
+        "найди",
+        "покажи",
+        "выведи",
+        "git status",
+        "git diff",
+    )
+    en_phrases = (
+        "check if",
+        "check whether",
+        "git status",
+        "git diff",
+    )
+    en_token_markers = {"find", "show", "list"}
+
+    if any(pattern in lowered for pattern in ru_patterns + en_phrases):
+        return True
+    return any(_token_match(marker, lowered) for marker in en_token_markers)
+
+
 def _build_create_guidance(language: str) -> str:
     return (
-        "This is a CREATE task. Do not loop on inspect and do not use final_answer without changes. "
+        "This is a CREATE task. Do not loop on inspect and do not use final_answer or report_to_user without changes. "
         "Choose a path inside the workspace and move to write_file or append_file, then verify with facts."
     )
 
 
 def _build_premature_final_answer_error(language: str) -> str:
-    return "A CREATE task cannot finish without created or changed files."
+    return (
+        "Completion blocked: this looks like a CREATE task, "
+        "but no files were created or changed. "
+        "Create the required files inside the workspace, then verify."
+    )
 
 
 def _build_missing_implementation_error(language: str) -> str:
-    return "Task cannot finish without changes: the plan requires creating or editing files."
+    return (
+        "Completion blocked: this looks like a FIX/MODIFY task, "
+        "but no files were changed. Read the target file, make a minimal fix, then verify."
+    )
 
 
 def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
@@ -1220,6 +1762,28 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
     return normalized[:24]
 
 
+def _is_service_not_found_error(error_text: str) -> bool:
+    """Detect systemctl 'Unit X could not be found' terminal condition."""
+    return bool(_SYSTEMD_UNIT_NOT_FOUND_RE.search(error_text or ""))
+
+
+def _is_service_inspection_goal(user_goal: str) -> bool:
+    """Check if the user goal is about inspecting a specific systemd service."""
+    return bool(_SERVICE_INSPECTION_GOAL_RE.search(user_goal or ""))
+
+
+def _extract_service_name_from_not_found(error_text: str) -> str:
+    """Extract service name from 'Unit nginx.service could not be found.'"""
+    match = _SYSTEMD_UNIT_NOT_FOUND_RE.search(error_text or "")
+    if match:
+        matched = match.group(0)
+        # Extract the service name: "Unit nginx.service could not be found"
+        parts = matched.split()
+        if len(parts) >= 2:
+            return parts[1]  # e.g. "nginx.service"
+    return "the requested"
+
+
 def _is_terminal_model_error(error_text: str) -> bool:
     lowered = str(error_text).casefold()
     markers = (
@@ -1258,32 +1822,55 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
     actionable_remaining_plan_steps = [
         item for item in remaining_plan_steps
         if not _PLAN_REPORT_RE.search(item.casefold())
+        and not _plan_step_is_non_blocking_after_progress(self, item)
     ]
+    verify_only_complete = (
+        self._state.verify_only_goal
+        and not self._state.files_changed
+        and bool(self._state.verification_evidence)
+    )
 
     if self._state.create_goal and not self._state.files_changed:
         blockers.append(_build_premature_final_answer_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
+    if self._state.modify_goal and not self._state.files_changed:
+        blockers.append(_build_missing_implementation_error(self._state.task_language))
+        required_actions.update(_WRITE_ACTIONS)
+
     if (
-        not self._state.files_changed
+        not verify_only_complete
+        and not self._state.read_only_goal
+        and not self._state.files_changed
         and _plan_requires_file_changes(self)
     ):
         blockers.append(_build_missing_implementation_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
-    if actionable_remaining_plan_steps:
+    if actionable_remaining_plan_steps and not verify_only_complete:
         blockers.append(_build_incomplete_plan_error(self._state.task_language, actionable_remaining_plan_steps))
         if all(_PLAN_VERIFY_RE.search(item.casefold()) for item in actionable_remaining_plan_steps):
             required_actions.update(_VERIFY_ONLY_ACTIONS)
-        else:
+        elif _plan_requires_file_changes(self):
             required_actions.update(_WRITE_ACTIONS)
+        # else: info-gathering / devops task — don't force write actions,
+        # let the agent continue with whatever actions are appropriate
 
-    if missing:
+    if missing and not (self._state.read_only_goal and not self._state.files_changed):
         blockers.append(_build_missing_artifacts_error(self._state.task_language, missing))
         required_actions.update(_WRITE_ACTIONS)
 
     if self._state.files_changed and not self._state.verification_evidence:
         blockers.append(_build_missing_verification_error(self._state.task_language))
+        required_actions.update(_VERIFY_ONLY_ACTIONS)
+
+    if self._state.pending_verification_paths:
+        joined = ", ".join(self._state.pending_verification_paths[:5])
+        blockers.append(
+            f"Task cannot finish: verification required for recently changed files: {joined}. "
+            "Use git_diff, read_file, search_code, or run_shell (pytest/py_compile) to verify. "
+            "git_status alone is NOT sufficient."
+        )
         required_actions.update(_VERIFY_ONLY_ACTIONS)
 
     return blockers, sorted(required_actions)
@@ -1315,6 +1902,7 @@ def _remaining_plan_steps(self) -> list[str]:
     return [
         item for item in plan_info.plan
         if item not in self._state.completed_plan_steps
+        and not _plan_step_resolved_by_alternative_branch(self, item)
     ]
 
 
@@ -1333,7 +1921,8 @@ def _plan_item_matches_action(item: str, action_type: str, files_changed: list[s
             return True
         return bool(_PLAN_INSPECT_RE.search(item))
     if action_type in {"git_status", "git_diff", "run_shell"}:
-        return bool(_PLAN_VERIFY_RE.search(item))
+        # run_shell is the universal devops action — matches inspect, edit, or verify steps
+        return True
     return False
 
 
@@ -1376,7 +1965,7 @@ def _build_completion_blocker_instruction(language: str, blockers: list[str], ac
     action_text = ", ".join(actions) or "none"
     blocker_text = " ".join(blockers)
     return (
-        f"final_answer is forbidden. Blockers: {blocker_text} "
+        f"final_answer and report_to_user are forbidden. Blockers: {blocker_text} "
         f"The next step must be a corrective action using one of: {action_text}."
     )
 
@@ -1396,7 +1985,7 @@ def _build_strict_next_action_instruction(
     first_artifact = missing_artifacts[0] if missing_artifacts else ""
     message = (
         f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
-        "Do not use inspect/read/list_tree/find/search/final_answer on the next step. "
+        "Do not use inspect/read/list_tree/find/search/final_answer/report_to_user on the next step. "
         "For a CREATE task, switch directly to changing files inside the workspace."
     )
     if first_artifact:
@@ -1416,3 +2005,114 @@ def _build_git_fallback_instruction(language: str) -> str:
         "Git is unavailable or the repo is not initialized. Do not fail the task: "
         "switch to list_tree, read_file, find_files, or run_shell to verify structure, syntax, and execution."
     )
+
+
+def _plan_step_resolved_by_alternative_branch(self, item: str) -> bool:
+    normalized = item.casefold().strip()
+    if not normalized:
+        return False
+
+    completed = {step.casefold().strip() for step in self._state.completed_plan_steps}
+    if not completed:
+        return False
+
+    if _PLAN_EXISTS_RE.match(normalized):
+        return any(_PLAN_NOT_EXISTS_RE.match(step) for step in completed)
+    if _PLAN_NOT_EXISTS_RE.match(normalized):
+        return any(_PLAN_EXISTS_RE.match(step) for step in completed)
+    return False
+
+
+def _plan_step_is_non_blocking_after_progress(self, item: str) -> bool:
+    normalized = item.casefold().strip()
+    if not normalized:
+        return False
+
+    has_meaningful_progress = bool(self._state.files_changed or self._state.verification_evidence)
+    if not has_meaningful_progress:
+        return False
+
+    is_structure_inspect = (
+        bool(_PLAN_STRUCTURE_INSPECT_RE.search(normalized))
+        and not _PLAN_EDIT_RE.search(normalized)
+    )
+    is_inspect_only = (
+        bool(_PLAN_INSPECT_RE.search(normalized))
+        and not _PLAN_EDIT_RE.search(normalized)
+        and not _PLAN_VERIFY_RE.search(normalized)
+    )
+    return is_structure_inspect or is_inspect_only
+
+
+def _looks_like_report_artifact_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").strip().casefold()
+    filename = Path(normalized).name
+    if filename in _REPORT_ARTIFACT_PATTERNS:
+        return True
+
+    parsed = Path(filename)
+    if parsed.suffix not in _REPORT_ARTIFACT_EXTENSIONS:
+        return False
+
+    stem = parsed.stem
+    return any(keyword in stem for keyword in _REPORT_ARTIFACT_KEYWORDS)
+
+
+def _user_explicitly_requested_report_artifact(self, path: str) -> bool:
+    goal = self._state.user_goal.casefold()
+    normalized = path.replace("\\", "/").strip().casefold()
+    filename = Path(normalized).name
+
+    requested_artifacts = {
+        item.replace("\\", "/").strip().casefold()
+        for item in self._state.required_artifacts
+    }
+    if normalized in requested_artifacts or filename in requested_artifacts:
+        return True
+
+    if normalized in goal or filename in goal:
+        return True
+
+    report_words = (
+        "report",
+        "summary",
+        "status file",
+        "completion report",
+        "task report",
+        "отч",
+        "сводк",
+        "резюм",
+        "итог",
+    )
+    request_words = (
+        "create",
+        "write",
+        "save",
+        "generate",
+        "prepare",
+        "создай",
+        "сохрани",
+        "сгенерируй",
+        "подготов",
+    )
+    return any(word in goal for word in report_words) and any(word in goal for word in request_words)
+
+
+def _is_safe_read_only_shell_command(command_parts: Any) -> bool:
+    if not isinstance(command_parts, list) or not command_parts:
+        return False
+
+    parts = [str(part).strip().casefold() for part in command_parts if str(part).strip()]
+    if not parts:
+        return False
+
+    joined = " ".join(parts)
+    if any(marker in joined for marker in _READ_ONLY_SHELL_DENYLIST):
+        return False
+
+    program = parts[0]
+    if program == "git":
+        return len(parts) >= 2 and parts[1] in _SAFE_READ_ONLY_GIT_SUBCOMMANDS
+    if program in {"python", "python3"}:
+        return len(parts) == 2 and parts[1] in {"--version", "-v"}
+    return program in _SAFE_READ_ONLY_SHELLS

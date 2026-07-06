@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
 from hashlib import sha256
@@ -9,9 +10,33 @@ from pathlib import Path
 from typing import Any
 
 from openai.types.chat import ChatCompletionMessageParam
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    APIStatusError,
+    BadRequestError,
+    AuthenticationError,
+    PermissionDeniedError,
+    NotFoundError,
+    RateLimitError,
+    InternalServerError,
+)
 
+from agent_context import (
+    SECTION_PRIORITIES,
+    estimate_section_tokens,
+    split_prompt_into_sections,
+)
 from context_utils import trim_history
-from llm_clients import fallback_candidates_for_model
+from llm_clients import (
+    fallback_candidates_for_model,
+    is_custom_provider,
+    extract_custom_provider_name,
+    provider_supports_json_mode,
+    OPENAI_PROVIDER,
+    ANTHROPIC_PROVIDER,
+    OPENROUTER_PROVIDER,
+)
 from render_throttle import ThrottledRenderer
 
 try:
@@ -21,13 +46,191 @@ except ImportError:
 
 _PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
+# ── Safety: detect stale prompts/prompts/ duplicate ──────────────────────
+_STALE_PROMPT_DIR = _PROMPT_DIR / "prompts"
+if _STALE_PROMPT_DIR.is_dir():
+    import sys as _sys
+
+    print(
+        f"[devagent] WARNING: Stale prompt directory detected at {_STALE_PROMPT_DIR}.",
+        "Code loads prompts from", _PROMPT_DIR,
+        "— the duplicate is NOT used. Remove it to avoid confusion.",
+        file=_sys.stderr,
+    )
+
 _PROMPT_CACHE: dict[str, str] = {}
 
 _ROLE_PROMPT_FILES: dict[str, str] = {
     "coder": "coder_prompt.txt",
     "devops": "devops_prompt.txt",
     "chat": "chat_prompt.txt",
+    "report": "report_prompt.txt",
 }
+
+# Per-provider API request interval (seconds).
+# Top-tier providers get 2.5 s; all others get the default from config (5.0 s).
+# Override with AGENT_API_INTERVAL env var for all providers.
+_API_PROVIDER_INTERVALS: dict[str, float] = {
+    OPENAI_PROVIDER: 2.5,
+    ANTHROPIC_PROVIDER: 2.5,
+    OPENROUTER_PROVIDER: 2.5,
+}
+
+
+def _get_api_interval(self) -> float:
+    """Return the API request interval for the current provider."""
+    from os import environ as _environ
+
+    env_override = _environ.get("AGENT_API_INTERVAL")
+    if env_override is not None:
+        try:
+            return float(env_override)
+        except ValueError:
+            pass
+    provider = getattr(self.config, "provider", "")
+    return _API_PROVIDER_INTERVALS.get(provider, self.config.api_request_interval)
+
+
+def _format_llm_error(error: Exception, provider: str | None = None) -> str:
+    """Format LLM API errors into user-friendly messages."""
+    error_msg = str(error)
+    error_lower = error_msg.casefold()
+
+    # Helper: build a custom provider label from the provider string
+    def _custom_label(p: str) -> str:
+        if is_custom_provider(p):
+            name = extract_custom_provider_name(p)
+            return f"Custom provider '{name}'"
+        return None
+
+    # Connection errors
+    if isinstance(error, APIConnectionError):
+        if provider == "omniroute":
+            return (
+                "OmniRoute endpoint is unavailable. Check that OmniRoute is running "
+                "and base URL is http://localhost:20128/v1."
+            )
+        if provider == "openrouter":
+            return (
+                "Cannot reach OpenRouter API. Check your network and "
+                "https://openrouter.ai/status."
+            )
+        if is_custom_provider(provider):
+            return f"{_custom_label(provider)}: cannot reach the endpoint. Check base URL and network."
+        return f"Connection error: {error_msg}"
+
+    # Timeout errors
+    if isinstance(error, APITimeoutError):
+        if provider == "omniroute":
+            return "OmniRoute request timed out. Check if OmniRoute is responsive."
+        if provider == "openrouter":
+            return "OpenRouter request timed out. Check if the service is responsive."
+        if is_custom_provider(provider):
+            return f"{_custom_label(provider)}: request timed out. Check if the endpoint is responsive."
+        return f"Request timed out: {error_msg}"
+
+    # Authentication errors (401)
+    if isinstance(error, AuthenticationError):
+        if provider == "omniroute":
+            return "OmniRoute authentication failed. Check API key from Dashboard -> Endpoints."
+        if provider == "openrouter":
+            return "OpenRouter authentication failed. Check your API key at https://openrouter.ai/keys."
+        if is_custom_provider(provider):
+            return f"{_custom_label(provider)}: authentication failed. Check your API key."
+        return f"Authentication failed: {error_msg}"
+
+    # Permission errors (403)
+    if isinstance(error, PermissionDeniedError):
+        if provider == "omniroute":
+            return "OmniRoute permission denied. Check API key permissions."
+        if provider == "openrouter":
+            return "OpenRouter permission denied. Check API key permissions at https://openrouter.ai/keys."
+        if is_custom_provider(provider):
+            return f"{_custom_label(provider)}: permission denied. Check API key permissions."
+        return f"Permission denied: {error_msg}"
+
+    # Not found errors (404)
+    if isinstance(error, NotFoundError):
+        if provider == "omniroute":
+            return (
+                "OmniRoute model or endpoint was not found. Check exact model id, "
+                "for example kr/claude-sonnet-4.5."
+            )
+        if provider == "openrouter":
+            return (
+                "OpenRouter model not found. Check exact model id in provider/model "
+                "format (e.g. openai/gpt-5.4-mini). See https://openrouter.ai/models."
+            )
+        if is_custom_provider(provider):
+            return (
+                f"{_custom_label(provider)}: model or endpoint not found. "
+                "Check the base URL and model ID."
+            )
+        return f"Resource not found: {error_msg}"
+
+    # Rate limit errors (429)
+    if isinstance(error, RateLimitError):
+        if provider == "omniroute":
+            return "OmniRoute or upstream provider hit rate limit/quota."
+        if provider == "openrouter":
+            return (
+                "OpenRouter rate limit exceeded. Check your plan and credits at "
+                "https://openrouter.ai/settings."
+            )
+        if is_custom_provider(provider):
+            return f"{_custom_label(provider)}: rate limit exceeded."
+        return f"Rate limit exceeded: {error_msg}"
+
+    # Bad request errors (400)
+    if isinstance(error, BadRequestError):
+        # Check for OmniRoute-specific bad request patterns
+        if provider == "omniroute" and any(
+            marker in error_lower
+            for marker in ("improperly formed", "bad_request", "invalid_request_error")
+        ):
+            return (
+                "OmniRoute returned 400 bad_request. This usually means bad model id, "
+                "unsupported request shape, broken provider transform, or upstream provider "
+                "rejected the request. Try another exact OmniRoute model id or check OmniRoute logs."
+            )
+        if provider == "openrouter":
+            return (
+                "OpenRouter returned 400 bad request. This usually means invalid model id, "
+                "unsupported parameters, or the upstream provider rejected the request. "
+                "Verify the model id format (provider/model) and check OpenRouter docs."
+            )
+        if is_custom_provider(provider):
+            return (
+                f"{_custom_label(provider)}: bad request. This usually means an invalid "
+                "model ID, unsupported parameters, or the upstream provider rejected "
+                "the request."
+            )
+        return f"Bad request: {error_msg}"
+
+    # Server errors (500+)
+    if isinstance(error, InternalServerError):
+        if provider == "omniroute":
+            return "OmniRoute or upstream provider failed. Check OmniRoute logs."
+        if provider == "openrouter":
+            return "OpenRouter or upstream provider failed. Check https://openrouter.ai/status."
+        if is_custom_provider(provider):
+            return f"{_custom_label(provider)}: endpoint returned a server error."
+        return f"Server error: {error_msg}"
+
+    # Generic APIStatusError
+    if isinstance(error, APIStatusError):
+        status_code = getattr(error, "status_code", None)
+        if status_code and status_code >= 500:
+            if provider == "omniroute":
+                return f"OmniRoute or upstream provider failed (HTTP {status_code}). Check OmniRoute logs."
+            if provider == "openrouter":
+                return f"OpenRouter or upstream provider failed (HTTP {status_code}). Check https://openrouter.ai/status."
+            if is_custom_provider(provider):
+                return f"{_custom_label(provider)}: endpoint failed (HTTP {status_code})."
+            return f"Server error (HTTP {status_code}): {error_msg}"
+
+    # Fallback
+    return error_msg
 
 
 def _load_role_prompt(role: str) -> str:
@@ -46,11 +249,16 @@ def call_action_model(self, prompt: str) -> str:
         preferred_model = self._select_action_model_for_run()
     role = getattr(self._state, "current_agent_role", "coder")
     system_prompt = _load_role_prompt(role)
-    return self._call_model(
-        model=preferred_model,
-        system_prompt=system_prompt,
-        user_prompt=prompt,
-    )
+    self._retries_exhausted = False
+    try:
+        return self._call_model(
+            model=preferred_model,
+            system_prompt=system_prompt,
+            user_prompt=prompt,
+        )
+    except Exception:
+        self._retries_exhausted = True
+        raise
 
 
 def select_action_model_for_run(self) -> str:
@@ -116,7 +324,9 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                         model=current_model,
                         messages=messages,
                     )
-                    content = response.choices[0].message.content
+                    content = safe_extract_completion_content(
+                        response, self.config.provider, current_model
+                    )
                 total_duration = time.monotonic() - request_start
                 if not content:
                     raise RuntimeError("Model returned an empty response")
@@ -142,8 +352,9 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                 )
                 
                 # interval API request
-                if self.config.api_request_interval > 0:
-                    time.sleep(self.config.api_request_interval)
+                interval = _get_api_interval(self)
+                if interval > 0:
+                    time.sleep(interval)
 
                 return content
             except Exception as error:
@@ -168,9 +379,14 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                 if attempt < self.config.max_retries:
                     delay = self.config.retry_base_delay * (2 ** (attempt - 1))
                     error_msg_lowered = str(error).casefold()
-                    if any(m in error_msg_lowered for m in ("rate limit", "too many requests", "429", "quota", "high demand", "exhausted", "503")):
-                        delay = max(delay, 15.0 * attempt)
-                    self._ui.debug_print(f"API error. Retrying in {delay:.1f}s")
+                    if any(m in error_msg_lowered for m in ("rate limit", "too many requests", "429", "quota", "high demand", "exhausted", "503", "timeout")):
+                        delay = 5.0
+                    self._ui.debug_print(
+                        f"API error | provider={self.config.provider} model={current_model} "
+                        f"error={type(error).__name__}: {sanitize_error_message(str(error))} "
+                        f"attempt={attempt}/{self.config.max_retries} "
+                        f"retry_in={delay:.1f}s"
+                    )
                     sleep_start = time.monotonic()
                     time.sleep(delay)
                     actual_sleep = (time.monotonic() - sleep_start) * 1000
@@ -203,7 +419,7 @@ def call_model_streaming(
     total_chunk_bytes = 0
     renderer = ThrottledRenderer(max_fps=10)
     for chunk in stream:
-        delta = chunk.choices[0].delta if chunk.choices else None
+        delta = safe_extract_stream_delta(chunk)
         if delta and delta.content:
             if first_token_time is None:
                 first_token_time = time.monotonic()
@@ -240,14 +456,17 @@ def _create_json_completion(
     messages: list[ChatCompletionMessageParam],
     stream: bool = False,
 ):
-    request_kwargs = {
+    request_kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": self.config.model_temperature,
-        "response_format": {"type": "json_object"},
+        "timeout": self.config.api_timeout,
     }
+    if provider_supports_json_mode(self.config.provider):
+        request_kwargs["response_format"] = {"type": "json_object"}
     if stream:
         request_kwargs["stream"] = True
+        request_kwargs["stream_options"] = {"include_usage": True}
 
     first_error: Exception | None = None
     try:
@@ -289,41 +508,191 @@ def count_tokens(self, text: str) -> int:
 
 
 def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> str:
-    # Hard-limit for free APIs (11000 tokens) leaves room for the model's response
+    """Trim *user_prompt* to fit within the provider token budget.
+
+    Instead of blindly chopping the middle of the prompt (which can discard
+    critical context like verification evidence or completion blockers), this
+    implementation parses the prompt into logical sections, assigns each a
+    priority tier, and trims or drops sections from the lowest tier upward.
+
+    Priority tiers (see ``agent_context.SECTION_PRIORITIES``):
+      0 – critical (never touched)
+      1 – high     (truncated to ~50% when space is tight)
+      2 – medium   (truncated to ~30% when space is tight)
+      3 – low      (dropped first, truncated to ~20% if kept)
+    """
     max_tokens = 11000 if self.config.provider == "freeflow" else self.config.max_context_tokens
-    
     system_tokens = self._count_tokens(system_prompt)
     prompt_tokens = self._count_tokens(user_prompt)
 
-    # If system and user fit - return as is
     if system_tokens + prompt_tokens <= max_tokens:
         return user_prompt
 
-    # Calculate the remainder. If the system prompt took everything, give the user a hard minimum of 600 tokens,
-    # so that the request flies even if we slightly exceed the limit (retry will work).
     available = max_tokens - system_tokens
     if available < 600:
         available = 600
 
-    ratio = available / prompt_tokens
-    target_chars = int(len(user_prompt) * ratio * 0.95)
-    
-    head_chars = max(400, target_chars // 2)
-    tail_chars = max(400, target_chars - head_chars)
-    
-    if head_chars + tail_chars >= len(user_prompt):
-        trimmed = user_prompt[:target_chars]
-    else:
-        trimmed = (
-            user_prompt[:head_chars]
-            + "\n\n[...PROMPT MIDDLE TRUNCATED TO FIT PROVIDER LIMITS...]\n\n"
-            + user_prompt[-tail_chars:]
+    # ── Parse into sections ──────────────────────────────────────────
+    sections = split_prompt_into_sections(user_prompt)
+    if not sections or (len(sections) == 1 and not sections[0][0]):
+        # Fallback: single blob with no recognisable headers.
+        # Use simple proportional truncation from the end (still beats middle-chop).
+        ratio = available / max(prompt_tokens, 1)
+        target_chars = max(400, int(len(user_prompt) * ratio * 0.90))
+        if target_chars < len(user_prompt):
+            trimmed = user_prompt[:target_chars] + "\n[... truncated]"
+        else:
+            trimmed = user_prompt
+        self._ui.debug_print(
+            f"Prompt trimmed (fallback): sys={system_tokens}, user={prompt_tokens} "
+            f"-> available {available} (limit {max_tokens})"
         )
-    
-    msg = "\n\n[CONTEXT TRUNCATED]"
-    
-    self._ui.debug_print(f"Prompt trimmed: sys={system_tokens}, user={prompt_tokens} -> available {available} (limit {max_tokens})")
-    return trimmed + msg
+        return trimmed + "\n\n[CONTEXT TRIMMED BY PRIORITY]"
+
+    # ── Token-count each section ──────────────────────────────────────
+    section_tokens: list[int] = []
+    for _header, text, _priority in sections:
+        section_tokens.append(self._count_tokens(text))
+
+    total_user_tokens = sum(section_tokens)
+
+    # ── Helper: rebuild final prompt from current section list ────────
+    def rebuild(secs: list[tuple[str, str, int]], stoks: list[int]) -> str:
+        parts: list[str] = []
+        for (_h, text, _p), tok in zip(secs, stoks):
+            if text is not None and tok > 0:
+                parts.append(text)
+        return "\n".join(parts)
+
+    # ── Tier 3: drop low-priority sections entirely ───────────────────
+    if total_user_tokens > available:
+        for i, (_header, text, priority) in enumerate(sections):
+            if priority != 3:
+                continue
+            if text is None:
+                continue
+            total_user_tokens -= section_tokens[i]
+            section_tokens[i] = 0
+            sections[i] = (_header, None, priority)
+            if total_user_tokens <= available:
+                break
+
+    # ── Tier 2: truncate medium-priority sections ─────────────────────
+    if total_user_tokens > available:
+        for i, (header, text, priority) in enumerate(sections):
+            if priority != 2:
+                continue
+            if text is None:
+                continue
+            # Keep ~30% of the original token budget for this section
+            target_tok = max(60, int(section_tokens[i] * 0.30))
+            truncated = _truncate_section_text(text, target_tok)
+            sections[i] = (header, truncated, priority)
+            new_tok = self._count_tokens(truncated)
+            total_user_tokens = total_user_tokens - section_tokens[i] + new_tok
+            section_tokens[i] = new_tok
+            if total_user_tokens <= available:
+                break
+
+    # ── Tier 1: truncate high-priority sections (keep ~50%) ───────────
+    if total_user_tokens > available:
+        for i, (header, text, priority) in enumerate(sections):
+            if priority != 1:
+                continue
+            if text is None:
+                continue
+            target_tok = max(100, int(section_tokens[i] * 0.50))
+            truncated = _truncate_section_text(text, target_tok)
+            sections[i] = (header, truncated, priority)
+            new_tok = self._count_tokens(truncated)
+            total_user_tokens = total_user_tokens - section_tokens[i] + new_tok
+            section_tokens[i] = new_tok
+            if total_user_tokens <= available:
+                break
+
+    # ── Tier 2 aggressive: if still over, squeeze medium sections harder ──
+    if total_user_tokens > available:
+        for i, (header, text, priority) in enumerate(sections):
+            if priority != 2:
+                continue
+            if text is None:
+                continue
+            target_tok = max(40, int(section_tokens[i] * 0.15))
+            truncated = _truncate_section_text(text, target_tok)
+            sections[i] = (header, truncated, priority)
+            new_tok = self._count_tokens(truncated)
+            total_user_tokens = total_user_tokens - section_tokens[i] + new_tok
+            section_tokens[i] = new_tok
+            if total_user_tokens <= available:
+                break
+
+    # ── Last resort: proportional cut across ALL remaining sections ───
+    if total_user_tokens > available:
+        ratio = available / max(total_user_tokens, 1)
+        for i, (header, text, priority) in enumerate(sections):
+            if text is None or section_tokens[i] <= 0:
+                continue
+            target_tok = max(50, int(section_tokens[i] * ratio * 0.90))
+            truncated = _truncate_section_text(text, target_tok)
+            sections[i] = (header, truncated, priority)
+            section_tokens[i] = self._count_tokens(truncated)
+
+    trimmed = rebuild(sections, section_tokens)
+    if not trimmed:
+        trimmed = user_prompt[:max(400, available * 4)]
+
+    trimmed += "\n\n[CONTEXT TRIMMED BY PRIORITY]"
+
+    kept_count = sum(1 for t in section_tokens if t > 0)
+    self._ui.debug_print(
+        f"Prompt trimmed: sys={system_tokens}, user={prompt_tokens} "
+        f"-> {sum(section_tokens)} tokens in {kept_count}/{len(sections)} sections "
+        f"(limit {max_tokens}, available {available})"
+    )
+    return trimmed
+
+
+def _truncate_section_text(text: str, target_tokens: int, chars_per_token: int = 4) -> str:
+    """Truncate *text* from the end so it fits within ~*target_tokens*.
+
+    The header line (everything up to the first newline) is always preserved.
+    Subsequent lines are kept until the estimated token budget is exhausted,
+    then a truncation marker is appended.
+    """
+    if not text:
+        return text
+
+    target_chars = target_tokens * chars_per_token
+
+    # If the token target would allow more chars than we actually have,
+    # force a meaningful reduction (at least 10 %, at most keep 2/3).
+    if target_chars >= len(text):
+        target_chars = max(len(text) // 10, len(text) * 2 // 3)
+
+    if len(text) <= target_chars:
+        return text
+
+    lines = text.split("\n")
+    # Always keep the header (first line).
+    if len(lines) <= 1:
+        return text[:target_chars] + "\n[... truncated]"
+
+    header = lines[0]
+    body_lines = lines[1:]
+
+    result_lines = [header]
+    used = len(header)
+
+    for line in body_lines:
+        if used + len(line) + 1 > target_chars:
+            remaining = len(body_lines) - body_lines.index(line)
+            if remaining > 0:
+                result_lines.append(f"[... {remaining} more lines truncated]")
+            break
+        result_lines.append(line)
+        used += len(line) + 1
+
+    return "\n".join(result_lines)
 
 
 def prefer_smart_model(self) -> bool:
@@ -355,6 +724,8 @@ def _supports_plain_json_fallback(error: Exception) -> bool:
 
 def _should_retry_model_error(error: Exception) -> bool:
     message = str(error).casefold()
+
+    # Never retry these errors
     no_retry_markers = (
         # Non-transient configuration/model errors — retrying never helps.
         "no healthy backend available",
@@ -365,5 +736,99 @@ def _should_retry_model_error(error: Exception) -> bool:
         "unauthorized",
         "does not exist",
         "not found",
+        # OmniRoute-specific non-retryable errors
+        "bad_request",
+        "invalid_request_error",
+        "improperly formed",
+        # Malformed API response — retrying won't fix empty choices or missing message
+        "no choices",
+        "malformed response",
+        "missing message",
     )
-    return not any(marker in message for marker in no_retry_markers)
+
+    if any(marker in message for marker in no_retry_markers):
+        return False
+
+    # Check specific exception types
+    if isinstance(error, (AuthenticationError, PermissionDeniedError, NotFoundError, BadRequestError)):
+        return False
+
+    # Retry transient errors
+    return True
+
+
+# ── secret masking ────────────────────────────────────────────────────────────
+
+_SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
+    # (regex pattern, replacement)
+    (r"sk-[a-zA-Z0-9_-]{20,}", "sk-***"),
+    (r"Bearer [^\s]{10,}", "Bearer ***"),
+    (r"api_key[=:]\s*[^\s,;)\]}&\"]{4,}", "api_key=***"),
+    (r"Authorization:\s*\S+(\s+\S+)*", "Authorization: ***"),
+    (r"key-[a-zA-Z0-9_-]{20,}", "key-***"),
+)
+
+
+def sanitize_error_message(message: str) -> str:
+    """Mask secrets (API keys, tokens, auth headers) from error messages."""
+    for pattern, replacement in _SECRET_PATTERNS:
+        message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
+    return message
+
+
+# ── safe response extraction ────────────────────────────────────────────────────
+
+def safe_extract_completion_content(
+    response: Any,
+    provider: str | None = None,
+    model: str | None = None,
+) -> str:
+    """Safely extract message content from a non-streaming chat completion response.
+
+    Handles malformed API responses: empty choices list, missing message attribute,
+    or empty content. Raises a descriptive RuntimeError instead of IndexError
+    so the error message includes provider/model context.
+
+    Returns:
+        str: Message content string (may be empty string if the model returned
+             empty content — callers should check with ``if not content``).
+
+    Raises:
+        RuntimeError: If choices is empty or the message is missing.
+    """
+    ctx_parts: list[str] = []
+    if provider:
+        ctx_parts.append(f"provider={provider}")
+    if model:
+        ctx_parts.append(f"model={model}")
+    ctx = f" ({', '.join(ctx_parts)})" if ctx_parts else ""
+
+    choices = getattr(response, "choices", None)
+    if not choices:
+        raise RuntimeError(
+            f"Model returned an empty response — no choices in completion{ctx}"
+        )
+
+    choice = choices[0]
+    message = getattr(choice, "message", None)
+    if message is None:
+        raise RuntimeError(
+            f"Model returned a malformed response — choice is missing message{ctx}"
+        )
+
+    content = getattr(message, "content", None)
+    if content is None:
+        return ""
+    return content
+
+
+def safe_extract_stream_delta(chunk: Any) -> Any | None:
+    """Safely extract delta from a streaming chunk.
+
+    Returns the delta object if present, or None if the chunk has no choices
+    (e.g. a final usage-only chunk).
+    """
+    choices = getattr(chunk, "choices", None)
+    if not choices:
+        return None
+    return getattr(choices[0], "delta", None)

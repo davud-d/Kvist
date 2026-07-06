@@ -18,6 +18,7 @@ class AgentConfig:
     summary_recent_events: int = 8
     recent_feedback_limit: int = 4
     detailed_feedback_limit: int = 3
+    rolling_summary_interval: int = 5
     prompt_result_char_limit: int = 5000
     prompt_value_char_limit: int = 1600
     cache_enabled: bool = True
@@ -31,7 +32,8 @@ class AgentConfig:
     runtime_model_fallbacks_enabled: bool = False
     stream: bool = True
     verbose: bool = False
-    api_request_interval: float = 3.0
+    api_request_interval: float = 5.0
+    api_timeout: float = 60.0
 
 
 @dataclass(slots=True)
@@ -49,7 +51,11 @@ class RunState:
     task_language: str = ""
     system_os: str = ""
     system_shell: str = ""
+    user_goal: str = ""
     create_goal: bool = False
+    modify_goal: bool = False
+    read_only_goal: bool = False
+    verify_only_goal: bool = False
     plan_info: PlanInfo | None = None
     selected_action_role: str = ""
     selected_action_model: str = ""
@@ -57,11 +63,14 @@ class RunState:
     summary: str = ""
     files_read: list[str] = field(default_factory=list)
     files_changed: list[str] = field(default_factory=list)
+    pending_verification_paths: list[str] = field(default_factory=list)
+    security_policy_violations: list[str] = field(default_factory=list)
     required_artifacts: list[str] = field(default_factory=list)
     missing_artifacts: list[str] = field(default_factory=list)
     verification_evidence: list[str] = field(default_factory=list)
     completion_blockers: list[str] = field(default_factory=list)
     required_next_actions: list[str] = field(default_factory=list)
+    completion_ready: bool = False
     recent_feedback: list[str] = field(default_factory=list)
     recent_events: list[str] = field(default_factory=list)
     recent_result_details: list[str] = field(default_factory=list)
@@ -82,7 +91,10 @@ class RunState:
     parse_errors: int = 0
     read_only_streak: int = 0
     pending_instruction: str = ""
+    rolling_summaries: dict[int, str] = field(default_factory=dict)
     last_action_signature: str = ""
     last_progress: int = 0
     last_web_query: str = ""
     last_web_thought: str = ""
+    cached_static_prompt: str = ""
+    cached_static_suffix: str = ""
