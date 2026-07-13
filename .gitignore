@@ -61,6 +61,7 @@ jetbrains-plugin/bin/win/kvist.exe
 *.dylib
 
 # Other
+.mimocode/
 push.py
 text_gitignore.txt
 workspace
