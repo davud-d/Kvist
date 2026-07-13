@@ -97,6 +97,7 @@ def _session_document(
         "updated_at": time.time(),
         "session_history": getattr(self, "_session_history", []),
         "chat_history": _serializable_chat_history(self),
+        "response_language": getattr(self, "_last_response_language", None),
         "checkpoint": checkpoint,
     }
 
@@ -178,6 +179,10 @@ def load_session(self) -> bool:
     saved_history = data.get("session_history")
     self._session_history = saved_history if isinstance(saved_history, list) else []
 
+    saved_language = data.get("response_language")
+    if saved_language in ("ru", "en"):
+        self._last_response_language = saved_language
+
     saved_chat = data.get("chat_history")
     if isinstance(saved_chat, list) and saved_chat:
         self._chat_history = [
@@ -217,6 +222,7 @@ def persist_logs(self, user_goal: str) -> None:
         "goal": user_goal,
         "current_agent_role": self._state.current_agent_role,
         "task_language": self._state.task_language,
+        "response_language": self._state.response_language,
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
         "selected_action_model": self._state.selected_action_model,
@@ -262,6 +268,7 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
         "goal": user_goal,
         "current_agent_role": self._state.current_agent_role,
         "task_language": self._state.task_language,
+        "response_language": self._state.response_language,
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
         "selected_action_model": self._state.selected_action_model,
@@ -339,6 +346,10 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.progress = data.get("progress", 0)
     self._state.current_agent_role = str(data.get("current_agent_role") or "coder")
     self._state.task_language = str(data.get("task_language") or "")
+    saved_response_language = data.get("response_language")
+    self._state.response_language = (
+        saved_response_language if saved_response_language in ("ru", "en") else ""
+    )
     self._state.create_goal = bool(data.get("create_goal", False))
     self._state.selected_action_role = str(data.get("selected_action_role") or "")
     self._state.selected_action_model = str(data.get("selected_action_model") or "")

@@ -144,6 +144,71 @@ def test_run_loop_auto_completes_simple_create_after_verification(agent_factory)
     assert not (agent.executor.workspace / "task_report.txt").exists()
 
 
+def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_factory):
+    agent = agent_factory(max_steps=5)
+    agent._state.plan_info = PlanInfo(
+        goal="Создать hello.py",
+        complexity="simple",
+        plan=["create hello.py", "verify hello.py", "final report"],
+        success_criteria=["hello.py exists", "hello.py is verified"],
+        risks=[],
+    )
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+
+    responses = [
+        {
+            "thought": "Сначала запишу отчёт",
+            "plan_step": "edit",
+            "progress": 40,
+            "user_message": "Готовлю отчёт",
+            "action": {
+                "type": "write_file",
+                "args": {"path": "task_report.txt", "content": "done\n"},
+            },
+        },
+        {
+            "thought": "Теперь создаю hello.py",
+            "plan_step": "edit",
+            "progress": 70,
+            "user_message": "Создаю файл",
+            "action": {
+                "type": "write_file",
+                "args": {"path": "hello.py", "content": "print('Hello')\n"},
+            },
+        },
+        {
+            "thought": "Проверяю hello.py",
+            "plan_step": "verify",
+            "progress": 90,
+            "user_message": "Проверяю файл",
+            "action": {
+                "type": "read_file",
+                "args": {"path": "hello.py"},
+            },
+        },
+    ]
+    call_count = {"value": 0}
+
+    def fake_call_action_model(prompt: str) -> str:
+        index = call_count["value"]
+        if index >= len(responses):
+            raise AssertionError("run_loop requested an extra action after verification")
+        call_count["value"] += 1
+        return json.dumps(responses[index], ensure_ascii=False)
+
+    agent._call_action_model = fake_call_action_model
+
+    result = agent._run_loop("Создай hello.py", start_step=1)
+
+    assert call_count["value"] == 3
+    assert "hello.py" in result
+    assert agent._state.step_logs[-1]["status"] == "final_answer"
+    assert any(log["status"] == "error" for log in agent._state.step_logs[:-1])
+    assert not (agent.executor.workspace / "task_report.txt").exists()
+    assert (agent.executor.workspace / "hello.py").exists()
+
+
 def test_rolling_summary_stored_on_summary_step(agent_factory, tmp_path):
     """Rolling summary from command is stored in state on step % interval == 0."""
     agent = agent_factory(rolling_summary_interval=5)
@@ -206,6 +271,7 @@ def test_api_timeout_default_value():
 def test_is_modify_goal_detects_fix_and_edit_intents():
     """P1: _is_modify_goal returns True for fix/modify/change/edit patterns."""
     from agent_runtime import _is_modify_goal
+    assert _is_modify_goal("Add markdown rendering to ui.py")
     assert _is_modify_goal("Fix the bug in main.py")
     assert _is_modify_goal("fix: error in login")
     assert _is_modify_goal("Modify the parser")
@@ -214,6 +280,7 @@ def test_is_modify_goal_detects_fix_and_edit_intents():
     assert _is_modify_goal("Edit the config file")
     assert _is_modify_goal("Refactor the handler")
     assert _is_modify_goal("Improve performance")
+    assert _is_modify_goal("Добавь Markdown-рендеринг финального ответа в UI")
     assert _is_modify_goal("Исправь ошибку в main.py")
     assert _is_modify_goal("Изменить настройки")
     assert not _is_modify_goal("Check if main.py exists")

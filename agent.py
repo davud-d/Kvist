@@ -100,8 +100,8 @@ from role_router import route_role_with_llm, route_role
 from system_context import current_os_context, current_shell_context, current_time_context
 from ui import AgentUI
 from language_utils import detect_request_language
+from language_policy import resolve_response_language, response_language_name
 from rich.live import Live
-from rich.markdown import Markdown
 
 class LocalAgent:
     def __init__(
@@ -120,6 +120,9 @@ class LocalAgent:
         self._ui = AgentUI(console=self.console, verbose=self.config.verbose, perf_logger=self._perf_logger)
         self._encoding = self._init_tiktoken_encoding()
         self._current_step = 0
+        # Last resolved user-facing language for this session; used as the
+        # fallback when a new request has no detectable language.
+        self._last_response_language: str | None = None
         self.current_session = load_active_session(self)
         self._session_history: list[dict[str, Any]] = []
         load_session(self)
@@ -188,11 +191,20 @@ class LocalAgent:
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
         self._reset_run_state()
         self._state.task_language = detect_request_language(user_goal)
+        # User-facing response language is resolved by the runtime layer
+        # before any model call; the JSON protocol itself stays English.
+        self._state.response_language = resolve_response_language(
+            user_goal, previous_language=self._last_response_language
+        )
+        self._last_response_language = self._state.response_language
         self._state.system_os = current_os_context()
         self._state.system_shell = current_shell_context()
 
         # ── Role routing: either passed from outside or detected locally ─────
         self._state.current_agent_role = routed_role or self._route_role(user_goal)
+        # Shell risk assessment (command_policy) is role-aware; keep it in
+        # sync with the routed role for this run.
+        self.executor.set_active_role(self._state.current_agent_role)
 
         if self.config.verbose:
             self._select_action_model_for_run()
@@ -214,6 +226,7 @@ class LocalAgent:
         if not self._state.selected_action_model:
             self._select_action_model_for_run()
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
+        self._ui.print_sandbox_notice(self.executor.sandbox_note)
         self._ui.print_plan(self._state.plan_info)
         result = self._run_loop(user_goal, start_step=1)
         self._add_to_session_history(user_goal, self._state.current_agent_role, result)
@@ -225,8 +238,14 @@ class LocalAgent:
         if result is None:
             return None
         user_goal, last_step = result
+        self.executor.set_active_role(self._state.current_agent_role)
         if not self._state.task_language:
             self._state.task_language = detect_request_language(user_goal)
+        if self._state.response_language not in ("ru", "en"):
+            self._state.response_language = resolve_response_language(
+                user_goal, previous_language=self._last_response_language
+            )
+        self._last_response_language = self._state.response_language
         if not self._state.selected_action_model:
             self._select_action_model_for_run()
         self._ui.debug_print(
@@ -362,7 +381,16 @@ class LocalAgent:
                     history_lines.append(f"    Output: {output}")
             session_context = "\n".join(history_lines) + "\n\n---\n\n"
 
-        self._chat_history.append({"role": "user", "content": session_context + user_goal})
+        # Per-turn runtime directive: the reply language is resolved by the
+        # runtime layer (language_policy), not guessed by the model.
+        language_note = (
+            f"(Runtime directive: response_language = {self._state.response_language}. "
+            f"Reply in {response_language_name(self._state.response_language)}.)\n\n"
+        )
+
+        self._chat_history.append(
+            {"role": "user", "content": language_note + session_context + user_goal}
+        )
 
         # Trim history to keep only last 10 messages + system prompt
         self._chat_history = trim_history(self._chat_history, max_recent=10)
@@ -396,7 +424,7 @@ class LocalAgent:
                     content = safe_extract_completion_content(
                         response, self.config.provider, model
                     )
-                    self.console.print(Markdown(content))
+                    self._ui.print_user_markdown(content)
 
                 # Save model response to history and return
                 if content:
@@ -437,7 +465,7 @@ class LocalAgent:
         import time
         last_update = time.monotonic()
         
-        with Live(Markdown(""), console=self.console, refresh_per_second=15) as live:
+        with Live(self._ui.render_user_markdown(""), console=self.console, refresh_per_second=15) as live:
             for chunk in stream:
                 text = ""
                 
@@ -467,10 +495,10 @@ class LocalAgent:
                     # Throttle rendering to ~10 FPS to prevent CPU choke
                     now = time.monotonic()
                     if now - last_update > 0.1:
-                        live.update(Markdown("".join(chunks)))
+                        live.update(self._ui.render_user_markdown("".join(chunks)))
                         last_update = now
-                        
+
             # Final update to guarantee the last parts are rendered
-            live.update(Markdown("".join(chunks)))
+            live.update(self._ui.render_user_markdown("".join(chunks)))
                     
         return "".join(chunks)

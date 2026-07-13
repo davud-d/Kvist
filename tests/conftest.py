@@ -3,6 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from rich.text import Text
 
 from agent import LocalAgent
 from agent_state import AgentConfig, PlanInfo
@@ -27,6 +28,16 @@ class NullUI:
         pass
 
     def print_final(self, *args, **kwargs):
+        pass
+
+    def render_user_markdown(self, message, fallback_style=""):
+        _ = fallback_style
+        return Text(message)
+
+    def print_user_markdown(self, *args, **kwargs):
+        pass
+
+    def print_sandbox_notice(self, *args, **kwargs):
         pass
 
     def debug_print(self, *args, **kwargs):

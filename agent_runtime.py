@@ -97,6 +97,7 @@ def _build_report_context(self, user_goal: str, summary: str, result: str, issue
     state = self._state
     context = {
         "user_goal": user_goal,
+        "response_language": state.response_language or "en",
         "role": state.current_agent_role or "coder",
         "summary": summary,
         "result": result,
@@ -114,7 +115,6 @@ def _build_report_context(self, user_goal: str, summary: str, result: str, issue
 def _render_report(self, context: str) -> str:
     """Call the chat model to render a report from agent context. Streams markdown to console."""
     from rich.live import Live
-    from rich.markdown import Markdown
     from agent_model import _load_role_prompt, call_model, safe_extract_stream_delta, _create_json_completion
 
     report_prompt = _load_role_prompt("report")
@@ -122,7 +122,7 @@ def _render_report(self, context: str) -> str:
 
     if not getattr(self.config, "stream", True):
         raw = call_model(self, model=stream_model, system_prompt=report_prompt, user_prompt=context)
-        self._ui.console.print(Markdown(raw))
+        self._ui.print_user_markdown(raw)
         return raw
 
     messages = [
@@ -133,7 +133,7 @@ def _render_report(self, context: str) -> str:
     chunks: list[str] = []
     last_update = __import__("time").monotonic()
 
-    with Live(Markdown(""), console=self._ui.console, refresh_per_second=15) as live:
+    with Live(self._ui.render_user_markdown(""), console=self._ui.console, refresh_per_second=15) as live:
         for chunk in stream:
             text = ""
             delta = safe_extract_stream_delta(chunk)
@@ -153,10 +153,10 @@ def _render_report(self, context: str) -> str:
                 chunks.append(text)
                 now = __import__("time").monotonic()
                 if now - last_update > 0.1:
-                    live.update(Markdown("".join(chunks)))
+                    live.update(self._ui.render_user_markdown("".join(chunks)))
                     last_update = now
 
-        live.update(Markdown("".join(chunks)))
+        live.update(self._ui.render_user_markdown("".join(chunks)))
 
     return "".join(chunks)
 
@@ -317,12 +317,37 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 )
                 continue
 
-            # Block report artifacts when task is complete
+            # Block report-like artifact creation at the UI/report layer only.
+            # Never auto-complete here: the model may try to write task_report.txt
+            # before doing any real work, and that must stay a corrective error.
             if self._is_report_artifact_blocked(command):
-                # Task is complete, force final_answer instead of creating report
-                final_message = self._build_auto_completion_message()
-                self._register_final_answer(step, final_message)
-                break
+                self._refresh_completion_requirements(force_enforcement=True)
+                if self._state.completion_ready:
+                    feedback = {
+                        "ok": False,
+                        "action_type": command.action.type,
+                        "result": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
+                    }
+                    live_status = "completion enforced"
+                    live_message = "Task is complete, requiring final_answer"
+                else:
+                    feedback = {
+                        "ok": False,
+                        "action_type": command.action.type,
+                        "result": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
+                    }
+                    live_status = "report artifact blocked"
+                    live_message = "Report artifact blocked; continue the actual task"
+                self._register_feedback(step, command, feedback)
+                self._ui.update_live(
+                    user_message=live_message,
+                    status=live_status,
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step=command.plan_step,
+                    is_error=True,
+                )
+                continue
 
             # Block write actions for read-only tasks
             if self._is_read_only_violation(command):
@@ -583,17 +608,20 @@ def build_error_feedback(
 
 
 def command_language_error(self, command: AgentCommand) -> str | None:
-    language = self._state.task_language
-    checks = [
-        ("thought", command.thought),
-        ("user_message", command.user_message),
-    ]
-    if command.action.type in ("final_answer", "report_to_user"):
-        checks.append((f"{command.action.type}.message", str(command.action.args.get("message", "") or command.action.args.get("result", ""))))
-
-    for field_name, value in checks:
-        if not _matches_task_language(value, language):
-            return f"Field {field_name} is not written in English."
+    # Only the terminal user-facing text is policed. JSON keys, action types,
+    # thought, and intermediate technical fields are protocol-level English
+    # and are not language-checked; report_to_user output is rendered by the
+    # reporter, which receives response_language itself.
+    if command.action.type != "final_answer":
+        return None
+    language = self._state.response_language
+    message = str(command.action.args.get("message", ""))
+    if not _matches_response_language(message, language):
+        language_name = "Russian" if language == "ru" else "English"
+        return (
+            f"Field final_answer.args.message is not written in {language_name} "
+            f"(response_language: {language})."
+        )
     return None
 
 
@@ -606,10 +634,13 @@ def register_language_error(
     self._state.parse_errors += 1
     self._state.consecutive_errors += 1
     self._record_error(error_text)
+    language = self._state.response_language
+    language_name = "Russian" if language == "ru" else "English"
     self._state.pending_instruction = (
         f"{error_text} The previous step was rejected and was not executed. "
-        "Retry the same intended step, but write public JSON fields thought, "
-        "user_message, and final_answer.args.message only in English."
+        f"Retry the same intended step, but write final_answer.args.message in "
+        f"{language_name} (response_language: {language}). "
+        "JSON action keys and action types stay English."
     )
     self._state.step_logs.append(
         {
@@ -1061,8 +1092,14 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
 
 
 def build_early_stop_message(self, step: int) -> str | None:
+    is_ru = self._state.response_language == "ru"
     if self._state.consecutive_errors >= self.config.max_consecutive_errors:
         errors = _summarize_recent_errors(self)
+        if is_ru:
+            return (
+                "Агент остановлен: слишком много ошибок подряд. "
+                f"Последние ошибки: {errors}"
+            )
         return (
             "Agent stopped. Too many consecutive errors. "
             f"Last errors: {errors}"
@@ -1073,9 +1110,15 @@ def build_early_stop_message(self, step: int) -> str | None:
         self._state.stagnation_count >= self.config.stagnation_limit
         and "TERMINAL CONDITION" not in (self._state.pending_instruction or "")
     ):
+        last_actions = ", ".join(self._state.recent_feedback[-3:])
+        if is_ru:
+            return (
+                "Агент остановлен: прогресса нет, похоже на зацикливание. "
+                f"Последние действия: {last_actions}"
+            )
         return (
             "Agent stopped. No progress detected, possible loop. "
-            f"Last actions: {', '.join(self._state.recent_feedback[-3:])}"
+            f"Last actions: {last_actions}"
         )
 
     return None
@@ -1084,6 +1127,15 @@ def build_early_stop_message(self, step: int) -> str | None:
 def build_limit_reached_message(self) -> str:
     errors = _summarize_recent_errors(self)
     blockers = ", ".join(self._state.completion_blockers[-3:])
+    if self._state.response_language == "ru":
+        message = (
+            "Агент не успел завершить задачу за отведённый лимит шагов. "
+            f"Текущий прогресс: {self._state.progress}%. "
+            f"Последние ошибки: {errors}."
+        )
+        if blockers:
+            message += f" Блокеры: {blockers}."
+        return message
     message = (
         "Agent did not complete the task within the step limit. "
         f"Current progress: {self._state.progress}%. "
@@ -1098,12 +1150,18 @@ def build_auto_completion_message(self) -> str:
     """Build automatic completion message when task is verified but model doesn't call final_answer."""
     files_summary = ", ".join(self._state.files_changed[:5])
     if len(self._state.files_changed) > 5:
-        files_summary += f" and {len(self._state.files_changed) - 5} more"
+        extra = len(self._state.files_changed) - 5
+        files_summary += (
+            f" и ещё {extra}" if self._state.response_language == "ru" else f" and {extra} more"
+        )
 
+    if self._state.response_language == "ru":
+        if self._state.files_changed:
+            return f"Готово. Изменённые файлы: {files_summary}. Проверка пройдена."
+        return "Готово, все проверки пройдены."
     if self._state.files_changed:
-        return f"Task completed successfully. Modified files: {files_summary}. Verification confirmed."
-    else:
-        return "Task completed successfully. All checks passed."
+        return f"Done. Modified files: {files_summary}. Verification confirmed."
+    return "Done. All checks passed."
 
 
 def _summarize_recent_errors(self) -> str:
@@ -1543,13 +1601,18 @@ def set_required_next_actions(self, actions: set[str] | list[str], message: str)
     self._state.pending_instruction = message
 
 
-def _matches_task_language(text: str, language: str) -> bool:
+def _matches_response_language(text: str, language: str) -> bool:
     if language not in {"ru", "en"}:
         return True
     cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
     latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
-    if language == "ru":
+    if cyrillic == 0 and latin == 0:
+        # Purely technical output (paths, numbers, symbols) — no signal.
         return True
+    if language == "ru":
+        # A Russian final must contain at least some Russian; Latin-only
+        # technical terms inside it are fine.
+        return cyrillic > 0
     return cyrillic <= latin
 
 
@@ -1586,6 +1649,7 @@ def _is_modify_goal(user_goal: str) -> bool:
     """Detect fix/modify/change/update/edit intent from user goal."""
     lowered = user_goal.casefold()
     markers = (
+        "add ",
         "fix ",
         "fix:",
         "modify ",
@@ -1601,6 +1665,8 @@ def _is_modify_goal(user_goal: str) -> bool:
         "изменить",
         "обнови",
         "обновить",
+        "добавь",
+        "добавить",
         "отредактируй",
         "отредактировать",
         "переделай",

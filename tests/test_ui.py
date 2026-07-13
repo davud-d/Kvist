@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 
 import pytest
+from rich.console import Console
 
+import ui as ui_module
 from ui import AgentUI
 
 
@@ -21,6 +23,71 @@ def test_ui_basic_interface():
     ui.print_error("error")
 
     assert ui.verbose is False
+
+
+def test_print_user_markdown_accepts_markdown_text_without_crashing():
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=False)
+
+    ui.print_user_markdown("Updated `hello.txt`\n\n- first\n- second")
+
+    rendered = console.export_text()
+    assert "Updated hello.txt" in rendered
+    assert "first" in rendered
+    assert "second" in rendered
+
+
+def test_print_final_renders_markdown_without_crashing():
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=False)
+
+    ui.print_final("Updated `hello.txt`\n\n- first\n- second")
+
+    rendered = console.export_text()
+    assert "Updated hello.txt" in rendered
+    assert "first" in rendered
+    assert "second" in rendered
+
+
+def test_print_final_keeps_code_block_content():
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=False)
+
+    ui.print_final("```txt\nhello.txt\nhello world\n```")
+
+    rendered = console.export_text()
+    assert "hello.txt" in rendered
+    assert "hello world" in rendered
+
+
+def test_print_final_falls_back_to_plain_text_on_markdown_error(monkeypatch):
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=False)
+
+    def boom(message: str):
+        raise RuntimeError("markdown failed")
+
+    monkeypatch.setattr(ui_module, "Markdown", boom)
+
+    ui.print_final("Use `hello.txt` safely")
+
+    rendered = console.export_text()
+    assert "Use `hello.txt` safely" in rendered
+
+
+def test_print_user_markdown_falls_back_to_plain_text_on_markdown_error(monkeypatch):
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=False)
+
+    def boom(message: str):
+        raise RuntimeError("markdown failed")
+
+    monkeypatch.setattr(ui_module, "Markdown", boom)
+
+    ui.print_user_markdown("Use `hello.txt` safely")
+
+    rendered = console.export_text()
+    assert "Use `hello.txt` safely" in rendered
 
 
 def test_choose_option_returns_first_option():

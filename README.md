@@ -121,11 +121,18 @@ AGENT_PLANNER_MODEL=gpt-5
 AGENT_MAX_STEPS=20
 AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
+AGENT_SANDBOX_MODE=auto
 ```
 
 `AGENT_MAX_STEPS` is the one I change most often. Raise it when the agent keeps
 stopping one or two steps too early. `AGENT_VERBOSE=1` is useful when debugging
 DevAgentXD itself, and noisy for normal use.
+
+`AGENT_SANDBOX_MODE=bubblewrap` (Linux, requires `bwrap`) wraps shell commands in
+a bubblewrap sandbox: read-only root filesystem, writable workspace, shared
+network. The default (`auto`) keeps the workspace-only boundary and prints a hint
+when bwrap is available; if bubblewrap is requested but missing, the agent runs
+degraded and warns once.
 
 Provider notes:
 
@@ -248,9 +255,19 @@ The API key stays in your home directory config, not in the project.
 
 ## Sharp edges
 
-File access is kept inside the workspace. Shell commands go through an allowlist.
-There are size limits, output limits, and URL fetch blocks for obvious binary
-stuff.
+File access is kept inside the workspace (with symlink-escape checks), and `.env`
+files are blocked for both reading and writing. Shell commands pass two gates:
+an allowlist (piped commands are validated per segment) and a role-aware risk
+assessment (`command_policy.py`) — risky commands trigger an interactive
+approval prompt, and are denied when stdin is not a TTY. There are size limits,
+output limits, and URL fetch blocks for obvious binary stuff. Results of
+`web_search`/`fetch_url` are marked as untrusted external content before they
+reach the model.
+
+Be honest about what this is NOT: the default mode is not an OS sandbox. Shell
+commands run with your user's permissions; only cwd, the allowlist, and rlimits
+constrain them. On Linux you can opt into a real sandbox with
+`AGENT_SANDBOX_MODE=bubblewrap` (see "Knobs worth knowing").
 
 Still, this is a tool for supervised work. It can misunderstand the task or make
 the wrong edit confidently. Best workflow so far: ask for one contained change,
@@ -275,7 +292,9 @@ Execution and parsing:
 
 - `executor.py` handles workspace-safe file, shell, git, and web actions.
 - `parser.py` and `protocol.py` validate model actions.
-- `terminal.py` has the shell command allowlist.
+- `terminal.py` has the shell command allowlist and the HITL approval prompt.
+- `command_policy.py` risk-grades shell commands (SAFE/MODERATE/DANGEROUS, role-aware).
+- `sandbox.py` detects/wraps the optional bubblewrap OS sandbox.
 - `agent_web.py` guards web search and URL reads.
 
 LLM and provider wiring:

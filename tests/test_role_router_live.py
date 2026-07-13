@@ -29,7 +29,9 @@ import pytest
 import role_router
 from llm_clients import (
     FREEFLOW_PROVIDER,
+    configured_freeflow_backends,
     create_llm_client,
+    infer_freeflow_backend,
     required_secret_keys_for_provider,
     resolve_models_for_provider,
 )
@@ -503,30 +505,60 @@ def freeflow_client(freeflow_credentials):
         pytest.skip(f"Failed to create FreeFlow client: {error}")
 
 
+def _validate_model_backend_available(model: str, credentials: dict[str, str]) -> tuple[bool, str]:
+    """Check whether the model's required backend is configured.
+
+    Returns (is_available, reason).
+    """
+    backend = infer_freeflow_backend(model)
+    if backend is None:
+        return False, f"Cannot infer backend for model '{model}'"
+    configured = configured_freeflow_backends(credentials)
+    if backend not in configured:
+        return False, (
+            f"Model '{model}' requires {backend.capitalize()} backend, "
+            f"but only {', '.join(b.capitalize() for b in configured) if configured else 'no backends'} "
+            f"are configured. Add {backend.capitalize()} API key to ~/.devagent/config.json."
+        )
+    return True, ""
+
+
 @pytest.fixture(scope="module")
 def fast_model(freeflow_credentials):
     """Get the fast model for routing.
 
     Prefer Groq models over Gemini to avoid rate limits during testing.
+    If the preferred model's backend is not configured, fall back to
+    whatever model/backend is actually available, or skip with a clear reason.
     """
     models = freeflow_credentials["models"]
+    credentials = freeflow_credentials["credentials"]
 
     # Try to use a Groq model first (more stable for testing)
     groq_models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     for groq_model in groq_models:
         for role, model in models.items():
-            if model in groq_models:
-                return model
+            if model == groq_model:
+                ok, reason = _validate_model_backend_available(model, credentials)
+                if ok:
+                    return model
+                # Groq model is configured but backend unavailable — skip
+                pytest.skip(f"Cannot use Groq model for live tests: {reason}")
 
     # Fallback to configured fast model
     fast = models.get("fast")
     if not fast:
         pytest.skip("No fast model configured for FreeFlow provider")
 
-    # If fast model is Gemini, try to use Groq instead
+    # Validate the fast model's backend is available
+    ok, reason = _validate_model_backend_available(fast, credentials)
+    if not ok:
+        pytest.skip(f"Live tests skipped: {reason}")
+
+    # If fast model is Gemini and Groq is available, prefer Groq for rate-limit reasons
     if fast.startswith("gemini-"):
-        # Use Groq as fallback to avoid Gemini rate limits
-        return "llama-3.3-70b-versatile"
+        if "groq" in configured_freeflow_backends(credentials):
+            return "llama-3.3-70b-versatile"
 
     return fast
 
@@ -547,6 +579,10 @@ def is_llm_error_skippable(error_msg: str) -> tuple[bool, str]:
         ("backend unavailable", "Backend unavailable"),
         ("unavailable or misconfigured", "Backend misconfigured"),
         ("invalid api key", "Invalid API key"),
+        ("not found for api version", "Model not found (provider/model mismatch)"),
+        ("not found", "Resource not found"),
+        ("high demand", "Provider overloaded (transient)"),
+        ("all providers exhausted", "All providers exhausted"),
     ]
     for pattern, reason in skippable_patterns:
         if pattern in lowered:
@@ -635,7 +671,7 @@ def _run_role_routing_test(case: LiveTestCase, freeflow_client, fast_model, monk
         is_skippable, skip_reason = is_llm_error_skippable(decision.error)
 
         # Record result
-        _record_result(TestResult(
+        _record_result(LiveRouteResult(
             group=case.group,
             input=case.input,
             expected_role=case.expected_role,
@@ -655,7 +691,7 @@ def _run_role_routing_test(case: LiveTestCase, freeflow_client, fast_model, monk
     # Verify that direct_match is None and source is "llm"
     if case.group.startswith(("A_", "B_", "C_")):
         if direct_match is not None:
-            _record_result(TestResult(
+            _record_result(LiveRouteResult(
                 group=case.group,
                 input=case.input,
                 expected_role=case.expected_role,
@@ -675,7 +711,7 @@ def _run_role_routing_test(case: LiveTestCase, freeflow_client, fast_model, monk
             )
 
         if decision.source != "llm":
-            _record_result(TestResult(
+            _record_result(LiveRouteResult(
                 group=case.group,
                 input=case.input,
                 expected_role=case.expected_role,
@@ -696,7 +732,7 @@ def _run_role_routing_test(case: LiveTestCase, freeflow_client, fast_model, monk
 
         # Verify LLM was actually called
         if not decision.raw_response:
-            _record_result(TestResult(
+            _record_result(LiveRouteResult(
                 group=case.group,
                 input=case.input,
                 expected_role=case.expected_role,
@@ -715,7 +751,7 @@ def _run_role_routing_test(case: LiveTestCase, freeflow_client, fast_model, monk
     # Check if role matches expectation
     if decision.role != case.expected_role:
         # Record failure
-        _record_result(TestResult(
+        _record_result(LiveRouteResult(
             group=case.group,
             input=case.input,
             expected_role=case.expected_role,
@@ -774,7 +810,7 @@ def _run_role_routing_test(case: LiveTestCase, freeflow_client, fast_model, monk
         pytest.fail(failure_msg)
 
     # Record success
-    _record_result(TestResult(
+    _record_result(LiveRouteResult(
         group=case.group,
         input=case.input,
         expected_role=case.expected_role,
@@ -804,7 +840,7 @@ def test_live_llm_connection(freeflow_client, fast_model, monkeypatch):
         is_skippable, skip_reason = is_llm_error_skippable(str(error))
 
         # Record result
-        _record_result(TestResult(
+        _record_result(LiveRouteResult(
             group="infrastructure",
             input="Create a Python script",
             expected_role="coder",
@@ -822,7 +858,7 @@ def test_live_llm_connection(freeflow_client, fast_model, monkeypatch):
 
     # This should match direct rule, so source should be "direct"
     if decision.source != "direct":
-        _record_result(TestResult(
+        _record_result(LiveRouteResult(
             group="infrastructure",
             input="Create a Python script",
             expected_role="coder",
@@ -838,7 +874,7 @@ def test_live_llm_connection(freeflow_client, fast_model, monkeypatch):
         )
 
     if decision.role != "coder":
-        _record_result(TestResult(
+        _record_result(LiveRouteResult(
             group="infrastructure",
             input="Create a Python script",
             expected_role="coder",
@@ -851,7 +887,7 @@ def test_live_llm_connection(freeflow_client, fast_model, monkeypatch):
         pytest.fail(f"Expected role=coder, got role={decision.role}")
 
     # Record success
-    _record_result(TestResult(
+    _record_result(LiveRouteResult(
         group="infrastructure",
         input="Create a Python script",
         expected_role="coder",
@@ -860,6 +896,65 @@ def test_live_llm_connection(freeflow_client, fast_model, monkeypatch):
         model=fast_model,
         raw_response=decision.raw_response,
         status="passed",
+    ))
+
+
+@pytest.mark.live_llm
+@pytest.mark.smoke
+def test_validate_model_backend_mismatch_is_skipped(freeflow_credentials):
+    """Verify that a model requiring an unconfigured backend is detected and skipped.
+
+    This test does NOT reach the LLM — it validates the pre-flight check that
+    prevents the kind of provider/model mismatch described in the bug report
+    (e.g. llama-3.3-70b-versatile through gemini-only backends).
+    """
+    credentials = freeflow_credentials["credentials"]
+    configured = configured_freeflow_backends(credentials)
+
+    # Pick a model whose backend is NOT configured
+    if "groq" not in configured:
+        test_model = "llama-3.3-70b-versatile"
+        expected_backend = "groq"
+    elif "gemini" not in configured:
+        test_model = "gemini-3.5-flash"
+        expected_backend = "gemini"
+    else:
+        # Both backends are configured — this check is a no-op, which is fine
+        _record_result(LiveRouteResult(
+            group="infrastructure",
+            input="",
+            expected_role="",
+            actual_role="",
+            source="",
+            model="",
+            raw_response="",
+            status="passed",
+            skip_reason="",
+            matched_rule="",
+        ))
+        return
+
+    ok, reason = _validate_model_backend_available(test_model, credentials)
+    assert not ok, (
+        f"Expected model '{test_model}' to be rejected (requires {expected_backend}), "
+        f"but _validate_model_backend_available returned ok=True"
+    )
+    assert expected_backend in reason.lower(), (
+        f"Skip reason should mention '{expected_backend}' backend, got: {reason}"
+    )
+
+    # Record the check as passed
+    _record_result(LiveRouteResult(
+        group="infrastructure",
+        input=f"validate_backend_check({test_model})",
+        expected_role="",
+        actual_role="",
+        source="",
+        model=test_model,
+        raw_response="",
+        status="passed",
+        skip_reason="",
+        matched_rule=reason,
     ))
 
 

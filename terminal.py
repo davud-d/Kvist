@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import subprocess
+import sys
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
+
+from command_policy import CommandAssessment, RiskLevel, assess_command
+from sandbox import SandboxMode, detect_sandbox_mode, wrap_command_for_sandbox
 
 # ── Global HITL lock ─────────────────────────────────────────────
 # Prevents background TUI rendering while the user is typing y/N.
@@ -229,6 +234,10 @@ _SCRIPT_EXTENSIONS: dict[str, tuple[str, ...]] = {
 }
 _TERMINAL_PROFILES: frozenset[str] = frozenset({"restricted", "dev"})
 
+# Sandbox note is printed at most once per process to avoid log spam
+# when many TerminalExecutor instances are created (tests, delegation).
+_sandbox_note_shown = False
+
 
 class TerminalExecutor:
     """Cross-platform safe process execution within workspace.
@@ -288,6 +297,17 @@ class TerminalExecutor:
         if extra_forbidden:
             self._forbidden.update(extra_forbidden)
 
+        # OS sandbox: workspace-only by default, bubblewrap when opted in.
+        # WORKSPACE_ONLY is not process isolation — surface the note once
+        # through the agent UI layer (SafeExecutor.sandbox_note), not via
+        # a raw stderr print.
+        global _sandbox_note_shown
+        self.sandbox_mode, self._sandbox_note = detect_sandbox_mode()
+        if self._sandbox_note and _sandbox_note_shown:
+            self._sandbox_note = ""
+        elif self._sandbox_note:
+            _sandbox_note_shown = True
+
     @property
     def allowed_commands(self) -> list[str]:
         """Sorted list of allowed commands."""
@@ -299,8 +319,15 @@ class TerminalExecutor:
         cwd: str | None = None,
         env_overrides: dict[str, str] | None = None,
         timeout: float | None = None,
+        role: str = "coder",
     ) -> TerminalResult:
-        """Execute a command safely within workspace."""
+        """Execute a command safely within workspace.
+
+        Two-layer gate:
+        1. Allowlist validation (this module). Failure → HITL approval.
+        2. Risk assessment (command_policy.assess_command, role-aware).
+           An allowlisted but risky command → HITL approval.
+        """
         try:
             self._validate(command)
         except TerminalError as validation_error:
@@ -318,7 +345,45 @@ class TerminalExecutor:
             # User approved — proceed with relaxed validation (skip allowlist check)
             return self._run_unvalidated(command, cwd, env_overrides, timeout)
 
+        assessment = self._assess_risk(command, role)
+        if assessment.requires_approval:
+            reason = f"Risk assessment: {assessment.reason}"
+            if not self._request_user_approval(command, reason):
+                return TerminalResult(
+                    command=command,
+                    returncode=-1,
+                    stdout="",
+                    stderr=(
+                        "Error: Command execution denied by user for security reasons. "
+                        f"{reason}. Find an alternative way to solve the task without this command."
+                    ),
+                    denied=True,
+                )
+
         return self._run_unvalidated(command, cwd, env_overrides, timeout)
+
+    def _assess_risk(self, command: list[str], role: str) -> CommandAssessment:
+        """Risk-grade a validated command via command_policy.
+
+        Piped commands are assessed per segment so `safe | dangerous` cannot
+        hide behind the first executable; the riskiest segment wins.
+        """
+        worst: CommandAssessment | None = None
+        requires_approval = False
+        for segment in self._split_pipe_segments(command):
+            candidate = assess_command(segment, role=role)
+            requires_approval = requires_approval or candidate.requires_approval
+            if worst is None or _risk_rank(candidate.risk) > _risk_rank(worst.risk):
+                worst = candidate
+        assert worst is not None  # _split_pipe_segments rejects empty commands
+        if requires_approval and not worst.requires_approval:
+            worst = CommandAssessment(
+                command=command,
+                risk=worst.risk,
+                reason=worst.reason,
+                requires_approval=True,
+            )
+        return worst
 
     def _run_unvalidated(
         self,
@@ -333,9 +398,19 @@ class TerminalExecutor:
         env = self._build_env(env_overrides)
         actual_command = self._wrap_for_platform(command)
 
-        # Auto-detect pipe usage: if command contains "|", run via sh -c
+        # Auto-detect pipe usage: if command contains "|", run via sh -c.
+        # Each non-pipe token is shell-quoted so arguments with spaces or
+        # metacharacters cannot be reinterpreted by sh.
         if "|" in actual_command:
-            actual_command = ["sh", "-c", " ".join(actual_command)]
+            joined = " ".join(
+                token if token == "|" else shlex.quote(token)
+                for token in actual_command
+            )
+            actual_command = ["sh", "-c", joined]
+
+        actual_command = wrap_command_for_sandbox(
+            actual_command, self.sandbox_mode, self.workspace, work_dir
+        )
 
         kwargs: dict[str, Any] = {
             "cwd": work_dir,
@@ -476,6 +551,28 @@ class TerminalExecutor:
         if not command:
             raise TerminalError("Empty command")
 
+        # Total length limit
+        if sum(len(t) for t in command) > 2000:
+            raise TerminalError("Command too long")
+
+        # A command containing "|" later runs via `sh -c`, so EVERY pipe
+        # segment must independently pass the allowlist — otherwise the
+        # first allowed executable would smuggle arbitrary binaries after it.
+        for segment in self._split_pipe_segments(command):
+            self._validate_single(segment)
+
+    def _split_pipe_segments(self, command: list[str]) -> list[list[str]]:
+        segments: list[list[str]] = [[]]
+        for token in command:
+            if token == "|":
+                segments.append([])
+            else:
+                segments[-1].append(token)
+        if any(not segment for segment in segments):
+            raise TerminalError("Empty command segment around '|' is forbidden")
+        return segments
+
+    def _validate_single(self, command: list[str]) -> None:
         executable = command[0].lower()
 
         if executable in self._forbidden:
@@ -491,10 +588,6 @@ class TerminalExecutor:
             self._validate_shell_command(command, executable)
         else:
             self._validate_standard_command(command, executable)
-
-        # Total length limit
-        if sum(len(t) for t in command) > 2000:
-            raise TerminalError("Command too long")
 
     def _validate_standard_command(self, command: list[str], executable: str) -> None:
         # Subcommand validation (for git and similar)
@@ -715,6 +808,10 @@ class TerminalExecutor:
             text[: self.max_output_chars]
             + f"\n[TRUNCATED: showing first {self.max_output_chars} of {len(text)} characters]"
         )
+
+
+def _risk_rank(risk: RiskLevel) -> int:
+    return {RiskLevel.SAFE: 0, RiskLevel.MODERATE: 1, RiskLevel.DANGEROUS: 2}[risk]
 
 
 def _unix_resource_limits() -> None:

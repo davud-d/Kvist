@@ -49,6 +49,9 @@ class PlanInfo:
 class RunState:
     current_agent_role: str = "coder"
     task_language: str = ""
+    # User-facing response language ("ru"/"en") resolved by language_policy
+    # before any model call. Protocol JSON stays English regardless.
+    response_language: str = "en"
     system_os: str = ""
     system_shell: str = ""
     user_goal: str = ""

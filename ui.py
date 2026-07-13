@@ -10,6 +10,10 @@ from rich import box
 from rich.align import Align
 from rich.console import Console, Group
 from rich.live import Live
+try:
+    from rich.markdown import Markdown
+except ImportError:
+    Markdown = None  # type: ignore[assignment]
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
@@ -122,16 +126,42 @@ class AgentUI:
 
     def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
         _ = user_messages
-        final_panel = Panel(
-            Text(final_message, style="bright_green"),
+        try:
+            final_panel = Panel(
+                self.render_user_markdown(final_message, fallback_style="bright_green"),
+                title="Final Answer",
+                title_align="left",
+                border_style="bright_green",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+            self.console.print(final_panel)
+        except Exception:
+            self.console.print(self._build_plain_final_panel(final_message))
+
+    def render_user_markdown(self, message: str, fallback_style: str = "") -> Any:
+        if Markdown is None:
+            return Text(message, style=fallback_style)
+        try:
+            return Markdown(message)
+        except Exception:
+            return Text(message, style=fallback_style)
+
+    def print_user_markdown(self, message: str) -> None:
+        try:
+            self.console.print(self.render_user_markdown(message))
+        except Exception:
+            self.console.print(Text(message))
+
+    def _build_plain_final_panel(self, message: str) -> Panel:
+        return Panel(
+            Text(message, style="bright_green"),
             title="Final Answer",
             title_align="left",
             border_style="bright_green",
             box=box.ROUNDED,
             padding=(1, 2),
         )
-
-        self.console.print(final_panel)
 
     def debug_print(self, message: str) -> None:
         if self.verbose:
@@ -144,6 +174,24 @@ class AgentUI:
     def print_error(self, message: str) -> None:
         """Print an error message (backward-compatible)."""
         self.console.print(f"[bright_yellow]{message}[/bright_yellow]")
+
+    def print_sandbox_notice(self, note: str) -> None:
+        """Show a one-time sandbox honesty notice as a dim info panel.
+
+        The default mode is workspace-only — not OS isolation. This notice
+        makes the boundary explicit without looking like an error or warning.
+        """
+        if not note:
+            return
+        panel = Panel(
+            Text(note, style="grey70"),
+            title="Sandbox",
+            title_align="left",
+            border_style="grey50",
+            box=box.ROUNDED,
+            padding=(0, 2),
+        )
+        self.console.print(panel)
 
     def choose_option(
         self,
