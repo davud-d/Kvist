@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.styles import Style
 
 
 @dataclass(frozen=True)
@@ -15,15 +17,76 @@ class SlashCommand:
 
 
 SLASH_COMMANDS: tuple[SlashCommand, ...] = (
-    SlashCommand("help", "Show slash command help"),
-    SlashCommand("new", "Reset the session"),
-    SlashCommand("provider", "Switch LLM provider"),
-    SlashCommand("models", "Select fast/smart/planner models"),
-    SlashCommand("role", "Select agent role (auto/coder/devops/chat)"),
-    SlashCommand("session", "Manage and switch sessions"),
-    SlashCommand("resume", "Resume last checkpoint"),
-    SlashCommand("bye", "Exit Kvist", aliases=("exit", "quit")),
+    SlashCommand(
+        "help",
+        "Show Kvist information and platform support",
+        aliases=("about", "info"),
+    ),
+    SlashCommand("new", "Reset the active session and start fresh"),
+    SlashCommand("provider", "Switch or configure the LLM provider"),
+    SlashCommand("models", "Select fast, smart and planner models"),
+    SlashCommand("role", "Choose auto, coder, devops or chat role"),
+    SlashCommand("session", "Create, switch or delete saved sessions"),
+    SlashCommand("resume", "Continue the latest saved checkpoint"),
+    SlashCommand(
+        "bye",
+        "Save the active session and exit Kvist",
+        aliases=("exit", "quit"),
+    ),
 )
+
+
+# The completion popup is intentionally styled like a compact command palette:
+# command on the left, explanation on the right, with a quiet lavender accent.
+# ``noreverse`` is required because prompt_toolkit's default selected-row style
+# uses reverse video and would otherwise override the palette below.
+SLASH_COMMAND_STYLE = Style.from_dict(
+    {
+        "slash-command.prompt": "fg:#cdd6f4 bold",
+        "slash-command.prompt-continuation": "fg:#6c7086",
+        "completion-menu": "bg:default",
+        "completion-menu.completion": "fg:#a6adc8 bg:default",
+        "completion-menu.completion.current": (
+            "fg:#f5e0dc bg:default bold noreverse"
+        ),
+        "completion-menu.meta.completion": "fg:#7f849c bg:default",
+        "completion-menu.meta.completion.current": (
+            "fg:#cdd6f4 bg:default noreverse"
+        ),
+        "auto-suggestion": "fg:#585b70 italic",
+        "scrollbar.background": "bg:default",
+        "scrollbar.button": "bg:default",
+    }
+)
+
+SLASH_COMMAND_PROMPT = FormattedText(
+    [("class:slash-command.prompt", "\n❯ ")]
+)
+SLASH_COMMAND_PROMPT_CONTINUATION = FormattedText(
+    [("class:slash-command.prompt-continuation", "  · ")]
+)
+SLASH_COMMAND_MENU_HEIGHT = len(SLASH_COMMANDS)
+
+
+def _matching_name(command: SlashCommand, query: str) -> str | None:
+    return next(
+        (
+            name
+            for name in (command.name, *command.aliases)
+            if name.casefold().startswith(query)
+        ),
+        None,
+    )
+
+
+def has_slash_command_completion(text: str) -> bool:
+    """Return whether ``text`` should open the slash-command palette."""
+
+    if not text.startswith("/") or any(character.isspace() for character in text):
+        return False
+
+    query = text[1:].casefold()
+    return any(_matching_name(command, query) for command in SLASH_COMMANDS)
 
 
 class SlashCommandCompleter(Completer):
@@ -38,18 +101,13 @@ class SlashCommandCompleter(Completer):
             return
 
         # Do not show the menu after arguments: "/new something"
-        if " " in text:
+        if any(character.isspace() for character in text):
             return
 
         query = text[1:].casefold()
 
         for command in self._commands:
-            names = (command.name, *command.aliases)
-
-            matched_name = next(
-                (name for name in names if name.casefold().startswith(query)),
-                None,
-            )
+            matched_name = _matching_name(command, query)
             if matched_name is None:
                 continue
 

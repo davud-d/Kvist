@@ -11,6 +11,7 @@ from pathlib import Path
 from prompt_toolkit import PromptSession
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.output import ColorDepth
 from rich.console import Console
 from rich.panel import Panel
 
@@ -65,15 +66,33 @@ from user_config import (
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
 
-from slash_commands import SlashCommandCompleter, normalize_slash_command
+from slash_commands import (
+    SLASH_COMMAND_MENU_HEIGHT,
+    SLASH_COMMAND_PROMPT,
+    SLASH_COMMAND_PROMPT_CONTINUATION,
+    SLASH_COMMAND_STYLE,
+    SlashCommandCompleter,
+    has_slash_command_completion,
+    normalize_slash_command,
+)
 
 console = Console()
+
+
+def slash_completion_is_active() -> bool:
+    return has_slash_command_completion(session.default_buffer.text)
+
+
 session = PromptSession(
     history=InMemoryHistory(),
     completer=SlashCommandCompleter(),
-    complete_while_typing=True,
-    complete_style=CompleteStyle.MULTI_COLUMN,
+    complete_while_typing=Condition(slash_completion_is_active),
+    complete_style=CompleteStyle.COLUMN,
+    # One row for the raised input plus one row per command below it.
+    reserve_space_for_menu=SLASH_COMMAND_MENU_HEIGHT + 1,
     auto_suggest=AutoSuggestFromHistory(),
+    style=SLASH_COMMAND_STYLE,
+    color_depth=ColorDepth.TRUE_COLOR,
 )
 
 
@@ -93,9 +112,9 @@ def multiline_input() -> str:
     # Use a condition to enable multiline mode only when there's a newline in the input
     is_multiline = Condition(lambda: "\n" in session.default_buffer.text)
     return session.prompt(
-        "\n> ",
+        SLASH_COMMAND_PROMPT,
         multiline=is_multiline,
-        prompt_continuation="... ",
+        prompt_continuation=SLASH_COMMAND_PROMPT_CONTINUATION,
     ).strip()
 
 
@@ -600,6 +619,33 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         console.print("[yellow]Provider creation cancelled.[/yellow]")
         return None
 
+    # ── Step 3b: Streaming support ──────────────────────────────────────
+    streaming_choice = ui.choose_option(
+        title="Does this endpoint support streaming responses?",
+        options=[
+            {
+                "value": "no",
+                "label": "No / not sure (recommended)",
+                "description": (
+                    "Many third-party OpenAI-compatible gateways handle plain "
+                    "requests correctly but break on stream=true. If in doubt, "
+                    "keep this off."
+                ),
+            },
+            {
+                "value": "yes",
+                "label": "Yes, streaming is verified to work",
+                "description": "Enable stream=true requests for this provider.",
+            },
+        ],
+        current_value="no",
+        help_text="↑/↓ — select, Enter — confirm",
+    )
+    if streaming_choice is None:
+        console.print("[yellow]Provider creation cancelled.[/yellow]")
+        return None
+    streaming = streaming_choice == "yes"
+
     # ── Step 4: API key (optional, masked) ─────────────────────────────
     api_key = ui.prompt_secret(
         title="Enter API key (optional, press Enter to skip):",
@@ -686,6 +732,7 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         f"[bold]Protocol:[/bold] {proto_display}",
         f"[bold]Base URL:[/bold] {base_url}",
         f"[bold]API key:[/bold] {'[green]configured[/green]' if api_key else '[dim]none[/dim]'}",
+        f"[bold]Streaming:[/bold] {'enabled' if streaming else 'disabled'}",
         f"[bold]Models:[/bold]",
     ]
     for role in MODEL_ROLES:
@@ -717,6 +764,7 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         "base_url": base_url,
         "api_key": api_key,
         "models": models,
+        "streaming": streaming,
     })
     provider_id = f"{CUSTOM_PROVIDER_PREFIX}{name}"
     console.print(f"[green]Custom provider [bold]{label}[/bold] created successfully![/green]")

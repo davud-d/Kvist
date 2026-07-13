@@ -1,52 +1,104 @@
 # Kvist
 
-Kvist is a local coding agent for one workspace at a time.
+[Русская версия](README.ru.md)
 
-I use it for the kind of repo work that is small but annoying: find where some
-setting is loaded, make a narrow patch, explain a dusty file, check why a
-dependency upgrade broke. It runs in the terminal, keeps its hands inside the
-workspace, and shows progress while it works.
+<p align="center">
+  <a href="https://github.com/davud-d/Kvist"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-Kvist-181717?style=for-the-badge&logo=github"></a>
+  <a href="https://github.com/davud-d/Kvist/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/davud-d/Kvist?style=for-the-badge&logo=github&color=yellow"></a>
+  <a href="https://github.com/davud-d/Kvist/forks"><img alt="GitHub forks" src="https://img.shields.io/github/forks/davud-d/Kvist?style=for-the-badge&logo=github"></a>
+  <a href="https://github.com/davud-d/Kvist/issues"><img alt="GitHub issues" src="https://img.shields.io/github/issues/davud-d/Kvist?style=for-the-badge&logo=github"></a>
+  <a href="https://github.com/davud-d/Kvist/commits"><img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/davud-d/Kvist?style=for-the-badge&logo=github"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/davud-d/Kvist?style=for-the-badge&color=blue"></a>
+</p>
 
-It is not an IDE and not a magic safety box. Read the diff before you trust it.
+<p align="center">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-supported-0078D4?style=flat-square&logo=windows11&logoColor=white">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-supported-FCC624?style=flat-square&logo=linux&logoColor=black">
+  <img alt="Terminal CLI" src="https://img.shields.io/badge/Interface-Terminal_CLI-4D4D4D?style=flat-square&logo=windowsterminal&logoColor=white">
+  <img alt="Local workspace agent" src="https://img.shields.io/badge/Agent-local_workspace-6f42c1?style=flat-square&logo=robotframework&logoColor=white">
+  <img alt="Three agent roles" src="https://img.shields.io/badge/Roles-coder_%7C_devops_%7C_chat-8A2BE2?style=flat-square">
+  <img alt="Six providers" src="https://img.shields.io/badge/LLM_providers-6-0A7EA4?style=flat-square">
+  <img alt="Six prompts" src="https://img.shields.io/badge/System_prompts-6-5C2D91?style=flat-square">
+  <img alt="Strict JSON protocol" src="https://img.shields.io/badge/Protocol-strict_JSON-000000?style=flat-square&logo=json&logoColor=white">
+  <img alt="Human in the loop" src="https://img.shields.io/badge/Safety-human--in--the--loop-2EA44F?style=flat-square">
+  <img alt="Test suite" src="https://img.shields.io/badge/tests-364_passed-brightgreen?style=flat-square&logo=pytest&logoColor=white">
+  <img alt="JetBrains plugin" src="https://img.shields.io/badge/JetBrains_Plugin-2025.3-000000?style=flat-square&logo=jetbrains&logoColor=white">
+</p>
+
+<p align="center">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai&logoColor=white">
+  <img alt="Anthropic" src="https://img.shields.io/badge/Anthropic-supported-D97757?style=flat-square&logo=anthropic&logoColor=white">
+  <img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-supported-6467F2?style=flat-square">
+  <img alt="OmniRoute" src="https://img.shields.io/badge/OmniRoute-supported-008080?style=flat-square">
+  <img alt="FreeFlow LLM" src="https://img.shields.io/badge/FreeFlow_LLM-beta-orange?style=flat-square">
+  <img alt="Custom endpoints" src="https://img.shields.io/badge/Custom_endpoints-OpenAI_%7C_Anthropic-555555?style=flat-square">
+</p>
+
+## Preview
+
+### First launch
+
+API key input is intentionally hidden.
+
+![Kvist first launch with hidden API key input](preview/start.png)
+
+### Agent at work
+
+![Kvist working in the terminal](preview/working.png)
+
+### Final report
+
+![Kvist final report in the terminal](preview/end.png)
+
+Kvist is a local terminal coding agent that works with one workspace at a time.
+It can inspect and edit project files, run development and infrastructure
+commands, verify changes, search current technical documentation, and keep
+separate named sessions for a project.
+
+Kvist routes every request to one of three roles:
+
+- `coder` works with source code and project files through a strict JSON action
+  protocol.
+- `devops` handles deployment, services, Docker, CI/CD, and other system tasks
+  with role-aware command approval.
+- `chat` answers questions and discusses architecture without touching files or
+  running commands.
+
+It is a supervised tool, not an IDE or a complete security boundary. Review the
+diff and command output before trusting a result.
 
 ## Requirements
 
 - Python 3.11+
-- OpenAI API key or a FreeFlow-compatible provider key
+- An API key or endpoint for at least one supported LLM provider
+- A terminal with TTY support for interactive provider, model, role, session,
+  and security prompts
 
-The JetBrains plugin has a separate build path; see the note at the bottom.
+The CLI supports Windows and Linux. macOS is present in the runtime checks but
+remains untested/experimental. The JetBrains plugin supports Windows and Linux
+only.
 
-## Setup
+The JetBrains plugin has additional build requirements; see
+[`jetbrains-plugin/README.md`](jetbrains-plugin/README.md).
 
-From the repo root:
+## Install
+
+From the repository root:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-No `.env` is needed for the first run. If `~/.kvist/config.json` is missing,
-Kvist asks for the key required by the active provider and stores the
-selected provider in the same file.
+PyInstaller is only needed when building a standalone binary:
 
-Example:
-
-```json
-{
-	"llm_provider": "openai",
-	"openai_api_key": "sk-..."
-}
+```bash
+python -m pip install pyinstaller
+python -m PyInstaller kvist.spec
 ```
 
-Config path:
-
-- Linux/macOS: `~/.kvist/config.json`
-- Windows: `C:\Users\<USERNAME>\.kvist\config.json`
-
-Old configs with `OPENAI_API_KEY` in that JSON still load.
-
-If you switch to `FreeFlow LLM`, Kvist keeps the selected provider and can
-store provider-specific keys such as `gemini_api_key` or `groq_api_key`.
-Selected models are also stored in the same config separately for each provider.
+The resulting executable is `dist/kvist` on Linux or `dist/kvist.exe` on
+Windows.
 
 ## Run
 
@@ -62,127 +114,151 @@ With a built binary:
 kvist --workspace "<project_path>"
 ```
 
-`--workspace` is required. Kvist creates the folder if it is not there. I prefer
-passing an absolute path; relative paths work, but only relative to the terminal
-you launched from.
+`--workspace` is the only CLI option and is required. Kvist resolves the path,
+creates the directory if it does not exist, and then confines its file actions
+to that workspace. Absolute paths are the least surprising; relative paths are
+resolved from the directory where Kvist was started.
 
-Example tasks:
+Example requests:
 
 ```text
 > Find where settings are loaded and explain the flow
 ```
 
 ```text
-> Add validation for empty workspace paths and keep the error message short
+> Add validation for empty workspace paths and run the relevant tests
 ```
 
-Use `/bye` to exit. Use `/resume` if the last run was interrupted and a
-checkpoint exists. Use `/provider` to switch between `OpenAI` and
-`FreeFlow LLM` with the arrow keys. Use `/models` to select `fast`, `smart`,
-and `planner` models for the current provider the same way.
+Use `Alt+Enter` or `Esc+Enter` for multiline input. Slash-command completion
+appears as soon as the input starts with `/`.
 
-Multiline input is a bit old-school: end the line with `\`.
+## Interactive commands
+
+| Command | What it does |
+| --- | --- |
+| `/help` | Show Kvist information and platform support. `/about` and `/info` are also accepted. |
+| `/new` | Clear the active session history and checkpoint, keeping the current session name. |
+| `/provider` | Switch provider or create a custom provider. |
+| `/models` | Select the `fast`, `smart`, and `planner` models for the active provider. |
+| `/role` | Select `auto`, `coder`, `devops`, or `chat`. The choice is saved globally. |
+| `/session` | Create, switch, or delete named workspace sessions. The active session cannot be deleted. |
+| `/resume` | Continue the checkpoint stored in the active session. |
+| `/bye` | Save the session and exit. `/exit` and `/quit` are aliases. |
+
+Session names contain 1-64 lowercase letters, digits, hyphens, or underscores
+and must start with a letter or digit. Kvist shows the last few tasks when a
+session is loaded and keeps up to ten completed task summaries in its context.
+
+## How a request is processed
+
+In `auto` role mode, deterministic rules handle clear requests first. Ambiguous
+requests are classified by the `fast` model through
+`prompts/router_prompt.txt`; a
+keyword router is the fallback when that model call fails. A manual `/role`
+selection bypasses automatic routing.
+
+For `coder` and `devops` tasks, Kvist then:
+
+1. Uses the `planner` prompt with the configured `fast` model to build a short
+   plan, success criteria, risks, and a simple/complex classification. A local
+   fallback plan is used if planning fails.
+2. Chooses the `fast` action model for simple work or the `smart` model for
+   complex work and recovery from errors.
+3. Runs a step loop with the role prompt, strict action parsing, read-before-edit
+   and verification guards, progress tracking, and checkpoints.
+4. Either returns a short `final_answer` or passes a structured
+   `report_to_user` result to the reporter prompt for a natural final report.
+
+The runtime context includes the OS, shell, current time, request language,
+known dependency versions, session history, plan state, changed files, recent
+tool results, verification evidence, and completion blockers.
+
+`chat` uses a lighter path: the model responds directly in Markdown, retains a
+short chat history, and has no file or terminal actions.
+
+## Providers and models
+
+The configured `fast`, `smart`, and `planner` roles are model tiers, not agent
+roles. Model environment variables take precedence over saved model selections;
+built-in defaults are used only when no override or saved choice exists.
+
+In the current implementation, routing, planning, chat, and report rendering
+use the `fast` model. The `smart` model runs complex coder/devops action loops.
+The `planner` selection is saved and displayed, but `agent_planner.py` does not
+consume it yet.
+
+| Provider | Current defaults | Behavior |
+| --- | --- | --- |
+| OpenAI | `gpt-5.4-mini` for all three model roles | Streaming and native JSON mode. The configured models are checked against models accessible to the API key and can fall back within the OpenAI list. |
+| Anthropic | `claude-haiku-4-5` for `fast`; `claude-sonnet-4-6` for `smart` and `planner` | Native Anthropic Messages API adapter with streaming; JSON is enforced by the prompt/parser rather than `response_format`. |
+| OpenRouter | No automatic defaults | Choose from the curated list or enter an exact `provider/model` ID. Streaming and native JSON mode are enabled. |
+| OmniRoute | No automatic defaults | Enter exact dynamic model IDs manually. Uses an OpenAI-compatible local endpoint; streaming and native JSON mode are disabled by the current integration. |
+| FreeFlow LLM | `gemini-3.5-flash` for all three roles | Gemini/Groq integration, non-streaming, best-effort JSON parsing. The required key depends on the selected model backend. This provider is still beta and may be unstable. |
+| Custom | No automatic defaults | A saved OpenAI- or Anthropic-compatible endpoint with manual model IDs and an optional API key. |
+
+OpenAI remains the safest built-in choice for strict JSON action steps. Provider
+and model availability can change upstream; the table above describes the IDs
+and behavior currently encoded in this repository.
+
+### First-run configuration
+
+On the first interactive run, Kvist asks for a provider, any missing model IDs,
+and the credentials required by the selected models. Secret input is masked.
+Selections and credentials are stored in:
+
+- Linux/macOS: `~/.kvist/config.json`
+- Windows: `C:\Users\<USERNAME>\.kvist\config.json`
+
+The file is plain JSON in the user's home directory. Do not commit or share it.
+Legacy configs with `OPENAI_API_KEY` inside the JSON are still accepted.
+
+Example:
+
+```json
+{
+  "llm_provider": "anthropic",
+  "anthropic_api_key": "...",
+  "role_selection": "auto",
+  "llm_models": {
+    "anthropic": {
+      "fast": "claude-haiku-4-5",
+      "smart": "claude-sonnet-4-6",
+      "planner": "claude-sonnet-4-6"
+    }
+  }
+}
+```
+
+Recognized credential variables are `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, and
+`OMNIROUTE_API_KEY`. The corresponding base URL variables are
+`ANTHROPIC_BASE_URL`, `OPENROUTER_BASE_URL`, and `OMNIROUTE_BASE_URL`.
+
+### OpenRouter
+
+The default endpoint is `https://openrouter.ai/api/v1`. OpenRouter has no
+automatic model defaults because model availability is external. During setup
+or `/models`, choose a curated model or enter an exact ID such as:
 
 ```text
-> Refactor the parser so that \
-... validation errors include the action type
+openai/gpt-5.4-mini
+anthropic/claude-sonnet-4-6
+google/gemini-3.5-flash
 ```
 
-## Preview
+### OmniRoute
 
-### First launch
+The default endpoint is `http://localhost:20128/v1`. Start OmniRoute, copy the
+API key from its Dashboard → Endpoints page, select OmniRoute with `/provider`,
+and provide a model ID for each role. IDs may use `provider/model`, a router or
+combo name without spaces, or the explicit value `auto`.
 
-When Kvist asks for the API key, typed characters are invisible. That is
-expected; keep typing and press Enter.
-
-![Kvist first launch with hidden API key input](preview/start.png)
-
-### Agent at work
-
-The agent prints what it is doing while it inspects files, thinks through the
-next step, and applies small changes.
-
-![Kvist working in the terminal](preview/working.png)
-
-### Final report
-
-At the end, Kvist summarizes what happened: actions, reasoning notes, and
-the result the user should check.
-
-![Kvist final report in the terminal](preview/end.png)
-
-## Knobs worth knowing
-
-```env
-AGENT_LLM_PROVIDER=openai
-AGENT_FAST_MODEL=gpt-5-mini
-AGENT_SMART_MODEL=gpt-5
-AGENT_PLANNER_MODEL=gpt-5
-AGENT_MAX_STEPS=20
-AGENT_PERSIST_LOGS=1
-AGENT_VERBOSE=0
-AGENT_SANDBOX_MODE=auto
-```
-
-`AGENT_MAX_STEPS` is the one I change most often. Raise it when the agent keeps
-stopping one or two steps too early. `AGENT_VERBOSE=1` is useful when debugging
-Kvist itself, and noisy for normal use.
-
-`AGENT_SANDBOX_MODE=bubblewrap` (Linux, requires `bwrap`) wraps shell commands in
-a bubblewrap sandbox: read-only root filesystem, writable workspace, shared
-network. The default (`auto`) keeps the workspace-only boundary and prints a hint
-when bwrap is available; if bubblewrap is requested but missing, the agent runs
-degraded and warns once.
-
-Provider notes:
-
-- `OpenAI` remains the safest option for strict JSON planner/action steps.
-- For `OpenAI`, the defaults now prefer the `GPT-5` family, with automatic fallback
-	to `GPT-4.1` if the API key does not have `GPT-5` access.
-- `FreeFlow LLM` is integrated as an optional provider for Gemini/Groq models.
-- `FreeFlow LLM` does not guarantee the same native JSON mode as the official
-	OpenAI SDK, so Kvist falls back to plain completions there.
-- For `FreeFlow LLM`, all default roles now use `gemini-3.1-pro-preview`.
-- **⚠️ `FreeFlow LLM` is currently in beta testing and remains very unstable.**
-  Expect intermittent failures, timeouts, and inconsistent responses. Use
-  `OpenAI` if you need reliable results.
-- `OmniRoute` is a local OpenAI-compatible gateway for routing requests to multiple
-  LLM providers. See the OmniRoute section below for setup details.
-
-`AGENT_PERSIST_LOGS=0` stops run logs, but sessions and `/resume` still use
-`<project>/.kvist/sessions/<name>.json`.
-
-Web search is deliberately limited. It is meant for external libraries, docs,
-release notes, pricing, limits, and other things that can go stale.
-
-```env
-SEARCH_PROVIDER=auto
-SEARXNG_BASE_URL=
-TAVILY_API_KEY=
-BRAVE_SEARCH_API_KEY=
-```
-
-## OmniRoute
-
-OmniRoute is a local OpenAI-compatible gateway that routes requests to multiple LLM providers.
-
-**Kvist does not ship default OmniRoute models.** You must enter exact OmniRoute model ids manually because OmniRoute providers and models are dynamic.
-
-### Setup
-
-1. Start OmniRoute locally (default: `http://localhost:20128`)
-2. Get your API key from OmniRoute Dashboard → Endpoints
-3. Select OmniRoute as provider when starting Kvist
-4. Enter exact model ids for each role
-
-### Configuration
-
-Example `~/.kvist/config.json`:
+Example configuration:
 
 ```json
 {
   "llm_provider": "omniroute",
-  "omniroute_api_key": "YOUR_KEY",
+  "omniroute_api_key": "...",
   "omniroute_base_url": "http://localhost:20128/v1",
   "llm_models": {
     "omniroute": {
@@ -194,137 +270,214 @@ Example `~/.kvist/config.json`:
 }
 ```
 
-Environment variables:
+If the endpoint is unavailable, verify that OmniRoute is running and that the
+base URL ends in `/v1`. Authentication errors normally point to the Dashboard
+key; 404 and 400 responses usually indicate an incorrect model ID, endpoint, or
+upstream provider configuration.
 
-```bash
-AGENT_LLM_PROVIDER=omniroute
-OMNIROUTE_API_KEY=...
-OMNIROUTE_BASE_URL=http://localhost:20128/v1
-AGENT_FAST_MODEL=kr/claude-haiku-4.5
-AGENT_SMART_MODEL=kr/claude-sonnet-4.5
-AGENT_PLANNER_MODEL=kr/claude-sonnet-4.5
+### Custom compatible endpoints
+
+Choose `+ Create custom provider...` in `/provider`. The wizard asks for:
+
+- a lowercase provider ID;
+- an `http://` or `https://` base URL;
+- the OpenAI-compatible or Anthropic-compatible protocol;
+- an optional API key and display name;
+- one model ID for every tier or separate IDs for each tier.
+
+Custom providers are saved under `custom_providers` and selected as
+`custom:<id>`. For example:
+
+```json
+{
+  "llm_provider": "custom:local-vllm",
+  "custom_providers": {
+    "local-vllm": {
+      "label": "Local vLLM",
+      "protocol": "openai",
+      "base_url": "http://localhost:8000/v1",
+      "api_key": "",
+      "models": {
+        "fast": "local-model",
+        "smart": "local-model",
+        "planner": "local-model"
+      }
+    }
+  }
+}
 ```
 
-### Model ID Format
+## Runtime settings
 
-OmniRoute model ids typically follow `provider/model` format:
+Useful environment variables and their current defaults:
+
+```env
+AGENT_LLM_PROVIDER=openai
+AGENT_FAST_MODEL=gpt-5.4-mini
+AGENT_SMART_MODEL=gpt-5.4-mini
+AGENT_PLANNER_MODEL=gpt-5.4-mini
+AGENT_MAX_STEPS=50
+AGENT_PERSIST_LOGS=1
+AGENT_VERBOSE=0
+AGENT_API_INTERVAL=
+AGENT_SANDBOX_MODE=auto
+AGENT_TERMINAL_PROFILE=dev
+AGENT_TERMINAL_TIMEOUT=15
+AGENT_TERMINAL_MAX_OUTPUT=12000
+```
+
+- `AGENT_MAX_STEPS` limits the coder/devops action loop.
+- `AGENT_PERSIST_LOGS=0` disables completed run logs but does not disable
+  session files or `/resume` checkpoints.
+- `AGENT_VERBOSE=1` prints model selection, retries, and other diagnostics.
+- `AGENT_API_INTERVAL` overrides the delay between API calls. Without it,
+  OpenAI, Anthropic, and OpenRouter use 2.5 seconds; other providers use the
+  configured 5-second default.
+- `AGENT_TERMINAL_PROFILE=restricted` removes interpreters, package managers,
+  build tools, and interactive shells from the normal allowlist. They may still
+  reach the human approval prompt rather than running automatically.
+- Terminal timeouts are clamped to 1-30 seconds; captured output is clamped to
+  1,000-200,000 characters.
+
+## Web search
+
+Web access is intended for current external documentation, API references,
+release notes, migration guides, prices, and limits. It is not used when the
+answer is already in the workspace. Search and fetched content are marked as
+untrusted before being added to model context.
+
+```env
+SEARCH_PROVIDER=auto
+SEARXNG_BASE_URL=
+TAVILY_API_KEY=
+BRAVE_SEARCH_API_KEY=
+WEB_SEARCH_TIMEOUT=8
+WEB_SEARCH_MAX_RESULTS=5
+```
+
+The automatic fallback order is SearXNG → Tavily → Brave. Setting
+`SEARCH_PROVIDER` to one of `searxng`, `tavily`, or `brave` tries that provider
+first and then the remaining configured providers. Search timeouts are clamped
+to 1-30 seconds and result limits to 1-20.
+
+`fetch_url` accepts only HTTP(S), limits response size, rejects obvious binary
+formats, and only allows general fetching from the runtime domain allowlist.
+
+## Files created in a workspace
+
+Kvist stores project-local state under `.kvist/`:
 
 ```text
-kr/claude-sonnet-4.5
-kr/claude-haiku-4.5
-if/qwen3-coder-plus
+<workspace>/.kvist/
+├── active_session.json
+├── sessions/
+│   └── <name>.json
+└── logs/
+    ├── run_001.json
+    └── debug/logs.jsonl
 ```
 
-You can also use combo/router names without slashes or type `auto` for OmniRoute auto routing (only if intentional).
+`logs/` appears only when run logging is enabled and a run is persisted.
+Performance JSONL logging is disabled in code by default. API keys remain in
+the home-directory config, not in the workspace.
 
-### Manual Model Input
+## Safety model
 
-When you select OmniRoute or run `/models`:
+Kvist applies several layers, but the default is not an OS sandbox:
 
-1. Kvist asks for exact model id for each role (fast, smart, planner)
-2. Enter the model id manually
-3. Validation checks format (no whitespace, no URLs, proper `provider/model` structure)
-4. Models are saved to config for future sessions
+- File actions resolve paths inside the workspace and reject symlink escapes.
+- `.env` files, internal `.kvist` state, secret material, oversized files, and
+  non-UTF-8 edit targets are guarded.
+- Shell commands pass a platform-aware allowlist and a role-aware risk policy.
+  Unknown or state-changing commands require human approval; without a TTY,
+  approval is denied.
+- Destructive and privilege-escalation executables such as `rm`, `sudo`, `dd`,
+  `mkfs`, `shutdown`, and `reboot` are forbidden by normal validation.
+- Shell operators and command substitution are restricted, working directories
+  stay inside the workspace, and Unix child processes receive resource limits.
+- Logs redact common token formats and truncate large values.
 
-### Troubleshooting
+With `AGENT_SANDBOX_MODE=auto` or `workspace`, shell processes still run with
+the current user's OS permissions. On Linux,
+`AGENT_SANDBOX_MODE=bubblewrap` uses `bwrap` with a read-only root filesystem, a
+writable workspace bind, isolated process IDs, and shared networking. If
+`bwrap` is unavailable, Kvist warns and falls back to the workspace-only mode.
 
-**"OmniRoute endpoint is unavailable"**
-- Check that OmniRoute is running
-- Verify base URL is `http://localhost:20128/v1`
+## Prompt and action architecture
 
-**"OmniRoute authentication failed"**
-- Check API key from Dashboard → Endpoints
+The active prompt files are:
 
-**"OmniRoute model or endpoint was not found"**
-- Verify exact model id (e.g., `kr/claude-sonnet-4.5`)
-- Check that the provider is connected in OmniRoute
+- `prompts/router_prompt.txt` — selects `coder`, `devops`, or `chat` for
+  requests not handled by deterministic routing.
+- `prompts/planner_prompt.txt` — returns the task plan, success criteria, risks,
+  and complexity as JSON.
+- `prompts/coder_prompt.txt` — strict coding and workspace action protocol.
+- `prompts/devops_prompt.txt` — strict DevOps protocol with system-awareness and
+  human approval rules.
+- `prompts/chat_prompt.txt` — direct Markdown conversation with no tools.
+- `prompts/report_prompt.txt` — turns a structured completed-task result into a
+  concise user-facing report.
 
-**"OmniRoute returned 400 bad_request"**
-- Usually means bad model id, unsupported request shape, broken provider transform, or upstream provider rejected the request
-- Try another exact model id or check OmniRoute logs
+Coder and DevOps can emit these validated actions:
 
-## Files it creates
+```text
+final_answer, report_to_user,
+read_file, read_multiple_files, write_file, append_file, replace_in_file,
+list_dir, list_tree, find_files, search_code,
+git_status, git_diff, run_shell,
+web_search, fetch_url, delegate_task
+```
 
-Inside the target project:
-
-- `<project>/.kvist/logs/`
-- `<project>/.kvist/sessions/<name>.json`
-- `<project>/.kvist/active_session.json`
-
-The API key stays in your home directory config, not in the project.
-
-## Sharp edges
-
-File access is kept inside the workspace (with symlink-escape checks), and `.env`
-files are blocked for both reading and writing. Shell commands pass two gates:
-an allowlist (piped commands are validated per segment) and a role-aware risk
-assessment (`command_policy.py`) — risky commands trigger an interactive
-approval prompt, and are denied when stdin is not a TTY. There are size limits,
-output limits, and URL fetch blocks for obvious binary stuff. Results of
-`web_search`/`fetch_url` are marked as untrusted external content before they
-reach the model.
-
-Be honest about what this is NOT: the default mode is not an OS sandbox. Shell
-commands run with your user's permissions; only cwd, the allowlist, and rlimits
-constrain them. On Linux you can opt into a real sandbox with
-`AGENT_SANDBOX_MODE=bubblewrap` (see "Knobs worth knowing").
-
-Still, this is a tool for supervised work. It can misunderstand the task or make
-the wrong edit confidently. Best workflow so far: ask for one contained change,
-inspect, then continue.
-
-Some internal error messages are still ugly. The runtime got attention first;
-the polish can wait.
+`parser.py` enforces the exact schema; `executor.py` implements the actions;
+`agent_runtime.py` blocks premature completion, read-only violations, repeated
+dead ends, and unverified edits.
 
 ## Project layout
 
-Core:
+Core runtime:
 
-- `main.py` starts the CLI and wires workspace, key loading, models, and UI.
-- `agent.py` glues the agent pieces together.
-- `agent_runtime.py` runs the step loop and checkpoints progress.
-- `agent_state.py` holds `AgentConfig` and runtime dataclasses (`PlanInfo`, etc.).
-- `agent_model.py` calls the action LLM, handles streaming, token counting, and model fallback.
-- `agent_planner.py` runs the optional planning step before the main action loop.
-- `agent_context.py` builds the per-step context prompt with localized labels.
+- `main.py` starts the REPL and handles slash commands and interactive setup.
+- `agent.py` coordinates routing, planning, chat, sessions, and the action loop.
+- `agent_runtime.py` executes steps, tracks evidence, and renders final reports.
+- `agent_state.py` defines configuration, plan, and run state.
+- `agent_context.py` builds and priority-trims the per-step runtime context.
+- `agent_model.py` loads role prompts, selects model tiers, streams responses,
+  retries API calls, and handles JSON-mode fallback.
+- `agent_planner.py` runs the planner and supplies a local fallback plan.
 
-Execution and parsing:
+Providers and routing:
 
-- `executor.py` handles workspace-safe file, shell, git, and web actions.
-- `parser.py` and `protocol.py` validate model actions.
-- `terminal.py` has the shell command allowlist and the HITL approval prompt.
-- `command_policy.py` risk-grades shell commands (SAFE/MODERATE/DANGEROUS, role-aware).
-- `sandbox.py` detects/wraps the optional bubblewrap OS sandbox.
-- `agent_web.py` guards web search and URL reads.
+- `llm_clients.py` defines providers, model lists, defaults, validation, adapters,
+  and fallback candidates.
+- `user_config.py` reads and writes `~/.kvist/config.json` and custom providers.
+- `role_router.py` combines deterministic, LLM, keyword, and default routing.
+- `language_policy.py` and `language_utils.py` keep user-facing output in the
+  request language.
 
-LLM and provider wiring:
+Execution and persistence:
 
-- `llm_clients.py` configures OpenAI and FreeFlow clients, model lists, and fallback chains.
-- `user_config.py` reads/writes `~/.kvist/config.json`, handles key prompts and provider selection.
+- `executor.py`, `terminal.py`, `command_policy.py`, and `sandbox.py` implement
+  actions, shell validation, approvals, risk grading, and optional bubblewrap.
+- `parser.py` and `protocol.py` define the strict action protocol.
+- `agent_logging.py` stores named sessions, checkpoints, and run logs.
+- `agent_web.py` limits when web actions may be used.
+- `deps.py` detects dependency versions from Python project and lock files.
+- `ui.py` and `render_throttle.py` render the terminal interface efficiently.
 
-Utilities:
+Packaging and integrations:
 
-- `context_utils.py` sliding-window context trimmer for message history.
-- `render_throttle.py` non-blocking render throttle for streaming chunk output.
-- `language_utils.py` detects the user's request language and picks localized strings.
-- `deps.py` scans workspace dependency files for pinned versions.
-- `performance_logger.py` structured JSONL debug logger for `.kvist/logs/debug/`.
+- `kvist.spec` is the PyInstaller definition and bundles `prompts/`.
+- `package_script.py` creates a source archive from Git-visible files.
+- `jetbrains-plugin/` contains the IntelliJ Platform integration for Windows and
+  Linux, pinned to the 2025.3 platform line.
 
-UI and packaging:
+## Tests
 
-- `ui.py` renders terminal output.
-- `agent_logging.py` writes run logs and checkpoints.
-- `package_script.py` PyInstaller build helper.
+Run the full test suite from the repository root:
 
-Prompts:
+```bash
+python -m pytest
+```
 
-- `prompts/coder_prompt.txt` system prompt for the coder role.
-- `prompts/devops_prompt.txt` system prompt for the devops role.
-- `prompts/chat_prompt.txt` system prompt for the chat role.
-- `prompts/router_prompt.txt` system prompt for the router role.
-- `prompts/planner_prompt.txt` system prompt for the planner model.
-
-`jetbrains-plugin/` contains an IntelliJ Platform plugin that launches Kvist in
-the IDE terminal for the current project. It is pinned to IntelliJ Platform
-2025.3, supports Windows/Linux, and expects built binaries under
-`jetbrains-plugin/bin/` before packaging.
+Prompt-specific tests ensure the runtime uses the top-level `prompts/` directory
+and that the documented JSON action schemas stay synchronized with the parser.

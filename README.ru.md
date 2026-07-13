@@ -1,52 +1,103 @@
 # Kvist
 
-Kvist это локальный coding agent для одного workspace за раз.
+[English version](README.md)
 
-Я бы использовал его для мелкой, но надоедливой работы по репозиторию: найти,
-где грузится настройка, сделать узкую правку, объяснить старый файл, проверить,
-почему после обновления библиотеки что-то поехало. Он работает в терминале,
-держится внутри указанной папки и показывает прогресс по ходу дела.
+<p align="center">
+  <a href="https://github.com/davud-d/Kvist"><img alt="GitHub repository" src="https://img.shields.io/badge/GitHub-Kvist-181717?style=for-the-badge&logo=github"></a>
+  <a href="https://github.com/davud-d/Kvist/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/davud-d/Kvist?style=for-the-badge&logo=github&color=yellow"></a>
+  <a href="https://github.com/davud-d/Kvist/forks"><img alt="GitHub forks" src="https://img.shields.io/github/forks/davud-d/Kvist?style=for-the-badge&logo=github"></a>
+  <a href="https://github.com/davud-d/Kvist/issues"><img alt="GitHub issues" src="https://img.shields.io/github/issues/davud-d/Kvist?style=for-the-badge&logo=github"></a>
+  <a href="https://github.com/davud-d/Kvist/commits"><img alt="GitHub last commit" src="https://img.shields.io/github/last-commit/davud-d/Kvist?style=for-the-badge&logo=github"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/davud-d/Kvist?style=for-the-badge&color=blue"></a>
+</p>
 
-Это не IDE и не волшебная песочница. Дифф всё равно надо читать.
+<p align="center">
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-supported-0078D4?style=flat-square&logo=windows11&logoColor=white">
+  <img alt="Linux" src="https://img.shields.io/badge/Linux-supported-FCC624?style=flat-square&logo=linux&logoColor=black">
+  <img alt="Terminal CLI" src="https://img.shields.io/badge/Interface-Terminal_CLI-4D4D4D?style=flat-square&logo=windowsterminal&logoColor=white">
+  <img alt="Local workspace agent" src="https://img.shields.io/badge/Agent-local_workspace-6f42c1?style=flat-square&logo=robotframework&logoColor=white">
+  <img alt="Three agent roles" src="https://img.shields.io/badge/Roles-coder_%7C_devops_%7C_chat-8A2BE2?style=flat-square">
+  <img alt="Six providers" src="https://img.shields.io/badge/LLM_providers-6-0A7EA4?style=flat-square">
+  <img alt="Six prompts" src="https://img.shields.io/badge/System_prompts-6-5C2D91?style=flat-square">
+  <img alt="Strict JSON protocol" src="https://img.shields.io/badge/Protocol-strict_JSON-000000?style=flat-square&logo=json&logoColor=white">
+  <img alt="Human in the loop" src="https://img.shields.io/badge/Safety-human--in--the--loop-2EA44F?style=flat-square">
+  <img alt="Test suite" src="https://img.shields.io/badge/tests-364_passed-brightgreen?style=flat-square&logo=pytest&logoColor=white">
+  <img alt="JetBrains plugin" src="https://img.shields.io/badge/JetBrains_Plugin-2025.3-000000?style=flat-square&logo=jetbrains&logoColor=white">
+</p>
 
-## Что нужно
+<p align="center">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai&logoColor=white">
+  <img alt="Anthropic" src="https://img.shields.io/badge/Anthropic-supported-D97757?style=flat-square&logo=anthropic&logoColor=white">
+  <img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-supported-6467F2?style=flat-square">
+  <img alt="OmniRoute" src="https://img.shields.io/badge/OmniRoute-supported-008080?style=flat-square">
+  <img alt="FreeFlow LLM" src="https://img.shields.io/badge/FreeFlow_LLM-beta-orange?style=flat-square">
+  <img alt="Custom endpoints" src="https://img.shields.io/badge/Custom_endpoints-OpenAI_%7C_Anthropic-555555?style=flat-square">
+</p>
+
+## Превью
+
+### Первый запуск
+
+Ввод API key намеренно скрыт.
+
+![Первый запуск Kvist со скрытым вводом API key](preview/start.png)
+
+### Работа агента
+
+![Kvist работает в терминале](preview/working.png)
+
+### Финальный отчёт
+
+![Финальный отчёт Kvist в терминале](preview/end.png)
+
+Kvist — локальный coding agent для терминала, работающий с одним workspace за
+раз. Он умеет изучать и редактировать файлы проекта, запускать команды
+разработки и инфраструктуры, проверять изменения, искать актуальную техническую
+документацию и вести отдельные именованные сессии проекта.
+
+Каждый запрос Kvist направляет в одну из трёх ролей:
+
+- `coder` работает с кодом и файлами проекта через строгий JSON-протокол
+  действий;
+- `devops` занимается деплоем, сервисами, Docker, CI/CD и другими системными
+  задачами с role-aware подтверждением команд;
+- `chat` отвечает на вопросы и обсуждает архитектуру, не трогая файлы и не
+  запуская команды.
+
+Это инструмент для работы под присмотром, а не IDE и не полная граница
+безопасности. Перед тем как доверять результату, проверяйте diff и вывод команд.
+
+## Требования
 
 - Python 3.11+
-- OpenAI API key или ключ совместимого провайдера для FreeFlow
+- API key или endpoint хотя бы одного поддерживаемого LLM-провайдера
+- Терминал с TTY для интерактивного выбора провайдера, моделей, роли, сессии и
+  подтверждения опасных команд
 
-JetBrains-плагин собирается отдельно; короткая заметка есть внизу.
+CLI поддерживает Windows и Linux. macOS учитывается runtime-проверками, но
+остаётся непроверенной/экспериментальной платформой. JetBrains-плагин
+поддерживает только Windows и Linux.
 
-## Настройка
+У JetBrains-плагина есть дополнительные требования к сборке; они описаны в
+[`jetbrains-plugin/README.md`](jetbrains-plugin/README.md).
+
+## Установка
 
 Из корня репозитория:
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
-Для первого запуска `.env` не нужен. Если `~/.kvist/config.json` отсутствует,
-Kvist спросит ключ для активного провайдера и сохранит имя провайдера в тот
-же файл.
+PyInstaller нужен только для сборки отдельного бинарника:
 
-Пример:
-
-```json
-{
-	"llm_provider": "openai",
-	"openai_api_key": "sk-..."
-}
+```bash
+python -m pip install pyinstaller
+python -m PyInstaller kvist.spec
 ```
 
-Путь к конфигу:
-
-- Linux/macOS: `~/.kvist/config.json`
-- Windows: `C:\Users\<USERNAME>\.kvist\config.json`
-
-Старый вариант с `OPENAI_API_KEY` внутри этого JSON тоже читается.
-
-Если переключиться на `FreeFlow LLM`, Kvist сохранит выбранный провайдер и
-при необходимости может держать там же `gemini_api_key` или `groq_api_key`.
-Выбранные модели тоже сохраняются в этом же конфиге отдельно для каждого провайдера.
+Готовый файл появится как `dist/kvist` в Linux или `dist/kvist.exe` в Windows.
 
 ## Запуск
 
@@ -62,127 +113,157 @@ python main.py --workspace "<project_path>"
 kvist --workspace "<project_path>"
 ```
 
-`--workspace` обязателен. Если папки нет, Kvist её создаст. Я обычно передаю
-абсолютный путь: относительные пути тоже работают, но считаются от терминала,
-из которого был запуск.
+`--workspace` — единственный и обязательный аргумент CLI. Kvist разворачивает
+путь, при необходимости создаёт каталог и затем ограничивает им файловые
+действия. Абсолютный путь обычно понятнее; относительный считается от каталога,
+из которого запущен Kvist.
 
-Примеры задач:
-
-```text
-> Find where settings are loaded and explain the flow
-```
+Примеры запросов:
 
 ```text
-> Add validation for empty workspace paths and keep the error message short
+> Найди, где загружаются настройки, и объясни поток данных
 ```
-
-Выход — `/bye`. Если прошлый запуск оборвался и checkpoint успел сохраниться,
-`/resume` попробует продолжить. Команда `/provider` открывает выбор провайдера
-через стрелки на клавиатуре. Команда `/models` так же позволяет стрелками
-выбрать `fast`, `smart` и `planner` модели для текущего провайдера.
-
-Многострочный ввод чуть старомодный: поставьте `\` в конце строки.
 
 ```text
-> Refactor the parser so that \
-... validation errors include the action type
+> Добавь проверку пустого workspace path и запусти подходящие тесты
 ```
 
-## Превью
+Для многострочного ввода используйте `Alt+Enter` или `Esc+Enter`. Автодополнение
+slash-команд появляется, как только ввод начинается с `/`.
 
-### Первый запуск
+## Интерактивные команды
 
-Когда Kvist просит API key, символы при вводе не показываются. Это
-нормально: вставьте ключ и нажмите Enter.
+| Команда | Что делает |
+| --- | --- |
+| `/help` | Показывает информацию о Kvist и поддержку платформ. Также принимаются `/about` и `/info`. |
+| `/new` | Очищает историю и checkpoint активной сессии, сохраняя её текущее имя. |
+| `/provider` | Переключает провайдера или создаёт пользовательского провайдера. |
+| `/models` | Выбирает модели `fast`, `smart` и `planner` для активного провайдера. |
+| `/role` | Выбирает `auto`, `coder`, `devops` или `chat`. Выбор сохраняется глобально. |
+| `/session` | Создаёт, переключает или удаляет именованные сессии workspace. Активную сессию удалить нельзя. |
+| `/resume` | Продолжает checkpoint, сохранённый в активной сессии. |
+| `/bye` | Сохраняет сессию и завершает работу. `/exit` и `/quit` — алиасы. |
 
-![Первый запуск Kvist с невидимым вводом API key](preview/start.png)
+Имя сессии содержит 1-64 строчные латинские буквы, цифры, дефисы или
+подчёркивания и начинается с буквы или цифры. При загрузке Kvist показывает
+несколько последних задач и держит в контексте до десяти завершённых задач.
 
-### Работа агента
+## Как обрабатывается запрос
 
-Во время задачи агент показывает, что он делает: какие файлы смотрит, какой шаг
-выбирает дальше и где применяет правку.
+В режиме роли `auto` явные запросы сначала обрабатываются детерминированными
+правилами. Неоднозначные запросы классифицирует `fast`-модель через
+`prompts/router_prompt.txt`; если вызов модели не удался, используется
+keyword-router.
+Ручной выбор через `/role` отключает автоматическую маршрутизацию.
 
-![Kvist работает в терминале](preview/working.png)
+Для задач `coder` и `devops` Kvist выполняет такую цепочку:
 
-### Финальный отчёт
+1. Через planner-промпт и настроенную `fast`-модель строит короткий план,
+   критерии успеха, риски и классификацию simple/complex. Если planning не
+   сработал, используется локальный fallback-план.
+2. Выбирает action-модель `fast` для простой работы или `smart` для сложной
+   работы и восстановления после ошибок.
+3. Запускает пошаговый цикл с промптом роли, строгим разбором действий,
+   проверками read-before-edit и обязательной верификации, прогрессом и
+   checkpoint.
+4. Либо возвращает короткий `final_answer`, либо передаёт структурированный
+   результат `report_to_user` reporter-промпту для естественного финального
+   отчёта.
 
-В конце Kvist выводит короткий отчёт: что было сделано, какие были заметки
-по ходу работы и какой результат стоит проверить.
+В runtime-контекст входят ОС, shell, текущее время, язык запроса, известные
+версии зависимостей, история сессии, состояние плана, изменённые файлы,
+последние результаты инструментов, факты проверки и блокеры завершения.
 
-![Финальный отчёт Kvist в терминале](preview/end.png)
+`chat` работает по облегчённому пути: модель отвечает напрямую в Markdown,
+сохраняет короткую историю диалога и не имеет файловых или терминальных
+действий.
 
-## Настройки, которые полезно знать
+## Провайдеры и модели
 
-```env
-AGENT_LLM_PROVIDER=openai
-AGENT_FAST_MODEL=gpt-5-mini
-AGENT_SMART_MODEL=gpt-5
-AGENT_PLANNER_MODEL=gpt-5
-AGENT_MAX_STEPS=20
-AGENT_PERSIST_LOGS=1
-AGENT_VERBOSE=0
-AGENT_SANDBOX_MODE=auto
+Настраиваемые `fast`, `smart` и `planner` — это уровни моделей, а не роли
+агента. Переменные окружения моделей имеют приоритет над сохранённым выбором;
+встроенные defaults используются только при отсутствии обоих вариантов.
+
+В текущей реализации routing, planning, chat и формирование отчёта используют
+`fast`-модель. `smart` запускает сложные action loops coder/devops. Настройка
+`planner` сохраняется и показывается в UI, но `agent_planner.py` пока её не
+использует.
+
+| Провайдер | Текущие defaults | Поведение |
+| --- | --- | --- |
+| OpenAI | `gpt-5.4-mini` для всех трёх модельных ролей | Streaming и native JSON mode. Настроенные модели сверяются с доступными для API key и могут переключаться по внутреннему списку OpenAI. |
+| Anthropic | `claude-haiku-4-5` для `fast`; `claude-sonnet-4-6` для `smart` и `planner` | Адаптер native Anthropic Messages API со streaming; JSON обеспечивается промптом и parser, а не `response_format`. |
+| OpenRouter | Автоматических defaults нет | Можно выбрать curated-модель или ввести точный ID `provider/model`. Streaming и native JSON mode включены. |
+| OmniRoute | Автоматических defaults нет | Точные динамические model IDs вводятся вручную. Используется локальный OpenAI-compatible endpoint; текущая интеграция отключает streaming и native JSON mode. |
+| FreeFlow LLM | `gemini-3.5-flash` для всех трёх ролей | Интеграция Gemini/Groq без streaming, JSON разбирается в best-effort режиме. Нужный ключ зависит от backend выбранной модели. Провайдер всё ещё в beta и может работать нестабильно. |
+| Custom | Автоматических defaults нет | Сохранённый OpenAI- или Anthropic-compatible endpoint с ручными model IDs и необязательным API key. |
+
+OpenAI остаётся самым безопасным встроенным вариантом для строгих JSON-шагов.
+Доступность провайдеров и моделей может меняться на их стороне; таблица
+описывает ID и поведение, которые сейчас зашиты в этом репозитории.
+
+### Конфигурация первого запуска
+
+При первом интерактивном запуске Kvist спрашивает провайдера, недостающие model
+IDs и credentials, необходимые выбранным моделям. Ввод секретов скрыт. Выбор и
+credentials сохраняются в:
+
+- Linux/macOS: `~/.kvist/config.json`
+- Windows: `C:\Users\<USERNAME>\.kvist\config.json`
+
+Это обычный JSON-файл в домашнем каталоге пользователя. Не коммитьте и не
+передавайте его. Старые конфиги с `OPENAI_API_KEY` внутри JSON по-прежнему
+читаются.
+
+Пример:
+
+```json
+{
+  "llm_provider": "anthropic",
+  "anthropic_api_key": "...",
+  "role_selection": "auto",
+  "llm_models": {
+    "anthropic": {
+      "fast": "claude-haiku-4-5",
+      "smart": "claude-sonnet-4-6",
+      "planner": "claude-sonnet-4-6"
+    }
+  }
+}
 ```
 
-`AGENT_MAX_STEPS` я бы трогал первым. Поднимайте, если агент регулярно
-останавливается за шаг-два до результата. `AGENT_VERBOSE=1` полезен при отладке
-самого Kvist, в обычной работе быстро надоедает.
+Распознаются переменные credentials `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` и `OMNIROUTE_API_KEY`.
+Соответствующие переменные endpoint: `ANTHROPIC_BASE_URL`,
+`OPENROUTER_BASE_URL` и `OMNIROUTE_BASE_URL`.
 
-`AGENT_SANDBOX_MODE=bubblewrap` (Linux, нужен `bwrap`) оборачивает shell-команды
-в bubblewrap-песочницу: корень файловой системы read-only, workspace на запись,
-сеть общая. По умолчанию (`auto`) действует только граница workspace, а при
-наличии bwrap печатается подсказка; если bubblewrap запрошен, но не установлен —
-агент работает в degraded-режиме и один раз предупреждает.
+### OpenRouter
 
-По провайдерам:
+Endpoint по умолчанию — `https://openrouter.ai/api/v1`. У OpenRouter нет
+автоматических defaults моделей, потому что их доступность внешняя. При
+настройке или через `/models` выберите curated-модель либо введите точный ID,
+например:
 
-- `OpenAI` остаётся самым безопасным вариантом для строгого JSON-режима.
-- Для `OpenAI` по умолчанию используются модели семейства `GPT-5`, с авто-fallback
-	на `GPT-4.1`, если у ключа нет доступа к `GPT-5`.
-- `FreeFlow LLM` подключён как опциональный провайдер для моделей Gemini/Groq.
-- У `FreeFlow LLM` нет такой же гарантии native JSON mode, как у официального
-	OpenAI SDK, поэтому здесь используется fallback на обычные completions.
-- Для `FreeFlow LLM` по умолчанию все роли используют `gemini-3.1-pro-preview`.
-- **⚠️ `FreeFlow LLM` сейчас находится в бета-тестировании и остаётся очень
-  нестабильным.** Возможны периодические сбои, таймауты и непоследовательные
-  ответы. Используйте `OpenAI`, если нужна стабильная работа.
-- `OmniRoute` — это локальный OpenAI-совместимый gateway для маршрутизации запросов
-  к нескольким LLM-провайдерам. См. раздел OmniRoute ниже для настройки.
-
-`AGENT_PERSIST_LOGS=0` отключает run-логи, но сессии и `/resume` всё равно
-используют `<project>/.kvist/sessions/<имя>.json`.
-
-Web search тут специально ограничен. Он нужен для внешних библиотек,
-документации, релизов, цен, лимитов и прочих вещей, которые могут устареть.
-
-```env
-SEARCH_PROVIDER=auto
-SEARXNG_BASE_URL=
-TAVILY_API_KEY=
-BRAVE_SEARCH_API_KEY=
+```text
+openai/gpt-5.4-mini
+anthropic/claude-sonnet-4-6
+google/gemini-3.5-flash
 ```
 
-## OmniRoute
+### OmniRoute
 
-OmniRoute — это локальный OpenAI-совместимый gateway, который маршрутизирует запросы к нескольким LLM-провайдерам.
+Endpoint по умолчанию — `http://localhost:20128/v1`. Запустите OmniRoute,
+скопируйте API key со страницы Dashboard → Endpoints, выберите OmniRoute через
+`/provider` и задайте model ID для каждой роли. ID может иметь вид
+`provider/model`, быть именем router/combo без пробелов или явным значением
+`auto`.
 
-**Kvist не поставляется с моделями по умолчанию для OmniRoute.** Вы должны вручную вводить точные model ids для OmniRoute, потому что провайдеры и модели OmniRoute динамические.
-
-### Настройка
-
-1. Запустите OmniRoute локально (по умолчанию: `http://localhost:20128`)
-2. Получите API key из OmniRoute Dashboard → Endpoints
-3. Выберите OmniRoute как провайдера при запуске Kvist
-4. Введите точные model ids для каждой роли
-
-### Конфигурация
-
-Пример `~/.kvist/config.json`:
+Пример конфигурации:
 
 ```json
 {
   "llm_provider": "omniroute",
-  "omniroute_api_key": "ВАШ_КЛЮЧ",
+  "omniroute_api_key": "...",
   "omniroute_base_url": "http://localhost:20128/v1",
   "llm_models": {
     "omniroute": {
@@ -194,135 +275,218 @@ OmniRoute — это локальный OpenAI-совместимый gateway, �
 }
 ```
 
-Переменные окружения:
+Если endpoint недоступен, проверьте, что OmniRoute запущен и base URL
+заканчивается на `/v1`. Ошибка authentication обычно указывает на ключ из
+Dashboard, а ответы 404 и 400 — на неверный model ID, endpoint или конфигурацию
+upstream-провайдера.
 
-```bash
-AGENT_LLM_PROVIDER=omniroute
-OMNIROUTE_API_KEY=...
-OMNIROUTE_BASE_URL=http://localhost:20128/v1
-AGENT_FAST_MODEL=kr/claude-haiku-4.5
-AGENT_SMART_MODEL=kr/claude-sonnet-4.5
-AGENT_PLANNER_MODEL=kr/claude-sonnet-4.5
+### Пользовательские совместимые endpoints
+
+Выберите `+ Create custom provider...` в `/provider`. Wizard запросит:
+
+- ID провайдера из строчных латинских букв;
+- base URL с `http://` или `https://`;
+- OpenAI-compatible или Anthropic-compatible протокол;
+- необязательный API key и отображаемое имя;
+- один model ID для всех уровней или отдельный ID для каждого.
+
+Custom providers сохраняются в `custom_providers` и выбираются как
+`custom:<id>`. Например:
+
+```json
+{
+  "llm_provider": "custom:local-vllm",
+  "custom_providers": {
+    "local-vllm": {
+      "label": "Local vLLM",
+      "protocol": "openai",
+      "base_url": "http://localhost:8000/v1",
+      "api_key": "",
+      "models": {
+        "fast": "local-model",
+        "smart": "local-model",
+        "planner": "local-model"
+      }
+    }
+  }
+}
 ```
 
-### Формат Model ID
+## Runtime-настройки
 
-Model ids для OmniRoute обычно следуют формату `provider/model`:
+Полезные переменные окружения и их текущие defaults:
+
+```env
+AGENT_LLM_PROVIDER=openai
+AGENT_FAST_MODEL=gpt-5.4-mini
+AGENT_SMART_MODEL=gpt-5.4-mini
+AGENT_PLANNER_MODEL=gpt-5.4-mini
+AGENT_MAX_STEPS=50
+AGENT_PERSIST_LOGS=1
+AGENT_VERBOSE=0
+AGENT_API_INTERVAL=
+AGENT_SANDBOX_MODE=auto
+AGENT_TERMINAL_PROFILE=dev
+AGENT_TERMINAL_TIMEOUT=15
+AGENT_TERMINAL_MAX_OUTPUT=12000
+```
+
+- `AGENT_MAX_STEPS` ограничивает цикл действий coder/devops.
+- `AGENT_PERSIST_LOGS=0` отключает логи завершённых запусков, но не файлы
+  сессий и checkpoint для `/resume`.
+- `AGENT_VERBOSE=1` показывает выбор модели, retries и другую диагностику.
+- `AGENT_API_INTERVAL` переопределяет задержку между API-вызовами. Без него
+  OpenAI, Anthropic и OpenRouter используют 2,5 секунды, остальные провайдеры —
+  настроенный default в 5 секунд.
+- `AGENT_TERMINAL_PROFILE=restricted` убирает interpreters, package managers,
+  build tools и интерактивные shells из обычного allowlist. Вместо
+  автоматического запуска они всё ещё могут попасть на подтверждение человеком.
+- Terminal timeout ограничивается диапазоном 1-30 секунд, а захватываемый вывод
+  — диапазоном 1 000-200 000 символов.
+
+## Web search
+
+Web-доступ предназначен для актуальной внешней документации, API references,
+release notes, migration guides, цен и лимитов. Он не используется, если ответ
+уже есть в workspace. Результаты поиска и загруженный контент помечаются как
+недоверенные до добавления в контекст модели.
+
+```env
+SEARCH_PROVIDER=auto
+SEARXNG_BASE_URL=
+TAVILY_API_KEY=
+BRAVE_SEARCH_API_KEY=
+WEB_SEARCH_TIMEOUT=8
+WEB_SEARCH_MAX_RESULTS=5
+```
+
+Автоматический fallback-порядок: SearXNG → Tavily → Brave. Если задать
+`SEARCH_PROVIDER` как `searxng`, `tavily` или `brave`, этот провайдер будет
+проверен первым, затем остальные настроенные провайдеры. Search timeout
+ограничивается 1-30 секундами, число результатов — 1-20.
+
+`fetch_url` принимает только HTTP(S), ограничивает размер ответа, отклоняет
+очевидные бинарные форматы и разрешает общее чтение только с доменов из runtime
+allowlist.
+
+## Файлы в workspace
+
+Локальное состояние проекта хранится в `.kvist/`:
 
 ```text
-kr/claude-sonnet-4.5
-kr/claude-haiku-4.5
-if/qwen3-coder-plus
+<workspace>/.kvist/
+├── active_session.json
+├── sessions/
+│   └── <name>.json
+└── logs/
+    ├── run_001.json
+    └── debug/logs.jsonl
 ```
 
-Вы также можете использовать имена combo/router без слешей или ввести `auto` для авто-маршрутизации OmniRoute (только если намеренно).
+`logs/` появляется только при включённом run logging и сохранённом запуске.
+Performance JSONL logging по умолчанию выключен в коде. API keys остаются в
+конфиге домашнего каталога, а не в workspace.
 
-### Ручной ввод моделей
+## Модель безопасности
 
-Когда вы выбираете OmniRoute или запускаете `/models`:
+Kvist использует несколько уровней защиты, но default-режим не является
+OS-песочницей:
 
-1. Kvist запрашивает точный model id для каждой роли (fast, smart, planner)
-2. Введите model id вручную
-3. Валидация проверяет формат (без пробелов, без URL, правильная структура `provider/model`)
-4. Модели сохраняются в конфиг для будущих сессий
+- Файловые действия разрешают пути внутри workspace и отклоняют symlink-побеги.
+- Доступ к `.env`, внутреннему состоянию `.kvist`, секретным материалам,
+  слишком большим файлам и не-UTF-8 целям редактирования ограничен.
+- Shell-команды проходят platform-aware allowlist и role-aware risk policy.
+  Неизвестные или меняющие состояние команды требуют подтверждения; без TTY оно
+  отклоняется.
+- Разрушительные команды и повышение привилегий через `rm`, `sudo`, `dd`,
+  `mkfs`, `shutdown` и `reboot` запрещены обычной валидацией.
+- Shell operators и command substitution ограничены, рабочий каталог остаётся
+  внутри workspace, а дочерние процессы Unix получают resource limits.
+- Логи скрывают распространённые форматы токенов и обрезают большие значения.
 
-### Устранение проблем
+При `AGENT_SANDBOX_MODE=auto` или `workspace` shell-процессы всё ещё работают с
+OS-правами текущего пользователя. В Linux `AGENT_SANDBOX_MODE=bubblewrap`
+использует `bwrap`: read-only корень, writable bind workspace, отдельные process
+IDs и общую сеть. Если `bwrap` недоступен, Kvist предупреждает и переходит в
+workspace-only режим.
 
-**"OmniRoute endpoint is unavailable"**
-- Проверьте, что OmniRoute запущен
-- Проверьте, что base URL — `http://localhost:20128/v1`
+## Архитектура промптов и действий
 
-**"OmniRoute authentication failed"**
-- Проверьте API key из Dashboard → Endpoints
+Активные файлы промптов:
 
-**"OmniRoute model or endpoint was not found"**
-- Проверьте точный model id (например, `kr/claude-sonnet-4.5`)
-- Проверьте, что провайдер подключен в OmniRoute
+- `prompts/router_prompt.txt` — выбирает `coder`, `devops` или `chat` для
+  запросов, не обработанных детерминированной маршрутизацией;
+- `prompts/planner_prompt.txt` — возвращает план задачи, критерии успеха, риски и
+  complexity в JSON;
+- `prompts/coder_prompt.txt` — строгий протокол работы с кодом и workspace;
+- `prompts/devops_prompt.txt` — строгий DevOps-протокол с учётом системы и
+  правил подтверждения человеком;
+- `prompts/chat_prompt.txt` — прямой Markdown-диалог без инструментов;
+- `prompts/report_prompt.txt` — превращает структурированный результат задачи в
+  короткий пользовательский отчёт.
 
-**"OmniRoute returned 400 bad_request"**
-- Обычно означает неправильный model id, неподдерживаемую форму запроса, сломанную трансформацию провайдера или upstream провайдер отклонил запрос
-- Попробуйте другой точный model id или проверьте логи OmniRoute
+Coder и DevOps могут выдавать следующие валидируемые действия:
 
-## Что появляется на диске
+```text
+final_answer, report_to_user,
+read_file, read_multiple_files, write_file, append_file, replace_in_file,
+list_dir, list_tree, find_files, search_code,
+git_status, git_diff, run_shell,
+web_search, fetch_url, delegate_task
+```
 
-Внутри целевого проекта:
-
-- `<project>/.kvist/logs/`
-- `<project>/.kvist/sessions/<имя>.json`
-- `<project>/.kvist/active_session.json`
-
-API key остаётся в домашнем конфиге, а не в проекте.
-
-## Острые углы
-
-Доступ к файлам ограничен workspace (включая защиту от symlink-побега), файлы
-`.env` заблокированы и на чтение, и на запись. Shell-команды проходят два слоя:
-allowlist (команды с pipe проверяются посегментно) и role-aware оценку риска
-(`command_policy.py`) — рискованные команды требуют интерактивного одобрения,
-а без TTY отклоняются. Есть лимиты размера файлов, вывода и запрет на чтение
-очевидных бинарных URL. Результаты `web_search`/`fetch_url` помечаются как
-недоверенный внешний контент до того, как попадут в модель.
-
-Честно о том, чем это НЕ является: режим по умолчанию — не OS-песочница.
-Shell-команды выполняются с правами вашего пользователя; их ограничивают только
-cwd, allowlist и rlimits. На Linux можно включить настоящую песочницу через
-`AGENT_SANDBOX_MODE=bubblewrap` (см. «Настройки, которые полезно знать»).
-
-Но это инструмент для работы под присмотром. Он может не так понять задачу или
-уверенно поправить не тот кусок. Самый нормальный режим: одна небольшая правка,
-проверка, потом следующая.
-
-Часть внутренних ошибок пока выглядит некрасиво. Сначала доводился runtime,
-полировку ещё можно подтянуть.
+`parser.py` проверяет точную схему, `executor.py` реализует действия, а
+`agent_runtime.py` блокирует преждевременное завершение, нарушения read-only,
+повторяющиеся тупиковые шаги и непроверенные правки.
 
 ## Структура проекта
 
-Ядро:
+Основной runtime:
 
-- `main.py` запускает CLI и связывает workspace, ключ, модели и UI.
-- `agent.py` склеивает части агента.
-- `agent_runtime.py` ведёт цикл шагов и checkpoint.
-- `agent_state.py` хранит `AgentConfig` и runtime-датаклассы (`PlanInfo` и т.д.).
-- `agent_model.py` вызывает action-модель, стриминг, подсчёт токенов и fallback моделей.
-- `agent_planner.py` запускает опциональный шаг планирования перед основным циклом.
-- `agent_context.py` собирает контекст для каждого шага с локализованными метками.
+- `main.py` запускает REPL и обрабатывает slash-команды и интерактивную
+  настройку;
+- `agent.py` координирует routing, planning, chat, сессии и цикл действий;
+- `agent_runtime.py` выполняет шаги, отслеживает доказательства и формирует
+  финальные отчёты;
+- `agent_state.py` определяет конфигурацию, план и состояние запуска;
+- `agent_context.py` собирает и priority-trim runtime-контекст каждого шага;
+- `agent_model.py` загружает промпты ролей, выбирает уровни моделей, обрабатывает
+  streaming, retries и fallback из JSON mode;
+- `agent_planner.py` запускает planner и предоставляет локальный fallback-план.
 
-Исполнение и парсинг:
+Провайдеры и маршрутизация:
 
-- `executor.py` отвечает за безопасные действия с файлами, shell, git и web.
-- `parser.py` и `protocol.py` проверяют действия модели.
-- `terminal.py` хранит allowlist shell-команд и HITL-подтверждение.
-- `command_policy.py` оценивает риск shell-команд (SAFE/MODERATE/DANGEROUS, с учётом роли).
-- `sandbox.py` детектирует и подключает опциональную bubblewrap-песочницу.
-- `agent_web.py` ограничивает web search и чтение URL.
+- `llm_clients.py` определяет провайдеры, списки моделей, defaults, валидацию,
+  адаптеры и fallback candidates;
+- `user_config.py` читает и пишет `~/.kvist/config.json` и custom providers;
+- `role_router.py` сочетает deterministic, LLM, keyword и default routing;
+- `language_policy.py` и `language_utils.py` сохраняют язык пользовательского
+  ответа.
 
-LLM и провайдеры:
+Исполнение и сохранение состояния:
 
-- `llm_clients.py` настраивает клиенты OpenAI и FreeFlow, списки моделей и fallback-цепочки.
-- `user_config.py` читает/пишет `~/.kvist/config.json`, запрашивает ключи и выбор провайдера.
+- `executor.py`, `terminal.py`, `command_policy.py` и `sandbox.py` реализуют
+  действия, shell validation, подтверждения, risk grading и bubblewrap;
+- `parser.py` и `protocol.py` задают строгий протокол действий;
+- `agent_logging.py` хранит именованные сессии, checkpoints и run logs;
+- `agent_web.py` ограничивает условия использования web-действий;
+- `deps.py` определяет версии зависимостей по Python project и lock-файлам;
+- `ui.py` и `render_throttle.py` эффективно отображают терминальный интерфейс.
 
-Утилиты:
+Сборка и интеграции:
 
-- `context_utils.py` sliding-window тример контекста для истории сообщений.
-- `render_throttle.py` неблокирующий throttle для потокового вывода.
-- `language_utils.py` определяет язык запроса пользователя и подбирает локализованные строки.
-- `deps.py` сканирует файлы зависимостей workspace для получения версий.
-- `performance_logger.py` структурированный JSONL-логгер для `.kvist/logs/debug/`.
+- `kvist.spec` задаёт сборку PyInstaller и включает `prompts/`;
+- `package_script.py` создаёт архив исходников из видимых Git файлов;
+- `jetbrains-plugin/` содержит интеграцию IntelliJ Platform для Windows и Linux,
+  закреплённую на линейке платформы 2025.3.
 
-UI и сборка:
+## Тесты
 
-- `ui.py` рисует вывод в терминале.
-- `agent_logging.py` пишет run-логи и checkpoint.
-- `package_script.py` скрипт сборки через PyInstaller.
+Полный набор тестов запускается из корня репозитория:
 
-Промпты:
+```bash
+python -m pytest
+```
 
-- `prompts/coder_prompt.txt` системный промпт для роли coder.
-- `prompts/devops_prompt.txt` системный промпт для роли devops.
-- `prompts/chat_prompt.txt` системный промпт для роли chat.
-- `prompts/router_prompt.txt` системный промпт для роутера ролей.
-- `prompts/planner_prompt.txt` системный промпт для planner-модели.
-
-`jetbrains-plugin/` содержит IntelliJ Platform plugin: он запускает Kvist в IDE
-Terminal для текущего проекта. Плагин прибит к IntelliJ Platform 2025.3,
-поддерживает Windows/Linux и ждёт собранные бинарники в `jetbrains-plugin/bin/`.
+Отдельные prompt-тесты проверяют, что runtime использует верхний каталог
+`prompts/`, а документированные схемы JSON-действий синхронизированы с parser.

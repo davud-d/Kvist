@@ -375,6 +375,9 @@ def get_custom_providers(config_path: Path | None = None) -> dict[str, dict]:
                 "base_url": info["base_url"].strip(),
                 "api_key": str(info.get("api_key", "")).strip(),
                 "models": _normalize_provider_models(info.get("models")),
+                # Missing on providers saved before this field existed — treat as
+                # unverified and default to the safe non-streaming path.
+                "streaming": bool(info.get("streaming", False)),
             }
     return result
 
@@ -389,6 +392,7 @@ def save_custom_provider(name: str, provider_config: dict, config_path: Path | N
     """Save or update a custom provider configuration.
 
     ``provider_config`` must have keys: ``label``, ``base_url``, ``api_key``, ``models``.
+    ``streaming`` is optional and defaults to ``False``.
     """
     if not name or not name.strip():
         raise ValueError("Custom provider name cannot be empty")
@@ -403,6 +407,7 @@ def save_custom_provider(name: str, provider_config: dict, config_path: Path | N
         "base_url": str(provider_config.get("base_url", "")).strip(),
         "api_key": str(provider_config.get("api_key", "")).strip(),
         "models": _normalize_provider_models(provider_config.get("models")),
+        "streaming": bool(provider_config.get("streaming", False)),
     }
     payload[CUSTOM_PROVIDERS_KEY] = all_providers
     save_user_config(payload, config_path)

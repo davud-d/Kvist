@@ -73,7 +73,7 @@ val kvistSandboxBinaries = copySpec {
     }
 }
 
-val validateHostKvistBinary by tasks.registering {
+val validateHostKvistBinary = tasks.register("validateHostKvistBinary") {
     group = "verification"
     description = "Ensures that the current host binary exists for local sandbox runs."
     notCompatibleWithConfigurationCache("Reads project-local binary files during task execution.")
@@ -83,13 +83,24 @@ val validateHostKvistBinary by tasks.registering {
     }
 }
 
-val validateAllKvistBinaries by tasks.registering {
+val validateAllKvistBinaries = tasks.register("validateAllKvistBinaries") {
     group = "verification"
     description = "Ensures that all packaged Kvist binaries exist for plugin distribution builds."
     notCompatibleWithConfigurationCache("Reads project-local binary files during task execution.")
 
     doLast {
-        validateBinarySet(requiredBinariesForBuild(), "plugin packaging")
+        validateBinarySet(requiredBinariesForRunIde(), "plugin packaging")
+
+        val hostBinaries = requiredBinariesForRunIde()
+        requiredBinariesForBuild()
+            .filterNot { it in hostBinaries }
+            .filterNot { it.isFile }
+            .forEach { missing ->
+                logger.warn(
+                    "Optional Kvist binary is missing: ${missing.invariantSeparatorsPath}. " +
+                        "The plugin will be built without support for that platform."
+                )
+            }
     }
 }
 
@@ -103,27 +114,40 @@ tasks.named("runIde") {
 }
 
 tasks.named<Zip>("buildPlugin") {
-    dependsOn(validateAllKvistBinaries)
+    dependsOn(validateHostKvistBinary)
 
     doLast {
         val archiveFile = archiveFile.get().asFile
-        val expectedEntries = listOf(
+
+        val hostEntry = when {
+            hostOsName.contains("win") -> "$pluginDistributionDirectoryName/bin/win/kvist.exe"
+            hostOsName.contains("linux") -> "$pluginDistributionDirectoryName/bin/linux/kvist.bin"
+            else -> null
+        }
+        val optionalEntries = listOf(
             "$pluginDistributionDirectoryName/bin/win/kvist.exe",
             "$pluginDistributionDirectoryName/bin/linux/kvist.bin",
-        )
+        ).filterNot { it == hostEntry }
 
-        val missingEntries = ZipFile(archiveFile).use { zipFile ->
-            expectedEntries.filter { expectedEntry -> zipFile.getEntry(expectedEntry) == null }
-        }
+        ZipFile(archiveFile).use { zipFile ->
+            if (hostEntry != null && zipFile.getEntry(hostEntry) == null) {
+                throw GradleException(
+                    buildString {
+                        appendLine("The plugin archive is missing the required host Kvist binary:")
+                        appendLine(" - $hostEntry")
+                        append("Archive: ${archiveFile.invariantSeparatorsPath}")
+                    }
+                )
+            }
 
-        if (missingEntries.isNotEmpty()) {
-            throw GradleException(
-                buildString {
-                    appendLine("The plugin archive is missing required Kvist binaries:")
-                    missingEntries.forEach { appendLine(" - $it") }
-                    append("Archive: ${archiveFile.invariantSeparatorsPath}")
+            optionalEntries
+                .filter { zipFile.getEntry(it) == null }
+                .forEach { missing ->
+                    logger.warn(
+                        "The plugin archive is missing optional Kvist binary: $missing. " +
+                            "The plugin will be built without support for that platform."
+                    )
                 }
-            )
         }
     }
 }

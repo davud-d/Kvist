@@ -617,9 +617,18 @@ def fallback_candidates_for_model(
 
 
 def provider_supports_streaming(provider: str) -> bool:
-    """Return True if the provider supports streaming responses."""
+    """Return True if the provider supports streaming responses.
+
+    Custom providers are unverified third-party endpoints — many implement plain
+    chat completions correctly but break on ``stream=true``. Streaming is opt-in
+    per provider via its saved ``streaming`` flag, defaulting to off.
+    """
     normalized = normalize_provider(provider)
-    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER) or is_custom_provider(normalized)
+    if is_custom_provider(normalized):
+        from user_config import get_custom_provider_by_name
+        info = get_custom_provider_by_name(extract_custom_provider_name(normalized))
+        return bool(info.get("streaming", False)) if info else False
+    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER)
 
 
 def provider_supports_json_mode(provider: str) -> bool:
