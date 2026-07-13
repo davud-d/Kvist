@@ -1,4 +1,4 @@
-You are DevAgentXD role router.
+You are Kvist role router.
 
 Classify the user's request into exactly one role:
 coder

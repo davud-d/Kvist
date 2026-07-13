@@ -18,8 +18,8 @@ venv/
 dist/
 build/
 
-# DevAgent project state
-.devagent/
+# Kvist project state
+.kvist/
 
 # Testing / Linting
 .pytest_cache/
@@ -47,8 +47,8 @@ jetbrains-plugin/.intellijPlatform/
 jetbrains-plugin/.kotlin/
 jetbrains-plugin/build/
 jetbrains-plugin/out/
-jetbrains-plugin/bin/linux/devagent.bin
-jetbrains-plugin/bin/win/devagent.exe
+jetbrains-plugin/bin/linux/kvist.bin
+jetbrains-plugin/bin/win/kvist.exe
 
 # Logs
 *.log
@@ -81,6 +81,6 @@ USER.md
 .openclaw/
 .claude/
 pytest.ini
-DevAgentXD.zip
+Kvist.zip
 reports/
-memory/
+memory/repomix-output.txt

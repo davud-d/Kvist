@@ -190,7 +190,7 @@ def build_agent(
                 example_model = "kr/claude-sonnet-4.5"
             if not sys.stdin.isatty():
                 raise RuntimeError(
-                    f"{provider_display} models are not configured. Run DevAgent in an interactive "
+                    f"{provider_display} models are not configured. Run Kvist in an interactive "
                     f"terminal and set exact model ids with /models, for example {example_model}."
                 )
             # Interactive setup if models are missing
@@ -1033,7 +1033,7 @@ def main() -> None:
         print(str(error), file=sys.stderr)
         sys.exit(2)
 
-    console.print("[dim]Local AI agent [/dim]DevAgentXD [dim]started. [/dim]")
+    console.print("[dim]Local AI agent [/dim]Kvist [dim]started. [/dim]")
     console.print(f"[dim]Workspace: {executor.workspace}[/dim]")
     print_runtime_banner(config, max_steps, verbose, model_warnings)
     console.print("[red]Type '/bye' to exit. For multiline input, use Alt+Enter or Esc+Enter.[/red]")
@@ -1266,19 +1266,19 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/about" or user_goal.lower() == "/info" or user_goal.lower() == "/help":
-                console.print("[green]This is DevAgentXD: open-source AI agent for Windows/Linux. [/green]")
+                console.print("[green]This is Kvist: open-source AI agent for Windows/Linux. [/green]")
                 console.print('''[red] 
 Support: 
   Linux: Yes
   Windows: Yes
   macOS: Untested (or Experimental)
                 [/red]''')
-                console.print("[dim]\nDevAgentXD by Davud, © 2026 [/dim]")
+                console.print("[dim]\nKvist by Davud, © 2026 [/dim]")
                 console.print("[dim] Author: Davud [/dim]")
                 console.print("[dim] LICENCE: MIT [/dim]")
-                console.print("[dim] Repository: [blue]https://github.com/davud-d/DevAgentXD[/blue] [/dim]")
+                console.print("[dim] Repository: [blue]https://github.com/davud-d/KVist[/blue] [/dim]")
                 console.print("[dim] Release Version: 1.0 [/dim]")
-                console.print("[orange]\nThank you for using DevAgentXD [/orange]")
+                console.print("[orange]\nThank you for using Kvist [/orange]")
                 continue
 
             from role_router import route_role_decision_with_llm, route_role

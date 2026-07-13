@@ -36,7 +36,7 @@ def test_executor_blocks_workspace_escape_env_and_internal_paths(tmp_path):
     with pytest.raises(ExecutorError, match="env file"):
         executor._read_file(".env")
     with pytest.raises(ExecutorError, match="internal agent directory"):
-        executor._list_dir(".devagent")
+        executor._list_dir(".kvist")
     with pytest.raises(ExecutorError, match="env file"):
         executor._run_shell(["cat", ".env"])
 
@@ -53,14 +53,14 @@ def test_executor_git_fallback_sanitizes_internal_paths(tmp_path, monkeypatch):
     executor = SafeExecutor(tmp_path)
 
     def fail(command, **kwargs):
-        raise TerminalError(".devagent/logs/state")
+        raise TerminalError(".kvist/logs/state")
 
     monkeypatch.setattr(executor._terminal, "run", fail)
     result = executor._git_status()
 
     assert result.ok is True
     assert result.data["fallback_used"] is True
-    assert ".devagent" not in result.data["stderr"]
+    assert ".kvist" not in result.data["stderr"]
 
 
 def test_executor_normalizes_and_filters_search_results(tmp_path):

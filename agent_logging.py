@@ -35,15 +35,15 @@ def is_valid_session_name(session_name: object) -> bool:
 def get_state_path(self, session_name: str = "default"):
     if not is_valid_session_name(session_name):
         raise ValueError(f"Invalid session name: {session_name!r}")
-    return self.executor.workspace / ".devagent" / "sessions" / f"{session_name}.json"
+    return self.executor.workspace / ".kvist" / "sessions" / f"{session_name}.json"
 
 
 def get_active_session_path(self):
-    return self.executor.workspace / ".devagent" / "active_session.json"
+    return self.executor.workspace / ".kvist" / "active_session.json"
 
 
 def get_sessions_dir(self):
-    return self.executor.workspace / ".devagent" / "sessions"
+    return self.executor.workspace / ".kvist" / "sessions"
 
 
 def _read_json_object(path) -> dict[str, Any]:

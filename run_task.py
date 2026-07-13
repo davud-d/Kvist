@@ -7,7 +7,7 @@ from main import build_agent
 import asyncio
 
 def run():
-    workspace = Path("/tmp/devagent_test")
+    workspace = Path("/tmp/kvist_test")
     executor = SafeExecutor(workspace=workspace)
     agent, config, warnings = build_agent(
         executor=executor,

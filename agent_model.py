@@ -52,7 +52,7 @@ if _STALE_PROMPT_DIR.is_dir():
     import sys as _sys
 
     print(
-        f"[devagent] WARNING: Stale prompt directory detected at {_STALE_PROMPT_DIR}.",
+        f"[kvist] WARNING: Stale prompt directory detected at {_STALE_PROMPT_DIR}.",
         "Code loads prompts from", _PROMPT_DIR,
         "— the duplicate is NOT used. Remove it to avoid confusion.",
         file=_sys.stderr,

@@ -23,8 +23,8 @@ class AgentConfig:
     prompt_value_char_limit: int = 1600
     cache_enabled: bool = True
     persist_logs: bool = True
-    logs_dirname: str = ".devagent/logs"
-    state_filename: str = ".devagent/state.json"
+    logs_dirname: str = ".kvist/logs"
+    state_filename: str = ".kvist/state.json"
     model_temperature: float = 0.1
     max_retries: int = 2
     retry_base_delay: float = 2.0

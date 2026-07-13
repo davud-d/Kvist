@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-This module configures LLM clients and model lists for DevAgentXD.
+This module configures LLM clients and model lists for Kvist.
 
 The defaults and model options have been updated to reflect the most recent
 officially supported model IDs from OpenAI, Google Gemini, Groq and DeepSeek.

@@ -10,7 +10,7 @@ def test_perf_logger_is_noop_when_disabled(tmp_path):
     logger = PerfLogger(tmp_path)
     logger.log_render(render_duration_ms=100)
     logger.flush()
-    assert not (tmp_path / ".devagent").exists()
+    assert not (tmp_path / ".kvist").exists()
 
 
 def test_perf_logger_writes_jsonl_when_enabled(tmp_path, monkeypatch):
@@ -32,7 +32,7 @@ def test_perf_logger_writes_jsonl_when_enabled(tmp_path, monkeypatch):
     )
     logger.flush()
 
-    path = tmp_path / ".devagent" / "logs" / "debug" / "logs.jsonl"
+    path = tmp_path / ".kvist" / "logs" / "debug" / "logs.jsonl"
     record = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
     assert record["type"] == "api_request"
     assert len(record["error"]) == 300

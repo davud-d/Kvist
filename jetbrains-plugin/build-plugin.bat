@@ -13,12 +13,12 @@ set "DIST_DIR=%PROJECT_DIR%\dist"
 set "BUILD_DIR=%PROJECT_DIR%\build"
 set "PLUGIN_BUILD_DIR=%PLUGIN_DIR%\build"
 set "SANDBOX_ROOT=%PLUGIN_DIR%\.intellijPlatform\sandbox"
-set "PLUGIN_NAME=devagent-intellij"
-set "SANDBOX_BINARY_SUFFIX=plugins\%PLUGIN_NAME%\bin\win\devagent.exe"
+set "PLUGIN_NAME=kvist-intellij"
+set "SANDBOX_BINARY_SUFFIX=plugins\%PLUGIN_NAME%\bin\win\kvist.exe"
 
 :: Binary names (adding .exe for Windows)
-set "WIN_BINARY_SRC=%DIST_DIR%\devagent.exe"
-set "WIN_BINARY_DST=%PLUGIN_DIR%\bin\win\devagent.exe"
+set "WIN_BINARY_SRC=%DIST_DIR%\kvist.exe"
+set "WIN_BINARY_DST=%PLUGIN_DIR%\bin\win\kvist.exe"
 
 call :log "Project directory: %PROJECT_DIR%"
 call :log "Plugin directory: %PLUGIN_DIR%"
@@ -32,8 +32,8 @@ if %ERRORLEVEL% neq 0 (
 call :log "Python: %PYTHON_BIN%"
 
 :: Check for required files
-if not exist "%PROJECT_DIR%\devagent.spec" (
-    echo devagent.spec not found in %PROJECT_DIR% >&2
+if not exist "%PROJECT_DIR%\kvist.spec" (
+    echo kvist.spec not found in %PROJECT_DIR% >&2
     exit /b 1
 )
 
@@ -50,9 +50,9 @@ if exist "%DIST_DIR%" rd /s /q "%DIST_DIR%"
 if exist "%BUILD_DIR%" rd /s /q "%BUILD_DIR%"
 if exist "%PLUGIN_BUILD_DIR%" rd /s /q "%PLUGIN_BUILD_DIR%"
 
-call :log "Building DevAgent binary with PyInstaller"
+call :log "Building Kvist binary with PyInstaller"
 cd /d "%PROJECT_DIR%"
-"%PYTHON_BIN%" -m PyInstaller devagent.spec
+"%PYTHON_BIN%" -m PyInstaller kvist.spec
 if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
 
 if not exist "%WIN_BINARY_SRC%" (
@@ -101,10 +101,10 @@ set "STOPPED_ANY="
 where powershell.exe >nul 2>nul
 if errorlevel 1 goto :eof
 
-for /f "usebackq delims=" %%i in (`powershell.exe -NoProfile -Command "$ErrorActionPreference = 'SilentlyContinue'; $sandboxRoot = [System.IO.Path]::GetFullPath('%SANDBOX_ROOT%'); $binarySuffix = '%SANDBOX_BINARY_SUFFIX%'; $targetProcesses = Get-CimInstance Win32_Process -Filter \"Name = 'devagent.exe'\" ^| Where-Object { ($_.ExecutablePath -and [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($sandboxRoot, [System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath($_.ExecutablePath).EndsWith($binarySuffix, [System.StringComparison]::OrdinalIgnoreCase)) -or ($_.CommandLine -and $_.CommandLine.IndexOf($binarySuffix, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) }; foreach ($process in $targetProcesses) { $process.ProcessId }"`) do (
+for /f "usebackq delims=" %%i in (`powershell.exe -NoProfile -Command "$ErrorActionPreference = 'SilentlyContinue'; $sandboxRoot = [System.IO.Path]::GetFullPath('%SANDBOX_ROOT%'); $binarySuffix = '%SANDBOX_BINARY_SUFFIX%'; $targetProcesses = Get-CimInstance Win32_Process -Filter \"Name = 'kvist.exe'\" ^| Where-Object { ($_.ExecutablePath -and [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith($sandboxRoot, [System.StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath($_.ExecutablePath).EndsWith($binarySuffix, [System.StringComparison]::OrdinalIgnoreCase)) -or ($_.CommandLine -and $_.CommandLine.IndexOf($binarySuffix, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) }; foreach ($process in $targetProcesses) { $process.ProcessId }"`) do (
     if not defined STOPPED_ANY (
         set "STOPPED_ANY=1"
-        call :log "Stopping running sandbox DevAgent processes"
+        call :log "Stopping running sandbox Kvist processes"
     )
     taskkill /f /pid %%i >nul 2>&1
 )
@@ -119,7 +119,7 @@ if not exist "%SANDBOX_ROOT%" goto :eof
 set "COPIED_ANY=0"
 
 :: Recursively find and replace binary in sandbox folders
-for /r "%SANDBOX_ROOT%" %%f in (devagent.exe) do (
+for /r "%SANDBOX_ROOT%" %%f in (kvist.exe) do (
     echo %%f | findstr /c:"%SANDBOX_BINARY_SUFFIX%" >nul
     if not errorlevel 1 (
         copy /y "%WIN_BINARY_DST%" "%%f" >nul

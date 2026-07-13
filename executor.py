@@ -77,7 +77,7 @@ class SafeExecutor:
     def __init__(self, workspace: str | Path) -> None:
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
-        self.internal_agent_dirname = ".devagent"
+        self.internal_agent_dirname = ".kvist"
         self.active_role = "coder"
 
         self.max_read_chars = 20000
@@ -458,7 +458,7 @@ class SafeExecutor:
         return target.relative_to(self.workspace).as_posix()
 
     _INTERNAL_PATH_TOKEN_RE = re.compile(
-        r"(?<![A-Za-z0-9_.-])(?:\./)?\.devagent(?:[\\/]|$)",
+        r"(?<![A-Za-z0-9_.-])(?:\./)?\.kvist(?:[\\/]|$)",
         re.IGNORECASE,
     )
 
@@ -1428,7 +1428,7 @@ class SafeExecutor:
         body: bytes | None = None,
     ) -> tuple[int, Any, bytes]:
         request_headers = {
-            "User-Agent": "devagentxd-local-agent/1.0",
+            "User-Agent": "kvist-local-agent/1.0",
             "Accept-Encoding": "identity",
         }
         request_headers.update(headers)

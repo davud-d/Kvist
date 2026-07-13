@@ -50,7 +50,7 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     assert agent._state.plan_info.goal == "Test goal"
     agent._clear_checkpoint()
 
-    state_path = agent.executor.workspace / ".devagent" / "sessions" / "default.json"
+    state_path = agent.executor.workspace / ".kvist" / "sessions" / "default.json"
     payload = json.loads(state_path.read_text(encoding="utf-8"))
     assert payload["checkpoint"] is None
     assert payload["session_history"] == agent._session_history
@@ -84,7 +84,7 @@ def test_save_session_restores_active_session_and_full_chat_history(agent_factor
 def test_load_checkpoint_supports_legacy_flat_session_file(agent_factory):
     agent = agent_factory()
     agent.current_session = "legacy"
-    state_path = agent.executor.workspace / ".devagent" / "sessions" / "legacy.json"
+    state_path = agent.executor.workspace / ".kvist" / "sessions" / "legacy.json"
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         json.dumps(

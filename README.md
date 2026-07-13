@@ -1,6 +1,6 @@
-# DevAgentXD
+# Kvist
 
-DevAgentXD is a local coding agent for one workspace at a time.
+Kvist is a local coding agent for one workspace at a time.
 
 I use it for the kind of repo work that is small but annoying: find where some
 setting is loaded, make a narrow patch, explain a dusty file, check why a
@@ -24,8 +24,8 @@ From the repo root:
 pip install -r requirements.txt
 ```
 
-No `.env` is needed for the first run. If `~/.devagent/config.json` is missing,
-DevAgentXD asks for the key required by the active provider and stores the
+No `.env` is needed for the first run. If `~/.kvist/config.json` is missing,
+Kvist asks for the key required by the active provider and stores the
 selected provider in the same file.
 
 Example:
@@ -39,12 +39,12 @@ Example:
 
 Config path:
 
-- Linux/macOS: `~/.devagent/config.json`
-- Windows: `C:\Users\<USERNAME>\.devagent\config.json`
+- Linux/macOS: `~/.kvist/config.json`
+- Windows: `C:\Users\<USERNAME>\.kvist\config.json`
 
 Old configs with `OPENAI_API_KEY` in that JSON still load.
 
-If you switch to `FreeFlow LLM`, DevAgentXD keeps the selected provider and can
+If you switch to `FreeFlow LLM`, Kvist keeps the selected provider and can
 store provider-specific keys such as `gemini_api_key` or `groq_api_key`.
 Selected models are also stored in the same config separately for each provider.
 
@@ -59,10 +59,10 @@ python main.py --workspace "<project_path>"
 With a built binary:
 
 ```bash
-devagent --workspace "<project_path>"
+kvist --workspace "<project_path>"
 ```
 
-`--workspace` is required. DevAgentXD creates the folder if it is not there. I prefer
+`--workspace` is required. Kvist creates the folder if it is not there. I prefer
 passing an absolute path; relative paths work, but only relative to the terminal
 you launched from.
 
@@ -92,24 +92,24 @@ Multiline input is a bit old-school: end the line with `\`.
 
 ### First launch
 
-When DevAgentXD asks for the API key, typed characters are invisible. That is
+When Kvist asks for the API key, typed characters are invisible. That is
 expected; keep typing and press Enter.
 
-![DevAgentXD first launch with hidden API key input](preview/start.png)
+![Kvist first launch with hidden API key input](preview/start.png)
 
 ### Agent at work
 
 The agent prints what it is doing while it inspects files, thinks through the
 next step, and applies small changes.
 
-![DevAgentXD working in the terminal](preview/working.png)
+![Kvist working in the terminal](preview/working.png)
 
 ### Final report
 
-At the end, DevAgentXD summarizes what happened: actions, reasoning notes, and
+At the end, Kvist summarizes what happened: actions, reasoning notes, and
 the result the user should check.
 
-![DevAgentXD final report in the terminal](preview/end.png)
+![Kvist final report in the terminal](preview/end.png)
 
 ## Knobs worth knowing
 
@@ -126,7 +126,7 @@ AGENT_SANDBOX_MODE=auto
 
 `AGENT_MAX_STEPS` is the one I change most often. Raise it when the agent keeps
 stopping one or two steps too early. `AGENT_VERBOSE=1` is useful when debugging
-DevAgentXD itself, and noisy for normal use.
+Kvist itself, and noisy for normal use.
 
 `AGENT_SANDBOX_MODE=bubblewrap` (Linux, requires `bwrap`) wraps shell commands in
 a bubblewrap sandbox: read-only root filesystem, writable workspace, shared
@@ -141,7 +141,7 @@ Provider notes:
 	to `GPT-4.1` if the API key does not have `GPT-5` access.
 - `FreeFlow LLM` is integrated as an optional provider for Gemini/Groq models.
 - `FreeFlow LLM` does not guarantee the same native JSON mode as the official
-	OpenAI SDK, so DevAgentXD falls back to plain completions there.
+	OpenAI SDK, so Kvist falls back to plain completions there.
 - For `FreeFlow LLM`, all default roles now use `gemini-3.1-pro-preview`.
 - **⚠️ `FreeFlow LLM` is currently in beta testing and remains very unstable.**
   Expect intermittent failures, timeouts, and inconsistent responses. Use
@@ -150,7 +150,7 @@ Provider notes:
   LLM providers. See the OmniRoute section below for setup details.
 
 `AGENT_PERSIST_LOGS=0` stops run logs, but sessions and `/resume` still use
-`<project>/.devagent/sessions/<name>.json`.
+`<project>/.kvist/sessions/<name>.json`.
 
 Web search is deliberately limited. It is meant for external libraries, docs,
 release notes, pricing, limits, and other things that can go stale.
@@ -166,18 +166,18 @@ BRAVE_SEARCH_API_KEY=
 
 OmniRoute is a local OpenAI-compatible gateway that routes requests to multiple LLM providers.
 
-**DevAgentXD does not ship default OmniRoute models.** You must enter exact OmniRoute model ids manually because OmniRoute providers and models are dynamic.
+**Kvist does not ship default OmniRoute models.** You must enter exact OmniRoute model ids manually because OmniRoute providers and models are dynamic.
 
 ### Setup
 
 1. Start OmniRoute locally (default: `http://localhost:20128`)
 2. Get your API key from OmniRoute Dashboard → Endpoints
-3. Select OmniRoute as provider when starting DevAgentXD
+3. Select OmniRoute as provider when starting Kvist
 4. Enter exact model ids for each role
 
 ### Configuration
 
-Example `~/.devagent/config.json`:
+Example `~/.kvist/config.json`:
 
 ```json
 {
@@ -221,7 +221,7 @@ You can also use combo/router names without slashes or type `auto` for OmniRoute
 
 When you select OmniRoute or run `/models`:
 
-1. DevAgentXD asks for exact model id for each role (fast, smart, planner)
+1. Kvist asks for exact model id for each role (fast, smart, planner)
 2. Enter the model id manually
 3. Validation checks format (no whitespace, no URLs, proper `provider/model` structure)
 4. Models are saved to config for future sessions
@@ -247,9 +247,9 @@ When you select OmniRoute or run `/models`:
 
 Inside the target project:
 
-- `<project>/.devagent/logs/`
-- `<project>/.devagent/sessions/<name>.json`
-- `<project>/.devagent/active_session.json`
+- `<project>/.kvist/logs/`
+- `<project>/.kvist/sessions/<name>.json`
+- `<project>/.kvist/active_session.json`
 
 The API key stays in your home directory config, not in the project.
 
@@ -300,7 +300,7 @@ Execution and parsing:
 LLM and provider wiring:
 
 - `llm_clients.py` configures OpenAI and FreeFlow clients, model lists, and fallback chains.
-- `user_config.py` reads/writes `~/.devagent/config.json`, handles key prompts and provider selection.
+- `user_config.py` reads/writes `~/.kvist/config.json`, handles key prompts and provider selection.
 
 Utilities:
 
@@ -308,7 +308,7 @@ Utilities:
 - `render_throttle.py` non-blocking render throttle for streaming chunk output.
 - `language_utils.py` detects the user's request language and picks localized strings.
 - `deps.py` scans workspace dependency files for pinned versions.
-- `performance_logger.py` structured JSONL debug logger for `.devagent/logs/debug/`.
+- `performance_logger.py` structured JSONL debug logger for `.kvist/logs/debug/`.
 
 UI and packaging:
 
@@ -324,7 +324,7 @@ Prompts:
 - `prompts/router_prompt.txt` system prompt for the router role.
 - `prompts/planner_prompt.txt` system prompt for the planner model.
 
-`jetbrains-plugin/` contains an IntelliJ Platform plugin that launches DevAgentXD in
+`jetbrains-plugin/` contains an IntelliJ Platform plugin that launches Kvist in
 the IDE terminal for the current project. It is pinned to IntelliJ Platform
 2025.3, supports Windows/Linux, and expects built binaries under
 `jetbrains-plugin/bin/` before packaging.

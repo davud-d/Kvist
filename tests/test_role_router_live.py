@@ -12,7 +12,7 @@ Test modes:
   Run: env RUN_LIVE_LLM_TESTS=1 RUN_FULL_LIVE_LLM_MATRIX=1 pytest tests/test_role_router_live.py -m live_llm
 
 Requirements:
-- FreeFlow LLM provider configured in ~/.devagent/config.json
+- FreeFlow LLM provider configured in ~/.kvist/config.json
 - At least one backend (Gemini or Groq) with valid API key
 - freeflow-llm package installed
 """
@@ -67,7 +67,7 @@ def _record_result(result: LiveRouteResult) -> None:
 
 def _save_json_report() -> None:
     """Save test results to JSON report."""
-    report_dir = Path.home() / ".devagent" / "test-reports"
+    report_dir = Path.home() / ".kvist" / "test-reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "role-router-live.json"
 
@@ -467,7 +467,7 @@ def freeflow_credentials(skip_if_not_enabled, skip_if_freeflow_not_installed):
     # Get saved models for FreeFlow provider
     saved_models = get_saved_models(FREEFLOW_PROVIDER)
     if not saved_models:
-        pytest.skip("No FreeFlow models configured in ~/.devagent/config.json")
+        pytest.skip("No FreeFlow models configured in ~/.kvist/config.json")
 
     # Resolve models
     resolved_models, warnings = resolve_models_for_provider(FREEFLOW_PROVIDER, saved_models)
@@ -483,7 +483,7 @@ def freeflow_credentials(skip_if_not_enabled, skip_if_freeflow_not_installed):
     credentials = load_available_credentials(required_keys)
     if not credentials:
         pytest.skip(
-            f"No FreeFlow credentials found in ~/.devagent/config.json. "
+            f"No FreeFlow credentials found in ~/.kvist/config.json. "
             f"Required keys: {', '.join(required_keys)}"
         )
 
@@ -518,7 +518,7 @@ def _validate_model_backend_available(model: str, credentials: dict[str, str]) -
         return False, (
             f"Model '{model}' requires {backend.capitalize()} backend, "
             f"but only {', '.join(b.capitalize() for b in configured) if configured else 'no backends'} "
-            f"are configured. Add {backend.capitalize()} API key to ~/.devagent/config.json."
+            f"are configured. Add {backend.capitalize()} API key to ~/.kvist/config.json."
         )
     return True, ""
 

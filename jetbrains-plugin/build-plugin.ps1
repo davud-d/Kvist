@@ -8,11 +8,11 @@ $DistDir = Join-Path $ProjectDir "dist"
 $BuildDir = Join-Path $ProjectDir "build"
 $PluginBuildDir = Join-Path $PluginDir "build"
 $SandboxRoot = Join-Path $PluginDir ".intellijPlatform\sandbox"
-$PluginName = "devagent-intellij"
-$SandboxBinarySuffix = "plugins\$PluginName\bin\win\devagent.exe"
+$PluginName = "kvist-intellij"
+$SandboxBinarySuffix = "plugins\$PluginName\bin\win\kvist.exe"
 
-$WinBinarySrc = Join-Path $DistDir "devagent.exe"
-$WinBinaryDst = Join-Path $PluginDir "bin\win\devagent.exe"
+$WinBinarySrc = Join-Path $DistDir "kvist.exe"
+$WinBinaryDst = Join-Path $PluginDir "bin\win\kvist.exe"
 
 function Write-Log($Message) {
     Write-Host "===> $Message" -ForegroundColor Cyan
@@ -29,7 +29,7 @@ function Find-Python {
 }
 
 function Stop-SandboxAgents {
-    $Processes = Get-CimInstance Win32_Process -Filter "Name = 'devagent.exe'" -ErrorAction SilentlyContinue |
+    $Processes = Get-CimInstance Win32_Process -Filter "Name = 'kvist.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
             ($_.ExecutablePath -and
                 [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
@@ -44,7 +44,7 @@ function Stop-SandboxAgents {
         }
 
     if ($Processes) {
-        Write-Log "Stopping running sandbox DevAgent processes"
+        Write-Log "Stopping running sandbox Kvist processes"
         $Processes | ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
@@ -56,9 +56,9 @@ function Refresh-SandboxBinary {
     if (-not (Test-Path $SandboxRoot)) { return }
     
     $CopiedAny = $false
-    # Find all devagent.exe files specifically inside the plugin's bin/win path within sandbox
+    # Find all kvist.exe files specifically inside the plugin's bin/win path within sandbox
     $Pattern = [regex]::Escape($SandboxBinarySuffix)
-    $SandboxBins = Get-ChildItem -Path $SandboxRoot -Filter "devagent.exe" -Recurse
+    $SandboxBins = Get-ChildItem -Path $SandboxRoot -Filter "kvist.exe" -Recurse
     
     foreach ($Bin in $SandboxBins) {
         if ($Bin.FullName -match $Pattern) {
@@ -79,8 +79,8 @@ Write-Log "Project directory: $ProjectDir"
 Write-Log "Plugin directory: $PluginDir"
 Write-Log "Python: $PythonBin"
 
-if (-not (Test-Path (Join-Path $ProjectDir "devagent.spec"))) {
-    throw "devagent.spec not found in $ProjectDir"
+if (-not (Test-Path (Join-Path $ProjectDir "kvist.spec"))) {
+    throw "kvist.spec not found in $ProjectDir"
 }
 
 if (-not (Test-Path (Join-Path $PluginDir "gradlew.bat"))) {
@@ -94,9 +94,9 @@ foreach ($Dir in @($DistDir, $BuildDir, $PluginBuildDir)) {
     if (Test-Path $Dir) { Remove-Item -Path $Dir -Recurse -Force }
 }
 
-Write-Log "Building DevAgent binary with PyInstaller"
+Write-Log "Building Kvist binary with PyInstaller"
 Set-Location $ProjectDir
-& $PythonBin -m PyInstaller devagent.spec
+& $PythonBin -m PyInstaller kvist.spec
 
 if (-not (Test-Path $WinBinarySrc)) {
     throw "PyInstaller output not found: $WinBinarySrc"

@@ -9,9 +9,9 @@ DIST_DIR="$PROJECT_DIR/dist"
 BUILD_DIR="$PROJECT_DIR/build"
 PLUGIN_BUILD_DIR="$PLUGIN_DIR/build"
 SANDBOX_ROOT="$PLUGIN_DIR/.intellijPlatform/sandbox"
-PLUGIN_NAME="devagent-intellij"
-LINUX_BINARY_SRC="$DIST_DIR/devagent"
-LINUX_BINARY_DST="$PLUGIN_DIR/bin/linux/devagent.bin"
+PLUGIN_NAME="kvist-intellij"
+LINUX_BINARY_SRC="$DIST_DIR/kvist"
+LINUX_BINARY_DST="$PLUGIN_DIR/bin/linux/kvist.bin"
 
 log() {
 	printf '===> %s\n' "$1"
@@ -42,14 +42,14 @@ stop_running_sandbox_agents() {
 		return 0
 	fi
 
-	local pattern="$SANDBOX_ROOT/.*/plugins/$PLUGIN_NAME/bin/linux/devagent\.bin"
+	local pattern="$SANDBOX_ROOT/.*/plugins/$PLUGIN_NAME/bin/linux/kvist\.bin"
 	local pids
 	pids="$(pgrep -f "$pattern" || true)"
 	if [[ -z "$pids" ]]; then
 		return 0
 	fi
 
-	log "Stopping running sandbox DevAgent processes"
+	log "Stopping running sandbox Kvist processes"
 	while IFS= read -r pid; do
 		[[ -n "$pid" ]] || continue
 		kill "$pid" 2>/dev/null || true
@@ -68,7 +68,7 @@ refresh_sandbox_binary() {
 		install -Dm755 "$LINUX_BINARY_DST" "$sandbox_bin"
 		copied_any=1
 		printf '    synced: %s\n' "$sandbox_bin"
-	done < <(find "$SANDBOX_ROOT" -type f -path "*/plugins/$PLUGIN_NAME/bin/linux/devagent.bin" 2>/dev/null | sort)
+	done < <(find "$SANDBOX_ROOT" -type f -path "*/plugins/$PLUGIN_NAME/bin/linux/kvist.bin" 2>/dev/null | sort)
 
 	if [[ "$copied_any" -eq 1 ]]; then
 		log "Sandbox binaries refreshed"
@@ -81,8 +81,8 @@ log "Project directory: $PROJECT_DIR"
 log "Plugin directory: $PLUGIN_DIR"
 log "Python: $PYTHON_BIN"
 
-if [[ ! -f "$PROJECT_DIR/devagent.spec" ]]; then
-	printf 'devagent.spec not found in %s\n' "$PROJECT_DIR" >&2
+if [[ ! -f "$PROJECT_DIR/kvist.spec" ]]; then
+	printf 'kvist.spec not found in %s\n' "$PROJECT_DIR" >&2
 	exit 1
 fi
 
@@ -99,9 +99,9 @@ rm -rf "$DIST_DIR" "$BUILD_DIR"
 log "Cleaning previous plugin build artifacts"
 rm -rf "$PLUGIN_BUILD_DIR"
 
-log "Building DevAgent binary with PyInstaller"
+log "Building Kvist binary with PyInstaller"
 cd "$PROJECT_DIR"
-"$PYTHON_BIN" -m PyInstaller devagent.spec
+"$PYTHON_BIN" -m PyInstaller kvist.spec
 
 if [[ ! -f "$LINUX_BINARY_SRC" ]]; then
 	printf 'PyInstaller output not found: %s\n' "$LINUX_BINARY_SRC" >&2

@@ -451,7 +451,7 @@ class AgentUI:
 
         title = Text.assemble(
             (f"{light_symbol} ", light_style),
-            ("DevAgentXD", "bold bright_white"),
+            ("Kvist", "bold bright_white"),
             (f" • {state_label}", "grey70"),
         )
 

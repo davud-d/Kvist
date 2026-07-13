@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Structured JSONL performance logger.
 
-Logs go to `.devagent/logs/debug/logs.jsonl` inside the workspace.
+Logs go to `.kvist/logs/debug/logs.jsonl` inside the workspace.
 Controlled by the ``DEBUG_LOGGING`` constant below.  Set it to ``True``
 to enable recording; the default is ``False`` so the logger is a no-op
 in production and adds zero overhead.
@@ -38,7 +38,7 @@ class PerfLogger:
         self._enabled = DEBUG_LOGGING
         if not self._enabled:
             return
-        self._log_dir = workspace / ".devagent" / "logs" / "debug"
+        self._log_dir = workspace / ".kvist" / "logs" / "debug"
         self._log_path = self._log_dir / "logs.jsonl"
         self._buffer: list[str] = []
         self._lock = threading.Lock()

@@ -28,14 +28,14 @@ val hostOsName = System.getProperty("os.name").lowercase(Locale.US)
 val pluginDistributionDirectoryName = project.name
 
 fun requiredBinariesForBuild(): List<File> = listOf(
-    file("bin/win/devagent.exe"),
-    file("bin/linux/devagent.bin"),
+    file("bin/win/kvist.exe"),
+    file("bin/linux/kvist.bin"),
 )
 
 fun requiredBinariesForRunIde(): List<File> {
     return when {
-        hostOsName.contains("win") -> listOf(file("bin/win/devagent.exe"))
-        hostOsName.contains("linux") -> listOf(file("bin/linux/devagent.bin"))
+        hostOsName.contains("win") -> listOf(file("bin/win/kvist.exe"))
+        hostOsName.contains("linux") -> listOf(file("bin/linux/kvist.bin"))
         else -> emptyList()
     }
 }
@@ -46,17 +46,17 @@ fun validateBinarySet(files: List<File>, context: String) {
     if (missingFiles.isNotEmpty()) {
         throw GradleException(
             buildString {
-                appendLine("Missing required DevAgent binaries for $context:")
+                appendLine("Missing required Kvist binaries for $context:")
                 missingFiles.forEach { appendLine(" - ${it.invariantSeparatorsPath}") }
                 appendLine("Expected files:")
-                appendLine(" - bin/win/devagent.exe")
-                append(" - bin/linux/devagent.bin")
+                appendLine(" - bin/win/kvist.exe")
+                append(" - bin/linux/kvist.bin")
             }
         )
     }
 }
 
-val devAgentSandboxBinaries = copySpec {
+val kvistSandboxBinaries = copySpec {
     from("bin/win") {
         exclude("**/.gitkeep")
         into("$pluginDistributionDirectoryName/bin/win")
@@ -64,7 +64,7 @@ val devAgentSandboxBinaries = copySpec {
     }
 
     from("bin/linux") {
-        include("devagent.bin")
+        include("kvist.bin")
         into("$pluginDistributionDirectoryName/bin/linux")
         includeEmptyDirs = false
         filePermissions {
@@ -73,7 +73,7 @@ val devAgentSandboxBinaries = copySpec {
     }
 }
 
-val validateHostDevAgentBinary by tasks.registering {
+val validateHostKvistBinary by tasks.registering {
     group = "verification"
     description = "Ensures that the current host binary exists for local sandbox runs."
     notCompatibleWithConfigurationCache("Reads project-local binary files during task execution.")
@@ -83,9 +83,9 @@ val validateHostDevAgentBinary by tasks.registering {
     }
 }
 
-val validateAllDevAgentBinaries by tasks.registering {
+val validateAllKvistBinaries by tasks.registering {
     group = "verification"
-    description = "Ensures that all packaged DevAgent binaries exist for plugin distribution builds."
+    description = "Ensures that all packaged Kvist binaries exist for plugin distribution builds."
     notCompatibleWithConfigurationCache("Reads project-local binary files during task execution.")
 
     doLast {
@@ -94,22 +94,22 @@ val validateAllDevAgentBinaries by tasks.registering {
 }
 
 tasks.named<Sync>("prepareSandbox") {
-    dependsOn(validateHostDevAgentBinary)
-    with(devAgentSandboxBinaries)
+    dependsOn(validateHostKvistBinary)
+    with(kvistSandboxBinaries)
 }
 
 tasks.named("runIde") {
-    dependsOn(validateHostDevAgentBinary)
+    dependsOn(validateHostKvistBinary)
 }
 
 tasks.named<Zip>("buildPlugin") {
-    dependsOn(validateAllDevAgentBinaries)
+    dependsOn(validateAllKvistBinaries)
 
     doLast {
         val archiveFile = archiveFile.get().asFile
         val expectedEntries = listOf(
-            "$pluginDistributionDirectoryName/bin/win/devagent.exe",
-            "$pluginDistributionDirectoryName/bin/linux/devagent.bin",
+            "$pluginDistributionDirectoryName/bin/win/kvist.exe",
+            "$pluginDistributionDirectoryName/bin/linux/kvist.bin",
         )
 
         val missingEntries = ZipFile(archiveFile).use { zipFile ->
@@ -119,7 +119,7 @@ tasks.named<Zip>("buildPlugin") {
         if (missingEntries.isNotEmpty()) {
             throw GradleException(
                 buildString {
-                    appendLine("The plugin archive is missing required DevAgent binaries:")
+                    appendLine("The plugin archive is missing required Kvist binaries:")
                     missingEntries.forEach { appendLine(" - $it") }
                     append("Archive: ${archiveFile.invariantSeparatorsPath}")
                 }

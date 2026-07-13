@@ -24,4 +24,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "devagent-intellij"
+rootProject.name = "kvist-intellij"

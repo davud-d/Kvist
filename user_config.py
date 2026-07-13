@@ -17,7 +17,7 @@ from llm_clients import (
     normalize_provider,
 )
 
-USER_CONFIG_DIRNAME = ".devagent"
+USER_CONFIG_DIRNAME = ".kvist"
 USER_CONFIG_FILENAME = "config.json"
 USER_CONFIG_KEY = "openai_api_key"
 LEGACY_USER_CONFIG_KEY = "OPENAI_API_KEY"
