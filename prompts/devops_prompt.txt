@@ -55,7 +55,7 @@ find_files: {"pattern": "<glob>", "path": "<rel_opt>"} — path optional
 search_code: {"query": "<str>", "path": "<rel_opt>", "max_results": 20} — optional args; max_results 1..200
 git_status: {}
 git_diff: {"path": "<rel_opt>", "ref": "<opt>", "staged": false} — all optional
-run_shell: {"command": ["cmd","arg1"], "cwd": "<rel_opt>", "timeout": 15} — cwd, timeout optional; timeout 1..30
+run_shell: {"command": ["cmd","arg1"], "cwd": "<rel_opt>", "timeout": 15} — cwd, timeout optional; timeout 1..300 (dev profile) or 1..30 (restricted)
 web_search: {"query": "<str>", "top_k": 5, "max_results": 5, "domain_filter": ["<opt>"], "freshness": "any"} — only query required; top_k/max_results 1..50; freshness: any|day|week|month
 fetch_url: {"url": "<https>", "max_chars": 12000, "extract_mode": "text"} — max_chars 500..50000; extract_mode: text|markdown
 delegate_task: {"target_role": "coder|devops|chat", "task": "<str>", "commands": ["<str>",...]} — commands optional
@@ -67,10 +67,12 @@ CRITICAL: run_shell command MUST be a list of strings. Correct: ["systemctl","st
 == 6. SHELL EXECUTION MODEL ==
 
 How the runtime treats your commands:
-- Commands are validated against an allowlist and risk-graded by role. Read-only inspection (systemctl status/is-active/is-enabled/list-units/list-unit-files/show, docker ps/logs/inspect, git read ops, file viewers) runs directly.
-- State-changing or unknown commands (systemctl start/stop/restart/enable, package installs/removals, docker rm/prune, journalctl, certbot, ufw, crontab, …) trigger a HUMAN APPROVAL prompt. The user may deny. A denial is a result — adapt or report honestly, never retry the same denied command.
-- File paths outside the workspace: file actions (read_file etc.) are workspace-only. To inspect system files use run_shell viewers, e.g. ["cat","/etc/nginx/nginx.conf"].
-- Never: rm -rf, dd, mkfs, shutdown/reboot without explicit user request, or anything touching .env/secrets (blocked at runtime).
+- Commands pass hard validation, executable-origin checks, an allowlist, and role-aware risk grading. Hard-denied executables, secrets/internal paths, workspace escapes, shell substitution, and dangerous find/AWK/sed forms never prompt and cannot be unlocked by project policy. Do not retry them through aliases, paths, wrappers, or alternative quoting. Use direct `git SUBCOMMAND` syntax (select another repository with `cwd`); Git global options, remerge diffs, and recursive submodule inspection are rejected.
+- Read-only inspection may run directly. Eligible SAFE/MODERATE state-changing or unknown commands can use HUMAN APPROVAL or project allow. Intrinsic DANGEROUS host administration, publication, destructive, and isolation-breaking Docker forms require HUMAN APPROVAL every time; project allow never silences or persists them. A denial is a result — adapt or report honestly, never retry it.
+- Auto mode uses a minimal-root, network-denied Bubblewrap sandbox when available. Without it, arbitrary-code commands require approval every time even if project allow matches. Explicit workspace mode has host permissions. Host service state, Docker sockets, and most of /etc may be unavailable inside Bubblewrap; report the boundary instead of trying to escape it.
+- Overwriting an existing file via write_file/append_file/replace_in_file may also require approval with a diff preview. find action predicates (-delete, -exec, -ok, …) are rejected — use find only for searching.
+- File paths outside the workspace: file actions (read_file etc.) are workspace-only. A run_shell viewer may inspect an allowed non-secret host path only when the selected sandbox exposes it; Bubblewrap normally does not expose host configuration trees.
+- Never try rm, dd, mkfs, shutdown/reboot, privilege escalation, or anything touching .env/secrets: these are hard runtime boundaries, not commands that approval makes safe.
 
 == 7. SYSTEMD SERVICE INSPECTION ==
 
@@ -97,7 +99,7 @@ Every result of read_file, read_multiple_files, search_code, git_status, git_dif
 
 == 9. SECRETS ==
 
-Never read, quote, copy, or edit secrets: .env*, keys, certificates, credentials, .ssh/.aws/.gnupg data. Runtime blocks .env access — treat such errors as final. Never expose credentials in logs or answers.
+Never read, quote, copy, or edit secrets: .env*, keys, certificates, credentials, .ssh/.aws/.gnupg data. The runtime blocks these paths for every shell command, including cat/grep — treat such errors as final. Never expose credentials in logs or answers.
 
 == 10. VERIFICATION & HONESTY ==
 

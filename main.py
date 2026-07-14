@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -232,6 +233,26 @@ def apply_strime_mode(agent, enabled: bool) -> bool:
     return True
 
 
+@contextmanager
+def wizard_screen():
+    """Run a whole provider/model wizard inside the alternate screen buffer.
+
+    The alternate buffer captures every line the wizard prints (menus, plain
+    input()/getpass() prompts, errors). Leaving it restores the previous
+    screen — banner and prompt history — exactly as they were, so the wizard
+    leaves no trace. Outside a TTY it is a no-op.
+    """
+    use_alt = sys.stdin.isatty() and console.is_terminal and not console.is_alt_screen
+    if use_alt:
+        console.set_alt_screen(True)
+        console.clear()
+    try:
+        yield
+    finally:
+        if use_alt:
+            console.set_alt_screen(False)
+
+
 def resolve_startup_provider(provider_override: str | None = None) -> str:
     if provider_override:
         return normalize_provider(provider_override)
@@ -375,6 +396,65 @@ def print_runtime_banner(config: AgentConfig, max_steps: int, verbose: bool, war
     )
     for warning in warnings:
         console.print(f"[yellow]{warning}[/yellow]")
+
+
+def render_exit_message(agent: LocalAgent) -> None:
+    """Print a short stop banner. Called after leaving the session's alt screen.
+
+    The whole interactive session runs on the terminal's alternate screen
+    buffer (see `main()`), so leaving it already restores whatever was on the
+    real screen before the agent started — this just appends a brief note
+    below that restored content instead of leaving the full chat transcript.
+    """
+    session_name = getattr(agent, "current_session", "default")
+    console.print("[dim]Kvist agent[/dim] [red]stopped.[/red]")
+    console.print(
+        f"[dim]To continue, start the agent and resume session [bold]{session_name}[/bold].[/dim]"
+    )
+
+
+def render_startup_banner(
+    agent: LocalAgent,
+    config: AgentConfig,
+    max_steps: int,
+    verbose: bool,
+    warnings: list[str],
+) -> None:
+    """Clear the session's alternate screen and draw the agent banner."""
+    console.clear()
+
+    console.print("[dim]Local AI agent [/dim]Kvist [dim]started. [/dim]")
+    console.print(f"[dim]Workspace: {agent.executor.workspace}[/dim]")
+    print_runtime_banner(config, max_steps, verbose, warnings)
+    console.print("[red]Type '/bye' to exit. For multiline input, use Alt+Enter or Esc+Enter.[/red]")
+    console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
+    console.print("[dim]Command '/provider' — switch the LLM provider.[/dim]")
+    console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
+    console.print("[dim]Command '/role' — select agent role (auto/coder/devops/chat).[/dim]")
+    console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
+    console.print("[dim]Command '/new' — reset to a fresh session.[/dim]")
+    console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
+    console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
+    console.print("[dim]Command /about — to get more info about agent.[/dim]")
+    console.print("[dim]Enter your task.[/dim]")
+
+    session_name = getattr(agent, "current_session", "default")
+    sessions = agent._list_sessions()
+    console.print(f"[dim]Session: [bold]{session_name}[/bold] ({len(sessions)} saved)[/dim]")
+    history = getattr(agent, "_session_history", [])
+    if history:
+        console.print("[dim]── Previous in this session ──[/dim]")
+        for entry in history[-3:]:
+            role_color = {"coder": "green", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
+            console.print(f"  [{role_color}]{entry.get('role', '?')}[/{role_color}] {entry.get('goal', '')[:100]}")
+
+    saved_role = get_saved_role()
+    if saved_role and saved_role != "auto":
+        role_colors = {"coder": "green", "devops": "magenta", "chat": "cyan"}
+        role_color = role_colors.get(saved_role, "white")
+        console.print(f"[{role_color}]Current role: {saved_role} (manual — auto-detection disabled)[/{role_color}]")
+    else:
+        console.print("[dim]Current role: auto (automatic detection enabled)[/dim]")
 
 
 def choose_provider(current_provider: str, verbose: bool) -> str | None:
@@ -616,6 +696,27 @@ def choose_models(provider: str, current_models: dict[str, str], verbose: bool) 
     if selected == original:
         return selected
     return selected
+
+
+def select_models_interactively(config: AgentConfig, verbose: bool) -> dict[str, str] | None:
+    """Route the /models wizard to the picker matching the active provider."""
+    current_models = {
+        "fast": config.fast_model,
+        "smart": config.smart_model,
+        "planner": config.planner_model,
+    }
+    ui = AgentUI(console=console, verbose=verbose)
+    if config.provider == OMNIROUTE_PROVIDER:
+        return configure_omniroute_models_interactively(ui, current_models=current_models)
+    if config.provider == OPENROUTER_PROVIDER:
+        return configure_openrouter_models_interactively(ui, current_models=current_models)
+    if is_custom_provider(config.provider):
+        return configure_custom_provider_models_interactively(ui, current_models=current_models)
+    return choose_models(
+        provider=config.provider,
+        current_models=current_models,
+        verbose=verbose,
+    )
 
 
 # ── Custom Provider Wizard ═══════════════════════════════════════════════════
@@ -1225,41 +1326,17 @@ def main() -> None:
 
     sync_strime_suggestion(config.provider, config.stream)
 
-    console.print("[dim]Local AI agent [/dim]Kvist [dim]started. [/dim]")
-    console.print(f"[dim]Workspace: {executor.workspace}[/dim]")
-    print_runtime_banner(config, max_steps, verbose, model_warnings)
-    console.print("[red]Type '/bye' to exit. For multiline input, use Alt+Enter or Esc+Enter.[/red]")
-    console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
-    console.print("[dim]Command '/provider' — switch the LLM provider.[/dim]")
-    console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
-    console.print("[dim]Command '/role' — select agent role (auto/coder/devops/chat).[/dim]")
-    console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
-    console.print("[dim]Command '/new' — reset to a fresh session.[/dim]")
-    console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
-    console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
-    console.print("[dim]Command /about — to get more info about agent.[/dim]")
-    console.print("[dim]Enter your task.[/dim]")
+    # The whole interactive session runs on the alternate screen buffer, so
+    # whatever was on the real terminal before startup (shell prompt, prior
+    # scrollback) is left untouched and reappears exactly as it was once the
+    # session ends — no destructive clearing of the user's own terminal.
+    use_session_screen = sys.stdin.isatty() and console.is_terminal
+    if use_session_screen:
+        console.set_alt_screen(True)
 
-    # Show current session on startup
-    session_name = getattr(agent, "current_session", "default")
-    sessions = agent._list_sessions()
-    console.print(f"[dim]Session: [bold]{session_name}[/bold] ({len(sessions)} saved)[/dim]")
-    history = getattr(agent, "_session_history", [])
-    if history:
-        console.print("[dim]── Previous in this session ──[/dim]")
-        for entry in history[-3:]:
-            role_color = {"coder": "green", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
-            console.print(f"  [{role_color}]{entry.get('role', '?')}[/{role_color}] {entry.get('goal', '')[:100]}")
+    render_startup_banner(agent, config, max_steps, verbose, model_warnings)
 
-    # Show current role on startup
-    saved_role = get_saved_role()
-    if saved_role and saved_role != "auto":
-        role_colors = {"coder": "green", "devops": "magenta", "chat": "cyan"}
-        role_color = role_colors.get(saved_role, "white")
-        console.print(f"[{role_color}]Current role: {saved_role} (manual — auto-detection disabled)[/{role_color}]")
-    else:
-        console.print("[dim]Current role: auto (automatic detection enabled)[/dim]")
-
+    interrupted = False
     try:
         while True:
             user_goal = multiline_input()
@@ -1268,7 +1345,6 @@ def main() -> None:
                 session_language = detect_request_language(user_goal, fallback=session_language)
             if user_goal.lower() == "/bye":
                 agent.save_session()
-                console.print("[red]Exiting.[/red]")
                 break
 
             if user_goal.lower() == "/resume":
@@ -1327,25 +1403,31 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/provider":
-                selected_provider = choose_provider(config.provider, verbose)
+                previous_provider = config.provider
+                build_error: str | None = None
+                with wizard_screen():
+                    selected_provider = choose_provider(previous_provider, verbose)
+                    if selected_provider is not None and selected_provider != previous_provider:
+                        try:
+                            agent, config, model_warnings = build_agent(
+                                executor=executor,
+                                max_steps=max_steps,
+                                persist_logs=persist_logs,
+                                verbose=verbose,
+                                provider_override=selected_provider,
+                                language_hint=session_language,
+                            )
+                        except RuntimeError as error:
+                            build_error = str(error)
+
                 if selected_provider is None:
                     console.print("[yellow]Provider switch cancelled.[/yellow]")
                     continue
-                if selected_provider == config.provider:
+                if selected_provider == previous_provider:
                     console.print("[dim]Provider unchanged.[/dim]")
                     continue
-
-                try:
-                    agent, config, model_warnings = build_agent(
-                        executor=executor,
-                        max_steps=max_steps,
-                        persist_logs=persist_logs,
-                        verbose=verbose,
-                        provider_override=selected_provider,
-                        language_hint=session_language,
-                    )
-                except RuntimeError as error:
-                    console.print(f"[red]{error}[/red]")
+                if build_error is not None:
+                    console.print(f"[red]{build_error}[/red]")
                     continue
 
                 executor.set_hitl_callbacks(
@@ -1361,102 +1443,61 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/models":
-                if config.provider == OMNIROUTE_PROVIDER:
-                    # OmniRoute uses manual model input
-                    ui = AgentUI(console=console, verbose=verbose)
-                    selected_models = configure_omniroute_models_interactively(
-                        ui,
-                        current_models={
-                            "fast": config.fast_model,
-                            "smart": config.smart_model,
-                            "planner": config.planner_model,
-                        },
+                uses_manual_model_ids = (
+                    config.provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+                    or is_custom_provider(config.provider)
+                )
+                if not uses_manual_model_ids and not get_model_options(config.provider):
+                    console.print(
+                        "[yellow]No models available for current provider "
+                        f"({provider_label(config.provider)}). "
+                        "Use /provider to switch.[/yellow]"
                     )
-                    if selected_models is None:
-                        console.print("[yellow]Model switch cancelled.[/yellow]")
-                        continue
-                elif config.provider == OPENROUTER_PROVIDER:
-                    # OpenRouter: pick from curated list or enter custom id
-                    ui = AgentUI(console=console, verbose=verbose)
-                    selected_models = configure_openrouter_models_interactively(
-                        ui,
-                        current_models={
-                            "fast": config.fast_model,
-                            "smart": config.smart_model,
-                            "planner": config.planner_model,
-                        },
-                    )
-                    if selected_models is None:
-                        console.print("[yellow]Model switch cancelled.[/yellow]")
-                        continue
-                elif is_custom_provider(config.provider):
-                    # Custom provider: manual model input
-                    ui = AgentUI(console=console, verbose=verbose)
-                    selected_models = configure_custom_provider_models_interactively(
-                        ui,
-                        current_models={
-                            "fast": config.fast_model,
-                            "smart": config.smart_model,
-                            "planner": config.planner_model,
-                        },
-                    )
-                    if selected_models is None:
-                        console.print("[yellow]Model switch cancelled.[/yellow]")
-                        continue
-                else:
-                    model_options = get_model_options(config.provider)
-                    if not model_options:
-                        console.print(
-                            "[yellow]No models available for current provider "
-                            f"({provider_label(config.provider)}). "
-                            "Use /provider to switch.[/yellow]"
-                        )
-                        continue
-                    selected_models = choose_models(
-                        provider=config.provider,
-                        current_models={
-                            "fast": config.fast_model,
-                            "smart": config.smart_model,
-                            "planner": config.planner_model,
-                        },
-                        verbose=verbose,
-                    )
-                    if selected_models is None:
-                        console.print("[yellow]Model switch cancelled.[/yellow]")
-                        continue
+                    continue
 
-                available_credentials = load_available_credentials(
-                    (
-                        OPENAI_API_KEY_KEY,
-                        "gemini_api_key",
-                        "groq_api_key",
-                        "omniroute_api_key",
-                        "openrouter_api_key",
-                    )
-                )
-                validation_issues = validate_model_selection(
-                    config.provider,
-                    selected_models,
-                    available_credentials,
-                    language_hint=session_language,
-                )
+                build_error: str | None = None
+                validation_issues: list[str] = []
+                with wizard_screen():
+                    selected_models = select_models_interactively(config, verbose)
+                    if selected_models is not None:
+                        available_credentials = load_available_credentials(
+                            (
+                                OPENAI_API_KEY_KEY,
+                                "gemini_api_key",
+                                "groq_api_key",
+                                "omniroute_api_key",
+                                "openrouter_api_key",
+                            )
+                        )
+                        validation_issues = validate_model_selection(
+                            config.provider,
+                            selected_models,
+                            available_credentials,
+                            language_hint=session_language,
+                        )
+                        if not validation_issues:
+                            try:
+                                agent, config, model_warnings = build_agent(
+                                    executor=executor,
+                                    max_steps=max_steps,
+                                    persist_logs=persist_logs,
+                                    verbose=verbose,
+                                    provider_override=config.provider,
+                                    models_override=selected_models,
+                                    language_hint=session_language,
+                                )
+                            except RuntimeError as error:
+                                build_error = str(error)
+
+                if selected_models is None:
+                    console.print("[yellow]Model switch cancelled.[/yellow]")
+                    continue
                 if validation_issues:
                     for issue in validation_issues:
                         console.print(f"[red]{issue}[/red]")
                     continue
-
-                try:
-                    agent, config, model_warnings = build_agent(
-                        executor=executor,
-                        max_steps=max_steps,
-                        persist_logs=persist_logs,
-                        verbose=verbose,
-                        provider_override=config.provider,
-                        models_override=selected_models,
-                        language_hint=session_language,
-                    )
-                except RuntimeError as error:
-                    console.print(f"[red]{error}[/red]")
+                if build_error is not None:
+                    console.print(f"[red]{build_error}[/red]")
                     continue
 
                 executor.set_hitl_callbacks(
@@ -1554,7 +1595,13 @@ Support:
                 print(f"\n[Final Answer]\n{result}")
     except KeyboardInterrupt:
         agent.save_session()
-        console.print("\n[red]Interrupted by user (Ctrl+C). \nExiting.[/red]")
+        interrupted = True
+    finally:
+        if use_session_screen:
+            console.set_alt_screen(False)
+
+    render_exit_message(agent)
+    if interrupted:
         sys.exit(130)
 
 

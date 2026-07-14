@@ -353,9 +353,16 @@ AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
 AGENT_API_INTERVAL=
 AGENT_SANDBOX_MODE=auto
+AGENT_SANDBOX_NET=deny
+AGENT_CHILD_ENV_ALLOW=       # comma-separated non-secret child variables
 AGENT_TERMINAL_PROFILE=dev
 AGENT_TERMINAL_TIMEOUT=15
 AGENT_TERMINAL_MAX_OUTPUT=12000
+AGENT_WRITE_APPROVAL=1
+AGENT_RLIMIT_CPU=          # dev: 120, restricted: 8 (seconds)
+AGENT_RLIMIT_AS_MB=        # dev: 2048, restricted: 256
+AGENT_RLIMIT_NPROC=        # dev: 4096, restricted: 256
+AGENT_FETCH_EXTRA_DOMAINS= # comma-separated extra fetch_url domains
 ```
 
 - `AGENT_MAX_STEPS` limits the coder/devops action loop.
@@ -365,11 +372,24 @@ AGENT_TERMINAL_MAX_OUTPUT=12000
 - `AGENT_API_INTERVAL` overrides the delay between API calls. Without it,
   OpenAI, Anthropic, and OpenRouter use 2.5 seconds; other providers use the
   configured 5-second default.
-- `AGENT_TERMINAL_PROFILE=restricted` removes interpreters, package managers,
-  build tools, and interactive shells from the normal allowlist. They may still
-  reach the human approval prompt rather than running automatically.
-- Terminal timeouts are clamped to 1-30 seconds; captured output is clamped to
-  1,000-200,000 characters.
+- `AGENT_TERMINAL_PROFILE=restricted` hard-blocks non-probe interpreter,
+  package-manager, build-tool, and shell execution. Exact trusted version probes
+  remain available.
+- Child processes receive a constructed environment, not the full parent
+  environment. `AGENT_CHILD_ENV_ALLOW=PROJECT_MODE,FEATURE_FLAG` explicitly
+  passes additional non-secret, non-loader variables; the same names may then be
+  used in `env_overrides`. Secret and execution-control names remain blocked.
+  Every terminal run also gets a fresh, private, initially empty child `HOME`.
+- Terminal timeouts are clamped to 1-300 seconds in the `dev` profile and
+  1-30 seconds in `restricted`; captured output is clamped to 1,000-200,000
+  characters.
+- Unix child processes get profile-based resource limits (CPU, address space,
+  process count, file size, open files). `AGENT_RLIMIT_CPU`,
+  `AGENT_RLIMIT_AS_MB`, and `AGENT_RLIMIT_NPROC` override the profile defaults.
+- `AGENT_WRITE_APPROVAL=0` disables the interactive diff-preview approval that
+  otherwise guards overwriting existing files (see "Safety model"). Use it for
+  CI and other non-interactive runs; with the gate enabled and no TTY,
+  overwrites fail deterministically.
 
 ## Web search
 
@@ -394,6 +414,10 @@ to 1-30 seconds and result limits to 1-20.
 
 `fetch_url` accepts only HTTP(S), limits response size, rejects obvious binary
 formats, and only allows general fetching from the runtime domain allowlist.
+The allowlist covers common official documentation sites (Python, MDN, Go,
+Rust, Kubernetes, Docker, nginx, GitHub, and others) and can be extended with
+`AGENT_FETCH_EXTRA_DOMAINS=example.dev,docs.internal.io`. Fetched content is
+always marked untrusted regardless of the domain.
 
 ## Files created in a workspace
 
@@ -415,25 +439,116 @@ the home-directory config, not in the workspace.
 
 ## Safety model
 
-Kvist applies several layers, but the default is not an OS sandbox:
+Kvist uses a non-bypassable authorization pipeline and selects an OS sandbox by
+default on Linux when a trusted Bubblewrap installation is available:
 
 - File actions resolve paths inside the workspace and reject symlink escapes.
 - `.env` files, internal `.kvist` state, secret material, oversized files, and
-  non-UTF-8 edit targets are guarded.
+  non-UTF-8 edit targets are guarded. Shell arguments that point at secret
+  paths (`.env*`, `.ssh`, `.aws`, `.gnupg`, key/certificate files,
+  `credentials`) are rejected for every command, including read-only ones like
+  `cat` and `grep`, on both relative and absolute paths.
 - Shell commands pass a platform-aware allowlist and a role-aware risk policy.
-  Unknown or state-changing commands require human approval; without a TTY,
-  approval is denied.
+  Anything that is not read-only — interpreters and build runners (`python`,
+  `node`, `make`, `cargo`, `go`, `awk`), package installs, `git push`,
+  unknown commands — requires human approval. Eligible SAFE/MODERATE commands
+  may use a project allow-rule; intrinsic DANGEROUS commands may not. Without a
+  TTY, required approval is denied.
+- Hard denials are distinct from approval-required commands. Forbidden
+  executables, workspace escapes, secret/internal paths, shell substitution,
+  and dangerous `find`/AWK/sed forms never prompt, cannot be project-allowed,
+  and never reach process creation.
+- Exact version probes are executable-specific and compare the complete argv.
+  A path-qualified executable cannot inherit a trusted command's SAFE status,
+  and executable lookup/target identities are bound to authorization.
+- `find` action predicates (`-delete`, `-exec`, `-ok`, `-fprintf`, ...) are
+  rejected; pure searches stay approval-free. `awk system()`/piped `getline`
+  and `sed` in-place/execute/write forms are rejected.
+- Read-only Git commands use direct `git SUBCOMMAND` syntax and are launched
+  with filesystem-monitor/index-hook, external-diff/textconv, implicit signature
+  verification, remerge-driver, and recursive-submodule helper paths disabled.
+  Git global options before the subcommand fail closed; status/diff also fail
+  closed on repository filter/include configuration.
+- Docker run/create/build/buildx/service forms with host mounts,
+  `--privileged`, insecure build entitlements, or host namespaces
+  (`--network=host`, `--pid=host`, ...), host-port publication, image push, and
+  nested destructive operations are graded dangerous for every role.
 - Destructive and privilege-escalation executables such as `rm`, `sudo`, `dd`,
   `mkfs`, `shutdown`, and `reboot` are forbidden by normal validation.
+- Overwriting an existing file (`write_file`, `append_file`,
+  `replace_in_file`) shows a unified diff and asks for approval; creating a
+  new file does not. `AGENT_WRITE_APPROVAL=0` disables the gate.
 - Shell operators and command substitution are restricted, working directories
-  stay inside the workspace, and Unix child processes receive resource limits.
+  stay inside the workspace, and Unix child processes receive profile-based
+  resource limits including a fork-bomb brake (`RLIMIT_NPROC`).
+- Before process creation, Kvist repeats hard validation and compares the exact
+  argv, normalized cwd and directory identity, role, policy state, sandbox and
+  network mode, sanitized environment digest, executable identities, and hashes
+  of directly selected scripts/build-control files. A changed input invalidates
+  the approval.
 - Logs redact common token formats and truncate large values.
 
-With `AGENT_SANDBOX_MODE=auto` or `workspace`, shell processes still run with
-the current user's OS permissions. On Linux,
-`AGENT_SANDBOX_MODE=bubblewrap` uses `bwrap` with a read-only root filesystem, a
-writable workspace bind, isolated process IDs, and shared networking. If
-`bwrap` is unavailable, Kvist warns and falls back to the workspace-only mode.
+### Project permission policy
+
+`<workspace>/.kvist/permissions.json` holds per-project rules, similar to
+`.claude/settings.json` in Claude Code:
+
+```json
+{
+  "allow": ["git status", "python *"],
+  "deny": ["pip install *"],
+  "ask": ["npm run"]
+}
+```
+
+Patterns are token-prefix matches with shell-style globbing per token
+(`python *` covers any Python argv). Executable aliases are also checked in
+canonical form. Resolution order is: project `deny` → hard validation →
+intrinsic `DANGEROUS` → project `ask` → executable-origin/automatic-fallback
+approval → eligible project `allow` → default risk behavior. `DANGEROUS`
+commands always need confirmation for that execution and are never offered as
+"always allow". `allow` can suppress prompts only for eligible SAFE/MODERATE
+commands; it cannot unlock `rm`, secret reads, sandbox violations, or similar
+hard blocks. Overlapping rules resolve to `deny`, and every pipeline segment
+must pass. The agent itself cannot edit the policy because `.kvist/` is blocked
+from model-driven file actions. Malformed or symlinked policy files fail closed.
+
+`AGENT_SANDBOX_MODE=auto` selects a trusted system `bwrap` on Linux. The sandbox
+mounts only the workspace plus required system runtime/library paths; it does
+not bind the host root, `/home`, `/root`, unrelated repositories, or credential
+directories. `/tmp` is ephemeral, `HOME` is an empty directory, `.kvist` is
+masked, process namespaces are isolated, and networking is unshared by default.
+Set `AGENT_SANDBOX_NET=allow` only when the command needs network access.
+
+If Bubblewrap is unavailable in `auto`, Kvist uses a visibly restricted
+workspace fallback: interpreters, scripts, build/package tools, and unknown
+arbitrary-code executables require confirmation on every execution, even when a
+project allow-rule matches. Explicit `AGENT_SANDBOX_MODE=workspace` is a weaker
+user-selected mode in which approved children retain the current user's host
+permissions. These weaker modes still use a new private, verified-empty child
+`HOME` for every run. Explicit `bubblewrap` with no trusted binary blocks shell
+execution instead of degrading.
+
+### Current boundary limits
+
+- Workspace mode is not OS isolation. The automatic fallback also permits its
+  small read-only command set to see non-secret host paths allowed by command
+  validation.
+- Direct scripts and common build-control files are hashed, but transitive
+  imports, `python -m` modules, Make includes, package-script sources, and other
+  dependency graphs are not fully attested.
+- The child PATH contains only fixed system locations (not `/usr/local`), but
+  transitive helpers launched by trusted system tools are not individually
+  content-attested.
+- Secret-path checks cover named and canonical direct arguments, and recursive
+  grep/ripgrep directory traversal is blocked. Repository/history-aware or
+  transitive tools can still surface protected content not named in argv.
+  Strong Bubblewrap prevents access to host credential trees, but workspace
+  contents and history remain the user's responsibility.
+- A narrow filesystem race remains between the final identity/hash comparison
+  and the OS process-creation call. Captured output is truncated after capture,
+  not streamed into a bounded buffer; Windows timeout cleanup cannot guarantee
+  termination of every descendant process.
 
 ## Prompt and action architecture
 

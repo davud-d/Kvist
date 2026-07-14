@@ -4,7 +4,8 @@ from __future__ import annotations
 import re
 import sys
 import time
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from rich import box
 from rich.align import Align
@@ -67,6 +68,29 @@ class AgentUI:
 
         self._live.stop()
         self._live = None
+
+    @contextmanager
+    def _bounded_screen(self) -> Iterator[None]:
+        """Draw interactive UI inside the terminal's alternate screen buffer.
+
+        The alternate buffer is a separate screen: entering it preserves the
+        current one, and leaving restores it byte-for-byte. Nothing outside
+        this bounded region can be erased. Outside a TTY it is a no-op, and
+        when the console is already on the alternate screen (an enclosing
+        wizard owns it) the ownership stays with the outer context.
+        """
+        use_alt = (
+            sys.stdin.isatty()
+            and self.console.is_terminal
+            and not self.console.is_alt_screen
+        )
+        if use_alt:
+            self.console.set_alt_screen(True)
+        try:
+            yield
+        finally:
+            if use_alt:
+                self.console.set_alt_screen(False)
 
     def update_live(
         self,
@@ -219,56 +243,55 @@ class AgentUI:
         values = [item["value"] for item in normalized_options]
         index = values.index(current_value) if current_value in values else 0
 
-        while True:
-            self.console.clear()
-            self.console.print(
-                Panel(
-                    Text(help_text, style="grey70"),
-                    title=title,
-                    title_align="left",
-                    border_style="bright_cyan",
-                    box=box.ROUNDED,
-                    padding=(1, 2),
-                )
-            )
-
-            rows: list[Text] = []
-            for option_index, option in enumerate(normalized_options):
-                is_selected = option_index == index
-                prefix = "❯ " if is_selected else "  "
-                row = Text()
-                row.append(prefix, style="bright_green" if is_selected else "grey50")
-                row.append(
-                    option["label"],
-                    style="bold bright_green" if is_selected else "white",
-                )
-                description = option.get("description", "").strip()
-                if description:
-                    row.append(f" — {description}", style="grey70")
-                rows.append(row)
-
-            self.console.print(
-                Panel(
-                    Group(*rows),
-                    border_style="grey50",
-                    box=box.ROUNDED,
-                    padding=(0, 1),
-                )
-            )
-
-            pressed = self._read_menu_key()
-            if pressed == "up":
-                index = (index - 1) % len(normalized_options)
-                continue
-            if pressed == "down":
-                index = (index + 1) % len(normalized_options)
-                continue
-            if pressed == "enter":
+        with self._bounded_screen():
+            while True:
                 self.console.clear()
-                return normalized_options[index]["value"]
-            if pressed in {"escape", "interrupt"}:
-                self.console.clear()
-                return None
+                self.console.print(
+                    Panel(
+                        Text(help_text, style="grey70"),
+                        title=title,
+                        title_align="left",
+                        border_style="bright_cyan",
+                        box=box.ROUNDED,
+                        padding=(1, 2),
+                    )
+                )
+
+                rows: list[Text] = []
+                for option_index, option in enumerate(normalized_options):
+                    is_selected = option_index == index
+                    prefix = "❯ " if is_selected else "  "
+                    row = Text()
+                    row.append(prefix, style="bright_green" if is_selected else "grey50")
+                    row.append(
+                        option["label"],
+                        style="bold bright_green" if is_selected else "white",
+                    )
+                    description = option.get("description", "").strip()
+                    if description:
+                        row.append(f" — {description}", style="grey70")
+                    rows.append(row)
+
+                self.console.print(
+                    Panel(
+                        Group(*rows),
+                        border_style="grey50",
+                        box=box.ROUNDED,
+                        padding=(0, 1),
+                    )
+                )
+
+                pressed = self._read_menu_key()
+                if pressed == "up":
+                    index = (index - 1) % len(normalized_options)
+                    continue
+                if pressed == "down":
+                    index = (index + 1) % len(normalized_options)
+                    continue
+                if pressed == "enter":
+                    return normalized_options[index]["value"]
+                if pressed in {"escape", "interrupt"}:
+                    return None
 
     def prompt_text(
         self,
@@ -284,8 +307,6 @@ class AgentUI:
         if not sys.stdin.isatty():
             return current_value if current_value else None
 
-        self.console.clear()
-
         # Build panel content
         content_parts: list[Text | str] = []
         if help_text:
@@ -298,33 +319,32 @@ class AgentUI:
 
         content_parts.append(Text("Enter value (Esc to cancel):", style="white"))
 
-        self.console.print(
-            Panel(
-                Group(*content_parts),
-                title=title,
-                title_align="left",
-                border_style="bright_cyan",
-                box=box.ROUNDED,
-                padding=(1, 2),
-            )
-        )
-
-        try:
-            if _PROMPT_TOOLKIT_AVAILABLE:
-                user_input = pt_prompt(
-                    "> ",
-                    default=current_value if current_value else "",
-                    style=PtStyle.from_dict({"": "#ffffff"}),
-                ).strip()
-                self.console.clear()
-                return user_input if user_input else (current_value or None)
-            else:
-                user_input = input("> ").strip()
-                self.console.clear()
-                return user_input if user_input else (current_value or None)
-        except (KeyboardInterrupt, EOFError):
+        with self._bounded_screen():
             self.console.clear()
-            return None
+            self.console.print(
+                Panel(
+                    Group(*content_parts),
+                    title=title,
+                    title_align="left",
+                    border_style="bright_cyan",
+                    box=box.ROUNDED,
+                    padding=(1, 2),
+                )
+            )
+
+            try:
+                if _PROMPT_TOOLKIT_AVAILABLE:
+                    user_input = pt_prompt(
+                        "> ",
+                        default=current_value if current_value else "",
+                        style=PtStyle.from_dict({"": "#ffffff"}),
+                    ).strip()
+                    return user_input if user_input else (current_value or None)
+                else:
+                    user_input = input("> ").strip()
+                    return user_input if user_input else (current_value or None)
+            except (KeyboardInterrupt, EOFError):
+                return None
 
     def prompt_secret(
         self,
@@ -345,8 +365,6 @@ class AgentUI:
             from getpass import getpass
             return getpass("> ").strip() or None
 
-        self.console.clear()
-
         content_parts: list[Text | str] = []
         if help_text:
             content_parts.append(Text(help_text, style="grey70"))
@@ -358,28 +376,28 @@ class AgentUI:
 
         content_parts.append(Text("Enter value (input hidden, Esc to cancel):", style="white"))
 
-        self.console.print(
-            Panel(
-                Group(*content_parts),
-                title=title,
-                title_align="left",
-                border_style="bright_cyan",
-                box=box.ROUNDED,
-                padding=(1, 2),
+        with self._bounded_screen():
+            self.console.clear()
+            self.console.print(
+                Panel(
+                    Group(*content_parts),
+                    title=title,
+                    title_align="left",
+                    border_style="bright_cyan",
+                    box=box.ROUNDED,
+                    padding=(1, 2),
+                )
             )
-        )
 
-        try:
-            user_input = pt_prompt(
-                "> ",
-                is_password=True,
-                style=PtStyle.from_dict({"": "#ffffff"}),
-            ).strip()
-            self.console.clear()
-            return user_input
-        except (KeyboardInterrupt, EOFError):
-            self.console.clear()
-            return None
+            try:
+                user_input = pt_prompt(
+                    "> ",
+                    is_password=True,
+                    style=PtStyle.from_dict({"": "#ffffff"}),
+                ).strip()
+                return user_input
+            except (KeyboardInterrupt, EOFError):
+                return None
 
     @staticmethod
     def _read_menu_key() -> str:

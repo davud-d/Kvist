@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import difflib
 import fnmatch
 import json
 import os
@@ -14,8 +15,9 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from env_utils import read_float_env, read_int_env
 from protocol import AgentCommand
-from terminal import TerminalExecutor, TerminalError, is_hitl_active
+from terminal import TerminalExecutor, TerminalError, is_hitl_active, request_user_confirmation
 
 
 class ExecutorError(Exception):
@@ -91,7 +93,7 @@ class SafeExecutor:
             "AGENT_TERMINAL_TIMEOUT",
             default=15.0,
             min_value=1.0,
-            max_value=30.0,
+            max_value=300.0,
         )
         self.max_output_chars = self._read_int_env(
             "AGENT_TERMINAL_MAX_OUTPUT",
@@ -100,6 +102,14 @@ class SafeExecutor:
             max_value=200_000,
         )
 
+        # Overwriting an existing file requires interactive approval with a
+        # diff preview. AGENT_WRITE_APPROVAL=0 disables the gate (CI /
+        # non-interactive runs).
+        self.write_approval_enabled = (
+            self._read_int_env("AGENT_WRITE_APPROVAL", default=1, min_value=0, max_value=1) == 1
+        )
+        self.max_diff_preview_chars = 4000
+
         self._terminal = TerminalExecutor(
             workspace=self.workspace,
             timeout=terminal_timeout,
@@ -107,8 +117,11 @@ class SafeExecutor:
             profile=terminal_profile,
         )
 
-        # Sandbox honesty notice — surfaced once by the agent UI, not stderr.
-        self.sandbox_note = self._terminal._sandbox_note
+        # Sandbox honesty + policy-file notices — surfaced once by the
+        # agent UI, not stderr.
+        self.sandbox_note = "\n".join(
+            note for note in (self._terminal._sandbox_note, self._terminal._policy_note) if note
+        )
 
         self.ignored_dirs = {
             ".git",
@@ -144,7 +157,20 @@ class SafeExecutor:
             "openai.com",
             "github.com",
             "stackoverflow.com",
+            "developer.mozilla.org",
+            "nodejs.org",
+            "go.dev",
+            "pkg.go.dev",
+            "doc.rust-lang.org",
+            "docs.rs",
+            "kubernetes.io",
+            "docs.docker.com",
+            "nginx.org",
+            "learn.microsoft.com",
+            "docs.github.com",
+            "git-scm.com",
         }
+        self.allowed_web_domains.update(self._extra_fetch_domains())
 
         self.web_search_provider = (os.getenv("SEARCH_PROVIDER", "auto").strip().lower() or "auto")
         self.searxng_base_url = os.getenv("SEARXNG_BASE_URL", "").strip().rstrip("/")
@@ -581,6 +607,55 @@ class SafeExecutor:
             },
         )
 
+    def _extra_fetch_domains(self) -> set[str]:
+        """AGENT_FETCH_EXTRA_DOMAINS: comma-separated fetch_url domains."""
+        raw = os.getenv("AGENT_FETCH_EXTRA_DOMAINS", "")
+        return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+    def _confirm_overwrite(self, path: str, old_text: str, new_text: str) -> None:
+        """Diff-preview HITL gate for overwriting an existing file.
+
+        New files never reach this gate. Non-interactive runs (stdin is
+        not a TTY) fail deterministically unless AGENT_WRITE_APPROVAL=0.
+        """
+        if not self.write_approval_enabled:
+            return
+        if old_text == new_text:
+            return
+
+        diff_lines = difflib.unified_diff(
+            old_text.splitlines(),
+            new_text.splitlines(),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm="",
+        )
+        diff_preview = self._truncate_text("\n".join(diff_lines), self.max_diff_preview_chars)
+
+        try:
+            approved = request_user_confirmation(
+                title="File overwrite — Human-in-the-Loop",
+                body=f"The agent wants to overwrite [bold]{path}[/bold]:\n\n{diff_preview}",
+                question=f"Allow overwriting '{path}'?",
+            )
+        except TerminalError as error:
+            raise ExecutorError(
+                f"Overwriting existing file '{path}' requires interactive approval: {error}. "
+                "Set AGENT_WRITE_APPROVAL=0 for non-interactive runs."
+            ) from error
+
+        if not approved:
+            raise ExecutorError(
+                f"Overwrite of '{path}' denied by user. "
+                "Do not retry the same write; adjust the approach or report to the user."
+            )
+
+    def _read_existing_text_for_diff(self, target: Path) -> str:
+        try:
+            return target.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return "<existing content unavailable>"
+
     def _write_file(self, path: str, content: str) -> ExecutionResult:
         target = self._guard_env_file_access(path)
         content_bytes = content.encode("utf-8")
@@ -589,6 +664,8 @@ class SafeExecutor:
                 f"File size ({len(content_bytes)} bytes) exceeds limit "
                 f"({self.max_file_size_bytes} bytes)"
             )
+        if target.is_file():
+            self._confirm_overwrite(path, self._read_existing_text_for_diff(target), content)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
@@ -603,6 +680,9 @@ class SafeExecutor:
 
     def _append_file(self, path: str, content: str) -> ExecutionResult:
         target = self._guard_env_file_access(path)
+        if target.is_file() and content:
+            old_text = self._read_existing_text_for_diff(target)
+            self._confirm_overwrite(path, old_text, old_text + content)
         target.parent.mkdir(parents=True, exist_ok=True)
         with target.open("a", encoding="utf-8") as file:
             file.write(content)
@@ -641,6 +721,7 @@ class SafeExecutor:
 
         occurrences_replaced = min(occurrences_found, count)
         updated_text = original_text.replace(old_text, new_text, count)
+        self._confirm_overwrite(path, original_text, updated_text)
         target.write_text(updated_text, encoding="utf-8")
 
         return ExecutionResult(
@@ -889,7 +970,9 @@ class SafeExecutor:
         ref: str | None = None,
         staged: bool = False,
     ) -> ExecutionResult:
-        command = ["git", "diff"]
+        # Disable repository-configured external diff/textconv helpers so this
+        # inspection action remains a read-only, non-executing Git operation.
+        command = ["git", "diff", "--no-ext-diff", "--no-textconv"]
         if staged:
             command.append("--staged")
         if ref:
@@ -1518,14 +1601,7 @@ class SafeExecutor:
         min_value: int,
         max_value: int,
     ) -> int:
-        raw = os.getenv(name)
-        if raw is None:
-            return default
-        try:
-            value = int(raw)
-        except ValueError:
-            return default
-        return max(min_value, min(value, max_value))
+        return read_int_env(name, default=default, min_value=min_value, max_value=max_value)
 
     def _read_float_env(
         self,
@@ -1534,14 +1610,7 @@ class SafeExecutor:
         min_value: float,
         max_value: float,
     ) -> float:
-        raw = os.getenv(name)
-        if raw is None:
-            return default
-        try:
-            value = float(raw)
-        except ValueError:
-            return default
-        return max(min_value, min(value, max_value))
+        return read_float_env(name, default=default, min_value=min_value, max_value=max_value)
 
     def _read_full_text(self, target: Path) -> str:
         """Reads the file in full without truncation. For write/replace operations."""

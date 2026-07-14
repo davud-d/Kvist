@@ -1,24 +1,16 @@
 # -*- coding: utf-8 -*-
-"""OS-level sandbox detection and command wrapping for shell execution.
+"""OS-level sandbox selection and Bubblewrap command construction.
 
-Honest model of what each mode guarantees:
-
-- WORKSPACE_ONLY — NOT a real OS sandbox. It means: cwd is confined to the
-  workspace, agent file actions are path-checked by SafeExecutor, and Unix
-  resource limits are applied to child processes. The child process itself
-  still runs with the full permissions of the current user and can, in
-  principle, touch anything the user can.
-- BUBBLEWRAP — shell commands are wrapped in ``bwrap`` with a read-only root
-  filesystem and a writable workspace bind. Linux-only, opt-in via
-  ``AGENT_SANDBOX_MODE=bubblewrap``. Network stays shared so package
-  installs and web tooling keep working.
-- NONE — no boundary at all. Never used by the terminal; exists so callers
-  can report a truthful status.
+``auto`` selects Bubblewrap on Linux when a system installation is present.
+When it is unavailable, the terminal applies an approval-only restricted
+fallback for commands capable of arbitrary code execution.  Explicit
+``workspace`` mode remains a user-selected weaker boundary.
 """
 from __future__ import annotations
 
 import os
 import shutil
+import stat
 import sys
 from enum import Enum
 from pathlib import Path
@@ -30,47 +22,193 @@ class SandboxMode(Enum):
     BUBBLEWRAP = "bubblewrap"
 
 
+_SYSTEM_EXEC_PATH = os.pathsep.join(
+    path for path in ("/usr/local/sbin", "/usr/local/bin", "/usr/sbin", "/usr/bin", "/sbin", "/bin")
+    if Path(path).is_dir()
+)
+
+
+def normalize_sandbox_request(requested: str | None = None) -> str:
+    value = requested if requested is not None else os.getenv("AGENT_SANDBOX_MODE", "auto")
+    value = (value or "auto").strip().casefold()
+    if value in {"workspace", "workspace_only"}:
+        return "workspace"
+    if value in {"auto", "bubblewrap"}:
+        return value
+    return "invalid"
+
+
+def resolve_bubblewrap_path() -> str | None:
+    """Resolve bwrap from fixed system directories, never a project PATH."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        found = shutil.which("bwrap", path=_SYSTEM_EXEC_PATH)
+    except TypeError:
+        # Compatibility with simple test doubles for shutil.which.  The real
+        # stdlib implementation always takes ``path`` and production lookup
+        # therefore remains restricted to system directories.
+        found = shutil.which("bwrap")
+    if not found:
+        return None
+    lookup = Path(found)
+    if not lookup.is_absolute():
+        return None
+    try:
+        resolved = lookup.resolve(strict=True)
+    except OSError:
+        return None
+    if not resolved.is_file() or not _trusted_system_binary(lookup, resolved):
+        return None
+    return str(resolved)
+
+
+def _trusted_system_binary(lookup: Path, resolved: Path) -> bool:
+    roots: list[Path] = []
+    for raw in ("/usr", "/bin", "/sbin"):
+        try:
+            root = Path(raw).resolve(strict=True)
+        except OSError:
+            continue
+        if root not in roots:
+            roots.append(root)
+    try:
+        parent = lookup.parent.resolve(strict=True)
+        target = resolved.resolve(strict=True)
+    except OSError:
+        return False
+    root = next(
+        (
+            item
+            for item in roots
+            if _is_relative_to(parent, item) and _is_relative_to(target, item)
+        ),
+        None,
+    )
+    if root is None:
+        return False
+    paths = [target]
+    for start in (parent, target.parent):
+        current = start
+        while True:
+            if current not in paths:
+                paths.append(current)
+            if current == root:
+                break
+            if current.parent == current:
+                return False
+            current = current.parent
+    return not any(_user_mutable(path) for path in paths)
+
+
+def _is_relative_to(path: Path, boundary: Path) -> bool:
+    try:
+        path.relative_to(boundary)
+    except ValueError:
+        return False
+    return True
+
+
+def _user_mutable(path: Path) -> bool:
+    try:
+        info = path.stat()
+    except OSError:
+        return True
+    if hasattr(os, "geteuid") and info.st_uid == os.geteuid():
+        return True
+    try:
+        if os.access(path, os.W_OK, effective_ids=True):
+            return True
+    except TypeError:
+        if os.access(path, os.W_OK):
+            return True
+    if info.st_mode & stat.S_IWOTH:
+        return True
+    if not hasattr(os, "getegid"):
+        return False
+    try:
+        groups = {os.getegid(), *os.getgroups()}
+    except OSError:
+        groups = {os.getegid()}
+    return bool(info.st_mode & stat.S_IWGRP and info.st_gid in groups)
+
+
 def bubblewrap_available() -> bool:
-    return sys.platform.startswith("linux") and shutil.which("bwrap") is not None
+    return resolve_bubblewrap_path() is not None
 
 
 def detect_sandbox_mode(requested: str | None = None) -> tuple[SandboxMode, str]:
-    """Resolve the effective sandbox mode and a human-readable note.
+    """Resolve the effective sandbox mode and a user-facing security note."""
+    raw = requested if requested is not None else os.getenv("AGENT_SANDBOX_MODE", "auto")
+    request = normalize_sandbox_request(requested)
+    available = bubblewrap_available()
 
-    Args:
-        requested: Override for the ``AGENT_SANDBOX_MODE`` env var
-            (``auto`` | ``workspace`` | ``bubblewrap``). ``None`` reads the env.
-
-    Returns:
-        ``(mode, note)``. ``note`` is non-empty when the executor runs in a
-        degraded mode relative to the request, or when a stronger mode is
-        available but not enabled.
-    """
-    value = requested if requested is not None else os.getenv("AGENT_SANDBOX_MODE", "auto")
-    value = (value or "auto").strip().lower()
-
-    if value == "bubblewrap":
-        if bubblewrap_available():
+    if request == "bubblewrap":
+        if available:
             return SandboxMode.BUBBLEWRAP, ""
         return (
             SandboxMode.WORKSPACE_ONLY,
-            "AGENT_SANDBOX_MODE=bubblewrap requested, but bwrap was not found on this system. "
-            "Running degraded: workspace-only boundary, shell commands are NOT OS-sandboxed.",
+            "AGENT_SANDBOX_MODE=bubblewrap was requested, but a trusted bwrap executable "
+            "was not found; shell execution is blocked rather than silently degraded.",
         )
 
-    if value in {"auto", "workspace", "workspace_only", ""}:
-        note = ""
-        if value == "auto" and bubblewrap_available():
-            note = (
-                "bubblewrap detected but not enabled; shell commands run with user permissions "
-                "(workspace-only boundary). Set AGENT_SANDBOX_MODE=bubblewrap to enable OS sandboxing."
-            )
-        return SandboxMode.WORKSPACE_ONLY, note
+    if request == "workspace":
+        return (
+            SandboxMode.WORKSPACE_ONLY,
+            "Explicit workspace-only mode is not an OS sandbox; approved child processes "
+            "run with the current user's host permissions.",
+        )
 
+    if request == "auto":
+        if available:
+            return SandboxMode.BUBBLEWRAP, ""
+        return (
+            SandboxMode.WORKSPACE_ONLY,
+            "Bubblewrap is unavailable; auto mode is using a restricted approval-only "
+            "workspace fallback for arbitrary-code commands.",
+        )
+
+    # Invalid values must not silently opt into the weak mode.  Resolve them
+    # like auto and surface the configuration error.
+    if available:
+        return (
+            SandboxMode.BUBBLEWRAP,
+            f"Unknown AGENT_SANDBOX_MODE={raw!r}; secure auto mode selected Bubblewrap.",
+        )
     return (
         SandboxMode.WORKSPACE_ONLY,
-        f"Unknown AGENT_SANDBOX_MODE={value!r}; using workspace-only boundary.",
+        f"Unknown AGENT_SANDBOX_MODE={raw!r}; Bubblewrap is unavailable, so the restricted "
+        "automatic fallback is active.",
     )
+
+
+def sandbox_network_allowed(value: str | None = None) -> bool:
+    """Return whether the strong sandbox may share the host network."""
+    raw = value if value is not None else os.getenv("AGENT_SANDBOX_NET", "deny")
+    return (raw or "deny").strip().casefold() == "allow"
+
+
+def _append_runtime_mounts(wrapped: list[str]) -> None:
+    """Mount only system runtime trees needed by ordinary dynamically linked CLIs."""
+    for raw_path in ("/usr", "/bin", "/sbin", "/lib", "/lib64"):
+        path = Path(raw_path)
+        if path.exists():
+            wrapped.extend(("--ro-bind", raw_path, raw_path))
+    for raw_path in ("/etc/ld.so.cache", "/etc/ld.so.conf", "/etc/ld.so.conf.d", "/etc/localtime"):
+        path = Path(raw_path)
+        if path.exists():
+            wrapped.extend(("--ro-bind", str(path.resolve()), raw_path))
+
+
+def _append_network_mounts(wrapped: list[str]) -> None:
+    for raw_path in ("/etc/resolv.conf", "/etc/hosts", "/etc/nsswitch.conf", "/etc/gai.conf"):
+        path = Path(raw_path)
+        if path.exists():
+            wrapped.extend(("--ro-bind", str(path.resolve()), raw_path))
+    for raw_path in ("/etc/ssl/certs", "/etc/ca-certificates", "/etc/pki/ca-trust"):
+        path = Path(raw_path)
+        if path.exists():
+            wrapped.extend(("--ro-bind", raw_path, raw_path))
 
 
 def wrap_command_for_sandbox(
@@ -78,24 +216,51 @@ def wrap_command_for_sandbox(
     mode: SandboxMode,
     workspace: Path,
     cwd: Path,
+    *,
+    bwrap_path: str | None = None,
+    network_allowed: bool | None = None,
 ) -> list[str]:
-    """Wrap an already validated command for the given sandbox mode.
-
-    WORKSPACE_ONLY / NONE return the command unchanged: those modes rely on
-    the caller's cwd confinement and validation, not on process isolation.
-    """
+    """Wrap a validated command in a minimal Bubblewrap filesystem."""
     if mode is not SandboxMode.BUBBLEWRAP:
         return command
-    return [
-        "bwrap",
-        "--ro-bind", "/", "/",
-        "--dev", "/dev",
-        "--proc", "/proc",
-        "--tmpfs", "/tmp",
-        "--bind", str(workspace), str(workspace),
-        "--unshare-pid",
+
+    workspace = workspace.resolve()
+    cwd = cwd.resolve()
+    if workspace == Path("/"):
+        raise ValueError("Refusing to bind the complete host root as a workspace")
+    binary = bwrap_path or resolve_bubblewrap_path()
+    if not binary:
+        raise ValueError("Bubblewrap mode requires a trusted absolute bwrap executable")
+
+    wrapped = [
+        binary,
         "--die-with-parent",
-        "--chdir", str(cwd),
-        "--",
-        *command,
+        "--new-session",
+        "--unshare-pid",
+        "--unshare-ipc",
+        "--unshare-uts",
+        "--unshare-cgroup-try",
     ]
+    if network_allowed is None:
+        network_allowed = sandbox_network_allowed()
+    if not network_allowed:
+        wrapped.append("--unshare-net")
+
+    _append_runtime_mounts(wrapped)
+    if network_allowed:
+        _append_network_mounts(wrapped)
+    wrapped.extend(
+        (
+            "--proc", "/proc",
+            "--dev", "/dev",
+            "--tmpfs", "/tmp",
+            "--dir", "/tmp/kvist-home",
+            "--setenv", "HOME", "/tmp/kvist-home",
+            "--setenv", "TMPDIR", "/tmp",
+            "--bind", str(workspace), str(workspace),
+        )
+    )
+    internal_dir = workspace / ".kvist"
+    wrapped.extend(("--tmpfs", str(internal_dir)))
+    wrapped.extend(("--chdir", str(cwd), "--", *command))
+    return wrapped

@@ -359,9 +359,16 @@ AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
 AGENT_API_INTERVAL=
 AGENT_SANDBOX_MODE=auto
+AGENT_SANDBOX_NET=deny
+AGENT_CHILD_ENV_ALLOW=       # дополнительные безопасные переменные через запятую
 AGENT_TERMINAL_PROFILE=dev
 AGENT_TERMINAL_TIMEOUT=15
 AGENT_TERMINAL_MAX_OUTPUT=12000
+AGENT_WRITE_APPROVAL=1
+AGENT_RLIMIT_CPU=          # dev: 120, restricted: 8 (секунды)
+AGENT_RLIMIT_AS_MB=        # dev: 2048, restricted: 256
+AGENT_RLIMIT_NPROC=        # dev: 4096, restricted: 256
+AGENT_FETCH_EXTRA_DOMAINS= # доп. домены для fetch_url, через запятую
 ```
 
 - `AGENT_MAX_STEPS` ограничивает цикл действий coder/devops.
@@ -371,11 +378,24 @@ AGENT_TERMINAL_MAX_OUTPUT=12000
 - `AGENT_API_INTERVAL` переопределяет задержку между API-вызовами. Без него
   OpenAI, Anthropic и OpenRouter используют 2,5 секунды, остальные провайдеры —
   настроенный default в 5 секунд.
-- `AGENT_TERMINAL_PROFILE=restricted` убирает interpreters, package managers,
-  build tools и интерактивные shells из обычного allowlist. Вместо
-  автоматического запуска они всё ещё могут попасть на подтверждение человеком.
-- Terminal timeout ограничивается диапазоном 1-30 секунд, а захватываемый вывод
-  — диапазоном 1 000-200 000 символов.
+- `AGENT_TERMINAL_PROFILE=restricted` жёстко блокирует запуск интерпретаторов,
+  package managers, build tools и shells, кроме точных version probes через
+  доверенный системный executable.
+- Окружение дочернего процесса строится из allowlist, а не наследуется целиком.
+  `AGENT_CHILD_ENV_ALLOW=PROJECT_MODE,FEATURE_FLAG` явно разрешает дополнительные
+  несекретные и не управляющие загрузчиком переменные, в том числе для
+  `env_overrides`; секретные и execution-control имена всё равно блокируются.
+  Каждый terminal run получает новый приватный и изначально пустой child `HOME`.
+- Terminal timeout ограничивается диапазоном 1-300 секунд в профиле `dev` и
+  1-30 секунд в `restricted`; захватываемый вывод — диапазоном
+  1 000-200 000 символов.
+- Дочерние процессы Unix получают профильные resource limits (CPU, память,
+  число процессов, размер файла, открытые файлы). `AGENT_RLIMIT_CPU`,
+  `AGENT_RLIMIT_AS_MB` и `AGENT_RLIMIT_NPROC` переопределяют дефолты профиля.
+- `AGENT_WRITE_APPROVAL=0` отключает интерактивное подтверждение с diff-превью
+  при перезаписи существующих файлов (см. «Модель безопасности»). Нужно для CI
+  и других неинтерактивных запусков; при включённом гейте и без TTY перезапись
+  детерминированно завершается ошибкой.
 
 ## Web search
 
@@ -400,7 +420,10 @@ WEB_SEARCH_MAX_RESULTS=5
 
 `fetch_url` принимает только HTTP(S), ограничивает размер ответа, отклоняет
 очевидные бинарные форматы и разрешает общее чтение только с доменов из runtime
-allowlist.
+allowlist. Список покрывает ходовые сайты официальной документации (Python,
+MDN, Go, Rust, Kubernetes, Docker, nginx, GitHub и другие) и расширяется через
+`AGENT_FETCH_EXTRA_DOMAINS=example.dev,docs.internal.io`. Загруженный контент
+всегда помечается как недоверенный независимо от домена.
 
 ## Файлы в workspace
 
@@ -422,26 +445,113 @@ Performance JSONL logging по умолчанию выключен в коде. 
 
 ## Модель безопасности
 
-Kvist использует несколько уровней защиты, но default-режим не является
-OS-песочницей:
+Kvist использует обязательный для каждого запуска authorization pipeline и на
+Linux по умолчанию выбирает OS-песочницу, если найден доверенный Bubblewrap:
 
 - Файловые действия разрешают пути внутри workspace и отклоняют symlink-побеги.
 - Доступ к `.env`, внутреннему состоянию `.kvist`, секретным материалам,
-  слишком большим файлам и не-UTF-8 целям редактирования ограничен.
+  слишком большим файлам и не-UTF-8 целям редактирования ограничен. Аргументы
+  shell-команд, указывающие на секретные пути (`.env*`, `.ssh`, `.aws`,
+  `.gnupg`, ключи/сертификаты, `credentials`), отклоняются для любой команды,
+  включая read-only `cat` и `grep`, на относительных и абсолютных путях.
 - Shell-команды проходят platform-aware allowlist и role-aware risk policy.
-  Неизвестные или меняющие состояние команды требуют подтверждения; без TTY оно
-  отклоняется.
+  Всё, что не read-only — интерпретаторы и сборщики (`python`, `node`, `make`,
+  `cargo`, `go`, `awk`), установка пакетов, `git push`, неизвестные команды —
+  требует подтверждения человеком. Project allow может покрыть только
+  допустимые SAFE/MODERATE команды, но не intrinsic DANGEROUS; без TTY
+  обязательное подтверждение отклоняется.
+- Жёсткий запрет отделён от команды, требующей подтверждения. Запрещённые
+  executable, выход из workspace, секретные/внутренние пути, shell substitution
+  и опасные формы `find`/AWK/sed не показывают prompt, не снимаются allow-правилом
+  и не доходят до создания процесса.
+- Version probe задаётся отдельно для каждого executable и сравнивает весь argv.
+  Path-qualified файл не наследует SAFE-классификацию системной команды;
+  lookup- и target-identity executable входят в контекст авторизации.
+- Action-предикаты `find` (`-delete`, `-exec`, `-ok`, `-fprintf`, ...)
+  отклоняются; чистый поиск не требует подтверждения. `awk system()`/`getline`
+  с пайпом и `sed` в in-place/execute/write формах отклоняются.
+- Read-only Git-команды используют прямой синтаксис `git SUBCOMMAND` и
+  запускаются с отключёнными filesystem monitor/index hooks, external
+  diff/textconv, implicit signature verification, remerge drivers и recursive
+  submodule helpers. Глобальные Git-опции перед subcommand отклоняются fail
+  closed; status/diff также fail closed при filter/include в repository config.
+- Docker run/create/build/buildx/service с host-монтированием, `--privileged`,
+  небезопасными build entitlements или host namespaces (`--network=host`,
+  `--pid=host`, ...), публикацией host ports, push image и вложенными
+  destructive operations считаются опасными для любой роли.
 - Разрушительные команды и повышение привилегий через `rm`, `sudo`, `dd`,
   `mkfs`, `shutdown` и `reboot` запрещены обычной валидацией.
+- Перезапись существующего файла (`write_file`, `append_file`,
+  `replace_in_file`) показывает unified diff и запрашивает подтверждение;
+  создание нового файла — нет. `AGENT_WRITE_APPROVAL=0` отключает гейт.
 - Shell operators и command substitution ограничены, рабочий каталог остаётся
-  внутри workspace, а дочерние процессы Unix получают resource limits.
+  внутри workspace, а дочерние процессы Unix получают профильные resource
+  limits, включая защиту от форк-бомбы (`RLIMIT_NPROC`).
+- Непосредственно перед spawn Kvist повторяет hard validation и сравнивает argv,
+  нормализованный cwd и identity каталога, роль, состояние policy, режимы
+  sandbox/network, digest очищенного environment, identity executable и SHA-256
+  прямо выбранных scripts/build-control files. Изменение отменяет подтверждение.
 - Логи скрывают распространённые форматы токенов и обрезают большие значения.
 
-При `AGENT_SANDBOX_MODE=auto` или `workspace` shell-процессы всё ещё работают с
-OS-правами текущего пользователя. В Linux `AGENT_SANDBOX_MODE=bubblewrap`
-использует `bwrap`: read-only корень, writable bind workspace, отдельные process
-IDs и общую сеть. Если `bwrap` недоступен, Kvist предупреждает и переходит в
-workspace-only режим.
+### Проектная политика разрешений
+
+`<workspace>/.kvist/permissions.json` хранит правила уровня проекта, по
+аналогии с `.claude/settings.json` в Claude Code:
+
+```json
+{
+  "allow": ["git status", "python *"],
+  "deny": ["pip install *"],
+  "ask": ["npm run"]
+}
+```
+
+Паттерны сопоставляются по префиксу токенов с shell-glob на каждый токен
+(`python *` покрывает любой Python argv); executable дополнительно сравнивается
+в канонической форме. Порядок: project `deny` → hard validation → intrinsic
+`DANGEROUS` → project `ask` → подтверждение executable-origin/auto-fallback →
+допустимый project `allow` → обычная risk policy. `DANGEROUS` всегда требует
+подтверждения конкретного запуска и не предлагается как «always allow».
+`allow` снимает повторный prompt только с допустимых SAFE/MODERATE команд и не
+разблокирует `rm`, чтение секретов или нарушение sandbox. Пересекающиеся правила
+разрешаются в пользу `deny`; каждый сегмент pipeline проверяется отдельно.
+Модель не может редактировать `.kvist`; malformed или symlinked policy fail
+closed.
+
+`AGENT_SANDBOX_MODE=auto` на Linux выбирает доверенный системный `bwrap`.
+Песочница монтирует только workspace и необходимые runtime/library paths, без
+host root, `/home`, `/root`, других репозиториев и каталогов credentials. `/tmp`
+эфемерен, `HOME` пуст, `.kvist` замаскирован, process namespaces изолированы, а
+сеть по умолчанию unshared. `AGENT_SANDBOX_NET=allow` следует включать только
+для команды, которой действительно нужна сеть.
+
+Если Bubblewrap недоступен в `auto`, включается явно отмеченный restricted
+workspace fallback: interpreters, scripts, build/package tools и неизвестные
+arbitrary-code executables требуют подтверждения каждого запуска даже при
+совпавшем project allow. Явный `AGENT_SANDBOX_MODE=workspace` — более слабый
+режим, где одобренный процесс сохраняет host-права текущего пользователя.
+В этих слабых режимах каждый run всё равно получает новый приватный,
+проверенно-пустой child `HOME`. Явный `bubblewrap` без доверенного binary
+блокирует shell execution и не деградирует незаметно.
+
+### Текущие ограничения границы
+
+- Workspace mode не является OS isolation. Read-only набор automatic fallback
+  также видит несекретные host paths, разрешённые command validation.
+- Прямые scripts и распространённые build-control files хэшируются, но
+  transitive imports, модули `python -m`, Make includes, исходники package
+  scripts и другие dependency graphs полностью не аттестуются.
+- Child PATH содержит только фиксированные системные каталоги (без
+  `/usr/local`), но transitive helpers, запускаемые доверенными системными
+  tools, отдельно по содержимому не аттестуются.
+- Проверка secret paths покрывает named/canonical direct arguments, а recursive
+  traversal через grep/ripgrep блокируется. Repository/history-aware и
+  transitive tools всё ещё могут вывести защищённый content, не названный в
+  argv. Strong Bubblewrap скрывает host credential trees, но содержимое и
+  история workspace остаются ответственностью пользователя.
+- Между финальным сравнением identity/hash и OS process creation остаётся узкое
+  race window. Captured output ограничивается после чтения, а не bounded stream;
+  на Windows timeout cleanup не гарантирует завершение каждого descendant.
 
 ## Архитектура промптов и действий
 

@@ -214,3 +214,106 @@ def test_symlink_escape_still_blocked(tmp_path):
     dir_link.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ExecutorError, match="outside workspace|Symbolic link"):
         executor._read_file("outside_dir/secret.txt")
+
+
+# ── File overwrite approval gate (AGENT_WRITE_APPROVAL) ─────────────
+
+def test_overwrite_gate_denies_without_tty(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "1")
+    executor = SafeExecutor(tmp_path)
+    executor._write_file("app.py", "original\n")  # new file: no gate
+
+    with pytest.raises(ExecutorError, match="interactive approval"):
+        executor._write_file("app.py", "changed\n")
+    with pytest.raises(ExecutorError, match="interactive approval"):
+        executor._append_file("app.py", "tail\n")
+    with pytest.raises(ExecutorError, match="interactive approval"):
+        executor._replace_in_file("app.py", "original", "changed")
+
+    assert executor._read_file("app.py").data["content"] == "original\n"
+
+
+def test_overwrite_gate_skips_new_files_and_identical_content(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "1")
+    executor = SafeExecutor(tmp_path)
+
+    created = executor._write_file("new_dir/new_file.py", "content\n")
+    assert created.ok is True
+
+    unchanged = executor._write_file("new_dir/new_file.py", "content\n")
+    assert unchanged.ok is True
+
+
+def test_overwrite_gate_shows_diff_and_respects_answer(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "1")
+    executor = SafeExecutor(tmp_path)
+    executor._write_file("app.py", "old line\n")
+
+    prompts: list = []
+
+    def fake_confirmation(title, body, question):
+        prompts.append(body)
+        return True
+
+    import executor as executor_module
+    monkeypatch.setattr(executor_module, "request_user_confirmation", fake_confirmation)
+
+    executor._write_file("app.py", "new line\n")
+    assert executor._read_file("app.py").data["content"] == "new line\n"
+    assert prompts and "-old line" in prompts[0] and "+new line" in prompts[0]
+
+    monkeypatch.setattr(
+        executor_module, "request_user_confirmation", lambda title, body, question: False
+    )
+    with pytest.raises(ExecutorError, match="denied by user"):
+        executor._write_file("app.py", "third version\n")
+
+
+def test_overwrite_gate_disabled_for_non_interactive_runs(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    executor = SafeExecutor(tmp_path)
+    executor._write_file("app.py", "one\n")
+    executor._write_file("app.py", "two\n")
+    assert executor._read_file("app.py").data["content"] == "two\n"
+
+
+# ── fetch_url domain allowlist extensions ────────────────────────────
+
+def test_default_fetch_allowlist_includes_common_docs_domains(tmp_path):
+    executor = SafeExecutor(tmp_path)
+    for domain in (
+        "developer.mozilla.org",
+        "go.dev",
+        "doc.rust-lang.org",
+        "kubernetes.io",
+        "docs.docker.com",
+        "nginx.org",
+    ):
+        assert executor._is_allowed_domain(domain), domain
+
+
+def test_extra_fetch_domains_from_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_FETCH_EXTRA_DOMAINS", "example.dev, docs.internal.io")
+    executor = SafeExecutor(tmp_path)
+
+    assert executor._is_allowed_domain("example.dev")
+    assert executor._is_allowed_domain("docs.internal.io")
+    assert not executor._is_allowed_domain("evil.example")
+
+
+def test_extra_fetch_domain_content_still_marked_untrusted(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_FETCH_EXTRA_DOMAINS", "example.dev")
+    executor = SafeExecutor(tmp_path)
+
+    def fake_http(**kwargs):
+        return (
+            200,
+            {"Content-Type": "text/html; charset=utf-8"},
+            b"<html><body><p>hello</p></body></html>",
+        )
+
+    monkeypatch.setattr(executor, "_http_request", fake_http)
+    result = executor._fetch_url("https://example.dev/docs")
+
+    assert result.data["untrusted"] is True
+    assert result.data["notice"] == UNTRUSTED_CONTENT_NOTICE

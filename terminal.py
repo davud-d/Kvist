@@ -2,18 +2,57 @@
 """Cross-platform terminal module for safe process execution."""
 from __future__ import annotations
 
+import functools
+import hashlib
+import json
 import os
 import re
 import shlex
+import shutil
+import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
-from command_policy import CommandAssessment, RiskLevel, assess_command
-from sandbox import SandboxMode, detect_sandbox_mode, wrap_command_for_sandbox
+from command_policy import (
+    CommandAssessment,
+    RiskLevel,
+    _diff_has_output_option,
+    _file_has_compile_option,
+    _git_has_external_helper_option,
+    _git_has_remerge_diff_option,
+    _git_ref_filter_has_signature_atom,
+    _git_has_signature_verification_option,
+    _git_has_unsafe_submodule_option,
+    _git_tag_has_signing_or_verification_option,
+    _git_read_operation_arguments,
+    _has_long_output_option,
+    _hostname_is_read_only,
+    _sort_has_output_or_program_option,
+    _tree_has_output_option,
+    _uniq_has_output_operand,
+    assess_command,
+    canonical_executable_name,
+    is_bare_executable_token,
+    is_exact_version_probe,
+    is_find_action_token,
+)
+from env_utils import read_int_env
+from permission_policy import append_allow_rule, load_policy
+from sandbox import (
+    SandboxMode,
+    detect_sandbox_mode,
+    normalize_sandbox_request,
+    resolve_bubblewrap_path,
+    sandbox_network_allowed,
+    wrap_command_for_sandbox,
+)
 
 # ── Global HITL lock ─────────────────────────────────────────────
 # Prevents background TUI rendering while the user is typing y/N.
@@ -39,6 +78,24 @@ def _exit_hitl() -> None:
         _hitl_active = False
 
 
+@contextmanager
+def _alt_screen(console: Any) -> Iterator[None]:
+    """Draw an approval prompt inside the terminal's alternate screen buffer.
+
+    Entering the alternate buffer preserves the current screen; leaving it
+    restores that screen exactly, so the prompt has hard boundaries and can
+    never erase output above it. Outside a TTY it is a no-op.
+    """
+    use_alt = sys.stdin.isatty() and console.is_terminal
+    if use_alt:
+        console.set_alt_screen(True)
+    try:
+        yield
+    finally:
+        if use_alt:
+            console.set_alt_screen(False)
+
+
 @dataclass(slots=True)
 class TerminalResult:
     """Result of a terminal command execution."""
@@ -53,6 +110,23 @@ class TerminalResult:
 
 class TerminalError(Exception):
     """Terminal command validation or execution error."""
+
+
+class HardDenyError(TerminalError):
+    """Non-overridable security boundary violation."""
+
+
+class ApprovalRequiredError(TerminalError):
+    """Execution is eligible only after an exact per-execution approval."""
+
+
+class CommandNotAllowedError(ApprovalRequiredError):
+    """Allowlist miss (unknown executable or subcommand).
+
+    Unlike hard validation errors (forbidden executables, secret paths,
+    shell operators), an allowlist miss may be overridden by an explicit
+    allow-rule in the project permission policy.
+    """
 
 
 # ---------------------------------------------------------------------------
@@ -70,6 +144,9 @@ _FORBIDDEN_EXECUTABLES: frozenset[str] = frozenset({
     "ssh", "scp", "sftp", "telnet", "ftp",
     # Windows registry
     "reg", "regedit",
+    # Generic execution wrappers can otherwise hide a forbidden executable.
+    "env", "xargs", "parallel", "nohup", "nice", "timeout", "setsid",
+    "chroot", "unshare", "nsenter", "busybox", "toybox",
 })
 
 _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
@@ -80,6 +157,7 @@ _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
     "cargo", "go", "java", "javac", "dotnet",
     "powershell", "pwsh", "cmd", "cmd.exe",
     "bash", "sh", "zsh", "fish",
+    "ruby", "perl", "php",
 })
 
 # ---------------------------------------------------------------------------
@@ -87,7 +165,7 @@ _RESTRICTED_EXTRA_FORBIDDEN: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 _FORBIDDEN_OPERATORS: frozenset[str] = frozenset({
     ";", "&&", "||",
-    ">", ">>",
+    ">", ">>", "<", "<<", "<<<", "2>", "2>>", "|&",
     "&",
 })
 
@@ -96,6 +174,54 @@ _FORBIDDEN_OPERATORS: frozenset[str] = frozenset({
 # inside arguments ($(…), `…`, ${…})
 # ---------------------------------------------------------------------------
 _SUBST_RE = re.compile(r"\$\(|`|\$\{")
+
+# ---------------------------------------------------------------------------
+# Secret material paths: forbidden as an argument of ANY command,
+# including read-only ones (cat, grep, find, ...), relative or absolute.
+# ---------------------------------------------------------------------------
+_TOKEN_PATH_PREFIX = r"(?:(?<![A-Za-z0-9_.-])|(?<=-[A-Za-z]))"
+_TOKEN_PATH_SUFFIX = r"(?=$|[\\/]|[^A-Za-z0-9_.-])"
+_SECRET_TOKEN_RE = re.compile(
+    rf"{_TOKEN_PATH_PREFIX}(?:\.env(?:\.[\w.-]*)?|\.ssh|\.aws|\.gnupg)"
+    rf"{_TOKEN_PATH_SUFFIX}"
+    rf"|{_TOKEN_PATH_PREFIX}(?:id_rsa|id_ed25519|id_ecdsa|credentials)"
+    rf"{_TOKEN_PATH_SUFFIX}"
+    r"|\.(?:pem|key|p12|pfx|crt)(?=$|[^A-Za-z0-9_.-])"
+    rf"|{_TOKEN_PATH_PREFIX}(?:\.netrc|\.npmrc|\.pypirc|\.git-credentials)"
+    rf"{_TOKEN_PATH_SUFFIX}"
+    rf"|{_TOKEN_PATH_PREFIX}(?:\.kube|\.azure){_TOKEN_PATH_SUFFIX}"
+    rf"|{_TOKEN_PATH_PREFIX}proc[\\/](?:self|\d+)[\\/]"
+    rf"(?:environ|cmdline|mem|fd|root){_TOKEN_PATH_SUFFIX}",
+    re.IGNORECASE,
+)
+
+_INTERNAL_TOKEN_RE = re.compile(
+    rf"{_TOKEN_PATH_PREFIX}\.kvist{_TOKEN_PATH_SUFFIX}", re.IGNORECASE
+)
+
+_AWK_SYSTEM_RE = re.compile(r"\bsystem\s*\(")
+_AWK_LOAD_RE = re.compile(r"(^|[\s;{}])@load\b")
+_AWK_INCLUDE_RE = re.compile(r"(^|[\s;{}])@include\b")
+_AWK_EXTERNAL_PIPE_RE = re.compile(r"(?<!\|)\|(?!\|)|\|&")
+_AWK_SAFE_LONG_OPTIONS: frozenset[str] = frozenset({
+    "--characters-as-bytes", "--csv", "--traditional", "--posix", "--lint",
+    "--lint-old", "--non-decimal-data", "--bignum", "--use-lc-numeric",
+    "--optimize", "--no-optimize", "--gen-pot", "--version", "--help",
+    "--usage", "--copyleft", "--copyright", "--re-interval", "--sandbox",
+})
+_AWK_SAFE_SHORT_OPTIONS: frozenset[str] = frozenset({
+    "-b", "-c", "-C", "-g", "-h", "-L", "-M", "-N", "-O", "-P",
+    "-r", "-S", "-t", "-V",
+})
+
+# GNU sed constructs that execute commands or write files:
+# the standalone `e`/`w`/`W` commands and the `e` flag of s///.
+_SED_STANDALONE_WRITE_RE = re.compile(
+    r"(?:^|[;\n{}])\s*"
+    r"(?:(?:\d+(?:~\d+)?|[+~]\d+|\$|/(?:\\.|[^/])*/)"
+    r"(?:\s*,\s*(?:\d+(?:~\d+)?|[+~]\d+|\$|/(?:\\.|[^/])*/))?\s*)?"
+    r"!?\s*[eWw](?:\s|$)"
+)
 
 # ---------------------------------------------------------------------------
 # Allowed commands: common and platform-specific
@@ -107,6 +233,15 @@ _COMMON_ALLOWED: dict[str, set[str] | None] = {
         "show", "tag", "remote", "stash", "ls-files",
     },
 }
+
+_KNOWN_GIT_SUBCOMMANDS: frozenset[str] = frozenset({
+    "add", "am", "archive", "bisect", "blame", "branch", "bundle", "checkout",
+    "cherry-pick", "clean", "clone", "commit", "config", "describe", "diff",
+    "fetch", "format-patch", "gc", "grep", "init", "log", "ls-files", "merge",
+    "mv", "notes", "pull", "push", "range-diff", "rebase", "reflog", "remote",
+    "reset", "restore", "revert", "rev-parse", "rm", "show", "show-branch",
+    "sparse-checkout", "stash", "status", "submodule", "switch", "tag", "worktree",
+})
 
 _DEV_COMMON_ALLOWED: dict[str, set[str] | None] = {
     "python": None,
@@ -234,6 +369,130 @@ _SCRIPT_EXTENSIONS: dict[str, tuple[str, ...]] = {
 }
 _TERMINAL_PROFILES: frozenset[str] = frozenset({"restricted", "dev"})
 
+_FALLBACK_READ_ONLY_EXECUTABLES: frozenset[str] = frozenset({
+    "ls", "dir", "pwd", "cat", "head", "tail", "echo", "whoami", "which",
+    "where", "file", "uname", "hostname", "wc", "grep", "sort", "uniq",
+    "diff", "test", "tree", "ver", "findstr", "type", "find", "sed", "awk",
+    "gawk",
+})
+
+_SAFE_CHILD_ENV_NAMES: frozenset[str] = frozenset({
+    "LANG", "LC_ALL", "TERM", "COLORTERM", "CI", "NO_COLOR", "FORCE_COLOR",
+})
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SECRET_ENV_RE = re.compile(
+    r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL[A-Z0-9]*)(?:$|_)",
+    re.IGNORECASE,
+)
+_CONTROL_ENV_NAMES: frozenset[str] = frozenset({
+    "PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP", "PYTHONINSPECT", "NODE_OPTIONS",
+    "BASH_ENV", "ENV", "RUBYOPT", "RUBYLIB", "PERL5OPT", "PERL5LIB", "PHP_INI_SCAN_DIR",
+    "GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+    "SSH_ASKPASS", "SSH_AUTH_SOCK", "DBUS_SESSION_BUS_ADDRESS", "DOCKER_HOST",
+    "PROMPT_COMMAND", "CDPATH", "IFS", "SHELLOPTS", "PS4", "MAKEFLAGS", "MAKEFILES",
+    "GCONV_PATH", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS",
+    "CLASSPATH", "DOTNET_STARTUP_HOOKS", "PHPRC", "RUSTFLAGS", "ZDOTDIR",
+    "LESSOPEN", "LESSCLOSE", "PAGER", "MANPAGER", "EDITOR", "VISUAL", "BROWSER",
+    "RIPGREP_CONFIG_PATH", "AWKPATH", "AWKLIBPATH",
+})
+_CONTROL_ENV_PREFIXES: tuple[str, ...] = (
+    "LD_", "DYLD_", "GIT_", "PYTHON", "NODE_", "RUBY", "PERL", "BASH_",
+    "SSH_", "DOCKER_", "NPM_CONFIG_", "CARGO_", "RUSTC_",
+)
+_SECRET_ENV_PREFIXES: tuple[str, ...] = (
+    "OPENAI_", "ANTHROPIC_", "AWS_", "AZURE_", "GOOGLE_", "GITHUB_", "GITLAB_",
+)
+
+FileIdentity = tuple[str, int, int, int, int, int]
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutableBinding:
+    """The lookup entry and final executable target selected for one segment."""
+
+    token: str
+    lookup_path: str | None
+    resolved_path: str | None
+    lookup_identity: FileIdentity | None
+    target_identity: FileIdentity | None
+    trusted_system: bool
+    content_digest: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionContext:
+    """Security-relevant snapshot bound to one approval decision."""
+
+    argv: tuple[str, ...]
+    cwd: str
+    cwd_identity: FileIdentity | None
+    role: str
+    sandbox_mode: str
+    sandbox_profile: str
+    network_mode: str
+    environment_digest: str
+    policy_digest: str
+    sandbox_executable_identity: FileIdentity | None
+    executable_bindings: tuple[ExecutableBinding, ...]
+    referenced_files: tuple[tuple[str, str], ...]
+
+# Per-profile timeout ceiling: restricted keeps the old tight cap, dev
+# allows real builds and test runs.
+_TIMEOUT_CEILINGS: dict[str, float] = {"restricted": 30.0, "dev": 300.0}
+
+
+@dataclass(slots=True)
+class ResourceLimits:
+    """Unix rlimits applied to child processes via preexec_fn."""
+
+    cpu_seconds: int
+    address_space_bytes: int
+    nproc: int
+    fsize_bytes: int
+    nofile: int
+
+
+_MB = 1024 * 1024
+
+_PROFILE_RESOURCE_DEFAULTS: dict[str, ResourceLimits] = {
+    # dev: wide enough for builds and test suites, still bounded.
+    "dev": ResourceLimits(
+        cpu_seconds=120,
+        address_space_bytes=2048 * _MB,
+        nproc=4096,
+        fsize_bytes=64 * _MB,
+        nofile=256,
+    ),
+    # restricted: the historical tight limits.
+    "restricted": ResourceLimits(
+        cpu_seconds=8,
+        address_space_bytes=256 * _MB,
+        nproc=256,
+        fsize_bytes=1 * _MB,
+        nofile=64,
+    ),
+}
+
+
+def resolve_resource_limits(profile: str) -> ResourceLimits:
+    """Profile defaults, overridable via AGENT_RLIMIT_* env vars."""
+    base = _PROFILE_RESOURCE_DEFAULTS.get(profile, _PROFILE_RESOURCE_DEFAULTS["dev"])
+    cpu = read_int_env("AGENT_RLIMIT_CPU", default=base.cpu_seconds, min_value=1, max_value=3600)
+    as_mb = read_int_env(
+        "AGENT_RLIMIT_AS_MB",
+        default=base.address_space_bytes // _MB,
+        min_value=64,
+        max_value=16384,
+    )
+    nproc = read_int_env("AGENT_RLIMIT_NPROC", default=base.nproc, min_value=16, max_value=65536)
+    return ResourceLimits(
+        cpu_seconds=cpu,
+        address_space_bytes=as_mb * _MB,
+        nproc=nproc,
+        fsize_bytes=base.fsize_bytes,
+        nofile=base.nofile,
+    )
+
 # Sandbox note is printed at most once per process to avoid log spam
 # when many TerminalExecutor instances are created (tests, delegation).
 _sandbox_note_shown = False
@@ -277,13 +536,25 @@ class TerminalExecutor:
         extra_forbidden: set[str] | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
-        self.timeout = max(1.0, min(timeout, 30.0))
         self.max_output_chars = max(1000, min(max_output_chars, 200_000))
         self._is_windows = os.name == "nt"
         normalized_profile = (profile or "dev").strip().lower()
         if normalized_profile not in _TERMINAL_PROFILES:
             normalized_profile = "dev"
         self.profile = normalized_profile
+        self._timeout_ceiling = _TIMEOUT_CEILINGS[self.profile]
+        self.timeout = max(1.0, min(timeout, self._timeout_ceiling))
+        self._resource_limits = resolve_resource_limits(self.profile)
+        self._authorization_lock = threading.Lock()
+        self._authorized_context_ids: set[int] = set()
+        self._run_lock = threading.RLock()
+        self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
+        self._child_home = Path()
+        self._rotate_child_home()
+
+        # Project permission policy (.kvist/permissions.json). A broken
+        # file yields an empty policy plus a note surfaced by the UI layer.
+        self._policy, self._policy_note = load_policy(self.workspace)
 
         # Build allowlist: common + platform-specific + user-provided
         self._allowed = self._build_allowed_commands()
@@ -297,12 +568,19 @@ class TerminalExecutor:
         if extra_forbidden:
             self._forbidden.update(extra_forbidden)
 
-        # OS sandbox: workspace-only by default, bubblewrap when opted in.
-        # WORKSPACE_ONLY is not process isolation — surface the note once
-        # through the agent UI layer (SafeExecutor.sandbox_note), not via
-        # a raw stderr print.
+        # Capture requested/effective sandbox state.  Auto selects bwrap when
+        # available; its no-bwrap fallback gets stricter approval semantics.
         global _sandbox_note_shown
+        self.sandbox_request = normalize_sandbox_request()
         self.sandbox_mode, self._sandbox_note = detect_sandbox_mode()
+        self._bwrap_path = resolve_bubblewrap_path() if self.sandbox_mode is SandboxMode.BUBBLEWRAP else None
+        self._sandbox_required_unavailable = (
+            self.sandbox_request == "bubblewrap" and self.sandbox_mode is not SandboxMode.BUBBLEWRAP
+        )
+        self._automatic_restricted_fallback = (
+            self.sandbox_request in {"auto", "invalid"}
+            and self.sandbox_mode is SandboxMode.WORKSPACE_ONLY
+        )
         if self._sandbox_note and _sandbox_note_shown:
             self._sandbox_note = ""
         elif self._sandbox_note:
@@ -321,46 +599,248 @@ class TerminalExecutor:
         timeout: float | None = None,
         role: str = "coder",
     ) -> TerminalResult:
-        """Execute a command safely within workspace.
+        """Execute one serialized run with a fresh, private child HOME."""
+        with self._run_lock:
+            self._rotate_child_home()
+            return self._run_once(command, cwd, env_overrides, timeout, role)
 
-        Two-layer gate:
-        1. Allowlist validation (this module). Failure → HITL approval.
-        2. Risk assessment (command_policy.assess_command, role-aware).
-           An allowlisted but risky command → HITL approval.
-        """
-        try:
-            self._validate(command)
-        except TerminalError as validation_error:
-            if not self._request_user_approval(command, str(validation_error)):
-                return TerminalResult(
-                    command=command,
-                    returncode=-1,
-                    stdout="",
-                    stderr=(
-                        "Error: Command execution denied by user for security reasons. "
-                        "Find an alternative way to solve the task without this command."
-                    ),
-                    denied=True,
-                )
-            # User approved — proceed with relaxed validation (skip allowlist check)
-            return self._run_unvalidated(command, cwd, env_overrides, timeout)
+    def _run_once(
+        self,
+        command: list[str],
+        cwd: str | None = None,
+        env_overrides: dict[str, str] | None = None,
+        timeout: float | None = None,
+        role: str = "coder",
+    ) -> TerminalResult:
+        """Execute through the non-bypassable validation and approval pipeline."""
+        if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
+            raise HardDenyError("Hard security denial: command must be a non-empty list of strings")
+        # Own the mutable argv so callers cannot race our checks by retaining
+        # and mutating their list from another thread.
+        command = list(command)
+        role = role if role in {"coder", "devops", "chat"} else "coder"
+        self._refresh_policy()
 
+        # Project deny has first precedence and is itself non-approvable.
+        decision = self._policy_decision(command)
+        if decision == "deny":
+            raise HardDenyError(
+                "Hard security denial: command blocked by the project permission policy (deny rule)"
+            )
+
+        work_dir = self._resolve_cwd(cwd)
+        if self._sandbox_required_unavailable:
+            raise HardDenyError(
+                "Hard security denial: mandatory Bubblewrap sandbox is unavailable"
+            )
+        environment = self._build_env(env_overrides)
+        bindings = self._resolve_executable_bindings(command, work_dir, environment)
+        self._validate_executable_boundaries(command, work_dir, bindings)
+        self._hard_validate(command, work_dir, bindings)
+        initial_context = self._build_execution_context(
+            command,
+            work_dir,
+            role,
+            environment,
+            bindings,
+            sandbox_mode=self.sandbox_mode,
+            network_allowed=sandbox_network_allowed(),
+            bwrap_path=self._bwrap_path,
+        )
         assessment = self._assess_risk(command, role)
-        if assessment.requires_approval:
-            reason = f"Risk assessment: {assessment.reason}"
-            if not self._request_user_approval(command, reason):
-                return TerminalResult(
-                    command=command,
-                    returncode=-1,
-                    stdout="",
-                    stderr=(
-                        "Error: Command execution denied by user for security reasons. "
-                        f"{reason}. Find an alternative way to solve the task without this command."
-                    ),
-                    denied=True,
-                )
 
-        return self._run_unvalidated(command, cwd, env_overrides, timeout)
+        allowlist_error: CommandNotAllowedError | None = None
+        try:
+            self._validate_allowlist(command, bindings)
+        except CommandNotAllowedError as error:
+            allowlist_error = error
+
+        fallback_approval = self._fallback_requires_approval(command, bindings)
+        origin_approval = self._requires_executable_origin_approval(command, bindings)
+        authorization_token = object()
+
+        def execute_authorized(expected_context: ExecutionContext) -> TerminalResult:
+            """Mint a one-shot spawn capability inside this validated run only."""
+            token_id = id(authorization_token)
+            with self._authorization_lock:
+                self._authorized_context_ids.add(token_id)
+            try:
+                return self._execute_validated(
+                    command,
+                    cwd,
+                    env_overrides,
+                    timeout,
+                    role,
+                    expected_context=expected_context,
+                    authorization_token=authorization_token,
+                )
+            finally:
+                with self._authorization_lock:
+                    self._authorized_context_ids.discard(token_id)
+
+        # Intrinsic DANGEROUS always wins over ask/allow and is never
+        # persistable as a repository allow rule.
+        if assessment.risk is RiskLevel.DANGEROUS:
+            return self._approve_or_deny(
+                command,
+                f"Risk assessment: {assessment.reason}",
+                lambda: execute_authorized(initial_context),
+                offer_rule=False,
+            )
+
+        if decision == "ask":
+            return self._approve_or_deny(
+                command,
+                "Project permission policy requires confirmation (ask rule)",
+                lambda: execute_authorized(initial_context),
+                offer_rule=False,
+            )
+
+        if fallback_approval:
+            return self._approve_or_deny(
+                command,
+                "Automatic sandbox fallback requires per-execution approval for arbitrary-code commands",
+                lambda: execute_authorized(initial_context),
+                offer_rule=False,
+            )
+
+        if origin_approval:
+            return self._approve_or_deny(
+                command,
+                "Executable origin is not eligible for trusted-name or project-allow suppression",
+                lambda: execute_authorized(initial_context),
+                offer_rule=False,
+            )
+
+        # A project allow may suppress approval only after hard validation and
+        # only for non-dangerous, non-fallback execution.
+        if decision == "allow":
+            return execute_authorized(initial_context)
+
+        if allowlist_error is not None:
+            return self._approve_or_deny(
+                command,
+                str(allowlist_error),
+                lambda: execute_authorized(initial_context),
+                offer_rule=False,
+            )
+
+        if assessment.requires_approval:
+            return self._approve_or_deny(
+                command,
+                f"Risk assessment: {assessment.reason}",
+                lambda: execute_authorized(initial_context),
+                offer_rule=assessment.risk is RiskLevel.MODERATE,
+            )
+
+        return execute_authorized(initial_context)
+
+    def _approve_or_deny(
+        self,
+        command: list[str],
+        reason: str,
+        execute_authorized: Callable[[], TerminalResult],
+        offer_rule: bool,
+    ) -> TerminalResult:
+        """HITL gate: run on approval, denied TerminalResult otherwise.
+
+        ``offer_rule`` — after an approval of a risk-graded command, offer
+        to persist a project allow-rule. Never offered for hard validation
+        failures: those are non-interactive hard denials.
+        """
+        if not self._request_user_approval(command, reason):
+            return TerminalResult(
+                command=command,
+                returncode=-1,
+                stdout="",
+                stderr=(
+                    "Error: Command execution denied by user for security reasons. "
+                    f"{reason}. Find an alternative way to solve the task without this command."
+                ),
+                denied=True,
+            )
+        result = execute_authorized()
+        if offer_rule:
+            self._offer_allow_rule(command)
+        return result
+
+    def _fallback_requires_approval(
+        self, command: list[str], bindings: tuple[ExecutableBinding, ...] | None = None
+    ) -> bool:
+        if not self._automatic_restricted_fallback:
+            return False
+        for index, segment in enumerate(self._split_pipe_segments(command)):
+            binding = bindings[index] if bindings is not None else None
+            if is_exact_version_probe(segment) and (
+                binding is None or binding.trusted_system
+            ):
+                continue
+            if canonical_executable_name(segment[0]) not in _FALLBACK_READ_ONLY_EXECUTABLES:
+                return True
+        return False
+
+    def _policy_decision(self, command: list[str]) -> str | None:
+        """Worst-per-segment policy decision: deny > ask > allow.
+
+        "allow" requires EVERY pipe segment to match an allow-rule; one
+        deny/ask segment decides for the whole pipeline. A malformed pipe
+        is left for _validate to report.
+        """
+        if not command:
+            return None
+        try:
+            segments = self._split_pipe_segments(command)
+        except TerminalError:
+            return None
+        decisions: list[str | None] = []
+        for segment in segments:
+            normalized = [canonical_executable_name(segment[0]), *segment[1:]]
+            candidates = {self._policy.decide(segment), self._policy.decide(normalized)}
+            if "deny" in candidates:
+                decisions.append("deny")
+            elif "ask" in candidates:
+                decisions.append("ask")
+            elif "allow" in candidates:
+                decisions.append("allow")
+            else:
+                decisions.append(None)
+        if "deny" in decisions:
+            return "deny"
+        if "ask" in decisions:
+            return "ask"
+        if all(item == "allow" for item in decisions):
+            return "allow"
+        return None
+
+    def _refresh_policy(self) -> None:
+        policy, note = load_policy(self.workspace)
+        self._policy = policy
+        self._policy_note = note
+
+    def _offer_allow_rule(self, command: list[str]) -> None:
+        """After an interactive approval, offer "always allow in this repo"."""
+        if not sys.stdin.isatty() or "|" in command:
+            return
+        pattern = _suggest_allow_pattern(command)
+        try:
+            accepted = request_user_confirmation(
+                title="Permission policy",
+                body=(
+                    f"Save allow rule [bold]{pattern}[/bold] to .kvist/permissions.json?\n"
+                    "Matching commands will run without approval in this repo."
+                ),
+                question=f"Always allow '{pattern}' in this repo?",
+            )
+        except TerminalError:
+            return
+        if not accepted:
+            return
+        try:
+            append_allow_rule(self.workspace, pattern)
+        except (OSError, ValueError) as error:
+            print(f"Failed to save allow rule: {error}", file=sys.stderr)
+            return
+        self._policy, self._policy_note = load_policy(self.workspace)
 
     def _assess_risk(self, command: list[str], role: str) -> CommandAssessment:
         """Risk-grade a validated command via command_policy.
@@ -385,18 +865,64 @@ class TerminalExecutor:
             )
         return worst
 
-    def _run_unvalidated(
+    def _execute_validated(
         self,
         command: list[str],
         cwd: str | None = None,
         env_overrides: dict[str, str] | None = None,
         timeout: float | None = None,
+        role: str = "coder",
+        *,
+        expected_context: ExecutionContext,
+        authorization_token: object,
     ) -> TerminalResult:
-        """Execute an already validated (or user-approved) command."""
+        """Repeat hard validation/context construction immediately before spawn."""
+        token_id = id(authorization_token)
+        with self._authorization_lock:
+            if token_id not in self._authorized_context_ids:
+                raise HardDenyError(
+                    "Hard security denial: final execution lacks a one-shot authorization capability"
+                )
+            self._authorized_context_ids.remove(token_id)
+        command_snapshot = list(command)
+        sandbox_mode = self.sandbox_mode
+        network_allowed = sandbox_network_allowed()
+        bwrap_path = self._bwrap_path
+        workspace = self.workspace
+        self._refresh_policy()
+        if self._policy_decision(command_snapshot) == "deny":
+            raise HardDenyError(
+                "Hard security denial: command became blocked by a project deny rule before execution"
+            )
         work_dir = self._resolve_cwd(cwd)
         effective_timeout = self._clamp_timeout(timeout)
         env = self._build_env(env_overrides)
-        actual_command = self._wrap_for_platform(command)
+        bindings = self._resolve_executable_bindings(command_snapshot, work_dir, env)
+        self._validate_executable_boundaries(command_snapshot, work_dir, bindings)
+        self._hard_validate(command_snapshot, work_dir, bindings)
+        context = self._build_execution_context(
+            command_snapshot,
+            work_dir,
+            role,
+            env,
+            bindings,
+            sandbox_mode=sandbox_mode,
+            network_allowed=network_allowed,
+            bwrap_path=bwrap_path,
+        )
+        if context != expected_context:
+            raise HardDenyError(
+                "Hard security denial: approved execution context changed before process creation"
+            )
+        missing = next(
+            (binding.token for binding in bindings[: len(self._split_pipe_segments(command_snapshot))] if not binding.resolved_path),
+            None,
+        )
+        if missing is not None:
+            raise TerminalError(f"Executable not found before process creation: {missing}")
+
+        actual_command = self._materialize_executables(command_snapshot, bindings)
+        actual_command = self._wrap_for_platform(actual_command, bindings)
 
         # Auto-detect pipe usage: if command contains "|", run via sh -c.
         # Each non-pipe token is shell-quoted so arguments with spaces or
@@ -406,19 +932,27 @@ class TerminalExecutor:
                 token if token == "|" else shlex.quote(token)
                 for token in actual_command
             )
-            actual_command = ["sh", "-c", joined]
+            shell_binding = bindings[-1]
+            if not shell_binding.resolved_path or not shell_binding.trusted_system:
+                raise HardDenyError("Hard security denial: trusted pipeline shell is unavailable")
+            actual_command = [shell_binding.resolved_path, "-c", joined]
 
-        actual_command = wrap_command_for_sandbox(
-            actual_command, self.sandbox_mode, self.workspace, work_dir
-        )
+        try:
+            actual_command = wrap_command_for_sandbox(
+                actual_command,
+                sandbox_mode,
+                workspace,
+                work_dir,
+                bwrap_path=bwrap_path,
+                network_allowed=network_allowed,
+            )
+        except ValueError as error:
+            raise HardDenyError(f"Hard security denial: {error}") from error
 
         kwargs: dict[str, Any] = {
             "cwd": work_dir,
-            "capture_output": True,
-            "text": True,
-            "encoding": "utf-8",
-            "errors": "replace",
-            "timeout": effective_timeout,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
             "shell": False,
             "env": env,
         }
@@ -427,64 +961,66 @@ class TerminalExecutor:
             kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
         else:
             kwargs["start_new_session"] = True
-            kwargs["preexec_fn"] = _unix_resource_limits
+            kwargs["preexec_fn"] = functools.partial(_unix_resource_limits, self._resource_limits)
 
         try:
-            proc = subprocess.run(actual_command, **kwargs)
-        except UnicodeDecodeError:
-            # Rare: output contains broken UTF-8 even with errors="replace"
-            kwargs["encoding"] = "utf-8"
-            kwargs["errors"] = "surrogateescape"
-            proc = subprocess.run(actual_command, **kwargs)
-            # Decode safely: replace surrogates with replacement chars
-            stdout_raw = proc.stdout or ""
-            stderr_raw = proc.stderr or ""
-            if isinstance(stdout_raw, str):
-                stdout_raw = stdout_raw.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
-            if isinstance(stderr_raw, str):
-                stderr_raw = stderr_raw.encode("utf-8", errors="replace").decode("utf-8", errors="replace")
-            return TerminalResult(
-                command=command,
-                returncode=proc.returncode,
-                stdout=self._truncate(stdout_raw),
-                stderr=self._truncate(stderr_raw),
-                timed_out=False,
-            )
-        except subprocess.TimeoutExpired:
-            return TerminalResult(
-                command=command,
-                returncode=-1,
-                stdout="",
-                stderr=f"Timeout: command did not complete within {effective_timeout} sec",
-                timed_out=True,
-            )
+            proc = subprocess.Popen(actual_command, **kwargs)
         except FileNotFoundError:
-            raise TerminalError(f"Executable not found: {command[0]}")
+            raise TerminalError(f"Executable not found: {command_snapshot[0]}")
         except OSError as exc:
             raise TerminalError(f"Process launch error: {exc}")
 
+        try:
+            stdout_bytes, stderr_bytes = proc.communicate(timeout=effective_timeout)
+        except subprocess.TimeoutExpired:
+            self._terminate_process_tree(proc)
+            stdout_bytes, stderr_bytes = proc.communicate()
+            return TerminalResult(
+                command=command_snapshot,
+                returncode=-1,
+                stdout=self._truncate(_decode_process_output(stdout_bytes)),
+                stderr=self._truncate(
+                    f"Timeout: command did not complete within {effective_timeout} sec\n"
+                    + _decode_process_output(stderr_bytes)
+                ),
+                timed_out=True,
+            )
+
         return TerminalResult(
-            command=command,
+            command=command_snapshot,
             returncode=proc.returncode,
-            stdout=self._truncate(proc.stdout or ""),
-            stderr=self._truncate(proc.stderr or ""),
+            stdout=self._truncate(_decode_process_output(stdout_bytes)),
+            stderr=self._truncate(_decode_process_output(stderr_bytes)),
             timed_out=False,
         )
+
+    def _terminate_process_tree(self, proc: subprocess.Popen[bytes]) -> None:
+        """Terminate the process group created for this command on Unix."""
+        if self._is_windows:
+            proc.kill()
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            proc.kill()
 
     @classmethod
     def _request_user_approval(cls, command: list[str], error_message: str) -> bool:
         """Interactive approval prompt (Human-in-the-Loop).
 
-        Displays a warning panel via rich, then prompts for
-        y/N via standard input(). After receiving the answer, fully
-        clears the panel and input line from the terminal via ANSI escapes.
+        Displays a warning panel via rich inside the terminal's alternate
+        screen buffer, then prompts for y/N via standard input(). Leaving the
+        alternate buffer restores the previous screen exactly, so the prompt
+        has hard boundaries and never erases output above it.
 
         Before input:
         - Pauses background Live TUI (via suspend callback)
         - Sets global HITL flag (blocks update_live)
 
         After input:
-        - Clears panel + input line (ANSI \\033[F\\033[K × N)
+        - Leaves the alternate screen buffer (previous screen restored)
         - Clears HITL flag
         - Resumes Live TUI (via resume callback)
 
@@ -494,7 +1030,7 @@ class TerminalExecutor:
         import sys
 
         if not sys.stdin.isatty():
-            raise TerminalError(error_message)
+            raise ApprovalRequiredError(error_message)
 
         from rich.console import Console
         from rich.panel import Panel
@@ -522,19 +1058,13 @@ class TerminalExecutor:
                 title_align="left",
                 padding=(1, 2),
             )
-            console.print(panel)
 
-            try:
-                choice = input("Allow execution? [y/N]: ").strip().lower()
-            except EOFError:
-                raise TerminalError(error_message)
-
-            # Clear panel + input line from terminal
-            # Panel ~12 lines + 1 input line = 13; 20 is a safe margin
-            _HITL_CLEAR_LINES = 20
-            for _ in range(_HITL_CLEAR_LINES):
-                sys.stdout.write("\033[F\033[K")
-            sys.stdout.flush()
+            with _alt_screen(console):
+                console.print(panel)
+                try:
+                    choice = input("Allow execution? [y/N]: ").strip().lower()
+                except EOFError:
+                    raise ApprovalRequiredError(error_message)
 
             return choice in ("y", "yes")
         finally:
@@ -547,19 +1077,44 @@ class TerminalExecutor:
     # Validation
     # ------------------------------------------------------------------
 
-    def _validate(self, command: list[str]) -> None:
+    def _validate(self, command: list[str], cwd: str | None = None) -> None:
+        """Backward-compatible full validator used by tests and callers."""
+        work_dir = self._resolve_cwd(cwd)
+        self._hard_validate(command, work_dir)
+        self._validate_allowlist(command)
+
+    def _hard_validate(
+        self,
+        command: list[str],
+        work_dir: Path,
+        bindings: tuple[ExecutableBinding, ...] | None = None,
+    ) -> None:
+        """Authoritative non-overridable validation for every pipe segment."""
         if not command:
-            raise TerminalError("Empty command")
+            raise HardDenyError("Hard security denial: Empty command")
+        if not command[0].strip():
+            raise HardDenyError("Hard security denial: executable token is empty")
+        if any("\x00" in token for token in command):
+            raise HardDenyError("Hard security denial: NUL bytes are forbidden in command arguments")
 
-        # Total length limit
         if sum(len(t) for t in command) > 2000:
-            raise TerminalError("Command too long")
+            raise HardDenyError("Hard security denial: command too long")
 
-        # A command containing "|" later runs via `sh -c`, so EVERY pipe
-        # segment must independently pass the allowlist — otherwise the
-        # first allowed executable would smuggle arbitrary binaries after it.
-        for segment in self._split_pipe_segments(command):
-            self._validate_single(segment)
+        for index, segment in enumerate(self._split_pipe_segments(command)):
+            trusted_probe = bindings is None or bindings[index].trusted_system
+            self._hard_validate_single(segment, work_dir, trusted_probe=trusted_probe)
+
+    def _validate_allowlist(
+        self,
+        command: list[str],
+        bindings: tuple[ExecutableBinding, ...] | None = None,
+    ) -> None:
+        for index, segment in enumerate(self._split_pipe_segments(command)):
+            trusted_probe = bindings is None or bindings[index].trusted_system
+            if is_exact_version_probe(segment) and trusted_probe:
+                continue
+            executable = canonical_executable_name(segment[0])
+            self._require_allowlisted(segment, executable)
 
     def _split_pipe_segments(self, command: list[str]) -> list[list[str]]:
         segments: list[list[str]] = [[]]
@@ -569,49 +1124,425 @@ class TerminalExecutor:
             else:
                 segments[-1].append(token)
         if any(not segment for segment in segments):
-            raise TerminalError("Empty command segment around '|' is forbidden")
+            raise HardDenyError("Hard security denial: Empty command segment around '|' is forbidden")
         return segments
 
-    def _validate_single(self, command: list[str]) -> None:
-        executable = command[0].lower()
+    def _hard_validate_single(
+        self, command: list[str], work_dir: Path, *, trusted_probe: bool = True
+    ) -> None:
+        if not command[0].strip():
+            raise HardDenyError("Hard security denial: executable token is empty")
+        executable = canonical_executable_name(command[0])
 
-        if executable in self._forbidden:
-            raise TerminalError(f"Command '{command[0]}' is forbidden")
+        self._validate_common_tokens(
+            [command[0]], executable, allow_executable_path=True, work_dir=work_dir
+        )
 
+        if executable in self._forbidden and not (
+            is_exact_version_probe(command) and trusted_probe
+        ):
+            raise HardDenyError(
+                f"Hard security denial: command '{command[0]}' is unconditionally forbidden"
+            )
+
+        if executable in {"bash", "sh", "powershell", "pwsh", "cmd", "cmd.exe"}:
+            self._validate_shell_command(command, executable, work_dir)
+            return
+
+        if executable == "find":
+            self._validate_find_arguments(command[1:])
+        if executable == "sort" and _sort_has_output_or_program_option(command[1:]):
+            raise HardDenyError("Hard security denial: sort output/external-program modes are forbidden")
+        if executable == "tree" and _tree_has_output_option(command[1:]):
+            raise HardDenyError("Hard security denial: tree output-file mode is forbidden")
+        if executable == "hostname" and not _hostname_is_read_only(command[1:]):
+            raise HardDenyError("Hard security denial: hostname mutation is forbidden")
+        if executable == "diff" and _diff_has_output_option(command[1:]):
+            raise HardDenyError("Hard security denial: diff output-file mode is forbidden")
+        if executable == "uniq" and _uniq_has_output_operand(command[1:]):
+            raise HardDenyError("Hard security denial: uniq output-file operand is forbidden")
+        if executable == "file" and _file_has_compile_option(command[1:]):
+            raise HardDenyError("Hard security denial: file magic compilation mode is forbidden")
+        if executable == "git":
+            self._validate_git_arguments(command, work_dir)
+        self._validate_common_tokens(command[1:], executable, work_dir=work_dir)
+        if executable == "grep":
+            self._validate_grep_arguments(command[1:])
+        if executable == "rg":
+            self._validate_rg_arguments(command, work_dir)
+        if executable == "make":
+            self._validate_make_argument_clusters(command[1:])
+        self._validate_interpreter_modes(command, executable, work_dir)
+
+    def _validate_git_arguments(self, command: list[str], work_dir: Path) -> None:
+        """Reject Git syntax that can hide subcommands or launch configured helpers."""
+        if is_exact_version_probe(command):
+            return
+        # Kvist's allowlist, risk policy, and deterministic hardening all bind
+        # to direct ``git SUBCOMMAND`` syntax. Ambiguous/global-option forms
+        # fail closed; callers can select a repository with ``cwd`` instead.
+        if len(command) > 1 and command[1].startswith("-"):
+            raise HardDenyError(
+                "Hard security denial: Git global options before the subcommand are forbidden"
+            )
+        if len(command) > 1 and command[1].casefold() not in _KNOWN_GIT_SUBCOMMANDS:
+            raise HardDenyError(
+                "Hard security denial: unknown Git subcommands/aliases are forbidden"
+            )
+        if (
+            len(command) > 1
+            and command[1].casefold() == "tag"
+            and _git_tag_has_signing_or_verification_option(command[2:])
+        ):
+            raise HardDenyError(
+                "Hard security denial: Git tag signing/verification helpers are forbidden"
+            )
+        if (
+            len(command) > 1
+            and command[1].casefold() in {"branch", "tag"}
+            and _git_ref_filter_has_signature_atom(command[2:])
+        ):
+            raise HardDenyError(
+                "Hard security denial: Git ref signature formatting is forbidden"
+            )
+        git_dir = self._git_metadata_directory(work_dir)
+        subcommand = command[1].casefold() if len(command) > 1 else ""
+        self._deny_git_repository_helpers(git_dir, subcommand)
+        read_args = _git_read_operation_arguments(command)
+        if len(command) > 1 and command[1].casefold() in {"status", "diff"}:
+            self._deny_git_worktree_filters(git_dir)
+        if (
+            len(command) > 1
+            and command[1].casefold() == "status"
+            and _git_has_unsafe_submodule_option(command[2:])
+        ):
+            raise HardDenyError(
+                "Hard security denial: recursive Git submodule inspection is forbidden"
+            )
+        if read_args is None:
+            return
+        if _has_long_output_option(read_args):
+            raise HardDenyError("Hard security denial: Git output-file mode is forbidden")
+        if _git_has_external_helper_option(read_args):
+            raise HardDenyError(
+                "Hard security denial: Git external diff/textconv execution is forbidden"
+            )
+        if _git_has_remerge_diff_option(read_args):
+            raise HardDenyError(
+                "Hard security denial: Git remerge diffs may execute custom merge drivers"
+            )
+        if _git_has_unsafe_submodule_option(read_args):
+            raise HardDenyError(
+                "Hard security denial: recursive Git submodule inspection is forbidden"
+            )
+        if _git_has_signature_verification_option(read_args):
+            raise HardDenyError(
+                "Hard security denial: Git signature-verifier execution is forbidden"
+            )
+
+    def _git_metadata_directory(self, work_dir: Path) -> Path | None:
+        """Locate repository metadata without allowing a gitdir workspace escape."""
+        current = work_dir
+        while _is_relative_to(current, self.workspace):
+            marker = current / ".git"
+            if marker.is_dir():
+                resolved = marker.resolve(strict=True)
+                if not _is_relative_to(resolved, self.workspace):
+                    raise HardDenyError(
+                        "Hard security denial: Git metadata resolves outside the workspace"
+                    )
+                return resolved
+            if marker.is_file():
+                try:
+                    pointer = marker.resolve(strict=True)
+                    if not _is_relative_to(pointer, self.workspace):
+                        raise HardDenyError(
+                            "Hard security denial: Git metadata pointer resolves outside the workspace"
+                        )
+                    content = pointer.read_text(encoding="utf-8", errors="strict")
+                except HardDenyError:
+                    raise
+                except (OSError, UnicodeError) as error:
+                    raise HardDenyError(
+                        f"Hard security denial: cannot inspect Git metadata pointer: {error}"
+                    ) from error
+                prefix, separator, value = content.strip().partition(":")
+                if prefix.casefold() != "gitdir" or not separator or not value.strip():
+                    raise HardDenyError("Hard security denial: malformed .git metadata pointer")
+                resolved = (current / value.strip()).resolve(strict=True)
+                if not resolved.is_dir() or not _is_relative_to(resolved, self.workspace):
+                    raise HardDenyError(
+                        "Hard security denial: Git metadata resolves outside the workspace"
+                    )
+                return resolved
+            if current == self.workspace or current.parent == current:
+                break
+            current = current.parent
+        if (work_dir / "HEAD").is_file() and (work_dir / "config").is_file():
+            return work_dir
+        return None
+
+    def _deny_git_worktree_filters(self, git_dir: Path | None) -> None:
+        """SAFE Git worktree reads may not invoke clean/process filter commands."""
+        if git_dir is None:
+            return
+        for config in self._git_configuration_paths(git_dir):
+            content = self._read_git_configuration(config)
+            if re.search(r"(?im)^\s*\[\s*(?:filter|include|includeIf)\b", content):
+                raise HardDenyError(
+                    "Hard security denial: Git worktree filters/includes may execute helpers"
+                )
+
+    def _deny_git_repository_helpers(
+        self, git_dir: Path | None, subcommand: str
+    ) -> None:
+        """Reject effective repository config that can launch hidden helpers."""
+        if git_dir is None:
+            return
+        for config in self._git_configuration_paths(git_dir):
+            content = self._read_git_configuration(config)
+            if re.search(r"(?im)^\s*\[\s*include(?:If)?\b", content):
+                raise HardDenyError(
+                    "Hard security denial: Git configuration includes may import executable settings"
+                )
+            alternate_commands = _git_config_section_values(
+                content, "core", "alternateRefsCommand"
+            )
+            if alternate_commands or re.search(
+                r"(?im)^\s*core\.alternateRefsCommand\s*=", content
+            ):
+                raise HardDenyError(
+                    "Hard security denial: Git alternate-refs commands are forbidden"
+                )
+            if subcommand in {"branch", "tag"}:
+                for value in _git_config_section_values(content, subcommand, "sort"):
+                    normalized = value.casefold().lstrip("-")
+                    if normalized.startswith("signature:") or re.search(
+                        r"%\(\*?signature", normalized
+                    ):
+                        raise HardDenyError(
+                            "Hard security denial: Git ref signature sorting is forbidden"
+                        )
+
+    def _read_git_configuration(self, config: Path) -> str:
+        try:
+            resolved = config.resolve(strict=True)
+            if not _is_relative_to(resolved, self.workspace):
+                raise HardDenyError(
+                    "Hard security denial: Git configuration resolves outside the workspace"
+                )
+            if resolved.stat().st_size > 1024 * 1024:
+                raise HardDenyError("Hard security denial: Git configuration is too large")
+            return resolved.read_text(encoding="utf-8", errors="strict")
+        except HardDenyError:
+            raise
+        except (OSError, UnicodeError) as error:
+            raise HardDenyError(
+                f"Hard security denial: cannot inspect Git configuration: {error}"
+            ) from error
+
+    def _git_common_directory(self, git_dir: Path) -> Path:
+        """Resolve a linked worktree's common metadata directory fail-closed."""
+        marker = git_dir / "commondir"
+        if not marker.exists() and not marker.is_symlink():
+            return git_dir
+        try:
+            resolved_marker = marker.resolve(strict=True)
+            if not _is_relative_to(resolved_marker, self.workspace):
+                raise HardDenyError(
+                    "Hard security denial: Git commondir pointer resolves outside the workspace"
+                )
+            if resolved_marker.stat().st_size > 4096:
+                raise HardDenyError("Hard security denial: Git commondir pointer is too large")
+            value = resolved_marker.read_text(encoding="utf-8", errors="strict").strip()
+            if not value or "\n" in value or "\r" in value or "\x00" in value:
+                raise HardDenyError("Hard security denial: malformed Git commondir pointer")
+            common_dir = (git_dir / value).resolve(strict=True)
+        except HardDenyError:
+            raise
+        except (OSError, UnicodeError, RuntimeError) as error:
+            raise HardDenyError(
+                f"Hard security denial: cannot inspect Git commondir pointer: {error}"
+            ) from error
+        if not common_dir.is_dir() or not _is_relative_to(common_dir, self.workspace):
+            raise HardDenyError(
+                "Hard security denial: Git common metadata resolves outside the workspace"
+            )
+        return common_dir
+
+    def _git_configuration_paths(self, git_dir: Path) -> list[Path]:
+        """Return existing common and per-worktree Git configuration files."""
+        common_dir = self._git_common_directory(git_dir)
+        candidates = [common_dir / "config", git_dir / "config", git_dir / "config.worktree"]
+        paths: list[Path] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if not candidate.exists() and not candidate.is_symlink():
+                continue
+            key = str(candidate)
+            if key not in seen:
+                seen.add(key)
+                paths.append(candidate)
+        return paths
+
+    def _require_allowlisted(self, command: list[str], executable: str) -> None:
         if executable not in self._allowed:
-            raise TerminalError(
+            raise CommandNotAllowedError(
                 f"Command '{command[0]}' is not allowed. "
                 f"Allowed: {', '.join(sorted(self._allowed))}"
             )
 
-        if executable in {"bash", "sh", "powershell", "pwsh", "cmd", "cmd.exe"}:
-            self._validate_shell_command(command, executable)
-        else:
-            self._validate_standard_command(command, executable)
-
-    def _validate_standard_command(self, command: list[str], executable: str) -> None:
         # Subcommand validation (for git and similar)
         allowed_sub = self._allowed.get(executable)
         if allowed_sub is not None and len(command) > 1:
-            sub = command[1].lstrip("-")
+            sub = command[1].lstrip("-").casefold()
             if sub and sub not in allowed_sub:
-                raise TerminalError(
+                raise CommandNotAllowedError(
                     f"Subcommand '{command[1]}' is not allowed for '{command[0]}'"
                 )
 
-        self._validate_common_tokens(command[1:], executable)
-        self._validate_interpreter_inline_modes(command, executable)
+    def _validate_find_arguments(self, args: list[str]) -> None:
+        for token in args:
+            if is_find_action_token(token):
+                raise HardDenyError(
+                    f"Hard security denial: find action predicate '{token}' is forbidden: "
+                    "it deletes files or executes commands"
+                )
 
-    def _validate_shell_command(self, command: list[str], executable: str) -> None:
+    def _validate_make_argument_clusters(self, args: list[str]) -> None:
+        """Reject Make syntax that can hide execution inputs or inline code."""
+        options_with_values = {"C", "E", "f", "I", "j", "l", "o", "W"}
+        canonical_long_inputs = {"--directory", "--file", "--makefile"}
+        assignment_operators = (":::=", "::=", ":=", "+=", "?=", "!=", "=")
+        makefile_options = {"-f", "--file", "--makefile"}
+        for index, token in enumerate(args):
+            flag = token.partition("=")[0]
+            stripped = token.lstrip()
+            makefiles_suffix = (
+                stripped[len("MAKEFILES") :].lstrip()
+                if stripped.startswith("MAKEFILES")
+                else ""
+            )
+            if makefiles_suffix and makefiles_suffix.startswith(assignment_operators):
+                raise HardDenyError(
+                    "Hard security denial: command-line MAKEFILES inputs are forbidden"
+                )
+            if (
+                token == "-f-"
+                or token in {"--file=-", "--makefile=-"}
+                or (
+                    token in makefile_options
+                    and index + 1 < len(args)
+                    and args[index + 1] == "-"
+                )
+            ):
+                raise HardDenyError(
+                    "Hard security denial: Makefile input from stdin is forbidden"
+                )
+            if flag != "--" and flag.startswith("--"):
+                if "--temp-stdin".startswith(flag):
+                    raise HardDenyError(
+                        "Hard security denial: Make temporary-stdin input is forbidden"
+                    )
+                if "--eval".startswith(flag):
+                    raise HardDenyError(
+                        "Hard security denial: Make inline eval is forbidden"
+                    )
+                if any(
+                    option.startswith(flag) and flag != option
+                    for option in canonical_long_inputs
+                ):
+                    raise HardDenyError(
+                        f"Hard security denial: abbreviated Make input option '{flag}' is forbidden"
+                    )
+                continue
+            if token == "-E":
+                raise HardDenyError(
+                    "Hard security denial: Make inline eval is forbidden"
+                )
+            if not token.startswith("-") or token.startswith("--") or len(token) <= 2:
+                continue
+            for position, option in enumerate(token[1:]):
+                if option == "E":
+                    raise HardDenyError(
+                        "Hard security denial: Make inline eval is forbidden"
+                    )
+                if option not in options_with_values:
+                    continue
+                if position > 0:
+                    raise HardDenyError(
+                        f"Hard security denial: ambiguous clustered Make option '{token}' is forbidden"
+                    )
+                # The remainder is this option's value, not more flags.
+                break
+
+    def _validate_grep_arguments(self, args: list[str]) -> None:
+        index = 0
+        while index < len(args):
+            token = args[index]
+            lowered = token.casefold()
+            if lowered in {"-r", "--recursive", "--dereference-recursive"}:
+                raise HardDenyError("Hard security denial: recursive grep is forbidden")
+            if token.startswith("-") and not token.startswith("--") and any(
+                flag in token[1:] for flag in ("r", "R")
+            ):
+                raise HardDenyError("Hard security denial: recursive grep is forbidden")
+            if lowered.startswith("--directories=") and lowered.partition("=")[2] == "recurse":
+                raise HardDenyError("Hard security denial: recursive grep is forbidden")
+            if lowered == "-d" and index + 1 < len(args):
+                if args[index + 1].casefold() == "recurse":
+                    raise HardDenyError("Hard security denial: recursive grep is forbidden")
+                index += 2
+                continue
+            if lowered.startswith("-d") and lowered[2:] == "recurse":
+                raise HardDenyError("Hard security denial: recursive grep is forbidden")
+            index += 1
+
+    def _validate_rg_arguments(self, command: list[str], work_dir: Path) -> None:
+        """Allow ripgrep only over explicit regular files, never directory trees."""
+        safe_flags = {
+            "-n", "--line-number", "-N", "--no-line-number",
+            "-i", "--ignore-case", "-s", "--case-sensitive", "-S", "--smart-case",
+            "-F", "--fixed-strings", "-w", "--word-regexp", "-x", "--line-regexp",
+            "-v", "--invert-match", "-q", "--quiet", "-c", "--count",
+            "--count-matches", "--no-messages", "--json", "--pcre2",
+        }
+        positionals: list[str] = []
+        after_separator = False
+        for token in command[1:]:
+            if token == "--" and not after_separator:
+                after_separator = True
+                continue
+            if not after_separator and token in safe_flags:
+                continue
+            if not after_separator and token.startswith("-"):
+                raise HardDenyError(
+                    f"Hard security denial: unsupported ripgrep option '{token}' could enable recursive access"
+                )
+            positionals.append(token)
+        if len(positionals) < 2:
+            raise HardDenyError(
+                "Hard security denial: ripgrep requires explicit regular-file operands"
+            )
+        for token in positionals[1:]:
+            path = self._resolve_workspace_reference(token, work_dir, "ripgrep input")
+            if not path.is_file():
+                raise HardDenyError(
+                    "Hard security denial: recursive ripgrep directory traversal is forbidden"
+                )
+
+    def _validate_shell_command(self, command: list[str], executable: str, work_dir: Path) -> None:
         if executable in {"bash", "sh"}:
             if len(command) != 2:
-                raise TerminalError(f"For '{command[0]}' only script file execution within workspace is allowed")
-            self._validate_script_argument(command[1], executable)
+                raise HardDenyError(
+                    f"Hard security denial: for '{command[0]}' only a workspace script file is allowed"
+                )
+            self._validate_script_argument(command[1], executable, work_dir)
             return
 
         if executable in {"powershell", "pwsh"}:
             if len(command) < 3:
-                raise TerminalError(f"For '{command[0]}' only -File <script.ps1> mode is allowed")
+                raise HardDenyError(f"Hard security denial: for '{command[0]}' only -File is allowed")
 
             script_index: int | None = None
             index = 1
@@ -619,7 +1550,7 @@ class TerminalExecutor:
                 token = command[index]
                 lowered = token.lower()
                 if lowered in _POWERSHELL_COMMAND_FLAGS:
-                    raise TerminalError(f"Inline mode '{token}' is forbidden for '{command[0]}'")
+                    raise HardDenyError(f"Hard security denial: inline mode '{token}' is forbidden")
                 if lowered in _POWERSHELL_FILE_FLAGS:
                     script_index = index + 1
                     break
@@ -628,47 +1559,47 @@ class TerminalExecutor:
                     continue
                 if lowered in _POWERSHELL_SAFE_FLAGS_WITH_VALUE:
                     if index + 1 >= len(command):
-                        raise TerminalError(f"Flag '{token}' requires a safe value before -File")
-                    self._validate_common_tokens([command[index + 1]])
+                        raise HardDenyError(f"Hard security denial: flag '{token}' requires a value")
+                    self._validate_common_tokens([command[index + 1]], work_dir=work_dir)
                     index += 2
                     continue
-                raise TerminalError(f"For '{command[0]}' only -File <script.ps1> mode is allowed")
+                raise HardDenyError(f"Hard security denial: for '{command[0]}' only -File is allowed")
 
             if script_index is None or script_index >= len(command):
-                raise TerminalError(f"No script file specified after -File for '{command[0]}'")
+                raise HardDenyError(f"Hard security denial: no script follows -File for '{command[0]}'")
 
             if len(command) != script_index + 1:
-                raise TerminalError(f"Only one script file is allowed after -File for '{command[0]}'")
+                raise HardDenyError(f"Hard security denial: only one PowerShell script is allowed")
 
             script = command[script_index]
-            self._validate_common_tokens(command[1:script_index])
-            self._validate_script_argument(script, executable)
+            self._validate_common_tokens(command[1:script_index], work_dir=work_dir)
+            self._validate_script_argument(script, executable, work_dir)
             return
 
-        self._validate_windows_cmd_command(command)
+        self._validate_windows_cmd_command(command, work_dir)
 
-    def _validate_windows_cmd_command(self, command: list[str]) -> None:
+    def _validate_windows_cmd_command(self, command: list[str], work_dir: Path) -> None:
         if len(command) < 3 or command[1].lower() != "/c":
-            raise TerminalError(f"For '{command[0]}' only /c <builtin|script> mode is allowed")
+            raise HardDenyError(f"Hard security denial: for '{command[0]}' only /c is allowed")
 
         if len(command) != 3:
-            raise TerminalError(f"Only one safe argument is allowed after /c for '{command[0]}'")
+            raise HardDenyError(f"Hard security denial: only one safe argument is allowed after /c")
 
         payload = command[2].strip()
         if not payload:
-            raise TerminalError("Empty string after /c is forbidden")
+            raise HardDenyError("Hard security denial: empty string after /c is forbidden")
         if _CMD_DANGEROUS_INLINE_RE.search(payload):
-            raise TerminalError("Dangerous shell operators in cmd /c are forbidden")
+            raise HardDenyError("Hard security denial: dangerous shell operators in cmd /c")
         if _SUBST_RE.search(payload):
-            raise TerminalError("Command substitution in cmd /c is forbidden")
+            raise HardDenyError("Hard security denial: command substitution in cmd /c")
 
         if self._looks_like_relative_script(payload, _SCRIPT_EXTENSIONS["cmd"]):
-            self._validate_script_argument(payload, "cmd")
+            self._validate_script_argument(payload, "cmd", work_dir)
             return
 
         builtin, separator, remainder = payload.partition(" ")
         if builtin.lower() not in _WINDOWS_CMD_BUILTINS:
-            raise TerminalError(f"For '{command[0]}' only CMD builtins or .bat/.cmd from workspace are allowed")
+            raise HardDenyError(f"Hard security denial: unsupported cmd /c payload")
         if not separator:
             return
 
@@ -677,48 +1608,401 @@ class TerminalExecutor:
             return
 
         if not all(_WINDOWS_CMD_BUILTIN_RE.fullmatch(token) for token in remainder_tokens):
-            raise TerminalError("CMD builtin arguments contain invalid characters")
+            raise HardDenyError("Hard security denial: CMD builtin arguments contain invalid characters")
 
-        self._validate_common_tokens(remainder_tokens)
+        self._validate_common_tokens(remainder_tokens, work_dir=work_dir)
 
-    def _validate_common_tokens(self, tokens: list[str], executable: str = "") -> None:
-        for token in tokens:
+    def _validate_common_tokens(
+        self,
+        tokens: list[str],
+        executable: str = "",
+        *,
+        allow_executable_path: bool = False,
+        work_dir: Path | None = None,
+    ) -> None:
+        for token_index, token in enumerate(tokens):
             # Exact match only with shell operator (not substring!)
             if token in _FORBIDDEN_OPERATORS:
-                raise TerminalError(f"Shell operator '{token}' is forbidden")
+                raise HardDenyError(f"Hard security denial: shell operator '{token}' is forbidden")
 
             # Detect command substitution inside arguments: $(…), `…`, ${…}
             if _SUBST_RE.search(token):
-                raise TerminalError(
-                    "Command substitution ($(), ``, ${}) in arguments is forbidden"
+                raise HardDenyError(
+                    "Hard security denial: Command substitution ($(), ``, ${}) is forbidden"
                 )
 
-            if self._is_absolute_path(token) and executable.casefold() not in _ABSOLUTE_PATH_SAFE_COMMANDS:
-                raise TerminalError("Absolute paths are forbidden in arguments")
+            # Secret paths are forbidden for every command, including
+            # read-only ones, on both relative and absolute paths.
+            self._check_secret_token(token)
+            if _INTERNAL_TOKEN_RE.search(token.replace("\\", "/")):
+                raise HardDenyError("Hard security denial: access to internal .kvist paths is forbidden")
 
-            # UNC paths on Windows (\\server\share)
-            if token.startswith("\\\\"):
-                raise TerminalError("UNC paths are forbidden in arguments")
+            # Reapply path-boundary checks to attached option/response values;
+            # ``--config=/host`` must not hide a path that ``/host`` would
+            # have rejected as a standalone token.
+            docker_host_path = (
+                executable.casefold() == "docker"
+                and _docker_path_is_risk_graded(tokens, token_index)
+            )
+            for fragment in _argument_path_fragments(token):
+                if (
+                    self._is_absolute_path(fragment)
+                    and not allow_executable_path
+                    and executable.casefold() not in _ABSOLUTE_PATH_SAFE_COMMANDS
+                    and not docker_host_path
+                ):
+                    raise HardDenyError(
+                        "Hard security denial: Absolute paths are forbidden in arguments"
+                    )
+                if fragment.startswith("\\\\") and not docker_host_path:
+                    raise HardDenyError("Hard security denial: UNC paths are forbidden in arguments")
+                segments = [s for s in fragment.replace("\\", "/").split("/") if s]
+                if ".." in segments and not docker_host_path:
+                    raise HardDenyError("Hard security denial: Path traversal (..) is forbidden")
 
-            # Path traversal
-            segments = [s for s in token.replace("\\", "/").split("/") if s]
-            if ".." in segments:
-                raise TerminalError("Path traversal (..) is forbidden")
+            if work_dir is not None and not allow_executable_path:
+                self._check_existing_sensitive_reference(token, work_dir)
 
-    def _validate_interpreter_inline_modes(self, command: list[str], executable: str) -> None:
-        if executable in {"python", "python3", "py"} and any(arg == "-c" for arg in command[1:]):
-            raise TerminalError(f"Inline mode '-c' is forbidden for '{command[0]}'")
-        if executable == "node" and any(arg in {"-e", "--eval"} for arg in command[1:]):
-            raise TerminalError("Inline mode '-e' is forbidden for 'node'")
-        if executable == "sed" and any(
-            arg == "-i" or arg.startswith("-i") or arg == "--in-place" for arg in command[1:]
+    def _check_secret_token(self, token: str) -> None:
+        if _SECRET_TOKEN_RE.search(token.replace("\\", "/")):
+            raise HardDenyError("Hard security denial: access to secret files is forbidden")
+
+    def _check_existing_sensitive_reference(self, token: str, work_dir: Path) -> None:
+        """Re-check canonical targets for direct, attached, and response paths."""
+        for fragment in _argument_path_fragments(token):
+            if not fragment or "\x00" in fragment:
+                continue
+            try:
+                raw = Path(fragment).expanduser()
+                candidate = raw if raw.is_absolute() else work_dir / raw
+                if not candidate.exists() and not candidate.is_symlink():
+                    continue
+                canonical = candidate.resolve(strict=True)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            self._check_resolved_sensitive_path(canonical, "command argument")
+
+    def _validate_interpreter_modes(
+        self,
+        command: list[str],
+        executable: str,
+        work_dir: Path,
+    ) -> None:
+        if is_exact_version_probe(command):
+            return
+        if executable in {"python", "python3", "py"} and any(
+            arg == "-c" or arg.startswith("-c") for arg in command[1:]
         ):
-            raise TerminalError("In-place mode 'sed -i' is forbidden: only sed -n (read-only) is allowed")
+            raise HardDenyError(f"Hard security denial: Inline mode '-c' is forbidden for Python")
+        if executable == "node" and any(
+            arg in {"-e", "--eval", "-p", "--print"}
+            or arg.startswith(("--eval=", "--print=", "-e"))
+            for arg in command[1:]
+        ):
+            raise HardDenyError("Hard security denial: inline Node execution is forbidden")
+        if executable == "node" and any(
+            arg in {"-r", "--require", "--loader", "--import"}
+            or arg.startswith(("-r", "--require=", "--loader=", "--experimental-loader=", "--import="))
+            or arg in {"--experimental-loader", "--run"}
+            or arg.startswith("--run=")
+            for arg in command[1:]
+        ):
+            raise HardDenyError("Hard security denial: Node preload/loader execution is forbidden")
+        if executable == "ruby" and any(
+            arg == "-e"
+            or arg.startswith("-e")
+            or arg in {"-r", "--require", "-I", "--include", "-C", "-X", "-S", "-x"}
+            or arg.startswith(("--require=", "--include=", "-r", "-I", "-C", "-X", "-S", "-x"))
+            for arg in command[1:]
+        ):
+            raise HardDenyError(
+                "Hard security denial: Ruby inline/preload/search/chdir modes are forbidden"
+            )
+        if executable == "perl" and any(
+            arg in {"-e", "-E", "-M", "-m", "-I", "-S", "-x"}
+            or arg.startswith(("-e", "-E", "-M", "-m", "-I", "-S", "-x"))
+            for arg in command[1:]
+        ):
+            raise HardDenyError(
+                "Hard security denial: Perl inline/preload/search/chdir modes are forbidden"
+            )
+        if executable == "php" and any(
+            arg in {"-a", "-r", "-B", "-R", "-E", "-d", "-c", "-S", "--interactive", "--define", "--php-ini", "--server", "--process-begin", "--process-code", "--process-end"}
+            or arg.startswith(("-r", "-B", "-R", "-E", "-d", "-c", "-S", "--define=", "--php-ini=", "--server=", "--process-begin=", "--process-code=", "--process-end="))
+            for arg in command[1:]
+        ):
+            raise HardDenyError(
+                "Hard security denial: PHP inline/config/server execution modes are forbidden"
+            )
+        if executable in {"python", "python3", "py"} and any(
+            arg in {"-i", "--inspect"} or arg.startswith("--inspect=")
+            for arg in command[1:]
+        ):
+            raise HardDenyError("Hard security denial: Python interactive mode is forbidden")
+        if executable == "node" and any(
+            arg in {"-i", "--interactive"} for arg in command[1:]
+        ):
+            raise HardDenyError("Hard security denial: Node interactive mode is forbidden")
+        if executable in {"python", "python3", "py", "node", "ruby", "perl", "php"}:
+            mode, script = _interpreter_target(command, executable)
+            if script == "-":
+                raise HardDenyError("Hard security denial: interpreter stdin execution is forbidden")
+            if mode == "none":
+                raise HardDenyError(
+                    f"Hard security denial: '{command[0]}' must select a concrete workspace script"
+                )
+        if executable in {"awk", "gawk"}:
+            self._validate_awk(command, work_dir)
+        if executable == "sed":
+            self._validate_sed(command, work_dir)
 
-    def _validate_script_argument(self, script: str, executable: str) -> None:
-        self._validate_common_tokens([script])
+    def _validate_awk(self, command: list[str], work_dir: Path) -> None:
+        programs: list[str] = []
+        index = 1
+        while index < len(command):
+            token = command[index]
+            if (
+                token in {"-p", "-o", "-d", "-D", "--profile", "--pretty-print", "--dump-variables", "--debug"}
+                or token.startswith(("--profile=", "--pretty-print=", "--dump-variables=", "--debug="))
+                or (
+                    token.startswith("-")
+                    and not token.startswith("--")
+                    and len(token) > 2
+                    and token[1] in {"p", "o", "d", "D"}
+                )
+            ):
+                raise HardDenyError("Hard security denial: AWK diagnostic/output-file modes are forbidden")
+            if (
+                token in {"-i", "--include"}
+                or (token.startswith("-i") and token != "-i")
+                or token.startswith("--include=")
+            ):
+                raise HardDenyError("Hard security denial: AWK source inclusion is forbidden")
+            if (
+                token in {"-l", "--load"}
+                or (token.startswith("-l") and token != "-l")
+                or token.startswith("--load=")
+            ):
+                raise HardDenyError("Hard security denial: dynamic AWK extensions are forbidden")
+            if token in {"-f", "--file", "-E", "--exec"}:
+                if index + 1 >= len(command):
+                    raise HardDenyError("Hard security denial: AWK program-file option requires a file")
+                programs.append(self._read_inspectable_script(command[index + 1], work_dir, "AWK"))
+                index += 2
+                continue
+            if token.startswith("-f") and token != "-f":
+                programs.append(self._read_inspectable_script(token[2:], work_dir, "AWK"))
+                index += 1
+                continue
+            if token == "--":
+                if index + 1 >= len(command):
+                    raise HardDenyError("Hard security denial: AWK requires a program after '--'")
+                programs.append(command[index + 1])
+                break
+            if token.startswith("-E") and token != "-E":
+                programs.append(self._read_inspectable_script(token[2:], work_dir, "AWK"))
+                index += 1
+                continue
+            if token.startswith("--file="):
+                programs.append(self._read_inspectable_script(token.partition("=")[2], work_dir, "AWK"))
+                index += 1
+                continue
+            if token.startswith("--exec="):
+                programs.append(self._read_inspectable_script(token.partition("=")[2], work_dir, "AWK"))
+                index += 1
+                continue
+            if token in {"-e", "--source"}:
+                if index + 1 >= len(command):
+                    raise HardDenyError("Hard security denial: AWK source option requires a program")
+                programs.append(command[index + 1])
+                index += 2
+                continue
+            if token.startswith("-e") and token != "-e":
+                programs.append(token[2:])
+                index += 1
+                continue
+            if token.startswith("--source="):
+                programs.append(token.partition("=")[2])
+                index += 1
+                continue
+            if token in {"-v", "--assign", "-F", "--field-separator"}:
+                if index + 1 >= len(command):
+                    raise HardDenyError(f"Hard security denial: AWK option '{token}' requires a value")
+                index += 2
+                continue
+            if (
+                (token.startswith("-v") and token != "-v")
+                or (token.startswith("-F") and token != "-F")
+                or token.startswith(("--assign=", "--field-separator="))
+            ):
+                index += 1
+                continue
+            if token == "-W" or token.startswith("-W"):
+                raise HardDenyError(
+                    "Hard security denial: implementation-specific AWK -W modes are forbidden"
+                )
+            if token in _AWK_SAFE_LONG_OPTIONS or token.startswith("--lint="):
+                index += 1
+                continue
+            if token.startswith("--"):
+                raise HardDenyError(
+                    f"Hard security denial: unsupported or abbreviated AWK option '{token}'"
+                )
+            if token in _AWK_SAFE_SHORT_OPTIONS:
+                index += 1
+                continue
+            if token.startswith("-"):
+                raise HardDenyError(
+                    f"Hard security denial: unsupported or ambiguous AWK option '{token}'"
+                )
+            programs.append(token)
+            # The first positional token is the inline program; remaining
+            # positionals are input files and need no language scan.
+            break
+
+        for program in programs:
+            stripped = _strip_awk_strings(program.replace("\\\n", ""))
+            if _AWK_SYSTEM_RE.search(stripped):
+                raise HardDenyError("Hard security denial: AWK system() calls are forbidden")
+            if _AWK_LOAD_RE.search(stripped):
+                raise HardDenyError("Hard security denial: AWK dynamic extension loading is forbidden")
+            if _AWK_INCLUDE_RE.search(stripped):
+                raise HardDenyError("Hard security denial: AWK source inclusion is forbidden")
+            if re.search(r"@[A-Za-z_][A-Za-z0-9_:]*\s*\(", stripped):
+                raise HardDenyError("Hard security denial: indirect AWK function execution is forbidden")
+            if _AWK_EXTERNAL_PIPE_RE.search(stripped):
+                raise HardDenyError("Hard security denial: AWK getline with a pipe/external pipe is forbidden")
+            if re.search(r">{1,2}", stripped):
+                raise HardDenyError("Hard security denial: AWK output redirection is forbidden")
+
+    def _validate_sed(self, command: list[str], work_dir: Path) -> None:
+        scripts: list[str] = []
+        explicit_scripts = False
+        index = 1
+        while index < len(command):
+            token = command[index]
+            lowered = token.casefold()
+            if lowered == "--in-place" or lowered.startswith("--in-place="):
+                raise HardDenyError("Hard security denial: In-place sed mode is forbidden")
+            if token in {"-e", "--expression"}:
+                if index + 1 >= len(command):
+                    raise HardDenyError("Hard security denial: sed expression flag requires a script")
+                scripts.append(command[index + 1])
+                explicit_scripts = True
+                index += 2
+                continue
+            if token.startswith("--expression="):
+                scripts.append(token.partition("=")[2])
+                explicit_scripts = True
+                index += 1
+                continue
+            if token in {"-f", "--file"}:
+                if index + 1 >= len(command):
+                    raise HardDenyError("Hard security denial: sed -f requires a script file")
+                scripts.append(self._read_inspectable_script(command[index + 1], work_dir, "sed"))
+                explicit_scripts = True
+                index += 2
+                continue
+            if token.startswith("--file="):
+                scripts.append(self._read_inspectable_script(token.partition("=")[2], work_dir, "sed"))
+                explicit_scripts = True
+                index += 1
+                continue
+            if lowered in {
+                "--quiet", "--silent", "--regexp-extended", "--posix", "--sandbox",
+                "--unbuffered", "--null-data", "--debug", "--separate",
+            }:
+                index += 1
+                continue
+            if token.startswith("--"):
+                raise HardDenyError(f"Hard security denial: unsupported sed option '{token}'")
+            if token.startswith("-") and not token.startswith("--"):
+                cluster = token[1:]
+                position = 0
+                consumed_script = False
+                while position < len(cluster):
+                    option = cluster[position]
+                    if option == "i":
+                        raise HardDenyError("Hard security denial: In-place sed mode is forbidden")
+                    if option == "e":
+                        attached = cluster[position + 1 :]
+                        if attached:
+                            scripts.append(attached)
+                            consumed_script = True
+                        elif index + 1 < len(command):
+                            scripts.append(command[index + 1])
+                            index += 1
+                            consumed_script = True
+                        else:
+                            raise HardDenyError("Hard security denial: sed -e requires a script")
+                        explicit_scripts = True
+                        break
+                    if option == "f":
+                        attached = cluster[position + 1 :]
+                        if not attached:
+                            if index + 1 >= len(command):
+                                raise HardDenyError("Hard security denial: sed -f requires a script file")
+                            attached = command[index + 1]
+                            index += 1
+                        scripts.append(self._read_inspectable_script(attached, work_dir, "sed"))
+                        explicit_scripts = True
+                        consumed_script = True
+                        break
+                    if option == "l":
+                        attached = cluster[position + 1 :]
+                        if attached:
+                            if not attached.isdigit():
+                                raise HardDenyError(
+                                    "Hard security denial: ambiguous sed -l option is forbidden"
+                                )
+                        else:
+                            if index + 1 >= len(command) or not command[index + 1].isdigit():
+                                raise HardDenyError(
+                                    "Hard security denial: sed -l requires a numeric line length"
+                                )
+                            index += 1
+                        break
+                    position += 1
+                index += 1
+                if consumed_script:
+                    continue
+                continue
+            if not explicit_scripts and not scripts:
+                scripts.append(token)
+            index += 1
+
+        for script in scripts:
+            if _sed_script_is_dangerous(script):
+                raise HardDenyError(
+                    "Hard security denial: sed execute/write commands (e, w, W, s///e, s///w) are forbidden"
+                )
+
+    def _read_inspectable_script(self, token: str, work_dir: Path, language: str) -> str:
+        if token == "-":
+            raise HardDenyError(
+                f"Hard security denial: {language} program input from stdin is forbidden"
+            )
+        path = self._resolve_workspace_reference(token, work_dir, f"{language} script")
+        if not path.exists():
+            raise HardDenyError(f"Hard security denial: {language} script file does not exist")
+        if not path.is_file():
+            raise HardDenyError(f"Hard security denial: {language} script is not a regular file")
+        try:
+            if path.stat().st_size > 1024 * 1024:
+                raise HardDenyError(f"Hard security denial: {language} script is too large to inspect")
+            return path.read_text(encoding="utf-8", errors="strict")
+        except UnicodeError as error:
+            raise HardDenyError(f"Hard security denial: {language} script is not UTF-8") from error
+        except OSError as error:
+            raise HardDenyError(f"Hard security denial: cannot inspect {language} script: {error}") from error
+
+    def _validate_script_argument(self, script: str, executable: str, work_dir: Path) -> None:
+        self._validate_common_tokens([script], work_dir=work_dir)
         if not self._looks_like_relative_script(script, _SCRIPT_EXTENSIONS[executable]):
-            raise TerminalError(f"For '{executable}' only relative script file within workspace is allowed")
+            raise HardDenyError(
+                f"Hard security denial: for '{executable}' only a workspace script file is allowed"
+            )
+        self._resolve_workspace_reference(script, work_dir, f"{executable} script")
 
     def _looks_like_relative_script(self, path_token: str, extensions: tuple[str, ...]) -> bool:
         normalized = path_token.replace("\\", "/")
@@ -750,33 +2034,508 @@ class TerminalExecutor:
     def _resolve_cwd(self, cwd: str | None) -> Path:
         """Resolves working directory strictly within workspace."""
         if not cwd:
-            return self.workspace
-
-        if self._is_absolute_path(cwd) or cwd.startswith("\\\\"):
-            raise TerminalError("Absolute paths are forbidden for cwd")
-
-        candidate = (self.workspace / cwd).resolve()
+            candidate = self.workspace
+        else:
+            if self._is_absolute_path(cwd) or cwd.startswith("\\\\"):
+                raise HardDenyError("Hard security denial: absolute paths are forbidden for cwd")
+            if ".." in [part for part in cwd.replace("\\", "/").split("/") if part]:
+                raise HardDenyError("Hard security denial: working directory is outside workspace")
+            try:
+                candidate = (self.workspace / cwd).resolve(strict=True)
+            except (OSError, RuntimeError) as error:
+                raise HardDenyError(
+                    f"Hard security denial: cannot resolve working directory: {error}"
+                ) from error
         try:
             candidate.relative_to(self.workspace)
         except ValueError:
-            raise TerminalError("Working directory is outside workspace")
+            raise HardDenyError("Hard security denial: working directory is outside workspace")
 
         if not candidate.is_dir():
-            raise TerminalError(f"Working directory not found: {cwd}")
+            raise HardDenyError(f"Hard security denial: working directory not found: {cwd}")
+
+        self._check_resolved_sensitive_path(candidate, "working directory")
 
         return candidate
 
     def _clamp_timeout(self, timeout: float | None) -> float:
         if timeout is None:
             return self.timeout
-        return max(1.0, min(timeout, 30.0))
+        return max(1.0, min(timeout, self._timeout_ceiling))
 
-    def _build_env(self, overrides: dict[str, str] | None) -> dict[str, str] | None:
-        if not overrides:
-            return None
-        env = dict(os.environ)
-        env.update(overrides)
+    def _resolve_workspace_reference(self, token: str, work_dir: Path, kind: str) -> Path:
+        raw = Path(token).expanduser()
+        try:
+            candidate = (raw if raw.is_absolute() else work_dir / raw).resolve(strict=False)
+        except (OSError, RuntimeError) as error:
+            raise HardDenyError(
+                f"Hard security denial: cannot resolve {kind}: {error}"
+            ) from error
+        try:
+            candidate.relative_to(self.workspace)
+        except ValueError as error:
+            raise HardDenyError(
+                f"Hard security denial: {kind} resolves outside the workspace"
+            ) from error
+        self._check_resolved_sensitive_path(candidate, kind)
+        return candidate
+
+    def _check_resolved_sensitive_path(self, candidate: Path, kind: str) -> None:
+        normalized = candidate.as_posix()
+        if _INTERNAL_TOKEN_RE.search(normalized):
+            raise HardDenyError(
+                f"Hard security denial: {kind} points into internal .kvist state"
+            )
+        if _SECRET_TOKEN_RE.search(normalized):
+            raise HardDenyError(
+                f"Hard security denial: {kind} points into secret material"
+            )
+
+    def _build_env(self, overrides: dict[str, str] | None) -> dict[str, str]:
+        """Build a child environment from an allowlist; never inherit wholesale."""
+        self._validate_child_home()
+        env: dict[str, str] = {
+            "PATH": _controlled_child_path(),
+            "HOME": str(self._child_home),
+            "TMPDIR": "/tmp",
+            "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_ATTR_NOSYSTEM": "1",
+            "GIT_NO_LAZY_FETCH": "1",
+        }
+        explicitly_allowed = _explicit_child_env_names()
+        for name, value in os.environ.items():
+            upper = name.upper()
+            if _is_blocked_child_env_name(upper):
+                continue
+            if upper in _SAFE_CHILD_ENV_NAMES or upper.startswith("LC_") or upper in explicitly_allowed:
+                env[name] = value
+
+        if overrides is None:
+            return env
+        if not isinstance(overrides, dict):
+            raise HardDenyError("Hard security denial: environment overrides must be a string mapping")
+        for name, value in overrides.items():
+            if not isinstance(name, str) or not _ENV_NAME_RE.fullmatch(name):
+                raise HardDenyError("Hard security denial: invalid environment override name")
+            if not isinstance(value, str):
+                raise HardDenyError(f"Hard security denial: environment override '{name}' is not a string")
+            upper = name.upper()
+            if _is_blocked_child_env_name(upper) or upper in {"PATH", "HOME", "TMPDIR"}:
+                raise HardDenyError(
+                    f"Hard security denial: environment override '{name}' is secret-bearing or execution-controlling"
+                )
+            if upper not in _SAFE_CHILD_ENV_NAMES and not upper.startswith("LC_") and upper not in explicitly_allowed:
+                raise HardDenyError(
+                    f"Hard security denial: environment override '{name}' is not in AGENT_CHILD_ENV_ALLOW"
+                )
+            env[name] = value
         return env
+
+    def _rotate_child_home(self) -> None:
+        previous = self._child_home_manager
+        manager = tempfile.TemporaryDirectory(
+            prefix="kvist-home-", ignore_cleanup_errors=True
+        )
+        path = Path(manager.name)
+        try:
+            path.chmod(0o700)
+        except OSError as error:
+            manager.cleanup()
+            raise HardDenyError(
+                f"Hard security denial: cannot secure child HOME: {error}"
+            ) from error
+        self._child_home_manager = manager
+        self._child_home = path
+        if previous is not None:
+            previous.cleanup()
+
+    def _validate_child_home(self) -> None:
+        try:
+            info = self._child_home.lstat()
+            entries = list(self._child_home.iterdir())
+        except OSError as error:
+            raise HardDenyError(
+                f"Hard security denial: child HOME is unavailable: {error}"
+            ) from error
+        if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
+            raise HardDenyError("Hard security denial: child HOME is not a real directory")
+        if info.st_mode & 0o077:
+            raise HardDenyError("Hard security denial: child HOME permissions are not private")
+        if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+            raise HardDenyError("Hard security denial: child HOME has the wrong owner")
+        if entries:
+            raise HardDenyError("Hard security denial: child HOME is not empty")
+
+    def _build_execution_context(
+        self,
+        command: list[str],
+        work_dir: Path,
+        role: str,
+        env: dict[str, str],
+        bindings: tuple[ExecutableBinding, ...],
+        *,
+        sandbox_mode: SandboxMode,
+        network_allowed: bool,
+        bwrap_path: str | None,
+    ) -> ExecutionContext:
+        referenced = tuple(self._hash_referenced_files(command, work_dir))
+        environment_payload = json.dumps(sorted(env.items()), ensure_ascii=False, separators=(",", ":"))
+        policy_payload = json.dumps(
+            {
+                "allow": self._policy.allow,
+                "deny": self._policy.deny,
+                "ask": self._policy.ask,
+                "note": self._policy_note,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        sandbox_identity = (
+            _path_identity(Path(bwrap_path)) if bwrap_path else None
+        )
+        return ExecutionContext(
+            argv=tuple(command),
+            cwd=str(work_dir),
+            cwd_identity=_path_identity(work_dir),
+            role=role,
+            sandbox_mode=sandbox_mode.value,
+            sandbox_profile=self.profile,
+            network_mode="allow" if network_allowed else "deny",
+            environment_digest=hashlib.sha256(environment_payload.encode("utf-8")).hexdigest(),
+            policy_digest=hashlib.sha256(policy_payload.encode("utf-8")).hexdigest(),
+            sandbox_executable_identity=sandbox_identity,
+            executable_bindings=bindings,
+            referenced_files=referenced,
+        )
+
+    def _resolve_executable(self, token: str, work_dir: Path, env: dict[str, str]) -> Path | None:
+        binding = self._resolve_executable_binding(token, work_dir, env)
+        return Path(binding.resolved_path) if binding.resolved_path else None
+
+    def _resolve_executable_bindings(
+        self, command: list[str], work_dir: Path, env: dict[str, str]
+    ) -> tuple[ExecutableBinding, ...]:
+        bindings: list[ExecutableBinding] = []
+        for segment in self._split_pipe_segments(command):
+            token = segment[0]
+            if (
+                self._is_windows
+                and is_bare_executable_token(token)
+                and token.casefold() in _WINDOWS_CMD_BUILTINS
+            ):
+                cmd_binding = self._resolve_executable_binding("cmd.exe", work_dir, env)
+                binding = ExecutableBinding(
+                    token=token,
+                    lookup_path=cmd_binding.lookup_path,
+                    resolved_path=cmd_binding.resolved_path,
+                    lookup_identity=cmd_binding.lookup_identity,
+                    target_identity=cmd_binding.target_identity,
+                    trusted_system=cmd_binding.trusted_system,
+                    content_digest=cmd_binding.content_digest,
+                )
+            else:
+                binding = self._resolve_executable_binding(token, work_dir, env)
+            bindings.append(binding)
+        if "|" in command:
+            bindings.append(self._resolve_executable_binding("sh", work_dir, env))
+        return tuple(bindings)
+
+    def _resolve_executable_binding(
+        self, token: str, work_dir: Path, env: dict[str, str]
+    ) -> ExecutableBinding:
+        lookup: Path | None
+        if not is_bare_executable_token(token):
+            raw = Path(token).expanduser()
+            lookup = raw if raw.is_absolute() else work_dir / raw
+            lookup = Path(os.path.abspath(lookup))
+        else:
+            found = shutil.which(token, path=env["PATH"])
+            lookup = Path(found).absolute() if found else None
+
+        resolved: Path | None = None
+        if lookup is not None:
+            try:
+                candidate = lookup.resolve(strict=True)
+                if candidate.is_file():
+                    resolved = candidate
+            except (OSError, RuntimeError):
+                resolved = None
+
+        trusted = bool(
+            lookup is not None
+            and resolved is not None
+            and _is_trusted_system_executable(lookup, resolved)
+        )
+        digest: str | None = None
+        if resolved is not None and not trusted:
+            try:
+                digest = _sha256_file(resolved)
+            except OSError as error:
+                raise HardDenyError(
+                    f"Hard security denial: cannot hash executable '{token}': {error}"
+                ) from error
+        return ExecutableBinding(
+            token=token,
+            lookup_path=str(lookup) if lookup is not None else None,
+            resolved_path=str(resolved) if resolved is not None else None,
+            lookup_identity=_path_entry_identity(lookup) if lookup is not None else None,
+            target_identity=_path_identity(resolved) if resolved is not None else None,
+            trusted_system=trusted,
+            content_digest=digest,
+        )
+
+    def _validate_executable_boundaries(
+        self,
+        command: list[str],
+        work_dir: Path,
+        bindings: tuple[ExecutableBinding, ...],
+    ) -> None:
+        segments = self._split_pipe_segments(command)
+        for index, segment in enumerate(segments):
+            token = segment[0]
+            binding = bindings[index]
+            if binding.resolved_path:
+                self._check_resolved_sensitive_path(
+                    Path(binding.resolved_path), "executable"
+                )
+            if is_bare_executable_token(token):
+                continue
+
+            raw = Path(token).expanduser()
+            lookup = raw if raw.is_absolute() else work_dir / raw
+            lookup = Path(os.path.abspath(lookup))
+            lookup_in_workspace = _is_relative_to(lookup, self.workspace)
+            target_in_workspace = bool(
+                binding.resolved_path
+                and _is_relative_to(Path(binding.resolved_path), self.workspace)
+            )
+            if lookup_in_workspace and binding.resolved_path and not target_in_workspace:
+                raise HardDenyError(
+                    "Hard security denial: executable symlink resolves outside the workspace"
+                )
+            if not lookup_in_workspace and not binding.trusted_system:
+                raise HardDenyError(
+                    "Hard security denial: path-qualified executable is outside trusted system roots"
+                )
+
+        if "|" in command:
+            shell_binding = bindings[-1]
+            if not shell_binding.resolved_path or not shell_binding.trusted_system:
+                raise HardDenyError(
+                    "Hard security denial: trusted pipeline shell is unavailable"
+                )
+
+    def _requires_executable_origin_approval(
+        self, command: list[str], bindings: tuple[ExecutableBinding, ...]
+    ) -> bool:
+        for index, segment in enumerate(self._split_pipe_segments(command)):
+            if bindings[index].trusted_system:
+                continue
+            executable = canonical_executable_name(segment[0])
+            if executable in self._allowed or is_exact_version_probe(segment):
+                return True
+        return False
+
+    def _materialize_executables(
+        self,
+        command: list[str],
+        bindings: tuple[ExecutableBinding, ...],
+    ) -> list[str]:
+        materialized: list[str] = []
+        for segment_index, segment in enumerate(self._split_pipe_segments(command)):
+            if segment_index:
+                materialized.append("|")
+            binding = bindings[segment_index]
+            is_builtin = (
+                self._is_windows
+                and is_bare_executable_token(segment[0])
+                and segment[0].casefold() in _WINDOWS_CMD_BUILTINS
+            )
+            materialized.append(
+                segment[0]
+                if is_builtin or not binding.resolved_path
+                else binding.resolved_path
+            )
+            args = list(segment[1:])
+            if canonical_executable_name(segment[0]) == "git" and not is_exact_version_probe(segment):
+                args = _harden_git_arguments(args)
+            materialized.extend(args)
+        return materialized
+
+    def _hash_referenced_files(self, command: list[str], work_dir: Path) -> list[tuple[str, str]]:
+        paths: dict[str, Path] = {}
+        for segment in self._split_pipe_segments(command):
+            for path in self._referenced_files_for_segment(segment, work_dir):
+                if not path.exists():
+                    continue
+                try:
+                    canonical = path.resolve(strict=True)
+                except (OSError, RuntimeError) as error:
+                    raise HardDenyError(
+                        f"Hard security denial: cannot resolve referenced execution input: {error}"
+                    ) from error
+                if not canonical.is_file():
+                    raise HardDenyError("Hard security denial: referenced execution input is not a regular file")
+                try:
+                    relative = canonical.relative_to(self.workspace).as_posix()
+                except ValueError as error:
+                    raise HardDenyError(
+                        "Hard security denial: referenced execution input is outside the workspace"
+                    ) from error
+                self._check_resolved_sensitive_path(canonical, "referenced execution input")
+                paths[relative] = canonical
+        hashed: list[tuple[str, str]] = []
+        for relative, path in sorted(paths.items()):
+            try:
+                digest = _sha256_file(path)
+            except OSError as error:
+                raise HardDenyError(
+                    f"Hard security denial: cannot hash referenced execution input '{relative}': {error}"
+                ) from error
+            hashed.append((relative, digest))
+        return hashed
+
+    def _referenced_files_for_segment(self, command: list[str], work_dir: Path) -> list[Path]:
+        executable = canonical_executable_name(command[0])
+        found: list[Path] = []
+
+        if is_exact_version_probe(command):
+            return found
+
+        if executable in {"bash", "sh"} and len(command) == 2:
+            found.append(self._resolve_workspace_reference(command[1], work_dir, "script"))
+        elif executable in {"powershell", "pwsh"}:
+            script = _option_value(command, {"-file", "-f"}, casefold=True)
+            if script:
+                found.append(self._resolve_workspace_reference(script, work_dir, "PowerShell script"))
+        elif executable in {"cmd", "cmd.exe"} and len(command) == 3:
+            payload = command[2]
+            if self._looks_like_relative_script(payload, _SCRIPT_EXTENSIONS[executable]):
+                found.append(self._resolve_workspace_reference(payload, work_dir, "CMD script"))
+        elif executable in {"python", "python3", "py", "node", "ruby", "perl", "php"}:
+            script = _direct_interpreter_script(command, executable)
+            if script:
+                found.append(self._resolve_workspace_reference(script, work_dir, "interpreter script"))
+            found.extend(self._existing_workspace_file_arguments(command[1:], work_dir))
+        elif executable in {"awk", "gawk", "sed"}:
+            for token in _script_file_arguments(command):
+                found.append(self._resolve_workspace_reference(token, work_dir, f"{executable} script"))
+        elif executable == "make":
+            make_dir = self._effective_option_directory(
+                command, work_dir, {"-C", "--directory"}, sequential=True
+            )
+            makefiles = _option_values(command, {"-f", "--file", "--makefile"})
+            if makefiles:
+                for makefile in makefiles:
+                    found.append(self._resolve_workspace_reference(makefile, make_dir, "Makefile"))
+            else:
+                for name in ("GNUmakefile", "makefile", "Makefile"):
+                    candidate = make_dir / name
+                    if candidate.is_file():
+                        found.append(candidate)
+                        break
+        elif executable == "cargo":
+            manifest = _option_value(command, {"--manifest-path"})
+            if manifest:
+                found.append(self._resolve_workspace_reference(manifest, work_dir, "Cargo manifest"))
+            else:
+                candidate = _find_parent_file(work_dir, self.workspace, "Cargo.toml")
+                if candidate:
+                    found.append(candidate)
+        elif executable == "go":
+            go_dir = self._effective_option_directory(command, work_dir, {"-C"})
+            candidate = _find_parent_file(go_dir, self.workspace, "go.mod")
+            if candidate:
+                found.append(candidate)
+            found.extend(self._existing_workspace_file_arguments(command[1:], go_dir))
+        elif executable == "cmake":
+            source = _option_value(command, {"-S", "--source"})
+            if source:
+                source_dir = self._resolve_workspace_reference(source, work_dir, "CMake source")
+            else:
+                source_dir = self._cmake_positional_source(command, work_dir) or work_dir
+            found.append(source_dir / "CMakeLists.txt")
+        elif executable == "ninja":
+            ninja_dir = self._effective_option_directory(command, work_dir, {"-C"})
+            build_files = _option_values(command, {"-f"}) or ["build.ninja"]
+            for build_file in build_files:
+                found.append(self._resolve_workspace_reference(build_file, ninja_dir, "Ninja build file"))
+        elif executable in {"npm", "npx", "pnpm", "yarn"}:
+            directory_flags = {
+                "npm": {"--prefix"},
+                "npx": {"--prefix"},
+                "pnpm": {"--dir", "--prefix", "-C"},
+                "yarn": {"--cwd"},
+            }[executable]
+            package_dir = self._effective_option_directory(command, work_dir, directory_flags)
+            found.append(package_dir / "package.json")
+        elif executable == "git":
+            git_dir = self._git_metadata_directory(work_dir)
+            if git_dir is not None:
+                commondir = git_dir / "commondir"
+                if commondir.exists() or commondir.is_symlink():
+                    found.append(commondir)
+                found.extend(self._git_configuration_paths(git_dir))
+                common_dir = self._git_common_directory(git_dir)
+                for hooks in {git_dir / "hooks", common_dir / "hooks"}:
+                    if hooks.is_dir():
+                        for hook in hooks.iterdir():
+                            if hook.is_file() and os.access(hook, os.X_OK):
+                                found.append(hook)
+        return found
+
+    def _effective_option_directory(
+        self,
+        command: list[str],
+        work_dir: Path,
+        names: set[str],
+        *,
+        sequential: bool = False,
+    ) -> Path:
+        current = work_dir
+        for value in _option_values(command, names):
+            base = current if sequential else work_dir
+            current = self._resolve_workspace_reference(value, base, "tool working directory")
+            if not current.is_dir():
+                # The tool will report a missing directory; keeping the
+                # canonical path still makes the approval context stable.
+                break
+        return current
+
+    def _cmake_positional_source(self, command: list[str], work_dir: Path) -> Path | None:
+        for token in command[1:]:
+            if token.startswith("-"):
+                continue
+            try:
+                candidate = self._resolve_workspace_reference(token, work_dir, "CMake source")
+            except HardDenyError:
+                raise
+            if candidate.is_dir() and (candidate / "CMakeLists.txt").exists():
+                return candidate
+        return None
+
+    def _existing_workspace_file_arguments(self, args: list[str], work_dir: Path) -> list[Path]:
+        """Bind plausible directly named files without guessing option arity."""
+        found: dict[str, Path] = {}
+        for token in args:
+            candidates = [token]
+            if "=" in token:
+                candidates.append(token.partition("=")[2])
+            for value in candidates:
+                if not value or value.startswith("-"):
+                    continue
+                try:
+                    raw = Path(value).expanduser()
+                    candidate = raw if raw.is_absolute() else work_dir / raw
+                    if not candidate.exists() and not candidate.is_symlink():
+                        continue
+                    resolved = self._resolve_workspace_reference(value, work_dir, "interpreter input")
+                except (OSError, RuntimeError, ValueError):
+                    continue
+                if resolved.is_file():
+                    found[str(resolved)] = resolved
+        return list(found.values())
 
     @staticmethod
     def _escape_cmd_arg(arg: str) -> str:
@@ -793,12 +2552,17 @@ class TerminalExecutor:
             escaped.append(ch)
         return "".join(escaped)
 
-    def _wrap_for_platform(self, command: list[str]) -> list[str]:
+    def _wrap_for_platform(
+        self, command: list[str], bindings: tuple[ExecutableBinding, ...]
+    ) -> list[str]:
         """On Windows wraps CMD built-in commands through cmd.exe /c."""
         if self._is_windows and command[0].lower() in _WINDOWS_CMD_BUILTINS:
+            cmd_path = bindings[0].resolved_path
+            if not cmd_path or not bindings[0].trusted_system:
+                raise HardDenyError("Hard security denial: trusted cmd.exe is unavailable")
             # Escape arguments to prevent shell injection via & | && etc.
             safe_args = [self._escape_cmd_arg(a) for a in command]
-            return ["cmd.exe", "/c"] + safe_args
+            return [cmd_path, "/c"] + safe_args
         return command
 
     def _truncate(self, text: str) -> str:
@@ -810,25 +2574,565 @@ class TerminalExecutor:
         )
 
 
+def _git_config_section_values(content: str, section: str, key: str) -> list[str]:
+    """Extract simple scalar values from an exact, unsubsectioned Git section."""
+    values: list[str] = []
+    section_pattern = re.compile(
+        rf"(?ims)^\s*\[\s*{re.escape(section)}\s*\]\s*"
+        rf"(.*?)(?=^\s*\[|\Z)"
+    )
+    key_pattern = re.compile(
+        rf"(?im)^\s*{re.escape(key)}\s*=\s*(.*?)\s*$"
+    )
+    for match in section_pattern.finditer(content):
+        values.extend(value.group(1) for value in key_pattern.finditer(match.group(1)))
+    return values
+
+
+def _harden_git_arguments(args: list[str]) -> list[str]:
+    """Disable repository-configured hooks/helpers for approved Git reads."""
+    hardened = [
+        "-c", "core.fsmonitor=false",
+        "-c", "log.showSignature=false",
+        "-c", "format.pretty=medium",
+        "-c", "log.diffMerges=off",
+        "-c", "diff.submodule=short",
+        "-c", "diff.ignoreSubmodules=all",
+        "-c", "core.alternateRefsCommand=",
+        "-c", "branch.sort=refname",
+        "-c", "tag.sort=refname",
+        "--no-optional-locks",
+    ]
+    if not args:
+        return hardened
+    subcommand = args[0].casefold()
+    helper_flags = ["--no-ext-diff", "--no-textconv"]
+    submodule_flags = ["--ignore-submodules=all"]
+    if subcommand == "status":
+        return hardened + [args[0]] + submodule_flags + args[1:]
+    if subcommand in {"diff", "log", "show"}:
+        present = set(args[1:])
+        return (
+            hardened
+            + [args[0]]
+            + [flag for flag in helper_flags if flag not in present]
+            + submodule_flags
+            + args[1:]
+        )
+    if (
+        subcommand == "stash"
+        and len(args) >= 2
+        and args[1].casefold() in {"list", "show"}
+    ):
+        present = set(args[2:])
+        return (
+            hardened
+            + args[:2]
+            + [flag for flag in helper_flags if flag not in present]
+            + submodule_flags
+            + args[2:]
+        )
+    return hardened + args
+
+
+def _argument_path_fragments(token: str) -> set[str]:
+    """Return direct and common attached option/response path candidates."""
+    fragments = {token}
+    if "=" in token:
+        fragments.add(token.partition("=")[2])
+    if token.startswith("@") and len(token) > 1:
+        fragments.add(token[1:])
+    for prefix in ("-f", "-E", "-C", "-S"):
+        if token.startswith(prefix) and token != prefix:
+            fragments.add(token[len(prefix) :])
+    return fragments
+
+
+def _docker_path_is_risk_graded(tokens: list[str], index: int) -> bool:
+    """Host-path Docker options are authorized by DANGEROUS risk, not path hiding."""
+    path_flags = {
+        "-v", "--volume", "--mount", "--mount-add", "--volumes-from", "--device",
+        "--build-context", "--secret", "--ssh", "--output", "-o", "--cache-from",
+        "--cache-to", "--file", "-f",
+    }
+    token = tokens[index]
+    flag = token.partition("=")[0]
+    if flag in path_flags or (
+        token.startswith("-o") and not token.startswith("--")
+    ):
+        return True
+    if token.startswith("-") and not token.startswith("--") and "v" in token[1:]:
+        return True
+    if index == 0:
+        return False
+    previous = tokens[index - 1]
+    previous_flag = previous.partition("=")[0]
+    return previous_flag in path_flags or (
+        previous.startswith("-")
+        and not previous.startswith("--")
+        and "v" in previous[1:]
+    )
+
+
+def _controlled_child_path() -> str:
+    if os.name == "nt":
+        return os.defpath
+    paths = (
+        "/usr/sbin", "/usr/bin", "/sbin", "/bin",
+    )
+    existing = [path for path in paths if Path(path).is_dir()]
+    return os.pathsep.join(existing) or os.defpath
+
+
+def _explicit_child_env_names() -> set[str]:
+    raw = os.getenv("AGENT_CHILD_ENV_ALLOW", "")
+    names: set[str] = set()
+    for item in raw.split(","):
+        name = item.strip().upper()
+        if _ENV_NAME_RE.fullmatch(name) and not _is_blocked_child_env_name(name):
+            names.add(name)
+    return names
+
+
+def _is_blocked_child_env_name(upper: str) -> bool:
+    return (
+        bool(_SECRET_ENV_RE.search(upper))
+        or upper.startswith(_SECRET_ENV_PREFIXES)
+        or upper in _CONTROL_ENV_NAMES
+        or upper.startswith(_CONTROL_ENV_PREFIXES)
+    )
+
+
+def _path_identity(path: Path) -> FileIdentity | None:
+    try:
+        resolved = path.resolve(strict=True)
+        info = resolved.stat()
+    except OSError:
+        return None
+    return (
+        str(resolved),
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _path_entry_identity(path: Path) -> FileIdentity | None:
+    try:
+        absolute = Path(os.path.abspath(path))
+        info = absolute.lstat()
+    except OSError:
+        return None
+    return (
+        str(absolute),
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _is_relative_to(path: Path, boundary: Path) -> bool:
+    try:
+        path.relative_to(boundary)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:
+    """Trust only fixed system roots that the current user cannot mutate."""
+    if os.name == "nt":
+        system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+        roots = [system_root / "System32", system_root]
+    else:
+        roots = [Path("/usr"), Path("/bin"), Path("/sbin")]
+
+    canonical_roots: list[Path] = []
+    for root in roots:
+        try:
+            candidate = root.resolve(strict=True)
+        except OSError:
+            continue
+        if candidate not in canonical_roots:
+            canonical_roots.append(candidate)
+
+    try:
+        lookup_parent = lookup.parent.resolve(strict=True)
+        target = resolved.resolve(strict=True)
+    except OSError:
+        return False
+    matching_root = next(
+        (
+            root
+            for root in canonical_roots
+            if _is_relative_to(lookup_parent, root) and _is_relative_to(target, root)
+        ),
+        None,
+    )
+    if matching_root is None:
+        return False
+
+    paths_to_check = [target]
+    for start in (lookup_parent, target.parent):
+        current = start
+        while True:
+            if current not in paths_to_check:
+                paths_to_check.append(current)
+            if current == matching_root:
+                break
+            if current.parent == current:
+                return False
+            current = current.parent
+    return not any(_path_is_user_mutable(path) for path in paths_to_check)
+
+
+def _path_is_user_mutable(path: Path) -> bool:
+    try:
+        info = path.stat()
+    except OSError:
+        return True
+    if not hasattr(os, "geteuid"):
+        return bool(info.st_mode & stat.S_IWOTH)
+    if info.st_uid == os.geteuid():
+        return True
+    try:
+        if os.access(path, os.W_OK, effective_ids=True):
+            return True
+    except TypeError:
+        if os.access(path, os.W_OK):
+            return True
+    if info.st_mode & stat.S_IWOTH:
+        return True
+    try:
+        groups = {os.getegid(), *os.getgroups()}
+    except OSError:
+        groups = {os.getegid()}
+    return bool(info.st_mode & stat.S_IWGRP and info.st_gid in groups)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(128 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _decode_process_output(value: bytes | str | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return value.decode("utf-8", errors="replace")
+
+
+def _strip_awk_strings(program: str) -> str:
+    """Blank quoted AWK string contents while preserving operators outside."""
+    output: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for char in program:
+        if escaped:
+            output.append(" ")
+            escaped = False
+            continue
+        if quote is not None:
+            if char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            output.append(" ")
+            continue
+        # POSIX AWK has only double-quoted string literals. Apostrophes are
+        # ordinary regexp/program characters and must not hide later tokens.
+        if char == '"':
+            quote = '"'
+            output.append(" ")
+            continue
+        output.append(char)
+    return "".join(output)
+
+
+def _sed_script_is_dangerous(script: str) -> bool:
+    if _SED_STANDALONE_WRITE_RE.search(script):
+        return True
+    # Check the complete script before splitting on semicolons: GNU sed's
+    # alternate-regex addresses may legally contain semicolons inside their
+    # delimiter pair (for example ``\%a;b%w file``).
+    if _sed_command_after_addresses(script) in {"e", "w", "W"}:
+        return True
+    for start in [0, *(match.end() for match in re.finditer(r"[;\n{}]", script))]:
+        if _sed_command_after_addresses(script[start:]) in {"e", "w", "W"}:
+            return True
+    length = len(script)
+    for index, char in enumerate(script[:-1]):
+        if char != "s":
+            continue
+        delimiter = script[index + 1]
+        if delimiter.isalnum() or delimiter.isspace() or delimiter == "\\":
+            continue
+        position = index + 2
+        complete = True
+        for _ in range(2):
+            escaped = False
+            while position < length:
+                current = script[position]
+                position += 1
+                if escaped:
+                    escaped = False
+                elif current == "\\":
+                    escaped = True
+                elif current == delimiter:
+                    break
+            else:
+                complete = False
+                break
+        if not complete:
+            continue
+        flags_start = position
+        while position < length and script[position] not in ";\n":
+            position += 1
+        flags = script[flags_start:position].lstrip()
+        flag_word = flags.split(maxsplit=1)[0] if flags else ""
+        # Numeric occurrence selectors and benign g/p/I/M flags are allowed;
+        # e or w/W changes the command into execution or a filesystem write.
+        if any(flag in flag_word for flag in ("e", "w", "W")):
+            return True
+    return False
+
+
+def _sed_command_after_addresses(fragment: str) -> str:
+    """Return the command byte after common GNU/POSIX sed addresses."""
+    position = 0
+    length = len(fragment)
+
+    def skip_space(index: int) -> int:
+        while index < length and fragment[index].isspace():
+            index += 1
+        return index
+
+    def consume_regex(index: int, delimiter: str) -> int:
+        escaped = False
+        while index < length:
+            char = fragment[index]
+            index += 1
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == delimiter:
+                return index
+        return length
+
+    position = skip_space(position)
+    for address_index in range(2):
+        before = position
+        if position < length and fragment[position].isdigit():
+            while position < length and fragment[position].isdigit():
+                position += 1
+            if position < length and fragment[position] == "~":
+                position += 1
+                while position < length and fragment[position].isdigit():
+                    position += 1
+        elif position < length and fragment[position] == "$":
+            position += 1
+        elif position < length and fragment[position] in {"+", "~"}:
+            position += 1
+            while position < length and fragment[position].isdigit():
+                position += 1
+        elif position < length and fragment[position] == "/":
+            position = consume_regex(position + 1, "/")
+            while position < length and fragment[position] in {"I", "M"}:
+                position += 1
+        elif position + 1 < length and fragment[position] == "\\":
+            delimiter = fragment[position + 1]
+            position = consume_regex(position + 2, delimiter)
+            while position < length and fragment[position] in {"I", "M"}:
+                position += 1
+        if position == before:
+            break
+        position = skip_space(position)
+        if address_index == 0 and position < length and fragment[position] == ",":
+            position = skip_space(position + 1)
+            continue
+        break
+    while position < length and fragment[position] == "!":
+        position = skip_space(position + 1)
+    return fragment[position] if position < length else ""
+
+
+_SAFE_PYTHON_FLAGS: frozenset[str] = frozenset({
+    "-B", "-E", "-I", "-O", "-OO", "-P", "-q", "-s", "-S", "-u",
+})
+
+
+def _interpreter_target(command: list[str], executable: str) -> tuple[str, str | None]:
+    """Parse a deliberately small, unambiguous direct-interpreter grammar."""
+    args = command[1:]
+    if executable in {"python", "python3", "py"}:
+        index = 0
+        while index < len(args) and args[index] in _SAFE_PYTHON_FLAGS:
+            index += 1
+        if index >= len(args):
+            return "none", None
+        token = args[index]
+        if token == "-m":
+            if index + 1 >= len(args) or not args[index + 1] or args[index + 1].startswith("-"):
+                raise HardDenyError("Hard security denial: Python -m requires a module name")
+            return "module", args[index + 1]
+        if token == "--":
+            return ("script", args[index + 1]) if index + 1 < len(args) else ("none", None)
+        if token.startswith("-"):
+            raise HardDenyError(
+                f"Hard security denial: unsupported or clustered Python option '{token}'"
+            )
+        return "script", token
+
+    if not args:
+        return "none", None
+    token = args[0]
+    if executable == "php" and token in {"-f", "--file"}:
+        if len(args) < 2:
+            raise HardDenyError("Hard security denial: PHP file mode requires a script")
+        return "script", args[1]
+    if executable == "php" and token.startswith("--file="):
+        return "script", token.partition("=")[2]
+    if token == "--":
+        return ("script", args[1]) if len(args) > 1 else ("none", None)
+    if token.startswith("-"):
+        raise HardDenyError(
+            f"Hard security denial: unsupported or clustered {executable} option '{token}'"
+        )
+    return "script", token
+
+
+def _direct_interpreter_script(command: list[str], executable: str) -> str | None:
+    mode, target = _interpreter_target(command, executable)
+    return target if mode == "script" else None
+
+
+def _script_file_arguments(command: list[str]) -> list[str]:
+    values: list[str] = []
+    executable = canonical_executable_name(command[0]) if command else ""
+    index = 1
+    while index < len(command):
+        token = command[index]
+        if token in {"-f", "--file", "-E", "--exec"} and index + 1 < len(command):
+            values.append(command[index + 1])
+            index += 2
+            continue
+        if token.startswith("--file="):
+            values.append(token.partition("=")[2])
+        elif token.startswith("--exec="):
+            values.append(token.partition("=")[2])
+        elif token.startswith("-f") and token != "-f":
+            values.append(token[2:])
+        elif token.startswith("-E") and token != "-E":
+            values.append(token[2:])
+        elif executable == "sed" and token.startswith("-") and not token.startswith("--"):
+            cluster = token[1:]
+            for position, option in enumerate(cluster):
+                if option == "f":
+                    attached = cluster[position + 1 :]
+                    if attached:
+                        values.append(attached)
+                    elif index + 1 < len(command):
+                        values.append(command[index + 1])
+                        index += 1
+                    break
+                # These options consume the remainder (or next token), so a
+                # later 'f' byte is script data/numeric data, not an option.
+                if option in {"e", "l"}:
+                    break
+        index += 1
+    return values
+
+
+def _option_values(
+    command: list[str],
+    names: set[str],
+    *,
+    casefold: bool = False,
+) -> list[str]:
+    """Collect split, equals, and attached single-letter option values."""
+    normalized_names = {name.casefold() if casefold else name for name in names}
+    values: list[str] = []
+    index = 1
+    while index < len(command):
+        token = command[index]
+        comparable = token.casefold() if casefold else token
+        flag, separator, value = comparable.partition("=")
+        if flag in normalized_names:
+            if separator:
+                # Slice the original token so path case is preserved.
+                values.append(token.partition("=")[2])
+                index += 1
+                continue
+            if index + 1 < len(command):
+                values.append(command[index + 1])
+                index += 2
+                continue
+            index += 1
+            continue
+        matched_attached = False
+        for name in normalized_names:
+            if len(name) == 2 and name.startswith("-") and comparable.startswith(name) and comparable != name:
+                values.append(token[len(name) :])
+                matched_attached = True
+                break
+        index += 1
+        if matched_attached:
+            continue
+    return values
+
+
+def _option_value(
+    command: list[str], names: set[str], *, casefold: bool = False
+) -> str | None:
+    values = _option_values(command, names, casefold=casefold)
+    return values[0] if values else None
+
+
+def _find_parent_file(start: Path, boundary: Path, name: str) -> Path | None:
+    current = start.resolve()
+    boundary = boundary.resolve()
+    while True:
+        candidate = current / name
+        if candidate.is_file():
+            return candidate.resolve()
+        if current == boundary:
+            return None
+        if boundary not in current.parents:
+            return None
+        current = current.parent
+
+
 def _risk_rank(risk: RiskLevel) -> int:
     return {RiskLevel.SAFE: 0, RiskLevel.MODERATE: 1, RiskLevel.DANGEROUS: 2}[risk]
 
 
-def _unix_resource_limits() -> None:
+def _unix_resource_limits(limits: ResourceLimits) -> None:
     """Resource limits for child processes on Unix.
 
     Called as preexec_fn — runs in the child process before exec.
+    RLIMIT_NPROC counts processes per user, so it is a fork-bomb brake,
+    not a per-command process cap.
     """
     try:
         import resource
 
-        resource.setrlimit(resource.RLIMIT_CPU, (8, 8))
+        resource.setrlimit(resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds))
         resource.setrlimit(
             resource.RLIMIT_AS,
-            (256 * 1024 * 1024, 256 * 1024 * 1024),
+            (limits.address_space_bytes, limits.address_space_bytes),
         )
-        resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
-        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+        resource.setrlimit(resource.RLIMIT_NPROC, (limits.nproc, limits.nproc))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limits.fsize_bytes, limits.fsize_bytes))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (limits.nofile, limits.nofile))
     except ImportError:
         pass
     except Exception:
@@ -837,3 +3141,43 @@ def _unix_resource_limits() -> None:
             "[TerminalExecutor] Failed to set resource limits",
             file=sys.stderr,
         )
+
+
+def _suggest_allow_pattern(command: list[str]) -> str:
+    """Derive the allow-rule pattern shown in the "always allow" prompt."""
+    if len(command) >= 2 and not command[1].startswith("-"):
+        return f"{command[0]} {command[1]}"
+    return f"{command[0]} *"
+
+
+def request_user_confirmation(title: str, body: str, question: str) -> bool:
+    """Generic Human-in-the-Loop confirmation with Live-TUI pause.
+
+    Shared by the terminal layer and the file-write approval gate in
+    SafeExecutor. Raises TerminalError when stdin is not a TTY so
+    non-interactive callers get a deterministic failure.
+    """
+    if not sys.stdin.isatty():
+        raise TerminalError("Interactive confirmation required, but stdin is not a TTY")
+
+    from rich.console import Console
+    from rich.panel import Panel
+
+    if TerminalExecutor._hitl_suspend_fn is not None:
+        TerminalExecutor._hitl_suspend_fn()
+    _enter_hitl()
+    try:
+        console = Console()
+        with _alt_screen(console):
+            console.print(
+                Panel(body, border_style="yellow", title=title, title_align="left", padding=(1, 2))
+            )
+            try:
+                choice = input(f"{question} [y/N]: ").strip().lower()
+            except EOFError:
+                return False
+        return choice in ("y", "yes")
+    finally:
+        _exit_hitl()
+        if TerminalExecutor._hitl_resume_fn is not None:
+            TerminalExecutor._hitl_resume_fn()

@@ -86,6 +86,21 @@ class FakeLLMClient:
         )
 
 
+@pytest.fixture(autouse=True)
+def _disable_write_approval_gate(monkeypatch):
+    """Tests run without a TTY; the overwrite gate would deny every edit.
+
+    Tests that exercise the gate itself re-enable it explicitly via
+    AGENT_WRITE_APPROVAL=1.
+    """
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    # General unit tests exercise policy/terminal behavior without depending
+    # on the host's bwrap installation. Sandbox tests opt into auto/bwrap
+    # explicitly when that behavior is under test.
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "workspace")
+    monkeypatch.setenv("AGENT_SANDBOX_NET", "deny")
+
+
 @pytest.fixture
 def agent_factory(tmp_path):
     def build(**config_overrides):
