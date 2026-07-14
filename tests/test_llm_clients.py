@@ -213,6 +213,16 @@ def test_openrouter_model_validation():
     assert llm_clients.is_model_supported_by_provider("openrouter", "https://x.com") is False
 
 
+def test_omniroute_multi_segment_model_id():
+    # OmniRoute accepts multi-segment ids like backend/vendor/model
+    assert llm_clients.is_model_supported_by_provider("omniroute", "groq/openai/gpt-oss-120b") is True
+    assert llm_clients.validate_omniroute_model_id("groq/openai/gpt-oss-120b") is None
+    assert llm_clients.normalize_model_name("omniroute", "  groq/openai/gpt-oss-120b  ") == "groq/openai/gpt-oss-120b"
+    # Empty segments are still rejected
+    assert llm_clients.is_model_supported_by_provider("omniroute", "groq//gpt-oss-120b") is False
+    assert llm_clients.is_model_supported_by_provider("omniroute", "groq/openai/") is False
+
+
 def test_openrouter_normalize_model_name():
     # OpenRouter only strips whitespace, preserves case (provider/model format)
     assert llm_clients.normalize_model_name("openrouter", "  anthropic/claude-sonnet-4-6  ") == "anthropic/claude-sonnet-4-6"
@@ -312,7 +322,17 @@ def test_custom_provider_label():
     assert "Custom:" in label or "custom" in label.lower()
 
 
-def test_custom_provider_streaming():
+def test_custom_provider_streaming_is_opt_in(monkeypatch):
+    monkeypatch.setattr(
+        "user_config.get_custom_provider_by_name",
+        lambda name: {"streaming": False},
+    )
+    assert llm_clients.provider_supports_streaming("custom:my-llama") is False
+
+    monkeypatch.setattr(
+        "user_config.get_custom_provider_by_name",
+        lambda name: {"streaming": True},
+    )
     assert llm_clients.provider_supports_streaming("custom:my-llama") is True
 
 

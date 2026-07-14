@@ -551,6 +551,8 @@ class SafeExecutor:
                 "path": path,
                 "content": content,
                 "truncated": truncated,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
 
@@ -572,7 +574,11 @@ class SafeExecutor:
         return ExecutionResult(
             ok=True,
             action_type="read_multiple_files",
-            data={"files": files},
+            data={
+                "files": files,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
+            },
         )
 
     def _write_file(self, path: str, content: str) -> ExecutionResult:
@@ -840,6 +846,8 @@ class SafeExecutor:
                 "query": query,
                 "path": path,
                 "results": results,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
 
@@ -870,6 +878,8 @@ class SafeExecutor:
                 "stderr": stderr,
                 "fallback_used": False,
                 "git_available": result.returncode == 0,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
 
@@ -920,6 +930,8 @@ class SafeExecutor:
                 "stderr": stderr,
                 "fallback_used": False,
                 "git_available": result.returncode == 0,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
 
@@ -975,6 +987,8 @@ class SafeExecutor:
                 "stdout": self._sanitize_internal_paths_in_text(result.stdout),
                 "stderr": self._sanitize_internal_paths_in_text(result.stderr),
                 "timed_out": result.timed_out,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
 

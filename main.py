@@ -67,16 +67,22 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
 
 from slash_commands import (
+    SLASH_COMMAND_KEY_BINDINGS,
+    SLASH_COMMAND_LEXER,
     SLASH_COMMAND_MENU_HEIGHT,
     SLASH_COMMAND_PROMPT,
     SLASH_COMMAND_PROMPT_CONTINUATION,
     SLASH_COMMAND_STYLE,
+    SlashCommandAutoSuggest,
     SlashCommandCompleter,
     has_slash_command_completion,
     normalize_slash_command,
 )
 
 console = Console()
+slash_command_auto_suggest = SlashCommandAutoSuggest(
+    fallback=AutoSuggestFromHistory()
+)
 
 
 def slash_completion_is_active() -> bool:
@@ -90,7 +96,9 @@ session = PromptSession(
     complete_style=CompleteStyle.COLUMN,
     # One row for the raised input plus one row per command below it.
     reserve_space_for_menu=SLASH_COMMAND_MENU_HEIGHT + 1,
-    auto_suggest=AutoSuggestFromHistory(),
+    auto_suggest=slash_command_auto_suggest,
+    key_bindings=SLASH_COMMAND_KEY_BINDINGS,
+    lexer=SLASH_COMMAND_LEXER,
     style=SLASH_COMMAND_STYLE,
     color_depth=ColorDepth.TRUE_COLOR,
 )
@@ -148,6 +156,80 @@ def validate_user_goal(user_goal: str, language_hint: str = "en") -> str | None:
         )
 
     return None
+
+
+def parse_verbose_value(raw: str, current: bool) -> bool | None:
+    """Parse /verbose, accepting true/false with optional angle brackets."""
+
+    parts = raw.strip().split(maxsplit=1)
+    if not parts or parts[0].casefold() != "/verbose":
+        return None
+    if len(parts) == 1:
+        return not current
+
+    value = parts[1].strip().casefold()
+    if value.startswith("<") and value.endswith(">"):
+        value = value[1:-1].strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
+
+
+def parse_strime_value(raw: str, current: bool) -> bool | None:
+    """Parse /strime, accepting true/false with optional angle brackets."""
+
+    parts = raw.strip().split(maxsplit=1)
+    if not parts or parts[0].casefold() != "/strime":
+        return None
+    if len(parts) == 1:
+        return not current
+
+    value = parts[1].strip().casefold()
+    if value.startswith("<") and value.endswith(">"):
+        value = value[1:-1].strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
+
+
+def apply_verbose_mode(agent, enabled: bool) -> None:
+    """Apply a verbose-mode change to the active runtime objects."""
+
+    agent.config.verbose = enabled
+    agent._ui.verbose = enabled
+    if hasattr(agent.client, "_verbose"):
+        agent.client._verbose = enabled
+    slash_command_auto_suggest.set_verbose(enabled)
+
+
+def sync_strime_suggestion(provider: str, enabled: bool) -> None:
+    slash_command_auto_suggest.set_streaming(
+        enabled,
+        available=is_custom_provider(provider),
+    )
+
+
+def apply_strime_mode(agent, enabled: bool) -> bool:
+    """Persist and apply streaming mode for the active custom provider."""
+
+    provider = normalize_provider(agent.config.provider)
+    if not is_custom_provider(provider):
+        return False
+
+    name = extract_custom_provider_name(provider)
+    info = get_custom_provider_by_name(name)
+    if info is None:
+        return False
+
+    info["streaming"] = enabled
+    save_custom_provider(name, info)
+    agent.config.stream = enabled
+    sync_strime_suggestion(provider, enabled)
+    return True
 
 
 def resolve_startup_provider(provider_override: str | None = None) -> str:
@@ -257,7 +339,7 @@ def build_agent(
         )
         models = resolved_openai_models
         warnings.extend(access_warnings)
-    elif not provider_supports_streaming(provider):
+    elif provider == FREEFLOW_PROVIDER:
         warnings.append(
             "For FreeFlow LLM, streaming is disabled: the library handles stream responses unstably."
         )
@@ -266,6 +348,10 @@ def build_agent(
             warnings.append(
                 "FreeFlow fallback across providers is unavailable: configure both Gemini and Groq keys."
             )
+    elif is_custom_provider(provider) and not provider_supports_streaming(provider):
+        warnings.append(
+            "Streaming is disabled for this custom provider. Use /strime to enable it."
+        )
     client = create_llm_client(provider=provider, credentials=credentials, verbose=verbose)
     config = AgentConfig(
         provider=provider,
@@ -536,15 +622,15 @@ def choose_models(provider: str, current_models: dict[str, str], verbose: bool) 
 
 
 def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str | None:
-    """RichUI wizard to create a new custom OpenAI-compatible provider.
+    """RichUI wizard to create a new custom OpenAI- or Anthropic-compatible provider.
 
-    Walks the user through: name, base URL, API key (optional), display label,
-    and models. Returns ``\"custom:<name>\"`` on success or ``None`` if cancelled.
+    Walks the user through: name, protocol, base URL, API key (optional), display
+    label, and models. Returns ``\"custom:<name>\"`` on success or ``None`` if cancelled.
     """
     console.print()
     console.print(Panel(
         "[bold bright_cyan]Create Custom Provider[/bold bright_cyan]\n"
-        "[dim]Configure an OpenAI-compatible endpoint as a custom provider.[/dim]",
+        "[dim]Configure an OpenAI- or Anthropic-compatible endpoint as a custom provider.[/dim]",
         border_style="bright_cyan",
     ))
 
@@ -575,29 +661,7 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
             continue
         break
 
-    # ── Step 2: Base URL ──────────────────────────────────────────────
-    while True:
-        base_url = ui.prompt_text(
-            title="Enter base URL:",
-            current_value="",
-            help_text=(
-                "OpenAI-compatible endpoint URL.\n"
-                "Example: http://localhost:8080/v1 or https://api.example.com/v1"
-            ),
-        )
-        if base_url is None:
-            console.print("[yellow]Provider creation cancelled.[/yellow]")
-            return None
-        base_url = base_url.strip()
-        if not base_url:
-            console.print("[red]Base URL cannot be empty.[/red]")
-            continue
-        if not base_url.startswith(("http://", "https://")):
-            console.print("[red]Base URL must start with http:// or https://[/red]")
-            continue
-        break
-
-    # ── Step 3: Protocol ──────────────────────────────────────────────
+    # ── Step 2: Protocol ──────────────────────────────────────────────
     protocol = ui.choose_option(
         title="Select protocol:",
         options=[
@@ -618,6 +682,83 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
     if protocol is None:
         console.print("[yellow]Provider creation cancelled.[/yellow]")
         return None
+
+    # ── Step 3: Base URL ──────────────────────────────────────────────
+    if protocol == "anthropic":
+        url_help = (
+            "Anthropic-compatible endpoint URL.\n"
+            "Example: https://api.anthropic.com or https://gateway.example.com"
+        )
+    else:
+        url_help = (
+            "OpenAI-compatible endpoint URL.\n"
+            "Example: http://localhost:8080/v1 or https://api.example.com/v1"
+        )
+
+    while True:
+        base_url = ui.prompt_text(
+            title="Enter base URL:",
+            current_value="",
+            help_text=url_help,
+        )
+        if base_url is None:
+            console.print("[yellow]Provider creation cancelled.[/yellow]")
+            return None
+        base_url = base_url.strip()
+        if not base_url:
+            console.print("[red]Base URL cannot be empty.[/red]")
+            continue
+        if not base_url.startswith(("http://", "https://")):
+            choice = ui.choose_option(
+                title="base URL должен начинаться с https://.",
+                options=[
+                    {"value": "add_https", "label": "Добавить https:// автоматически"},
+                    {"value": "retry", "label": "Ввести заново"},
+                ],
+                current_value="add_https",
+                help_text="Enter — confirm, Esc — cancel",
+            )
+            if choice is None:
+                console.print("[yellow]Provider creation cancelled.[/yellow]")
+                return None
+            if choice == "add_https":
+                base_url = "https://" + base_url
+                break
+            else:
+                continue
+        break
+
+    if protocol == "openai":
+        url_stripped = base_url.strip()
+        while url_stripped.endswith("/"):
+            url_stripped = url_stripped[:-1]
+
+        from urllib.parse import urlparse
+        parsed = urlparse(url_stripped)
+        path = parsed.path.strip("/")
+
+        if not path:
+            choice = ui.choose_option(
+                title=(
+                    "base URL не содержит суффикса пути, большинство OpenAI-совместимых эндпоинтов требуют /v1, "
+                    "без него запросы вернут 404."
+                ),
+                options=[
+                    {"value": "add", "label": "Добавить /v1 (рекомендуется)"},
+                    {"value": "keep", "label": "Оставить как есть"},
+                ],
+                current_value="add",
+                help_text="Enter — confirm, Esc — cancel",
+            )
+            if choice is None:
+                console.print("[yellow]Provider creation cancelled.[/yellow]")
+                return None
+            if choice == "add":
+                base_url = url_stripped + "/v1"
+            else:
+                base_url = url_stripped
+        else:
+            base_url = url_stripped
 
     # ── Step 3b: Streaming support ──────────────────────────────────────
     streaming_choice = ui.choose_option(
@@ -1060,6 +1201,7 @@ def main() -> None:
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "50"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
+    slash_command_auto_suggest.set_verbose(verbose)
     session_language = detect_request_language(os.getenv("LANG", ""), fallback="en")
 
     try:
@@ -1081,6 +1223,8 @@ def main() -> None:
         print(str(error), file=sys.stderr)
         sys.exit(2)
 
+    sync_strime_suggestion(config.provider, config.stream)
+
     console.print("[dim]Local AI agent [/dim]Kvist [dim]started. [/dim]")
     console.print(f"[dim]Workspace: {executor.workspace}[/dim]")
     print_runtime_banner(config, max_steps, verbose, model_warnings)
@@ -1091,6 +1235,8 @@ def main() -> None:
     console.print("[dim]Command '/role' — select agent role (auto/coder/devops/chat).[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
     console.print("[dim]Command '/new' — reset to a fresh session.[/dim]")
+    console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
+    console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
     console.print("[dim]Command /about — to get more info about agent.[/dim]")
     console.print("[dim]Enter your task.[/dim]")
 
@@ -1133,6 +1279,53 @@ def main() -> None:
                     print(f"\n[Final Answer]\n{result}")
                 continue
 
+            if (
+                user_goal
+                and user_goal.split(maxsplit=1)[0].casefold() == "/verbose"
+            ):
+                selected_verbose = parse_verbose_value(user_goal, verbose)
+                if selected_verbose is None:
+                    console.print(
+                        "[yellow]Usage: /verbose <true> or /verbose <false>[/yellow]"
+                    )
+                    continue
+
+                verbose = selected_verbose
+                apply_verbose_mode(agent, verbose)
+                state = "enabled" if verbose else "disabled"
+                console.print(f"[green]Verbose mode {state}.[/green]")
+                continue
+
+            if (
+                user_goal
+                and user_goal.split(maxsplit=1)[0].casefold() == "/strime"
+            ):
+                if not is_custom_provider(config.provider):
+                    console.print(
+                        "[yellow]/strime is available only for custom providers.[/yellow]"
+                    )
+                    continue
+
+                selected_streaming = parse_strime_value(
+                    user_goal,
+                    agent.config.stream,
+                )
+                if selected_streaming is None:
+                    console.print(
+                        "[yellow]Usage: /strime <true> or /strime <false>[/yellow]"
+                    )
+                    continue
+
+                if not apply_strime_mode(agent, selected_streaming):
+                    console.print(
+                        "[yellow]The active custom provider could not be updated.[/yellow]"
+                    )
+                    continue
+
+                state = "enabled" if selected_streaming else "disabled"
+                console.print(f"[green]Streaming mode {state}.[/green]")
+                continue
+
             if user_goal.lower() == "/provider":
                 selected_provider = choose_provider(config.provider, verbose)
                 if selected_provider is None:
@@ -1159,6 +1352,7 @@ def main() -> None:
                     suspend_fn=agent._ui.stop_live,
                     resume_fn=agent._ui.start_live,
                 )
+                sync_strime_suggestion(config.provider, config.stream)
 
                 console.print(
                     f"[green]Provider changed to {provider_label(config.provider)}.[/green]"
@@ -1317,14 +1511,14 @@ def main() -> None:
                 console.print("[green]This is Kvist: open-source AI agent for Windows/Linux. [/green]")
                 console.print('''[red] 
 Support: 
-  Linux: Yes
-  Windows: Yes
-  macOS: Untested (or Experimental)
+  [green]Linux: Yes
+  Windows: Yes [/green]
+  [dim]macOS: Untested (or Experimental)[/dim]
                 [/red]''')
                 console.print("[dim]\nKvist by Davud, © 2026 [/dim]")
                 console.print("[dim] Author: Davud [/dim]")
                 console.print("[dim] LICENCE: MIT [/dim]")
-                console.print("[dim] Repository: [blue]https://github.com/davud-d/KVist[/blue] [/dim]")
+                console.print("[dim] Repository: [blue]https://github.com/davud-d/Kvist[/blue] [/dim]")
                 console.print("[dim] Release Version: 1.0 [/dim]")
                 console.print("[orange]\nThank you for using Kvist [/orange]")
                 continue

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_state import RunState
-from executor import ExecutorError
+from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
 
@@ -1065,13 +1065,23 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
         "ok": bool(feedback.get("ok")),
     }
 
+    raw_data = feedback.get("data", {}) if feedback.get("ok") else None
     if feedback.get("ok"):
-        payload["data"] = self._compact_for_prompt(feedback.get("data", {}))
+        payload["data"] = self._compact_for_prompt(raw_data)
     else:
         payload["normalized_error"] = self._feedback_error_for_model(feedback)
 
     serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-    return self._truncate_for_prompt(serialized, self.config.prompt_result_char_limit)
+    serialized = self._truncate_for_prompt(serialized, self.config.prompt_result_char_limit)
+
+    if isinstance(raw_data, dict) and raw_data.get("untrusted"):
+        return (
+            f'<UNTRUSTED_TOOL_OUTPUT source="{command.action.type}">\n'
+            f"{UNTRUSTED_CONTENT_NOTICE}\n"
+            f"{serialized}\n"
+            "</UNTRUSTED_TOOL_OUTPUT>"
+        )
+    return serialized
 
 
 def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:

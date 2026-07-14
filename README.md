@@ -143,7 +143,39 @@ appears as soon as the input starts with `/`.
 | `/role` | Select `auto`, `coder`, `devops`, or `chat`. The choice is saved globally. |
 | `/session` | Create, switch, or delete named workspace sessions. The active session cannot be deleted. |
 | `/resume` | Continue the checkpoint stored in the active session. |
+| `/verbose <true\|false>` | Enable or disable verbose runtime output without restarting Kvist. |
+| `/strime <true\|false>` | Enable or disable streaming for the active custom provider. |
 | `/bye` | Save the session and exit. `/exit` and `/quit` are aliases. |
+
+### Verbose mode
+
+After you type `/verbose`, Kvist displays a grey inline suggestion in angle
+brackets. It suggests `<true>` when verbose mode is disabled and `<false>` when
+verbose mode is enabled. Press `Tab` to insert the suggested value:
+
+```text
+/verbose <true>
+```
+
+You can also enter `/verbose <true>` or `/verbose <false>` manually. Entering
+`/verbose` without an argument toggles the current state. The change applies to
+the active runtime immediately; after a restart, the initial value is read from
+`AGENT_VERBOSE` again.
+
+### Custom-provider streaming
+
+Custom providers use non-streaming requests by default. When a custom provider
+is active, typing `/strime` shows `<true>` if streaming is disabled or `<false>`
+if it is enabled. Press `Tab` to insert the suggested value:
+
+```text
+/strime <true>
+```
+
+You can also enter `/strime <true>` or `/strime <false>` manually. Entering
+`/strime` without an argument toggles the current state. The value is saved in
+the active custom-provider configuration and applied to the current agent
+immediately. The command is rejected for built-in providers.
 
 Session names contain 1-64 lowercase letters, digits, hyphens, or underscores
 and must start with a letter or digit. Kvist shows the last few tasks when a

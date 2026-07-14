@@ -3,9 +3,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.bindings.completion import generate_completions
+from prompt_toolkit.keys import Keys
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style
 
 
@@ -28,6 +34,8 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("role", "Choose auto, coder, devops or chat role"),
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),
+    SlashCommand("verbose", "Enable or disable verbose runtime output"),
+    SlashCommand("strime", "Toggle streaming for the active custom provider"),
     SlashCommand(
         "bye",
         "Save the active session and exit Kvist",
@@ -44,6 +52,8 @@ SLASH_COMMAND_STYLE = Style.from_dict(
     {
         "slash-command.prompt": "fg:#cdd6f4 bold",
         "slash-command.prompt-continuation": "fg:#6c7086",
+        "slash-command.input": "fg:#f9e2af bold",
+        "slash-command.argument": "fg:#a6adc8",
         "completion-menu": "bg:default",
         "completion-menu.completion": "fg:#a6adc8 bg:default",
         "completion-menu.completion.current": (
@@ -79,14 +89,136 @@ def _matching_name(command: SlashCommand, query: str) -> str | None:
     )
 
 
-def has_slash_command_completion(text: str) -> bool:
-    """Return whether ``text`` should open the slash-command palette."""
-
+def _has_slash_command_prefix(text: str) -> bool:
     if not text.startswith("/") or any(character.isspace() for character in text):
         return False
 
     query = text[1:].casefold()
     return any(_matching_name(command, query) for command in SLASH_COMMANDS)
+
+
+def has_slash_command_completion(text: str) -> bool:
+    """Return whether ``text`` should open the slash-command palette."""
+
+    # Once a toggle command is complete, its inline <true>/<false> suggestion
+    # takes over and the regular command row should disappear.
+    if text.casefold() in {"/verbose", "/strime"}:
+        return False
+    return _has_slash_command_prefix(text)
+
+
+class SlashCommandAutoSuggest(AutoSuggest):
+    """Inline argument suggestion for commands plus history fallback."""
+
+    def __init__(
+        self,
+        verbose_enabled: bool = False,
+        streaming_enabled: bool = False,
+        streaming_available: bool = False,
+        fallback: AutoSuggest | None = None,
+    ) -> None:
+        self.verbose_enabled = verbose_enabled
+        self.streaming_enabled = streaming_enabled
+        self.streaming_available = streaming_available
+        self.fallback = fallback
+
+    def set_verbose(self, enabled: bool) -> None:
+        self.verbose_enabled = enabled
+
+    def set_streaming(self, enabled: bool, *, available: bool) -> None:
+        self.streaming_enabled = enabled
+        self.streaming_available = available
+
+    def get_suggestion(
+        self,
+        buffer: Buffer,
+        document: Document,
+    ) -> Suggestion | None:
+        if document.is_cursor_at_the_end:
+            value = "false" if self.verbose_enabled else "true"
+            if document.text.casefold() == "/verbose":
+                return Suggestion(f" <{value}>")
+            if document.text.casefold() == "/verbose ":
+                return Suggestion(f"<{value}>")
+
+            if self.streaming_available:
+                value = "false" if self.streaming_enabled else "true"
+                if document.text.casefold() == "/strime":
+                    return Suggestion(f" <{value}>")
+                if document.text.casefold() == "/strime ":
+                    return Suggestion(f"<{value}>")
+
+        if self.fallback is not None:
+            return self.fallback.get_suggestion(buffer, document)
+        return None
+
+
+class SlashCommandLexer(Lexer):
+    """Highlight the command token and keep its arguments subdued."""
+
+    def lex_document(self, document: Document):
+        def get_line(lineno: int):
+            line = document.lines[lineno]
+            if lineno != 0 or not line.startswith("/"):
+                return [("", line)]
+
+            command, separator, arguments = line.partition(" ")
+            known_names = {
+                name.casefold()
+                for item in SLASH_COMMANDS
+                for name in (item.name, *item.aliases)
+            }
+            if command[1:].casefold() not in known_names:
+                return [("", line)]
+
+            fragments = [("class:slash-command.input", command)]
+            if separator:
+                fragments.append(
+                    ("class:slash-command.argument", separator + arguments)
+                )
+            return fragments
+
+        return get_line
+
+
+SLASH_COMMAND_LEXER = SlashCommandLexer()
+
+
+def move_cursor_left(buffer: Buffer) -> None:
+    """Keep the cursor at the command input while its palette is open."""
+
+    if _has_slash_command_prefix(buffer.text):
+        buffer.cursor_position = len(buffer.text)
+        return
+    buffer.cursor_left(count=1)
+
+
+SLASH_COMMAND_KEY_BINDINGS = KeyBindings()
+
+
+@SLASH_COMMAND_KEY_BINDINGS.add(Keys.Left)
+def _handle_left_arrow(event) -> None:
+    move_cursor_left(event.current_buffer)
+
+
+def accept_inline_suggestion(buffer: Buffer) -> bool:
+    """Accept a dynamic toggle argument if it is currently visible."""
+
+    if (
+        buffer.document.is_cursor_at_the_end
+        and buffer.text.casefold()
+        in {"/verbose", "/verbose ", "/strime", "/strime "}
+        and buffer.suggestion is not None
+    ):
+        buffer.insert_text(buffer.suggestion.text)
+        return True
+    return False
+
+
+@SLASH_COMMAND_KEY_BINDINGS.add(Keys.ControlI)
+def _handle_tab(event) -> None:
+    if not accept_inline_suggestion(event.current_buffer):
+        generate_completions(event)
 
 
 class SlashCommandCompleter(Completer):
@@ -102,6 +234,9 @@ class SlashCommandCompleter(Completer):
 
         # Do not show the menu after arguments: "/new something"
         if any(character.isspace() for character in text):
+            return
+
+        if text.casefold() in {"/verbose", "/strime"}:
             return
 
         query = text[1:].casefold()

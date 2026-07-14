@@ -409,16 +409,15 @@ def validate_omniroute_model_id(model: str) -> str | None:
     if candidate.startswith("http://") or candidate.startswith("https://"):
         return "Model id cannot be a URL"
 
-    # Check provider/model format validity
+    # Check slash-separated format validity. OmniRoute accepts multi-segment ids
+    # like "groq/openai/gpt-oss-120b" (backend/vendor/model), not just provider/model.
     if "/" in candidate:
         parts = candidate.split("/")
-        if len(parts) != 2:
-            return "Model id with slash must be exactly provider/model format"
-        provider_part, model_part = parts
-        if not provider_part or not model_part:
-            return "Neither provider nor model part can be empty"
-        if provider_part.strip() != provider_part or model_part.strip() != model_part:
-            return "Provider and model parts cannot have leading/trailing whitespace"
+        for part in parts:
+            if not part:
+                return "Model id cannot have empty path segments"
+            if part.strip() != part:
+                return "Model id segments cannot have leading/trailing whitespace"
 
     # Combo/router name without slash - just ensure no whitespace
     if " " in candidate:

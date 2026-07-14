@@ -388,8 +388,16 @@ class LocalAgent:
             f"Reply in {response_language_name(self._state.response_language)}.)\n\n"
         )
 
+        # Tell the model which provider/model is actually serving this turn, so
+        # it can answer honestly when asked what it runs on.
+        model_note = (
+            f"(Runtime fact: you are being served by provider = "
+            f"{self.config.provider}, model = {self.config.fast_model}. "
+            f"If the user asks which model you are, answer with this.)\n\n"
+        )
+
         self._chat_history.append(
-            {"role": "user", "content": language_note + session_context + user_goal}
+            {"role": "user", "content": language_note + model_note + session_context + user_goal}
         )
 
         # Trim history to keep only last 10 messages + system prompt
