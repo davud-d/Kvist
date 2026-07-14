@@ -564,11 +564,18 @@ def test_git_spawn_argv_disables_implicit_hooks_and_helpers(
 ):
     captured: list[list[str]] = []
 
+    import io
+
     class FakeProcess:
         returncode = 0
+        pid = -1
 
-        def communicate(self, timeout=None):
-            return b"", b""
+        def __init__(self):
+            self.stdout = io.BytesIO(b"")
+            self.stderr = io.BytesIO(b"")
+
+        def wait(self, timeout=None):
+            return 0
 
     def fake_popen(argv, **kwargs):
         captured.append(argv)

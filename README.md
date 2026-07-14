@@ -355,6 +355,7 @@ AGENT_API_INTERVAL=
 AGENT_SANDBOX_MODE=auto
 AGENT_SANDBOX_NET=deny
 AGENT_CHILD_ENV_ALLOW=       # comma-separated non-secret child variables
+AGENT_TOOL_PATHS=            # pathsep-separated absolute toolchain dirs
 AGENT_TERMINAL_PROFILE=dev
 AGENT_TERMINAL_TIMEOUT=15
 AGENT_TERMINAL_MAX_OUTPUT=12000
@@ -380,6 +381,14 @@ AGENT_FETCH_EXTRA_DOMAINS= # comma-separated extra fetch_url domains
   passes additional non-secret, non-loader variables; the same names may then be
   used in `env_overrides`. Secret and execution-control names remain blocked.
   Every terminal run also gets a fresh, private, initially empty child `HOME`.
+- The child `PATH` prepends existing project-local tool directories (`.venv/bin`,
+  `venv/bin`, `node_modules/.bin`) inside the workspace, then validated
+  `AGENT_TOOL_PATHS` entries, then trusted system directories. Each
+  `AGENT_TOOL_PATHS` entry must be an absolute, existing, non-world-writable
+  directory; it is read-only mounted into Bubblewrap. Your full `HOME`,
+  `.local/bin`, nvm, pyenv, and cargo directories are never added automatically.
+  Standard Python virtualenvs work: a `.venv/bin/python` symlinking to a trusted
+  system interpreter runs with the correct `sys.prefix` and site-packages.
 - Terminal timeouts are clamped to 1-300 seconds in the `dev` profile and
   1-30 seconds in `restricted`; captured output is clamped to 1,000-200,000
   characters.
@@ -448,6 +457,14 @@ default on Linux when a trusted Bubblewrap installation is available:
   paths (`.env*`, `.ssh`, `.aws`, `.gnupg`, key/certificate files,
   `credentials`) are rejected for every command, including read-only ones like
   `cat` and `grep`, on both relative and absolute paths.
+- Under Bubblewrap the secret guard is enforced by the OS, not just argv
+  scanning: before launch Kvist enumerates protected workspace files/directories
+  and masks them inside the sandbox (files shadowed by read-only `/dev/null`,
+  directories replaced by empty tmpfs). Arbitrary child code — Python, Node,
+  shell redirection, AWK/sed constructing the path at runtime, compiled helpers,
+  symlinks — reads an empty/permission-denied object instead of the secret. The
+  protected-set digest is bound to the approval, so adding a secret between
+  approval and spawn invalidates it.
 - Shell commands pass a platform-aware allowlist and a role-aware risk policy.
   Anything that is not read-only — interpreters and build runners (`python`,
   `node`, `make`, `cargo`, `go`, `awk`), package installs, `git push`,
@@ -481,6 +498,16 @@ default on Linux when a trusted Bubblewrap installation is available:
 - Shell operators and command substitution are restricted, working directories
   stay inside the workspace, and Unix child processes receive profile-based
   resource limits including a fork-bomb brake (`RLIMIT_NPROC`).
+- Executable scripts with a `#!` line have their interpreter attested: the
+  shebang is parsed (direct, `/usr/bin/env NAME`, `env -S NAME ARGS`), the
+  interpreter is resolved with the sandboxed PATH, must be a trusted system
+  binary or a workspace file, and its identity/content is bound to the approval.
+- The whole process tree is supervised. A command that times out or completes
+  cannot leave detached (`setsid`) descendants running: under Bubblewrap the PID
+  namespace reaps them, and a cgroup v2 scope tears down the subtree on timeout
+  and on completion. Output is captured with bounded in-memory buffers while the
+  process runs (no unbounded buffering, no blocking second drain), so a runaway
+  child cannot exhaust the parent's memory.
 - Before process creation, Kvist repeats hard validation and compares the exact
   argv, normalized cwd and directory identity, role, policy state, sandbox and
   network mode, sanitized environment digest, executable identities, and hashes
@@ -516,18 +543,22 @@ from model-driven file actions. Malformed or symlinked policy files fail closed.
 `AGENT_SANDBOX_MODE=auto` selects a trusted system `bwrap` on Linux. The sandbox
 mounts only the workspace plus required system runtime/library paths; it does
 not bind the host root, `/home`, `/root`, unrelated repositories, or credential
-directories. `/tmp` is ephemeral, `HOME` is an empty directory, `.kvist` is
-masked, process namespaces are isolated, and networking is unshared by default.
-Set `AGENT_SANDBOX_NET=allow` only when the command needs network access.
+directories. `/tmp` is ephemeral, `HOME` is an empty directory, `.kvist` and
+every protected workspace secret are masked, process namespaces are isolated,
+and networking is unshared by default. Set `AGENT_SANDBOX_NET=allow` only when
+the command needs network access.
 
 If Bubblewrap is unavailable in `auto`, Kvist uses a visibly restricted
 workspace fallback: interpreters, scripts, build/package tools, and unknown
 arbitrary-code executables require confirmation on every execution, even when a
-project allow-rule matches. Explicit `AGENT_SANDBOX_MODE=workspace` is a weaker
-user-selected mode in which approved children retain the current user's host
-permissions. These weaker modes still use a new private, verified-empty child
-`HOME` for every run. Explicit `bubblewrap` with no trusted binary blocks shell
-execution instead of degrading.
+project allow-rule matches, and are hard-denied outright if no cgroup v2 scope
+is available to control detached descendants. Explicit
+`AGENT_SANDBOX_MODE=workspace` is a weaker user-selected mode in which approved
+children retain the current user's host permissions — it is warned and provides
+**no** secret masking and **no** `.kvist` isolation, so use it only when you
+accept running project code with your own permissions. These weaker modes still
+use a new private, verified-empty child `HOME` for every run. Explicit
+`bubblewrap` with no trusted binary blocks shell execution instead of degrading.
 
 ### Current boundary limits
 
@@ -537,18 +568,21 @@ execution instead of degrading.
 - Direct scripts and common build-control files are hashed, but transitive
   imports, `python -m` modules, Make includes, package-script sources, and other
   dependency graphs are not fully attested.
-- The child PATH contains only fixed system locations (not `/usr/local`), but
+- The child PATH prepends existing project-local tool directories and validated
+  `AGENT_TOOL_PATHS`, then fixed system locations (not `/usr/local`), but
   transitive helpers launched by trusted system tools are not individually
   content-attested.
-- Secret-path checks cover named and canonical direct arguments, and recursive
-  grep/ripgrep directory traversal is blocked. Repository/history-aware or
-  transitive tools can still surface protected content not named in argv.
-  Strong Bubblewrap prevents access to host credential trees, but workspace
-  contents and history remain the user's responsibility.
+- Secret-path checks cover named and canonical direct arguments, and under
+  Bubblewrap protected files/directories are OS-masked so runtime-constructed
+  paths cannot reach them. Repository/history-aware tools can still surface
+  protected content not named in argv. Strong Bubblewrap prevents access to host
+  credential trees and masks workspace secrets, but in explicit `workspace` mode
+  neither the secret mask nor `.kvist` isolation applies.
 - A narrow filesystem race remains between the final identity/hash comparison
-  and the OS process-creation call. Captured output is truncated after capture,
-  not streamed into a bounded buffer; Windows timeout cleanup cannot guarantee
-  termination of every descendant process.
+  and the OS process-creation call. Detached-descendant cleanup relies on the
+  Bubblewrap PID namespace or a cgroup v2 scope; in explicit `workspace` mode
+  without cgroup v2, and on Windows, timeout cleanup cannot guarantee termination
+  of every descendant process.
 
 ## Prompt and action architecture
 

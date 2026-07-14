@@ -263,7 +263,15 @@ def test_workspace_safe_name_executable_cannot_inherit_project_allow(tmp_path, m
 
 
 def test_workspace_executable_symlink_escape_is_hard_denied_without_spawn(tmp_path, monkeypatch):
-    (tmp_path / "ls").symlink_to("/usr/bin/ls")
+    # An escape to an untrusted, user-mutable target outside the workspace stays
+    # denied.  (A launcher pointing at a trusted system binary — the venv
+    # pattern — is intentionally permitted; see test_security_stage1_1.)
+    outside = tmp_path.parent / "outside_tool_dir"
+    outside.mkdir(exist_ok=True)
+    target = outside / "ls"
+    target.write_text("#!/bin/sh\necho escaped\n", encoding="utf-8")
+    target.chmod(0o755)
+    (tmp_path / "ls").symlink_to(target)
     approvals = []
     executor = TerminalExecutor(tmp_path)
     monkeypatch.setattr(

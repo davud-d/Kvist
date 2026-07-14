@@ -15,6 +15,8 @@ import sys
 from enum import Enum
 from pathlib import Path
 
+from secret_paths import enumerate_secret_targets
+
 
 class SandboxMode(Enum):
     NONE = "none"
@@ -211,6 +213,29 @@ def _append_network_mounts(wrapped: list[str]) -> None:
             wrapped.extend(("--ro-bind", raw_path, raw_path))
 
 
+def _append_secret_masks(wrapped: list[str], workspace: Path) -> None:
+    """Hide protected workspace secrets so arbitrary child code cannot read them.
+
+    Directories become empty tmpfs mounts; files are shadowed by ``/dev/null``,
+    which yields an empty, unreadable-for-write object.  Masking the real
+    target also neutralises symlinks and runtime-constructed paths that resolve
+    to it — the OS view, not argv scanning, is the boundary.
+    """
+    secret_files, secret_dirs = enumerate_secret_targets(workspace)
+    for path in secret_dirs:
+        wrapped.extend(("--tmpfs", str(path)))
+    for path in secret_files:
+        wrapped.extend(("--ro-bind", "/dev/null", str(path)))
+
+
+def _append_tool_path_mounts(wrapped: list[str], tool_paths: tuple[Path, ...]) -> None:
+    """Read-only bind explicitly configured external toolchain directories."""
+    for path in tool_paths:
+        resolved = path.resolve()
+        if resolved.is_dir():
+            wrapped.extend(("--ro-bind", str(resolved), str(resolved)))
+
+
 def wrap_command_for_sandbox(
     command: list[str],
     mode: SandboxMode,
@@ -219,6 +244,7 @@ def wrap_command_for_sandbox(
     *,
     bwrap_path: str | None = None,
     network_allowed: bool | None = None,
+    tool_paths: tuple[Path, ...] = (),
 ) -> list[str]:
     """Wrap a validated command in a minimal Bubblewrap filesystem."""
     if mode is not SandboxMode.BUBBLEWRAP:
@@ -260,7 +286,10 @@ def wrap_command_for_sandbox(
             "--bind", str(workspace), str(workspace),
         )
     )
+    _append_tool_path_mounts(wrapped, tool_paths)
     internal_dir = workspace / ".kvist"
     wrapped.extend(("--tmpfs", str(internal_dir)))
+    # Secret masks come after the workspace bind so they shadow the real files.
+    _append_secret_masks(wrapped, workspace)
     wrapped.extend(("--chdir", str(cwd), "--", *command))
     return wrapped

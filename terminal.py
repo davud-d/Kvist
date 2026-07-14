@@ -9,9 +9,8 @@ import os
 import re
 import shlex
 import shutil
-import signal
 import stat
-import subprocess
+import subprocess  # noqa: F401  spawn boundary lives in process_tree; kept as the patch target
 import sys
 import tempfile
 import threading
@@ -45,6 +44,7 @@ from command_policy import (
 )
 from env_utils import read_int_env
 from permission_policy import append_allow_rule, load_policy
+from process_tree import cgroup_supervision_available, run_supervised
 from sandbox import (
     SandboxMode,
     detect_sandbox_mode,
@@ -53,6 +53,7 @@ from sandbox import (
     sandbox_network_allowed,
     wrap_command_for_sandbox,
 )
+from secret_paths import secret_mask_digest
 
 # ── Global HITL lock ─────────────────────────────────────────────
 # Prevents background TUI rendering while the user is typing y/N.
@@ -417,6 +418,12 @@ class ExecutableBinding:
     target_identity: FileIdentity | None
     trusted_system: bool
     content_digest: str | None
+    # Interpreter selected by a ``#!`` line when the resolved target is an
+    # executable workspace script the kernel would hand to another program.
+    interpreter_path: str | None = None
+    interpreter_identity: FileIdentity | None = None
+    interpreter_digest: str | None = None
+    interpreter_trusted_system: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -435,6 +442,8 @@ class ExecutionContext:
     sandbox_executable_identity: FileIdentity | None
     executable_bindings: tuple[ExecutableBinding, ...]
     referenced_files: tuple[tuple[str, str], ...]
+    secret_mask_digest: str
+    tool_paths: tuple[str, ...]
 
 # Per-profile timeout ceiling: restricted keeps the old tight cap, dev
 # allows real builds and test runs.
@@ -581,6 +590,13 @@ class TerminalExecutor:
             self.sandbox_request in {"auto", "invalid"}
             and self.sandbox_mode is SandboxMode.WORKSPACE_ONLY
         )
+        self._external_tool_paths = _external_tool_paths()
+        # Process-tree teardown of detached (setsid) descendants needs either
+        # the Bubblewrap PID namespace or a cgroup v2 scope.
+        self._cgroup_available = cgroup_supervision_available()
+        self._tree_control_available = (
+            self.sandbox_mode is SandboxMode.BUBBLEWRAP or self._cgroup_available
+        )
         if self._sandbox_note and _sandbox_note_shown:
             self._sandbox_note = ""
         elif self._sandbox_note:
@@ -635,6 +651,16 @@ class TerminalExecutor:
             )
         environment = self._build_env(env_overrides)
         bindings = self._resolve_executable_bindings(command, work_dir, environment)
+        if (
+            self._automatic_restricted_fallback
+            and not self._cgroup_available
+            and self._command_needs_arbitrary_code(command, bindings)
+        ):
+            raise HardDenyError(
+                "Hard security denial: automatic fallback cannot control detached "
+                "descendants without a Bubblewrap PID namespace or cgroup v2 scope; "
+                "arbitrary-code execution is refused"
+            )
         self._validate_executable_boundaries(command, work_dir, bindings)
         self._hard_validate(command, work_dir, bindings)
         initial_context = self._build_execution_context(
@@ -699,7 +725,9 @@ class TerminalExecutor:
         if fallback_approval:
             return self._approve_or_deny(
                 command,
-                "Automatic sandbox fallback requires per-execution approval for arbitrary-code commands",
+                "Automatic sandbox fallback (no Bubblewrap: no secret masking or "
+                ".kvist isolation) requires per-execution approval for arbitrary-code "
+                "commands",
                 lambda: execute_authorized(initial_context),
                 offer_rule=False,
             )
@@ -763,6 +791,19 @@ class TerminalExecutor:
         if offer_rule:
             self._offer_allow_rule(command)
         return result
+
+    def _command_needs_arbitrary_code(
+        self, command: list[str], bindings: tuple[ExecutableBinding, ...] | None = None
+    ) -> bool:
+        for index, segment in enumerate(self._split_pipe_segments(command)):
+            binding = bindings[index] if bindings is not None else None
+            if is_exact_version_probe(segment) and (
+                binding is None or binding.trusted_system
+            ):
+                continue
+            if canonical_executable_name(segment[0]) not in _FALLBACK_READ_ONLY_EXECUTABLES:
+                return True
+        return False
 
     def _fallback_requires_approval(
         self, command: list[str], bindings: tuple[ExecutableBinding, ...] | None = None
@@ -945,66 +986,46 @@ class TerminalExecutor:
                 work_dir,
                 bwrap_path=bwrap_path,
                 network_allowed=network_allowed,
+                tool_paths=self._external_tool_paths,
             )
         except ValueError as error:
             raise HardDenyError(f"Hard security denial: {error}") from error
 
-        kwargs: dict[str, Any] = {
-            "cwd": work_dir,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "shell": False,
-            "env": env,
-        }
-
-        if self._is_windows:
-            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-        else:
-            kwargs["start_new_session"] = True
-            kwargs["preexec_fn"] = functools.partial(_unix_resource_limits, self._resource_limits)
-
+        rlimit_setter = (
+            None
+            if self._is_windows
+            else functools.partial(_unix_resource_limits, self._resource_limits)
+        )
         try:
-            proc = subprocess.Popen(actual_command, **kwargs)
+            outcome = run_supervised(
+                actual_command,
+                cwd=work_dir,
+                env=env,
+                timeout=effective_timeout,
+                max_capture_bytes=self.max_output_chars * 4,
+                rlimit_setter=rlimit_setter,
+                is_windows=self._is_windows,
+                use_cgroup=self._cgroup_available,
+            )
         except FileNotFoundError:
             raise TerminalError(f"Executable not found: {command_snapshot[0]}")
         except OSError as exc:
             raise TerminalError(f"Process launch error: {exc}")
 
-        try:
-            stdout_bytes, stderr_bytes = proc.communicate(timeout=effective_timeout)
-        except subprocess.TimeoutExpired:
-            self._terminate_process_tree(proc)
-            stdout_bytes, stderr_bytes = proc.communicate()
-            return TerminalResult(
-                command=command_snapshot,
-                returncode=-1,
-                stdout=self._truncate(_decode_process_output(stdout_bytes)),
-                stderr=self._truncate(
-                    f"Timeout: command did not complete within {effective_timeout} sec\n"
-                    + _decode_process_output(stderr_bytes)
-                ),
-                timed_out=True,
+        stdout = self._bound_output(outcome.stdout, outcome.stdout_truncated)
+        stderr = self._bound_output(outcome.stderr, outcome.stderr_truncated)
+        if outcome.timed_out:
+            stderr = (
+                f"Timeout: command did not complete within {effective_timeout} sec\n"
+                + stderr
             )
-
         return TerminalResult(
             command=command_snapshot,
-            returncode=proc.returncode,
-            stdout=self._truncate(_decode_process_output(stdout_bytes)),
-            stderr=self._truncate(_decode_process_output(stderr_bytes)),
-            timed_out=False,
+            returncode=outcome.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            timed_out=outcome.timed_out,
         )
-
-    def _terminate_process_tree(self, proc: subprocess.Popen[bytes]) -> None:
-        """Terminate the process group created for this command on Unix."""
-        if self._is_windows:
-            proc.kill()
-            return
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        except OSError:
-            proc.kill()
 
     @classmethod
     def _request_user_approval(cls, command: list[str], error_message: str) -> bool:
@@ -2095,7 +2116,7 @@ class TerminalExecutor:
         """Build a child environment from an allowlist; never inherit wholesale."""
         self._validate_child_home()
         env: dict[str, str] = {
-            "PATH": _controlled_child_path(),
+            "PATH": _controlled_child_path(self.workspace, self._external_tool_paths),
             "HOME": str(self._child_home),
             "TMPDIR": "/tmp",
             "GIT_CONFIG_NOSYSTEM": "1",
@@ -2207,6 +2228,8 @@ class TerminalExecutor:
             sandbox_executable_identity=sandbox_identity,
             executable_bindings=bindings,
             referenced_files=referenced,
+            secret_mask_digest=secret_mask_digest(self.workspace),
+            tool_paths=tuple(str(path) for path in self._external_tool_paths),
         )
 
     def _resolve_executable(self, token: str, work_dir: Path, env: dict[str, str]) -> Path | None:
@@ -2242,7 +2265,7 @@ class TerminalExecutor:
         return tuple(bindings)
 
     def _resolve_executable_binding(
-        self, token: str, work_dir: Path, env: dict[str, str]
+        self, token: str, work_dir: Path, env: dict[str, str], *, attest_shebang: bool = True
     ) -> ExecutableBinding:
         lookup: Path | None
         if not is_bare_executable_token(token):
@@ -2275,6 +2298,12 @@ class TerminalExecutor:
                 raise HardDenyError(
                     f"Hard security denial: cannot hash executable '{token}': {error}"
                 ) from error
+
+        interpreter = (
+            self._attest_shebang_interpreter(resolved, work_dir, env)
+            if attest_shebang and resolved is not None and not trusted
+            else None
+        )
         return ExecutableBinding(
             token=token,
             lookup_path=str(lookup) if lookup is not None else None,
@@ -2283,6 +2312,67 @@ class TerminalExecutor:
             target_identity=_path_identity(resolved) if resolved is not None else None,
             trusted_system=trusted,
             content_digest=digest,
+            interpreter_path=interpreter[0] if interpreter else None,
+            interpreter_identity=interpreter[1] if interpreter else None,
+            interpreter_digest=interpreter[2] if interpreter else None,
+            interpreter_trusted_system=interpreter[3] if interpreter else False,
+        )
+
+    def _attest_shebang_interpreter(
+        self, script: Path, work_dir: Path, env: dict[str, str]
+    ) -> tuple[str, FileIdentity | None, str | None, bool] | None:
+        """Attest the interpreter the kernel selects from a script's ``#!`` line.
+
+        The kernel execs ``parts[0]`` literally, so that binary is what we must
+        attest — regardless of its name.  Only when ``parts[0]`` resolves to a
+        *trusted-system* ``env`` do we follow its argument to the effective
+        interpreter (``env`` re-executes it via PATH).  An ``env``-named binary
+        anywhere else is attested as itself, closing the impersonation bypass.
+        """
+        try:
+            with open(script, "rb") as handle:
+                head = handle.read(256)
+        except OSError:
+            return None
+        parts = _parse_shebang(head)
+        if parts is None:
+            return None
+        if not parts:
+            raise HardDenyError(
+                "Hard security denial: unsupported or ambiguous shebang interpreter"
+            )
+        binding = self._resolve_executable_binding(
+            parts[0], work_dir, env, attest_shebang=False
+        )
+        if (
+            binding.resolved_path is not None
+            and binding.trusted_system
+            and os.path.basename(binding.resolved_path) == "env"
+        ):
+            arg = _env_interpreter_name(parts[1:])
+            if not arg:
+                raise HardDenyError(
+                    "Hard security denial: unsupported or ambiguous env shebang interpreter"
+                )
+            binding = self._resolve_executable_binding(
+                arg, work_dir, env, attest_shebang=False
+            )
+        if binding.resolved_path is None:
+            # Interpreter cannot be resolved with the sandboxed PATH; the exec
+            # would fail, but do not fabricate an attestation for it.
+            return (binding.token, None, None, False)
+        interpreter = Path(binding.resolved_path)
+        in_workspace = _is_relative_to(interpreter, self.workspace)
+        if not binding.trusted_system and not in_workspace:
+            raise HardDenyError(
+                "Hard security denial: shebang interpreter is outside trusted system "
+                "roots and the workspace"
+            )
+        return (
+            binding.resolved_path,
+            binding.target_identity,
+            binding.content_digest,
+            binding.trusted_system,
         )
 
     def _validate_executable_boundaries(
@@ -2310,7 +2400,20 @@ class TerminalExecutor:
                 binding.resolved_path
                 and _is_relative_to(Path(binding.resolved_path), self.workspace)
             )
-            if lookup_in_workspace and binding.resolved_path and not target_in_workspace:
+            # A project launcher (e.g. .venv/bin/python -> /usr/bin/python3)
+            # may resolve to a trusted, user-immutable system interpreter; the
+            # launcher's own lstat identity is attested so swapping the symlink
+            # invalidates approval.  Escapes to any other target stay denied.
+            target_trusted = bool(
+                binding.resolved_path
+                and _is_trusted_system_target(Path(binding.resolved_path))
+            )
+            if (
+                lookup_in_workspace
+                and binding.resolved_path
+                and not target_in_workspace
+                and not target_trusted
+            ):
                 raise HardDenyError(
                     "Hard security denial: executable symlink resolves outside the workspace"
                 )
@@ -2330,7 +2433,12 @@ class TerminalExecutor:
         self, command: list[str], bindings: tuple[ExecutableBinding, ...]
     ) -> bool:
         for index, segment in enumerate(self._split_pipe_segments(command)):
-            if bindings[index].trusted_system:
+            binding = bindings[index]
+            if binding.trusted_system:
+                continue
+            # A project launcher symlink whose target is a user-immutable system
+            # binary executes that system binary; treat it like a trusted origin.
+            if binding.resolved_path and _is_trusted_system_target(Path(binding.resolved_path)):
                 continue
             executable = canonical_executable_name(segment[0])
             if executable in self._allowed or is_exact_version_probe(segment):
@@ -2352,16 +2460,30 @@ class TerminalExecutor:
                 and is_bare_executable_token(segment[0])
                 and segment[0].casefold() in _WINDOWS_CMD_BUILTINS
             )
-            materialized.append(
-                segment[0]
-                if is_builtin or not binding.resolved_path
-                else binding.resolved_path
-            )
+            materialized.append(self._materialized_argv0(segment[0], binding, is_builtin))
             args = list(segment[1:])
             if canonical_executable_name(segment[0]) == "git" and not is_exact_version_probe(segment):
                 args = _harden_git_arguments(args)
             materialized.extend(args)
         return materialized
+
+    def _materialized_argv0(self, token: str, binding: ExecutableBinding, is_builtin: bool) -> str:
+        if is_builtin or not binding.resolved_path:
+            return token
+        # A project launcher symlink (e.g. .venv/bin/python) must keep its own
+        # path as argv[0] so the interpreter finds pyvenv.cfg and its
+        # site-packages; substituting the resolved system binary would break
+        # venv semantics.  The launcher inode is attested, so a swap between
+        # approval and spawn invalidates the bound context.
+        if (
+            not is_bare_executable_token(token)
+            and binding.lookup_path
+            and binding.lookup_path != binding.resolved_path
+            and _is_relative_to(Path(binding.lookup_path), self.workspace)
+            and _is_trusted_system_target(Path(binding.resolved_path))
+        ):
+            return binding.lookup_path
+        return binding.resolved_path
 
     def _hash_referenced_files(self, command: list[str], work_dir: Path) -> list[tuple[str, str]]:
         paths: dict[str, Path] = {}
@@ -2573,6 +2695,24 @@ class TerminalExecutor:
             + f"\n[TRUNCATED: showing first {self.max_output_chars} of {len(text)} characters]"
         )
 
+    def _bound_output(self, data: bytes, byte_truncated: bool) -> str:
+        """Decode captured bytes and apply the character display cap.
+
+        ``byte_truncated`` marks output already clipped at the supervisor's
+        in-memory byte ceiling; surface that even when the decoded prefix fits
+        the character cap so truncation is never silent.
+        """
+        text = _decode_process_output(data)
+        if len(text) > self.max_output_chars:
+            return (
+                text[: self.max_output_chars]
+                + f"\n[TRUNCATED: showing first {self.max_output_chars} of "
+                f"{len(text)}+ characters]"
+            )
+        if byte_truncated:
+            return text + "\n[TRUNCATED: output exceeded the capture byte limit]"
+        return text
+
 
 def _git_config_section_values(content: str, section: str, key: str) -> list[str]:
     """Extract simple scalar values from an exact, unsubsectioned Git section."""
@@ -2674,14 +2814,129 @@ def _docker_path_is_risk_graded(tokens: list[str], index: int) -> bool:
     )
 
 
-def _controlled_child_path() -> str:
+_PROJECT_TOOL_SUBDIRS: tuple[str, ...] = (
+    ".venv/bin", "venv/bin", ".venv/Scripts", "venv/Scripts", "node_modules/.bin",
+)
+
+
+def _project_tool_dirs(workspace: Path) -> list[Path]:
+    """Trusted project-local tool directories that exist inside the workspace."""
+    dirs: list[Path] = []
+    for relative in _PROJECT_TOOL_SUBDIRS:
+        candidate = workspace / relative
+        try:
+            if candidate.is_dir() and _is_relative_to(candidate.resolve(strict=True), workspace):
+                dirs.append(candidate)
+        except OSError:
+            continue
+    return dirs
+
+
+def _external_tool_paths() -> tuple[Path, ...]:
+    """Validated absolute toolchain directories from AGENT_TOOL_PATHS.
+
+    Each entry must be absolute, exist as a directory, and not be writable by
+    other principals (world-writable).  Home is never added wholesale.
+    """
+    raw = os.getenv("AGENT_TOOL_PATHS", "")
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for item in raw.split(os.pathsep):
+        item = item.strip()
+        if not item:
+            continue
+        candidate = Path(item)
+        if not candidate.is_absolute():
+            continue
+        try:
+            resolved = candidate.resolve(strict=True)
+            info = resolved.stat()
+        except OSError:
+            continue
+        if not stat.S_ISDIR(info.st_mode):
+            continue
+        if info.st_mode & stat.S_IWOTH:
+            continue
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(resolved)
+    return tuple(paths)
+
+
+def _system_exec_dirs() -> list[Path]:
     if os.name == "nt":
-        return os.defpath
-    paths = (
-        "/usr/sbin", "/usr/bin", "/sbin", "/bin",
-    )
-    existing = [path for path in paths if Path(path).is_dir()]
-    return os.pathsep.join(existing) or os.defpath
+        return [Path(part) for part in os.defpath.split(os.pathsep) if part]
+    return [Path(p) for p in ("/usr/sbin", "/usr/bin", "/sbin", "/bin") if Path(p).is_dir()]
+
+
+def _parse_shebang(head: bytes) -> list[str] | None:
+    """Return the ``#!`` token list, ``[]`` for an ambiguous line, or None.
+
+    ``None`` means the file has no shebang (e.g. an ELF binary).  An empty list
+    means the shebang exists but is empty/undecodable and the caller must fail
+    closed.  The first token is the program the kernel actually execs.
+    """
+    if not head.startswith(b"#!"):
+        return None
+    line = head[2:].split(b"\n", 1)[0]
+    try:
+        text = line.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return []
+    return text.split()
+
+
+def _env_interpreter_name(args: list[str]) -> str:
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in ("-S", "--split-string"):
+            index += 1
+            continue
+        if token.startswith("-S"):
+            inner = token[2:].strip()
+            if inner:
+                return inner.split()[0]
+            index += 1
+            continue
+        if token.startswith("--split-string="):
+            inner = token.split("=", 1)[1].strip()
+            return inner.split()[0] if inner else ""
+        if token in ("-u", "--unset", "-C", "--chdir", "-P"):
+            index += 2
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+        if "=" in token:
+            index += 1
+            continue
+        return token.split()[0] if " " in token else token
+    return ""
+
+
+def _controlled_child_path(
+    workspace: Path | None = None, tool_paths: tuple[Path, ...] = ()
+) -> str:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        text = str(path)
+        if text not in seen:
+            seen.add(text)
+            ordered.append(text)
+
+    if workspace is not None:
+        for path in _project_tool_dirs(workspace):
+            add(path)
+    for path in tool_paths:
+        add(path)
+    for path in _system_exec_dirs():
+        add(path)
+    return os.pathsep.join(ordered) or os.defpath
 
 
 def _explicit_child_env_names() -> set[str]:
@@ -2741,6 +2996,16 @@ def _is_relative_to(path: Path, boundary: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _is_trusted_system_target(resolved: Path) -> bool:
+    """Whether a resolved target is a user-immutable system binary on its own.
+
+    Unlike ``_is_trusted_system_executable`` this ignores the lookup location,
+    so a workspace launcher that points into ``/usr`` (a venv symlink) can be
+    recognised as resolving to a safe interpreter.
+    """
+    return _is_trusted_system_executable(resolved, resolved)
 
 
 def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:

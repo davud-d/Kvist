@@ -361,6 +361,7 @@ AGENT_API_INTERVAL=
 AGENT_SANDBOX_MODE=auto
 AGENT_SANDBOX_NET=deny
 AGENT_CHILD_ENV_ALLOW=       # дополнительные безопасные переменные через запятую
+AGENT_TOOL_PATHS=            # абсолютные каталоги toolchain через разделитель путей
 AGENT_TERMINAL_PROFILE=dev
 AGENT_TERMINAL_TIMEOUT=15
 AGENT_TERMINAL_MAX_OUTPUT=12000
@@ -386,6 +387,14 @@ AGENT_FETCH_EXTRA_DOMAINS= # доп. домены для fetch_url, через �
   несекретные и не управляющие загрузчиком переменные, в том числе для
   `env_overrides`; секретные и execution-control имена всё равно блокируются.
   Каждый terminal run получает новый приватный и изначально пустой child `HOME`.
+- Child `PATH` сначала добавляет существующие проектные каталоги инструментов
+  (`.venv/bin`, `venv/bin`, `node_modules/.bin`) внутри workspace, затем
+  проверенные записи `AGENT_TOOL_PATHS`, затем доверенные системные каталоги.
+  Каждая запись `AGENT_TOOL_PATHS` должна быть абсолютным существующим каталогом
+  без world-writable прав; она монтируется read-only в Bubblewrap. Полный `HOME`,
+  `.local/bin`, nvm, pyenv и cargo автоматически не добавляются. Стандартные
+  Python virtualenv работают: `.venv/bin/python`, ссылающийся на доверенный
+  системный интерпретатор, запускается с корректным `sys.prefix` и site-packages.
 - Terminal timeout ограничивается диапазоном 1-300 секунд в профиле `dev` и
   1-30 секунд в `restricted`; захватываемый вывод — диапазоном
   1 000-200 000 символов.
@@ -454,6 +463,13 @@ Linux по умолчанию выбирает OS-песочницу, если �
   shell-команд, указывающие на секретные пути (`.env*`, `.ssh`, `.aws`,
   `.gnupg`, ключи/сертификаты, `credentials`), отклоняются для любой команды,
   включая read-only `cat` и `grep`, на относительных и абсолютных путях.
+- Под Bubblewrap защита секретов обеспечивается ОС, а не только проверкой argv:
+  перед запуском Kvist перечисляет защищённые файлы/каталоги workspace и
+  маскирует их внутри песочницы (файлы подменяются read-only `/dev/null`,
+  каталоги — пустым tmpfs). Произвольный дочерний код — Python, Node, shell,
+  AWK/sed, конструирующие путь во время выполнения, скомпилированные бинарники,
+  symlink — читает пустой объект или получает permission denied. Дайджест
+  набора защищённых путей привязан к подтверждению.
 - Shell-команды проходят platform-aware allowlist и role-aware risk policy.
   Всё, что не read-only — интерпретаторы и сборщики (`python`, `node`, `make`,
   `cargo`, `go`, `awk`), установка пакетов, `git push`, неизвестные команды —
@@ -521,18 +537,31 @@ closed.
 `AGENT_SANDBOX_MODE=auto` на Linux выбирает доверенный системный `bwrap`.
 Песочница монтирует только workspace и необходимые runtime/library paths, без
 host root, `/home`, `/root`, других репозиториев и каталогов credentials. `/tmp`
-эфемерен, `HOME` пуст, `.kvist` замаскирован, process namespaces изолированы, а
-сеть по умолчанию unshared. `AGENT_SANDBOX_NET=allow` следует включать только
-для команды, которой действительно нужна сеть.
+эфемерен, `HOME` пуст, `.kvist` и все защищённые секреты workspace замаскированы,
+process namespaces изолированы, а сеть по умолчанию unshared.
+`AGENT_SANDBOX_NET=allow` следует включать только для команды, которой
+действительно нужна сеть.
 
 Если Bubblewrap недоступен в `auto`, включается явно отмеченный restricted
 workspace fallback: interpreters, scripts, build/package tools и неизвестные
 arbitrary-code executables требуют подтверждения каждого запуска даже при
-совпавшем project allow. Явный `AGENT_SANDBOX_MODE=workspace` — более слабый
-режим, где одобренный процесс сохраняет host-права текущего пользователя.
-В этих слабых режимах каждый run всё равно получает новый приватный,
+совпавшем project allow, и жёстко отклоняются, если нет cgroup v2 scope для
+контроля detached-потомков. Явный `AGENT_SANDBOX_MODE=workspace` — более слабый
+режим, где одобренный процесс сохраняет host-права текущего пользователя; он
+сопровождается предупреждением и **не** даёт ни маскировки секретов, ни изоляции
+`.kvist`. В этих слабых режимах каждый run всё равно получает новый приватный,
 проверенно-пустой child `HOME`. Явный `bubblewrap` без доверенного binary
 блокирует shell execution и не деградирует незаметно.
+
+Каждый запуск выполняется под супервизором дерева процессов: команда, которая
+завершилась по timeout или нормально, не может оставить detached (`setsid`)
+потомков — под Bubblewrap их убивает PID namespace, а cgroup v2 scope сносит всё
+поддерево и по timeout, и по завершению. Вывод захватывается в ограниченные
+in-memory буферы во время работы процесса (без неограниченной буферизации и без
+блокирующего повторного drain), поэтому дочерний процесс не может исчерпать
+память родителя. Скрипты с `#!` аттестуют интерпретатор (прямой, `env NAME`,
+`env -S NAME ARGS`): он должен быть доверенным системным бинарником или файлом
+workspace, а его identity/содержимое привязаны к подтверждению.
 
 ### Текущие ограничения границы
 
@@ -541,17 +570,21 @@ arbitrary-code executables требуют подтверждения каждо�
 - Прямые scripts и распространённые build-control files хэшируются, но
   transitive imports, модули `python -m`, Make includes, исходники package
   scripts и другие dependency graphs полностью не аттестуются.
-- Child PATH содержит только фиксированные системные каталоги (без
-  `/usr/local`), но transitive helpers, запускаемые доверенными системными
-  tools, отдельно по содержимому не аттестуются.
-- Проверка secret paths покрывает named/canonical direct arguments, а recursive
-  traversal через grep/ripgrep блокируется. Repository/history-aware и
-  transitive tools всё ещё могут вывести защищённый content, не названный в
-  argv. Strong Bubblewrap скрывает host credential trees, но содержимое и
-  история workspace остаются ответственностью пользователя.
+- Child PATH сначала добавляет проектные каталоги инструментов и проверенные
+  `AGENT_TOOL_PATHS`, затем фиксированные системные каталоги (без `/usr/local`),
+  но transitive helpers, запускаемые доверенными системными tools, отдельно по
+  содержимому не аттестуются.
+- Проверка secret paths покрывает named/canonical direct arguments, а под
+  Bubblewrap защищённые файлы/каталоги маскируются на уровне ОС, так что
+  сконструированные во время выполнения пути до них не доходят.
+  Repository/history-aware tools всё ещё могут вывести защищённый content, не
+  названный в argv. Strong Bubblewrap скрывает host credential trees и маскирует
+  секреты workspace, но в явном режиме `workspace` ни маскировка секретов, ни
+  изоляция `.kvist` не действуют.
 - Между финальным сравнением identity/hash и OS process creation остаётся узкое
-  race window. Captured output ограничивается после чтения, а не bounded stream;
-  на Windows timeout cleanup не гарантирует завершение каждого descendant.
+  race window. Очистка detached-потомков опирается на Bubblewrap PID namespace
+  или cgroup v2 scope; в явном режиме `workspace` без cgroup v2 и на Windows
+  timeout cleanup не гарантирует завершение каждого descendant.
 
 ## Архитектура промптов и действий
 
