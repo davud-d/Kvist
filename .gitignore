@@ -84,5 +84,5 @@ USER.md
 pytest.ini
 Kvist.zip
 reports/
-memory/repomix-output.txt
+memory/
 kvist_repomix.md
