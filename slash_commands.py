@@ -28,6 +28,11 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         "Show Kvist information and platform support",
         aliases=("about", "info"),
     ),
+    SlashCommand(
+        "commands",
+        "List all available slash commands",
+        aliases=("cmds",),
+    ),
     SlashCommand("new", "Reset the active session and start fresh"),
     SlashCommand("provider", "Switch or configure the LLM provider"),
     SlashCommand("models", "Select fast, smart and planner models"),

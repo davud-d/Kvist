@@ -550,6 +550,7 @@ def test_venv_symlink_to_system_python_is_permitted(tmp_path, monkeypatch):
     vb = tmp_path / ".venv" / "bin"
     vb.mkdir(parents=True)
     (vb / "python").symlink_to(os.path.realpath(sys.executable))
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("import sys; print('prefix', sys.prefix)", encoding="utf-8")
     ex = TerminalExecutor(tmp_path, timeout=10)
     result = ex.run([".venv/bin/python", "hi.py"])
@@ -564,9 +565,22 @@ def test_venv_symlink_to_untrusted_target_is_denied(tmp_path):
     evil.write_text("#!/bin/sh\necho pwned\n", encoding="utf-8")
     evil.chmod(0o755)
     (vb / "python").symlink_to(evil)
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     ex = TerminalExecutor(tmp_path, timeout=5)
     with pytest.raises(HardDenyError, match="symlink resolves outside"):
         ex.run([".venv/bin/python", "-c", "1"])
+
+
+def test_venv_without_pyvenv_cfg_is_denied(tmp_path):
+    """A launcher symlink without an attested pyvenv.cfg is not a venv exception."""
+    _write_policy(tmp_path, ["*"])
+    vb = tmp_path / ".venv" / "bin"
+    vb.mkdir(parents=True)
+    (vb / "python").symlink_to(os.path.realpath(sys.executable))
+    (tmp_path / "hi.py").write_text("print('should not run')", encoding="utf-8")
+    ex = TerminalExecutor(tmp_path, timeout=5)
+    with pytest.raises(HardDenyError, match="symlink resolves outside"):
+        ex.run([".venv/bin/python", "hi.py"])
 
 
 @requires_bwrap

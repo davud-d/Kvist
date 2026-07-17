@@ -1548,6 +1548,21 @@ def main() -> None:
                 console.print(f"[yellow]{validation_error}[/yellow]")
                 continue
 
+            if user_goal.lower() == "/commands":
+                from slash_commands import SLASH_COMMANDS
+
+                console.print("[bold]Available commands:[/bold]")
+                for command in SLASH_COMMANDS:
+                    aliases = (
+                        f" [dim](aliases: {', '.join('/' + a for a in command.aliases)})[/dim]"
+                        if command.aliases
+                        else ""
+                    )
+                    console.print(
+                        f"  [cyan]/{command.name}[/cyan] — {command.description}{aliases}"
+                    )
+                continue
+
             if user_goal.lower() == "/about" or user_goal.lower() == "/info" or user_goal.lower() == "/help":
                 console.print("[green]This is Kvist: open-source AI agent for Windows/Linux. [/green]")
                 console.print('''[red] 

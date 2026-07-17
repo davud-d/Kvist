@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
+from enum import Enum
 
 from command_policy import (
     CommandAssessment,
@@ -53,7 +54,7 @@ from sandbox import (
     sandbox_network_allowed,
     wrap_command_for_sandbox,
 )
-from secret_paths import secret_mask_digest
+from secret_paths import UnsafeSecretPathError, secret_mask_digest
 
 # ── Global HITL lock ─────────────────────────────────────────────
 # Prevents background TUI rendering while the user is typing y/N.
@@ -406,14 +407,41 @@ _SECRET_ENV_PREFIXES: tuple[str, ...] = (
 
 FileIdentity = tuple[str, int, int, int, int, int]
 
+class ExecutableOrigin(str, Enum):
+    TRUSTED_SYSTEM = "trusted_system"
+    VERIFIED_VENV = "verified_venv"
+    WORKSPACE_FILE = "workspace_file"
+    WORKSPACE_ALIAS = "workspace_alias"
+    EXTERNAL_TOOL = "external_tool"
+    UNRESOLVED = "unresolved"
 
 @dataclass(frozen=True, slots=True)
 class ExecutableBinding:
-    """The lookup entry and final executable target selected for one segment."""
+    """The requested and effective executable selected for one segment.
+
+    ``token`` is the name/path supplied in argv, while ``lookup_path`` is the
+    entry found either explicitly or through PATH and ``resolved_path`` is the
+    final binary the OS will execute.  The remaining origin fields make that
+    distinction explicit so security decisions do not have to reconstruct it.
+    """
 
     token: str
+    requested_name: str
+    effective_name: str | None
+    # Exact entry selected by explicit argv lookup or the controlled PATH.
     lookup_path: str | None
+    lookup_in_workspace: bool
+    target_in_workspace: bool
+    lookup_is_symlink: bool
+    lookup_is_alias: bool
+    origin: ExecutableOrigin
+    # Final symlink-resolved executable and its policy-level identity.
     resolved_path: str | None
+    requested_identity: str
+    effective_identity: str | None
+    # ``None`` means no effective executable could be resolved.
+    identity_matches: bool | None
+    identity_mismatch: bool
     lookup_identity: FileIdentity | None
     target_identity: FileIdentity | None
     trusted_system: bool
@@ -424,6 +452,16 @@ class ExecutableBinding:
     interpreter_identity: FileIdentity | None = None
     interpreter_digest: str | None = None
     interpreter_trusted_system: bool = False
+    # Narrow exception: true only when this binding is a verified project
+    # venv Python launcher (workspace-relative .venv|venv/bin[/Scripts]
+    # launcher, attested pyvenv.cfg, final target is a trusted-system Python
+    # interpreter — never Bash/sh/env/Perl/Node).  This is the *only* case in
+    # which a workspace-lookup symlink to a trusted system target is treated
+    # as a trusted execution origin; a generic workspace-to-system alias
+    # (e.g. ``tools/cat -> /usr/bin/bash``) is never granted this status.
+    venv_launcher: bool = False
+    venv_pyvenv_cfg_identity: FileIdentity | None = None
+    venv_pyvenv_cfg_digest: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2215,6 +2253,12 @@ class TerminalExecutor:
         sandbox_identity = (
             _path_identity(Path(bwrap_path)) if bwrap_path else None
         )
+        try:
+            mask_digest = secret_mask_digest(self.workspace)
+        except UnsafeSecretPathError as error:
+            raise HardDenyError(
+                f"Hard security denial: cannot build a complete secret mask: {error}"
+            ) from error
         return ExecutionContext(
             argv=tuple(command),
             cwd=str(work_dir),
@@ -2228,7 +2272,7 @@ class TerminalExecutor:
             sandbox_executable_identity=sandbox_identity,
             executable_bindings=bindings,
             referenced_files=referenced,
-            secret_mask_digest=secret_mask_digest(self.workspace),
+            secret_mask_digest=mask_digest,
             tool_paths=tuple(str(path) for path in self._external_tool_paths),
         )
 
@@ -2251,11 +2295,26 @@ class TerminalExecutor:
                 binding = ExecutableBinding(
                     token=token,
                     lookup_path=cmd_binding.lookup_path,
+                    lookup_in_workspace=cmd_binding.lookup_in_workspace,
+                    lookup_is_symlink=cmd_binding.lookup_is_symlink,
                     resolved_path=cmd_binding.resolved_path,
+                    requested_identity=canonical_executable_name(token),
+                    effective_identity=cmd_binding.effective_identity,
+                    identity_matches=(
+                        canonical_executable_name(token) == cmd_binding.effective_identity
+                        if cmd_binding.effective_identity is not None
+                        else None
+                    ),
                     lookup_identity=cmd_binding.lookup_identity,
                     target_identity=cmd_binding.target_identity,
                     trusted_system=cmd_binding.trusted_system,
                     content_digest=cmd_binding.content_digest,
+                    requested_name=canonical_executable_name(token),
+                    effective_name=cmd_binding.effective_name,
+                    target_in_workspace=cmd_binding.target_in_workspace,
+                    lookup_is_alias=cmd_binding.lookup_is_alias,
+                    origin=cmd_binding.origin,
+                    identity_mismatch=False,
                 )
             else:
                 binding = self._resolve_executable_binding(token, work_dir, env)
@@ -2304,18 +2363,100 @@ class TerminalExecutor:
             if attest_shebang and resolved is not None and not trusted
             else None
         )
+        venv_verified: tuple[FileIdentity, str] | None = None
+        if not trusted and lookup is not None and resolved is not None:
+            venv_verified = _verify_venv_python_launcher(self.workspace, lookup, resolved)
+        requested_identity = canonical_executable_name(token)
+        effective_identity = (
+            canonical_executable_name(resolved.name) if resolved is not None else None
+        )
+        requested_name = requested_identity
+        effective_name = effective_identity
+
+        lookup_in_workspace = bool(
+            lookup is not None and _is_relative_to(lookup, self.workspace)
+        )
+        target_in_workspace = bool(
+            resolved is not None and _is_relative_to(resolved, self.workspace)
+        )
+        lookup_is_symlink = _path_entry_is_symlink(lookup)
+        lookup_is_alias = bool(
+            lookup is not None
+            and resolved is not None
+            and (lookup_is_symlink or Path(os.path.abspath(lookup)) != resolved)
+        )
+
+        if resolved is None:
+            origin = ExecutableOrigin.UNRESOLVED
+        elif trusted:
+            origin = ExecutableOrigin.TRUSTED_SYSTEM
+        elif venv_verified is not None:
+            origin = ExecutableOrigin.VERIFIED_VENV
+        elif lookup_in_workspace and lookup_is_alias:
+            origin = ExecutableOrigin.WORKSPACE_ALIAS
+        elif lookup_in_workspace:
+            origin = ExecutableOrigin.WORKSPACE_FILE
+        else:
+            origin = ExecutableOrigin.EXTERNAL_TOOL
+
+        identity_matches = (
+            (requested_name == effective_name)
+            if effective_name is not None
+            else None
+        )
+        identity_mismatch = bool(
+            requested_name
+            and effective_name
+            and not _same_executable_family(requested_name, effective_name)
+        )
+        if venv_verified is not None:
+            identity_mismatch = False
+
         return ExecutableBinding(
             token=token,
             lookup_path=str(lookup) if lookup is not None else None,
             resolved_path=str(resolved) if resolved is not None else None,
-            lookup_identity=_path_entry_identity(lookup) if lookup is not None else None,
-            target_identity=_path_identity(resolved) if resolved is not None else None,
+            lookup_identity=(
+                _path_entry_identity(lookup)
+                if lookup is not None
+                else None
+            ),
+            target_identity=(
+                _path_identity(resolved)
+                if resolved is not None
+                else None
+            ),
             trusted_system=trusted,
             content_digest=digest,
+
+            requested_name=requested_name,
+            effective_name=effective_name,
+            requested_identity=requested_identity,
+            effective_identity=effective_identity,
+            identity_matches=identity_matches,
+            lookup_in_workspace=lookup_in_workspace,
+            target_in_workspace=target_in_workspace,
+            lookup_is_symlink=lookup_is_symlink,
+            lookup_is_alias=lookup_is_alias,
+            origin=origin,
+            identity_mismatch=identity_mismatch,
+
             interpreter_path=interpreter[0] if interpreter else None,
             interpreter_identity=interpreter[1] if interpreter else None,
             interpreter_digest=interpreter[2] if interpreter else None,
             interpreter_trusted_system=interpreter[3] if interpreter else False,
+
+            venv_launcher=venv_verified is not None,
+            venv_pyvenv_cfg_identity=(
+                venv_verified[0]
+                if venv_verified
+                else None
+            ),
+            venv_pyvenv_cfg_digest=(
+                venv_verified[1]
+                if venv_verified
+                else None
+            ),
         )
 
     def _attest_shebang_interpreter(
@@ -2392,32 +2533,28 @@ class TerminalExecutor:
             if is_bare_executable_token(token):
                 continue
 
-            raw = Path(token).expanduser()
-            lookup = raw if raw.is_absolute() else work_dir / raw
-            lookup = Path(os.path.abspath(lookup))
-            lookup_in_workspace = _is_relative_to(lookup, self.workspace)
-            target_in_workspace = bool(
-                binding.resolved_path
-                and _is_relative_to(Path(binding.resolved_path), self.workspace)
-            )
-            # A project launcher (e.g. .venv/bin/python -> /usr/bin/python3)
-            # may resolve to a trusted, user-immutable system interpreter; the
-            # launcher's own lstat identity is attested so swapping the symlink
-            # invalidates approval.  Escapes to any other target stay denied.
-            target_trusted = bool(
-                binding.resolved_path
-                and _is_trusted_system_target(Path(binding.resolved_path))
-            )
+            # A verified project venv Python launcher (e.g.
+            # .venv/bin/python -> /usr/bin/python3) may resolve to a trusted,
+            # user-immutable system interpreter; the launcher's own lstat
+            # identity and its venv's pyvenv.cfg are attested, so swapping the
+            # symlink or pyvenv.cfg invalidates approval.  This is the only
+            # workspace-to-system escape permitted — a generic alias (e.g.
+            # ``.venv/bin/cat -> /usr/bin/bash``) is never trusted merely
+            # because its target lives under a system root; escapes to any
+            # other target, or from any other basename/location, stay denied.
             if (
-                lookup_in_workspace
-                and binding.resolved_path
-                and not target_in_workspace
-                and not target_trusted
+                binding.lookup_in_workspace
+                and not binding.target_in_workspace
+                and not binding.venv_launcher
             ):
                 raise HardDenyError(
-                    "Hard security denial: executable symlink resolves outside the workspace"
+                    "Hard security denial: executable symlink resolves"
+                    " outside the workspace: "
+                    f"requested={binding.token!r}, "
+                    f"lookup={binding.lookup_path!r}, "
+                    f"effective={binding.resolved_path!r}"
                 )
-            if not lookup_in_workspace and not binding.trusted_system:
+            if not binding.lookup_in_workspace and not binding.trusted_system:
                 raise HardDenyError(
                     "Hard security denial: path-qualified executable is outside trusted system roots"
                 )
@@ -2436,9 +2573,13 @@ class TerminalExecutor:
             binding = bindings[index]
             if binding.trusted_system:
                 continue
-            # A project launcher symlink whose target is a user-immutable system
-            # binary executes that system binary; treat it like a trusted origin.
-            if binding.resolved_path and _is_trusted_system_target(Path(binding.resolved_path)):
+            # Only a verified project venv Python launcher is treated as a
+            # trusted origin; a generic workspace symlink/PATH alias landing
+            # on a trusted-looking target (e.g. a workspace ``cat`` aliasing
+            # ``/usr/bin/bash``) must still require per-execution approval so
+            # a project allow rule keyed on the alias name cannot silently
+            # authorize a different effective executable.
+            if binding.venv_launcher:
                 continue
             executable = canonical_executable_name(segment[0])
             if executable in self._allowed or is_exact_version_probe(segment):
@@ -2479,8 +2620,7 @@ class TerminalExecutor:
             not is_bare_executable_token(token)
             and binding.lookup_path
             and binding.lookup_path != binding.resolved_path
-            and _is_relative_to(Path(binding.lookup_path), self.workspace)
-            and _is_trusted_system_target(Path(binding.resolved_path))
+            and binding.venv_launcher
         ):
             return binding.lookup_path
         return binding.resolved_path
@@ -2990,6 +3130,29 @@ def _path_entry_identity(path: Path) -> FileIdentity | None:
     )
 
 
+def _path_entry_is_symlink(path: Path | None) -> bool:
+    """Return whether the exact lookup entry is a symlink, without following it."""
+    if path is None:
+        return False
+    try:
+        return stat.S_ISLNK(Path(os.path.abspath(path)).lstat().st_mode)
+    except OSError:
+        return False
+
+
+def _same_executable_family(a: str, b: str) -> bool:
+    """Return True when *a* and *b* name the same tool family.
+
+    ``python`` / ``python3`` / ``python3.11`` are the same family;
+    ``python`` / ``node`` are not.
+    """
+    if a == b:
+        return True
+    a_base = re.sub(r"\d[\d.]*$", "", a)
+    b_base = re.sub(r"\d[\d.]*$", "", b)
+    return a_base == b_base
+
+
 def _is_relative_to(path: Path, boundary: Path) -> bool:
     try:
         path.relative_to(boundary)
@@ -2998,14 +3161,76 @@ def _is_relative_to(path: Path, boundary: Path) -> bool:
     return True
 
 
-def _is_trusted_system_target(resolved: Path) -> bool:
-    """Whether a resolved target is a user-immutable system binary on its own.
+_VENV_LAUNCHER_DIRS: frozenset[str] = frozenset(
+    (".venv/bin", "venv/bin", ".venv/Scripts", "venv/Scripts")
+)
+# python, python3, python3.11, ... and the Windows .exe suffix.  Deliberately
+# excludes bash/sh/env/perl/node/etc so a launcher aliasing another family is
+# never mistaken for a venv Python interpreter.
+_VENV_PYTHON_BASENAME_RE = re.compile(r"^python(3(\.\d{1,2})?)?(\.exe)?$", re.IGNORECASE)
 
-    Unlike ``_is_trusted_system_executable`` this ignores the lookup location,
-    so a workspace launcher that points into ``/usr`` (a venv symlink) can be
-    recognised as resolving to a safe interpreter.
+
+def _verify_venv_python_launcher(
+    workspace: Path, lookup: Path, resolved: Path
+) -> tuple[FileIdentity, str] | None:
+    """Verify ``lookup`` is a genuine project venv Python launcher.
+
+    This is the *only* exception that lets a workspace-owned (attacker- or
+    tool-writable) path stand in for a trusted system executable.  Every
+    condition below is required; any failure returns ``None`` and the caller
+    denies the workspace-to-system escape like any other untrusted alias.
+    Returns ``(pyvenv_cfg_identity, pyvenv_cfg_digest)`` on success so the
+    execution context binds the launcher to its venv's declared identity —
+    mutating pyvenv.cfg between approval and spawn invalidates the approval.
     """
-    return _is_trusted_system_executable(resolved, resolved)
+    try:
+        if not _is_relative_to(lookup, workspace):
+            return None
+        rel_parts = lookup.relative_to(workspace).parts
+    except ValueError:
+        return None
+    if len(rel_parts) != 3:
+        return None
+    venv_name, bin_name, launcher_name = rel_parts
+    if f"{venv_name}/{bin_name}" not in _VENV_LAUNCHER_DIRS:
+        return None
+    if not _VENV_PYTHON_BASENAME_RE.match(launcher_name):
+        return None
+
+    venv_root = workspace / venv_name
+    try:
+        if stat.S_ISLNK(venv_root.lstat().st_mode):
+            return None
+        venv_root_resolved = venv_root.resolve(strict=True)
+    except OSError:
+        return None
+    if not _is_relative_to(venv_root_resolved, workspace) or venv_root_resolved == workspace:
+        return None
+
+    pyvenv_cfg = venv_root / "pyvenv.cfg"
+    try:
+        cfg_lstat = pyvenv_cfg.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(cfg_lstat.st_mode):
+        return None
+
+    # The final target the kernel would actually exec must be a trusted,
+    # user-immutable system Python — never Bash, sh, env, Perl, Node, or any
+    # other binary, regardless of what the launcher basename claims.
+    if not _is_trusted_system_executable(resolved, resolved):
+        return None
+    if not _VENV_PYTHON_BASENAME_RE.match(resolved.name):
+        return None
+
+    cfg_identity = _path_entry_identity(pyvenv_cfg)
+    if cfg_identity is None:
+        return None
+    try:
+        cfg_digest = _sha256_file(pyvenv_cfg)
+    except OSError:
+        return None
+    return (cfg_identity, cfg_digest)
 
 
 def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:
