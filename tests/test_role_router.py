@@ -101,6 +101,27 @@ def test_route_role_with_llm_falls_back_on_client_error(monkeypatch):
     assert route_role_with_llm("nginx deploy", Client(), "model") == "devops"
 
 
+def test_router_redacts_credentials_before_llm_and_in_error(monkeypatch):
+    monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
+    synthetic = "sk-proj-" + "q" * 24
+    client = _make_client(
+        should_raise=True,
+        error_msg=f"Authorization: Bearer {synthetic}",
+    )
+
+    decision = route_role_decision_with_llm(
+        f"абракадабра api_key={synthetic}",
+        client=client,
+        model="test-model",
+    )
+
+    assert client.calls == 1
+    assert synthetic not in str(client.last_kwargs)
+    assert synthetic not in (decision.error or "")
+    assert "[REDACTED]" in str(client.last_kwargs)
+    assert "[REDACTED]" in (decision.error or "")
+
+
 # ── New diagnostic tests ─────────────────────────────────────────
 
 

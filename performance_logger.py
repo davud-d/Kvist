@@ -9,11 +9,20 @@ in production and adds zero overhead.
 from __future__ import annotations
 
 import json
+import os
+import stat
 import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from durable_json import (
+    JsonStorageError,
+    exclusive_storage_lock,
+    validate_storage_path,
+)
+from redaction import redact_text, redact_value
 
 # ──────────────────────────────────────────────────────────────────────
 # Flip this to True when you need debug performance logging.
@@ -38,25 +47,21 @@ class PerfLogger:
         self._enabled = DEBUG_LOGGING
         if not self._enabled:
             return
-        self._log_dir = workspace / ".kvist" / "logs" / "debug"
+        self._workspace = workspace.resolve()
+        self._log_dir = self._workspace / ".kvist" / "logs" / "debug"
         self._log_path = self._log_dir / "logs.jsonl"
+        self._write_lock_path = self._log_dir / "performance-log"
         self._buffer: list[str] = []
         self._lock = threading.Lock()
-        self._file_ready = False
         # render rate tracking
         self._render_timestamps: list[float] = []
         self._render_call_count = 0
 
     # ── helpers ───────────────────────────────────────────────────────
 
-    def _ensure_file(self) -> None:
-        if self._file_ready:
-            return
-        self._log_dir.mkdir(parents=True, exist_ok=True)
-        self._file_ready = True
-
     def _append(self, record: dict[str, Any]) -> None:
-        line = json.dumps(record, ensure_ascii=False, default=str)
+        safe_record = redact_value(record)
+        line = json.dumps(safe_record, ensure_ascii=False, default=str)
         with self._lock:
             self._buffer.append(line)
             if len(self._buffer) >= _FLUSH_THRESHOLD:
@@ -66,12 +71,46 @@ class PerfLogger:
         """Write buffer to disk.  Caller must hold ``self._lock``."""
         if not self._buffer:
             return
-        self._ensure_file()
         try:
-            with self._log_path.open("a", encoding="utf-8") as fh:
-                for line in self._buffer:
-                    fh.write(line + "\n")
-        except OSError:
+            with exclusive_storage_lock(
+                self._write_lock_path,
+                boundary=self._workspace,
+            ):
+                path = validate_storage_path(
+                    self._log_path,
+                    self._workspace,
+                )
+                flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT
+                flags |= getattr(os, "O_CLOEXEC", 0)
+                flags |= getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(path, flags, 0o600)
+                try:
+                    info = os.fstat(descriptor)
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or info.st_nlink > 1
+                        or (
+                            hasattr(os, "geteuid")
+                            and info.st_uid != os.geteuid()
+                        )
+                    ):
+                        raise OSError("unsafe performance log identity")
+                    fchmod = getattr(os, "fchmod", None)
+                    if fchmod is not None:
+                        fchmod(descriptor, 0o600)
+                    payload = (
+                        "\n".join(self._buffer) + "\n"
+                    ).encode("utf-8")
+                    written = 0
+                    while written < len(payload):
+                        count = os.write(descriptor, payload[written:])
+                        if count <= 0:
+                            raise OSError("performance log write made no progress")
+                        written += count
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+        except (JsonStorageError, OSError):
             pass  # never crash the agent because of logging
         self._buffer.clear()
 
@@ -123,7 +162,7 @@ class PerfLogger:
                 "chunks_per_second": round(chunks_per_second, 2) if chunks_per_second is not None else None,
             },
             "ok": ok,
-            "error": error[:_MAX_ERROR_LEN] if error else None,
+            "error": redact_text(error)[:_MAX_ERROR_LEN] if error else None,
         }
         self._append(record)
 

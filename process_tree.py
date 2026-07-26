@@ -22,6 +22,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -35,6 +36,7 @@ _KILL_DEADLINE = 2.0
 _READER_JOIN_GRACE = 2.0
 _REAP_DEADLINE = 2.0
 _CHUNK = 65536
+_DESCENDANT_POLL_INTERVAL = 0.01
 
 
 @dataclass(slots=True)
@@ -47,6 +49,10 @@ class SupervisedResult:
     stderr_truncated: bool
 
 
+class ProcessSupervisionError(RuntimeError):
+    """Required process-tree containment could not be established."""
+
+
 class _BoundedReader(threading.Thread):
     """Drain a pipe into a fixed-size buffer; keep reading and discard overflow."""
 
@@ -56,12 +62,26 @@ class _BoundedReader(threading.Thread):
         self._limit = max(0, limit)
         self._chunks: list[bytes] = []
         self._size = 0
+        self._stop_requested = threading.Event()
+        self._nonblocking = False
+        try:
+            os.set_blocking(self._stream.fileno(), False)
+            self._nonblocking = True
+        except (AttributeError, OSError, ValueError):
+            pass
         self.truncated = False
 
     def run(self) -> None:
         try:
-            while True:
-                chunk = self._stream.read(_CHUNK)
+            while not self._stop_requested.is_set():
+                try:
+                    if self._nonblocking:
+                        chunk = os.read(self._stream.fileno(), _CHUNK)
+                    else:
+                        chunk = self._stream.read(_CHUNK)
+                except BlockingIOError:
+                    self._stop_requested.wait(_KILL_POLL_INTERVAL)
+                    continue
                 if not chunk:
                     break
                 if self._size < self._limit:
@@ -77,11 +97,94 @@ class _BoundedReader(threading.Thread):
         finally:
             try:
                 self._stream.close()
-            except OSError:
+            except (OSError, ValueError):
+                pass
+
+    def stop(self) -> None:
+        self._stop_requested.set()
+        if not self._nonblocking:
+            try:
+                self._stream.close()
+            except (OSError, ValueError):
                 pass
 
     def data(self) -> bytes:
         return b"".join(self._chunks)
+
+
+def _linux_process_start_time(pid: int) -> int | None:
+    """Return Linux /proc starttime for PID-reuse-safe descendant tracking."""
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii")
+        fields = raw.rsplit(") ", 1)[1].split()
+        return int(fields[19])
+    except (FileNotFoundError, IndexError, OSError, ValueError):
+        return None
+
+
+def _linux_child_pids(pid: int) -> list[int]:
+    try:
+        raw = Path(f"/proc/{pid}/task/{pid}/children").read_text(
+            encoding="ascii"
+        )
+    except OSError:
+        return []
+    children: list[int] = []
+    for token in raw.split():
+        try:
+            child = int(token)
+        except ValueError:
+            continue
+        if child > 0:
+            children.append(child)
+    return children
+
+
+def _linux_descendant_snapshot(root_pid: int) -> dict[int, int]:
+    found: dict[int, int] = {}
+    pending = [root_pid]
+    seen = {root_pid}
+    while pending:
+        parent = pending.pop()
+        for child in _linux_child_pids(parent):
+            if child in seen:
+                continue
+            seen.add(child)
+            started = _linux_process_start_time(child)
+            if started is None:
+                continue
+            found[child] = started
+            pending.append(child)
+    return found
+
+
+class _LinuxDescendantTracker(threading.Thread):
+    """Best-effort fallback for descendants that leave the process group."""
+
+    def __init__(self, root_pid: int) -> None:
+        super().__init__(daemon=True)
+        self._root_pid = root_pid
+        self._stop_requested = threading.Event()
+        self._lock = threading.Lock()
+        self._observed: dict[int, int] = {}
+
+    def capture(self) -> None:
+        snapshot = _linux_descendant_snapshot(self._root_pid)
+        if snapshot:
+            with self._lock:
+                self._observed.update(snapshot)
+
+    def run(self) -> None:
+        while not self._stop_requested.is_set():
+            self.capture()
+            self._stop_requested.wait(_DESCENDANT_POLL_INTERVAL)
+
+    def stop_and_snapshot(self) -> dict[int, int]:
+        self.capture()
+        self._stop_requested.set()
+        self.join(_DESCENDANT_POLL_INTERVAL * 5)
+        with self._lock:
+            return dict(self._observed)
 
 
 class _CgroupScope:
@@ -123,38 +226,82 @@ class _CgroupScope:
         finally:
             os.close(fd)
 
-    def kill(self) -> None:
+    def kill(self) -> str | None:
         try:
             with open(self.path / "cgroup.kill", "w") as handle:
                 handle.write("1")
         except OSError:
-            pass
+            return "required cgroup scope could not be killed"
         deadline = time.monotonic() + _KILL_DEADLINE
+        members = ""
         while time.monotonic() < deadline:
             try:
                 members = (self.path / "cgroup.procs").read_text().strip()
             except OSError:
-                break
+                return "required cgroup membership could not be verified"
             if not members:
-                break
+                return None
             time.sleep(_KILL_POLL_INTERVAL)
+        return (
+            "required cgroup scope remained populated after its cleanup "
+            "deadline"
+        )
 
-    def close(self) -> None:
+    def close(self) -> str | None:
         try:
             self.path.rmdir()
+        except FileNotFoundError:
+            return None
+        except OSError:
+            return "required cgroup scope could not be removed"
+        return None
+
+
+def _terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
+    # ``start_new_session=True`` makes the spawned PID the process-group ID.
+    # Record/use that stable value directly: after a normal leader exit,
+    # ``proc.wait()`` has reaped it and ``getpgid(proc.pid)`` fails even while
+    # descendants still keep the original group alive.
+    group_id = proc.pid if isinstance(proc.pid, int) and proc.pid > 0 else None
+    try:
+        if group_id is None:
+            raise ProcessLookupError
+        os.killpg(group_id, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    except (PermissionError, OSError):
+        try:
+            proc.kill()
         except OSError:
             pass
 
 
-def _terminate_process_group(proc: subprocess.Popen[bytes]) -> None:
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):
-        pass
-    except OSError:
+def _kill_recorded_descendants(processes: dict[int, int]) -> None:
+    """Kill recorded descendants only if their Linux starttime still matches."""
+    own_group = os.getpgrp()
+    groups: set[int] = set()
+    live_pids: list[int] = []
+    for pid, expected_start in processes.items():
+        if _linux_process_start_time(pid) != expected_start:
+            continue
+        live_pids.append(pid)
         try:
-            proc.kill()
-        except OSError:
+            group = os.getpgid(pid)
+        except (ProcessLookupError, PermissionError, OSError):
+            continue
+        if group > 0 and group != own_group:
+            groups.add(group)
+    for group in groups:
+        try:
+            os.killpg(group, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    for pid in live_pids:
+        if _linux_process_start_time(pid) != processes[pid]:
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
             pass
 
 
@@ -173,6 +320,10 @@ def run_supervised(
     scope: _CgroupScope | None = None
     if use_cgroup and not is_windows:
         scope = _CgroupScope.create()
+        if scope is None:
+            raise ProcessSupervisionError(
+                "required cgroup process-tree scope became unavailable"
+            )
 
     def preexec() -> None:
         if scope is not None:
@@ -182,6 +333,10 @@ def run_supervised(
 
     kwargs: dict[str, Any] = {
         "cwd": cwd,
+        # Terminal commands are non-interactive actions. Inheriting Kvist's
+        # controlling stdin lets a child consume UI keystrokes, block on a
+        # prompt, or race the HITL input path.
+        "stdin": subprocess.DEVNULL,
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
         "shell": False,
@@ -195,6 +350,12 @@ def run_supervised(
 
     try:
         proc = subprocess.Popen(argv, **kwargs)
+    except subprocess.SubprocessError as error:
+        if scope is not None:
+            scope.close()
+        raise ProcessSupervisionError(
+            "child process supervision setup failed"
+        ) from error
     except BaseException:
         if scope is not None:
             scope.close()
@@ -202,6 +363,19 @@ def run_supervised(
 
     stdout_reader = _BoundedReader(proc.stdout, max_capture_bytes)
     stderr_reader = _BoundedReader(proc.stderr, max_capture_bytes)
+    descendant_tracker = (
+        _LinuxDescendantTracker(proc.pid)
+        if (
+            not is_windows
+            and scope is None
+            and sys.platform.startswith("linux")
+            and isinstance(proc.pid, int)
+            and proc.pid > 0
+        )
+        else None
+    )
+    if descendant_tracker is not None:
+        descendant_tracker.start()
     stdout_reader.start()
     stderr_reader.start()
 
@@ -214,7 +388,17 @@ def run_supervised(
     # Always tear down the whole subtree before joining readers: this kills
     # detached descendants (survival on normal completion) and closes any pipe
     # they inherited, so the readers reach EOF instead of blocking forever.
-    _terminate_tree(proc, scope, is_windows)
+    recorded_descendants = (
+        descendant_tracker.stop_and_snapshot()
+        if descendant_tracker is not None
+        else {}
+    )
+    termination_error = _terminate_tree(
+        proc,
+        scope,
+        is_windows,
+        recorded_descendants=recorded_descendants,
+    )
 
     # Reap the main process so it does not linger as a zombie after a timeout
     # kill.  Orphaned descendants reparent to init, which reaps them.
@@ -223,11 +407,21 @@ def run_supervised(
     except subprocess.TimeoutExpired:
         pass
 
-    stdout_reader.join(_READER_JOIN_GRACE)
-    stderr_reader.join(_READER_JOIN_GRACE)
+    readers = (stdout_reader, stderr_reader)
+    reader_deadline = time.monotonic() + _READER_JOIN_GRACE
+    for reader in readers:
+        reader.join(max(0.0, reader_deadline - time.monotonic()))
+    for reader in readers:
+        if reader.is_alive():
+            reader.stop()
+    for reader in readers:
+        if reader.is_alive():
+            reader.join(_KILL_POLL_INTERVAL * 5)
 
-    if scope is not None:
-        scope.close()
+    scope_close_error = scope.close() if scope is not None else None
+    supervision_error = termination_error or scope_close_error
+    if supervision_error:
+        raise ProcessSupervisionError(supervision_error)
 
     returncode = proc.returncode if proc.returncode is not None else -1
     return SupervisedResult(
@@ -244,22 +438,28 @@ def _terminate_tree(
     proc: subprocess.Popen[bytes],
     scope: "_CgroupScope | None",
     is_windows: bool,
-) -> None:
+    *,
+    recorded_descendants: dict[int, int],
+) -> str | None:
     if is_windows:
         try:
             proc.kill()
         except OSError:
             pass
-        return
+        return None
     if scope is not None:
-        scope.kill()
-        return
+        error = scope.kill()
+        if error:
+            _terminate_process_group(proc)
+        return error
     _terminate_process_group(proc)
+    if recorded_descendants:
+        _kill_recorded_descendants(recorded_descendants)
+    return None
 
 
 def cgroup_supervision_available() -> bool:
     scope = _CgroupScope.create()
     if scope is None:
         return False
-    scope.close()
-    return True
+    return scope.close() is None

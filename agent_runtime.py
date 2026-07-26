@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from agent_state import RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
+from redaction import redact_text, redact_value
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -109,7 +111,9 @@ def _build_report_context(self, user_goal: str, summary: str, result: str, issue
         "plan_steps": state.plan_info.plan if state.plan_info else [],
         "errors": state.error_history[-5:] if state.error_history else [],
     }
-    return json.dumps(context, ensure_ascii=False, indent=2)
+    safe_context = redact_value(context)
+    assert isinstance(safe_context, dict)
+    return json.dumps(safe_context, ensure_ascii=False, indent=2)
 
 
 def _render_report(self, context: str) -> str:
@@ -160,6 +164,42 @@ def _render_report(self, context: str) -> str:
     return "".join(chunks)
 
 
+def finalize_run(
+    self,
+    user_goal: str,
+    task_completed: bool,
+    primary_error: BaseException | None,
+) -> None:
+    """Attempt every lifecycle cleanup without replacing a primary failure."""
+    cleanup_steps: list[tuple[str, Any]] = [
+        ("stop live UI", self._ui.stop_live),
+        ("persist run log", lambda: self._persist_logs(user_goal)),
+        ("flush performance log", self._perf_logger.flush),
+    ]
+    if task_completed:
+        cleanup_steps.append(("clear completed checkpoint", self._clear_checkpoint))
+
+    failures: list[tuple[str, Exception]] = []
+    for label, cleanup in cleanup_steps:
+        try:
+            cleanup()
+        except Exception as error:
+            failures.append((label, error))
+
+    if not failures:
+        return
+
+    details = "; ".join(
+        f"{label}: {redact_text(str(error).strip() or type(error).__name__)}"
+        for label, error in failures
+    )
+    message = f"Runtime cleanup failed after all steps were attempted: {details}"
+    if primary_error is not None:
+        primary_error.add_note(message)
+        return
+    raise RuntimeError(message) from None
+
+
 def run_loop(self, user_goal: str, start_step: int) -> str:
     self._ui.start_live()
 
@@ -178,6 +218,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._refresh_completion_requirements()
     steps_since_checkpoint = 0
     report_rendered = False
+    task_completed = False
     try:
         for step in range(start_step, self.config.max_steps + 1):
             early_stop_message = self._build_early_stop_message(step)
@@ -191,7 +232,9 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             try:
                 raw_text = self._call_action_model(prompt)
             except Exception as error:
-                error_text = str(error).strip() or type(error).__name__
+                error_text = redact_text(
+                    str(error).strip() or type(error).__name__
+                )
                 self._state.consecutive_errors += 1
                 self._record_error(error_text)
                 self._state.step_logs.append(
@@ -235,7 +278,11 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             try:
                 command = parse_agent_command(raw_text)
             except CommandValidationError as error:
-                self._register_parse_error(step, raw_text, str(error))
+                self._register_parse_error(
+                    step,
+                    raw_text,
+                    redact_text(str(error)),
+                )
                 self._ui.update_live(
                     user_message="clarifying step format and continuing",
                     status="fixing response format",
@@ -427,6 +474,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 if self._state.seen_actions.get("completion_ready_violations", 0) >= 1:
                     final_message = self._build_auto_completion_message()
                     self._register_final_answer(step, final_message)
+                    task_completed = True
                     break
                 self._state.seen_actions["completion_ready_violations"] = self._state.seen_actions.get("completion_ready_violations", 0) + 1
                 continue
@@ -465,6 +513,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     continue
                 final_message = str(command.action.args["message"])
                 self._register_final_answer(step, final_message)
+                task_completed = True
                 break
 
             if command.action.type == "report_to_user":
@@ -495,6 +544,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 final_message = report_text or tech_result or summary
                 self._register_final_answer(step, final_message)
                 report_rendered = True
+                task_completed = True
                 break
 
             feedback = self._execute_command(command)
@@ -515,6 +565,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             ):
                 final_message = self._build_auto_completion_message()
                 self._register_final_answer(step, final_message)
+                task_completed = True
                 break
 
             if (
@@ -543,10 +594,11 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         if not final_message:
             final_message = self._build_limit_reached_message()
     finally:
-        self._ui.stop_live()
-        self._persist_logs(user_goal)
-        self._perf_logger.flush()
-        self._clear_checkpoint()
+        self._finalize_run(
+            user_goal,
+            task_completed=task_completed,
+            primary_error=sys.exception(),
+        )
 
     if not self.config.verbose and not report_rendered:
         self._ui.print_final(final_message, self._state.user_messages)
@@ -562,33 +614,41 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
     try:
         result = self.executor.execute(command)
     except ExecutorError as error:
-        return self._build_error_feedback(command.action.type, str(error))
+        return self._build_error_feedback(
+            command.action.type,
+            redact_text(str(error)),
+        )
     except Exception as error:
-        raw_error = f"Unexpected executor error: {type(error).__name__}: {error}"
+        raw_error = redact_text(
+            f"Unexpected executor error: {type(error).__name__}: {error}"
+        )
         return self._build_error_feedback(command.action.type, raw_error)
 
     if result.ok:
+        safe_data = redact_value(result.data)
         return {
             "ok": True,
             "action_type": result.action_type,
-            "data": result.data,
+            "data": safe_data,
         }
 
     error_text = "Action failed"
     if isinstance(result.data, dict):
-        error_text = str(result.data.get("error") or error_text)
+        error_text = redact_text(str(result.data.get("error") or error_text))
         # Prefer stderr/stdout output from the actual command over generic error
         if error_text == "Action failed":
             stderr = str(result.data.get("stderr", "")).strip()
             stdout = str(result.data.get("stdout", "")).strip()
             if stderr:
-                error_text = stderr
+                error_text = redact_text(stderr)
             elif stdout:
-                error_text = stdout
+                error_text = redact_text(stdout)
 
     payload = self._build_error_feedback(result.action_type, error_text)
     if isinstance(result.data, dict):
-        payload["data"] = result.data
+        safe_data = redact_value(result.data)
+        assert isinstance(safe_data, dict)
+        payload["data"] = safe_data
     return payload
 
 
@@ -597,12 +657,13 @@ def build_error_feedback(
     action_type: str,
     raw_error: str,
 ) -> dict[str, Any]:
+    safe_error = redact_text(str(raw_error))
     return {
         "ok": False,
         "action_type": action_type,
-        "error": raw_error,
-        "raw_error": raw_error,
-        "normalized_error": self._normalize_error_for_model(raw_error),
+        "error": safe_error,
+        "raw_error": safe_error,
+        "normalized_error": self._normalize_error_for_model(safe_error),
     }
 
 
@@ -662,7 +723,7 @@ def register_language_error(
 
 
 def normalize_error_for_model(self, raw_error: str) -> str:
-    error = str(raw_error).strip() or "Unknown error"
+    error = redact_text(str(raw_error).strip()) or "Unknown error"
     lowered = error.casefold()
     
     is_overloaded = any(m in lowered for m in ("all providers exhausted", "rate limit", "too many requests", "high demand", "503"))
@@ -990,6 +1051,7 @@ def plan_progress(self) -> int:
 
 
 def record_error(self, error_text: str) -> None:
+    error_text = redact_text(str(error_text))
     self._state.error_history.append(error_text)
     self._state.error_history = self._state.error_history[-5:]
     self._state.error_patterns[error_text] = self._state.error_patterns.get(error_text, 0) + 1
@@ -1066,7 +1128,7 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
 
     raw_data = feedback.get("data", {}) if feedback.get("ok") else None
     if feedback.get("ok"):
-        payload["data"] = self._compact_for_prompt(raw_data)
+        payload["data"] = self._compact_for_prompt(redact_value(raw_data))
     else:
         payload["normalized_error"] = self._feedback_error_for_model(feedback)
 
@@ -1088,7 +1150,9 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
     status = "OK" if ok else "ERROR"
     raw_suffix = ""
     if not ok:
-        raw_error = str(feedback.get("raw_error") or feedback.get("error") or "").strip()
+        raw_error = redact_text(
+            str(feedback.get("raw_error") or feedback.get("error") or "").strip()
+        )
         normalized_error = self._feedback_error_for_model(feedback)
         if raw_error and raw_error != normalized_error:
             raw_suffix = f" Raw error: {raw_error}."

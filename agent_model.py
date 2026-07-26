@@ -37,6 +37,7 @@ from llm_clients import (
     ANTHROPIC_PROVIDER,
     OPENROUTER_PROVIDER,
 )
+from redaction import redact_text, redact_value
 from render_throttle import ThrottledRenderer
 
 try:
@@ -44,6 +45,7 @@ try:
 except ImportError:
     tiktoken = None  # type: ignore[assignment]
 
+_TOKEN_ENCODING_UNINITIALIZED = object()
 _PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
 
 # ── Safety: detect stale prompts/prompts/ duplicate ──────────────────────
@@ -93,8 +95,9 @@ def _get_api_interval(self) -> float:
 
 def _format_llm_error(error: Exception, provider: str | None = None) -> str:
     """Format LLM API errors into user-friendly messages."""
-    error_msg = str(error)
-    error_lower = error_msg.casefold()
+    raw_error_msg = str(error)
+    error_msg = redact_text(raw_error_msg)
+    error_lower = raw_error_msg.casefold()
 
     # Helper: build a custom provider label from the provider string
     def _custom_label(p: str) -> str:
@@ -398,7 +401,10 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                         context="retry_sleep",
                     )
 
-    raise RuntimeError(f"Failed to get model response: {last_error}")
+    safe_error = sanitize_error_message(
+        str(last_error).strip() if last_error else "unknown provider error"
+    )
+    raise RuntimeError(f"Failed to get model response: {safe_error}")
 
 
 def call_model_streaming(
@@ -456,9 +462,11 @@ def _create_json_completion(
     messages: list[ChatCompletionMessageParam],
     stream: bool = False,
 ):
+    safe_messages = redact_value(messages)
+    assert isinstance(safe_messages, list)
     request_kwargs: dict[str, Any] = {
         "model": model,
-        "messages": messages,
+        "messages": safe_messages,
         "temperature": self.config.model_temperature,
         "timeout": self.config.api_timeout,
     }
@@ -478,7 +486,7 @@ def _create_json_completion(
 
     fallback_kwargs: dict[str, Any] = {
         "model": model,
-        "messages": messages,
+        "messages": safe_messages,
     }
     # Omit temperature when the first error was temperature-related so that the
     # fallback request does not repeat the same failure.
@@ -502,9 +510,13 @@ def init_tiktoken_encoding():
 
 
 def count_tokens(self, text: str) -> int:
-    if self._encoding is None:
+    encoding = self._encoding
+    if encoding is _TOKEN_ENCODING_UNINITIALIZED:
+        encoding = self._init_tiktoken_encoding()
+        self._encoding = encoding
+    if encoding is None:
         return len(text) // 4
-    return len(self._encoding.encode(text, disallowed_special=()))
+    return len(encoding.encode(text, disallowed_special=()))
 
 
 def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> str:
@@ -757,23 +769,9 @@ def _should_retry_model_error(error: Exception) -> bool:
     return True
 
 
-# ── secret masking ────────────────────────────────────────────────────────────
-
-_SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
-    # (regex pattern, replacement)
-    (r"sk-[a-zA-Z0-9_-]{20,}", "sk-***"),
-    (r"Bearer [^\s]{10,}", "Bearer ***"),
-    (r"api_key[=:]\s*[^\s,;)\]}&\"]{4,}", "api_key=***"),
-    (r"Authorization:\s*\S+(\s+\S+)*", "Authorization: ***"),
-    (r"key-[a-zA-Z0-9_-]{20,}", "key-***"),
-)
-
-
 def sanitize_error_message(message: str) -> str:
     """Mask secrets (API keys, tokens, auth headers) from error messages."""
-    for pattern, replacement in _SECRET_PATTERNS:
-        message = re.sub(pattern, replacement, message, flags=re.IGNORECASE)
-    return message
+    return redact_text(message)
 
 
 # ── safe response extraction ────────────────────────────────────────────────────

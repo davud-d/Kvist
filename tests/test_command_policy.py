@@ -210,9 +210,49 @@ def test_docker_run_isolation_breaking_flags_are_dangerous(command):
         assert result.requires_approval is True
 
 
-def test_docker_read_only_subcommands_stay_safe():
-    assert assess_command(["docker", "ps"]).requires_approval is False
-    assert assess_command(["docker", "logs", "web"]).requires_approval is False
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["docker", "ps"],
+        ["docker", "images"],
+        ["docker", "logs", "web"],
+        ["docker", "inspect", "web"],
+        ["docker", "stats", "--no-stream"],
+        ["docker", "info"],
+        ["docker", "version"],
+    ],
+)
+def test_docker_daemon_reads_require_approval(command):
+    assessment = assess_command(command)
+    assert assessment.risk is RiskLevel.MODERATE
+    assert assessment.requires_approval is True
+
+
+def test_docker_client_only_version_probe_stays_safe():
+    for flag in ("--version", "-v"):
+        assessment = assess_command(["docker", flag])
+        assert assessment.risk is RiskLevel.SAFE
+        assert assessment.requires_approval is False
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["docker", "--host", "tcp://daemon.invalid:2375", "ps"],
+        ["docker", "--host=tcp://daemon.invalid:2375", "images"],
+        ["docker", "-Htcp://daemon.invalid:2375", "info"],
+        ["docker", "--context", "production", "version"],
+        ["docker", "-cproduction", "ps"],
+        ["docker", "--config", "docker-config", "logs", "web"],
+        ["docker", "--tlsverify", "ps"],
+        ["docker", "--tlscert=client-fixture", "inspect", "web"],
+    ],
+)
+def test_docker_daemon_access_overrides_are_dangerous(command):
+    for role in ("coder", "devops"):
+        assessment = assess_command(command, role=role)
+        assert assessment.risk is RiskLevel.DANGEROUS
+        assert assessment.requires_approval is True
 
 
 def test_docker_run_without_risky_flags_is_moderate():

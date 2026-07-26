@@ -14,26 +14,29 @@ Gradle build) that wraps the same Python core.
 ## Commands
 
 ```bash
-pip install -r requirements.txt              # deps (Python 3.11+)
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
 
-python main.py --workspace "<project_path>"  # run the agent (--workspace is required)
-python run_task.py "<task prompt>"           # non-interactive single-task entry (hardcodes /tmp/kvist_test)
+.venv/bin/python main.py --workspace "<project_path>"  # run the agent (--workspace is required)
+.venv/bin/python run_task.py "<task prompt>"           # non-interactive single-task entry (hardcodes /tmp/kvist_test)
 
-pytest                                       # full test suite
-pytest tests/test_role_router.py             # one file
-pytest tests/test_parser.py::test_name       # one test
-pytest -m smoke                              # minimal per-role smoke subset
-RUN_LIVE_LLM_TESTS=1 pytest -m live_llm      # opt-in tests that hit a real FreeFlow provider
+.venv/bin/python -m pytest                              # full test suite
+.venv/bin/python -m pytest tests/test_role_router.py    # one file
+.venv/bin/python -m pytest tests/test_parser.py::test_name
+.venv/bin/python -m pytest -m offline_smoke             # fast credential-free smoke subset
+RUN_LIVE_LLM_TESTS=1 .venv/bin/python -m pytest -m live_llm
+.venv/bin/python -m ruff check .                        # static runtime-error lint
 
-pyinstaller kvist.spec                    # build the `kvist` binary (bundles prompts/)
+.venv/bin/python -m PyInstaller kvist.spec  # build the `kvist` binary (bundles prompts/)
 
 # Byte-compile the project for syntax checks, excluding generated/agent workspaces.
 # compileall will recurse into .agent-workspace/ and workspace/ dirs if not excluded —
 # those contain generated/broken test samples that are not part of the core project.
-python -m compileall -x '\.agent-workspace/|/workspace/' -q .
+.venv/bin/python -m compileall -x '\.agent-workspace/|/workspace/' -q .
 ```
 
-There is no linter/formatter configured in-repo.
+Ruff is configured as a narrow static runtime-error gate; no formatter is
+configured in-repo.
 
 ## Configuration & runtime knobs
 

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import sandbox
+import terminal as terminal_module
 from permission_policy import policy_file_path
 from sandbox import SandboxMode, detect_sandbox_mode, resolve_bubblewrap_path, wrap_command_for_sandbox
 from terminal import HardDenyError, TerminalExecutor
@@ -18,7 +19,11 @@ def fake_which(value):
 
 def test_detect_bubblewrap_when_available(monkeypatch):
     monkeypatch.setattr(sandbox.sys, "platform", "linux")
-    monkeypatch.setattr(sandbox.shutil, "which", fake_which("/usr/bin/bwrap"))
+    monkeypatch.setattr(
+        sandbox,
+        "resolve_bubblewrap_path",
+        lambda: "/usr/bin/bwrap",
+    )
 
     mode, note = detect_sandbox_mode("bubblewrap")
 
@@ -50,7 +55,11 @@ def test_detect_auto_uses_restricted_fallback_without_bwrap(monkeypatch):
 
 def test_detect_auto_selects_bubblewrap_when_available(monkeypatch):
     monkeypatch.setattr(sandbox.sys, "platform", "linux")
-    monkeypatch.setattr(sandbox.shutil, "which", fake_which("/usr/bin/bwrap"))
+    monkeypatch.setattr(
+        sandbox,
+        "resolve_bubblewrap_path",
+        lambda: "/usr/bin/bwrap",
+    )
 
     mode, note = detect_sandbox_mode("auto")
 
@@ -63,6 +72,23 @@ def test_bubblewrap_lookup_rejects_untrusted_or_mutable_target(monkeypatch):
     monkeypatch.setattr(sandbox.shutil, "which", fake_which("/usr/bin/bwrap"))
     monkeypatch.setattr(sandbox, "_trusted_system_binary", lambda lookup, target: False)
     assert resolve_bubblewrap_path() is None
+
+
+def test_bubblewrap_lookup_accepts_trust_checked_absolute_target(
+    monkeypatch,
+    tmp_path,
+):
+    binary = tmp_path / "bwrap"
+    binary.write_bytes(b"fixture")
+    monkeypatch.setattr(sandbox.sys, "platform", "linux")
+    monkeypatch.setattr(sandbox.shutil, "which", fake_which(str(binary)))
+    monkeypatch.setattr(
+        sandbox,
+        "_trusted_system_binary",
+        lambda lookup, target: True,
+    )
+
+    assert resolve_bubblewrap_path() == str(binary.resolve())
 
 
 def test_unknown_value_uses_secure_auto_resolution(monkeypatch):
@@ -117,6 +143,23 @@ def test_wrap_command_builds_minimal_bwrap_invocation(tmp_path):
     assert wrapped[separator_index + 1 :] == ["ls", "-la"]
 
 
+def test_wrap_command_rejects_cwd_outside_workspace(tmp_path):
+    workspace = tmp_path / "ws"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+
+    with pytest.raises(ValueError, match="cwd must be a directory inside"):
+        wrap_command_for_sandbox(
+            ["ls"],
+            SandboxMode.BUBBLEWRAP,
+            workspace,
+            outside,
+            bwrap_path="/usr/bin/bwrap",
+            network_allowed=False,
+        )
+
+
 def test_optional_runtime_mounts_only_added_when_present(tmp_path, monkeypatch):
     original_exists = Path.exists
 
@@ -146,7 +189,16 @@ def test_optional_runtime_mounts_only_added_when_present(tmp_path, monkeypatch):
 def test_terminal_uses_bubblewrap_when_auto_and_available(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     monkeypatch.setattr(sandbox.sys, "platform", "linux")
-    monkeypatch.setattr(sandbox.shutil, "which", fake_which("/usr/bin/bwrap"))
+    monkeypatch.setattr(
+        sandbox,
+        "resolve_bubblewrap_path",
+        lambda: "/usr/bin/bwrap",
+    )
+    monkeypatch.setattr(
+        terminal_module,
+        "resolve_bubblewrap_path",
+        lambda: "/usr/bin/bwrap",
+    )
 
     executor = TerminalExecutor(tmp_path)
 
@@ -154,7 +206,10 @@ def test_terminal_uses_bubblewrap_when_auto_and_available(tmp_path, monkeypatch)
     assert executor._bwrap_path == "/usr/bin/bwrap"
 
 
-def test_auto_fallback_project_allow_cannot_silence_arbitrary_code(tmp_path, monkeypatch):
+def test_auto_fallback_without_tree_control_hard_denies_arbitrary_code(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     monkeypatch.setattr(sandbox.shutil, "which", fake_which(None))
     path = policy_file_path(tmp_path)
@@ -162,6 +217,7 @@ def test_auto_fallback_project_allow_cannot_silence_arbitrary_code(tmp_path, mon
     path.write_text(json.dumps({"allow": ["python *"], "deny": [], "ask": []}), encoding="utf-8")
     (tmp_path / "safe.py").write_text("print('safe')\n", encoding="utf-8")
     executor = TerminalExecutor(tmp_path)
+    executor._cgroup_available = False
     requested = []
     monkeypatch.setattr(
         TerminalExecutor,
@@ -169,10 +225,9 @@ def test_auto_fallback_project_allow_cannot_silence_arbitrary_code(tmp_path, mon
         classmethod(lambda cls, command, reason: requested.append((command, reason)) or False),
     )
 
-    result = executor.run(["python", "safe.py"])
-
-    assert requested and "fallback" in requested[0][1].casefold()
-    assert result.denied is True
+    with pytest.raises(HardDenyError, match="cannot control detached descendants"):
+        executor.run(["python", "safe.py"])
+    assert requested == []
 
 
 def test_bwrap_network_is_denied_unless_explicitly_allowed(tmp_path):

@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from redaction import redact_text, redact_value
+
 _VALID_ROLES = frozenset({"coder", "devops", "chat"})
 _DEFAULT_ROLE = "chat"
 
@@ -290,11 +292,13 @@ def route_role_decision_with_llm(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_goal},
     ]
+    safe_messages = redact_value(messages)
+    assert isinstance(safe_messages, list)
 
     try:
         response = client.chat.completions.create(
             model=model,
-            messages=messages,
+            messages=safe_messages,
             temperature=temperature,
             max_tokens=50,
         )
@@ -304,7 +308,9 @@ def route_role_decision_with_llm(
         decision.source = "llm"
     except Exception as exc:
         # ── Step 5: LLM failed → keyword fallback ─────────────
-        decision.error = str(exc) if isinstance(exc, Exception) else repr(exc)
+        decision.error = redact_text(
+            str(exc) if isinstance(exc, Exception) else repr(exc)
+        )
         kw_role = _keyword_route(user_goal)
         if kw_role != _DEFAULT_ROLE or any(
             kw in user_goal.casefold()

@@ -27,10 +27,16 @@ internal ``.kvist`` directory.
 """
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
+
+from durable_json import (
+    JsonStorageCorruptError,
+    JsonStorageError,
+    read_json_object,
+    update_json_object,
+)
 
 POLICY_RELATIVE_PATH = ".kvist/permissions.json"
 
@@ -88,19 +94,15 @@ def load_policy(workspace: Path) -> tuple[PermissionPolicy, str]:
     except ValueError as error:
         return PermissionPolicy(), f"Cannot use {POLICY_RELATIVE_PATH}: {error}"
     try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return PermissionPolicy(), ""
-    except OSError as error:
-        return PermissionPolicy(), f"Cannot read {POLICY_RELATIVE_PATH}: {error}"
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as error:
+        data = read_json_object(
+            path,
+            boundary=workspace.resolve(),
+            empty_as_missing=True,
+        )
+    except JsonStorageCorruptError as error:
         return PermissionPolicy(), f"Invalid JSON in {POLICY_RELATIVE_PATH}: {error}"
-
-    if not isinstance(data, dict):
-        return PermissionPolicy(), f"{POLICY_RELATIVE_PATH} must contain a JSON object"
+    except JsonStorageError as error:
+        return PermissionPolicy(), f"Cannot read {POLICY_RELATIVE_PATH}: {error}"
 
     parsed: dict[str, tuple[str, ...]] = {}
     for key in ("allow", "deny", "ask"):
@@ -123,20 +125,29 @@ def _parse_rule_list(value: object, key: str) -> tuple[tuple[str, ...], str]:
 def append_allow_rule(workspace: Path, pattern: str) -> None:
     """Persist an allow pattern ("always allow in this repo")."""
     path = _validated_policy_path(workspace)
-    data: dict[str, list[str]] = {"allow": [], "deny": [], "ask": []}
-    if path.exists():
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(loaded, dict):
-            raise ValueError(f"{POLICY_RELATIVE_PATH} must contain a JSON object")
+
+    def append_rule(loaded: dict[str, object]) -> dict[str, object]:
+        data: dict[str, object] = {"allow": [], "deny": [], "ask": []}
         for key in ("allow", "deny", "ask"):
             rules, error = _parse_rule_list(loaded.get(key, []), key)
             if error:
                 raise ValueError(error)
             data[key] = list(rules)
-    if pattern not in data["allow"]:
-        data["allow"].append(pattern)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        allow = data["allow"]
+        assert isinstance(allow, list)
+        if pattern not in allow:
+            allow.append(pattern)
+        return data
+
+    try:
+        update_json_object(
+            path,
+            append_rule,
+            boundary=workspace.resolve(),
+            empty_as_missing=True,
+        )
+    except JsonStorageError as error:
+        raise ValueError(f"Cannot update {POLICY_RELATIVE_PATH} safely") from error
 
 
 def _validated_policy_path(workspace: Path) -> Path:

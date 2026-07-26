@@ -228,12 +228,84 @@ def _append_secret_masks(wrapped: list[str], workspace: Path) -> None:
         wrapped.extend(("--ro-bind", "/dev/null", str(path)))
 
 
-def _append_tool_path_mounts(wrapped: list[str], tool_paths: tuple[Path, ...]) -> None:
-    """Read-only bind explicitly configured external toolchain directories."""
+def validated_external_tool_path(
+    path: Path,
+    workspace: Path | None = None,
+) -> Path | None:
+    """Resolve one narrowly scoped external tool directory.
+
+    Validation lives at the Bubblewrap boundary as well as configuration
+    loading so direct callers cannot turn ``tool_paths`` into an arbitrary
+    host-filesystem bind.
+    """
+    if not path.is_absolute():
+        return None
+    try:
+        resolved = path.resolve(strict=True)
+        info = resolved.stat()
+    except (OSError, RuntimeError):
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        return None
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return None
+    if len(resolved.parts) <= 2:
+        return None
+
+    for raw in ("/etc", "/var", "/run", "/proc", "/sys", "/dev"):
+        blocked = Path(raw)
+        if resolved == blocked or _is_relative_to(resolved, blocked):
+            return None
+
+    home: Path | None = None
+    if hasattr(os, "geteuid"):
+        try:
+            import pwd
+
+            home = Path(pwd.getpwuid(os.geteuid()).pw_dir).resolve(strict=True)
+        except (KeyError, OSError):
+            home = None
+    if home is None:
+        try:
+            home = Path.home().resolve(strict=True)
+        except OSError:
+            home = None
+    if home is not None:
+        if resolved == home or _is_relative_to(home, resolved):
+            return None
+        if _is_relative_to(resolved, home.parent) and not _is_relative_to(resolved, home):
+            return None
+
+    if workspace is not None:
+        try:
+            root = workspace.resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+        if (
+            resolved == root
+            or _is_relative_to(resolved, root)
+            or _is_relative_to(root, resolved)
+        ):
+            return None
+    return resolved
+
+
+def _append_tool_path_mounts(
+    wrapped: list[str],
+    tool_paths: tuple[Path, ...],
+    workspace: Path,
+) -> None:
+    """Read-only bind explicitly configured, narrowly scoped tool directories."""
+    seen: set[str] = set()
     for path in tool_paths:
-        resolved = path.resolve()
-        if resolved.is_dir():
-            wrapped.extend(("--ro-bind", str(resolved), str(resolved)))
+        resolved = validated_external_tool_path(path, workspace)
+        if resolved is None:
+            raise ValueError(f"Refusing unsafe external tool path: {path}")
+        value = str(resolved)
+        if value in seen:
+            continue
+        seen.add(value)
+        wrapped.extend(("--ro-bind", value, value))
 
 
 def wrap_command_for_sandbox(
@@ -250,10 +322,15 @@ def wrap_command_for_sandbox(
     if mode is not SandboxMode.BUBBLEWRAP:
         return command
 
-    workspace = workspace.resolve()
-    cwd = cwd.resolve()
+    try:
+        workspace = workspace.resolve(strict=True)
+        cwd = cwd.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise ValueError(f"Sandbox workspace or cwd cannot be resolved: {error}") from error
     if workspace == Path("/"):
         raise ValueError("Refusing to bind the complete host root as a workspace")
+    if not workspace.is_dir() or not cwd.is_dir() or not _is_relative_to(cwd, workspace):
+        raise ValueError("Sandbox cwd must be a directory inside the workspace")
     binary = bwrap_path or resolve_bubblewrap_path()
     if not binary:
         raise ValueError("Bubblewrap mode requires a trusted absolute bwrap executable")
@@ -286,7 +363,7 @@ def wrap_command_for_sandbox(
             "--bind", str(workspace), str(workspace),
         )
     )
-    _append_tool_path_mounts(wrapped, tool_paths)
+    _append_tool_path_mounts(wrapped, tool_paths, workspace)
     internal_dir = workspace / ".kvist"
     wrapped.extend(("--tmpfs", str(internal_dir)))
     # Secret masks come after the workspace bind so they shadow the real files.

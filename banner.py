@@ -13,6 +13,7 @@ from rich.console import Console
 
 from banner_frames import CURSOR_GLYPH, Frame, Rgb, frame_at
 from llm_clients import provider_label
+from redaction import sanitize_display_text
 from user_config import get_saved_role
 
 
@@ -365,11 +366,11 @@ def banner_available(console_width: int, console_height: int) -> bool:
 
 def _banner_fields(config) -> list[tuple[str, str]]:
     return [
-        ("Provider:", provider_label(config.provider)),
-        ("Fast:", str(config.fast_model)),
-        ("Smart:", str(config.smart_model)),
-        ("Planner:", str(config.planner_model)),
-        ("Role:", get_saved_role() or "auto"),
+        ("Provider:", sanitize_display_text(provider_label(config.provider))),
+        ("Fast:", sanitize_display_text(str(config.fast_model))),
+        ("Smart:", sanitize_display_text(str(config.smart_model))),
+        ("Planner:", sanitize_display_text(str(config.planner_model))),
+        ("Role:", sanitize_display_text(get_saved_role() or "auto")),
         ("Commands:", "/commands"),
     ]
 

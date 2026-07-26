@@ -45,16 +45,26 @@ from command_policy import (
 )
 from env_utils import read_int_env
 from permission_policy import append_allow_rule, load_policy
-from process_tree import cgroup_supervision_available, run_supervised
+from process_tree import (
+    ProcessSupervisionError,
+    cgroup_supervision_available,
+    run_supervised,
+)
+from redaction import redact_text, sanitize_display_text
 from sandbox import (
     SandboxMode,
     detect_sandbox_mode,
     normalize_sandbox_request,
     resolve_bubblewrap_path,
     sandbox_network_allowed,
+    validated_external_tool_path,
     wrap_command_for_sandbox,
 )
-from secret_paths import UnsafeSecretPathError, secret_mask_digest
+from secret_paths import (
+    UnsafeSecretPathError,
+    count_workspace_inode_aliases,
+    secret_mask_digest,
+)
 
 # ── Global HITL lock ─────────────────────────────────────────────
 # Prevents background TUI rendering while the user is typing y/N.
@@ -374,8 +384,7 @@ _TERMINAL_PROFILES: frozenset[str] = frozenset({"restricted", "dev"})
 _FALLBACK_READ_ONLY_EXECUTABLES: frozenset[str] = frozenset({
     "ls", "dir", "pwd", "cat", "head", "tail", "echo", "whoami", "which",
     "where", "file", "uname", "hostname", "wc", "grep", "sort", "uniq",
-    "diff", "test", "tree", "ver", "findstr", "type", "find", "sed", "awk",
-    "gawk",
+    "diff", "test", "tree", "ver", "findstr", "type", "find",
 })
 
 _SAFE_CHILD_ENV_NAMES: frozenset[str] = frozenset({
@@ -383,7 +392,16 @@ _SAFE_CHILD_ENV_NAMES: frozenset[str] = frozenset({
 })
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SECRET_ENV_RE = re.compile(
-    r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL[A-Z0-9]*)(?:$|_)",
+    r"(?:^|_)(?:"
+    r"API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|PRIVATE_?KEY|"
+    r"CREDENTIAL[A-Z0-9]*|AUTH(?:ORIZATION)?|COOKIE|SESSION|DSN|"
+    r"CONNECTION_STRING"
+    r")(?:$|_)",
+    re.IGNORECASE,
+)
+_SECRET_CONNECTION_ENV_RE = re.compile(
+    r"(?:^|_)(?:DATABASE|DB|REDIS|MONGODB|MONGO|POSTGRES|MYSQL|AMQP|BROKER)_URL"
+    r"(?:$|_)",
     re.IGNORECASE,
 )
 _CONTROL_ENV_NAMES: frozenset[str] = frozenset({
@@ -396,6 +414,16 @@ _CONTROL_ENV_NAMES: frozenset[str] = frozenset({
     "CLASSPATH", "DOTNET_STARTUP_HOOKS", "PHPRC", "RUSTFLAGS", "ZDOTDIR",
     "LESSOPEN", "LESSCLOSE", "PAGER", "MANPAGER", "EDITOR", "VISUAL", "BROWSER",
     "RIPGREP_CONFIG_PATH", "AWKPATH", "AWKLIBPATH",
+    "KUBECONFIG", "NETRC", "PGPASSFILE", "MYSQL_PWD", "MYSQL_HISTFILE",
+    "BOTO_CONFIG", "CLOUDSDK_CONFIG", "GNUPGHOME", "PIP_CONFIG_FILE",
+    "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR",
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "JAVA_HOME", "RUSTUP_HOME", "LOCPATH", "NLSPATH", "TZDIR",
+    "GIO_EXTRA_MODULES", "GTK_PATH", "QT_PLUGIN_PATH", "GI_TYPELIB_PATH",
+    "COMSPEC", "PATHEXT", "PSMODULEPATH", "SYSTEMROOT", "WINDIR",
+    "APPDATA", "LOCALAPPDATA", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+    "TEMP", "TMP",
 })
 _CONTROL_ENV_PREFIXES: tuple[str, ...] = (
     "LD_", "DYLD_", "GIT_", "PYTHON", "NODE_", "RUBY", "PERL", "BASH_",
@@ -486,6 +514,8 @@ class ExecutionContext:
 # Per-profile timeout ceiling: restricted keeps the old tight cap, dev
 # allows real builds and test runs.
 _TIMEOUT_CEILINGS: dict[str, float] = {"restricted": 30.0, "dev": 300.0}
+_MAX_COMMAND_ITEMS = 512
+_MAX_COMMAND_CHARS = 2000
 
 
 @dataclass(slots=True)
@@ -628,7 +658,7 @@ class TerminalExecutor:
             self.sandbox_request in {"auto", "invalid"}
             and self.sandbox_mode is SandboxMode.WORKSPACE_ONLY
         )
-        self._external_tool_paths = _external_tool_paths()
+        self._external_tool_paths = _external_tool_paths(self.workspace)
         # Process-tree teardown of detached (setsid) descendants needs either
         # the Bubblewrap PID namespace or a cgroup v2 scope.
         self._cgroup_available = cgroup_supervision_available()
@@ -669,6 +699,14 @@ class TerminalExecutor:
         """Execute through the non-bypassable validation and approval pipeline."""
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             raise HardDenyError("Hard security denial: command must be a non-empty list of strings")
+        if (
+            len(command) > _MAX_COMMAND_ITEMS
+            or sum(len(item) for item in command) + len(command) - 1
+            > _MAX_COMMAND_CHARS
+        ):
+            raise HardDenyError(
+                "Hard security denial: command is too large for safe validation and approval"
+            )
         # Own the mutable argv so callers cannot race our checks by retaining
         # and mutating their list from another thread.
         command = list(command)
@@ -905,7 +943,7 @@ class TerminalExecutor:
             accepted = request_user_confirmation(
                 title="Permission policy",
                 body=(
-                    f"Save allow rule [bold]{pattern}[/bold] to .kvist/permissions.json?\n"
+                    f"Save allow rule {pattern} to .kvist/permissions.json?\n"
                     "Matching commands will run without approval in this repo."
                 ),
                 question=f"Always allow '{pattern}' in this repo?",
@@ -1047,6 +1085,8 @@ class TerminalExecutor:
             )
         except FileNotFoundError:
             raise TerminalError(f"Executable not found: {command_snapshot[0]}")
+        except ProcessSupervisionError as exc:
+            raise TerminalError(f"Process supervision error: {exc}") from exc
         except OSError as exc:
             raise TerminalError(f"Process launch error: {exc}")
 
@@ -1093,6 +1133,7 @@ class TerminalExecutor:
 
         from rich.console import Console
         from rich.panel import Panel
+        from rich.text import Text
 
         # Pause background TUI rendering
         if cls._hitl_suspend_fn is not None:
@@ -1101,19 +1142,32 @@ class TerminalExecutor:
         _enter_hitl()
         try:
             console = Console()
-            command_str = " ".join(command)
-
-            panel_content = (
-                f"[bold red]⚠️  DANGEROUS COMMAND DETECTED[/bold red]\n\n"
-                f"[bold]Command:[/bold] [yellow]{command_str}[/yellow]\n"
-                f"[bold]Reason:[/bold] {error_message}\n\n"
-                f"[dim]This command does not match the security allowlist.\n"
-                f"The agent is attempting to run it. Proceed only if you trust this action.[/dim]"
+            command_text = sanitize_display_text(
+                json.dumps(command, ensure_ascii=False)
+            )
+            panel_content = Text()
+            panel_content.append(
+                "⚠️  DANGEROUS COMMAND DETECTED\n\n",
+                style="bold red",
+            )
+            panel_content.append("Argv: ", style="bold")
+            panel_content.append(command_text, style="yellow")
+            panel_content.append("\nReason: ", style="bold")
+            panel_content.append(
+                sanitize_display_text(error_message)
+            )
+            panel_content.append(
+                "\n\nThis command requires explicit authorization. "
+                "Proceed only if every argv element and the reason are expected.",
+                style="dim",
             )
             panel = Panel(
                 panel_content,
                 border_style="red",
-                title="[bold]Security Check — Human-in-the-Loop[/bold]",
+                title=Text(
+                    "Security Check — Human-in-the-Loop",
+                    style="bold",
+                ),
                 title_align="left",
                 padding=(1, 2),
             )
@@ -1156,8 +1210,14 @@ class TerminalExecutor:
         if any("\x00" in token for token in command):
             raise HardDenyError("Hard security denial: NUL bytes are forbidden in command arguments")
 
-        if sum(len(t) for t in command) > 2000:
-            raise HardDenyError("Hard security denial: command too long")
+        if (
+            len(command) > _MAX_COMMAND_ITEMS
+            or sum(len(item) for item in command) + len(command) - 1
+            > _MAX_COMMAND_CHARS
+        ):
+            raise HardDenyError(
+                "Hard security denial: command is too large for safe validation and approval"
+            )
 
         for index, segment in enumerate(self._split_pipe_segments(command)):
             trusted_probe = bindings is None or bindings[index].trusted_system
@@ -1222,6 +1282,13 @@ class TerminalExecutor:
             raise HardDenyError("Hard security denial: uniq output-file operand is forbidden")
         if executable == "file" and _file_has_compile_option(command[1:]):
             raise HardDenyError("Hard security denial: file magic compilation mode is forbidden")
+        if executable == "wc" and any(
+            token == "--files0-from" or token.startswith("--files0-from=")
+            for token in command[1:]
+        ):
+            raise HardDenyError(
+                "Hard security denial: wc indirect file-list mode is forbidden"
+            )
         if executable == "git":
             self._validate_git_arguments(command, work_dir)
         self._validate_common_tokens(command[1:], executable, work_dir=work_dir)
@@ -1679,7 +1746,16 @@ class TerminalExecutor:
         allow_executable_path: bool = False,
         work_dir: Path | None = None,
     ) -> None:
+        joined_tokens = " ".join(tokens)
+        if redact_text(joined_tokens) != joined_tokens:
+            raise HardDenyError(
+                "Hard security denial: credential-bearing command arguments are forbidden"
+            )
         for token_index, token in enumerate(tokens):
+            if "\x00" in token:
+                raise HardDenyError(
+                    "Hard security denial: command arguments cannot contain NUL"
+                )
             # Exact match only with shell operator (not substring!)
             if token in _FORBIDDEN_OPERATORS:
                 raise HardDenyError(f"Hard security denial: shell operator '{token}' is forbidden")
@@ -1727,19 +1803,114 @@ class TerminalExecutor:
             raise HardDenyError("Hard security denial: access to secret files is forbidden")
 
     def _check_existing_sensitive_reference(self, token: str, work_dir: Path) -> None:
-        """Re-check canonical targets for direct, attached, and response paths."""
+        """Re-check canonical targets for direct, attached, and response paths.
+
+        Relative arguments are workspace references even for otherwise safe
+        read-only tools.  Resolve them before execution so a symlink cannot
+        turn ``cat local-name`` (or an attached option value) into an
+        out-of-workspace read.  Resolution errors for relative references are
+        security relevant and therefore fail closed.
+
+        Explicit absolute paths retain their separately risk-graded behaviour
+        for the small read-only command allowlist.
+        """
         for fragment in _argument_path_fragments(token):
             if not fragment or "\x00" in fragment:
                 continue
             try:
                 raw = Path(fragment).expanduser()
-                candidate = raw if raw.is_absolute() else work_dir / raw
-                if not candidate.exists() and not candidate.is_symlink():
-                    continue
-                canonical = candidate.resolve(strict=True)
-            except (OSError, RuntimeError, ValueError):
+            except (OSError, RuntimeError, ValueError) as error:
+                raise HardDenyError(
+                    "Hard security denial: cannot resolve command argument"
+                ) from error
+            is_explicit_absolute = raw.is_absolute()
+            candidate = raw if is_explicit_absolute else work_dir / raw
+
+            if not is_explicit_absolute:
+                try:
+                    resolved = candidate.resolve(strict=False)
+                except (OSError, RuntimeError, ValueError) as error:
+                    raise HardDenyError(
+                        "Hard security denial: cannot resolve relative command "
+                        "argument or symlink"
+                    ) from error
+                if not _is_relative_to(resolved, self.workspace):
+                    raise HardDenyError(
+                        "Hard security denial: command argument resolves "
+                        "outside the workspace"
+                    )
+
+            if not candidate.exists() and not candidate.is_symlink():
                 continue
+            try:
+                canonical = candidate.resolve(strict=True)
+            except (OSError, RuntimeError, ValueError) as error:
+                if not is_explicit_absolute:
+                    raise HardDenyError(
+                        "Hard security denial: cannot resolve relative command "
+                        "argument or symlink"
+                    ) from error
+                continue
+            if not is_explicit_absolute and not _is_relative_to(
+                canonical,
+                self.workspace,
+            ):
+                raise HardDenyError(
+                    "Hard security denial: command argument resolves outside "
+                    "the workspace"
+                )
+            if not is_explicit_absolute:
+                self._check_workspace_regular_file_hardlinks(
+                    canonical,
+                    "command argument",
+                )
             self._check_resolved_sensitive_path(canonical, "command argument")
+
+    def _check_workspace_regular_file_hardlinks(
+        self,
+        candidate: Path,
+        kind: str,
+    ) -> None:
+        try:
+            info = candidate.stat()
+        except OSError as error:
+            raise HardDenyError(
+                f"Hard security denial: cannot inspect {kind} identity"
+            ) from error
+        self._check_inode_hardlink_containment(info, kind)
+
+    def _check_inode_hardlink_containment(
+        self,
+        info: os.stat_result,
+        kind: str,
+    ) -> None:
+        """Reject an inode whose extra names may live outside the workspace.
+
+        A link count above one is only dangerous when some of those names are
+        unreachable from the workspace: that is how an external inode is
+        imported under a workspace pathname.  Aliases that are all inside the
+        workspace import nothing; secret aliases among them are neutralised by
+        the sandbox mask, not by denying the argument.  A count below one means
+        the inode is already unlinked by a concurrent replace and has fewer,
+        never more, names.
+        """
+        if not stat.S_ISREG(info.st_mode) or info.st_nlink <= 1:
+            return
+        try:
+            aliases = count_workspace_inode_aliases(
+                self.workspace,
+                (info.st_dev, info.st_ino),
+            )
+        except UnsafeSecretPathError as error:
+            raise HardDenyError(
+                f"Hard security denial: {kind} has multiple hard links and the "
+                "workspace cannot be scanned to prove containment"
+            ) from error
+        if aliases < info.st_nlink:
+            raise HardDenyError(
+                f"Hard security denial: {kind} has multiple hard links and "
+                "cannot be proven to stay inside the workspace"
+            )
 
     def _validate_interpreter_modes(
         self,
@@ -2160,6 +2331,8 @@ class TerminalExecutor:
             "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_ATTR_NOSYSTEM": "1",
             "GIT_NO_LAZY_FETCH": "1",
+            "GIT_TERMINAL_PROMPT": "0",
+            "PIP_NO_INPUT": "1",
         }
         explicitly_allowed = _explicit_child_env_names()
         for name, value in os.environ.items():
@@ -2167,6 +2340,8 @@ class TerminalExecutor:
             if _is_blocked_child_env_name(upper):
                 continue
             if upper in _SAFE_CHILD_ENV_NAMES or upper.startswith("LC_") or upper in explicitly_allowed:
+                if redact_text(value) != value:
+                    continue
                 env[name] = value
 
         if overrides is None:
@@ -2186,6 +2361,10 @@ class TerminalExecutor:
             if upper not in _SAFE_CHILD_ENV_NAMES and not upper.startswith("LC_") and upper not in explicitly_allowed:
                 raise HardDenyError(
                     f"Hard security denial: environment override '{name}' is not in AGENT_CHILD_ENV_ALLOW"
+                )
+            if redact_text(value) != value:
+                raise HardDenyError(
+                    f"Hard security denial: environment override '{name}' contains credential-bearing data"
                 )
             env[name] = value
         return env
@@ -2526,6 +2705,26 @@ class TerminalExecutor:
         for index, segment in enumerate(segments):
             token = segment[0]
             binding = bindings[index]
+            if binding.lookup_in_workspace and binding.lookup_path:
+                lookup = Path(binding.lookup_path)
+                try:
+                    # ``lstat``: a launcher symlink is attested through its own
+                    # target binding, not through the target's link count.
+                    lookup_info = lookup.lstat()
+                except OSError as error:
+                    raise HardDenyError(
+                        "Hard security denial: cannot inspect workspace "
+                        "executable identity"
+                    ) from error
+                self._check_inode_hardlink_containment(
+                    lookup_info,
+                    "workspace executable",
+                )
+            if binding.target_in_workspace and binding.resolved_path:
+                self._check_workspace_regular_file_hardlinks(
+                    Path(binding.resolved_path),
+                    "workspace executable",
+                )
             if binding.resolved_path:
                 self._check_resolved_sensitive_path(
                     Path(binding.resolved_path), "executable"
@@ -2972,11 +3171,11 @@ def _project_tool_dirs(workspace: Path) -> list[Path]:
     return dirs
 
 
-def _external_tool_paths() -> tuple[Path, ...]:
+def _external_tool_paths(workspace: Path | None = None) -> tuple[Path, ...]:
     """Validated absolute toolchain directories from AGENT_TOOL_PATHS.
 
-    Each entry must be absolute, exist as a directory, and not be writable by
-    other principals (world-writable).  Home is never added wholesale.
+    Each entry must be absolute, exist as a directory, and not be group- or
+    world-writable.  Broad host and project trees are never added wholesale.
     """
     raw = os.getenv("AGENT_TOOL_PATHS", "")
     paths: list[Path] = []
@@ -2985,17 +3184,8 @@ def _external_tool_paths() -> tuple[Path, ...]:
         item = item.strip()
         if not item:
             continue
-        candidate = Path(item)
-        if not candidate.is_absolute():
-            continue
-        try:
-            resolved = candidate.resolve(strict=True)
-            info = resolved.stat()
-        except OSError:
-            continue
-        if not stat.S_ISDIR(info.st_mode):
-            continue
-        if info.st_mode & stat.S_IWOTH:
+        resolved = validated_external_tool_path(Path(item), workspace)
+        if resolved is None:
             continue
         key = str(resolved)
         if key in seen:
@@ -3092,6 +3282,7 @@ def _explicit_child_env_names() -> set[str]:
 def _is_blocked_child_env_name(upper: str) -> bool:
     return (
         bool(_SECRET_ENV_RE.search(upper))
+        or bool(_SECRET_CONNECTION_ENV_RE.search(upper))
         or upper.startswith(_SECRET_ENV_PREFIXES)
         or upper in _CONTROL_ENV_NAMES
         or upper.startswith(_CONTROL_ENV_PREFIXES)
@@ -3652,6 +3843,7 @@ def request_user_confirmation(title: str, body: str, question: str) -> bool:
 
     from rich.console import Console
     from rich.panel import Panel
+    from rich.text import Text
 
     if TerminalExecutor._hitl_suspend_fn is not None:
         TerminalExecutor._hitl_suspend_fn()
@@ -3660,10 +3852,17 @@ def request_user_confirmation(title: str, body: str, question: str) -> bool:
         console = Console()
         with _alt_screen(console):
             console.print(
-                Panel(body, border_style="yellow", title=title, title_align="left", padding=(1, 2))
+                Panel(
+                    Text(sanitize_display_text(body)),
+                    border_style="yellow",
+                    title=Text(sanitize_display_text(title)),
+                    title_align="left",
+                    padding=(1, 2),
+                )
             )
             try:
-                choice = input(f"{question} [y/N]: ").strip().lower()
+                safe_question = sanitize_display_text(question)
+                choice = input(f"{safe_question} [y/N]: ").strip().lower()
             except EOFError:
                 return False
         return choice in ("y", "yes")

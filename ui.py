@@ -20,6 +20,7 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
+from redaction import redact_value, sanitize_display_text
 from terminal import is_hitl_active
 
 try:
@@ -192,26 +193,29 @@ class AgentUI:
             return
 
         print("\n[Plan]")
-        print(f"Goal: {plan_info.goal}")
-        print(f"Complexity: {plan_info.complexity}")
+        print(f"Goal: {sanitize_display_text(str(plan_info.goal))}")
+        print(f"Complexity: {sanitize_display_text(str(plan_info.complexity))}")
 
         for index, item in enumerate(plan_info.plan, start=1):
-            print(f"{index}. {item}")
+            print(f"{index}. {sanitize_display_text(str(item))}")
 
         if plan_info.success_criteria:
             print("Success criteria:")
             for item in plan_info.success_criteria:
-                print(f"- {item}")
+                print(f"- {sanitize_display_text(str(item))}")
 
     def print_step_header(self, step: int, command: Any) -> None:
         if not self.verbose:
             return
 
         print(f"\n[Step {step}]")
-        print(f"Stage: {command.plan_step}")
-        print(f"Thought: {command.thought}")
-        print(f"Message: {command.user_message}")
-        print(f"Action: {command.action.type} {command.action.args}")
+        print(f"Stage: {sanitize_display_text(str(command.plan_step))}")
+        print(f"Thought: {sanitize_display_text(str(command.thought))}")
+        print(f"Message: {sanitize_display_text(str(command.user_message))}")
+        print(
+            f"Action: {command.action.type} "
+            f"{redact_value(command.action.args)}"
+        )
         print(f"Reported progress: {command.progress}%")
 
     def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
@@ -230,6 +234,7 @@ class AgentUI:
             self.console.print(self._build_plain_final_panel(final_message))
 
     def render_user_markdown(self, message: str, fallback_style: str = "") -> Any:
+        message = sanitize_display_text(message)
         if Markdown is None:
             return Text(message, style=fallback_style)
         try:
@@ -241,11 +246,11 @@ class AgentUI:
         try:
             self.console.print(self.render_user_markdown(message))
         except Exception:
-            self.console.print(Text(message))
+            self.console.print(Text(sanitize_display_text(message)))
 
     def _build_plain_final_panel(self, message: str) -> Panel:
         return Panel(
-            Text(message, style="bright_green"),
+            Text(sanitize_display_text(message), style="bright_green"),
             title="Final Answer",
             title_align="left",
             border_style="bright_green",
@@ -255,15 +260,15 @@ class AgentUI:
 
     def debug_print(self, message: str) -> None:
         if self.verbose:
-            print(message)
+            print(sanitize_display_text(message))
 
     def print_result(self, message: str) -> None:
         """Print a success/result message (backward-compatible)."""
-        self.console.print(f"[bright_green]{message}[/bright_green]")
+        self.console.print(Text(sanitize_display_text(message), style="bright_green"))
 
     def print_error(self, message: str) -> None:
         """Print an error message (backward-compatible)."""
-        self.console.print(f"[bright_yellow]{message}[/bright_yellow]")
+        self.console.print(Text(sanitize_display_text(message), style="bright_yellow"))
 
     def print_sandbox_notice(self, note: str) -> None:
         """Show a one-time sandbox honesty notice as a dim info panel.
@@ -273,6 +278,7 @@ class AgentUI:
         """
         if not note:
             return
+        note = sanitize_display_text(note)
         panel = Panel(
             Text(note, style="grey70"),
             title="Sandbox",
@@ -314,8 +320,8 @@ class AgentUI:
                 self.console.clear()
                 self.console.print(
                     Panel(
-                        Text(help_text, style="grey70"),
-                        title=title,
+                        Text(sanitize_display_text(help_text), style="grey70"),
+                        title=Text(sanitize_display_text(title)),
                         title_align="left",
                         border_style="bright_cyan",
                         box=box.ROUNDED,
@@ -330,10 +336,12 @@ class AgentUI:
                     row = Text()
                     row.append(prefix, style="bright_green" if is_selected else "grey50")
                     row.append(
-                        option["label"],
+                        sanitize_display_text(option["label"]),
                         style="bold bright_green" if is_selected else "white",
                     )
-                    description = option.get("description", "").strip()
+                    description = sanitize_display_text(
+                        option.get("description", "").strip()
+                    )
                     if description:
                         row.append(f" — {description}", style="grey70")
                     rows.append(row)
@@ -376,11 +384,18 @@ class AgentUI:
         # Build panel content
         content_parts: list[Text | str] = []
         if help_text:
-            content_parts.append(Text(help_text, style="grey70"))
+            content_parts.append(
+                Text(sanitize_display_text(help_text), style="grey70")
+            )
             content_parts.append("")
 
         if current_value:
-            content_parts.append(Text(f"Current: {current_value}", style="bright_yellow"))
+            content_parts.append(
+                Text(
+                    f"Current: {sanitize_display_text(current_value)}",
+                    style="bright_yellow",
+                )
+            )
             content_parts.append("")
 
         content_parts.append(Text("Enter value (Esc to cancel):", style="white"))
@@ -390,7 +405,7 @@ class AgentUI:
             self.console.print(
                 Panel(
                     Group(*content_parts),
-                    title=title,
+                    title=Text(sanitize_display_text(title)),
                     title_align="left",
                     border_style="bright_cyan",
                     box=box.ROUNDED,
@@ -433,7 +448,9 @@ class AgentUI:
 
         content_parts: list[Text | str] = []
         if help_text:
-            content_parts.append(Text(help_text, style="grey70"))
+            content_parts.append(
+                Text(sanitize_display_text(help_text), style="grey70")
+            )
             content_parts.append("")
 
         if current_value:
@@ -447,7 +464,7 @@ class AgentUI:
             self.console.print(
                 Panel(
                     Group(*content_parts),
-                    title=title,
+                    title=Text(sanitize_display_text(title)),
                     title_align="left",
                     border_style="bright_cyan",
                     box=box.ROUNDED,
@@ -490,6 +507,8 @@ class AgentUI:
                 if key.lower() == "j":
                     return "down"
 
+        import os
+        import select
         import termios
         import tty
 
@@ -498,15 +517,24 @@ class AgentUI:
         try:
             tty.setraw(fd)
             while True:
-                key = sys.stdin.read(1)
+                key = os.read(fd, 1).decode("utf-8", errors="ignore")
                 if key in {"\r", "\n"}:
                     return "enter"
                 if key == "\x03":
                     return "interrupt"
                 if key == "\x1b":
-                    next_char = sys.stdin.read(1)
+                    ready, _, _ = select.select([fd], [], [], 0.05)
+                    if not ready:
+                        return "escape"
+                    next_char = os.read(fd, 1).decode("utf-8", errors="ignore")
                     if next_char == "[":
-                        final_char = sys.stdin.read(1)
+                        ready, _, _ = select.select([fd], [], [], 0.05)
+                        if not ready:
+                            return "escape"
+                        final_char = os.read(fd, 1).decode(
+                            "utf-8",
+                            errors="ignore",
+                        )
                         if final_char == "A":
                             return "up"
                         if final_char == "B":
@@ -531,6 +559,7 @@ class AgentUI:
     ) -> Panel:
         light_symbol, light_style, state_label = self._status_light(status, is_error)
         public_message = self._clean_public_status(user_message)
+        public_plan_step = sanitize_display_text(str(plan_step))
         safe_progress = max(0, min(progress, 100))
 
         title = Text.assemble(
@@ -551,7 +580,7 @@ class AgentUI:
 
         message_text = Text(public_message, style="bold bright_cyan")
         meta_text = Text(
-            f"Step {step} • Progress {safe_progress}% • {plan_step}",
+            f"Step {step} • Progress {safe_progress}% • {public_plan_step}",
             style="grey70",
         )
 
@@ -596,7 +625,7 @@ class AgentUI:
 
     @staticmethod
     def _clean_public_status(text: str) -> str:
-        cleaned = re.sub(r"\s+", " ", text).strip()
+        cleaned = re.sub(r"\s+", " ", sanitize_display_text(text)).strip()
 
         if not cleaned:
             return "Working on the task"

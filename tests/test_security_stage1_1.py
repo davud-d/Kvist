@@ -13,15 +13,26 @@ import json
 import os
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 
 import pytest
 
 import terminal as terminal_module
-from process_tree import cgroup_supervision_available, run_supervised
+from process_tree import (
+    ProcessSupervisionError,
+    _BoundedReader,
+    cgroup_supervision_available,
+    run_supervised,
+)
 from sandbox import resolve_bubblewrap_path, wrap_command_for_sandbox, SandboxMode
-from secret_paths import enumerate_secret_targets, is_secret_basename, secret_mask_digest
+from secret_paths import (
+    UnsafeSecretPathError,
+    enumerate_secret_targets,
+    is_secret_basename,
+    secret_mask_digest,
+)
 from terminal import (
     ApprovalRequiredError,
     HardDenyError,
@@ -98,6 +109,42 @@ def test_secret_mask_digest_changes_when_secret_added(tmp_path):
     (tmp_path / ".env").write_text("A=1")
     after = secret_mask_digest(tmp_path)
     assert before != after
+
+
+def test_secret_enumeration_fails_closed_when_directory_cannot_be_scanned(
+    tmp_path,
+    monkeypatch,
+):
+    hidden = tmp_path / "temporarily-unreadable"
+    hidden.mkdir()
+    (hidden / ".env").write_text("A=1", encoding="utf-8")
+    original_iterdir = Path.iterdir
+
+    def deny_hidden(path):
+        if path == hidden:
+            raise PermissionError("fault-injected unreadable directory")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", deny_hidden)
+
+    with pytest.raises(UnsafeSecretPathError, match="complete secret mask"):
+        enumerate_secret_targets(tmp_path)
+
+
+def test_external_hardlink_alias_is_included_in_protected_file_masks(
+    tmp_path,
+    tmp_path_factory,
+):
+    outside = tmp_path_factory.mktemp("outside-hardlink-mask")
+    external = outside / "public.txt"
+    external.write_text("boundary fixture\n", encoding="utf-8")
+    alias = tmp_path / "alias.txt"
+    os.link(external, alias)
+
+    files, directories = enumerate_secret_targets(tmp_path)
+
+    assert directories == []
+    assert files == [alias]
 
 
 # ─────────────────────── strong-mode secret masking (bwrap) ──────────────────
@@ -247,7 +294,10 @@ def test_kvist_contents_not_readable_in_strong_mode(tmp_path, monkeypatch):
 
 # ───────────────────────────── weak-mode policy ──────────────────────────────
 
-def test_auto_fallback_denies_arbitrary_code_without_approval(tmp_path, monkeypatch):
+def test_auto_fallback_hard_denies_arbitrary_code_without_tree_control(
+    tmp_path,
+    monkeypatch,
+):
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     monkeypatch.setattr(terminal_module.shutil, "which", lambda name, path=None: None)
     monkeypatch.setattr(
@@ -256,6 +306,7 @@ def test_auto_fallback_denies_arbitrary_code_without_approval(tmp_path, monkeypa
     _write_policy(tmp_path, ["python *"])
     (tmp_path / "s.py").write_text("print('x')", encoding="utf-8")
     ex = TerminalExecutor(tmp_path)
+    ex._cgroup_available = False
     assert ex.sandbox_mode is SandboxMode.WORKSPACE_ONLY
     requested = []
     monkeypatch.setattr(
@@ -263,9 +314,32 @@ def test_auto_fallback_denies_arbitrary_code_without_approval(tmp_path, monkeypa
         "_request_user_approval",
         classmethod(lambda cls, c, r: requested.append(r) or False),
     )
-    result = ex.run(["python", "s.py"])
-    assert result.denied is True
-    assert requested and "fallback" in requested[0].casefold()
+    with pytest.raises(HardDenyError, match="cannot control detached descendants"):
+        ex.run(["python", "s.py"])
+    assert requested == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["awk", 'BEGIN { print "fixture" }'],
+        ["sed", "-n", "1p", "input.txt"],
+    ],
+)
+def test_auto_fallback_treats_path_programming_tools_as_arbitrary_code(
+    tmp_path,
+    monkeypatch,
+    command,
+):
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
+    monkeypatch.setattr("sandbox.resolve_bubblewrap_path", lambda: None)
+    monkeypatch.setattr(terminal_module, "resolve_bubblewrap_path", lambda: None)
+    (tmp_path / "input.txt").write_text("fixture\n", encoding="utf-8")
+    executor = TerminalExecutor(tmp_path)
+    executor._cgroup_available = False
+
+    with pytest.raises(HardDenyError, match="cannot control detached descendants"):
+        executor.run(command)
 
 
 def test_explicit_workspace_mode_is_named_and_warned(monkeypatch):
@@ -299,6 +373,201 @@ def _run_pt(script: str, marker: Path, timeout: float):
         is_windows=False,
         use_cgroup=cgroup_supervision_available(),
     )
+
+
+def test_same_session_descendant_killed_on_normal_completion_without_cgroup(
+    tmp_path,
+):
+    marker = tmp_path / "gpid-no-cgroup-normal"
+    body = (
+        "import subprocess,time\n"
+        "p=subprocess.Popen(['sleep','30'])\n"
+        f"open({str(marker)!r},'w').write(str(p.pid))\n"
+        "time.sleep(0.2)\n"
+    )
+    started = time.monotonic()
+    result = run_supervised(
+        [sys.executable, "-c", body],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=5,
+        max_capture_bytes=4096,
+        rlimit_setter=None,
+        is_windows=False,
+        use_cgroup=False,
+    )
+    descendant_pid = int(marker.read_text())
+    deadline = time.monotonic() + 2
+    while _proc_running(descendant_pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    try:
+        assert result.timed_out is False
+        assert time.monotonic() - started < 3
+        assert not _proc_running(descendant_pid)
+    finally:
+        _cleanup(descendant_pid)
+
+
+def test_same_session_descendant_killed_on_timeout_without_cgroup(tmp_path):
+    marker = tmp_path / "gpid-no-cgroup-timeout"
+    body = (
+        "import subprocess,time\n"
+        "p=subprocess.Popen(['sleep','30'])\n"
+        f"open({str(marker)!r},'w').write(str(p.pid))\n"
+        "time.sleep(30)\n"
+    )
+    result = run_supervised(
+        [sys.executable, "-c", body],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=1,
+        max_capture_bytes=4096,
+        rlimit_setter=None,
+        is_windows=False,
+        use_cgroup=False,
+    )
+    descendant_pid = int(marker.read_text())
+    deadline = time.monotonic() + 2
+    while _proc_running(descendant_pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    try:
+        assert result.timed_out is True
+        assert not _proc_running(descendant_pid)
+    finally:
+        _cleanup(descendant_pid)
+
+
+def test_required_cgroup_disappearance_fails_before_spawn(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "process_tree._CgroupScope.create",
+        classmethod(lambda cls: None),
+    )
+    spawned = []
+    monkeypatch.setattr(
+        "process_tree.subprocess.Popen",
+        lambda *args, **kwargs: spawned.append((args, kwargs)),
+    )
+
+    with pytest.raises(ProcessSupervisionError, match="became unavailable"):
+        run_supervised(
+            [sys.executable, "-c", "print('must not spawn')"],
+            cwd=tmp_path,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=1,
+            max_capture_bytes=4096,
+            rlimit_setter=None,
+            is_windows=False,
+            use_cgroup=True,
+        )
+
+    assert spawned == []
+
+
+def test_required_cgroup_cleanup_failure_is_reported_after_reader_cleanup(
+    tmp_path,
+    monkeypatch,
+):
+    closed = []
+
+    class BrokenScope:
+        def join_current_process(self):
+            pass
+
+        def kill(self):
+            return "fault-injected cgroup cleanup failure"
+
+        def close(self):
+            closed.append(True)
+            return None
+
+    monkeypatch.setattr(
+        "process_tree._CgroupScope.create",
+        classmethod(lambda cls: BrokenScope()),
+    )
+
+    with pytest.raises(ProcessSupervisionError, match="fault-injected"):
+        run_supervised(
+            [sys.executable, "-c", "print('fixture')"],
+            cwd=tmp_path,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=2,
+            max_capture_bytes=4096,
+            rlimit_setter=None,
+            is_windows=False,
+            use_cgroup=True,
+        )
+
+    assert closed == [True]
+    assert not any(
+        isinstance(thread, _BoundedReader)
+        for thread in threading.enumerate()
+    )
+
+
+def test_detached_pipe_holder_does_not_leak_reader_threads_without_cgroup(
+    tmp_path,
+):
+    marker = tmp_path / "detached-pipe-holder"
+    body = (
+        "import subprocess,time\n"
+        "p=subprocess.Popen(['sleep','30'],start_new_session=True)\n"
+        f"open({str(marker)!r},'w').write(str(p.pid))\n"
+        "time.sleep(0.2)\n"
+    )
+    started = time.monotonic()
+    result = run_supervised(
+        [sys.executable, "-c", body],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=5,
+        max_capture_bytes=4096,
+        rlimit_setter=None,
+        is_windows=False,
+        use_cgroup=False,
+    )
+    descendant_pid = int(marker.read_text())
+    deadline = time.monotonic() + 2
+    while _proc_running(descendant_pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    try:
+        assert result.timed_out is False
+        assert time.monotonic() - started < 3
+        assert not _proc_running(descendant_pid)
+        assert not any(
+            isinstance(thread, _BoundedReader)
+            for thread in threading.enumerate()
+        )
+    finally:
+        _cleanup(descendant_pid)
+
+
+def test_setsid_descendant_is_tracked_on_timeout_without_cgroup(tmp_path):
+    marker = tmp_path / "setsid-no-cgroup-timeout"
+    body = (
+        "import subprocess,time\n"
+        "p=subprocess.Popen(['sleep','30'],start_new_session=True)\n"
+        f"open({str(marker)!r},'w').write(str(p.pid))\n"
+        "time.sleep(30)\n"
+    )
+    result = run_supervised(
+        [sys.executable, "-c", body],
+        cwd=tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=1,
+        max_capture_bytes=4096,
+        rlimit_setter=None,
+        is_windows=False,
+        use_cgroup=False,
+    )
+    descendant_pid = int(marker.read_text())
+    deadline = time.monotonic() + 2
+    while _proc_running(descendant_pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    try:
+        assert result.timed_out is True
+        assert not _proc_running(descendant_pid)
+    finally:
+        _cleanup(descendant_pid)
 
 
 @requires_cgroup
@@ -535,6 +804,7 @@ def test_controlled_path_ignores_absent_dirs(tmp_path):
 def test_external_tool_paths_validated(tmp_path, monkeypatch):
     good = tmp_path / "tools"
     good.mkdir()
+    good.chmod(0o750)
     monkeypatch.setenv(
         "AGENT_TOOL_PATHS", os.pathsep.join([str(good), "relative/no", "/nonexistent-xyz"])
     )
@@ -543,6 +813,39 @@ def test_external_tool_paths_validated(tmp_path, monkeypatch):
     resolved = _external_tool_paths()
     assert good.resolve() in resolved
     assert all(p.is_absolute() and p.is_dir() for p in resolved)
+
+
+def test_external_tool_paths_reject_group_writable_and_broad_mounts(
+    tmp_path,
+    monkeypatch,
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    internal = workspace / "tools"
+    internal.mkdir()
+    group_writable = tmp_path / "group-tools"
+    group_writable.mkdir()
+    group_writable.chmod(0o770)
+    safe_external = tmp_path / "external" / "bin"
+    safe_external.mkdir(parents=True)
+    safe_external.chmod(0o750)
+    monkeypatch.setenv(
+        "AGENT_TOOL_PATHS",
+        os.pathsep.join(
+            [
+                "/",
+                str(workspace),
+                str(internal),
+                str(group_writable),
+                str(safe_external),
+            ]
+        ),
+    )
+    from terminal import _external_tool_paths
+
+    resolved = _external_tool_paths(workspace)
+
+    assert resolved == (safe_external.resolve(),)
 
 
 def test_venv_symlink_to_system_python_is_permitted(tmp_path, monkeypatch):
@@ -606,19 +909,48 @@ def test_real_venv_runs_and_imports_local_fixture(tmp_path, monkeypatch):
 
 
 def test_tool_path_mount_is_added_to_bwrap(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     ext = tmp_path / "external_tools"
     ext.mkdir()
+    ext.chmod(0o750)
     wrapped = wrap_command_for_sandbox(
         ["ls"],
         SandboxMode.BUBBLEWRAP,
-        tmp_path,
-        tmp_path,
+        workspace,
+        workspace,
         bwrap_path="/usr/bin/bwrap",
         network_allowed=False,
         tool_paths=(ext,),
     )
     joined = " ".join(wrapped)
     assert str(ext.resolve()) in joined
+
+
+@pytest.mark.parametrize("relative", [None, "inside", "group-writable"])
+def test_tool_path_mount_rejects_broad_project_and_mutable_paths(tmp_path, relative):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    if relative is None:
+        candidate = Path("/")
+    elif relative == "inside":
+        candidate = workspace / "tools"
+        candidate.mkdir()
+    else:
+        candidate = tmp_path / relative
+        candidate.mkdir()
+        candidate.chmod(0o770)
+
+    with pytest.raises(ValueError, match="unsafe external tool path"):
+        wrap_command_for_sandbox(
+            ["ls"],
+            SandboxMode.BUBBLEWRAP,
+            workspace,
+            workspace,
+            bwrap_path="/usr/bin/bwrap",
+            network_allowed=False,
+            tool_paths=(candidate,),
+        )
 
 
 def test_secret_mask_args_present_in_bwrap_wrap(tmp_path):

@@ -13,6 +13,7 @@ __pycache__/
 *.so
 .venv/
 venv/
+.venv.old*/
 .eggs/
 *.egg-info/
 dist/
@@ -24,6 +25,7 @@ build/
 # Testing / Linting
 .pytest_cache/
 .mypy_cache/
+.ruff_cache/
 
 # IDE
 .idea/
@@ -60,13 +62,18 @@ jetbrains-plugin/bin/win/kvist.exe
 *.so
 *.dylib
 
+# Demo UI (local scratch, not part of the shipped app)
+Demo UI/
+
+# Review-agent run logs (local scratch output)
+review-logs/
+
 # Other
 .mimocode/
 push.py
 text_gitignore.txt
 workspace
 workspace/
-package_script.py
 jetbrains-plugin/bin/linux/*
 jetbrains-plugin/bin/win/*
 project/
@@ -81,7 +88,6 @@ TOOLS.md
 USER.md
 .openclaw/
 .claude/
-pytest.ini
 Kvist.zip
 reports/
 memory/

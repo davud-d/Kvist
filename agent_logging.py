@@ -1,28 +1,34 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import json
 import re
 import time
 from typing import Any
 
 from agent_state import PlanInfo
-
-_SECRET_RE = re.compile(
-    r"sk-[a-zA-Z0-9]{20,}"
-    r"|ghp_[a-zA-Z0-9]{36,}"
-    r"|gho_[a-zA-Z0-9]{36,}"
-    r"|github_pat_[a-zA-Z0-9_]{20,}"
-    r"|AKIA[0-9A-Z]{16}"
-    r"|xox[baprs]-[a-zA-Z0-9\-]{10,}",
-    re.ASCII,
+from durable_json import (
+    JsonStorageCorruptError,
+    create_json_object,
+    delete_json_object,
+    exclusive_storage_lock,
+    list_json_object_entries,
+    read_json_object,
+    update_json_object,
+    validate_storage_directory,
+    validate_storage_path,
+    write_json_object,
 )
+from redaction import redact_value
+
 _SESSION_VERSION = 1
 _SESSION_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z", re.ASCII)
 
 
 def get_logs_dir(self):
-    return self.executor.workspace / self.config.logs_dirname
+    return validate_storage_directory(
+        self.executor.workspace / self.config.logs_dirname,
+        self.executor.workspace,
+    )
 
 
 def is_valid_session_name(session_name: object) -> bool:
@@ -35,35 +41,58 @@ def is_valid_session_name(session_name: object) -> bool:
 def get_state_path(self, session_name: str = "default"):
     if not is_valid_session_name(session_name):
         raise ValueError(f"Invalid session name: {session_name!r}")
-    return self.executor.workspace / ".kvist" / "sessions" / f"{session_name}.json"
+    return validate_storage_path(
+        self.executor.workspace / ".kvist" / "sessions" / f"{session_name}.json",
+        self.executor.workspace,
+    )
 
 
 def get_active_session_path(self):
-    return self.executor.workspace / ".kvist" / "active_session.json"
+    return validate_storage_path(
+        self.executor.workspace / ".kvist" / "active_session.json",
+        self.executor.workspace,
+    )
 
 
 def get_sessions_dir(self):
-    return self.executor.workspace / ".kvist" / "sessions"
-
-
-def _read_json_object(path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _write_json_object(path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    temp_path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    return validate_storage_directory(
+        self.executor.workspace / ".kvist" / "sessions",
+        self.executor.workspace,
     )
-    temp_path.replace(path)
+
+
+def _read_json_object(path, boundary=None) -> dict[str, Any]:
+    root = boundary or path.parent.resolve(strict=True)
+    return read_json_object(path, boundary=root)
+
+
+def _write_json_object(path, data: dict[str, Any], boundary=None) -> None:
+    root = boundary or path.parent.resolve(strict=True)
+    write_json_object(path, data, boundary=root)
+
+
+def _validated_session_document(
+    data: dict[str, Any],
+    session: str,
+) -> dict[str, Any]:
+    version = data.get("version")
+    if version is None:
+        return data
+    if type(version) is not int or version != _SESSION_VERSION:
+        detail = (
+            f" {version}"
+            if type(version) is int
+            else " with an invalid type"
+        )
+        raise JsonStorageCorruptError(
+            f"Unsupported session version{detail} for session {session!r}"
+        )
+    saved_session = data.get("session")
+    if saved_session is not None and saved_session != session:
+        raise JsonStorageCorruptError(
+            f"Session file identity does not match session {session!r}"
+        )
+    return data
 
 
 def _session_checkpoint(data: dict[str, Any]) -> dict[str, Any] | None:
@@ -91,7 +120,7 @@ def _session_document(
     self,
     checkpoint: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    document = {
         "version": _SESSION_VERSION,
         "session": getattr(self, "current_session", "default"),
         "updated_at": time.time(),
@@ -100,6 +129,31 @@ def _session_document(
         "response_language": getattr(self, "_last_response_language", None),
         "checkpoint": checkpoint,
     }
+    sanitized = redact_value(document)
+    assert isinstance(sanitized, dict)
+    return sanitized
+
+
+def _empty_session_document(session: str) -> dict[str, Any]:
+    return {
+        "version": _SESSION_VERSION,
+        "session": session,
+        "updated_at": time.time(),
+        "session_history": [],
+        "chat_history": [],
+        "response_language": None,
+        "checkpoint": None,
+    }
+
+
+def create_session(self, session: str) -> bool:
+    if not is_valid_session_name(session):
+        raise ValueError(f"Invalid session name: {session!r}")
+    return create_json_object(
+        get_state_path(self, session),
+        _empty_session_document(session),
+        boundary=self.executor.workspace,
+    )
 
 
 def save_active_session(self, name: str | None = None) -> None:
@@ -109,11 +163,26 @@ def save_active_session(self, name: str | None = None) -> None:
     _write_json_object(
         get_active_session_path(self),
         {"session": session, "updated_at": time.time()},
+        boundary=self.executor.workspace,
     )
 
 
 def load_active_session(self) -> str:
-    marker = _read_json_object(get_active_session_path(self))
+    try:
+        marker = _read_json_object(
+            get_active_session_path(self),
+            boundary=self.executor.workspace,
+        )
+    except JsonStorageCorruptError:
+        warnings = getattr(self, "_storage_warnings", None)
+        if not isinstance(warnings, list):
+            warnings = []
+            self._storage_warnings = warnings
+        warnings.append(
+            "The active-session marker was damaged; Kvist selected the "
+            "most recent usable session."
+        )
+        marker = {}
     saved_name = marker.get("session")
     if is_valid_session_name(saved_name):
         if saved_name == "default" or get_state_path(self, saved_name).is_file():
@@ -123,33 +192,58 @@ def load_active_session(self) -> str:
     if not sessions_dir.exists():
         return "default"
     candidates = [
-        path
-        for path in sessions_dir.glob("*.json")
-        if path.is_file() and is_valid_session_name(path.stem)
+        (path, info)
+        for path, info in list_json_object_entries(
+            sessions_dir,
+            boundary=self.executor.workspace,
+        )
+        if is_valid_session_name(path.stem)
     ]
     if not candidates:
         return "default"
-    try:
-        return max(candidates, key=lambda path: path.stat().st_mtime_ns).stem
-    except OSError:
-        return "default"
+    ordered = sorted(
+        candidates,
+        key=lambda candidate: candidate[1].st_mtime_ns,
+        reverse=True,
+    )
+    for candidate, _info in ordered:
+        try:
+            data = _read_json_object(
+                candidate,
+                boundary=self.executor.workspace,
+            )
+            if data:
+                _validated_session_document(data, candidate.stem)
+        except JsonStorageCorruptError:
+            continue
+        return candidate.stem
+    return "default"
 
 
 def list_sessions(self) -> list[str]:
     sessions_dir = get_sessions_dir(self)
     if not sessions_dir.exists():
         return []
-    return sorted(
-        p.stem for p in sessions_dir.glob("*.json")
-        if p.is_file() and p.stat().st_size > 0 and is_valid_session_name(p.stem)
-    )
+    sessions: list[str] = []
+    for path, info in list_json_object_entries(
+        sessions_dir,
+        boundary=self.executor.workspace,
+    ):
+        if (
+            info.st_size > 0
+            and is_valid_session_name(path.stem)
+        ):
+            sessions.append(path.stem)
+    return sorted(sessions)
 
 
 def delete_session(self, name: str) -> bool:
     path = get_state_path(self, name)
-    if path.exists():
-        path.unlink()
-        marker = _read_json_object(get_active_session_path(self))
+    if delete_json_object(path, boundary=self.executor.workspace):
+        marker = _read_json_object(
+            get_active_session_path(self),
+            boundary=self.executor.workspace,
+        )
         if marker.get("session") == name:
             save_active_session(self, "default")
         return True
@@ -159,21 +253,47 @@ def delete_session(self, name: str) -> bool:
 def save_session(self) -> None:
     session = getattr(self, "current_session", "default")
     state_path = get_state_path(self, session)
-    existing = _read_json_object(state_path)
-    _write_json_object(
+    update_json_object(
         state_path,
-        _session_document(self, checkpoint=_session_checkpoint(existing)),
+        lambda existing: _session_document(
+            self,
+            checkpoint=_session_checkpoint(existing),
+        ),
+        boundary=self.executor.workspace,
     )
     save_active_session(self, session)
 
 
-def load_session(self) -> bool:
-    session = getattr(self, "current_session", "default")
-    data = _read_json_object(get_state_path(self, session))
+def read_session_document(
+    self,
+    session: str | None = None,
+) -> dict[str, Any]:
+    resolved_session = session or getattr(self, "current_session", "default")
+    state_path = get_state_path(self, resolved_session)
+    data = _read_json_object(
+        state_path,
+        boundary=self.executor.workspace,
+    )
     if not data:
-        self._session_history = []
-        if hasattr(self, "_chat_history"):
-            del self._chat_history
+        return {}
+    validated = _validated_session_document(data, resolved_session)
+    sanitized = redact_value(validated)
+    assert isinstance(sanitized, dict)
+    if sanitized != validated:
+        _write_json_object(
+            state_path,
+            sanitized,
+            boundary=self.executor.workspace,
+        )
+    return sanitized
+
+
+def restore_session_document(self, data: dict[str, Any]) -> bool:
+    self._session_history = []
+    self._last_response_language = None
+    if hasattr(self, "_chat_history"):
+        del self._chat_history
+    if not data:
         return False
 
     saved_history = data.get("session_history")
@@ -192,24 +312,15 @@ def load_session(self) -> bool:
             and message.get("role") in ("system", "user", "assistant")
             and isinstance(message.get("content"), str)
         ]
-    elif hasattr(self, "_chat_history"):
-        del self._chat_history
     return True
 
 
+def load_session(self) -> bool:
+    return restore_session_document(self, read_session_document(self))
+
+
 def sanitize_for_log(self, value: Any, max_str_len: int = 300) -> Any:
-    if isinstance(value, str):
-        sanitized = _SECRET_RE.sub("[REDACTED]", value)
-        if len(sanitized) > max_str_len:
-            return sanitized[:max_str_len] + "...[TRUNCATED]"
-        return sanitized
-    if isinstance(value, dict):
-        return {k: self._sanitize_for_log(v, max_str_len) for k, v in value.items()}
-    if isinstance(value, list):
-        return [self._sanitize_for_log(item, max_str_len) for item in value]
-    if isinstance(value, set):
-        return [self._sanitize_for_log(item, max_str_len) for item in sorted(value)]
-    return value
+    return redact_value(value, max_str_len=max_str_len)
 
 
 def persist_logs(self, user_goal: str) -> None:
@@ -217,7 +328,6 @@ def persist_logs(self, user_goal: str) -> None:
         return
 
     logs_dir = get_logs_dir(self)
-    logs_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "goal": user_goal,
         "current_agent_role": self._state.current_agent_role,
@@ -250,20 +360,31 @@ def persist_logs(self, user_goal: str) -> None:
             "facts": self._state.web_facts,
             "applied_facts": self._state.applied_facts,
         },
-        "steps": self._sanitize_for_log(self._state.step_logs),
+        "steps": self._state.step_logs,
     }
-    next_index = len(list(logs_dir.glob("run_*.json"))) + 1
-    log_path = logs_dir / f"run_{next_index:03d}.json"
-    log_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    sanitized_payload = self._sanitize_for_log(payload)
+    assert isinstance(sanitized_payload, dict)
+    with exclusive_storage_lock(
+        logs_dir / "run-allocation",
+        boundary=self.executor.workspace,
+    ):
+        indices = []
+        for candidate in logs_dir.glob("run_*.json"):
+            suffix = candidate.stem.removeprefix("run_")
+            if suffix.isdigit():
+                indices.append(int(suffix))
+        next_index = max(indices, default=0) + 1
+        log_path = logs_dir / f"run_{next_index:03d}.json"
+        _write_json_object(
+            log_path,
+            sanitized_payload,
+            boundary=self.executor.workspace,
+        )
 
 
 def save_checkpoint(self, user_goal: str, step: int) -> None:
     session = getattr(self, "current_session", "default")
     state_path = get_state_path(self, session)
-    state_path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = {
         "goal": user_goal,
         "current_agent_role": self._state.current_agent_role,
@@ -310,15 +431,20 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
     _write_json_object(
         state_path,
         _session_document(self, checkpoint=checkpoint),
+        boundary=self.executor.workspace,
     )
     save_active_session(self, session)
 
 
 def load_checkpoint(self) -> tuple[str, int] | None:
     session = getattr(self, "current_session", "default")
-    session_data = _read_json_object(get_state_path(self, session))
+    session_data = _read_json_object(
+        get_state_path(self, session),
+        boundary=self.executor.workspace,
+    )
     if not session_data:
         return None
+    session_data = _validated_session_document(session_data, session)
 
     # Histories are session data, not checkpoint data, and must survive
     # completed tasks as well as interrupted ones.
@@ -393,5 +519,9 @@ def load_checkpoint(self) -> tuple[str, int] | None:
 def clear_checkpoint(self) -> None:
     session = getattr(self, "current_session", "default")
     state_path = get_state_path(self, session)
-    _write_json_object(state_path, _session_document(self, checkpoint=None))
+    _write_json_object(
+        state_path,
+        _session_document(self, checkpoint=None),
+        boundary=self.executor.workspace,
+    )
     save_active_session(self, session)

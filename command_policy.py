@@ -8,7 +8,7 @@ Examples:
     git status       → SAFE
     git diff         → SAFE
     git reset --hard → DANGEROUS
-    docker ps        → SAFE
+    docker ps        → MODERATE (host daemon boundary)
     docker compose up → DANGEROUS for every role
 """
 from __future__ import annotations
@@ -70,13 +70,13 @@ _SUBCOMMAND_RULES: dict[str, dict[str, RiskLevel]] = {
         "set-location": RiskLevel.DANGEROUS,
     },
     "docker": {
-        "ps": RiskLevel.SAFE,
-        "images": RiskLevel.SAFE,
-        "logs": RiskLevel.SAFE,
-        "inspect": RiskLevel.SAFE,
-        "stats": RiskLevel.SAFE,
-        "info": RiskLevel.SAFE,
-        "version": RiskLevel.SAFE,
+        "ps": RiskLevel.MODERATE,
+        "images": RiskLevel.MODERATE,
+        "logs": RiskLevel.MODERATE,
+        "inspect": RiskLevel.MODERATE,
+        "stats": RiskLevel.MODERATE,
+        "info": RiskLevel.MODERATE,
+        "version": RiskLevel.MODERATE,
         "build": RiskLevel.MODERATE,
         "pull": RiskLevel.MODERATE,
         "push": RiskLevel.DANGEROUS,
@@ -195,6 +195,7 @@ VERSION_PROBES: dict[str, frozenset[tuple[str, ...]]] = {
     "ruby": frozenset({("--version",), ("-v",)}),
     "perl": frozenset({("-v",), ("-V",)}),
     "php": frozenset({("--version",), ("-v",)}),
+    "docker": frozenset({("--version",), ("-v",)}),
 }
 
 _ALWAYS_DANGEROUS: frozenset[str] = frozenset({
@@ -493,6 +494,10 @@ def assess_command(command: list[str], role: str = "coder") -> CommandAssessment
     # role-based downgrade: host mounts / host namespaces are host access.
     if executable == "docker" and _docker_operation_breaks_isolation(
         command, subcommand_index, subcommand
+    ):
+        risk = RiskLevel.DANGEROUS
+    if executable == "docker" and _docker_has_daemon_access_override(
+        command, subcommand_index
     ):
         risk = RiskLevel.DANGEROUS
     if executable == "docker" and _docker_has_nested_destructive_verb(command):
@@ -827,6 +832,19 @@ _DOCKER_GLOBAL_OPTIONS_WITH_VALUE: frozenset[str] = frozenset({
     "--tlscacert", "--tlscert", "--tlskey",
 })
 
+_DOCKER_DAEMON_ACCESS_OPTIONS: frozenset[str] = frozenset({
+    "--config",
+    "--context",
+    "-c",
+    "--host",
+    "-H",
+    "--tls",
+    "--tlsverify",
+    "--tlscacert",
+    "--tlscert",
+    "--tlskey",
+})
+
 
 def _docker_subcommand_index(command: list[str]) -> int:
     """Locate a Docker subcommand after supported global options."""
@@ -845,6 +863,22 @@ def _docker_subcommand_index(command: list[str]) -> int:
         else:
             index += 1
     return index
+
+
+def _docker_has_daemon_access_override(
+    command: list[str],
+    subcommand_index: int,
+) -> bool:
+    """Treat alternate Docker daemons/configuration as a host boundary."""
+    for token in command[1:subcommand_index]:
+        flag = token.partition("=")[0]
+        if flag in _DOCKER_DAEMON_ACCESS_OPTIONS:
+            return True
+        if token.startswith("-H") and token != "-H":
+            return True
+        if token.startswith("-c") and token != "-c":
+            return True
+    return False
 
 
 def _docker_run_breaks_isolation(args: list[str]) -> bool:

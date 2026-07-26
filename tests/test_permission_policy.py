@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
+import stat
+import threading
 
 import pytest
 
@@ -125,18 +128,69 @@ def test_append_allow_rule_creates_and_deduplicates(tmp_path):
     assert policy.allow == ("git push", "python *")
 
 
+def test_permission_policy_is_private_and_recovers_previous_generation(
+    tmp_path,
+):
+    append_allow_rule(tmp_path, "git status")
+    append_allow_rule(tmp_path, "python *")
+    path = policy_file_path(tmp_path)
+    path.write_text("{partial", encoding="utf-8")
+
+    policy, note = load_policy(tmp_path)
+
+    assert note == ""
+    assert policy.allow == ("git status", "python *")
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_concurrent_allow_updates_do_not_lose_a_rule(tmp_path, monkeypatch):
+    import permission_policy
+
+    write_barrier = threading.Barrier(2)
+    original_write = getattr(permission_policy, "write_json_object", None)
+
+    def synchronized_write(*args, **kwargs):
+        write_barrier.wait(timeout=5)
+        assert original_write is not None
+        return original_write(*args, **kwargs)
+
+    if original_write is not None:
+        monkeypatch.setattr(
+            permission_policy,
+            "write_json_object",
+            synchronized_write,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(append_allow_rule, tmp_path, pattern)
+            for pattern in ("git status", "python *")
+        ]
+        for future in futures:
+            future.result(timeout=5)
+
+    policy, note = load_policy(tmp_path)
+    assert note == ""
+    assert set(policy.allow) == {"git status", "python *"}
+
+
 # ── Integration with TerminalExecutor.run ────────────────────────────
 
-def test_allow_rule_skips_hitl_for_moderate_command(tmp_path, monkeypatch):
-    write_policy(tmp_path, allow=["python *"])
+def test_allow_rule_skips_hitl_for_moderate_command(
+    tmp_path,
+    monkeypatch,
+    trusted_python_name,
+):
+    write_policy(tmp_path, allow=[f"{trusted_python_name} *"])
     executor = TerminalExecutor(tmp_path)
     executed = stub_execution(monkeypatch)
     forbid_approval(monkeypatch)
 
-    result = executor.run(["python", "script.py"])
+    result = executor.run([trusted_python_name, "script.py"])
 
     assert result.returncode == 0
-    assert executed == [["python", "script.py"]]
+    assert executed == [[trusted_python_name, "script.py"]]
 
 
 def test_allow_rule_covers_command_missing_from_builtin_allowlist(tmp_path, monkeypatch):
@@ -249,11 +303,15 @@ def test_missing_policy_file_keeps_current_behavior(tmp_path, monkeypatch):
     assert result.denied is False
 
 
-@pytest.mark.parametrize("replacement", [{"allow": [], "deny": [], "ask": []}, {"allow": [], "deny": [], "ask": ["python *"]}])
+@pytest.mark.parametrize("force_ask", [False, True])
 def test_policy_change_before_spawn_invalidates_silent_allow(
-    tmp_path, monkeypatch, replacement
+    tmp_path,
+    monkeypatch,
+    trusted_python_name,
+    force_ask,
 ):
-    write_policy(tmp_path, allow=["python *"])
+    pattern = f"{trusted_python_name} *"
+    write_policy(tmp_path, allow=[pattern])
     (tmp_path / "script.py").write_text("print('fixture')\n", encoding="utf-8")
     executor = TerminalExecutor(tmp_path)
     original = executor._execute_validated
@@ -261,15 +319,75 @@ def test_policy_change_before_spawn_invalidates_silent_allow(
     def mutate_policy_then_execute(*args, **kwargs):
         write_policy(
             tmp_path,
-            allow=replacement["allow"],
-            deny=replacement["deny"],
-            ask=replacement["ask"],
+            allow=[],
+            deny=[],
+            ask=[pattern] if force_ask else [],
         )
         return original(*args, **kwargs)
 
     monkeypatch.setattr(executor, "_execute_validated", mutate_policy_then_execute)
     with pytest.raises(HardDenyError, match="context changed"):
-        executor.run(["python", "script.py"])
+        executor.run([trusted_python_name, "script.py"])
+
+
+def test_auto_fallback_policy_tamper_cannot_suppress_per_run_approval(
+    tmp_path,
+    monkeypatch,
+    trusted_python_name,
+):
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
+    monkeypatch.setattr("sandbox.resolve_bubblewrap_path", lambda: None)
+    monkeypatch.setattr("terminal.resolve_bubblewrap_path", lambda: None)
+    pattern = f"{trusted_python_name} *"
+    write_policy(tmp_path)
+    (tmp_path / "script.py").write_text("print('fixture')\n", encoding="utf-8")
+    executor = TerminalExecutor(tmp_path)
+    executor._cgroup_available = True
+    requested = []
+    executions = 0
+
+    def approve(cls, command, reason):
+        requested.append(reason)
+        return True
+
+    def mutate_policy_on_first_execution(
+        command,
+        cwd=None,
+        env_overrides=None,
+        timeout=None,
+        role="coder",
+        *,
+        expected_context,
+        authorization_token,
+    ):
+        nonlocal executions
+        executions += 1
+        if executions == 1:
+            write_policy(tmp_path, allow=[pattern])
+        return TerminalResult(
+            command=command,
+            returncode=0,
+            stdout="",
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        TerminalExecutor,
+        "_request_user_approval",
+        classmethod(approve),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_execute_validated",
+        mutate_policy_on_first_execution,
+    )
+
+    executor.run([trusted_python_name, "script.py"])
+    executor.run([trusted_python_name, "script.py"])
+
+    assert executions == 2
+    assert len(requested) == 2
+    assert all("no Bubblewrap" in reason for reason in requested)
 
 
 def test_dangerous_allow_rule_never_silences_or_persists(tmp_path, monkeypatch):

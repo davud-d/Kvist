@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from rich.console import Console
+from rich.text import Text
 
 from agent_context import (
     build_runtime_prompt,
@@ -15,6 +16,7 @@ from agent_context import (
 )
 from agent_logging import (
     clear_checkpoint,
+    create_session,
     delete_session,
     is_valid_session_name,
     list_sessions,
@@ -22,6 +24,8 @@ from agent_logging import (
     load_checkpoint,
     load_session,
     persist_logs,
+    read_session_document,
+    restore_session_document,
     sanitize_for_log,
     save_active_session,
     save_checkpoint,
@@ -34,6 +38,7 @@ from agent_model import (
     _create_json_completion,
     count_tokens,
     init_tiktoken_encoding,
+    _TOKEN_ENCODING_UNINITIALIZED,
     prefer_smart_model,
     safe_extract_completion_content,
     safe_extract_stream_delta,
@@ -57,6 +62,7 @@ from agent_runtime import (
     feedback_error_for_model,
     feedback_to_detail,
     feedback_to_line,
+    finalize_run,
     is_repeat_blocked,
     normalize_error_for_model,
     plan_progress,
@@ -96,11 +102,21 @@ from agent_web import (
 )
 from executor import SafeExecutor
 from performance_logger import PerfLogger
+from redaction import redact_text, redact_value
 from role_router import route_role_with_llm, route_role
 from system_context import current_os_context, current_shell_context, current_time_context
 from ui import AgentUI
 from language_utils import detect_request_language
 from language_policy import resolve_response_language, response_language_name
+
+
+class ChatRequestCancelled(Exception):
+    """The user interrupted a chat request.
+
+    Raised instead of letting ``KeyboardInterrupt`` escape the chat path, so
+    the interrupt cancels one request rather than the whole REPL session.
+    """
+
 
 class LocalAgent:
     def __init__(
@@ -117,7 +133,10 @@ class LocalAgent:
         self.console = Console()
         self._perf_logger = PerfLogger(executor.workspace)
         self._ui = AgentUI(console=self.console, verbose=self.config.verbose, perf_logger=self._perf_logger)
-        self._encoding = self._init_tiktoken_encoding()
+        # Loading tiktoken's rank table costs tens of MiB and is unnecessary
+        # for session recovery and chat-only runs. count_tokens initializes it
+        # on the first context-budget calculation.
+        self._encoding = _TOKEN_ENCODING_UNINITIALIZED
         self._current_step = 0
         # Last resolved user-facing language for this session; used as the
         # fallback when a new request has no detectable language.
@@ -147,7 +166,9 @@ class LocalAgent:
         }
         if outputs:
             entry["outputs"] = outputs
-        self._session_history.append(entry)
+        safe_entry = redact_value(entry)
+        assert isinstance(safe_entry, dict)
+        self._session_history.append(safe_entry)
         # Keep last 10 entries
         if len(self._session_history) > 10:
             self._session_history = self._session_history[-10:]
@@ -157,14 +178,24 @@ class LocalAgent:
         """Reset to a fresh session — saves current, clears state, chat history, and checkpoint."""
         if name is not None and not is_valid_session_name(name):
             raise ValueError(f"Invalid session name: {name!r}")
-        if name is not None and name != self.current_session:
+        if name is not None:
+            if name == self.current_session:
+                raise ValueError(f"Session {name!r} already exists")
             self.save_session()
+            if not self._create_session(name):
+                raise ValueError(f"Session {name!r} already exists")
+            self._save_active_session(name)
             self.current_session = name
-        self._clear_checkpoint()
+            self._reset_run_state()
+            self._restore_session_document({})
+            return
+
         self._reset_run_state()
         self._session_history = []
+        self._last_response_language = None
         if hasattr(self, "_chat_history"):
             del self._chat_history
+        self._clear_checkpoint()
         self.save_session()
 
     def _save_session_marker(self) -> None:
@@ -177,15 +208,16 @@ class LocalAgent:
             raise ValueError(f"Invalid session name: {name!r}")
         if name == self.current_session:
             return
+        target_document = self._read_session_document(name)
         self.save_session()
+        if not target_document and self._create_session(name):
+            target_document = {}
+        elif not target_document:
+            target_document = self._read_session_document(name)
+        self._save_active_session(name)
         self.current_session = name
         self._reset_run_state()
-        if not self._load_session():
-            self._session_history = []
-            if hasattr(self, "_chat_history"):
-                del self._chat_history
-            self.save_session()
-        self._save_active_session()
+        self._restore_session_document(target_document)
 
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
         self._reset_run_state()
@@ -216,7 +248,11 @@ class LocalAgent:
 
         # ── Chat mode: lightweight path, no JSON protocol ────────
         if self._state.current_agent_role == "chat":
-            result = self._run_chat(user_goal)
+            try:
+                result = self._run_chat(user_goal)
+            except ChatRequestCancelled:
+                # A cancelled turn produced no answer, so it is not history.
+                return self._report_cancelled_turn()
             self._add_to_session_history(user_goal, "chat", result)
             return result
 
@@ -259,6 +295,7 @@ class LocalAgent:
 
     _reset_run_state = reset_run_state
     _run_loop = run_loop
+    _finalize_run = finalize_run
 
     _create_plan = create_plan
     _fallback_plan = fallback_plan
@@ -329,8 +366,11 @@ class LocalAgent:
     _save_checkpoint = save_checkpoint
     _load_checkpoint = load_checkpoint
     _clear_checkpoint = clear_checkpoint
+    _create_session = create_session
     save_session = save_session
     _load_session = load_session
+    _read_session_document = read_session_document
+    _restore_session_document = restore_session_document
     _save_active_session = save_active_session
     _list_sessions = list_sessions
     _delete_session = delete_session
@@ -395,6 +435,9 @@ class LocalAgent:
             f"If the user asks which model you are, answer with this.)\n\n"
         )
 
+        # Snapshot before the turn mutates history: a cancelled or failed turn
+        # must not leave a user message that no answer ever replies to.
+        history_before = list(self._chat_history)
         self._chat_history.append(
             {"role": "user", "content": language_note + model_note + session_context + user_goal}
         )
@@ -403,7 +446,7 @@ class LocalAgent:
         self._chat_history = trim_history(self._chat_history, max_recent=10)
 
         content = ""
-        last_error: Exception | None = None
+        last_error: str | None = None
 
         # Build model list: fast model first, then fallback candidates
         models_to_try: list[str] = [self.config.fast_model]
@@ -424,9 +467,11 @@ class LocalAgent:
                 if self.config.stream:
                     content = self._stream_chat_response(self._chat_history, model=model)
                 else:
+                    safe_history = redact_value(self._chat_history)
+                    assert isinstance(safe_history, list)
                     response = self.client.chat.completions.create(
                         model=model,
-                        messages=self._chat_history,
+                        messages=safe_history,
                     )
                     content = safe_extract_completion_content(
                         response, self.config.provider, model
@@ -439,36 +484,83 @@ class LocalAgent:
                     return content
 
                 # Empty content (but no exception) — try next model
-                last_error = RuntimeError("Model returned empty content")
+                last_error = "Model returned empty content"
                 continue
 
+            except (ChatRequestCancelled, KeyboardInterrupt) as error:
+                # Ordered before ``Exception`` so a cancelled turn is never
+                # retried against a fallback model.
+                self._chat_history = history_before
+                raise ChatRequestCancelled from error
+
             except Exception as error:
-                last_error = error
+                last_error = redact_text(
+                    str(error).strip() or type(error).__name__
+                )
                 if attempt < len(models_to_try) - 1:
                     self._ui.debug_print(
-                        f"Chat attempt {attempt + 1} failed ({error}), trying fallback..."
+                        f"Chat attempt {attempt + 1} failed ({last_error}), "
+                        "trying fallback..."
                     )
                 continue
 
         # All models exhausted — show friendly error, don't crash REPL
+        self._chat_history = history_before
         error_detail = f": {last_error}" if last_error else ""
         fallback_msg = (
             f"The model did not return a response{error_detail}. "
             "Try again, or use /provider to switch to a different provider."
         )
-        self.console.print(f"[yellow]{fallback_msg}[/yellow]")
+        self.console.print(Text(fallback_msg, style="yellow"))
         return fallback_msg
+
+    def _report_cancelled_turn(self) -> str:
+        message = (
+            "Запрос отменён."
+            if self._state.response_language == "ru"
+            else "Request cancelled."
+        )
+        self.console.print(Text(message, style="yellow"))
+        return message
 
     def _stream_chat_response(self, messages: list, model: str | None = None) -> str:
         """Stream chat response as markdown directly to console."""
         stream_model = model or self.config.fast_model
-        stream = self.client.chat.completions.create(
-            model=stream_model,
-            messages=messages,
-            stream=True,
-        )
+        safe_messages = redact_value(messages)
+        assert isinstance(safe_messages, list)
+        try:
+            stream = self.client.chat.completions.create(
+                model=stream_model,
+                messages=safe_messages,
+                stream=True,
+            )
+        except KeyboardInterrupt as error:
+            raise ChatRequestCancelled from error
+        try:
+            return self._consume_chat_stream(stream)
+        except KeyboardInterrupt as error:
+            raise ChatRequestCancelled from error
+        finally:
+            # Applies to cancellation, provider failure, and success alike:
+            # an abandoned HTTP stream would otherwise hold its connection.
+            self._close_chat_stream(stream)
+
+    def _close_chat_stream(self, stream: Any) -> None:
+        close = getattr(stream, "close", None)
+        if close is None:
+            return
+        try:
+            close()
+        except Exception as error:
+            # Already unwinding; a close failure must not replace the reason
+            # we are here, but it is reported rather than swallowed.
+            self._ui.debug_print(
+                f"Chat stream close failed: {redact_text(str(error))}"
+            )
+
+    def _consume_chat_stream(self, stream: Any) -> str:
         chunks: list[str] = []
-        
+
         import time
         last_update = time.monotonic()
         

@@ -13,6 +13,7 @@ from prompt_toolkit.output.base import Size
 from prompt_toolkit.shortcuts import CompleteStyle
 
 import banner
+import interactive_screen as interactive_screen_module
 from agent_state import AgentConfig
 from interactive_screen import InteractiveScreen
 from slash_commands import (
@@ -52,13 +53,19 @@ def _rendered_lines(runtime) -> list[str]:
     rendered = app.renderer.last_rendered_screen
     if rendered is None:
         return [""] * runtime.output.rows
-    return [
-        "".join(
-            rendered.data_buffer[row][column].char
-            for column in range(runtime.output.columns)
-        ).rstrip()
-        for row in range(runtime.output.rows)
-    ]
+    lines: list[str] = []
+    for row in range(runtime.output.rows):
+        # Screen buffers are nested defaultdicts. Indexing missing cells from
+        # this test thread mutates the renderer's live structures and races
+        # prompt_toolkit's UI thread. Read only existing cells instead.
+        row_data = rendered.data_buffer.get(row, {})
+        lines.append(
+            "".join(
+                cell.char if (cell := row_data.get(column)) is not None else " "
+                for column in range(runtime.output.columns)
+            ).rstrip()
+        )
+    return lines
 
 
 def _rendered_text(runtime) -> str:
@@ -229,12 +236,123 @@ def test_stream_slot_commits_once_and_restores_status(screen_runtime):
     screen_runtime.screen.set_stream("FINAL-STREAM")
     screen_runtime.screen.commit_stream()
     screen_runtime.screen.commit_stream()
-    _wait_until(lambda: "FINAL-STREAM" in _rendered_text(screen_runtime))
+    _wait_until(
+        lambda: (
+            "FINAL-STREAM" in _rendered_text(screen_runtime)
+            and "STATUS-ONLY" in _rendered_text(screen_runtime)
+        )
+    )
     text = _rendered_text(screen_runtime)
 
     assert text.count("FINAL-STREAM") == 1
     assert "PARTIAL-STREAM" not in text
     assert "STATUS-ONLY" in text
+
+
+def test_dynamic_control_cursor_uses_same_snapshot_as_rendered_content(
+    screen_runtime,
+):
+    screen = screen_runtime.screen
+    screen.suspend()
+
+    screen._get_transcript()
+    transcript_cursor = screen._transcript_cursor()
+    screen._append_formatted([("", "new transcript line\n")])
+    assert screen._transcript_cursor() == transcript_cursor
+    screen._get_transcript()
+    assert screen._transcript_cursor().y == 1
+
+    screen.set_status("one line")
+    screen._get_transient()
+    transient_cursor = screen._transient_cursor()
+    screen.set_status("first\nsecond")
+    assert screen._transient_cursor() == transient_cursor
+    screen._get_transient()
+    assert screen._transient_cursor().y == 1
+
+
+def test_split_ansi_does_not_corrupt_plain_cursor_state(screen_runtime):
+    screen = screen_runtime.screen
+    screen.suspend()
+
+    screen._append_output("\x1b[", "stdout")
+    screen._append_output("31mcolored\x1b[0m\n", "stdout")
+
+    assert screen._transcript_plain == "colored\n"
+    assert screen._last_transcript_line_locked() == 1
+    fragments = screen._get_transcript()
+    assert "".join(fragment[1] for fragment in fragments) == "colored\n"
+    assert fragments[0][0] == "ansired"
+
+
+def test_transcript_memory_and_entry_count_are_bounded(
+    screen_runtime,
+    monkeypatch,
+):
+    screen = screen_runtime.screen
+    screen.suspend()
+    monkeypatch.setattr(interactive_screen_module, "_MAX_TRANSCRIPT_CHARS", 240)
+    monkeypatch.setattr(interactive_screen_module, "_TRANSCRIPT_RETAIN_CHARS", 180)
+    monkeypatch.setattr(interactive_screen_module, "_MAX_TRANSCRIPT_ENTRIES", 12)
+
+    for index in range(40):
+        screen._append_formatted([("", f"bounded line {index:03d}\n")])
+
+    assert len(screen._transcript_plain) <= 240
+    assert len(screen._transcript_entries) <= 12
+    assert screen._transcript_plain.startswith(
+        interactive_screen_module._TRANSCRIPT_TRUNCATION_MARKER
+    )
+    assert "bounded line 039" in screen._transcript_plain
+    assert "bounded line 000" not in screen._transcript_plain
+
+
+def test_split_osc_is_hidden_without_delaying_following_text(screen_runtime):
+    screen = screen_runtime.screen
+    screen.suspend()
+
+    screen._append_output("\x1b]0;hidden title", "stdout")
+    screen._append_output("\x1b", "stdout")
+    screen._append_output("\\visible text\n", "stdout")
+
+    assert screen._transcript_plain == "visible text\n"
+    rendered = "".join(fragment[1] for fragment in screen._get_transcript())
+    assert rendered == "visible text\n"
+
+
+def test_invisible_ansi_storage_and_small_write_latency_are_bounded(
+    screen_runtime,
+    monkeypatch,
+):
+    screen = screen_runtime.screen
+    screen.suspend()
+    monkeypatch.setattr(interactive_screen_module, "_MAX_TRANSCRIPT_CHARS", 240)
+    monkeypatch.setattr(interactive_screen_module, "_TRANSCRIPT_RETAIN_CHARS", 180)
+
+    invisible = "\x1b]0;" + ("x" * 40) + "\x07"
+    for _ in range(40):
+        screen._append_output(invisible, "stdout")
+
+    assert screen._transcript_storage_chars <= 240
+    assert len(screen._transcript_plain) <= 240
+    assert "x" * 40 not in screen._transcript_plain
+
+    monkeypatch.setattr(interactive_screen_module, "_MAX_TRANSCRIPT_CHARS", 500_000)
+    monkeypatch.setattr(
+        interactive_screen_module,
+        "_TRANSCRIPT_RETAIN_CHARS",
+        400_000,
+    )
+    started = time.monotonic()
+    for index in range(5_000):
+        screen._append_output(
+            f"small write {index:05d} " + ("x" * 88) + "\n",
+            "stdout",
+        )
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 3.0
+    assert screen._transcript_storage_chars <= 500_000
 
 
 def test_suspend_resume_restores_streams_and_prompt_session(screen_runtime):
@@ -284,3 +402,25 @@ def test_resize_hides_banner_atomically_and_restores_it(
     restored = _rendered_lines(screen_runtime)
     assert restored[0].startswith("╭")
     assert restored[16].startswith("╰")
+
+
+def test_page_keys_scroll_transcript_without_recalling_input_history(
+    screen_runtime,
+):
+    screen_runtime.screen._append_output(
+        "".join(f"scroll line {index:03d}\n" for index in range(100)),
+        "stdout",
+    )
+    _wait_until(lambda: "scroll line 099" in _rendered_text(screen_runtime))
+
+    screen_runtime.input.send_text("\x1b[5~")
+    _wait_until(lambda: not screen_runtime.screen._follow_tail)
+    _wait_until(lambda: "scroll line 099" not in _rendered_text(screen_runtime))
+
+    assert screen_runtime.session.default_buffer.text == ""
+
+    screen_runtime.input.send_text("\x1b[6~")
+    _wait_until(lambda: screen_runtime.screen._follow_tail)
+    _wait_until(lambda: "scroll line 099" in _rendered_text(screen_runtime))
+
+    assert screen_runtime.session.default_buffer.text == ""

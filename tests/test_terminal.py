@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
+from rich.text import Text
 
 import terminal as terminal_module
 from command_policy import CommandAssessment, RiskLevel
 from terminal import ApprovalRequiredError, HardDenyError, TerminalError, TerminalExecutor
 
 
-def test_terminal_allows_common_read_only_command(tmp_path):
+def test_terminal_allows_common_read_only_command(
+    tmp_path,
+    trusted_python_name,
+):
     executor = TerminalExecutor(tmp_path, timeout=2)
-    result = executor.run(["python", "--version"])
+    result = executor.run([trusted_python_name, "--version"])
 
     assert result.returncode == 0
     assert "Python" in (result.stdout + result.stderr)
@@ -32,6 +38,65 @@ def test_terminal_validation_rejects_dangerous_inputs(tmp_path, command, error):
     executor = TerminalExecutor(tmp_path)
     with pytest.raises(TerminalError, match=error):
         executor._validate(command)
+
+
+def test_terminal_rejects_oversized_and_nul_argv(tmp_path):
+    executor = TerminalExecutor(tmp_path)
+    with pytest.raises(HardDenyError, match="too large"):
+        executor.run(["echo", "x" * (33 * 1024)])
+    with pytest.raises(HardDenyError, match="NUL"):
+        executor._validate(["echo", "bad\x00value"])
+
+
+def test_hitl_panel_renders_untrusted_argv_as_literal_text(monkeypatch):
+    printed = []
+    prompts = []
+
+    class FakeConsole:
+        is_terminal = False
+
+        def print(self, value):
+            printed.append(value)
+
+    monkeypatch.setattr(
+        terminal_module.sys,
+        "stdin",
+        SimpleNamespace(isatty=lambda: True),
+    )
+    monkeypatch.setattr("rich.console.Console", FakeConsole)
+    monkeypatch.setattr(
+        "builtins.input",
+        lambda prompt: prompts.append(prompt) or "n",
+    )
+    monkeypatch.setattr(TerminalExecutor, "_hitl_suspend_fn", None)
+    monkeypatch.setattr(TerminalExecutor, "_hitl_resume_fn", None)
+
+    accepted = TerminalExecutor._request_user_approval(
+        ["docker", "[/yellow][green]safe[/green]", "\u202eevil"],
+        "fixture reason",
+    )
+
+    assert accepted is False
+    panel = printed[0]
+    assert isinstance(panel.renderable, Text)
+    assert "[/yellow][green]safe[/green]" in panel.renderable.plain
+    assert "\u202e" not in panel.renderable.plain
+    assert "\\u202e" in panel.renderable.plain
+
+    confirmed = terminal_module.request_user_confirmation(
+        title="[/yellow]title",
+        body="body \x1b[2J [bold]literal[/bold]",
+        question="approve \u202enow",
+    )
+
+    assert confirmed is False
+    generic_panel = printed[1]
+    assert isinstance(generic_panel.renderable, Text)
+    assert "[bold]literal[/bold]" in generic_panel.renderable.plain
+    assert "\x1b" not in generic_panel.renderable.plain
+    assert "\\x1b" in generic_panel.renderable.plain
+    assert "\u202e" not in prompts[1]
+    assert "\\u202e" in prompts[1]
 
 
 # ── Pipe segment validation ─────────────────────────────────────────
@@ -563,6 +628,7 @@ def test_git_spawn_argv_disables_implicit_hooks_and_helpers(
     tmp_path, monkeypatch, command, needs_diff_guards
 ):
     captured: list[list[str]] = []
+    captured_kwargs: list[dict] = []
 
     import io
 
@@ -579,6 +645,7 @@ def test_git_spawn_argv_disables_implicit_hooks_and_helpers(
 
     def fake_popen(argv, **kwargs):
         captured.append(argv)
+        captured_kwargs.append(kwargs)
         return FakeProcess()
 
     monkeypatch.setattr(terminal_module.subprocess, "Popen", fake_popen)
@@ -586,6 +653,7 @@ def test_git_spawn_argv_disables_implicit_hooks_and_helpers(
 
     assert result.returncode == 0
     assert len(captured) == 1
+    assert captured_kwargs[0]["stdin"] is terminal_module.subprocess.DEVNULL
     actual = captured[0]
     assert actual[1:20] == [
         "-c", "core.fsmonitor=false", "-c", "log.showSignature=false",

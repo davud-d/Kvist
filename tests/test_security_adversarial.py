@@ -439,12 +439,15 @@ def test_final_execution_entry_requires_an_authorized_context(tmp_path):
     assert not hasattr(executor, "_execute_authorized")
 
 
-def test_approved_unchanged_script_executes_and_is_hashed(tmp_path):
+def test_approved_unchanged_script_executes_and_is_hashed(
+    tmp_path,
+    trusted_python_name,
+):
     script = tmp_path / "safe.py"
     script.write_text("from pathlib import Path\nPath('sentinel').write_text('ok')\n", encoding="utf-8")
     executor = _executor_with_approval(tmp_path)
 
-    result = executor.run(["python", "safe.py"])
+    result = executor.run([trusted_python_name, "safe.py"])
 
     assert result.returncode == 0
     assert (tmp_path / "sentinel").read_text(encoding="utf-8") == "ok"
@@ -539,7 +542,11 @@ def test_runtime_context_change_during_confirmation_invalidates_approval(
         executor.run(["python", "safe.py"])
 
 
-def test_child_environment_does_not_inherit_parent_secrets(tmp_path, monkeypatch):
+def test_child_environment_does_not_inherit_parent_secrets(
+    tmp_path,
+    monkeypatch,
+    trusted_python_name,
+):
     secret_names = [
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
@@ -562,7 +569,7 @@ def test_child_environment_does_not_inherit_parent_secrets(tmp_path, monkeypatch
     )
     executor = _executor_with_approval(tmp_path)
 
-    result = executor.run(["python", "inspect_env.py"])
+    result = executor.run([trusted_python_name, "inspect_env.py"])
     observed = json.loads(result.stdout)
 
     assert observed["secrets"] == {name: None for name in secret_names}
@@ -578,6 +585,61 @@ def test_environment_overrides_cannot_reintroduce_secrets(tmp_path):
     executor = TerminalExecutor(tmp_path)
     with pytest.raises(HardDenyError, match="secret-bearing"):
         executor.run(["echo", "safe"], env_overrides={"GITHUB_TOKEN": "secret"})
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "MY_APIKEY",
+        "PROJECT_AUTH",
+        "SESSION_ID",
+        "HTTP_COOKIE",
+        "DATABASE_URL",
+        "SENTRY_DSN",
+        "SERVICE_CONNECTION_STRING",
+    ],
+)
+def test_explicit_child_env_allow_rejects_additional_secret_names(
+    tmp_path,
+    monkeypatch,
+    name,
+):
+    monkeypatch.setenv("AGENT_CHILD_ENV_ALLOW", name)
+    monkeypatch.setenv(name, "synthetic-sensitive-value")
+    executor = TerminalExecutor(tmp_path)
+
+    assert name not in executor._build_env(None)
+    with pytest.raises(
+        HardDenyError,
+        match="secret-bearing|execution-controlling",
+    ):
+        executor._build_env({name: "synthetic-sensitive-value"})
+
+
+def test_allowed_child_env_cannot_launder_credential_value(
+    tmp_path,
+    monkeypatch,
+):
+    synthetic = "sk-proj-" + "v" * 24
+    monkeypatch.setenv("AGENT_CHILD_ENV_ALLOW", "PROJECT_MODE")
+    monkeypatch.setenv("PROJECT_MODE", synthetic)
+    executor = TerminalExecutor(tmp_path)
+
+    assert "PROJECT_MODE" not in executor._build_env(None)
+    with pytest.raises(HardDenyError, match="credential-bearing data"):
+        executor._build_env({"PROJECT_MODE": synthetic})
+
+
+def test_credential_bearing_argv_is_hard_denied(tmp_path):
+    synthetic = "sk-proj-" + "a" * 24
+    executor = TerminalExecutor(tmp_path)
+
+    with pytest.raises(HardDenyError, match="credential-bearing"):
+        executor._validate(["echo", f"api_key={synthetic}"])
+    with pytest.raises(HardDenyError, match="credential-bearing"):
+        executor._validate(
+            ["echo", "--api-key", "arbitrary-credential-123456"]
+        )
 
 
 def test_child_home_is_private_empty_and_bound_across_approval(tmp_path, monkeypatch):
@@ -634,6 +696,22 @@ def test_explicit_custom_environment_allow_mechanism(tmp_path, monkeypatch):
         "MAKEFILES",
         "LESSOPEN",
         "CUSTOM_CREDENTIALFILE",
+        "KUBECONFIG",
+        "NETRC",
+        "PGPASSFILE",
+        "MYSQL_PWD",
+        "CLOUDSDK_CONFIG",
+        "GNUPGHOME",
+        "PIP_CONFIG_FILE",
+        "XDG_CONFIG_HOME",
+        "SSL_CERT_FILE",
+        "REQUESTS_CA_BUNDLE",
+        "HTTPS_PROXY",
+        "JAVA_HOME",
+        "QT_PLUGIN_PATH",
+        "PATHEXT",
+        "USERPROFILE",
+        "TEMP",
     ],
 )
 def test_explicit_env_allow_cannot_enable_loader_or_secret_controls(tmp_path, monkeypatch, name):
@@ -686,6 +764,196 @@ def test_sensitive_argument_symlink_is_hard_denied_without_prompt_or_spawn(tmp_p
     with pytest.raises(HardDenyError, match="secret"):
         executor.run(["cat", "alias"])
     assert approvals == []
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["cat", "outside-link"],
+        ["head", "outside-link"],
+        ["grep", "fixture", "outside-link"],
+        ["awk", "{print}", "outside-link"],
+        ["sed", "-n", "1p", "outside-link"],
+        ["file", "outside-link"],
+    ],
+)
+def test_relative_input_symlink_cannot_escape_workspace(
+    tmp_path,
+    tmp_path_factory,
+    command,
+    monkeypatch,
+):
+    outside = tmp_path_factory.mktemp("outside-readable-input")
+    marker = outside / "public.txt"
+    marker.write_text("non-secret boundary fixture\n", encoding="utf-8")
+    (tmp_path / "outside-link").symlink_to(marker)
+    approvals = []
+    executor = TerminalExecutor(tmp_path)
+    monkeypatch.setattr(
+        TerminalExecutor,
+        "_request_user_approval",
+        classmethod(
+            lambda cls, requested, reason: (
+                approvals.append((requested, reason)) or True
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        terminal_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("subprocess reached")),
+    )
+
+    with pytest.raises(HardDenyError, match="outside the workspace"):
+        executor.run(command)
+
+    assert approvals == []
+
+
+def test_relative_directory_symlink_cannot_expand_find_outside_workspace(
+    tmp_path,
+    tmp_path_factory,
+):
+    outside = tmp_path_factory.mktemp("outside-find-root")
+    (outside / "public.txt").write_text("fixture\n", encoding="utf-8")
+    (tmp_path / "outside-dir").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(HardDenyError, match="outside the workspace"):
+        TerminalExecutor(tmp_path)._validate(
+            ["find", "outside-dir", "-maxdepth", "1", "-type", "f"]
+        )
+
+
+def test_workspace_internal_hardlink_pair_stays_usable(tmp_path):
+    # Every name of the inode is inside the workspace, so nothing external can
+    # be imported through the alias and the argument must remain executable.
+    source = tmp_path / "data.txt"
+    source.write_text("boundary fixture\n", encoding="utf-8")
+    os.link(source, tmp_path / "alias.txt")
+
+    TerminalExecutor(tmp_path)._validate(["cat", "alias.txt"])
+
+
+def test_workspace_internal_hardlink_pair_passes_executable_containment(tmp_path):
+    script = tmp_path / "runner"
+    script.write_text("#!/bin/sh\necho inside\n", encoding="utf-8")
+    script.chmod(0o755)
+    alias = tmp_path / "runner-alias"
+    os.link(script, alias)
+
+    TerminalExecutor(tmp_path)._check_workspace_regular_file_hardlinks(
+        alias,
+        "workspace executable",
+    )
+
+
+def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "data.txt"
+    source.write_text("boundary fixture\n", encoding="utf-8")
+    os.link(source, tmp_path / "alias.txt")
+    unreadable = tmp_path / "temporarily-unreadable"
+    unreadable.mkdir()
+    original_iterdir = Path.iterdir
+
+    def deny_unreadable(path):
+        if path == unreadable:
+            raise PermissionError("fault-injected unreadable directory")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", deny_unreadable)
+
+    with pytest.raises(HardDenyError, match="hard links"):
+        TerminalExecutor(tmp_path)._validate(["cat", "alias.txt"])
+
+
+def test_unresolvable_symlink_argument_fails_closed(tmp_path):
+    (tmp_path / "loop-a").symlink_to("loop-b")
+    (tmp_path / "loop-b").symlink_to("loop-a")
+
+    with pytest.raises(HardDenyError, match="cannot resolve|symlink"):
+        TerminalExecutor(tmp_path)._validate(["cat", "loop-a"])
+
+
+def test_unresolvable_home_argument_fails_closed(tmp_path):
+    with pytest.raises(HardDenyError, match="cannot resolve command argument"):
+        TerminalExecutor(tmp_path)._validate(
+            ["cat", "~kvist-user-that-does-not-exist/fixture"]
+        )
+
+
+def test_input_symlink_resolving_inside_workspace_remains_usable(tmp_path):
+    (tmp_path / "real.txt").write_text("fixture\n", encoding="utf-8")
+    (tmp_path / "inside-link").symlink_to("real.txt")
+
+    TerminalExecutor(tmp_path)._validate(["cat", "inside-link"])
+
+
+def test_relative_input_hardlink_cannot_alias_external_inode(
+    tmp_path,
+    tmp_path_factory,
+    monkeypatch,
+):
+    outside = tmp_path_factory.mktemp("outside-hardlink-input")
+    marker = outside / "public.txt"
+    marker.write_text("boundary fixture\n", encoding="utf-8")
+    os.link(marker, tmp_path / "alias.txt")
+    approvals = []
+    executor = TerminalExecutor(tmp_path)
+    monkeypatch.setattr(
+        TerminalExecutor,
+        "_request_user_approval",
+        classmethod(
+            lambda cls, requested, reason: (
+                approvals.append((requested, reason)) or True
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        terminal_module.subprocess,
+        "Popen",
+        lambda *args, **kwargs: (
+            _ for _ in ()
+        ).throw(AssertionError("subprocess reached")),
+    )
+
+    with pytest.raises(HardDenyError, match="hard links"):
+        executor.run(["cat", "alias.txt"])
+
+    assert approvals == []
+
+
+def test_workspace_executable_hardlink_is_rejected(
+    tmp_path,
+    tmp_path_factory,
+    monkeypatch,
+):
+    outside = tmp_path_factory.mktemp("outside-hardlink-executable")
+    executable = outside / "runner"
+    executable.write_text("#!/bin/sh\necho outside\n", encoding="utf-8")
+    executable.chmod(0o755)
+    os.link(executable, tmp_path / "runner")
+    monkeypatch.setattr(
+        TerminalExecutor,
+        "_request_user_approval",
+        classmethod(lambda cls, requested, reason: True),
+    )
+
+    with pytest.raises(HardDenyError, match="hard links"):
+        TerminalExecutor(tmp_path).run(["./runner"])
+
+
+def test_wc_indirect_file_list_is_hard_denied(tmp_path):
+    (tmp_path / "paths.list").write_bytes(b"/outside/public.txt\0")
+
+    with pytest.raises(HardDenyError, match="indirect file-list"):
+        TerminalExecutor(tmp_path)._validate(
+            ["wc", "--files0-from=paths.list"]
+        )
 
 
 def test_sensitive_cwd_is_hard_denied_without_prompt_or_spawn(tmp_path, monkeypatch):

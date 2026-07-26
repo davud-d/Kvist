@@ -83,14 +83,25 @@ def _resolve_symlink_chain(entry: Path) -> tuple[Path | None, bool]:
     for _ in range(_MAX_SYMLINK_DEPTH):
         try:
             info = current.lstat()
-        except OSError:
+        except FileNotFoundError:
             return current, True
+        except OSError as error:
+            raise UnsafeSecretPathError(
+                "Cannot build a complete secret mask because a protected "
+                "symlink target cannot be inspected"
+            ) from error
         if not stat.S_ISLNK(info.st_mode):
             return current, False
         if current in visited:
             return None, False
         visited.add(current)
-        target_text = os.readlink(current)
+        try:
+            target_text = os.readlink(current)
+        except OSError as error:
+            raise UnsafeSecretPathError(
+                "Cannot build a complete secret mask because a protected "
+                "symlink cannot be read"
+            ) from error
         target = Path(target_text)
         current = target if target.is_absolute() else (current.parent / target)
         current = Path(os.path.normpath(current))
@@ -131,25 +142,52 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
     ``UnsafeSecretPathError``: the caller must fail closed rather than run
     with an incomplete mask.
     """
-    workspace = workspace.resolve()
+    try:
+        workspace = workspace.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise UnsafeSecretPathError(
+            "Cannot build a complete secret mask because the workspace "
+            "cannot be resolved"
+        ) from error
     secret_files: list[Path] = []
     secret_dirs: list[Path] = []
     secret_inodes: set[tuple[int, int]] = set()
     linked_paths: dict[tuple[int, int], list[Path]] = {}
+    link_counts: dict[tuple[int, int], int] = {}
     visited_dir_inodes: set[tuple[int, int]] = set()
     stack: list[tuple[Path, bool]] = [(workspace, False)]
     while stack:
         current, in_secret = stack.pop()
         try:
+            current_real = current.resolve(strict=True)
+            current_info = current.lstat()
+            if (
+                current_real != current
+                or not _is_relative_to(current_real, workspace)
+                or not stat.S_ISDIR(current_info.st_mode)
+                or stat.S_ISLNK(current_info.st_mode)
+            ):
+                raise UnsafeSecretPathError(
+                    "Cannot build a complete secret mask because a scanned "
+                    "directory changed identity or escaped the workspace"
+                )
             entries = list(current.iterdir())
-        except OSError:
-            continue
+        except UnsafeSecretPathError:
+            raise
+        except (OSError, RuntimeError) as error:
+            raise UnsafeSecretPathError(
+                "Cannot build a complete secret mask because a workspace "
+                "directory cannot be scanned"
+            ) from error
         for entry in entries:
             name = entry.name
             try:
                 info = entry.lstat()
-            except OSError:
-                continue
+            except OSError as error:
+                raise UnsafeSecretPathError(
+                    "Cannot build a complete secret mask because a workspace "
+                    "entry cannot be inspected"
+                ) from error
             if stat.S_ISLNK(info.st_mode):
                 lexically_secret = in_secret or is_secret_basename(name) or is_secret_dir_name(name)
                 if not lexically_secret:
@@ -166,12 +204,15 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
                     )
                 if dangling:
                     # Nothing exists to leak yet; if it is created later the
-                    # mask digest changes and re-validation catches it.
+                    # mask digest changes and final re-validation catches it.
                     continue
                 try:
                     final_real = final.resolve(strict=True)
-                except OSError:
-                    continue
+                except (OSError, RuntimeError) as error:
+                    raise UnsafeSecretPathError(
+                        "Cannot build a complete secret mask because a "
+                        "protected symlink target cannot be resolved"
+                    ) from error
                 if not _is_relative_to(final_real, workspace):
                     # Nothing outside the workspace is bound into the
                     # sandbox, so the target is already inaccessible; do not
@@ -179,8 +220,11 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
                     continue
                 try:
                     target_info = final_real.stat()
-                except OSError:
-                    continue
+                except OSError as error:
+                    raise UnsafeSecretPathError(
+                        "Cannot build a complete secret mask because a "
+                        "protected symlink target cannot be inspected"
+                    ) from error
                 key = (target_info.st_dev, target_info.st_ino)
                 if stat.S_ISDIR(target_info.st_mode):
                     if key in visited_dir_inodes:
@@ -214,9 +258,18 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
                     secret_files.append(entry)
             if info.st_nlink > 1:
                 linked_paths.setdefault(key, []).append(entry)
+                link_counts[key] = max(link_counts.get(key, 0), info.st_nlink)
 
     masked = {p.resolve() for p in secret_files}
-    for key in secret_inodes:
+    protected_inodes = set(secret_inodes)
+    for key, paths in linked_paths.items():
+        # A regular inode reporting more links than were found during the
+        # complete workspace walk has at least one alias outside the mounted
+        # workspace (or in masked internal state). Binding any visible alias
+        # would otherwise import out-of-workspace bytes into Bubblewrap.
+        if link_counts[key] > len(paths):
+            protected_inodes.add(key)
+    for key in protected_inodes:
         for path in linked_paths.get(key, ()):
             if path.resolve() not in masked:
                 masked.add(path.resolve())
@@ -225,6 +278,52 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
     secret_files.sort()
     secret_dirs.sort()
     return secret_files, secret_dirs
+
+
+def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
+    """Count workspace names that share one ``(st_dev, st_ino)`` regular inode.
+
+    A caller compares the result with ``st_nlink`` to prove that every name of
+    a multiply-linked file lives inside the workspace.  ``.kvist`` is not
+    descended into, exactly as the mask walk does, so an alias hidden there is
+    simply not counted and containment stays unproven.  Symlinks are skipped
+    (they hold no inode alias) which also bounds the walk.
+    """
+    try:
+        root = workspace.resolve(strict=True)
+    except (OSError, RuntimeError) as error:
+        raise UnsafeSecretPathError(
+            "Cannot prove hardlink containment because the workspace cannot "
+            "be resolved"
+        ) from error
+    count = 0
+    stack: list[Path] = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except (OSError, RuntimeError) as error:
+            raise UnsafeSecretPathError(
+                "Cannot prove hardlink containment because a workspace "
+                "directory cannot be scanned"
+            ) from error
+        for entry in entries:
+            try:
+                info = entry.lstat()
+            except OSError as error:
+                raise UnsafeSecretPathError(
+                    "Cannot prove hardlink containment because a workspace "
+                    "entry cannot be inspected"
+                ) from error
+            if stat.S_ISLNK(info.st_mode):
+                continue
+            if stat.S_ISDIR(info.st_mode):
+                if entry.name not in _MASKED_DIR_NAMES:
+                    stack.append(entry)
+                continue
+            if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == key:
+                count += 1
+    return count
 
 
 def secret_mask_digest(workspace: Path) -> str:

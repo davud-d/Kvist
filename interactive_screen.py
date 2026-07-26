@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import _thread
 import io
+import os
 import queue
 import re
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from typing import Any, TextIO
+
+if os.name != "nt":
+    import termios
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition, has_completions, has_focus
@@ -35,6 +40,7 @@ from prompt_toolkit.layout.screen import Point
 from rich.console import Console
 
 import banner
+from redaction import escape_terminal_controls
 from slash_commands import (
     SLASH_COMMAND_MENU_HEIGHT,
     SLASH_COMMAND_PROMPT,
@@ -46,7 +52,28 @@ _BANNER_HEIGHT = 17
 _MIN_SCREEN_HEIGHT = 31
 _MAX_INPUT_HEIGHT = 8
 _MAX_TRANSIENT_HEIGHT = 10
+_MAX_TRANSCRIPT_CHARS = 500_000
+_TRANSCRIPT_RETAIN_CHARS = 400_000
+_MAX_TRANSCRIPT_ENTRIES = 2_000
+_TRANSCRIPT_TRUNCATION_MARKER = "[Earlier terminal output truncated]\n"
 _STOP = object()
+_ANSI_CHUNK_BATCH = 64
+
+
+def _restore_interrupt_signal(input_object: Any) -> None:
+    """Set ``ISIG`` back on the input's terminal, ignoring non-terminals."""
+    try:
+        descriptor = input_object.fileno()
+        attributes = termios.tcgetattr(descriptor)
+    except (AttributeError, OSError, ValueError, termios.error):
+        return
+    if attributes[3] & termios.ISIG:
+        return
+    attributes[3] |= termios.ISIG
+    try:
+        termios.tcsetattr(descriptor, termios.TCSANOW, attributes)
+    except (OSError, ValueError, termios.error):
+        return
 
 
 def _without_leading_newline(value: AnyFormattedText) -> list[tuple[str, str]]:
@@ -70,7 +97,61 @@ _CSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _OTHER_ESCAPE_RE = re.compile(r"\x1b(?!\[)(?:[()][0-2A-Z]|[@-_])")
 
 
+class _AnsiChunks:
+    """Append-only ANSI storage with bounded list overhead and no large +=."""
+
+    __slots__ = ("_blocks", "_pending")
+
+    def __init__(self, value: str) -> None:
+        self._blocks: list[str] = []
+        self._pending: list[str] = [value]
+
+    def append(self, value: str) -> None:
+        self._pending.append(value)
+        if len(self._pending) >= _ANSI_CHUNK_BATCH:
+            self._flush()
+
+    def text(self) -> str:
+        self._flush()
+        return "".join(self._blocks)
+
+    def _flush(self) -> None:
+        if self._pending:
+            self._blocks.append("".join(self._pending))
+            self._pending.clear()
+
+
+def _ansi_incomplete_suffix(
+    value: str,
+) -> tuple[int, str] | None:
+    """Return the trailing incomplete escape's index and parser kind."""
+    escape_index = value.rfind("\x1b")
+    if escape_index < 0:
+        return None
+    suffix = value[escape_index:]
+    if suffix.startswith("\x1b["):
+        return (
+            (escape_index, "csi")
+            if _CSI_RE.match(suffix) is None
+            else None
+        )
+    if suffix.startswith("\x1b]"):
+        return (
+            (escape_index, "osc")
+            if "\x07" not in suffix and "\x1b\\" not in suffix
+            else None
+        )
+    return (
+        (escape_index, "other")
+        if _OTHER_ESCAPE_RE.match(suffix) is None
+        else None
+    )
+
+
 def _clean_ansi(value: str) -> str:
+    incomplete = _ansi_incomplete_suffix(value)
+    if incomplete is not None:
+        value = value[:incomplete[0]]
     value = value.replace("\r\n", "\n").replace("\r", "\n")
     value = _OSC_RE.sub("", value)
 
@@ -78,7 +159,63 @@ def _clean_ansi(value: str) -> str:
         return match.group(0) if match.group(0).endswith("m") else ""
 
     value = _CSI_RE.sub(keep_colors, value)
-    return _OTHER_ESCAPE_RE.sub("", value)
+    value = _OTHER_ESCAPE_RE.sub("", value)
+    return escape_terminal_controls(value, preserve_ansi_escape=True)
+
+
+def _ansi_plain(value: str) -> str:
+    cleaned = _clean_ansi(value)
+    if "\x1b" not in cleaned:
+        return cleaned
+    return "".join(
+        fragment[1]
+        for fragment in to_formatted_text(ANSI(cleaned))
+    )
+
+
+def _ansi_formatted(value: str) -> list[tuple[str, str]]:
+    cleaned = _clean_ansi(value)
+    if "\x1b" not in cleaned:
+        return [("", cleaned)] if cleaned else []
+    return list(to_formatted_text(ANSI(cleaned)))
+
+
+def _ansi_entry_text(value: Any) -> str:
+    if isinstance(value, _AnsiChunks):
+        return value.text()
+    return value
+
+
+def _finish_pending_ansi(
+    value: str,
+    kind: str,
+    osc_escape: bool,
+) -> tuple[str, bool, bool]:
+    """Discard a continued control sequence and return unconsumed text."""
+    if kind == "csi":
+        for index, character in enumerate(value):
+            if "@" <= character <= "~":
+                return value[index + 1:], True, False
+        return "", False, False
+    if kind == "osc":
+        if osc_escape and value.startswith("\\"):
+            return value[1:], True, False
+        for index, character in enumerate(value):
+            if character == "\x07":
+                return value[index + 1:], True, False
+            if (
+                character == "\x1b"
+                and index + 1 < len(value)
+                and value[index + 1] == "\\"
+            ):
+                return value[index + 2:], True, False
+        return "", False, value.endswith("\x1b")
+    # ESC plus one final byte.
+    return (
+        (value[1:], True, False)
+        if value
+        else ("", False, False)
+    )
 
 
 class _BinaryOutputProxy:
@@ -172,6 +309,7 @@ class InteractiveScreen:
         # PromptSession creates these before stdout is replaced.  Retaining
         # them is important: the renderer must never write into our proxy.
         self._input = session.input
+        self._preserve_interrupt_signal()
         self._output = session.output
         self._real_stdout: TextIO = sys.stdout
         self._real_stderr: TextIO = sys.stderr
@@ -199,14 +337,24 @@ class InteractiveScreen:
         # sequences remain parseable.
         self._transcript_entries: list[tuple[str, Any]] = []
         self._transcript_cache: list[tuple[str, str]] | None = None
-        self._transcript_plain = ""
+        self._transcript_plain_parts: list[str] = []
+        self._transcript_plain_cache: str | None = ""
+        self._transcript_chars = 0
+        self._transcript_storage_chars = 0
+        self._transcript_line_count = 0
+        self._transcript_last_line_chars = 0
+        self._ansi_pending_stream: str | None = None
+        self._ansi_pending_kind: str | None = None
+        self._ansi_pending_osc_escape = False
         self._follow_tail = True
         self._transcript_cursor_line = 0
+        self._transcript_render_cursor = Point(x=0, y=0)
 
         self._status: Any | None = None
         self._stream: Any | None = None
         self._slot_generation = 0
         self._slot_cache: tuple[int, int, list[tuple[str, str]]] | None = None
+        self._transient_render_cursor = Point(x=0, y=0)
 
         self._layout: Layout | None = None
         self._transcript_window: Window | None = None
@@ -224,6 +372,12 @@ class InteractiveScreen:
     @property
     def layout(self) -> Layout | None:
         return self._layout
+
+    @property
+    def _transcript_plain(self) -> str:
+        """Materialized compatibility view of the chunked plain transcript."""
+        with self._state_lock:
+            return self._materialize_transcript_plain_locked()
 
     @property
     def is_running(self) -> bool:
@@ -381,6 +535,35 @@ class InteractiveScreen:
             raise EOFError
         return str(item).strip()
 
+    def _preserve_interrupt_signal(self) -> None:
+        """Keep ``ISIG`` set whenever prompt_toolkit takes the input raw.
+
+        Raw mode clears ``ISIG``, which stops Ctrl+C from being a signal and
+        turns it into an ordinary ``\\x03`` byte that only this application
+        can act on.  It cannot: between accepting a line and asking for the
+        next one the screen reads no input at all, and the main thread spends
+        that time blocked inside a provider socket read where no Python
+        bytecode runs — which is why ``interrupt_main`` alone cannot free it
+        either.  Restoring the flag inside the same context manager that
+        cleared it delegates Ctrl+C back to the terminal driver, whose signal
+        interrupts that syscall immediately.  Every other key still reaches
+        the application, so editing, history, completion and navigation are
+        unchanged.
+        """
+        if os.name == "nt":
+            return
+        enter_raw_mode = getattr(self._input, "raw_mode", None)
+        if enter_raw_mode is None:
+            return
+
+        @contextmanager
+        def raw_mode_keeping_signals() -> Iterator[None]:
+            with enter_raw_mode():
+                _restore_interrupt_signal(self._input)
+                yield
+
+        self._input.raw_mode = raw_mode_keeping_signals
+
     def _install_accept_handler(self) -> None:
         if self._handler_is_installed:
             return
@@ -456,16 +639,26 @@ class InteractiveScreen:
             if self._stream is None:
                 return
             committed = self._stream if content is None else content
-            self._stream = None
-            self._slot_generation += 1
-            self._slot_cache = None
-
-        if committed is not None:
             fragments = self._format_content(committed, self._terminal_width())
             if fragments:
                 if not self._fragments_end_in_newline(fragments):
                     fragments.append(("", "\n"))
-                self._append_formatted(fragments)
+                self._transcript_entries.append(("formatted", fragments))
+                plain = "".join(
+                    fragment[1] for fragment in fragments
+                )
+                self._append_transcript_plain_locked(plain)
+                self._transcript_storage_chars += len(plain)
+                self._trim_transcript_locked()
+                self._transcript_cache = None
+                if self._follow_tail:
+                    self._transcript_cursor_line = (
+                        self._last_transcript_line_locked()
+                    )
+            self._stream = None
+            self._slot_generation += 1
+            self._slot_cache = None
+
         self.invalidate()
 
     def invalidate(self) -> None:
@@ -479,19 +672,103 @@ class InteractiveScreen:
     # ------------------------------------------------------------------
     # Transcript/output capture
     # ------------------------------------------------------------------
+    def _append_transcript_plain_locked(self, value: str) -> None:
+        if not value:
+            return
+        self._transcript_plain_parts.append(value)
+        self._transcript_plain_cache = None
+        self._transcript_chars += len(value)
+        newlines = value.count("\n")
+        self._transcript_line_count += newlines
+        if newlines:
+            self._transcript_last_line_chars = len(
+                value.rsplit("\n", 1)[-1]
+            )
+        else:
+            self._transcript_last_line_chars += len(value)
+
+    def _set_transcript_plain_locked(self, value: str) -> None:
+        self._transcript_plain_parts = [value] if value else []
+        self._transcript_plain_cache = value
+        self._transcript_chars = len(value)
+        self._transcript_line_count = value.count("\n")
+        self._transcript_last_line_chars = len(
+            value.rsplit("\n", 1)[-1]
+        )
+
+    def _materialize_transcript_plain_locked(self) -> str:
+        if self._transcript_plain_cache is None:
+            value = "".join(self._transcript_plain_parts)
+            self._transcript_plain_parts = [value] if value else []
+            self._transcript_plain_cache = value
+        return self._transcript_plain_cache
+
+    def _plain_from_ansi_chunk_locked(
+        self,
+        value: str,
+        stream_name: str,
+        *,
+        continues_entry: bool,
+    ) -> str:
+        if (
+            not continues_entry
+            or self._ansi_pending_stream != stream_name
+        ):
+            self._ansi_pending_stream = None
+            self._ansi_pending_kind = None
+            self._ansi_pending_osc_escape = False
+
+        remainder = value
+        if self._ansi_pending_kind is not None:
+            remainder, finished, osc_escape = _finish_pending_ansi(
+                remainder,
+                self._ansi_pending_kind,
+                self._ansi_pending_osc_escape,
+            )
+            if not finished:
+                self._ansi_pending_osc_escape = osc_escape
+                return ""
+            self._ansi_pending_stream = None
+            self._ansi_pending_kind = None
+            self._ansi_pending_osc_escape = False
+
+        incomplete = _ansi_incomplete_suffix(remainder)
+        if incomplete is not None:
+            index, kind = incomplete
+            complete = remainder[:index]
+            self._ansi_pending_stream = stream_name
+            self._ansi_pending_kind = kind
+            self._ansi_pending_osc_escape = (
+                kind == "osc" and remainder.endswith("\x1b")
+            )
+        else:
+            complete = remainder
+        return _ansi_plain(complete)
+
     def _append_output(self, value: str, stream_name: str) -> None:
         if not value:
             return
         with self._state_lock:
-            if (
+            continues_entry = bool(
                 self._transcript_entries
                 and self._transcript_entries[-1][0] == f"ansi:{stream_name}"
-            ):
-                kind, previous = self._transcript_entries[-1]
-                self._transcript_entries[-1] = (kind, previous + value)
+            )
+            if continues_entry:
+                chunks = self._transcript_entries[-1][1]
+                assert isinstance(chunks, _AnsiChunks)
+                chunks.append(value)
             else:
-                self._transcript_entries.append((f"ansi:{stream_name}", value))
-            self._transcript_plain += _clean_ansi(value)
+                self._transcript_entries.append(
+                    (f"ansi:{stream_name}", _AnsiChunks(value))
+                )
+            plain = self._plain_from_ansi_chunk_locked(
+                value,
+                stream_name,
+                continues_entry=continues_entry,
+            )
+            self._append_transcript_plain_locked(plain)
+            self._transcript_storage_chars += len(value)
+            self._trim_transcript_locked()
             self._transcript_cache = None
             if self._follow_tail:
                 self._transcript_cursor_line = self._last_transcript_line_locked()
@@ -503,11 +780,50 @@ class InteractiveScreen:
         plain = "".join(fragment[1] for fragment in fragments)
         with self._state_lock:
             self._transcript_entries.append(("formatted", fragments))
-            self._transcript_plain += plain
+            self._append_transcript_plain_locked(plain)
+            self._transcript_storage_chars += len(plain)
+            self._trim_transcript_locked()
             self._transcript_cache = None
             if self._follow_tail:
                 self._transcript_cursor_line = self._last_transcript_line_locked()
         self.invalidate()
+
+    def _trim_transcript_locked(self) -> None:
+        """Bound transcript memory while retaining a useful recent tail."""
+        if (
+            self._transcript_chars <= _MAX_TRANSCRIPT_CHARS
+            and self._transcript_storage_chars <= _MAX_TRANSCRIPT_CHARS
+            and len(self._transcript_entries) <= _MAX_TRANSCRIPT_ENTRIES
+        ):
+            return
+
+        marker = _TRANSCRIPT_TRUNCATION_MARKER
+        remaining_chars = max(0, _TRANSCRIPT_RETAIN_CHARS - len(marker))
+        plain = self._materialize_transcript_plain_locked()
+        while plain.startswith(marker):
+            plain = plain[len(marker):]
+        retained_tail = plain[-remaining_chars:] if remaining_chars else ""
+        retained_plain = marker + retained_tail
+        # Once a bound is reached, historical color metadata is less valuable
+        # than predictable append/render cost. Compact the retained visible
+        # tail into one literal entry and let new output retain its formatting.
+        self._transcript_entries = [
+            ("formatted", [("", retained_plain)]),
+        ]
+        self._set_transcript_plain_locked(retained_plain)
+        self._transcript_storage_chars = len(retained_plain)
+        self._ansi_pending_stream = None
+        self._ansi_pending_kind = None
+        self._ansi_pending_osc_escape = False
+        self._transcript_cache = None
+        last = self._last_transcript_line_locked()
+        if self._follow_tail:
+            self._transcript_cursor_line = last
+        else:
+            self._transcript_cursor_line = min(
+                self._transcript_cursor_line,
+                last,
+            )
 
     def _get_transcript(self) -> AnyFormattedText:
         with self._state_lock:
@@ -515,24 +831,30 @@ class InteractiveScreen:
                 result: list[tuple[str, str]] = []
                 for kind, value in self._transcript_entries:
                     if kind.startswith("ansi:"):
-                        result.extend(to_formatted_text(ANSI(_clean_ansi(value))))
+                        result.extend(
+                            _ansi_formatted(_ansi_entry_text(value))
+                        )
                     else:
                         result.extend(value)
                 self._transcript_cache = result
+            if self._follow_tail:
+                self._transcript_render_cursor = Point(
+                    x=self._transcript_last_line_chars,
+                    y=self._last_transcript_line_locked(),
+                )
+            else:
+                self._transcript_render_cursor = Point(
+                    x=0,
+                    y=self._transcript_cursor_line,
+                )
             return list(self._transcript_cache)
 
     def _transcript_cursor(self) -> Point:
         with self._state_lock:
-            if self._follow_tail:
-                line = self._last_transcript_line_locked()
-                column = len(self._transcript_plain.rsplit("\n", 1)[-1])
-            else:
-                line = self._transcript_cursor_line
-                column = 0
-        return Point(x=column, y=max(0, line))
+            return self._transcript_render_cursor
 
     def _last_transcript_line_locked(self) -> int:
-        return max(0, self._transcript_plain.count("\n"))
+        return max(0, self._transcript_line_count)
 
     def _page_size(self) -> int:
         window = self._transcript_window
@@ -541,16 +863,40 @@ class InteractiveScreen:
 
     def _page_up(self) -> None:
         with self._state_lock:
-            last = self._last_transcript_line_locked()
-            current = last if self._follow_tail else self._transcript_cursor_line
+            render_info = (
+                self._transcript_window.render_info
+                if self._transcript_window is not None
+                else None
+            )
+            current_top = (
+                render_info.vertical_scroll
+                if render_info is not None
+                else self._transcript_cursor_line
+            )
             self._follow_tail = False
-            self._transcript_cursor_line = max(0, current - self._page_size())
+            self._transcript_cursor_line = max(
+                0,
+                current_top - self._page_size(),
+            )
         self.invalidate()
 
     def _page_down(self) -> None:
         with self._state_lock:
             last = self._last_transcript_line_locked()
-            target = self._transcript_cursor_line + self._page_size()
+            render_info = (
+                self._transcript_window.render_info
+                if self._transcript_window is not None
+                else None
+            )
+            current_top = (
+                render_info.vertical_scroll
+                if render_info is not None
+                else self._transcript_cursor_line
+            )
+            # Put the virtual cursor one viewport below the current bottom.
+            # prompt_toolkit then positions it at the next page instead of
+            # merely keeping the old tail visible.
+            target = current_top + 2 * self._page_size()
             if target >= last:
                 self._follow_tail = True
                 self._transcript_cursor_line = last
@@ -619,6 +965,7 @@ class InteractiveScreen:
         input_control = BufferControl(
             buffer=buffer,
             lexer=self.session.lexer,
+            key_bindings=self._create_transcript_navigation_bindings(),
             input_processors=[
                 BeforeInput(_INPUT_PROMPT),
                 AppendAutoSuggestion(),
@@ -733,6 +1080,17 @@ class InteractiveScreen:
         def next_history(event: Any) -> None:
             event.current_buffer.history_forward(count=event.arg or 1)
 
+        supplied = self.session.key_bindings
+        groups = [load_auto_suggest_bindings()]
+        if supplied is not None:
+            groups.append(supplied)
+        groups.append(bindings)
+        return merge_key_bindings(groups)
+
+    def _create_transcript_navigation_bindings(self) -> KeyBindings:
+        """Override BufferControl's PageUp/PageDown history bindings."""
+        bindings = KeyBindings()
+
         @bindings.add(Keys.PageUp, eager=True)
         def page_up(event: Any) -> None:
             self._page_up()
@@ -749,12 +1107,7 @@ class InteractiveScreen:
         def end(event: Any) -> None:
             self._follow_transcript_tail()
 
-        supplied = self.session.key_bindings
-        groups = [load_auto_suggest_bindings()]
-        if supplied is not None:
-            groups.append(supplied)
-        groups.append(bindings)
-        return merge_key_bindings(groups)
+        return bindings
 
     def _get_banner(self) -> AnyFormattedText:
         content = self._banner_content
@@ -820,12 +1173,17 @@ class InteractiveScreen:
         with self._state_lock:
             if generation == self._slot_generation:
                 self._slot_cache = (generation, width, fragments)
+            plain = "".join(fragment[1] for fragment in fragments)
+            lines = plain.split("\n")
+            self._transient_render_cursor = Point(
+                x=len(lines[-1]),
+                y=max(0, len(lines) - 1),
+            )
         return fragments
 
     def _transient_cursor(self) -> Point:
-        plain = "".join(fragment[1] for fragment in self._get_transient())
-        lines = plain.split("\n")
-        return Point(x=len(lines[-1]), y=max(0, len(lines) - 1))
+        with self._state_lock:
+            return self._transient_render_cursor
 
     def _format_content(self, content: Any, width: int) -> list[tuple[str, str]]:
         if content is None:

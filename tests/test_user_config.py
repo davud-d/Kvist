@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import concurrent.futures
+import errno
 import json
+import stat
+import threading
 
 import pytest
 
+import durable_json
 import user_config
 
 
@@ -13,6 +18,105 @@ def test_load_and_save_user_config(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8")) == {"x": "y"}
     assert user_config.load_user_config(path) == {"x": "y"}
     assert user_config.load_user_config(tmp_path / "missing.json") == {}
+
+
+def test_user_config_file_is_owner_only(tmp_path):
+    path = tmp_path / "config.json"
+
+    user_config.save_user_config(
+        {"openai_api_key": "fixture-not-a-real-key"},
+        path,
+    )
+
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_corrupt_user_config_recovers_previous_complete_generation(tmp_path):
+    path = tmp_path / "config.json"
+    user_config.save_user_config({"generation": 1}, path)
+    user_config.save_user_config({"generation": 2}, path)
+    path.write_text("{partial", encoding="utf-8")
+
+    assert user_config.load_user_config(path) == {"generation": 2}
+    assert json.loads(path.read_text(encoding="utf-8")) == {"generation": 2}
+
+
+def test_interrupted_user_config_replace_keeps_last_complete_value(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "config.json"
+    user_config.save_user_config({"generation": 1}, path)
+    original_replace = durable_json._replace_path
+
+    def fail_primary_replace(source, destination):
+        if destination == path:
+            raise OSError(errno.ENOSPC, "simulated full disk")
+        original_replace(source, destination)
+
+    monkeypatch.setattr(
+        durable_json,
+        "_replace_path",
+        fail_primary_replace,
+    )
+
+    with pytest.raises(RuntimeError, match="save user config"):
+        user_config.save_user_config({"generation": 2}, path)
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"generation": 1}
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_user_config_symlink_parent_is_rejected(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-config"
+    outside.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="save user config"):
+        user_config.save_user_config({"unsafe": True}, linked / "config.json")
+
+    assert not (outside / "config.json").exists()
+
+
+def test_concurrent_config_field_updates_do_not_clobber_each_other(
+    tmp_path,
+    monkeypatch,
+):
+    path = tmp_path / "config.json"
+    write_barrier = threading.Barrier(2)
+    original_save = user_config.save_user_config
+
+    def synchronized_save(*args, **kwargs):
+        write_barrier.wait(timeout=5)
+        return original_save(*args, **kwargs)
+
+    # This hook made the old load-then-save implementation deterministic.
+    # Transactional field updates no longer call the whole-document saver.
+    monkeypatch.setattr(
+        user_config,
+        "save_user_config",
+        synchronized_save,
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [
+            pool.submit(user_config.save_role_selection, "coder", path),
+            pool.submit(
+                user_config.save_models_for_provider,
+                "openai",
+                {"fast": "fast-model"},
+                path,
+            ),
+        ]
+        for future in futures:
+            future.result(timeout=5)
+
+    payload = user_config.load_user_config(path)
+    assert payload["role_selection"] == "coder"
+    assert payload["llm_models"] == {
+        "openai": {"fast": "fast-model"},
+    }
 
 
 def test_load_user_config_rejects_invalid_json_and_non_object(tmp_path):

@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 import getpass
-import json
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
-
 
 from openai import AuthenticationError, OpenAI
 
+from durable_json import (
+    JsonStorageCorruptError,
+    JsonStorageError,
+    read_json_object,
+    update_json_object,
+    write_json_object,
+)
 from llm_clients import (
     FREEFLOW_PROVIDER, OPENAI_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
     ANTHROPIC_PROVIDER,
@@ -63,37 +69,59 @@ def get_user_config_path() -> Path:
     return Path.home() / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME
 
 
+def _config_path_and_boundary(config_path: Path | None) -> tuple[Path, Path]:
+    if config_path is None:
+        boundary = Path.home().resolve(strict=True)
+        return boundary / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME, boundary
+    path = Path(os.path.abspath(Path(config_path).expanduser()))
+    boundary = path.parent
+    while not boundary.exists():
+        if boundary.parent == boundary:
+            raise RuntimeError("User config parent directory is unavailable.")
+        boundary = boundary.parent
+    return path, boundary.resolve(strict=True)
+
+
 def load_user_config(config_path: Path | None = None) -> dict[str, object]:
-    path = config_path or get_user_config_path()
-    if not path.exists():
-        return {}
-
+    path, boundary = _config_path_and_boundary(config_path)
     try:
-        raw_data = path.read_text(encoding="utf-8").strip()
-    except OSError as error:
-        raise RuntimeError("Failed to read user config.") from error
-
-    if not raw_data:
-        return {}
-
-    try:
-        payload = json.loads(raw_data)
-    except json.JSONDecodeError as error:
+        return read_json_object(
+            path,
+            boundary=boundary,
+            empty_as_missing=True,
+        )
+    except JsonStorageCorruptError as error:
         raise RuntimeError("User config is invalid.") from error
-
-    if not isinstance(payload, dict):
-        raise RuntimeError("User config is invalid.")
-
-    return payload
+    except JsonStorageError as error:
+        raise RuntimeError("Failed to read user config.") from error
 
 
 def save_user_config(payload: dict[str, object], config_path: Path | None = None) -> None:
-    path = config_path or get_user_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    path, boundary = _config_path_and_boundary(config_path)
+    try:
+        write_json_object(path, payload, boundary=boundary)
+    except JsonStorageError as error:
+        raise RuntimeError("Failed to save user config.") from error
+
+
+def _update_user_config(
+    update: Callable[[dict[str, object]], dict[str, object]],
+    config_path: Path | None = None,
+) -> dict[str, object]:
+    path, boundary = _config_path_and_boundary(config_path)
+    try:
+        return update_json_object(
+            path,
+            update,
+            boundary=boundary,
+            empty_as_missing=True,
+        )
+    except JsonStorageCorruptError as error:
+        raise RuntimeError(
+            "User config is invalid; refusing to overwrite it."
+        ) from error
+    except JsonStorageError as error:
+        raise RuntimeError("Failed to save user config.") from error
 
 
 def load_api_key_or_bootstrap(validation_model: str) -> str:
@@ -152,17 +180,25 @@ def save_models_for_provider(
     models: dict[str, str],
     config_path: Path | None = None,
 ) -> None:
-    payload = load_user_config(config_path)
-    all_models = payload.get(LLM_MODELS_KEY)
-    if not isinstance(all_models, dict):
-        all_models = {}
-    all_models[normalize_provider(provider)] = {
+    normalized_provider = normalize_provider(provider)
+    normalized_models = {
         key: value.strip()
         for key, value in models.items()
         if isinstance(value, str) and value.strip()
     }
-    payload[LLM_MODELS_KEY] = all_models
-    save_user_config(payload, config_path)
+
+    def save_models(payload: dict[str, object]) -> dict[str, object]:
+        existing_models = payload.get(LLM_MODELS_KEY)
+        all_models = (
+            dict(existing_models)
+            if isinstance(existing_models, dict)
+            else {}
+        )
+        all_models[normalized_provider] = normalized_models
+        payload[LLM_MODELS_KEY] = all_models
+        return payload
+
+    _update_user_config(save_models, config_path)
 
 
 def get_saved_role(config_path: Path | None = None) -> str | None:
@@ -176,9 +212,13 @@ def get_saved_role(config_path: Path | None = None) -> str | None:
 
 def save_role_selection(role: str, config_path: Path | None = None) -> None:
     """Save the role selection. Use 'auto' for automatic role detection."""
-    payload = load_user_config(config_path)
-    payload[ROLE_SELECTION_KEY] = role.strip()
-    save_user_config(payload, config_path)
+    normalized_role = role.strip()
+
+    def save_role(payload: dict[str, object]) -> dict[str, object]:
+        payload[ROLE_SELECTION_KEY] = normalized_role
+        return payload
+
+    _update_user_config(save_role, config_path)
 
 
 def ensure_provider_credentials(
@@ -192,6 +232,9 @@ def ensure_provider_credentials(
     normalized_provider = normalize_provider(provider)
     payload = load_user_config(config_path)
     payload[LLM_PROVIDER_KEY] = normalized_provider
+    changed_values: dict[str, object] = {
+        LLM_PROVIDER_KEY: normalized_provider,
+    }
     collected: dict[str, str] = {}
 
     keys_to_resolve = required_keys
@@ -227,6 +270,7 @@ def ensure_provider_credentials(
         if key_name == USER_CONFIG_KEY and normalized_provider == OPENAI_PROVIDER and not skip_validation:
             validate_api_key(secret, validation_model, language_hint=language_hint)
         payload[key_name] = secret
+        changed_values[key_name] = secret
         collected[key_name] = secret
 
     # Load base URL for OmniRoute and OpenRouter (non-secret)
@@ -235,16 +279,19 @@ def ensure_provider_credentials(
         if base_url:
             collected[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
             payload[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
+            changed_values[OMNIROUTE_BASE_URL_KEY] = base_url.strip()
     elif normalized_provider == OPENROUTER_PROVIDER:
         base_url = _resolve_secret(payload, OPENROUTER_BASE_URL_KEY)
         if base_url:
             collected[OPENROUTER_BASE_URL_KEY] = base_url.strip()
             payload[OPENROUTER_BASE_URL_KEY] = base_url.strip()
+            changed_values[OPENROUTER_BASE_URL_KEY] = base_url.strip()
     elif normalized_provider == ANTHROPIC_PROVIDER:
         base_url = _resolve_secret(payload, ANTHROPIC_BASE_URL_KEY)
         if base_url:
             collected[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
             payload[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
+            changed_values[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
 
     # Custom providers: credentials are stored in provider config, not as separate keys
     if is_custom_provider(normalized_provider):
@@ -256,7 +303,11 @@ def ensure_provider_credentials(
             if info.get("api_key"):
                 collected["api_key"] = info["api_key"].strip()
 
-    save_user_config(payload, config_path)
+    def save_credentials(current: dict[str, object]) -> dict[str, object]:
+        current.update(changed_values)
+        return current
+
+    _update_user_config(save_credentials, config_path)
     return collected
 
 def get_saved_provider_or_none(config_path: Path | None = None) -> str | None:
@@ -397,11 +448,7 @@ def save_custom_provider(name: str, provider_config: dict, config_path: Path | N
     if not name or not name.strip():
         raise ValueError("Custom provider name cannot be empty")
     name = name.strip()
-    payload = load_user_config(config_path)
-    all_providers = payload.get(CUSTOM_PROVIDERS_KEY)
-    if not isinstance(all_providers, dict):
-        all_providers = {}
-    all_providers[name] = {
+    normalized_config = {
         "label": str(provider_config.get("label", name)).strip(),
         "protocol": str(provider_config.get("protocol", "openai")).strip(),
         "base_url": str(provider_config.get("base_url", "")).strip(),
@@ -409,22 +456,36 @@ def save_custom_provider(name: str, provider_config: dict, config_path: Path | N
         "models": _normalize_provider_models(provider_config.get("models")),
         "streaming": bool(provider_config.get("streaming", False)),
     }
-    payload[CUSTOM_PROVIDERS_KEY] = all_providers
-    save_user_config(payload, config_path)
+
+    def save_provider(payload: dict[str, object]) -> dict[str, object]:
+        existing = payload.get(CUSTOM_PROVIDERS_KEY)
+        all_providers = dict(existing) if isinstance(existing, dict) else {}
+        all_providers[name] = normalized_config
+        payload[CUSTOM_PROVIDERS_KEY] = all_providers
+        return payload
+
+    _update_user_config(save_provider, config_path)
 
 
 def delete_custom_provider(name: str, config_path: Path | None = None) -> bool:
     """Delete a custom provider. Returns True if it was deleted, False if not found."""
     if not name:
         return False
-    payload = load_user_config(config_path)
-    all_providers = payload.get(CUSTOM_PROVIDERS_KEY)
-    if not isinstance(all_providers, dict) or name not in all_providers:
-        return False
-    del all_providers[name]
-    payload[CUSTOM_PROVIDERS_KEY] = all_providers
-    save_user_config(payload, config_path)
-    return True
+    deleted = False
+
+    def delete_provider(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal deleted
+        existing = payload.get(CUSTOM_PROVIDERS_KEY)
+        if not isinstance(existing, dict) or name not in existing:
+            return payload
+        all_providers = dict(existing)
+        del all_providers[name]
+        payload[CUSTOM_PROVIDERS_KEY] = all_providers
+        deleted = True
+        return payload
+
+    _update_user_config(delete_provider, config_path)
+    return deleted
 
 
 def _normalize_provider_models(models: object) -> dict[str, str]:

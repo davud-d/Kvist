@@ -22,7 +22,7 @@
   <img alt="Six prompts" src="https://img.shields.io/badge/System_prompts-6-5C2D91?style=flat-square">
   <img alt="Strict JSON protocol" src="https://img.shields.io/badge/Protocol-strict_JSON-000000?style=flat-square&logo=json&logoColor=white">
   <img alt="Human in the loop" src="https://img.shields.io/badge/Safety-human--in--the--loop-2EA44F?style=flat-square">
-  <img alt="Test suite" src="https://img.shields.io/badge/tests-364_passed-brightgreen?style=flat-square&logo=pytest&logoColor=white">
+  <img alt="Test suite" src="https://img.shields.io/badge/tests-1000%2B_offline-brightgreen?style=flat-square&logo=pytest&logoColor=white">
   <img alt="JetBrains plugin" src="https://img.shields.io/badge/JetBrains_Plugin-2025.3-000000?style=flat-square&logo=jetbrains&logoColor=white">
 </p>
 
@@ -87,14 +87,32 @@ CLI поддерживает Windows и Linux. macOS учитывается runt
 Из корня репозитория:
 
 ```bash
-python -m pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+Для разработки и тестов установите объявленные developer-зависимости:
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+Если в минимальном Linux-образе `venv` сообщает об отсутствии `ensurepip`,
+можно установить pip только внутрь проектного окружения официальным fallback
+PyPA:
+
+```bash
+python3 -m venv --without-pip .venv
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+  https://bootstrap.pypa.io/get-pip.py | .venv/bin/python -
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
 PyInstaller нужен только для сборки отдельного бинарника:
 
 ```bash
-python -m pip install pyinstaller
-python -m PyInstaller kvist.spec
+.venv/bin/python -m pip install pyinstaller
+.venv/bin/python -m PyInstaller kvist.spec
 ```
 
 Готовый файл появится как `dist/kvist` в Linux или `dist/kvist.exe` в Windows.
@@ -104,7 +122,7 @@ python -m PyInstaller kvist.spec
 Из исходников:
 
 ```bash
-python main.py --workspace "<project_path>"
+.venv/bin/python main.py --workspace "<project_path>"
 ```
 
 Через собранный бинарник:
@@ -117,6 +135,9 @@ kvist --workspace "<project_path>"
 путь, при необходимости создаёт каталог и затем ограничивает им файловые
 действия. Абсолютный путь обычно понятнее; относительный считается от каталога,
 из которого запущен Kvist.
+
+В Windows создайте окружение командой `py -m venv .venv` и используйте
+`.venv\Scripts\python.exe` вместо `.venv/bin/python`.
 
 Примеры запросов:
 
@@ -180,6 +201,11 @@ custom-провайдер, после ввода `/strime` показывает�
 Имя сессии содержит 1-64 строчные латинские буквы, цифры, дефисы или
 подчёркивания и начинается с буквы или цифры. При загрузке Kvist показывает
 несколько последних задач и держит в контексте до десяти завершённых задач.
+
+> **Известная проблема:** именованные сессии (`/session`, `/resume`, `/new`)
+> сейчас работают нестабильно — состояние checkpoint может теряться или
+> восстанавливаться некорректно между запусками. Не полагайтесь на
+> сохранение сессии для важной работы, пока это не исправлено.
 
 ## Как обрабатывается запрос
 
@@ -661,7 +687,19 @@ web_search, fetch_url, delegate_task
 Полный набор тестов запускается из корня репозитория:
 
 ```bash
-python -m pytest
+.venv/bin/python -m pytest -ra
+```
+
+Быстрый smoke-набор без credentials:
+
+```bash
+.venv/bin/python -m pytest -m offline_smoke -q
+```
+
+Статическая проверка ошибок:
+
+```bash
+.venv/bin/python -m ruff check .
 ```
 
 Отдельные prompt-тесты проверяют, что runtime использует верхний каталог

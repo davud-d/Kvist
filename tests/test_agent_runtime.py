@@ -21,6 +21,24 @@ def test_execute_command_wraps_executor_success_and_error(agent_factory):
     assert feedback["normalized_error"] == "bad"
 
 
+def test_execute_command_redacts_tool_output_before_model_feedback(agent_factory):
+    agent = agent_factory()
+    synthetic = "sk-proj-" + "r" * 24
+    command = make_command("read_file", {"path": "fixture.txt"})
+    agent.executor.execute = lambda cmd: ExecutionResult(
+        True,
+        "read_file",
+        {"path": "fixture.txt", "content": f"api_key={synthetic}"},
+    )
+
+    feedback = agent._execute_command(command)
+    detail = agent._feedback_to_detail(command, feedback)
+
+    assert synthetic not in str(feedback)
+    assert synthetic not in detail
+    assert "[REDACTED]" in detail
+
+
 def test_runtime_feedback_updates_read_write_web_and_verification_state(agent_factory):
     agent = agent_factory()
     agent._state.plan_info = make_plan()
@@ -207,6 +225,215 @@ def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_fac
     assert any(log["status"] == "error" for log in agent._state.step_logs[:-1])
     assert not (agent.executor.workspace / "task_report.txt").exists()
     assert (agent.executor.workspace / "hello.py").exists()
+
+
+def _read_responses(count: int) -> list[dict]:
+    return [
+        {
+            "thought": f"Inspecting file {index}",
+            "plan_step": "inspect",
+            "progress": index * 10,
+            "user_message": f"Inspecting file {index}",
+            "action": {
+                "type": "read_file",
+                "args": {"path": f"file-{index}.txt"},
+            },
+        }
+        for index in range(1, count + 1)
+    ]
+
+
+def test_run_loop_preserves_checkpoint_when_step_limit_interrupts_work(
+    agent_factory,
+):
+    agent = agent_factory(max_steps=5)
+    agent._state.plan_info = PlanInfo(
+        goal="Investigate files",
+        complexity="simple",
+        plan=["inspect files", "summarize findings"],
+        success_criteria=["findings are reported"],
+        risks=[],
+    )
+    responses = iter(_read_responses(5))
+    agent._call_action_model = lambda prompt: json.dumps(next(responses))
+    agent._execute_command = lambda command: {
+        "ok": True,
+        "action_type": command.action.type,
+        "data": {"path": command.action.args["path"]},
+    }
+
+    result = agent._run_loop("Investigate files", start_step=1)
+
+    assert "step limit" in result
+    restarted = agent_factory(max_steps=5)
+    checkpoint = restarted._load_checkpoint()
+    assert checkpoint == ("Investigate files", 5)
+    assert len(restarted._state.files_read) == 5
+
+
+def test_run_loop_preserves_last_checkpoint_on_keyboard_interrupt(agent_factory):
+    agent = agent_factory(max_steps=6)
+    agent._state.plan_info = PlanInfo(
+        goal="Investigate files",
+        complexity="simple",
+        plan=["inspect files", "summarize findings"],
+        success_criteria=["findings are reported"],
+        risks=[],
+    )
+    responses = iter(_read_responses(5))
+    calls = {"count": 0}
+
+    def interrupt_after_checkpoint(prompt: str) -> str:
+        _ = prompt
+        calls["count"] += 1
+        if calls["count"] == 6:
+            raise KeyboardInterrupt
+        return json.dumps(next(responses))
+
+    agent._call_action_model = interrupt_after_checkpoint
+    agent._execute_command = lambda command: {
+        "ok": True,
+        "action_type": command.action.type,
+        "data": {"path": command.action.args["path"]},
+    }
+
+    with pytest.raises(KeyboardInterrupt):
+        agent._run_loop("Investigate files", start_step=1)
+
+    restarted = agent_factory(max_steps=6)
+    checkpoint = restarted._load_checkpoint()
+    assert checkpoint == ("Investigate files", 5)
+    assert len(restarted._state.files_read) == 5
+
+
+def test_run_loop_clears_stale_checkpoint_after_completed_final_answer(
+    agent_factory,
+):
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = PlanInfo(
+        goal="Inspect files",
+        complexity="simple",
+        plan=["summarize findings"],
+        success_criteria=["findings are reported"],
+        risks=[],
+    )
+    agent._save_checkpoint("Interrupted earlier task", 4)
+    agent._call_action_model = lambda prompt: json.dumps(
+        {
+            "thought": "Reporting the completed inspection",
+            "plan_step": "done",
+            "progress": 100,
+            "user_message": "Reporting findings",
+            "action": {
+                "type": "final_answer",
+                "args": {"message": "Inspection complete."},
+            },
+        }
+    )
+
+    assert agent._run_loop("Inspect files", start_step=1) == "Inspection complete."
+    restarted = agent_factory(max_steps=1)
+    assert restarted._load_checkpoint() is None
+
+
+def test_run_loop_attempts_all_cleanup_after_ui_stop_failure(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = PlanInfo(
+        goal="Inspect files",
+        complexity="simple",
+        plan=["summarize findings"],
+        success_criteria=["findings are reported"],
+        risks=[],
+    )
+    agent._save_checkpoint("Interrupted earlier task", 4)
+    agent._call_action_model = lambda prompt: json.dumps(
+        {
+            "thought": "Reporting the completed inspection",
+            "plan_step": "done",
+            "progress": 100,
+            "user_message": "Reporting findings",
+            "action": {
+                "type": "final_answer",
+                "args": {"message": "Inspection complete."},
+            },
+        }
+    )
+    cleanup_calls: list[str] = []
+    synthetic_secret = "sk-proj-" + ("c" * 32)
+    original_persist = agent._persist_logs
+    original_flush = agent._perf_logger.flush
+    original_clear = agent._clear_checkpoint
+
+    def fail_ui_stop() -> None:
+        cleanup_calls.append("stop")
+        raise RuntimeError(
+            f"synthetic UI stop failure with token {synthetic_secret}"
+        )
+
+    def persist_logs(goal: str) -> None:
+        cleanup_calls.append("persist")
+        original_persist(goal)
+
+    def flush_performance_log() -> None:
+        cleanup_calls.append("flush")
+        original_flush()
+
+    def clear_checkpoint() -> None:
+        cleanup_calls.append("clear")
+        original_clear()
+
+    agent._ui.stop_live = fail_ui_stop
+    agent._persist_logs = persist_logs
+    agent._perf_logger.flush = flush_performance_log
+    agent._clear_checkpoint = clear_checkpoint
+
+    with pytest.raises(RuntimeError) as caught:
+        agent._run_loop("Inspect files", start_step=1)
+
+    assert cleanup_calls == ["stop", "persist", "flush", "clear"]
+    assert "synthetic UI stop failure" in str(caught.value)
+    assert synthetic_secret not in str(caught.value)
+    assert "[REDACTED]" in str(caught.value)
+    assert caught.value.__cause__ is None
+    restarted = agent_factory(max_steps=1)
+    assert restarted._load_checkpoint() is None
+
+
+def test_run_loop_cleanup_does_not_mask_keyboard_interrupt(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = PlanInfo(
+        goal="Investigate files",
+        complexity="simple",
+        plan=["inspect files", "summarize findings"],
+        success_criteria=["findings are reported"],
+        risks=[],
+    )
+    cleanup_calls: list[str] = []
+    synthetic_secret = "sk-proj-" + ("i" * 32)
+
+    def interrupt_model(prompt: str) -> str:
+        _ = prompt
+        raise KeyboardInterrupt
+
+    def fail_ui_stop() -> None:
+        cleanup_calls.append("stop")
+        raise RuntimeError(
+            f"synthetic UI stop failure with token {synthetic_secret}"
+        )
+
+    agent._call_action_model = interrupt_model
+    agent._ui.stop_live = fail_ui_stop
+    agent._persist_logs = lambda goal: cleanup_calls.append("persist")
+    agent._perf_logger.flush = lambda: cleanup_calls.append("flush")
+
+    with pytest.raises(KeyboardInterrupt) as caught:
+        agent._run_loop("Investigate files", start_step=1)
+
+    assert cleanup_calls == ["stop", "persist", "flush"]
+    notes = "\n".join(caught.value.__notes__)
+    assert "synthetic UI stop failure" in notes
+    assert synthetic_secret not in notes
+    assert "[REDACTED]" in notes
 
 
 def test_rolling_summary_stored_on_summary_step(agent_factory, tmp_path):
@@ -673,6 +900,7 @@ def test_pending_verification_blocks_final_answer(agent_factory):
 
 # ── P4: devops run_shell parsing ───────────────────────────────────────
 
+@pytest.mark.offline_smoke
 def test_devops_run_shell_parsed_and_executed(agent_factory):
     """DevOps run_shell: parser accepts command=[\"systemctl\",\"status\",\"nginx\"] and executor runs it."""
     from parser import parse_agent_command

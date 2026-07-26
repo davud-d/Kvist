@@ -25,6 +25,7 @@ class _ScreenRecorder:
         self.commits.append(content)
 
 
+@pytest.mark.offline_smoke
 def test_ui_basic_interface():
     """Test basic UI interface compatibility."""
     ui = AgentUI(verbose=False)
@@ -100,6 +101,47 @@ def test_print_final_keeps_code_block_content():
     rendered = console.export_text()
     assert "hello.txt" in rendered
     assert "hello world" in rendered
+
+
+def test_user_visible_output_redacts_credentials(capsys):
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=True)
+    synthetic = "sk-proj-" + "u" * 24
+
+    ui.print_error(f"failure api_key={synthetic}")
+    ui.print_final(f"provider error Authorization: Bearer {synthetic}")
+    ui.debug_print(f"debug password={synthetic}")
+    console.print(
+        ui._render_live_panel(
+            user_message=f"retry token={synthetic}",
+            status="error",
+            step=1,
+            progress=10,
+            plan_step=f"recover api_key={synthetic}",
+            is_error=True,
+        )
+    )
+
+    rendered = console.export_text() + capsys.readouterr().out
+    assert synthetic not in rendered
+    assert "[REDACTED]" in rendered
+
+
+def test_user_visible_output_escapes_terminal_and_bidi_controls():
+    console = Console(record=True, width=100)
+    ui = AgentUI(console=console, verbose=False)
+    dangerous = "before\x1b[2J\u202eafter\x08"
+
+    ui.print_error(dangerous)
+    ui.print_final(dangerous)
+
+    rendered = console.export_text()
+    assert "\x1b" not in rendered
+    assert "\u202e" not in rendered
+    assert "\x08" not in rendered
+    assert "\\x1b" in rendered
+    assert "\\u202e" in rendered
+    assert "\\x08" in rendered
 
 
 def test_print_final_falls_back_to_plain_text_on_markdown_error(monkeypatch):

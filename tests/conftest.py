@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +11,10 @@ from agent import LocalAgent
 from agent_state import AgentConfig, PlanInfo
 from executor import SafeExecutor
 from protocol import Action, AgentCommand
+from terminal import (
+    _controlled_child_path,
+    _is_trusted_system_executable,
+)
 
 
 class NullUI:
@@ -99,6 +105,24 @@ def _disable_write_approval_gate(monkeypatch):
     # explicitly when that behavior is under test.
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "workspace")
     monkeypatch.setenv("AGENT_SANDBOX_NET", "deny")
+
+
+@pytest.fixture
+def trusted_python_name(tmp_path):
+    """Return a Python command whose resolved binary passes terminal trust checks."""
+    controlled_path = _controlled_child_path(tmp_path)
+    for name in ("python3", "python", "py"):
+        found = shutil.which(name, path=controlled_path)
+        if found is None:
+            continue
+        lookup = Path(found)
+        try:
+            resolved = lookup.resolve(strict=True)
+        except OSError:
+            continue
+        if _is_trusted_system_executable(lookup, resolved):
+            return name
+    pytest.skip("no trusted system Python executable is available")
 
 
 @pytest.fixture

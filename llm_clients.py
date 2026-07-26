@@ -16,6 +16,7 @@ from typing import Any
 
 from language_utils import choose_localized_text
 from openai import OpenAI
+from redaction import redact_text
 
 # Provider names.
 OPENAI_PROVIDER = "openai"
@@ -1092,7 +1093,7 @@ class AnthropicCompatibleClient:
         available from the Anthropic SDK.
         """
         import anthropic
-        msg = str(error)
+        msg = redact_text(str(error))
         # Map known Anthropic error types to descriptive RuntimeError wrappers
         if isinstance(error, anthropic.AuthenticationError):
             return RuntimeError(f"Anthropic authentication failed: {msg}")

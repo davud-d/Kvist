@@ -9,12 +9,39 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+
+def _build_cli_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Local AI agent")
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Path to the project workspace directory.",
+    )
+    parser.add_argument(
+        "--no-banner",
+        action="store_true",
+        help="Disable the live banner and use the plain terminal interface.",
+    )
+    return parser
+
+
+# Reject invalid invocations and serve --help before constructing terminal UI
+# objects or importing provider SDKs. Imported callers (including tests and the
+# credential-free PTY fixture) still parse their current argv inside main().
+_DIRECT_CLI_ARGS = (
+    _build_cli_parser().parse_args()
+    if __name__ == "__main__"
+    else None
+)
+
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.output import ColorDepth
 from rich.console import Console
 from rich.panel import Panel
+from rich.text import Text
 
 import banner
 from agent import AgentConfig, LocalAgent
@@ -45,6 +72,7 @@ from llm_clients import (
     validate_model_selection,
     validate_omniroute_model_id,
 )
+from redaction import sanitize_display_text
 from ui import AgentUI
 from agent_logging import (
     delete_session as delete_agent_session,
@@ -86,6 +114,21 @@ console = Console()
 slash_command_auto_suggest = SlashCommandAutoSuggest(
     fallback=AutoSuggestFromHistory()
 )
+
+
+def _display_text(value: object, style: str = "") -> Text:
+    return Text(sanitize_display_text(str(value)), style=style)
+
+
+def _print_model_row(label: str, model: str) -> None:
+    line = Text("  ")
+    line.append(f"{sanitize_display_text(label):8s}", style="cyan")
+    line.append(" ")
+    if model:
+        line.append(sanitize_display_text(model))
+    else:
+        line.append("not set", style="red")
+    console.print(line)
 
 
 def slash_completion_is_active() -> bool:
@@ -255,6 +298,67 @@ def wizard_screen():
             console.set_alt_screen(False)
 
 
+def request_cancelled_text(language: str) -> str:
+    return "Запрос отменён." if language == "ru" else "Request cancelled."
+
+
+def release_terminal(
+    screen: InteractiveScreen | None,
+    use_session_screen: bool,
+) -> None:
+    """Hand the terminal back, absorbing one late Ctrl+C.
+
+    Teardown is the last chance to leave the alternate screen and restore the
+    process streams.  An interrupt arriving here must not abandon that work,
+    or the user is returned to a shell drawing on the alternate buffer.
+    """
+    try:
+        _restore_terminal(screen, use_session_screen)
+    except KeyboardInterrupt:
+        _restore_terminal(screen, use_session_screen)
+
+
+def _restore_terminal(
+    screen: InteractiveScreen | None,
+    use_session_screen: bool,
+) -> None:
+    if screen is not None:
+        screen.stop()
+    elif use_session_screen:
+        console.set_alt_screen(False)
+
+
+def save_session_for_shutdown(agent: LocalAgent) -> None:
+    """Persist the session on the way out without derailing shutdown.
+
+    Both ``/bye`` and Ctrl+C at the prompt end here, so the session is saved
+    the same way on either route.  A second Ctrl+C can land inside the durable
+    write; that write stays atomic and the previously saved generation remains
+    readable, so shutdown reports the interruption and continues rather than
+    printing a traceback over a terminal that is already being torn down.
+    """
+    try:
+        agent.save_session()
+    except KeyboardInterrupt:
+        console.print(
+            _display_text(
+                "Session save was interrupted; the last saved session is kept.",
+                "yellow",
+            )
+        )
+    except Exception as error:
+        safe_error = sanitize_display_text(
+            str(error).strip() or type(error).__name__
+        )
+        console.print(
+            _display_text(
+                f"Session save failed safely: {safe_error}. "
+                "The last saved session is kept.",
+                "yellow",
+            )
+        )
+
+
 @contextmanager
 def paused_interactive_screen(screen: InteractiveScreen | None):
     """Temporarily return terminal ownership to an existing Rich/input UI."""
@@ -331,7 +435,12 @@ def build_agent(
                 )
             # Interactive setup if models are missing
             ui = AgentUI(console=console, verbose=verbose)
-            console.print(f"[yellow]{provider_display} models are not configured.[/yellow]")
+            console.print(
+                _display_text(
+                    f"{provider_display} models are not configured.",
+                    "yellow",
+                )
+            )
             if provider == OPENROUTER_PROVIDER:
                 selected_models = configure_openrouter_models_interactively(ui, models)
             elif is_custom_provider(provider):
@@ -349,7 +458,9 @@ def build_agent(
             else:
                 save_models_for_provider(provider, selected_models)
             models = selected_models
-            console.print(f"[green]{provider_display} models saved.[/green]")
+            console.print(
+                _display_text(f"{provider_display} models saved.", "green")
+            )
 
     required_keys = required_secret_keys_for_provider(
         provider,
@@ -398,18 +509,36 @@ def build_agent(
         stream=provider_supports_streaming(provider),
         verbose=verbose,
     )
-    return LocalAgent(client=client, executor=executor, config=config), config, warnings
+    agent = LocalAgent(client=client, executor=executor, config=config)
+    warnings.extend(getattr(agent, "_storage_warnings", []))
+    return agent, config, warnings
 
 
 def print_runtime_banner(config: AgentConfig, max_steps: int, verbose: bool, warnings: list[str]) -> None:
-    console.print(
-        f"[magenta]Provider: {provider_label(config.provider)}[/magenta] | "
-        f"[green]Fast model: {config.fast_model}[/green] | "
-        f"[bold yellow]Smart model: {config.smart_model}[/bold yellow] | "
-        f"[blue]Planner model: {config.planner_model}[/blue] | Max steps: {max_steps} | Verbose: {verbose}"
+    line = Text()
+    line.append(
+        f"Provider: {sanitize_display_text(provider_label(config.provider))}",
+        style="magenta",
     )
+    line.append(" | ")
+    line.append(
+        f"Fast model: {sanitize_display_text(config.fast_model)}",
+        style="green",
+    )
+    line.append(" | ")
+    line.append(
+        f"Smart model: {sanitize_display_text(config.smart_model)}",
+        style="bold yellow",
+    )
+    line.append(" | ")
+    line.append(
+        f"Planner model: {sanitize_display_text(config.planner_model)}",
+        style="blue",
+    )
+    line.append(f" | Max steps: {max_steps} | Verbose: {verbose}")
+    console.print(line)
     for warning in warnings:
-        console.print(f"[yellow]{warning}[/yellow]")
+        console.print(_display_text(warning, "yellow"))
 
 
 def render_exit_message(agent: LocalAgent) -> None:
@@ -422,9 +551,13 @@ def render_exit_message(agent: LocalAgent) -> None:
     """
     session_name = getattr(agent, "current_session", "default")
     console.print("[dim]Kvist agent[/dim] [red]stopped.[/red]")
-    console.print(
-        f"[dim]To continue, start the agent and resume session [bold]{session_name}[/bold].[/dim]"
+    message = Text(
+        "To continue, start the agent and resume session ",
+        style="dim",
     )
+    message.append(sanitize_display_text(str(session_name)), style="bold dim")
+    message.append(".", style="dim")
+    console.print(message)
 
 
 def render_startup_banner(
@@ -438,7 +571,9 @@ def render_startup_banner(
     console.clear()
 
     console.print("[dim]Local AI agent [/dim]Kvist [dim]started. [/dim]")
-    console.print(f"[dim]Workspace: {agent.executor.workspace}[/dim]")
+    console.print(
+        _display_text(f"Workspace: {agent.executor.workspace}", "dim")
+    )
     print_runtime_banner(config, max_steps, verbose, warnings)
     console.print("[red]Type '/bye' to exit. For multiline input, use Alt+Enter or Esc+Enter.[/red]")
     console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
@@ -454,19 +589,36 @@ def render_startup_banner(
 
     session_name = getattr(agent, "current_session", "default")
     sessions = agent._list_sessions()
-    console.print(f"[dim]Session: [bold]{session_name}[/bold] ({len(sessions)} saved)[/dim]")
+    session_line = Text("Session: ", style="dim")
+    session_line.append(sanitize_display_text(str(session_name)), style="bold dim")
+    session_line.append(f" ({len(sessions)} saved)", style="dim")
+    console.print(session_line)
     history = getattr(agent, "_session_history", [])
     if history:
         console.print("[dim]── Previous in this session ──[/dim]")
         for entry in history[-3:]:
             role_color = {"coder": "green", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
-            console.print(f"  [{role_color}]{entry.get('role', '?')}[/{role_color}] {entry.get('goal', '')[:100]}")
+            history_line = Text("  ")
+            history_line.append(
+                sanitize_display_text(str(entry.get("role", "?"))),
+                style=role_color,
+            )
+            history_line.append(
+                " " + sanitize_display_text(str(entry.get("goal", ""))[:100])
+            )
+            console.print(history_line)
 
     saved_role = get_saved_role()
     if saved_role and saved_role != "auto":
         role_colors = {"coder": "green", "devops": "magenta", "chat": "cyan"}
         role_color = role_colors.get(saved_role, "white")
-        console.print(f"[{role_color}]Current role: {saved_role} (manual — auto-detection disabled)[/{role_color}]")
+        console.print(
+            _display_text(
+                f"Current role: {saved_role} "
+                "(manual — auto-detection disabled)",
+                role_color,
+            )
+        )
     else:
         console.print("[dim]Current role: auto (automatic detection enabled)[/dim]")
 
@@ -603,8 +755,12 @@ def choose_session(agent, verbose: bool) -> str | None:
                 "digits, hyphens, or underscores; start with a letter or digit.[/yellow]"
             )
             return None
-        agent.new_session(name)
-        console.print(f"[green]Session [bold]{name}[/bold] created.[/green]")
+        try:
+            agent.new_session(name)
+        except ValueError as error:
+            console.print(_display_text(error, "yellow"))
+            return None
+        console.print(_display_text(f"Session {name} created.", "green"))
         return name
 
     if selected == "__delete__":
@@ -620,16 +776,21 @@ def choose_session(agent, verbose: bool) -> str | None:
         if to_delete is None:
             return None
         agent._delete_session(to_delete)
-        console.print(f"[green]Session [bold]{to_delete}[/bold] deleted.[/green]")
-        return None
+        console.print(
+            _display_text(f"Session {to_delete} deleted.", "green")
+        )
+        return current
 
     if selected != current:
         agent.switch_session(selected)
         history_count = len(getattr(agent, "_session_history", []))
         chat_count = len(getattr(agent, "_chat_history", [])) - 1 if hasattr(agent, "_chat_history") else 0
         console.print(
-            f"[green]Switched to session [bold]{selected}[/bold] "
-            f"([dim]{history_count} tasks, {chat_count} chat msgs[/dim])[/green]"
+            _display_text(
+                f"Switched to session {selected} "
+                f"({history_count} tasks, {chat_count} chat msgs)",
+                "green",
+            )
         )
         # Display session context summary
         history = getattr(agent, "_session_history", [])
@@ -637,7 +798,18 @@ def choose_session(agent, verbose: bool) -> str | None:
             console.print("[dim]── Session context ──[/dim]")
             for entry in history[-3:]:
                 role_color = {"coder": "green", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
-                console.print(f"  [{role_color}]{entry.get('role', '?')}[/{role_color}] {entry.get('goal', '')[:100]}")
+                history_line = Text("  ")
+                history_line.append(
+                    sanitize_display_text(str(entry.get("role", "?"))),
+                    style=role_color,
+                )
+                history_line.append(
+                    " "
+                    + sanitize_display_text(
+                        str(entry.get("goal", ""))[:100]
+                    )
+                )
+                console.print(history_line)
         return selected
     return None
 
@@ -772,7 +944,13 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
             console.print("[red]Name can only contain lowercase letters, digits, hyphens and underscores.[/red]")
             continue
         if name in existing_names:
-            console.print(f"[red]Provider '{name}' already exists. Choose a different name.[/red]")
+            console.print(
+                _display_text(
+                    f"Provider {name!r} already exists. "
+                    "Choose a different name.",
+                    "red",
+                )
+            )
             continue
         break
 
@@ -975,27 +1153,43 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
                 return None
             model_id = model_id.strip()
             if not model_id:
-                console.print(f"[red]Model ID for {role} cannot be empty.[/red]")
+                console.print(
+                    _display_text(
+                        f"Model ID for {role} cannot be empty.",
+                        "red",
+                    )
+                )
                 return None
             models[role] = model_id
 
     # ── Step 7: Confirm ───────────────────────────────────────────────
     console.print()
     proto_display = "Anthropic-compatible" if protocol == "anthropic" else "OpenAI-compatible"
-    summary_parts = [
-        f"[bold]Provider ID:[/bold] {name}",
-        f"[bold]Display name:[/bold] {label}",
-        f"[bold]Protocol:[/bold] {proto_display}",
-        f"[bold]Base URL:[/bold] {base_url}",
-        f"[bold]API key:[/bold] {'[green]configured[/green]' if api_key else '[dim]none[/dim]'}",
-        f"[bold]Streaming:[/bold] {'enabled' if streaming else 'disabled'}",
-        f"[bold]Models:[/bold]",
-    ]
+    summary = Text()
+
+    def append_summary(label_text: str, value: str, style: str = "") -> None:
+        summary.append(f"{label_text}: ", style="bold")
+        summary.append(sanitize_display_text(value), style=style)
+        summary.append("\n")
+
+    append_summary("Provider ID", name)
+    append_summary("Display name", label)
+    append_summary("Protocol", proto_display)
+    append_summary("Base URL", base_url)
+    append_summary(
+        "API key",
+        "configured" if api_key else "none",
+        "green" if api_key else "dim",
+    )
+    append_summary("Streaming", "enabled" if streaming else "disabled")
+    summary.append("Models:\n", style="bold")
     for role in MODEL_ROLES:
-        summary_parts.append(f"  {role_labels[role]:8s} {models[role]}")
+        summary.append(f"  {role_labels[role]:8s} ")
+        summary.append(sanitize_display_text(models[role]))
+        summary.append("\n")
 
     console.print(Panel(
-        "\n".join(summary_parts),
+        summary,
         title="Provider Summary",
         border_style="bright_cyan",
     ))
@@ -1023,8 +1217,13 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         "streaming": streaming,
     })
     provider_id = f"{CUSTOM_PROVIDER_PREFIX}{name}"
-    console.print(f"[green]Custom provider [bold]{label}[/bold] created successfully![/green]")
-    console.print(f"[dim]Provider ID: {provider_id}[/dim]")
+    console.print(
+        _display_text(
+            f"Custom provider {label} created successfully!",
+            "green",
+        )
+    )
+    console.print(_display_text(f"Provider ID: {provider_id}", "dim"))
     return provider_id
 
 
@@ -1044,7 +1243,7 @@ def configure_custom_provider_models_interactively(
     for role in MODEL_ROLES:
         model = current_models.get(role, "")
         label = role_labels.get(role, role)
-        console.print(f"  [cyan]{label:8s}[/cyan] {model or '[red]not set[/red]'}")
+        _print_model_row(label, model)
 
     console.print()
     action = ui.choose_option(
@@ -1080,7 +1279,12 @@ def configure_custom_provider_models_interactively(
         for role in MODEL_ROLES:
             selected[role] = model_id.strip()
 
-        console.print(f"[green]Model set to [bold]{model_id}[/bold] for all roles.[/green]")
+        console.print(
+            _display_text(
+                f"Model set to {model_id} for all roles.",
+                "green",
+            )
+        )
         return selected
 
     return None
@@ -1118,7 +1322,7 @@ def configure_openrouter_models_interactively(
     for role in MODEL_ROLES:
         model = current_models.get(role, "")
         label = role_labels.get(role, role)
-        console.print(f"  [cyan]{label:8s}[/cyan] {model or '[red]not set[/red]'}")
+        _print_model_row(label, model)
 
     # ── Menu ════════════════════════════════════════════════════════════
     console.print()
@@ -1191,14 +1395,24 @@ def configure_openrouter_models_interactively(
         # Validate using the same OmniRoute validator (provider/model format)
         validation_error = validate_omniroute_model_id(model_id)
         if validation_error:
-            console.print(f"[red]Invalid model id: {validation_error}[/red]")
+            console.print(
+                _display_text(
+                    f"Invalid model id: {validation_error}",
+                    "red",
+                )
+            )
             return None
 
         selected: dict[str, str] = {}
         for role in MODEL_ROLES:
             selected[role] = model_id
 
-        console.print(f"[green]Model set to [bold]{model_id}[/bold] for all roles.[/green]")
+        console.print(
+            _display_text(
+                f"Model set to {model_id} for all roles.",
+                "green",
+            )
+        )
         return selected
 
     return None
@@ -1238,7 +1452,7 @@ def configure_omniroute_models_interactively(
     for role in MODEL_ROLES:
         model = current_models.get(role, "")
         label = role_labels.get(role, role)
-        console.print(f"  [cyan]{label:8s}[/cyan] {model or '[red]not set[/red]'}")
+        _print_model_row(label, model)
 
     # ── Menu ════════════════════════════════════════════════════════════
     console.print()
@@ -1289,7 +1503,12 @@ def configure_omniroute_models_interactively(
         # Validate
         validation_error = validate_omniroute_model_id(model_id)
         if validation_error:
-            console.print(f"[red]Invalid model id: {validation_error}[/red]")
+            console.print(
+                _display_text(
+                    f"Invalid model id: {validation_error}",
+                    "red",
+                )
+            )
             return None
 
         # Apply to all roles
@@ -1297,7 +1516,12 @@ def configure_omniroute_models_interactively(
         for role in MODEL_ROLES:
             selected[role] = model_id
 
-        console.print(f"[green]Model set to [bold]{model_id}[/bold] for all roles.[/green]")
+        console.print(
+            _display_text(
+                f"Model set to {model_id} for all roles.",
+                "green",
+            )
+        )
         return selected
 
     # Unknown action (shouldn't happen with choose_option, but defensive)
@@ -1305,18 +1529,11 @@ def configure_omniroute_models_interactively(
 
 
 def main() -> None:
-    cli = argparse.ArgumentParser(description="Local AI agent")
-    cli.add_argument(
-        "--workspace",
-        required=True,
-        help="Path to the project workspace directory.",
+    args = (
+        _DIRECT_CLI_ARGS
+        if _DIRECT_CLI_ARGS is not None
+        else _build_cli_parser().parse_args()
     )
-    cli.add_argument(
-        "--no-banner",
-        action="store_true",
-        help="Disable the live banner and use the plain terminal interface.",
-    )
-    args = cli.parse_args()
 
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "50"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
@@ -1335,7 +1552,7 @@ def main() -> None:
             language_hint=session_language,
         )
     except RuntimeError as error:
-        print(str(error), file=sys.stderr)
+        print(sanitize_display_text(str(error)), file=sys.stderr)
         sys.exit(2)
 
     sync_strime_suggestion(config.provider, config.stream)
@@ -1351,7 +1568,7 @@ def main() -> None:
             candidate_screen.start()
         except Exception as error:
             candidate_screen.stop()
-            interactive_screen_error = str(error)
+            interactive_screen_error = sanitize_display_text(str(error))
         else:
             interactive_screen = candidate_screen
             agent._ui.attach_screen(interactive_screen)
@@ -1383,12 +1600,15 @@ def main() -> None:
         render_startup_banner(agent, config, max_steps, verbose, model_warnings)
         if interactive_screen_error is not None:
             console.print(
-                "[yellow]Live banner unavailable; using the plain interface: "
-                f"{interactive_screen_error}[/yellow]"
+                _display_text(
+                    "Live banner unavailable; using the plain interface: "
+                    f"{interactive_screen_error}",
+                    "yellow",
+                )
             )
     else:
         for warning in model_warnings:
-            console.print(f"[yellow]{warning}[/yellow]")
+            console.print(_display_text(warning, "yellow"))
 
     interrupted = False
     try:
@@ -1401,15 +1621,28 @@ def main() -> None:
             if user_goal and not user_goal.startswith("/"):
                 session_language = detect_request_language(user_goal, fallback=session_language)
             if user_goal.lower() == "/bye":
-                agent.save_session()
+                save_session_for_shutdown(agent)
                 break
 
             if user_goal.lower() == "/resume":
-                result = agent.resume()
+                try:
+                    result = agent.resume()
+                except Exception as error:
+                    safe_error = sanitize_display_text(
+                        str(error).strip() or type(error).__name__
+                    )
+                    console.print(
+                        Text(
+                            "Resume failed safely: "
+                            f"{safe_error}. The current session remains available.",
+                            style="red",
+                        )
+                    )
+                    continue
                 if result is None:
                     console.print("[yellow]No saved checkpoint to resume.[/yellow]")
                 elif verbose:
-                    print(f"\n[Final Answer]\n{result}")
+                    print(f"\n[Final Answer]\n{sanitize_display_text(result)}")
                 continue
 
             if (
@@ -1426,7 +1659,9 @@ def main() -> None:
                 verbose = selected_verbose
                 apply_verbose_mode(agent, verbose)
                 state = "enabled" if verbose else "disabled"
-                console.print(f"[green]Verbose mode {state}.[/green]")
+                console.print(
+                    _display_text(f"Verbose mode {state}.", "green")
+                )
                 continue
 
             if (
@@ -1456,7 +1691,9 @@ def main() -> None:
                     continue
 
                 state = "enabled" if selected_streaming else "disabled"
-                console.print(f"[green]Streaming mode {state}.[/green]")
+                console.print(
+                    _display_text(f"Streaming mode {state}.", "green")
+                )
                 continue
 
             if user_goal.lower() == "/provider":
@@ -1475,7 +1712,7 @@ def main() -> None:
                                 language_hint=session_language,
                             )
                         except RuntimeError as error:
-                            build_error = str(error)
+                            build_error = sanitize_display_text(str(error))
 
                 if selected_provider is None:
                     console.print("[yellow]Provider switch cancelled.[/yellow]")
@@ -1484,7 +1721,7 @@ def main() -> None:
                     console.print("[dim]Provider unchanged.[/dim]")
                     continue
                 if build_error is not None:
-                    console.print(f"[red]{build_error}[/red]")
+                    console.print(_display_text(build_error, "red"))
                     continue
 
                 if interactive_screen is not None:
@@ -1502,13 +1739,17 @@ def main() -> None:
                 sync_strime_suggestion(config.provider, config.stream)
 
                 console.print(
-                    f"[green]Provider changed to {provider_label(config.provider)}.[/green]"
+                    _display_text(
+                        "Provider changed to "
+                        f"{provider_label(config.provider)}.",
+                        "green",
+                    )
                 )
                 if interactive_screen is None:
                     print_runtime_banner(config, max_steps, verbose, model_warnings)
                 else:
                     for warning in model_warnings:
-                        console.print(f"[yellow]{warning}[/yellow]")
+                        console.print(_display_text(warning, "yellow"))
                 continue
 
             if user_goal.lower() == "/models":
@@ -1518,9 +1759,12 @@ def main() -> None:
                 )
                 if not uses_manual_model_ids and not get_model_options(config.provider):
                     console.print(
-                        "[yellow]No models available for current provider "
-                        f"({provider_label(config.provider)}). "
-                        "Use /provider to switch.[/yellow]"
+                        _display_text(
+                            "No models available for current provider "
+                            f"({provider_label(config.provider)}). "
+                            "Use /provider to switch.",
+                            "yellow",
+                        )
                     )
                     continue
 
@@ -1556,17 +1800,17 @@ def main() -> None:
                                     language_hint=session_language,
                                 )
                             except RuntimeError as error:
-                                build_error = str(error)
+                                build_error = sanitize_display_text(str(error))
 
                 if selected_models is None:
                     console.print("[yellow]Model switch cancelled.[/yellow]")
                     continue
                 if validation_issues:
                     for issue in validation_issues:
-                        console.print(f"[red]{issue}[/red]")
+                        console.print(_display_text(issue, "red"))
                     continue
                 if build_error is not None:
-                    console.print(f"[red]{build_error}[/red]")
+                    console.print(_display_text(build_error, "red"))
                     continue
 
                 if interactive_screen is not None:
@@ -1594,7 +1838,7 @@ def main() -> None:
                     print_runtime_banner(config, max_steps, verbose, model_warnings)
                 else:
                     for warning in model_warnings:
-                        console.print(f"[yellow]{warning}[/yellow]")
+                        console.print(_display_text(warning, "yellow"))
                 continue
 
             if user_goal.lower() == "/new":
@@ -1611,7 +1855,12 @@ def main() -> None:
                 if result is None:
                     console.print("[yellow]Session switch cancelled.[/yellow]")
                 else:
-                    console.print(f"[dim]Active session: [bold]{agent.current_session}[/bold][/dim]")
+                    console.print(
+                        _display_text(
+                            f"Active session: {agent.current_session}",
+                            "dim",
+                        )
+                    )
                 continue
 
             if user_goal.lower() == "/role":
@@ -1625,12 +1874,14 @@ def main() -> None:
                 if interactive_screen is not None:
                     interactive_screen.set_config(config)
                 display_role = selected_role if selected_role != "auto" else "auto (automatic detection)"
-                console.print(f"[green]Role set to: {display_role}[/green]")
+                console.print(
+                    _display_text(f"Role set to: {display_role}", "green")
+                )
                 continue
 
             validation_error = validate_user_goal(user_goal, language_hint=session_language)
             if validation_error:
-                console.print(f"[yellow]{validation_error}[/yellow]")
+                console.print(_display_text(validation_error, "yellow"))
                 continue
 
             if user_goal.lower() == "/commands":
@@ -1677,6 +1928,17 @@ Support:
                         client=agent.client,
                         model=config.fast_model,
                     )
+                except KeyboardInterrupt:
+                    # Routing is a provider request made on the user's behalf
+                    # before the turn starts; interrupting it cancels that
+                    # turn, not the session.
+                    console.print(
+                        _display_text(
+                            request_cancelled_text(session_language),
+                            "yellow",
+                        )
+                    )
+                    continue
                 except Exception:
                     detected_role = route_role(user_goal)
                     decision = None
@@ -1688,19 +1950,34 @@ Support:
             # Show "(manual)" when user has overridden automatic detection
             if saved_role and saved_role != "auto":
                 source_tag = " (manual)"
-            console.print(f"[{role_color}]⚡ Role: {detected_role}{source_tag}[/{role_color}]")
+            console.print(
+                _display_text(
+                    f"⚡ Role: {detected_role}{source_tag}",
+                    role_color,
+                )
+            )
 
-            result = agent.run(user_goal, routed_role=detected_role)
+            try:
+                result = agent.run(user_goal, routed_role=detected_role)
+            except Exception as error:
+                safe_error = sanitize_display_text(
+                    str(error).strip() or type(error).__name__
+                )
+                console.print(
+                    Text(
+                        "Task failed safely: "
+                        f"{safe_error}. You can retry or switch provider.",
+                        style="red",
+                    )
+                )
+                continue
             if verbose:
-                print(f"\n[Final Answer]\n{result}")
+                print(f"\n[Final Answer]\n{sanitize_display_text(result)}")
     except KeyboardInterrupt:
-        agent.save_session()
+        save_session_for_shutdown(agent)
         interrupted = True
     finally:
-        if interactive_screen is not None:
-            interactive_screen.stop()
-        elif use_session_screen:
-            console.set_alt_screen(False)
+        release_terminal(interactive_screen, use_session_screen)
 
     render_exit_message(agent)
     if interrupted:

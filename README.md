@@ -22,7 +22,7 @@
   <img alt="Six prompts" src="https://img.shields.io/badge/System_prompts-6-5C2D91?style=flat-square">
   <img alt="Strict JSON protocol" src="https://img.shields.io/badge/Protocol-strict_JSON-000000?style=flat-square&logo=json&logoColor=white">
   <img alt="Human in the loop" src="https://img.shields.io/badge/Safety-human--in--the--loop-2EA44F?style=flat-square">
-  <img alt="Test suite" src="https://img.shields.io/badge/tests-364_passed-brightgreen?style=flat-square&logo=pytest&logoColor=white">
+  <img alt="Test suite" src="https://img.shields.io/badge/tests-1000%2B_offline-brightgreen?style=flat-square&logo=pytest&logoColor=white">
   <img alt="JetBrains plugin" src="https://img.shields.io/badge/JetBrains_Plugin-2025.3-000000?style=flat-square&logo=jetbrains&logoColor=white">
 </p>
 
@@ -87,14 +87,32 @@ The JetBrains plugin has additional build requirements; see
 From the repository root:
 
 ```bash
-python -m pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+
+For development and tests, install the declared developer requirements:
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+On a minimal Linux image where `venv` reports that `ensurepip` is unavailable,
+you can bootstrap pip only inside the project environment with the official
+PyPA fallback:
+
+```bash
+python3 -m venv --without-pip .venv
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+  https://bootstrap.pypa.io/get-pip.py | .venv/bin/python -
+.venv/bin/python -m pip install -r requirements-dev.txt
 ```
 
 PyInstaller is only needed when building a standalone binary:
 
 ```bash
-python -m pip install pyinstaller
-python -m PyInstaller kvist.spec
+.venv/bin/python -m pip install pyinstaller
+.venv/bin/python -m PyInstaller kvist.spec
 ```
 
 The resulting executable is `dist/kvist` on Linux or `dist/kvist.exe` on
@@ -105,7 +123,7 @@ Windows.
 From source:
 
 ```bash
-python main.py --workspace "<project_path>"
+.venv/bin/python main.py --workspace "<project_path>"
 ```
 
 With a built binary:
@@ -118,6 +136,9 @@ kvist --workspace "<project_path>"
 creates the directory if it does not exist, and then confines its file actions
 to that workspace. Absolute paths are the least surprising; relative paths are
 resolved from the directory where Kvist was started.
+
+On Windows, create the environment with `py -m venv .venv` and use
+`.venv\Scripts\python.exe` in place of `.venv/bin/python`.
 
 Example requests:
 
@@ -180,6 +201,11 @@ immediately. The command is rejected for built-in providers.
 Session names contain 1-64 lowercase letters, digits, hyphens, or underscores
 and must start with a letter or digit. Kvist shows the last few tasks when a
 session is loaded and keeps up to ten completed task summaries in its context.
+
+> **Known issue:** named sessions (`/session`, `/resume`, `/new`) are currently
+> unreliable — checkpoint state can be lost or restored incorrectly between
+> runs. Avoid relying on session persistence for important work until this is
+> fixed.
 
 ## How a request is processed
 
@@ -384,8 +410,9 @@ AGENT_FETCH_EXTRA_DOMAINS= # comma-separated extra fetch_url domains
 - The child `PATH` prepends existing project-local tool directories (`.venv/bin`,
   `venv/bin`, `node_modules/.bin`) inside the workspace, then validated
   `AGENT_TOOL_PATHS` entries, then trusted system directories. Each
-  `AGENT_TOOL_PATHS` entry must be an absolute, existing, non-world-writable
-  directory; it is read-only mounted into Bubblewrap. Your full `HOME`,
+  `AGENT_TOOL_PATHS` entry must be an absolute, existing,
+  non-group/world-writable narrow directory outside the workspace and
+  sensitive host trees; it is read-only mounted into Bubblewrap. Your full `HOME`,
   `.local/bin`, nvm, pyenv, and cargo directories are never added automatically.
   Standard Python virtualenvs work: a `.venv/bin/python` symlinking to a trusted
   system interpreter runs with the correct `sys.prefix` and site-packages.
@@ -486,7 +513,8 @@ default on Linux when a trusted Bubblewrap installation is available:
   verification, remerge-driver, and recursive-submodule helper paths disabled.
   Git global options before the subcommand fail closed; status/diff also fail
   closed on repository filter/include configuration.
-- Docker run/create/build/buildx/service forms with host mounts,
+- Docker daemon reads (including logs and inspect) require approval because
+  host daemon state can contain secrets. Docker run/create/build/buildx/service forms with host mounts,
   `--privileged`, insecure build entitlements, or host namespaces
   (`--network=host`, `--pid=host`, ...), host-port publication, image push, and
   nested destructive operations are graded dangerous for every role.
@@ -657,7 +685,19 @@ Packaging and integrations:
 Run the full test suite from the repository root:
 
 ```bash
-python -m pytest
+.venv/bin/python -m pytest -ra
+```
+
+Run the fast, credential-free smoke subset:
+
+```bash
+.venv/bin/python -m pytest -m offline_smoke -q
+```
+
+Run the static error gate:
+
+```bash
+.venv/bin/python -m ruff check .
 ```
 
 Prompt-specific tests ensure the runtime uses the top-level `prompts/` directory

@@ -1,11 +1,28 @@
 from __future__ import annotations
 
+import concurrent.futures
+import errno
+import multiprocessing
+import os
+import stat
+import threading
+from pathlib import Path
+
 import pytest
 
+import executor as executor_module
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError, SafeExecutor
 from terminal import TerminalError, TerminalResult
 
 
+def _append_source_in_process(workspace: str, prefix: str, count: int) -> None:
+    os.environ["AGENT_WRITE_APPROVAL"] = "0"
+    executor = SafeExecutor(Path(workspace))
+    for index in range(count):
+        executor._append_file("process-events.log", f"{prefix}-{index}\n")
+
+
+@pytest.mark.offline_smoke
 def test_executor_file_lifecycle_and_search(tmp_path):
     executor = SafeExecutor(tmp_path)
 
@@ -216,6 +233,97 @@ def test_symlink_escape_still_blocked(tmp_path):
         executor._read_file("outside_dir/secret.txt")
 
 
+def test_hardlink_to_external_inode_is_rejected_for_file_actions(tmp_path):
+    workspace = tmp_path / "ws"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    external = outside / "public.txt"
+    external.write_text("outside fixture\n", encoding="utf-8")
+    alias = workspace / "alias.txt"
+    os.link(external, alias)
+    executor = SafeExecutor(workspace)
+
+    with pytest.raises(ExecutorError, match="hard links"):
+        executor._read_file("alias.txt")
+    with pytest.raises(ExecutorError, match="hard links"):
+        executor._write_file("alias.txt", "replacement\n")
+    with pytest.raises(ExecutorError, match="hard links"):
+        executor._append_file("alias.txt", "append\n")
+    with pytest.raises(ExecutorError, match="hard links"):
+        executor._replace_in_file("alias.txt", "outside", "inside")
+    with pytest.raises(ExecutorError, match="hard links"):
+        executor._search_code("outside")
+
+    assert external.read_text(encoding="utf-8") == "outside fixture\n"
+
+
+def test_workspace_internal_hardlink_pair_stays_usable_for_file_actions(tmp_path):
+    # Hardlinked project trees are ordinary (``git clone --local``, ``cp -al``,
+    # pnpm stores); every name is inside the workspace so nothing is imported.
+    source = tmp_path / "pkg"
+    source.mkdir()
+    original = source / "index.js"
+    original.write_text("console.log('needle');\n", encoding="utf-8")
+    os.link(original, source / "index.alias.js")
+    executor = SafeExecutor(tmp_path)
+
+    assert "needle" in executor._read_file("pkg/index.alias.js").data["content"]
+    assert executor._search_code("needle").data["results"]
+    executor._write_file("pkg/index.alias.js", "console.log('replaced');\n")
+
+    # The write is atomic, so it replaces the name rather than the shared
+    # inode; what matters here is that it is permitted at all.
+    alias_text = (source / "index.alias.js").read_text(encoding="utf-8")
+    assert alias_text == "console.log('replaced');\n"
+
+
+def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
+    tmp_path,
+    monkeypatch,
+):
+    original = tmp_path / "data.txt"
+    original.write_text("fixture\n", encoding="utf-8")
+    os.link(original, tmp_path / "alias.txt")
+    unreadable = tmp_path / "temporarily-unreadable"
+    unreadable.mkdir()
+    executor = SafeExecutor(tmp_path)
+    original_iterdir = Path.iterdir
+
+    def deny_unreadable(path):
+        if path == unreadable:
+            raise PermissionError("fault-injected unreadable directory")
+        return original_iterdir(path)
+
+    monkeypatch.setattr(Path, "iterdir", deny_unreadable)
+
+    with pytest.raises(ExecutorError, match="hard links"):
+        executor._read_file("alias.txt")
+
+
+def test_search_code_revalidates_discovered_symlink_targets(tmp_path):
+    workspace = tmp_path / "ws"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    external = outside / "public.txt"
+    external.write_text("outside fixture\n", encoding="utf-8")
+    (workspace / "alias.txt").symlink_to(external)
+    executor = SafeExecutor(workspace)
+
+    with pytest.raises(ExecutorError, match="outside workspace"):
+        executor._search_code("outside")
+
+
+def test_search_code_rejects_alias_to_internal_or_env_file(tmp_path):
+    executor = SafeExecutor(tmp_path)
+    (tmp_path / ".env").write_text("SECRET_FIXTURE=1\n", encoding="utf-8")
+    (tmp_path / "env-alias").symlink_to(".env")
+
+    with pytest.raises(ExecutorError, match="env file"):
+        executor._search_code("SECRET_FIXTURE")
+
+
 # ── File overwrite approval gate (AGENT_WRITE_APPROVAL) ─────────────
 
 def test_overwrite_gate_denies_without_tty(tmp_path, monkeypatch):
@@ -275,6 +383,173 @@ def test_overwrite_gate_disabled_for_non_interactive_runs(tmp_path, monkeypatch)
     executor._write_file("app.py", "one\n")
     executor._write_file("app.py", "two\n")
     assert executor._read_file("app.py").data["content"] == "two\n"
+
+
+@pytest.mark.parametrize("operation", ["write", "append", "replace"])
+def test_interrupted_source_replace_preserves_previous_file(
+    tmp_path,
+    monkeypatch,
+    operation,
+):
+    executor = SafeExecutor(tmp_path)
+    executor._write_file("app.py", "generation one\n")
+    original_replace = executor_module.os.replace
+
+    def fail_target_replace(source, destination, *args, **kwargs):
+        if Path(destination).name == "app.py":
+            raise OSError(errno.ENOSPC, "fault-injected full disk")
+        return original_replace(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(executor_module.os, "replace", fail_target_replace)
+
+    with pytest.raises(ExecutorError, match="atomically replace"):
+        if operation == "write":
+            executor._write_file("app.py", "generation two\n")
+        elif operation == "append":
+            executor._append_file("app.py", "tail\n")
+        else:
+            executor._replace_in_file("app.py", "one", "two")
+
+    assert (tmp_path / "app.py").read_text(encoding="utf-8") == "generation one\n"
+    assert list(tmp_path.glob(".app.py.*.tmp")) == []
+
+
+def test_atomic_source_replace_preserves_existing_mode(tmp_path):
+    target = tmp_path / "tool.sh"
+    target.write_text("#!/bin/sh\necho old\n", encoding="utf-8")
+    target.chmod(0o755)
+
+    SafeExecutor(tmp_path)._write_file("tool.sh", "#!/bin/sh\necho new\n")
+
+    assert stat.S_IMODE(target.stat().st_mode) == 0o755
+
+
+def test_concurrent_source_appends_are_serializable(tmp_path):
+    target = tmp_path / "events.log"
+    target.write_text("", encoding="utf-8")
+    barrier = threading.Barrier(2)
+
+    def append_many(prefix):
+        executor = SafeExecutor(tmp_path)
+        barrier.wait(timeout=5)
+        for index in range(20):
+            executor._append_file("events.log", f"{prefix}-{index}\n")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(append_many, prefix) for prefix in ("a", "b")]
+        for future in futures:
+            future.result(timeout=20)
+
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 40
+    assert set(lines) == {
+        *(f"a-{index}" for index in range(20)),
+        *(f"b-{index}" for index in range(20)),
+    }
+
+
+def test_cross_process_source_appends_are_serializable(tmp_path):
+    target = tmp_path / "process-events.log"
+    target.write_text("", encoding="utf-8")
+    context = multiprocessing.get_context("spawn")
+    processes = [
+        context.Process(
+            target=_append_source_in_process,
+            args=(str(tmp_path), prefix, 12),
+        )
+        for prefix in ("a", "b")
+    ]
+
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=20)
+        assert process.exitcode == 0
+
+    lines = target.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 24
+    assert set(lines) == {
+        *(f"a-{index}" for index in range(12)),
+        *(f"b-{index}" for index in range(12)),
+    }
+
+
+def test_source_write_lock_cannot_follow_internal_symlink(tmp_path):
+    workspace = tmp_path / "workspace"
+    outside = tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    (workspace / ".kvist").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ExecutorError, match="write lock safely"):
+        SafeExecutor(workspace)._write_file("app.py", "fixture\n")
+
+    assert not (workspace / "app.py").exists()
+    assert list(outside.iterdir()) == []
+
+
+def test_atomic_source_write_detects_parent_symlink_swap(
+    tmp_path,
+    monkeypatch,
+):
+    workspace = tmp_path / "workspace"
+    source_dir = workspace / "src"
+    outside = tmp_path / "outside"
+    source_dir.mkdir(parents=True)
+    outside.mkdir()
+    executor = SafeExecutor(workspace)
+    original_validate = executor._validate_open_source_parent
+    calls = 0
+
+    def swap_before_final_validation(descriptor, parent):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            source_dir.rename(workspace / "moved-src")
+            source_dir.symlink_to(outside, target_is_directory=True)
+        return original_validate(descriptor, parent)
+
+    monkeypatch.setattr(
+        executor,
+        "_validate_open_source_parent",
+        swap_before_final_validation,
+    )
+
+    with pytest.raises(ExecutorError, match="directory changed"):
+        executor._write_file("src/app.py", "fixture\n")
+
+    assert not (outside / "app.py").exists()
+    assert list((workspace / "moved-src").glob(".*.tmp")) == []
+
+
+def test_atomic_source_write_preserves_concurrent_external_update(
+    tmp_path,
+    monkeypatch,
+):
+    target = tmp_path / "app.py"
+    target.write_text("original\n", encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+    original_validate = executor._validate_open_source_parent
+    calls = 0
+
+    def mutate_before_final_validation(descriptor, parent):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            target.write_text("concurrent update\n", encoding="utf-8")
+        return original_validate(descriptor, parent)
+
+    monkeypatch.setattr(
+        executor,
+        "_validate_open_source_parent",
+        mutate_before_final_validation,
+    )
+
+    with pytest.raises(ExecutorError, match="changed concurrently"):
+        executor._write_file("app.py", "agent update\n")
+
+    assert target.read_text(encoding="utf-8") == "concurrent update\n"
+    assert list(tmp_path.glob(".app.py.*.tmp")) == []
 
 
 # ── fetch_url domain allowlist extensions ────────────────────────────
