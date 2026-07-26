@@ -16,8 +16,10 @@ from prompt_toolkit.output import ColorDepth
 from rich.console import Console
 from rich.panel import Panel
 
+import banner
 from agent import AgentConfig, LocalAgent
 from executor import SafeExecutor
+from interactive_screen import InteractiveScreen
 from language_utils import choose_localized_text, detect_request_language
 from llm_clients import (
     create_llm_client,
@@ -251,6 +253,18 @@ def wizard_screen():
     finally:
         if use_alt:
             console.set_alt_screen(False)
+
+
+@contextmanager
+def paused_interactive_screen(screen: InteractiveScreen | None):
+    """Temporarily return terminal ownership to an existing Rich/input UI."""
+    if screen is not None:
+        screen.suspend()
+    try:
+        yield
+    finally:
+        if screen is not None:
+            screen.resume()
 
 
 def resolve_startup_provider(provider_override: str | None = None) -> str:
@@ -1297,6 +1311,11 @@ def main() -> None:
         required=True,
         help="Path to the project workspace directory.",
     )
+    cli.add_argument(
+        "--no-banner",
+        action="store_true",
+        help="Disable the live banner and use the plain terminal interface.",
+    )
     args = cli.parse_args()
 
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "50"))
@@ -1315,31 +1334,69 @@ def main() -> None:
             verbose=verbose,
             language_hint=session_language,
         )
-        # Wire HITL callbacks: pause/resume Live TUI during security prompts
-        executor.set_hitl_callbacks(
-            suspend_fn=agent._ui.stop_live,
-            resume_fn=agent._ui.start_live,
-        )
     except RuntimeError as error:
         print(str(error), file=sys.stderr)
         sys.exit(2)
 
     sync_strime_suggestion(config.provider, config.stream)
 
+    interactive_screen: InteractiveScreen | None = None
+    interactive_screen_error: str | None = None
+    if (
+        not args.no_banner
+        and banner.banner_available(console.width, console.height)
+    ):
+        candidate_screen = InteractiveScreen(session, config)
+        try:
+            candidate_screen.start()
+        except Exception as error:
+            candidate_screen.stop()
+            interactive_screen_error = str(error)
+        else:
+            interactive_screen = candidate_screen
+            agent._ui.attach_screen(interactive_screen)
+
+    if interactive_screen is not None:
+        executor.set_hitl_callbacks(
+            suspend_fn=interactive_screen.suspend,
+            resume_fn=interactive_screen.resume,
+        )
+    else:
+        executor.set_hitl_callbacks(
+            suspend_fn=agent._ui.stop_live,
+            resume_fn=agent._ui.start_live,
+        )
+
     # The whole interactive session runs on the alternate screen buffer, so
     # whatever was on the real terminal before startup (shell prompt, prior
     # scrollback) is left untouched and reappears exactly as it was once the
     # session ends — no destructive clearing of the user's own terminal.
-    use_session_screen = sys.stdin.isatty() and console.is_terminal
+    use_session_screen = (
+        interactive_screen is None
+        and sys.stdin.isatty()
+        and console.is_terminal
+    )
     if use_session_screen:
         console.set_alt_screen(True)
 
-    render_startup_banner(agent, config, max_steps, verbose, model_warnings)
+    if interactive_screen is None:
+        render_startup_banner(agent, config, max_steps, verbose, model_warnings)
+        if interactive_screen_error is not None:
+            console.print(
+                "[yellow]Live banner unavailable; using the plain interface: "
+                f"{interactive_screen_error}[/yellow]"
+            )
+    else:
+        for warning in model_warnings:
+            console.print(f"[yellow]{warning}[/yellow]")
 
     interrupted = False
     try:
         while True:
-            user_goal = multiline_input()
+            if interactive_screen is None:
+                user_goal = multiline_input()
+            else:
+                user_goal = interactive_screen.read_input()
             user_goal = normalize_slash_command(user_goal)
             if user_goal and not user_goal.startswith("/"):
                 session_language = detect_request_language(user_goal, fallback=session_language)
@@ -1405,7 +1462,7 @@ def main() -> None:
             if user_goal.lower() == "/provider":
                 previous_provider = config.provider
                 build_error: str | None = None
-                with wizard_screen():
+                with paused_interactive_screen(interactive_screen), wizard_screen():
                     selected_provider = choose_provider(previous_provider, verbose)
                     if selected_provider is not None and selected_provider != previous_provider:
                         try:
@@ -1430,16 +1487,28 @@ def main() -> None:
                     console.print(f"[red]{build_error}[/red]")
                     continue
 
-                executor.set_hitl_callbacks(
-                    suspend_fn=agent._ui.stop_live,
-                    resume_fn=agent._ui.start_live,
-                )
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                    agent._ui.attach_screen(interactive_screen)
+                    executor.set_hitl_callbacks(
+                        suspend_fn=interactive_screen.suspend,
+                        resume_fn=interactive_screen.resume,
+                    )
+                else:
+                    executor.set_hitl_callbacks(
+                        suspend_fn=agent._ui.stop_live,
+                        resume_fn=agent._ui.start_live,
+                    )
                 sync_strime_suggestion(config.provider, config.stream)
 
                 console.print(
                     f"[green]Provider changed to {provider_label(config.provider)}.[/green]"
                 )
-                print_runtime_banner(config, max_steps, verbose, model_warnings)
+                if interactive_screen is None:
+                    print_runtime_banner(config, max_steps, verbose, model_warnings)
+                else:
+                    for warning in model_warnings:
+                        console.print(f"[yellow]{warning}[/yellow]")
                 continue
 
             if user_goal.lower() == "/models":
@@ -1457,7 +1526,7 @@ def main() -> None:
 
                 build_error: str | None = None
                 validation_issues: list[str] = []
-                with wizard_screen():
+                with paused_interactive_screen(interactive_screen), wizard_screen():
                     selected_models = select_models_interactively(config, verbose)
                     if selected_models is not None:
                         available_credentials = load_available_credentials(
@@ -1500,10 +1569,18 @@ def main() -> None:
                     console.print(f"[red]{build_error}[/red]")
                     continue
 
-                executor.set_hitl_callbacks(
-                    suspend_fn=agent._ui.stop_live,
-                    resume_fn=agent._ui.start_live,
-                )
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                    agent._ui.attach_screen(interactive_screen)
+                    executor.set_hitl_callbacks(
+                        suspend_fn=interactive_screen.suspend,
+                        resume_fn=interactive_screen.resume,
+                    )
+                else:
+                    executor.set_hitl_callbacks(
+                        suspend_fn=agent._ui.stop_live,
+                        resume_fn=agent._ui.start_live,
+                    )
 
                 if is_custom_provider(config.provider):
                     name = extract_custom_provider_name(config.provider)
@@ -1513,7 +1590,11 @@ def main() -> None:
                 else:
                     save_models_for_provider(config.provider, selected_models)
                 console.print("[green]Models updated.[/green]")
-                print_runtime_banner(config, max_steps, verbose, model_warnings)
+                if interactive_screen is None:
+                    print_runtime_banner(config, max_steps, verbose, model_warnings)
+                else:
+                    for warning in model_warnings:
+                        console.print(f"[yellow]{warning}[/yellow]")
                 continue
 
             if user_goal.lower() == "/new":
@@ -1525,7 +1606,8 @@ def main() -> None:
                 if not hasattr(agent, "_list_sessions"):
                     console.print("[yellow]/session not available — restart the agent to load the latest code.[/yellow]")
                     continue
-                result = choose_session(agent, verbose)
+                with paused_interactive_screen(interactive_screen):
+                    result = choose_session(agent, verbose)
                 if result is None:
                     console.print("[yellow]Session switch cancelled.[/yellow]")
                 else:
@@ -1534,11 +1616,14 @@ def main() -> None:
 
             if user_goal.lower() == "/role":
                 saved_role = get_saved_role()
-                selected_role = choose_role(saved_role, verbose)
+                with paused_interactive_screen(interactive_screen):
+                    selected_role = choose_role(saved_role, verbose)
                 if selected_role is None:
                     console.print("[yellow]Role selection cancelled.[/yellow]")
                     continue
                 save_role_selection(selected_role)
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
                 display_role = selected_role if selected_role != "auto" else "auto (automatic detection)"
                 console.print(f"[green]Role set to: {display_role}[/green]")
                 continue
@@ -1612,7 +1697,9 @@ Support:
         agent.save_session()
         interrupted = True
     finally:
-        if use_session_screen:
+        if interactive_screen is not None:
+            interactive_screen.stop()
+        elif use_session_screen:
             console.set_alt_screen(False)
 
     render_exit_message(agent)

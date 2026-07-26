@@ -114,7 +114,6 @@ def _build_report_context(self, user_goal: str, summary: str, result: str, issue
 
 def _render_report(self, context: str) -> str:
     """Call the chat model to render a report from agent context. Streams markdown to console."""
-    from rich.live import Live
     from agent_model import _load_role_prompt, call_model, safe_extract_stream_delta, _create_json_completion
 
     report_prompt = _load_role_prompt("report")
@@ -133,7 +132,7 @@ def _render_report(self, context: str) -> str:
     chunks: list[str] = []
     last_update = __import__("time").monotonic()
 
-    with Live(self._ui.render_user_markdown(""), console=self._ui.console, refresh_per_second=15) as live:
+    with self._ui.live_markdown() as update_markdown:
         for chunk in stream:
             text = ""
             delta = safe_extract_stream_delta(chunk)
@@ -153,10 +152,10 @@ def _render_report(self, context: str) -> str:
                 chunks.append(text)
                 now = __import__("time").monotonic()
                 if now - last_update > 0.1:
-                    live.update(self._ui.render_user_markdown("".join(chunks)))
+                    update_markdown("".join(chunks))
                     last_update = now
 
-        live.update(self._ui.render_user_markdown("".join(chunks)))
+        update_markdown("".join(chunks))
 
     return "".join(chunks)
 

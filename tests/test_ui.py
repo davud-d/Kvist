@@ -9,6 +9,22 @@ import ui as ui_module
 from ui import AgentUI
 
 
+class _ScreenRecorder:
+    def __init__(self) -> None:
+        self.statuses = []
+        self.streams = []
+        self.commits = []
+
+    def set_status(self, content) -> None:
+        self.statuses.append(content)
+
+    def set_stream(self, content) -> None:
+        self.streams.append(content)
+
+    def commit_stream(self, content) -> None:
+        self.commits.append(content)
+
+
 def test_ui_basic_interface():
     """Test basic UI interface compatibility."""
     ui = AgentUI(verbose=False)
@@ -23,6 +39,32 @@ def test_ui_basic_interface():
     ui.print_error("error")
 
     assert ui.verbose is False
+
+
+def test_live_status_uses_attached_interactive_screen():
+    screen = _ScreenRecorder()
+    ui = AgentUI(verbose=False)
+    ui.attach_screen(screen)
+
+    ui.start_live()
+    ui.update_live(user_message="test", status="working", step=1)
+    ui.stop_live()
+
+    assert len(screen.statuses) == 3
+    assert screen.statuses[-1] is None
+
+
+def test_live_markdown_commits_attached_screen_once():
+    screen = _ScreenRecorder()
+    ui = AgentUI(verbose=False)
+    ui.attach_screen(screen)
+
+    with ui.live_markdown() as update:
+        update("partial")
+        update("final")
+
+    assert len(screen.streams) == 3  # Empty slot, partial, final.
+    assert len(screen.commits) == 1
 
 
 def test_print_user_markdown_accepts_markdown_text_without_crashing():

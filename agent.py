@@ -101,7 +101,6 @@ from system_context import current_os_context, current_shell_context, current_ti
 from ui import AgentUI
 from language_utils import detect_request_language
 from language_policy import resolve_response_language, response_language_name
-from rich.live import Live
 
 class LocalAgent:
     def __init__(
@@ -473,7 +472,7 @@ class LocalAgent:
         import time
         last_update = time.monotonic()
         
-        with Live(self._ui.render_user_markdown(""), console=self.console, refresh_per_second=15) as live:
+        with self._ui.live_markdown() as update_markdown:
             for chunk in stream:
                 text = ""
                 
@@ -503,10 +502,10 @@ class LocalAgent:
                     # Throttle rendering to ~10 FPS to prevent CPU choke
                     now = time.monotonic()
                     if now - last_update > 0.1:
-                        live.update(self._ui.render_user_markdown("".join(chunks)))
+                        update_markdown("".join(chunks))
                         last_update = now
 
             # Final update to guarantee the last parts are rendered
-            live.update(self._ui.render_user_markdown("".join(chunks)))
+            update_markdown("".join(chunks))
                     
         return "".join(chunks)

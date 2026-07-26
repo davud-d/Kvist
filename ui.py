@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import sys
 import time
+from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -38,8 +39,18 @@ class AgentUI:
         self.console = console or Console()
         self.verbose = verbose
         self._live: Live | None = None
+        self._screen: Any | None = None
         self._perf_logger = perf_logger
         self._spinner_cache: dict[tuple[str, str], Spinner] = {}
+
+    def attach_screen(self, screen: Any | None) -> None:
+        """Route transient agent output through a persistent TUI screen.
+
+        The screen intentionally stays duck-typed so ``AgentUI`` remains usable
+        without prompt_toolkit and by the legacy, non-banner startup path.
+        Passing ``None`` detaches the current screen.
+        """
+        self._screen = screen
 
     def start_live(self) -> None:
         if self.verbose or is_hitl_active():
@@ -54,6 +65,10 @@ class AgentUI:
             is_error=False,
         )
 
+        if self._screen is not None:
+            self._screen.set_status(initial)
+            return
+
         self._live = Live(
             initial,
             console=self.console,
@@ -63,6 +78,9 @@ class AgentUI:
         self._live.start()
 
     def stop_live(self) -> None:
+        if self._screen is not None:
+            self._screen.set_status(None)
+
         if self._live is None:
             return
 
@@ -101,7 +119,11 @@ class AgentUI:
         plan_step: str = "working",
         is_error: bool = False,
     ) -> None:
-        if self.verbose or self._live is None or is_hitl_active():
+        if (
+            self.verbose
+            or is_hitl_active()
+            or (self._screen is None and self._live is None)
+        ):
             return
 
         panel = self._render_live_panel(
@@ -113,13 +135,57 @@ class AgentUI:
             is_error=is_error,
         )
 
-        if self._perf_logger is not None:
+        if self._screen is not None:
+            if self._perf_logger is not None:
+                render_start = time.monotonic()
+                self._screen.set_status(panel)
+                render_duration_ms = (time.monotonic() - render_start) * 1000
+                self._perf_logger.log_render(render_duration_ms=render_duration_ms)
+            else:
+                self._screen.set_status(panel)
+        elif self._perf_logger is not None:
             render_start = time.monotonic()
+            assert self._live is not None
             self._live.update(panel, refresh=True)
             render_duration_ms = (time.monotonic() - render_start) * 1000
             self._perf_logger.log_render(render_duration_ms=render_duration_ms)
         else:
+            assert self._live is not None
             self._live.update(panel, refresh=True)
+
+    @contextmanager
+    def live_markdown(self) -> Iterator[Callable[[str], None]]:
+        """Expose one mutable Markdown entry for a streaming response.
+
+        A persistent screen keeps the entry in its stream slot while tokens
+        arrive, then commits that slot to the transcript exactly once.  The
+        legacy path deliberately retains Rich's existing ``Live`` behavior.
+        """
+        if self._screen is not None:
+            latest = ""
+
+            def update(message: str) -> None:
+                nonlocal latest
+                latest = message
+                self._screen.set_stream(self.render_user_markdown(message))
+
+            self._screen.set_stream(self.render_user_markdown(latest))
+            try:
+                yield update
+            finally:
+                self._screen.commit_stream(self.render_user_markdown(latest))
+            return
+
+        with Live(
+            self.render_user_markdown(""),
+            console=self.console,
+            refresh_per_second=15,
+        ) as live:
+
+            def update(message: str) -> None:
+                live.update(self.render_user_markdown(message))
+
+            yield update
 
     def print_plan(self, plan_info: Any) -> None:
         if not self.verbose:
