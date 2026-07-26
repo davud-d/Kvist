@@ -68,6 +68,12 @@ Demo UI/
 # Review-agent run logs (local scratch output)
 review-logs/
 
+# Local development metadata (kept locally, not tracked)
+/.agent/
+/.github/
+/.output.txt
+/CLAUDE.md
+
 # Other
 .mimocode/
 push.py
