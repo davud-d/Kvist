@@ -17,6 +17,9 @@ def test_cli_help_exits_before_terminal_and_provider_initialization(tmp_path):
     root = Path(__file__).resolve().parents[1]
     environment = os.environ.copy()
     environment["HOME"] = str(tmp_path)
+    environment.pop("FORCE_COLOR", None)
+    environment["NO_COLOR"] = "1"
+    environment["PYTHON_COLORS"] = "0"
 
     completed = subprocess.run(
         [sys.executable, str(root / "main.py"), "--help"],
