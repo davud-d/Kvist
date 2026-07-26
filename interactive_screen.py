@@ -24,7 +24,13 @@ if os.name != "nt":
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.filters import Condition, has_completions, has_focus
-from prompt_toolkit.formatted_text import ANSI, AnyFormattedText, to_formatted_text
+from prompt_toolkit.formatted_text import (
+    ANSI,
+    AnyFormattedText,
+    StyleAndTextTuples,
+    split_lines,
+    to_formatted_text,
+)
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.bindings.auto_suggest import (
     load_auto_suggest_bindings,
@@ -33,7 +39,12 @@ from prompt_toolkit.key_binding.key_bindings import merge_key_bindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import Dimension, Layout
 from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, Window
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.controls import (
+    BufferControl,
+    FormattedTextControl,
+    UIContent,
+    UIControl,
+)
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import AppendAutoSuggestion, BeforeInput
 from prompt_toolkit.layout.screen import Point
@@ -100,14 +111,19 @@ _OTHER_ESCAPE_RE = re.compile(r"\x1b(?!\[)(?:[()][0-2A-Z]|[@-_])")
 class _AnsiChunks:
     """Append-only ANSI storage with bounded list overhead and no large +=."""
 
-    __slots__ = ("_blocks", "_pending")
+    __slots__ = ("_blocks", "_pending", "_length")
 
     def __init__(self, value: str) -> None:
         self._blocks: list[str] = []
         self._pending: list[str] = [value]
+        self._length = len(value)
+
+    def __len__(self) -> int:
+        return self._length
 
     def append(self, value: str) -> None:
         self._pending.append(value)
+        self._length += len(value)
         if len(self._pending) >= _ANSI_CHUNK_BATCH:
             self._flush()
 
@@ -216,6 +232,73 @@ def _finish_pending_ansi(
         if value
         else ("", False, False)
     )
+
+
+def _extend_lines(
+    target: list[StyleAndTextTuples],
+    addition: list[StyleAndTextTuples],
+) -> None:
+    """Append split lines, joining across an entry's mid-line boundary.
+
+    Entries are cut where a write happened, not where a line ended, so the
+    first line of an addition continues the target's last line.
+    """
+    if not addition:
+        return
+    if not target:
+        target.extend(addition)
+        return
+    target[-1] = target[-1] + addition[0]
+    target.extend(addition[1:])
+
+
+def _banner_block(content: AnyFormattedText) -> list[StyleAndTextTuples]:
+    """Split banner fragments into lines the transcript can carry.
+
+    The trailing empty line is what makes transcript output start on its own
+    row instead of being joined onto the banner's bottom border.
+    """
+    fragments = list(to_formatted_text(content))
+    if not fragments:
+        return []
+    lines = list(split_lines(fragments))
+    lines.append([])
+    return lines
+
+
+class _TranscriptControl(UIControl):
+    """Transcript view that keeps its lines split between render passes.
+
+    ``FormattedTextControl`` re-splits its whole fragment list inside every
+    ``create_content`` call, before its own content cache is consulted, and
+    that call happens several times per frame.  The transcript is the one
+    control here whose content grows without bound, so it owns the split and
+    hands prompt_toolkit a ready line list instead.
+    """
+
+    def __init__(
+        self,
+        get_content: Callable[[], tuple[int, list[StyleAndTextTuples], Point]],
+    ) -> None:
+        self._get_content = get_content
+        self._content: UIContent | None = None
+        self._content_key: tuple[int, int, Point] | None = None
+
+    def create_content(self, width: int, height: int | None = None) -> UIContent:
+        generation, lines, cursor = self._get_content()
+        key = (generation, width, cursor)
+        if self._content is not None and self._content_key == key:
+            return self._content
+
+        content = UIContent(
+            get_line=lambda index: lines[index],
+            line_count=len(lines),
+            cursor_position=cursor,
+            show_cursor=False,
+        )
+        self._content_key = key
+        self._content = content
+        return content
 
 
 class _BinaryOutputProxy:
@@ -336,7 +419,15 @@ class InteractiveScreen:
         # fragments.  Adjacent stdout writes are coalesced so split SGR escape
         # sequences remain parseable.
         self._transcript_entries: list[tuple[str, Any]] = []
-        self._transcript_cache: list[tuple[str, str]] | None = None
+        self._transcript_line_cache: list[StyleAndTextTuples] | None = None
+        self._transcript_prefix_lines: list[StyleAndTextTuples] = []
+        self._transcript_prefix_entries = 0
+        self._last_entry_lines: list[StyleAndTextTuples] = []
+        self._last_entry_key: tuple[int, int] | None = None
+        self._banner_lines: list[StyleAndTextTuples] | None = None
+        self._banner_frame: Any = None
+        self._banner_line_count = 0
+        self._transcript_generation = 0
         self._transcript_plain_parts: list[str] = []
         self._transcript_plain_cache: str | None = ""
         self._transcript_chars = 0
@@ -348,7 +439,6 @@ class InteractiveScreen:
         self._ansi_pending_osc_escape = False
         self._follow_tail = True
         self._transcript_cursor_line = 0
-        self._transcript_render_cursor = Point(x=0, y=0)
 
         self._status: Any | None = None
         self._stream: Any | None = None
@@ -650,7 +740,7 @@ class InteractiveScreen:
                 self._append_transcript_plain_locked(plain)
                 self._transcript_storage_chars += len(plain)
                 self._trim_transcript_locked()
-                self._transcript_cache = None
+                self._invalidate_transcript_lines_locked()
                 if self._follow_tail:
                     self._transcript_cursor_line = (
                         self._last_transcript_line_locked()
@@ -769,7 +859,7 @@ class InteractiveScreen:
             self._append_transcript_plain_locked(plain)
             self._transcript_storage_chars += len(value)
             self._trim_transcript_locked()
-            self._transcript_cache = None
+            self._invalidate_transcript_lines_locked()
             if self._follow_tail:
                 self._transcript_cursor_line = self._last_transcript_line_locked()
         self.invalidate()
@@ -783,7 +873,7 @@ class InteractiveScreen:
             self._append_transcript_plain_locked(plain)
             self._transcript_storage_chars += len(plain)
             self._trim_transcript_locked()
-            self._transcript_cache = None
+            self._invalidate_transcript_lines_locked()
             if self._follow_tail:
                 self._transcript_cursor_line = self._last_transcript_line_locked()
         self.invalidate()
@@ -815,7 +905,7 @@ class InteractiveScreen:
         self._ansi_pending_stream = None
         self._ansi_pending_kind = None
         self._ansi_pending_osc_escape = False
-        self._transcript_cache = None
+        self._reset_transcript_lines_locked()
         last = self._last_transcript_line_locked()
         if self._follow_tail:
             self._transcript_cursor_line = last
@@ -825,41 +915,129 @@ class InteractiveScreen:
                 last,
             )
 
-    def _get_transcript(self) -> AnyFormattedText:
+    def _invalidate_transcript_lines_locked(self) -> None:
+        self._transcript_line_cache = None
+        self._transcript_generation += 1
+
+    def _reset_transcript_lines_locked(self) -> None:
+        self._transcript_prefix_lines = []
+        self._transcript_prefix_entries = 0
+        self._last_entry_lines = []
+        self._last_entry_key = None
+        self._invalidate_transcript_lines_locked()
+
+    @staticmethod
+    def _entry_lines(kind: str, value: Any) -> list[StyleAndTextTuples]:
+        if kind.startswith("ansi:"):
+            return list(split_lines(_ansi_formatted(_ansi_entry_text(value))))
+        return list(split_lines(value))
+
+    def _banner_is_visible(self) -> bool:
+        """True while the banner block is still on screen.
+
+        Before the first render there is no scroll position yet, and the
+        transcript starts at the top, so the banner is visible by definition.
+        """
+        window = self._transcript_window
+        render_info = window.render_info if window is not None else None
+        if render_info is None:
+            return True
+        # A hidden banner has no lines, so the top of the transcript is what
+        # decides whether it may come back after a resize.
+        return render_info.vertical_scroll < max(1, self._banner_line_count)
+
+    def _refresh_banner_lines_locked(self) -> bool:
+        """Re-render the banner block; return whether its lines changed.
+
+        The animation only advances while the block is on screen.  Scrolled
+        out of view it keeps its last frame, which costs nothing and picks the
+        loop back up wherever it stands once the user scrolls back up.
+        """
+        forced = self._banner_lines is None
+        if not forced and not self._banner_is_visible():
+            return False
+
+        content = self._get_banner() if self._show_banner() else []
+        if not forced and content is self._banner_frame:
+            return False
+
+        self._banner_frame = content
+        self._banner_lines = _banner_block(content)
+        self._banner_line_count = max(0, len(self._banner_lines) - 1)
+        return True
+
+    def _build_transcript_lines_locked(self) -> list[StyleAndTextTuples]:
+        """Split only what changed: every entry but the last is immutable."""
+        entries = self._transcript_entries
+        while self._transcript_prefix_entries < len(entries) - 1:
+            kind, value = entries[self._transcript_prefix_entries]
+            _extend_lines(
+                self._transcript_prefix_lines,
+                self._entry_lines(kind, value),
+            )
+            self._transcript_prefix_entries += 1
+
+        lines = list(self._banner_lines or [])
+        _extend_lines(lines, self._transcript_prefix_lines)
+        if entries:
+            _extend_lines(lines, self._last_entry_lines_locked())
+        return lines or [[]]
+
+    def _last_entry_lines_locked(self) -> list[StyleAndTextTuples]:
+        """Re-split the growing entry only when it actually grew."""
+        kind, value = self._transcript_entries[-1]
+        key = (id(value), len(value))
+        if self._last_entry_key != key:
+            self._last_entry_lines = self._entry_lines(kind, value)
+            self._last_entry_key = key
+        return self._last_entry_lines
+
+    def _transcript_content(
+        self,
+    ) -> tuple[int, list[StyleAndTextTuples], Point]:
+        """Return the transcript lines and the cursor belonging to them.
+
+        Returning both from one locked read is what keeps the rendered content
+        and the cursor position on the same snapshot.  The line list is never
+        mutated in place, so the caller may hold it without copying.
+        """
         with self._state_lock:
-            if self._transcript_cache is None:
-                result: list[tuple[str, str]] = []
-                for kind, value in self._transcript_entries:
-                    if kind.startswith("ansi:"):
-                        result.extend(
-                            _ansi_formatted(_ansi_entry_text(value))
-                        )
-                    else:
-                        result.extend(value)
-                self._transcript_cache = result
+            if self._refresh_banner_lines_locked():
+                self._invalidate_transcript_lines_locked()
+            if self._transcript_line_cache is None:
+                self._transcript_line_cache = (
+                    self._build_transcript_lines_locked()
+                )
             if self._follow_tail:
-                self._transcript_render_cursor = Point(
+                cursor = Point(
                     x=self._transcript_last_line_chars,
                     y=self._last_transcript_line_locked(),
                 )
             else:
-                self._transcript_render_cursor = Point(
-                    x=0,
-                    y=self._transcript_cursor_line,
-                )
-            return list(self._transcript_cache)
-
-    def _transcript_cursor(self) -> Point:
-        with self._state_lock:
-            return self._transcript_render_cursor
+                cursor = Point(x=0, y=self._transcript_cursor_line)
+            return (
+                self._transcript_generation,
+                self._transcript_line_cache,
+                cursor,
+            )
 
     def _last_transcript_line_locked(self) -> int:
-        return max(0, self._transcript_line_count)
+        return self._banner_line_count + max(0, self._transcript_line_count)
 
     def _page_size(self) -> int:
+        """One page measured in transcript lines, not in screen rows.
+
+        Scroll positions are line numbers, but the window wraps: a single long
+        answer paragraph can fill it on its own.  Stepping by the window height
+        would then jump over hundreds of lines instead of one screenful.
+        ``displayed_lines`` holds one entry per screen row, so the distinct
+        line numbers in it are what is actually on screen.
+        """
         window = self._transcript_window
         render_info = window.render_info if window is not None else None
-        return max(1, getattr(render_info, "window_height", 8) - 1)
+        if render_info is None:
+            return 8
+        return max(1, len(set(render_info.displayed_lines)) - 1)
 
     def _page_up(self) -> None:
         with self._state_lock:
@@ -922,21 +1100,7 @@ class InteractiveScreen:
                 self._terminal_width,
             )
 
-        header = ConditionalContainer(
-            Window(
-                FormattedTextControl(self._get_banner),
-                height=_BANNER_HEIGHT,
-                dont_extend_height=True,
-                always_hide_cursor=True,
-            ),
-            filter=Condition(self._show_banner),
-        )
-
-        transcript_control = FormattedTextControl(
-            self._get_transcript,
-            show_cursor=False,
-            get_cursor_position=self._transcript_cursor,
-        )
+        transcript_control = _TranscriptControl(self._transcript_content)
         transcript = Window(
             transcript_control,
             height=Dimension(min=1, weight=1),
@@ -997,7 +1161,6 @@ class InteractiveScreen:
         )
         root = HSplit(
             [
-                header,
                 transcript,
                 transient,
                 Window(height=1, char=" "),

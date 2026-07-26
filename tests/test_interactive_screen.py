@@ -72,6 +72,17 @@ def _rendered_text(runtime) -> str:
     return "\n".join(_rendered_lines(runtime))
 
 
+def _transcript_fragments(screen) -> list[tuple[str, str]]:
+    """Flatten the transcript lines below the banner into one fragment list."""
+    _, lines, _ = screen._transcript_content()
+    fragments: list[tuple[str, str]] = []
+    for index, line in enumerate(lines[screen._banner_line_count:]):
+        if index:
+            fragments.append(("", "\n"))
+        fragments.extend(line)
+    return fragments
+
+
 @pytest.fixture
 def screen_runtime(monkeypatch):
     monkeypatch.setattr(banner, "get_saved_role", lambda: "auto")
@@ -148,9 +159,10 @@ def test_slash_menu_opens_below_banner_at_minimum_height(screen_runtime):
         if "List all available slash commands" in line
     )
 
-    assert lines[0].startswith("╭")
-    assert lines[16].startswith("╰")
-    assert command_row > 16
+    # The banner has scrolled away with the output, so every row above the
+    # menu belongs to the transcript.
+    assert not any("▀" in line or "╭" in line for line in lines)
+    assert command_row > 0
     assert "Save the active session and exit Kvist" in _rendered_text(screen_runtime)
 
 
@@ -255,12 +267,13 @@ def test_dynamic_control_cursor_uses_same_snapshot_as_rendered_content(
     screen = screen_runtime.screen
     screen.suspend()
 
-    screen._get_transcript()
-    transcript_cursor = screen._transcript_cursor()
+    generation, lines, cursor = screen._transcript_content()
+    assert cursor.y == len(lines) - 1
+
     screen._append_formatted([("", "new transcript line\n")])
-    assert screen._transcript_cursor() == transcript_cursor
-    screen._get_transcript()
-    assert screen._transcript_cursor().y == 1
+    new_generation, new_lines, new_cursor = screen._transcript_content()
+    assert new_generation != generation
+    assert new_cursor.y == len(new_lines) - 1 == cursor.y + 1
 
     screen.set_status("one line")
     screen._get_transient()
@@ -279,10 +292,109 @@ def test_split_ansi_does_not_corrupt_plain_cursor_state(screen_runtime):
     screen._append_output("31mcolored\x1b[0m\n", "stdout")
 
     assert screen._transcript_plain == "colored\n"
-    assert screen._last_transcript_line_locked() == 1
-    fragments = screen._get_transcript()
+    assert screen._last_transcript_line_locked() == screen._banner_line_count + 1
+    fragments = _transcript_fragments(screen)
     assert "".join(fragment[1] for fragment in fragments) == "colored\n"
     assert fragments[0][0] == "ansired"
+
+
+def _fill_past_the_banner(screen) -> None:
+    screen._append_output(
+        "".join(f"scrolling line {index:03d}\n" for index in range(200)),
+        "stdout",
+    )
+
+
+def _scroll_to_top(runtime) -> None:
+    """Page up until the transcript reports the top.
+
+    ``_page_up`` steps from the last rendered scroll position, so the calls
+    have to be spaced by at least one refresh interval.
+    """
+    deadline = time.monotonic() + 4.0
+    while time.monotonic() < deadline:
+        if _transcript_scroll(runtime) == 0:
+            return
+        runtime.screen._page_up()
+        time.sleep(0.05)
+    pytest.fail("transcript did not scroll back to the top")
+
+
+def test_banner_scrolls_away_with_output_and_comes_back(screen_runtime):
+    screen = screen_runtime.screen
+    _fill_past_the_banner(screen)
+
+    _wait_until(lambda: "scrolling line 199" in _rendered_text(screen_runtime))
+    assert not any("▀" in line for line in _rendered_lines(screen_runtime))
+
+    _scroll_to_top(screen_runtime)
+
+    _wait_until(
+        lambda: any("▀" in line for line in _rendered_lines(screen_runtime))
+    )
+    assert _rendered_lines(screen_runtime)[0].startswith("╭")
+
+
+def test_banner_animation_runs_only_while_the_banner_is_on_screen(
+    screen_runtime,
+):
+    screen = screen_runtime.screen
+    _fill_past_the_banner(screen)
+    _wait_until(lambda: "scrolling line 199" in _rendered_text(screen_runtime))
+
+    scrolled_away = screen._transcript_content()[0]
+    time.sleep(0.15)
+    assert screen._transcript_content()[0] == scrolled_away
+
+    _scroll_to_top(screen_runtime)
+    _wait_until(
+        lambda: any("▀" in line for line in _rendered_lines(screen_runtime))
+    )
+
+    at_top = screen._transcript_content()[0]
+    _wait_until(lambda: screen._transcript_content()[0] != at_top)
+
+
+def _transcript_scroll(runtime):
+    render_info = runtime.screen._transcript_window.render_info
+    return None if render_info is None else render_info.vertical_scroll
+
+
+def test_page_up_steps_by_visible_lines_not_screen_rows(screen_runtime):
+    screen = screen_runtime.screen
+    # Long enough that every logical line wraps across several screen rows.
+    long_line = "wrapped " * 60
+    for index in range(60):
+        screen._append_output(f"{index:03d} {long_line}\n", "stdout")
+
+    _wait_until(lambda: (_transcript_scroll(screen_runtime) or 0) > 0)
+    before = _transcript_scroll(screen_runtime)
+
+    screen._page_up()
+    _wait_until(lambda: _transcript_scroll(screen_runtime) != before)
+    after = _transcript_scroll(screen_runtime)
+
+    assert after < before
+    # A page is the handful of wrapped lines actually on screen, not the ~20
+    # screen rows the transcript window is tall.
+    assert before - after <= 10
+
+
+def test_transcript_lines_merge_across_entry_boundaries(screen_runtime):
+    screen = screen_runtime.screen
+    screen.suspend()
+
+    # Entries are cut where a write happened, not where a line ended.
+    screen._append_output("first ", "stdout")
+    screen._append_formatted([("", "second\n")])
+    screen._append_output("third\n", "stdout")
+
+    _, lines, _ = screen._transcript_content()
+    below_banner = lines[screen._banner_line_count:]
+    text = "\n".join("".join(item[1] for item in line) for line in below_banner)
+
+    assert text == "first second\nthird\n"
+    assert screen._transcript_prefix_entries == 2
 
 
 def test_transcript_memory_and_entry_count_are_bounded(
@@ -316,7 +428,9 @@ def test_split_osc_is_hidden_without_delaying_following_text(screen_runtime):
     screen._append_output("\\visible text\n", "stdout")
 
     assert screen._transcript_plain == "visible text\n"
-    rendered = "".join(fragment[1] for fragment in screen._get_transcript())
+    rendered = "".join(
+        fragment[1] for fragment in _transcript_fragments(screen)
+    )
     assert rendered == "visible text\n"
 
 
