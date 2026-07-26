@@ -79,7 +79,11 @@ def test_completion_requirements_and_final_answer(agent_factory):
     agent._refresh_completion_requirements(force_enforcement=True)
     assert agent._state.completion_blockers
     assert "write_file" in agent._state.required_next_actions
-    assert agent._required_followup_error(make_command("read_file", {"path": "x"}))
+    # Read-only inspection is deliberately allowed through a corrective block
+    # (corrective_read_budget), so the model can read a file before patching it.
+    # Completion is still blocked.
+    assert agent._required_followup_error(make_command("read_file", {"path": "x"})) is None
+    assert agent._required_followup_error(make_command("final_answer", {"message": "done"}))
 
     agent._state.files_changed = ["app.py"]
     agent._state.verification_evidence = ["run_shell: python -m pytest"]

@@ -80,6 +80,15 @@ class RunState:
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)
+    # Actions rejected by the corrective guard. Kept separate from
+    # seen_actions so that a refused action never consumes the repeat budget
+    # of an action the runtime itself declined to execute.
+    blocked_actions: dict[str, int] = field(default_factory=dict)
+    # Read-only inspections still allowed while a corrective action is
+    # required. Prevents the guard from forcing a blind mutation.
+    corrective_read_budget: int = 0
+    # Set when git_diff reveals a mass deletion. Blocks completion.
+    destructive_diff: str = ""
     completed_plan_steps: set[str] = field(default_factory=set)
     stalled_reasons: list[str] = field(default_factory=list)
     step_logs: list[dict[str, Any]] = field(default_factory=list)

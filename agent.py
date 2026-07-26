@@ -71,6 +71,7 @@ from agent_runtime import (
     push_unique,
     record_error,
     record_user_message,
+    register_blocked_action,
     register_feedback,
     register_final_answer,
     register_language_error,
@@ -343,6 +344,7 @@ class LocalAgent:
     _action_signature = action_signature
     _record_user_message = record_user_message
     _required_followup_error = required_followup_error
+    _register_blocked_action = register_blocked_action
     _set_required_next_actions = set_required_next_actions
     _update_completed_plan_steps = update_completed_plan_steps
     _push_unique = push_unique

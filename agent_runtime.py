@@ -22,6 +22,14 @@ _READ_ONLY_ACTIONS = {
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
+# Read-only inspections still permitted while a corrective action is required.
+_CORRECTIVE_READ_BUDGET = 3
+
+# git_diff hunks removing at least this many lines, while adding proportionally
+# far fewer, are treated as accidental destruction rather than a fix.
+_DESTRUCTIVE_DIFF_MIN_REMOVED = 30
+_DESTRUCTIVE_DIFF_KEEP_RATIO = 0.5
+
 _REPORT_ARTIFACT_PATTERNS = {
     "report.txt",
     "final_report.txt",
@@ -310,9 +318,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             followup_error = self._required_followup_error(command)
             if followup_error:
-                blocked_signature = self._action_signature(command)
-                blocked_count = self._state.seen_actions.get(blocked_signature, 0) + 1
-                self._state.seen_actions[blocked_signature] = blocked_count
+                blocked_count = self._register_blocked_action(command)
                 self._state.stagnation_count += 1
                 self._state.pending_instruction = followup_error
                 if blocked_count >= 2:
@@ -843,7 +849,9 @@ def register_feedback(
             )
         elif (
             command.action.type == "replace_in_file"
-            and error_text == "old_text fragment not found in file."
+            # executor raises this without a trailing period; comparing against
+            # the punctuated form silently disabled this recovery path.
+            and error_text.rstrip(". ") == "old_text fragment not found in file"
         ):
             failed_path = str(command.action.args.get("path", "")).strip()
             if failed_path:
@@ -1516,6 +1524,29 @@ def _normalize_semantic_token(token: str) -> str:
     return token
 
 
+def _diff_change_counts(diff_text: str) -> tuple[int, int]:
+    """Count removed and added content lines in a unified diff.
+
+    File headers (---/+++) are not content and are skipped.
+    """
+    removed = 0
+    added = 0
+    for line in diff_text.splitlines():
+        if line.startswith("---") or line.startswith("+++"):
+            continue
+        if line.startswith("-"):
+            removed += 1
+        elif line.startswith("+"):
+            added += 1
+    return removed, added
+
+
+def _is_destructive_diff(removed: int, added: int) -> bool:
+    if removed < _DESTRUCTIVE_DIFF_MIN_REMOVED:
+        return False
+    return added < removed * _DESTRUCTIVE_DIFF_KEEP_RATIO
+
+
 def update_verification_evidence(self, command: AgentCommand, data: dict[str, Any]) -> None:
     action_type = command.action.type
     evidence: str | None = None
@@ -1537,6 +1568,18 @@ def update_verification_evidence(self, command: AgentCommand, data: dict[str, An
         evidence = action_type
         # git_diff counts as verification, git_status does NOT
         if action_type == "git_diff":
+            removed, added = _diff_change_counts(str(data.get("stdout", "")))
+            if _is_destructive_diff(removed, added):
+                # The diff is the evidence. A diff that deletes the file is
+                # evidence of destruction, not of a fix, so it must not clear
+                # the verification requirement or count as evidence at all.
+                self._state.destructive_diff = (
+                    f"git_diff shows {removed} lines removed and {added} added. "
+                    "This is file destruction, not a targeted fix."
+                )
+                return
+            # A clean diff after a destructive one means the file was restored.
+            self._state.destructive_diff = ""
             cleared_paths = list(self._state.pending_verification_paths)
             self._state.pending_verification_paths.clear()
     elif action_type == "run_shell":
@@ -1615,10 +1658,36 @@ def refresh_completion_requirements(self, force_enforcement: bool = False) -> No
         self._state.required_next_actions = []
 
 
+def register_blocked_action(self, command: AgentCommand) -> int:
+    """Record an action the corrective guard refused to execute.
+
+    Deliberately kept out of ``seen_actions``. That dict drives the repeat
+    budget in ``is_repeat_blocked``, and charging a refusal against it means
+    the runtime penalises the model for an action the runtime itself declined
+    to run. In run_001 this exhausted the budget for ``read_file main.py``
+    before verification, so the verification reads were rejected as repeats.
+
+    Returns the number of times this exact action has been blocked.
+    """
+    signature = self._action_signature(command)
+    count = self._state.blocked_actions.get(signature, 0) + 1
+    self._state.blocked_actions[signature] = count
+    return count
+
+
 def required_followup_error(self, command: AgentCommand) -> str | None:
     required_actions = set(self._state.required_next_actions)
     if not required_actions or command.action.type in required_actions:
         return None
+
+    # A read-only inspection is never a stall. Blocking it here is what forces
+    # the model to mutate a file it has never read: the runtime demands a write
+    # while the system prompt demands a prior read, and the runtime wins. The
+    # budget keeps the escape hatch from turning into an inspect loop.
+    if command.action.type in _READ_ONLY_ACTIONS and self._state.corrective_read_budget > 0:
+        self._state.corrective_read_budget -= 1
+        return None
+
     return _build_required_action_error(
         self._state.task_language,
         self._state.required_next_actions,
@@ -1672,6 +1741,7 @@ def _is_read_only_violation(self, command: AgentCommand) -> bool:
 def set_required_next_actions(self, actions: set[str] | list[str], message: str) -> None:
     self._state.required_next_actions = sorted(set(actions))
     self._state.pending_instruction = message
+    self._state.corrective_read_budget = _CORRECTIVE_READ_BUDGET
 
 
 def _matches_response_language(text: str, language: str) -> bool:
@@ -1956,6 +2026,20 @@ def _missing_required_artifacts(self) -> list[str]:
 def _compute_completion_status(self) -> tuple[list[str], list[str]]:
     blockers: list[str] = []
     required_actions: set[str] = set()
+
+    if self._state.destructive_diff:
+        blockers.append(
+            self._state.destructive_diff
+            + " Do not report success. Either restore the file from git "
+            "(git checkout -- <path>) and verify with a clean git_diff, or stop and "
+            "tell the user exactly what was deleted."
+        )
+        # Two exits, both allowed: restore the file, or report honestly. Leaving
+        # only mutation here would repeat the trap that caused the destruction.
+        required_actions.update({
+            "git_status", "git_diff", "read_file", "run_shell",
+            "final_answer", "report_to_user",
+        })
     missing = _missing_required_artifacts(self)
     remaining_plan_steps = _remaining_plan_steps(self)
     actionable_remaining_plan_steps = [

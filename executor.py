@@ -38,6 +38,16 @@ UNTRUSTED_CONTENT_NOTICE = (
 
 FileWriteIdentity = tuple[int, int, int, int, int, int]
 
+# ── Destructive overwrite guard ────────────────────────────────────
+# A full write_file over an existing file is legitimate for small files and
+# for generated output, but on a real source file it is almost always the
+# model replacing code it never read with an invented stub. Files below
+# _DESTRUCTIVE_MIN_LINES are exempt (too small to matter); above it, a write
+# that keeps less than _DESTRUCTIVE_KEEP_RATIO of the original line count is
+# rejected before the human-in-the-loop gate is ever reached.
+_DESTRUCTIVE_MIN_LINES = 40
+_DESTRUCTIVE_KEEP_RATIO = 0.5
+
 
 class _HTMLTextExtractor(HTMLParser):
     def __init__(self) -> None:
@@ -687,6 +697,30 @@ class SafeExecutor:
         raw = os.getenv("AGENT_FETCH_EXTRA_DOMAINS", "")
         return {item.strip().lower() for item in raw.split(",") if item.strip()}
 
+    def _guard_destructive_overwrite(self, path: str, old_text: str, new_text: str) -> None:
+        """Reject a write that would destroy most of an existing file.
+
+        This runs BEFORE _confirm_overwrite on purpose. The HITL gate delegates
+        the judgement to a human staring at a truncated diff, which is not a
+        safeguard against a 350-line deletion. This check is unconditional and
+        cannot be waived by AGENT_WRITE_APPROVAL.
+        """
+        if not old_text:
+            return
+        old_lines = len(old_text.splitlines())
+        new_lines = len(new_text.splitlines())
+        if old_lines < _DESTRUCTIVE_MIN_LINES:
+            return
+        if new_lines >= old_lines * _DESTRUCTIVE_KEEP_RATIO:
+            return
+        raise ExecutorError(
+            f"Refusing to overwrite '{path}': the write would shrink it from "
+            f"{old_lines} to {new_lines} lines ({old_lines - new_lines} removed). "
+            "Full overwrite of an existing source file is not allowed. Read the file "
+            "and use replace_in_file for a targeted patch. If a complete rewrite is "
+            "genuinely required, tell the user and let them confirm it out of band."
+        )
+
     def _confirm_overwrite(self, path: str, old_text: str, new_text: str) -> None:
         """Diff-preview HITL gate for overwriting an existing file.
 
@@ -1012,6 +1046,7 @@ class SafeExecutor:
         if target.is_file():
             old_text = self._read_existing_text_for_diff(target)
             self._require_unchanged_file(target, expected_identity)
+            self._guard_destructive_overwrite(path, old_text, content)
             self._confirm_overwrite(path, old_text, content)
         self._atomic_replace_text(target, content, expected_identity)
 
@@ -1116,6 +1151,7 @@ class SafeExecutor:
                 f"File is too large for the replace operation "
                 f"({updated_size} bytes, limit {self.max_writable_file_bytes})"
             )
+        self._guard_destructive_overwrite(path, original_text, updated_text)
         self._confirm_overwrite(path, original_text, updated_text)
         self._atomic_replace_text(target, updated_text, expected_identity)
 
