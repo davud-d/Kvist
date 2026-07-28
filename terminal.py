@@ -2397,10 +2397,13 @@ class TerminalExecutor:
             ) from error
         if not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode):
             raise HardDenyError("Hard security denial: child HOME is not a real directory")
-        if info.st_mode & 0o077:
-            raise HardDenyError("Hard security denial: child HOME permissions are not private")
-        if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
-            raise HardDenyError("Hard security denial: child HOME has the wrong owner")
+        if os.name == "nt":
+            _validate_windows_private_directory(self._child_home)
+        else:
+            if info.st_mode & 0o077:
+                raise HardDenyError("Hard security denial: child HOME permissions are not private")
+            if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+                raise HardDenyError("Hard security denial: child HOME has the wrong owner")
         if entries:
             raise HardDenyError("Hard security denial: child HOME is not empty")
 
@@ -3422,6 +3425,59 @@ def _verify_venv_python_launcher(
     except OSError:
         return None
     return (cfg_identity, cfg_digest)
+
+
+_WINDOWS_BROAD_ACCESS_SID_STRINGS = (
+    "S-1-1-0",       # Everyone
+    "S-1-5-11",      # Authenticated Users
+    "S-1-5-32-545",  # BUILTIN\\Users
+)
+
+
+def _validate_windows_private_directory(path: Path) -> None:
+    """Verify a directory's real Windows ACL denies broad-access principals.
+
+    Windows has no POSIX permission bits: os.stat().st_mode is synthetic and
+    chmod() does not restrict access the way it does on POSIX, so privacy has
+    to be checked against the actual DACL instead of st_mode.
+    """
+    try:
+        import ntsecuritycon
+        import pywintypes
+        import win32security
+    except ImportError as error:
+        raise HardDenyError(
+            f"Hard security denial: cannot verify child HOME privacy on Windows: {error}"
+        ) from error
+
+    try:
+        descriptor = win32security.GetFileSecurity(
+            str(path), win32security.DACL_SECURITY_INFORMATION
+        )
+        dacl = descriptor.GetSecurityDescriptorDacl()
+    except pywintypes.error as error:
+        raise HardDenyError(
+            f"Hard security denial: cannot read child HOME ACL: {error}"
+        ) from error
+
+    if dacl is None:
+        raise HardDenyError(
+            "Hard security denial: child HOME has no DACL (unrestricted access)"
+        )
+
+    broad_sids = [
+        win32security.ConvertStringSidToSid(text)
+        for text in _WINDOWS_BROAD_ACCESS_SID_STRINGS
+    ]
+    for index in range(dacl.GetAceCount()):
+        (ace_type, _ace_flags), mask, sid = dacl.GetAce(index)
+        if ace_type != ntsecuritycon.ACCESS_ALLOWED_ACE_TYPE or mask == 0:
+            continue
+        if any(win32security.EqualSid(sid, broad_sid) for broad_sid in broad_sids):
+            raise HardDenyError(
+                "Hard security denial: child HOME permissions are not private "
+                "(broad-access principal granted)"
+            )
 
 
 def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:
