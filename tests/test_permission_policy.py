@@ -7,6 +7,7 @@ import threading
 
 import pytest
 
+from tests.conftest import requires_posix
 from permission_policy import (
     PermissionPolicy,
     append_allow_rule,
@@ -128,6 +129,7 @@ def test_append_allow_rule_creates_and_deduplicates(tmp_path):
     assert policy.allow == ("git push", "python *")
 
 
+@requires_posix
 def test_permission_policy_is_private_and_recovers_previous_generation(
     tmp_path,
 ):
@@ -234,6 +236,7 @@ def test_deny_rule_applies_to_canonical_path_qualified_executable(tmp_path, monk
     assert requested == []
 
 
+@requires_posix
 def test_ask_rule_applies_to_canonical_path_qualified_executable(tmp_path, monkeypatch):
     write_policy(tmp_path, ask=["cat *"])
     executor = TerminalExecutor(tmp_path)
@@ -283,6 +286,7 @@ def test_allow_rule_cannot_override_find_action_guard(tmp_path, monkeypatch):
     assert requested == []
 
 
+@requires_posix
 def test_pipe_requires_allow_for_every_segment(tmp_path, monkeypatch):
     write_policy(tmp_path, allow=["cat *"])
     executor = TerminalExecutor(tmp_path)
@@ -294,6 +298,7 @@ def test_pipe_requires_allow_for_every_segment(tmp_path, monkeypatch):
     assert result.denied is True
 
 
+@requires_posix
 def test_missing_policy_file_keeps_current_behavior(tmp_path, monkeypatch):
     """Backward compatibility: no policy file → plain risk gradation."""
     executor = TerminalExecutor(tmp_path)
@@ -390,6 +395,7 @@ def test_auto_fallback_policy_tamper_cannot_suppress_per_run_approval(
     assert all("no Bubblewrap" in reason for reason in requested)
 
 
+@requires_posix
 def test_dangerous_allow_rule_never_silences_or_persists(tmp_path, monkeypatch):
     write_policy(tmp_path, allow=["docker run *"])
     executor = TerminalExecutor(tmp_path)
@@ -408,6 +414,7 @@ def test_dangerous_allow_rule_never_silences_or_persists(tmp_path, monkeypatch):
     assert result.denied is True
 
 
+@requires_posix
 def test_hard_denied_pipeline_segment_never_prompts(tmp_path, monkeypatch):
     write_policy(tmp_path, allow=["cat *", "find *"])
     executor = TerminalExecutor(tmp_path)

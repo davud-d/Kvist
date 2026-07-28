@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import terminal as terminal_module
 from sandbox import SandboxMode
 from terminal import HardDenyError, TerminalExecutor
@@ -234,6 +236,7 @@ def test_linked_worktree_common_config_mutation_invalidates_approval(tmp_path, m
         executor.run(["git", "tag", "v1"], cwd="linked")
 
 
+@requires_posix
 def test_workspace_safe_name_executable_cannot_inherit_project_allow(tmp_path, monkeypatch):
     sentinel = tmp_path / "sentinel"
     local_ls = tmp_path / "ls"
@@ -309,6 +312,7 @@ def test_untrusted_executable_mutation_invalidates_approval(tmp_path, monkeypatc
         executor.run(["./ls"])
 
 
+@requires_posix
 def test_parent_path_cannot_shadow_bare_system_executable(tmp_path, monkeypatch):
     sentinel = tmp_path / "sentinel"
     fake_ls = tmp_path / "ls"
@@ -642,6 +646,7 @@ def test_credential_bearing_argv_is_hard_denied(tmp_path):
         )
 
 
+@requires_posix
 def test_child_home_is_private_empty_and_bound_across_approval(tmp_path, monkeypatch):
     script = tmp_path / "safe.py"
     script.write_text("print('fixture')\n", encoding="utf-8")
@@ -826,6 +831,7 @@ def test_relative_directory_symlink_cannot_expand_find_outside_workspace(
         )
 
 
+@requires_posix
 def test_workspace_internal_hardlink_pair_stays_usable(tmp_path):
     # Every name of the inode is inside the workspace, so nothing external can
     # be imported through the alias and the argument must remain executable.
@@ -879,6 +885,7 @@ def test_unresolvable_symlink_argument_fails_closed(tmp_path):
         TerminalExecutor(tmp_path)._validate(["cat", "loop-a"])
 
 
+@requires_posix
 def test_unresolvable_home_argument_fails_closed(tmp_path):
     with pytest.raises(HardDenyError, match="cannot resolve command argument"):
         TerminalExecutor(tmp_path)._validate(
@@ -886,6 +893,7 @@ def test_unresolvable_home_argument_fails_closed(tmp_path):
         )
 
 
+@requires_posix
 def test_input_symlink_resolving_inside_workspace_remains_usable(tmp_path):
     (tmp_path / "real.txt").write_text("fixture\n", encoding="utf-8")
     (tmp_path / "inside-link").symlink_to("real.txt")
@@ -1058,6 +1066,7 @@ def test_selected_execution_input_mutation_invalidates_approval(
         executor.run(command)
 
 
+@requires_posix
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 def test_git_read_operations_do_not_launch_repository_helpers_or_index_hooks(
     tmp_path, monkeypatch

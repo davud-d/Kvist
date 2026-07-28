@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,6 +15,12 @@ from protocol import Action, AgentCommand
 from terminal import (
     _controlled_child_path,
     _is_trusted_system_executable,
+)
+
+requires_posix = pytest.mark.skipif(
+    os.name != "posix",
+    reason="POSIX-specific behavior (permission bits, Unix-only commands, "
+    "process groups, symlinks) not exercised on Windows",
 )
 
 

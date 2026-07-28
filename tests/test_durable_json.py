@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import durable_json
 from durable_json import (
     JsonStorageCorruptError,
@@ -39,6 +41,7 @@ def _increment_in_process(path: str, boundary: str, count: int) -> None:
         )
 
 
+@requires_posix
 def test_roundtrip_creates_private_directories_and_file(tmp_path):
     path = tmp_path / "private" / "nested" / "state.json"
     payload = {"message": "Привет 🌲", "items": [1, 2, 3]}
@@ -117,6 +120,9 @@ def test_json_directory_listing_rejects_unsafe_entries(
     directory = tmp_path / "sessions"
     directory.mkdir()
     unsafe = directory / "unsafe.json"
+
+    if unsafe_kind == "hardlink" and os.name != "posix":
+        pytest.skip("hardlink nlink-based detection is POSIX-specific")
 
     if unsafe_kind == "symlink":
         outside = tmp_path / "outside.json"

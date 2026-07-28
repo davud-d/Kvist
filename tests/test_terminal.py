@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
 from rich.text import Text
+
+from tests.conftest import requires_posix
 
 import terminal as terminal_module
 from command_policy import CommandAssessment, RiskLevel
@@ -101,6 +104,7 @@ def test_hitl_panel_renders_untrusted_argv_as_literal_text(monkeypatch):
 
 # ── Pipe segment validation ─────────────────────────────────────────
 
+@requires_posix
 def test_pipe_segments_each_validated_against_allowlist(tmp_path):
     """`allowed | forbidden` must not smuggle binaries past the allowlist."""
     executor = TerminalExecutor(tmp_path)
@@ -114,6 +118,7 @@ def test_pipe_segments_each_validated_against_allowlist(tmp_path):
         executor._validate(["cat", "file.txt", "|", "git", "reset"])
 
 
+@requires_posix
 def test_pipe_with_allowed_segments_passes_validation(tmp_path):
     executor = TerminalExecutor(tmp_path)
     executor._validate(["cat", "file.txt", "|", "grep", "needle"])
@@ -164,6 +169,7 @@ def test_run_uses_command_policy_and_denies_on_refusal(tmp_path, monkeypatch):
     assert result.returncode == -1
 
 
+@requires_posix
 def test_run_executes_safe_command_without_approval(tmp_path, monkeypatch):
     executor = TerminalExecutor(tmp_path)
 
@@ -317,12 +323,14 @@ def test_find_action_predicates_rejected(tmp_path, command):
         executor._validate(command)
 
 
+@requires_posix
 def test_find_pure_search_passes_validation(tmp_path):
     executor = TerminalExecutor(tmp_path)
     executor._validate(["find", ".", "-name", "*.py"])
     executor._validate(["find", ".", "-type", "f", "-mtime", "-1"])
 
 
+@requires_posix
 def test_find_pure_search_runs_without_approval(tmp_path, monkeypatch):
     executor = TerminalExecutor(tmp_path)
 
@@ -374,6 +382,8 @@ def test_ripgrep_explicit_regular_file_passes_validation(tmp_path):
     ],
 )
 def test_secret_paths_rejected_for_read_commands(tmp_path, command):
+    if command[0] == "find" and os.name != "posix":
+        pytest.skip("find has OS-specific pure-search validation ahead of the secret-path guard")
     executor = TerminalExecutor(tmp_path)
     with pytest.raises(TerminalError, match="secret files"):
         executor._validate(command)
@@ -388,6 +398,7 @@ def test_secret_paths_rejected_for_read_commands(tmp_path, command):
         ["cat", "requirements.txt"],
     ],
 )
+@requires_posix
 def test_non_secret_paths_pass_validation(tmp_path, command):
     executor = TerminalExecutor(tmp_path)
     executor._validate(command)
@@ -412,6 +423,7 @@ def test_awk_getline_with_pipe_rejected(tmp_path):
         executor._validate(["awk", '{"id" | getline line; print line}'])
 
 
+@requires_posix
 def test_awk_plain_program_passes_validation(tmp_path):
     executor = TerminalExecutor(tmp_path)
     executor._validate(["awk", "{print $1}", "file.txt"])
@@ -502,6 +514,7 @@ def test_sed_execute_write_and_inplace_rejected(tmp_path, command):
         executor._validate(command)
 
 
+@requires_posix
 def test_sed_read_only_usage_passes_validation(tmp_path):
     executor = TerminalExecutor(tmp_path)
     executor._validate(["sed", "-n", "1,10p", "file.txt"])
@@ -624,6 +637,7 @@ def test_indirect_execution_and_malformed_argv_are_hard_denied(tmp_path, command
         (["git", "stash", "list"], True),
     ],
 )
+@requires_posix
 def test_git_spawn_argv_disables_implicit_hooks_and_helpers(
     tmp_path, monkeypatch, command, needs_diff_guards
 ):
@@ -788,6 +802,7 @@ def test_resource_limits_env_overrides(monkeypatch):
     assert limits.nproc == 128
 
 
+@requires_posix
 def test_unix_resource_limits_set_nproc(monkeypatch):
     import resource
 

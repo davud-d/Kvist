@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import stat
 
+from tests.conftest import requires_posix
+
 import performance_logger
 from performance_logger import PerfLogger
 
@@ -14,6 +16,7 @@ def test_perf_logger_is_noop_when_disabled(tmp_path):
     assert not (tmp_path / ".kvist").exists()
 
 
+@requires_posix
 def test_perf_logger_writes_jsonl_when_enabled(tmp_path, monkeypatch):
     monkeypatch.setattr(performance_logger, "DEBUG_LOGGING", True)
     logger = PerfLogger(tmp_path)

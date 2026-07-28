@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import terminal as terminal_module
 from sandbox import resolve_bubblewrap_path, SandboxMode
 from secret_paths import UnsafeSecretPathError, enumerate_secret_targets
@@ -185,6 +187,7 @@ def test_secret_symlink_loop_raises_unsafe(tmp_path):
         enumerate_secret_targets(tmp_path)
 
 
+@requires_posix
 def test_secret_symlink_loop_is_hard_denied_end_to_end(tmp_path, monkeypatch):
     (tmp_path / "a").symlink_to("b")
     (tmp_path / "b").symlink_to("a")
@@ -396,6 +399,7 @@ def test_venv_python3_symlink_to_sh_denied(tmp_path, monkeypatch):
     assert not (tmp_path / "marker").exists()
 
 
+@requires_posix
 def test_workspace_path_cat_alias_to_bash_requires_approval_not_silent_allow(tmp_path, monkeypatch):
     """A bare 'cat' token resolved via the controlled project-toolchain PATH
     (.venv/bin prepended) onto a Bash alias must not silently execute: the
@@ -414,6 +418,7 @@ def test_workspace_path_cat_alias_to_bash_requires_approval_not_silent_allow(tmp
     assert not (tmp_path / "marker").exists()
 
 
+@requires_posix
 def test_executable_binding_records_requested_and_effective_identity(tmp_path):
     vb = _venv_bin(tmp_path)
     (vb / "cat").symlink_to("/usr/bin/bash")
@@ -432,6 +437,7 @@ def test_executable_binding_records_requested_and_effective_identity(tmp_path):
     assert binding.venv_launcher is False
 
 
+@requires_posix
 def test_executable_binding_records_matching_system_identity(tmp_path):
     ex = TerminalExecutor(tmp_path, timeout=5)
 

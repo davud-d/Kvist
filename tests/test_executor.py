@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import executor as executor_module
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError, SafeExecutor
 from terminal import TerminalError, TerminalResult
@@ -414,6 +416,7 @@ def test_interrupted_source_replace_preserves_previous_file(
     assert list(tmp_path.glob(".app.py.*.tmp")) == []
 
 
+@requires_posix
 def test_atomic_source_replace_preserves_existing_mode(tmp_path):
     target = tmp_path / "tool.sh"
     target.write_text("#!/bin/sh\necho old\n", encoding="utf-8")
@@ -488,6 +491,7 @@ def test_source_write_lock_cannot_follow_internal_symlink(tmp_path):
     assert list(outside.iterdir()) == []
 
 
+@requires_posix
 def test_atomic_source_write_detects_parent_symlink_swap(
     tmp_path,
     monkeypatch,
@@ -522,6 +526,7 @@ def test_atomic_source_write_detects_parent_symlink_swap(
     assert list((workspace / "moved-src").glob(".*.tmp")) == []
 
 
+@requires_posix
 def test_atomic_source_write_preserves_concurrent_external_update(
     tmp_path,
     monkeypatch,

@@ -8,6 +8,8 @@ import threading
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import durable_json
 import user_config
 
@@ -20,6 +22,7 @@ def test_load_and_save_user_config(tmp_path):
     assert user_config.load_user_config(tmp_path / "missing.json") == {}
 
 
+@requires_posix
 def test_user_config_file_is_owner_only(tmp_path):
     path = tmp_path / "config.json"
 

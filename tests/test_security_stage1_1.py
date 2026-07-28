@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import terminal as terminal_module
 from process_tree import (
     ProcessSupervisionError,
@@ -375,6 +377,7 @@ def _run_pt(script: str, marker: Path, timeout: float):
     )
 
 
+@requires_posix
 def test_same_session_descendant_killed_on_normal_completion_without_cgroup(
     tmp_path,
 ):
@@ -408,6 +411,7 @@ def test_same_session_descendant_killed_on_normal_completion_without_cgroup(
         _cleanup(descendant_pid)
 
 
+@requires_posix
 def test_same_session_descendant_killed_on_timeout_without_cgroup(tmp_path):
     marker = tmp_path / "gpid-no-cgroup-timeout"
     body = (
@@ -463,6 +467,7 @@ def test_required_cgroup_disappearance_fails_before_spawn(tmp_path, monkeypatch)
     assert spawned == []
 
 
+@requires_posix
 def test_required_cgroup_cleanup_failure_is_reported_after_reader_cleanup(
     tmp_path,
     monkeypatch,
@@ -504,6 +509,7 @@ def test_required_cgroup_cleanup_failure_is_reported_after_reader_cleanup(
     )
 
 
+@requires_posix
 def test_detached_pipe_holder_does_not_leak_reader_threads_without_cgroup(
     tmp_path,
 ):
@@ -541,6 +547,7 @@ def test_detached_pipe_holder_does_not_leak_reader_threads_without_cgroup(
         _cleanup(descendant_pid)
 
 
+@requires_posix
 def test_setsid_descendant_is_tracked_on_timeout_without_cgroup(tmp_path):
     marker = tmp_path / "setsid-no-cgroup-timeout"
     body = (
@@ -672,21 +679,25 @@ def _run_out(script: str, limit: int, timeout: float = 5):
     )
 
 
+@requires_posix
 def test_output_below_limit_is_complete():
     r = _run_out("import sys; sys.stdout.write('C'*100)", 50_000)
     assert len(r.stdout) == 100 and not r.stdout_truncated
 
 
+@requires_posix
 def test_output_exactly_at_limit_not_truncated():
     r = _run_out("import sys; sys.stdout.write('B'*50000)", 50_000)
     assert len(r.stdout) == 50_000 and not r.stdout_truncated
 
 
+@requires_posix
 def test_output_above_limit_is_bounded():
     r = _run_out("import sys; sys.stdout.write('A'*500000)", 50_000)
     assert len(r.stdout) == 50_000 and r.stdout_truncated
 
 
+@requires_posix
 def test_endless_output_stays_bounded_and_times_out():
     import resource
 
@@ -698,6 +709,7 @@ def test_endless_output_stays_bounded_and_times_out():
     assert rss1 - rss0 < 50_000  # parent memory did not scale with total output (KB)
 
 
+@requires_posix
 def test_both_streams_bounded_with_non_utf8():
     r = _run_out(
         "import os\nos.write(1, b'\\xff'*40000)\nos.write(2, b'\\x80'*40000)\n", 10_000
@@ -757,6 +769,7 @@ def test_shebang_external_interpreter_is_denied(tmp_path, monkeypatch):
         ex.run(["./run"])
 
 
+@requires_posix
 def test_shebang_system_interpreter_is_attested_and_runs(tmp_path, monkeypatch):
     _write_policy(tmp_path, ["*"])
     script = tmp_path / "hello.sh"
@@ -786,6 +799,7 @@ def test_shebang_interpreter_mutation_invalidates_context(tmp_path):
 
 # ─────────────────────── project PATH / venv / toolchains ────────────────────
 
+@requires_posix
 def test_controlled_path_prepends_project_tool_dirs(tmp_path):
     (tmp_path / ".venv" / "bin").mkdir(parents=True)
     (tmp_path / "node_modules" / ".bin").mkdir(parents=True)
@@ -795,12 +809,14 @@ def test_controlled_path_prepends_project_tool_dirs(tmp_path):
     assert path.index(str(tmp_path / ".venv" / "bin")) < path.index("/usr/bin")
 
 
+@requires_posix
 def test_controlled_path_ignores_absent_dirs(tmp_path):
     path = _controlled_child_path(tmp_path).split(os.pathsep)
     assert str(tmp_path / ".venv" / "bin") not in path
     assert "/usr/bin" in path or "/bin" in path
 
 
+@requires_posix
 def test_external_tool_paths_validated(tmp_path, monkeypatch):
     good = tmp_path / "tools"
     good.mkdir()
@@ -815,6 +831,7 @@ def test_external_tool_paths_validated(tmp_path, monkeypatch):
     assert all(p.is_absolute() and p.is_dir() for p in resolved)
 
 
+@requires_posix
 def test_external_tool_paths_reject_group_writable_and_broad_mounts(
     tmp_path,
     monkeypatch,
@@ -908,6 +925,7 @@ def test_real_venv_runs_and_imports_local_fixture(tmp_path, monkeypatch):
     assert "home_secret True" not in result.stdout  # host HOME not visible
 
 
+@requires_posix
 def test_tool_path_mount_is_added_to_bwrap(tmp_path):
     workspace = tmp_path / "workspace"
     workspace.mkdir()

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import sandbox
 import terminal as terminal_module
 from permission_policy import policy_file_path
@@ -160,6 +162,7 @@ def test_wrap_command_rejects_cwd_outside_workspace(tmp_path):
         )
 
 
+@requires_posix
 def test_optional_runtime_mounts_only_added_when_present(tmp_path, monkeypatch):
     original_exists = Path.exists
 

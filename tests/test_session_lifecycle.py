@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 import durable_json
 from durable_json import JsonStorageError
 
@@ -135,6 +137,7 @@ def test_large_unicode_session_roundtrip_preserves_user_content(agent_factory):
     assert restored._last_response_language == "ru"
 
 
+@requires_posix
 def test_missing_storage_directories_are_created_privately(agent_factory):
     agent = agent_factory()
     agent._session_history = [{"goal": "persist"}]

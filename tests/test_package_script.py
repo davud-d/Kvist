@@ -27,6 +27,11 @@ def test_create_source_archive_contains_only_committed_tree(tmp_path):
         check=True,
     )
     subprocess.run(
+        ["git", "config", "core.autocrlf", "false"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
         ["git", "config", "user.email", "archive-test@local.invalid"],
         cwd=repository,
         check=True,
