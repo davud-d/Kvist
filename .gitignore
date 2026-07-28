@@ -70,9 +70,7 @@ review-logs/
 
 # Local development metadata (kept locally, not tracked)
 /.agent/
-/.github/
 /.output.txt
-/CLAUDE.md
 
 # Other
 .mimocode/
