@@ -21,6 +21,9 @@ def test_action_model_uses_current_agent_role_prompt():
         def _select_action_model_for_run(self):
             return "fast"
 
+        def _prefer_smart_model(self):
+            return False
+        
         def _call_model(self, model, system_prompt, user_prompt):
             captured["model"] = model
             captured["system_prompt"] = system_prompt
@@ -84,7 +87,8 @@ def test_planner_uses_planner_prompt_not_role_prompt():
 
         def _parse_json_dict(self, raw):
             return json.loads(raw)
-
+        def _is_complex_goal(self, goal):
+            return False
     create_plan(Agent(), "test task")
 
     assert captured["system_prompt"] == PLANNER_PROMPT

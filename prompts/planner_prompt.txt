@@ -140,7 +140,6 @@ complexity="simple" if:
 - the task is about listing, searching, or inspecting without changes
 - the task touches one file or one small module
 - a small script needs to be created
-- a specific error needs to be fixed
 - the task does not require architecture analysis
 - the task is short and has a single clear goal
 
@@ -154,9 +153,11 @@ complexity="complex" if:
 - the task requires Linux and Windows compatibility
 - the task requires work with dependencies, packaging, builds, or CI
 - the task is longer than 180 characters and contains several requirements
+- the task is a bug report: it describes wrong behaviour that must first be located in unfamiliar code
 
 If you doubt between simple and complex, choose simple by default.
 Do not set complex out of fear.
+This tiebreak does not apply to bug reports: an unlocated bug is complex.
 
 RULES FOR plan
 

@@ -247,6 +247,17 @@ def _load_role_prompt(role: str) -> str:
 
 
 def call_action_model(self, prompt: str) -> str:
+    # The model is pinned once per run, so the escalation conditions inside
+    # _prefer_smart_model (errors, parse failures, stagnation) could never fire
+    # after the first step. Escalate once, never downgrade.
+    if (
+        self._state.selected_action_role != "smart"
+        and self.config.smart_model
+        and self._prefer_smart_model()
+    ):
+        self._state.selected_action_role = "smart"
+        self._state.selected_action_model = self.config.smart_model
+
     preferred_model = str(getattr(self._state, "selected_action_model", "")).strip()
     if not preferred_model:
         preferred_model = self._select_action_model_for_run()

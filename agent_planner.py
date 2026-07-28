@@ -59,6 +59,11 @@ def create_plan(self, user_goal: str) -> PlanInfo:
             risks = []
         if complexity not in {"simple", "complex"}:
             complexity = "complex" if self._is_complex_goal(user_goal) else "simple"
+        elif complexity == "simple" and self._is_complex_goal(user_goal):
+            # The planner runs on fast_model and its "simple" verdict pins the
+            # entire run to fast_model. Never let it downgrade a goal the
+            # deterministic heuristic already flagged as complex.
+            complexity = "complex"
 
         return PlanInfo(
             goal=str(data.get("goal", user_goal)).strip() or user_goal,

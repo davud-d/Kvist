@@ -18,6 +18,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from change_journal import record_baseline
 from durable_json import JsonStorageError, exclusive_storage_lock
 from env_utils import read_float_env, read_int_env
 from protocol import AgentCommand
@@ -1024,6 +1025,15 @@ class SafeExecutor:
                 except OSError:
                     pass
 
+    def _record_change_baseline(self, target: Path, existed: bool, old_text: str | None) -> None:
+        relative_path = str(target.relative_to(self.workspace))
+        record_baseline(
+            self.workspace,
+            relative_path=relative_path,
+            existed=existed,
+            content=old_text if existed else None,
+        )
+
     def _write_file(self, path: str, content: str) -> ExecutionResult:
         try:
             with exclusive_storage_lock(
@@ -1043,12 +1053,15 @@ class SafeExecutor:
                 f"({self.max_file_size_bytes} bytes)"
             )
         expected_identity = self._file_write_identity(target)
-        if target.is_file():
+        existed = target.is_file()
+        old_text = None
+        if existed:
             old_text = self._read_existing_text_for_diff(target)
             self._require_unchanged_file(target, expected_identity)
             self._guard_destructive_overwrite(path, old_text, content)
             self._confirm_overwrite(path, old_text, content)
         self._atomic_replace_text(target, content, expected_identity)
+        self._record_change_baseline(target, existed, old_text)
 
         return ExecutionResult(
             ok=True,
@@ -1072,8 +1085,9 @@ class SafeExecutor:
     def _append_file_locked(self, path: str, content: str) -> ExecutionResult:
         target = self._guard_env_file_access(path)
         expected_identity = self._file_write_identity(target)
+        existed = target.is_file()
         old_text = ""
-        if target.is_file():
+        if existed:
             old_text = self._read_existing_text_for_diff(target)
             self._require_unchanged_file(target, expected_identity)
         updated_text = old_text + content
@@ -1084,9 +1098,10 @@ class SafeExecutor:
                 f"({len(updated_bytes)} bytes, limit "
                 f"{self.max_writable_file_bytes})"
             )
-        if target.is_file() and content:
+        if existed and content:
             self._confirm_overwrite(path, old_text, old_text + content)
         self._atomic_replace_text(target, updated_text, expected_identity)
+        self._record_change_baseline(target, existed, old_text if existed else None)
 
         return ExecutionResult(
             ok=True,
@@ -1154,6 +1169,7 @@ class SafeExecutor:
         self._guard_destructive_overwrite(path, original_text, updated_text)
         self._confirm_overwrite(path, original_text, updated_text)
         self._atomic_replace_text(target, updated_text, expected_identity)
+        self._record_change_baseline(target, True, original_text)
 
         return ExecutionResult(
             ok=True,

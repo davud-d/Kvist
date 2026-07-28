@@ -854,6 +854,21 @@ def choose_role(current_role: str | None, verbose: bool) -> str | None:
     return selected
 
 
+def confirm_revert(file_count: int, verbose: bool) -> bool:
+    """Ask the user to confirm a workspace revert. Returns True if confirmed."""
+    ui = AgentUI(console=console, verbose=verbose)
+    confirmed = ui.choose_option(
+        title=f"Revert {file_count} file(s) to their pre-session state?",
+        options=[
+            {"value": "no", "label": "No, cancel"},
+            {"value": "yes", "label": "Yes, revert"},
+        ],
+        current_value="no",
+        help_text="Enter — confirm, Esc — cancel",
+    )
+    return confirmed == "yes"
+
+
 def choose_models(provider: str, current_models: dict[str, str], verbose: bool) -> dict[str, str] | None:
     ui = AgentUI(console=console, verbose=verbose)
     options = get_model_options(provider)
@@ -1844,6 +1859,44 @@ def main() -> None:
             if user_goal.lower() == "/new":
                 agent.new_session()
                 console.print("[green]Session reset — fresh start.[/green]")
+                continue
+
+            if user_goal.lower() == "/changes":
+                from change_journal import build_diff_report
+
+                report = build_diff_report(agent.executor.workspace)
+                console.print(Panel(
+                    Text(report),
+                    title="Changes since last reset",
+                    border_style="bright_cyan",
+                ))
+                continue
+
+            if user_goal.lower() == "/revert":
+                from change_journal import load_baseline, revert_workspace
+
+                baseline = load_baseline(agent.executor.workspace)
+                if not baseline:
+                    console.print("[yellow]Nothing to revert — no tracked changes.[/yellow]")
+                    continue
+
+                console.print(
+                    _display_text(
+                        f"This will restore {len(baseline)} file(s) to their state "
+                        "before the agent's first change and cannot be undone.",
+                        "yellow",
+                    )
+                )
+                with paused_interactive_screen(interactive_screen):
+                    confirmed = confirm_revert(len(baseline), verbose)
+                if not confirmed:
+                    console.print("[yellow]Revert cancelled.[/yellow]")
+                    continue
+
+                reverted = revert_workspace(agent.executor.workspace)
+                for item in reverted:
+                    console.print(f"  [dim]{item.action}:[/dim] {item.path}")
+                console.print(_display_text(f"Reverted {len(reverted)} file(s).", "green"))
                 continue
 
             if user_goal.lower() == "/session":
