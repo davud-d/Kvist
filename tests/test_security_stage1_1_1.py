@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 import pytest
@@ -445,9 +444,9 @@ def test_executable_binding_records_matching_system_identity(tmp_path):
     assert binding.identity_matches is True
 
 
-def test_executable_binding_records_verified_venv_launcher(tmp_path):
+def test_executable_binding_records_verified_venv_launcher(tmp_path, trusted_python_path):
     vb = _venv_bin(tmp_path)
-    real_python = Path(os.path.realpath(sys.executable))
+    real_python = trusted_python_path
     (vb / "python").symlink_to(real_python)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     ex = TerminalExecutor(tmp_path, timeout=5)
@@ -487,12 +486,11 @@ def test_executable_symlink_chain_ending_in_bash_is_denied(tmp_path, monkeypatch
     assert not (tmp_path / "marker").exists()
 
 
-def test_confirmation_callback_cannot_mutate_symlink_to_bash(tmp_path, monkeypatch):
+def test_confirmation_callback_cannot_mutate_symlink_to_bash(tmp_path, monkeypatch, trusted_python_path):
     """A legitimate venv launcher approved by HITL must not be swappable for
     Bash between approval and spawn."""
     vb = _venv_bin(tmp_path)
-    real_py = os.path.realpath(sys.executable)
-    (vb / "python").symlink_to(real_py)
+    (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "script.py").write_text("print('ok')\n", encoding="utf-8")
     _write_policy(tmp_path, [])  # no allow rule: risk assessment path is exercised
@@ -536,10 +534,9 @@ def test_fake_pyvenv_cfg_does_not_authorize_non_python_target(tmp_path, monkeypa
     assert not (tmp_path / "marker").exists()
 
 
-def test_valid_venv_python_launcher_still_works(tmp_path, monkeypatch):
+def test_valid_venv_python_launcher_still_works(tmp_path, monkeypatch, trusted_python_path):
     vb = _venv_bin(tmp_path)
-    real_py = os.path.realpath(sys.executable)
-    (vb / "python").symlink_to(real_py)
+    (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("print('VENV_OK')", encoding="utf-8")
     _write_policy(tmp_path, ["*"])
@@ -549,11 +546,10 @@ def test_valid_venv_python_launcher_still_works(tmp_path, monkeypatch):
     assert "VENV_OK" in result.stdout
 
 
-def test_valid_venv_dir_python3_still_works(tmp_path, monkeypatch):
+def test_valid_venv_dir_python3_still_works(tmp_path, monkeypatch, trusted_python_path):
     vb = tmp_path / "venv" / "bin"
     vb.mkdir(parents=True)
-    real_py = os.path.realpath(sys.executable)
-    (vb / "python3").symlink_to(real_py)
+    (vb / "python3").symlink_to(trusted_python_path)
     (tmp_path / "venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("print('VENV_OK')", encoding="utf-8")
     _write_policy(tmp_path, ["*"])
@@ -564,10 +560,9 @@ def test_valid_venv_dir_python3_still_works(tmp_path, monkeypatch):
 
 
 @requires_bwrap
-def test_valid_venv_preserves_sys_prefix(tmp_path, monkeypatch):
+def test_valid_venv_preserves_sys_prefix(tmp_path, monkeypatch, trusted_python_path):
     vb = _venv_bin(tmp_path)
-    real_py = os.path.realpath(sys.executable)
-    (vb / "python").symlink_to(real_py)
+    (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("import sys; print('prefix', sys.prefix)", encoding="utf-8")
     ex = _bwrap_executor(tmp_path, monkeypatch)
@@ -576,10 +571,9 @@ def test_valid_venv_preserves_sys_prefix(tmp_path, monkeypatch):
     assert str(tmp_path / ".venv") in result.stdout
 
 
-def test_pyvenv_cfg_mutation_invalidates_approval(tmp_path, monkeypatch):
+def test_pyvenv_cfg_mutation_invalidates_approval(tmp_path, monkeypatch, trusted_python_path):
     vb = _venv_bin(tmp_path)
-    real_py = os.path.realpath(sys.executable)
-    (vb / "python").symlink_to(real_py)
+    (vb / "python").symlink_to(trusted_python_path)
     cfg = tmp_path / ".venv" / "pyvenv.cfg"
     cfg.write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "script.py").write_text("print('ok')\n", encoding="utf-8")
@@ -604,10 +598,9 @@ def test_pyvenv_cfg_mutation_invalidates_approval(tmp_path, monkeypatch):
     assert approvals
 
 
-def test_launcher_chain_mutation_invalidates_approval(tmp_path, monkeypatch):
+def test_launcher_chain_mutation_invalidates_approval(tmp_path, monkeypatch, trusted_python_path):
     vb = _venv_bin(tmp_path)
-    real_py = os.path.realpath(sys.executable)
-    (vb / "python").symlink_to(real_py)
+    (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "script.py").write_text("print('ok')\n", encoding="utf-8")
     _write_policy(tmp_path, [])

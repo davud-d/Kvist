@@ -848,11 +848,11 @@ def test_external_tool_paths_reject_group_writable_and_broad_mounts(
     assert resolved == (safe_external.resolve(),)
 
 
-def test_venv_symlink_to_system_python_is_permitted(tmp_path, monkeypatch):
+def test_venv_symlink_to_system_python_is_permitted(tmp_path, monkeypatch, trusted_python_path):
     _write_policy(tmp_path, ["*"])
     vb = tmp_path / ".venv" / "bin"
     vb.mkdir(parents=True)
-    (vb / "python").symlink_to(os.path.realpath(sys.executable))
+    (vb / "python").symlink_to(trusted_python_path)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "hi.py").write_text("import sys; print('prefix', sys.prefix)", encoding="utf-8")
     ex = TerminalExecutor(tmp_path, timeout=10)

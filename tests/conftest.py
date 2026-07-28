@@ -107,9 +107,7 @@ def _disable_write_approval_gate(monkeypatch):
     monkeypatch.setenv("AGENT_SANDBOX_NET", "deny")
 
 
-@pytest.fixture
-def trusted_python_name(tmp_path):
-    """Return a Python command whose resolved binary passes terminal trust checks."""
+def _find_trusted_system_python(tmp_path) -> tuple[str, Path] | None:
     controlled_path = _controlled_child_path(tmp_path)
     for name in ("python3", "python", "py"):
         found = shutil.which(name, path=controlled_path)
@@ -121,8 +119,34 @@ def trusted_python_name(tmp_path):
         except OSError:
             continue
         if _is_trusted_system_executable(lookup, resolved):
-            return name
-    pytest.skip("no trusted system Python executable is available")
+            return name, resolved
+    return None
+
+
+@pytest.fixture
+def trusted_python_name(tmp_path):
+    """Return a Python command whose resolved binary passes terminal trust checks."""
+    found = _find_trusted_system_python(tmp_path)
+    if found is None:
+        pytest.skip("no trusted system Python executable is available")
+    name, _resolved = found
+    return name
+
+
+@pytest.fixture
+def trusted_python_path(tmp_path):
+    """Return the resolved path of a trusted-root system Python executable.
+
+    Unlike ``trusted_python_name`` (a bare command for PATH lookup), this is
+    the real target a venv launcher symlink must point at — CI runners that
+    install Python outside the trusted system roots (e.g. hostedtoolcache)
+    have no such binary, so tests depending on this fixture skip there.
+    """
+    found = _find_trusted_system_python(tmp_path)
+    if found is None:
+        pytest.skip("no trusted system Python executable is available")
+    _name, resolved = found
+    return resolved
 
 
 @pytest.fixture
