@@ -132,22 +132,36 @@ def _print_model_row(label: str, model: str) -> None:
 
 
 def slash_completion_is_active() -> bool:
-    return has_slash_command_completion(session.default_buffer.text)
+    return has_slash_command_completion(_get_session().default_buffer.text)
 
 
-session = PromptSession(
-    history=InMemoryHistory(),
-    completer=SlashCommandCompleter(),
-    complete_while_typing=Condition(slash_completion_is_active),
-    complete_style=CompleteStyle.COLUMN,
-    # One row for the raised input plus one row per command below it.
-    reserve_space_for_menu=SLASH_COMMAND_MENU_HEIGHT + 1,
-    auto_suggest=slash_command_auto_suggest,
-    key_bindings=SLASH_COMMAND_KEY_BINDINGS,
-    lexer=SLASH_COMMAND_LEXER,
-    style=SLASH_COMMAND_STYLE,
-    color_depth=ColorDepth.TRUE_COLOR,
-)
+_session: PromptSession | None = None
+
+
+def _get_session() -> PromptSession:
+    """Build the interactive PromptSession lazily.
+
+    Constructing it at import time calls prompt_toolkit's console detection,
+    which raises on hosts with no attached console (e.g. headless CI runners
+    importing this module for its other symbols) — so it's built on first
+    real use instead.
+    """
+    global _session
+    if _session is None:
+        _session = PromptSession(
+            history=InMemoryHistory(),
+            completer=SlashCommandCompleter(),
+            complete_while_typing=Condition(slash_completion_is_active),
+            complete_style=CompleteStyle.COLUMN,
+            # One row for the raised input plus one row per command below it.
+            reserve_space_for_menu=SLASH_COMMAND_MENU_HEIGHT + 1,
+            auto_suggest=slash_command_auto_suggest,
+            key_bindings=SLASH_COMMAND_KEY_BINDINGS,
+            lexer=SLASH_COMMAND_LEXER,
+            style=SLASH_COMMAND_STYLE,
+            color_depth=ColorDepth.TRUE_COLOR,
+        )
+    return _session
 
 
 def resolve_workspace_path(raw_path: str) -> Path:
@@ -164,8 +178,8 @@ def resolve_workspace_path(raw_path: str) -> Path:
 def multiline_input() -> str:
     """Read user input using prompt_toolkit for a better multiline experience."""
     # Use a condition to enable multiline mode only when there's a newline in the input
-    is_multiline = Condition(lambda: "\n" in session.default_buffer.text)
-    return session.prompt(
+    is_multiline = Condition(lambda: "\n" in _get_session().default_buffer.text)
+    return _get_session().prompt(
         SLASH_COMMAND_PROMPT,
         multiline=is_multiline,
         prompt_continuation=SLASH_COMMAND_PROMPT_CONTINUATION,
@@ -1578,7 +1592,7 @@ def main() -> None:
         not args.no_banner
         and banner.banner_available(console.width, console.height)
     ):
-        candidate_screen = InteractiveScreen(session, config)
+        candidate_screen = InteractiveScreen(_get_session(), config)
         try:
             candidate_screen.start()
         except Exception as error:

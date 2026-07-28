@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from prompt_toolkit.auto_suggest import Suggestion
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
@@ -270,9 +271,13 @@ def test_apply_strime_mode_rejects_builtin_provider():
 
 
 def test_prompt_session_uses_vertical_styled_command_menu():
-    assert main.session.complete_style is CompleteStyle.COLUMN
-    assert main.session.reserve_space_for_menu == SLASH_COMMAND_MENU_HEIGHT + 1
-    assert main.session.style is not None
+    try:
+        session = main._get_session()
+    except Exception as error:  # host has no attached console (e.g. CI service process)
+        pytest.skip(f"PromptSession requires a real console: {error}")
+    assert session.complete_style is CompleteStyle.COLUMN
+    assert session.reserve_space_for_menu == SLASH_COMMAND_MENU_HEIGHT + 1
+    assert session.style is not None
 
     prompt = to_formatted_text(SLASH_COMMAND_PROMPT)
     assert prompt == [("class:slash-command.prompt", "\n❯ ")]
