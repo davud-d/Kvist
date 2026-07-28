@@ -3465,15 +3465,12 @@ def _validate_windows_private_directory(path: Path) -> None:
             "Hard security denial: child HOME has no DACL (unrestricted access)"
         )
 
-    broad_sids = [
-        win32security.ConvertStringSidToSid(text)
-        for text in _WINDOWS_BROAD_ACCESS_SID_STRINGS
-    ]
+    broad_sid_strings = set(_WINDOWS_BROAD_ACCESS_SID_STRINGS)
     for index in range(dacl.GetAceCount()):
         (ace_type, _ace_flags), mask, sid = dacl.GetAce(index)
         if ace_type != ntsecuritycon.ACCESS_ALLOWED_ACE_TYPE or mask == 0:
             continue
-        if any(win32security.EqualSid(sid, broad_sid) for broad_sid in broad_sids):
+        if win32security.ConvertSidToStringSid(sid) in broad_sid_strings:
             raise HardDenyError(
                 "Hard security denial: child HOME permissions are not private "
                 "(broad-access principal granted)"
