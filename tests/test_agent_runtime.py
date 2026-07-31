@@ -275,6 +275,42 @@ def test_run_loop_preserves_checkpoint_when_step_limit_interrupts_work(
     assert len(restarted._state.files_read) == 5
 
 
+def test_run_loop_checkpoints_before_the_fifth_step(agent_factory):
+    agent = agent_factory(max_steps=6)
+    agent._state.plan_info = PlanInfo(
+        goal="Investigate files",
+        complexity="simple",
+        plan=["inspect files"],
+        success_criteria=["findings are reported"],
+        risks=[],
+    )
+    responses = iter(_read_responses(5))
+    calls = {"count": 0}
+
+    def interrupt_after_two_steps(prompt: str) -> str:
+        _ = prompt
+        calls["count"] += 1
+        if calls["count"] == 3:
+            raise KeyboardInterrupt
+        return json.dumps(next(responses))
+
+    agent._call_action_model = interrupt_after_two_steps
+    agent._execute_command = lambda command: {
+        "ok": True,
+        "action_type": command.action.type,
+        "data": {"path": command.action.args["path"]},
+    }
+
+    with pytest.raises(KeyboardInterrupt):
+        agent._run_loop("Investigate files", start_step=1)
+
+    # Per-step checkpointing must capture step 2 even though the old
+    # every-5-steps cadence would have saved nothing before step 5.
+    restarted = agent_factory(max_steps=6)
+    assert restarted._load_checkpoint() == ("Investigate files", 2)
+    assert len(restarted._state.files_read) == 2
+
+
 def test_run_loop_preserves_last_checkpoint_on_keyboard_interrupt(agent_factory):
     agent = agent_factory(max_steps=6)
     agent._state.plan_info = PlanInfo(

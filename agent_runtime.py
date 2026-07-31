@@ -224,7 +224,6 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     if not self._state.required_artifacts and not read_only_goal:
         self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
     self._refresh_completion_requirements()
-    steps_since_checkpoint = 0
     report_rendered = False
     task_completed = False
     try:
@@ -592,10 +591,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 is_error=not bool(feedback.get("ok")),
             )
 
-            steps_since_checkpoint += 1
-            if steps_since_checkpoint >= 5 or command.action.type in ("final_answer", "report_to_user"):
-                steps_since_checkpoint = 0
-                self._save_checkpoint(user_goal, step)
+            # Checkpoint every step: mutating actions land on disk immediately,
+            # so a coarser interval leaves resume state trailing the real
+            # workspace. The atomic write is negligible next to the LLM call.
+            self._save_checkpoint(user_goal, step)
 
         if not final_message:
             final_message = self._build_limit_reached_message()
