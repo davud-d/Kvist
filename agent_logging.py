@@ -422,6 +422,11 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
         "read_only_streak": self._state.read_only_streak,
         "pending_instruction": self._state.pending_instruction,
         "last_action_signature": self._state.last_action_signature,
+        "corrective_read_budget": self._state.corrective_read_budget,
+        "stalled_reasons": self._state.stalled_reasons,
+        "last_progress": self._state.last_progress,
+        "last_web_query": self._state.last_web_query,
+        "last_web_thought": self._state.last_web_thought,
         # JSON forces dict keys to strings; load_checkpoint casts step keys
         # back to int so sorted()/max() over rolling_summaries stay numeric.
         "rolling_summaries": {
@@ -515,6 +520,11 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.read_only_streak = data.get("read_only_streak", 0)
     self._state.pending_instruction = data.get("pending_instruction", "")
     self._state.last_action_signature = data.get("last_action_signature", "")
+    self._state.corrective_read_budget = data.get("corrective_read_budget", 0)
+    self._state.stalled_reasons = data.get("stalled_reasons", [])
+    self._state.last_progress = data.get("last_progress", 0)
+    self._state.last_web_query = data.get("last_web_query", "")
+    self._state.last_web_thought = data.get("last_web_thought", "")
     saved_summaries = data.get("rolling_summaries", {})
     if isinstance(saved_summaries, dict):
         self._state.rolling_summaries = {

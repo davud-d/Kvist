@@ -278,6 +278,9 @@ class LocalAgent:
         # restored: run() sets them, resume() must too or the prompt shows blanks.
         self._state.system_os = current_os_context()
         self._state.system_shell = current_shell_context()
+        # Re-detect for the current workspace like run() does; the restored
+        # versions may be stale after an interrupted run.
+        self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
         self.executor.set_active_role(self._state.current_agent_role)
         if not self._state.task_language:
             self._state.task_language = detect_request_language(user_goal)

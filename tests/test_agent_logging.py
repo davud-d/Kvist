@@ -48,6 +48,11 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     agent._state.recent_result_details = ["read ui.py: 120 lines", "ran pytest: ok"]
     agent._state.pending_verification_paths = ["ui.py", "parser.py"]
     agent._state.destructive_diff = "Mass deletion detected in ui.py."
+    agent._state.corrective_read_budget = 2
+    agent._state.stalled_reasons = ["no progress"]
+    agent._state.last_progress = 40
+    agent._state.last_web_query = "python fsync durability"
+    agent._state.last_web_thought = "check durable write"
     agent._session_history = [{"goal": "earlier", "role": "chat", "result": "done"}]
     agent._chat_history = [
         {"role": "system", "content": "prompt"},
@@ -67,6 +72,11 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     ]
     assert agent._state.pending_verification_paths == ["ui.py", "parser.py"]
     assert agent._state.destructive_diff == "Mass deletion detected in ui.py."
+    assert agent._state.corrective_read_budget == 2
+    assert agent._state.stalled_reasons == ["no progress"]
+    assert agent._state.last_progress == 40
+    assert agent._state.last_web_query == "python fsync durability"
+    assert agent._state.last_web_thought == "check durable write"
     agent._clear_checkpoint()
 
     state_path = agent.executor.workspace / ".kvist" / "sessions" / "default.json"
