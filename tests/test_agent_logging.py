@@ -45,6 +45,7 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     agent._state.plan_info = make_plan()
     agent._state.progress = 42
     agent._state.files_read = ["ui.py"]
+    agent._state.recent_result_details = ["read ui.py: 120 lines", "ran pytest: ok"]
     agent._session_history = [{"goal": "earlier", "role": "chat", "result": "done"}]
     agent._chat_history = [
         {"role": "system", "content": "prompt"},
@@ -58,6 +59,10 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     assert result == ("goal", 3)
     assert agent._state.progress == 42
     assert agent._state.plan_info.goal == "Test goal"
+    assert agent._state.recent_result_details == [
+        "read ui.py: 120 lines",
+        "ran pytest: ok",
+    ]
     agent._clear_checkpoint()
 
     state_path = agent.executor.workspace / ".kvist" / "sessions" / "default.json"
