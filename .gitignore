@@ -71,6 +71,8 @@ review-logs/
 # Local development metadata (kept locally, not tracked)
 /.agent/
 /.output.txt
+.agents
+.codex
 
 # Other
 .mimocode/
