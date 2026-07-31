@@ -419,6 +419,12 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
         "read_only_streak": self._state.read_only_streak,
         "pending_instruction": self._state.pending_instruction,
         "last_action_signature": self._state.last_action_signature,
+        # JSON forces dict keys to strings; load_checkpoint casts step keys
+        # back to int so sorted()/max() over rolling_summaries stay numeric.
+        "rolling_summaries": {
+            str(step_num): text
+            for step_num, text in self._state.rolling_summaries.items()
+        },
     }
     if self._state.plan_info:
         checkpoint["plan_info"] = {
@@ -503,6 +509,13 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.read_only_streak = data.get("read_only_streak", 0)
     self._state.pending_instruction = data.get("pending_instruction", "")
     self._state.last_action_signature = data.get("last_action_signature", "")
+    saved_summaries = data.get("rolling_summaries", {})
+    if isinstance(saved_summaries, dict):
+        self._state.rolling_summaries = {
+            int(step_num): text
+            for step_num, text in saved_summaries.items()
+            if str(step_num).lstrip("-").isdigit()
+        }
 
     # The legacy flat format stored histories inside the checkpoint.
     if "checkpoint" not in session_data:

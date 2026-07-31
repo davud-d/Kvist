@@ -68,6 +68,21 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     assert agent._load_checkpoint() is None
 
 
+def test_checkpoint_restores_rolling_summaries_with_int_keys(agent_factory):
+    agent = agent_factory(persist_logs=True)
+    agent._state.rolling_summaries = {5: "explored", 10: "edited files"}
+
+    agent._save_checkpoint("goal", 10)
+    agent._state.rolling_summaries = {}
+    result = agent._load_checkpoint()
+
+    assert result == ("goal", 10)
+    # JSON stringifies dict keys; load must cast them back so numeric
+    # sorted()/max() in the prompt builder keep working.
+    assert agent._state.rolling_summaries == {5: "explored", 10: "edited files"}
+    assert max(agent._state.rolling_summaries) == 10
+
+
 def test_save_session_restores_active_session_and_full_chat_history(agent_factory):
     agent = agent_factory()
     agent.current_session = "feature-work"
