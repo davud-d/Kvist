@@ -318,6 +318,14 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             followup_error = self._required_followup_error(command)
             if followup_error:
                 blocked_count = self._register_blocked_action(command)
+                # blocked_actions is in-memory only; this breadcrumb rides in
+                # recent_events (persisted + prompted) so a resumed run still
+                # knows its last action was refused.
+                self._push_unique(
+                    self._state.recent_events,
+                    f"Action '{command.action.type}' was blocked; corrective action required.",
+                    self.config.summary_recent_events,
+                )
                 self._state.stagnation_count += 1
                 self._state.pending_instruction = followup_error
                 if blocked_count >= 2:

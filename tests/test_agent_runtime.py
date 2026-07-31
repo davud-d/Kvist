@@ -275,6 +275,37 @@ def test_run_loop_preserves_checkpoint_when_step_limit_interrupts_work(
     assert len(restarted._state.files_read) == 5
 
 
+def test_run_loop_records_blocked_action_breadcrumb(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = PlanInfo(
+        goal="Build the thing",
+        complexity="simple",
+        plan=["write the file"],
+        success_criteria=["file exists"],
+        risks=[],
+    )
+    agent._state.create_goal = True
+    # keep_explicit_restriction needs both set so the loop-start refresh
+    # preserves required_next_actions instead of clearing it.
+    agent._state.required_next_actions = ["write_file"]
+    agent._state.pending_instruction = "Write the required file."
+
+    response = {
+        "thought": "look around first",
+        "plan_step": "inspect",
+        "progress": 10,
+        "user_message": "listing",
+        "action": {"type": "list_dir", "args": {"path": "."}},
+    }
+    agent._call_action_model = lambda prompt: json.dumps(response)
+
+    agent._run_loop("Build the thing", start_step=1)
+
+    # The corrective-guard block never reaches feedback, so without the
+    # breadcrumb a resumed run would forget the refusal entirely.
+    assert any("was blocked" in event for event in agent._state.recent_events)
+
+
 def test_run_loop_checkpoints_before_the_fifth_step(agent_factory):
     agent = agent_factory(max_steps=6)
     agent._state.plan_info = PlanInfo(
