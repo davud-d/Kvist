@@ -274,6 +274,10 @@ class LocalAgent:
         if result is None:
             return None
         user_goal, last_step = result
+        # Environment facts are recomputed for the current machine rather than
+        # restored: run() sets them, resume() must too or the prompt shows blanks.
+        self._state.system_os = current_os_context()
+        self._state.system_shell = current_shell_context()
         self.executor.set_active_role(self._state.current_agent_role)
         if not self._state.task_language:
             self._state.task_language = detect_request_language(user_goal)

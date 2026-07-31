@@ -222,6 +222,26 @@ def test_local_agent_resume_returns_none_without_checkpoint(agent_factory):
     assert agent_factory().resume() is None
 
 
+def test_local_agent_resume_repopulates_environment_context(agent_factory):
+    agent = agent_factory(persist_logs=True)
+    agent._save_checkpoint("do the task", 2)
+
+    captured = {}
+
+    def fake_run_loop(goal, start_step):
+        # Env facts must be set before the loop builds its first prompt,
+        # otherwise the OS/Shell lines render blank after /resume.
+        captured["os"] = agent._state.system_os
+        captured["shell"] = agent._state.system_shell
+        return "done"
+
+    agent._run_loop = fake_run_loop
+
+    assert agent.resume() == "done"
+    assert captured["os"]
+    assert captured["shell"]
+
+
 def test_switch_session_saves_outgoing_and_restores_selected_session(agent_factory):
     agent = agent_factory()
     agent.new_session("alpha")
