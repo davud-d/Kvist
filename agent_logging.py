@@ -401,6 +401,8 @@ def save_checkpoint(self, user_goal: str, step: int) -> None:
         "required_artifacts": self._state.required_artifacts,
         "missing_artifacts": self._state.missing_artifacts,
         "verification_evidence": self._state.verification_evidence,
+        "pending_verification_paths": self._state.pending_verification_paths,
+        "destructive_diff": self._state.destructive_diff,
         "completion_blockers": self._state.completion_blockers,
         "required_next_actions": self._state.required_next_actions,
         "recent_feedback": self._state.recent_feedback,
@@ -492,6 +494,8 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.required_artifacts = data.get("required_artifacts", [])
     self._state.missing_artifacts = data.get("missing_artifacts", [])
     self._state.verification_evidence = data.get("verification_evidence", [])
+    self._state.pending_verification_paths = data.get("pending_verification_paths", [])
+    self._state.destructive_diff = data.get("destructive_diff", "")
     self._state.completion_blockers = data.get("completion_blockers", [])
     self._state.required_next_actions = data.get("required_next_actions", [])
     self._state.recent_feedback = data.get("recent_feedback", [])
