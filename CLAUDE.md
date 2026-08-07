@@ -11,6 +11,19 @@ agent executes it through a sandboxed executor, feeds the result back, and repea
 until completion. There is also a JetBrains plugin (`jetbrains-plugin/`, separate
 Gradle build) that wraps the same Python core.
 
+## Pushing commits (MANDATORY)
+
+Commits go to the backup relay server, never straight to GitHub.
+
+- **Push only to the `relay` remote:** `git push relay <branch>`. This stores commits
+  on the server (`backup-host:git-relay/Kvist.git`); it does NOT reach GitHub. This is a
+  safety-net backup, not publication.
+- **NEVER push to GitHub.** Do not `git push origin`, do not push to any
+  `github.com` URL, and do not run `kvist-push` or otherwise trigger the server→GitHub
+  publish. Publishing to GitHub is a manual, human-only action the user performs.
+- As always, only push when the user explicitly asks; committing/pushing is never
+  implied by an ordinary code change.
+
 ## Commands
 
 ```bash
