@@ -8,7 +8,7 @@ import agent_model
 from agent import LocalAgent
 from agent_state import PlanInfo
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient
+from tests.conftest import FakeLLMClient, NullUI
 
 
 @pytest.mark.parametrize(
@@ -87,6 +87,7 @@ def test_agent_construction_does_not_load_token_encoding(
     agent = LocalAgent(
         FakeLLMClient(),
         SafeExecutor(tmp_path),
+        ui=NullUI(),
     )
 
     assert agent._encoding is agent_model._TOKEN_ENCODING_UNINITIALIZED

@@ -50,13 +50,14 @@ from pathlib import Path
 from agent import LocalAgent
 from agent_state import AgentConfig
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient
+from tests.conftest import FakeLLMClient, NullUI
 
 workspace = Path(sys.argv[1])
 agent = LocalAgent(
     FakeLLMClient(),
     SafeExecutor(workspace),
     AgentConfig(persist_logs=False, api_request_interval=0),
+    ui=NullUI(),
 )
 agent.new_session("restart")
 agent._session_history = [{"goal": "перезапуск 🌲"}]
@@ -70,12 +71,13 @@ from pathlib import Path
 from agent import LocalAgent
 from agent_state import AgentConfig
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient
+from tests.conftest import FakeLLMClient, NullUI
 
 agent = LocalAgent(
     FakeLLMClient(),
     SafeExecutor(Path(sys.argv[1])),
     AgentConfig(persist_logs=False, api_request_interval=0),
+    ui=NullUI(),
 )
 print(json.dumps({
     "session": agent.current_session,

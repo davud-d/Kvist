@@ -5,8 +5,8 @@ import sys
 import pytest
 from rich.console import Console
 
-import ui as ui_module
-from ui import AgentUI
+import terminal_banner as ui_module
+from terminal_banner import TerminalBannerUI as AgentUI
 
 
 class _ScreenRecorder:
@@ -69,7 +69,7 @@ def test_live_markdown_commits_attached_screen_once():
 
 
 def test_print_user_markdown_accepts_markdown_text_without_crashing():
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
 
     ui.print_user_markdown("Updated `hello.txt`\n\n- first\n- second")
@@ -81,7 +81,7 @@ def test_print_user_markdown_accepts_markdown_text_without_crashing():
 
 
 def test_print_final_renders_markdown_without_crashing():
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
 
     ui.print_final("Updated `hello.txt`\n\n- first\n- second")
@@ -93,7 +93,7 @@ def test_print_final_renders_markdown_without_crashing():
 
 
 def test_print_final_keeps_code_block_content():
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
 
     ui.print_final("```txt\nhello.txt\nhello world\n```")
@@ -104,7 +104,7 @@ def test_print_final_keeps_code_block_content():
 
 
 def test_user_visible_output_redacts_credentials(capsys):
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=True)
     synthetic = "sk-proj-" + "u" * 24
 
@@ -128,7 +128,7 @@ def test_user_visible_output_redacts_credentials(capsys):
 
 
 def test_user_visible_output_escapes_terminal_and_bidi_controls():
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
     dangerous = "before\x1b[2J\u202eafter\x08"
 
@@ -145,7 +145,7 @@ def test_user_visible_output_escapes_terminal_and_bidi_controls():
 
 
 def test_print_final_falls_back_to_plain_text_on_markdown_error(monkeypatch):
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
 
     def boom(message: str):
@@ -160,7 +160,7 @@ def test_print_final_falls_back_to_plain_text_on_markdown_error(monkeypatch):
 
 
 def test_print_user_markdown_falls_back_to_plain_text_on_markdown_error(monkeypatch):
-    console = Console(record=True, width=100)
+    console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
 
     def boom(message: str):
@@ -323,13 +323,13 @@ def test_prompt_text_returns_none_without_current_value_in_non_tty():
 
 def test_prompt_text_tty_enter_keeps_current(monkeypatch):
     """TTY: pressing Enter keeps the current value."""
-    from ui import pt_prompt as _pt_prompt
+    from terminal_banner import pt_prompt as _pt_prompt
 
     ui = AgentUI(verbose=False)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     # prompt_toolkit is available — monkeypatch it directly
     if _pt_prompt is not None:
-        monkeypatch.setattr("ui.pt_prompt", lambda *a, **kw: "")
+        monkeypatch.setattr("terminal_banner.pt_prompt",lambda *a, **kw: "")
     else:
         monkeypatch.setattr("builtins.input", lambda prompt="": "")
 
@@ -340,12 +340,12 @@ def test_prompt_text_tty_enter_keeps_current(monkeypatch):
 
 def test_prompt_text_tty_enter_cancels_without_current(monkeypatch):
     """TTY: pressing Enter without current_value → cancel (None)."""
-    from ui import pt_prompt as _pt_prompt
+    from terminal_banner import pt_prompt as _pt_prompt
 
     ui = AgentUI(verbose=False)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     if _pt_prompt is not None:
-        monkeypatch.setattr("ui.pt_prompt", lambda *a, **kw: "")
+        monkeypatch.setattr("terminal_banner.pt_prompt",lambda *a, **kw: "")
     else:
         monkeypatch.setattr("builtins.input", lambda prompt="": "")
 
@@ -355,12 +355,12 @@ def test_prompt_text_tty_enter_cancels_without_current(monkeypatch):
 
 def test_prompt_text_tty_types_new_value(monkeypatch):
     """TTY: typing a new value returns it."""
-    from ui import pt_prompt as _pt_prompt
+    from terminal_banner import pt_prompt as _pt_prompt
 
     ui = AgentUI(verbose=False)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     if _pt_prompt is not None:
-        monkeypatch.setattr("ui.pt_prompt", lambda *a, **kw: "ds-web/deepseek-v4-pro")
+        monkeypatch.setattr("terminal_banner.pt_prompt",lambda *a, **kw: "ds-web/deepseek-v4-pro")
     else:
         monkeypatch.setattr("builtins.input", lambda prompt="": "ds-web/deepseek-v4-pro")
 
@@ -370,7 +370,7 @@ def test_prompt_text_tty_types_new_value(monkeypatch):
 
 def test_prompt_text_tty_eof_cancels(monkeypatch):
     """TTY: EOFError (Ctrl+D) → cancel (None)."""
-    from ui import pt_prompt as _pt_prompt
+    from terminal_banner import pt_prompt as _pt_prompt
 
     ui = AgentUI(verbose=False)
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
@@ -379,7 +379,7 @@ def test_prompt_text_tty_eof_cancels(monkeypatch):
         raise EOFError()
 
     if _pt_prompt is not None:
-        monkeypatch.setattr("ui.pt_prompt", raise_eof)
+        monkeypatch.setattr("terminal_banner.pt_prompt",raise_eof)
     else:
         monkeypatch.setattr("builtins.input", lambda prompt="": (_ for _ in ()).throw(EOFError()))
 

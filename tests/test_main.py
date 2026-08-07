@@ -113,7 +113,7 @@ def test_choose_provider_delegates_to_ui(monkeypatch):
         def choose_option(self, **kwargs):
             return kwargs["current_value"]
 
-    monkeypatch.setattr(main, "AgentUI", FakeUI)
+    monkeypatch.setattr(main, "TerminalBannerUI",FakeUI)
     assert main.choose_provider("openai", False) == "openai"
 
 
@@ -135,7 +135,7 @@ def test_choose_session_creates_normalized_named_session(monkeypatch):
         _list_sessions=lambda: [],
         new_session=created.append,
     )
-    monkeypatch.setattr(main, "AgentUI", FakeUI)
+    monkeypatch.setattr(main, "TerminalBannerUI",FakeUI)
 
     assert main.choose_session(agent, False) == "feature_one"
     assert created == ["feature_one"]
@@ -159,7 +159,7 @@ def test_choose_session_rejects_path_like_name(monkeypatch):
         _list_sessions=lambda: [],
         new_session=created.append,
     )
-    monkeypatch.setattr(main, "AgentUI", FakeUI)
+    monkeypatch.setattr(main, "TerminalBannerUI",FakeUI)
 
     assert main.choose_session(agent, False) is None
     assert created == []
@@ -181,7 +181,7 @@ def test_choose_session_successful_delete_returns_active_session(monkeypatch):
         _list_sessions=lambda: ["current", "old_session"],
         _delete_session=deleted.append,
     )
-    monkeypatch.setattr(main, "AgentUI", FakeUI)
+    monkeypatch.setattr(main, "TerminalBannerUI",FakeUI)
 
     assert main.choose_session(agent, False) == "current"
     assert deleted == ["old_session"]
@@ -423,7 +423,7 @@ def test_configure_custom_provider_interactively_url_normalization(monkeypatch):
             return kwargs.get("current_value")
 
     ui = FakeUI()
-    monkeypatch.setattr(main, "AgentUI", lambda **kwargs: ui)
+    monkeypatch.setattr(main, "TerminalBannerUI",lambda **kwargs: ui)
 
     # 1. Test URL "https://api.example.dev" and "add"
     ui.prompt_selections = {

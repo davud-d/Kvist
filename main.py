@@ -74,6 +74,8 @@ from llm_clients import (
 )
 from redaction import sanitize_display_text
 from ui import AgentUI
+from terminal_banner import TerminalBannerUI
+from performance_logger import PerfLogger
 from agent_logging import (
     delete_session as delete_agent_session,
     is_valid_session_name,
@@ -448,7 +450,7 @@ def build_agent(
                     f"terminal and set exact model ids with /models, for example {example_model}."
                 )
             # Interactive setup if models are missing
-            ui = AgentUI(console=console, verbose=verbose)
+            ui = TerminalBannerUI(console=console, verbose=verbose)
             console.print(
                 _display_text(
                     f"{provider_display} models are not configured.",
@@ -523,7 +525,17 @@ def build_agent(
         stream=provider_supports_streaming(provider),
         verbose=verbose,
     )
-    agent = LocalAgent(client=client, executor=executor, config=config)
+    agent_console = Console()
+    perf_logger = PerfLogger(executor.workspace)
+    ui = TerminalBannerUI(console=agent_console, verbose=verbose, perf_logger=perf_logger)
+    agent = LocalAgent(
+        client=client,
+        executor=executor,
+        config=config,
+        ui=ui,
+        console=agent_console,
+        perf_logger=perf_logger,
+    )
     warnings.extend(getattr(agent, "_storage_warnings", []))
     return agent, config, warnings
 
@@ -638,7 +650,7 @@ def render_startup_banner(
 
 
 def choose_provider(current_provider: str, verbose: bool) -> str | None:
-    ui = AgentUI(console=console, verbose=verbose)
+    ui = TerminalBannerUI(console=console, verbose=verbose)
 
     # Built-in providers in order: OpenAI, Anthropic, OpenRouter, OmniRoute
     options: list[dict[str, str]] = [
@@ -711,7 +723,7 @@ def choose_provider(current_provider: str, verbose: bool) -> str | None:
 
 def choose_session(agent, verbose: bool) -> str | None:
     """Select or manage sessions via Rich UI."""
-    ui = AgentUI(console=console, verbose=verbose)
+    ui = TerminalBannerUI(console=console, verbose=verbose)
     sessions = agent._list_sessions()
     current = getattr(agent, "current_session", "default")
 
@@ -830,7 +842,7 @@ def choose_session(agent, verbose: bool) -> str | None:
 
 def choose_role(current_role: str | None, verbose: bool) -> str | None:
     """Select agent role via Rich UI. Returns role string or None if cancelled."""
-    ui = AgentUI(console=console, verbose=verbose)
+    ui = TerminalBannerUI(console=console, verbose=verbose)
 
     options: list[dict[str, str]] = [
         {
@@ -870,7 +882,7 @@ def choose_role(current_role: str | None, verbose: bool) -> str | None:
 
 def confirm_revert(file_count: int, verbose: bool) -> bool:
     """Ask the user to confirm a workspace revert. Returns True if confirmed."""
-    ui = AgentUI(console=console, verbose=verbose)
+    ui = TerminalBannerUI(console=console, verbose=verbose)
     confirmed = ui.choose_option(
         title=f"Revert {file_count} file(s) to their pre-session state?",
         options=[
@@ -884,7 +896,7 @@ def confirm_revert(file_count: int, verbose: bool) -> bool:
 
 
 def choose_models(provider: str, current_models: dict[str, str], verbose: bool) -> dict[str, str] | None:
-    ui = AgentUI(console=console, verbose=verbose)
+    ui = TerminalBannerUI(console=console, verbose=verbose)
     options = get_model_options(provider)
     if not options:
         return None
@@ -920,7 +932,7 @@ def select_models_interactively(config: AgentConfig, verbose: bool) -> dict[str,
         "smart": config.smart_model,
         "planner": config.planner_model,
     }
-    ui = AgentUI(console=console, verbose=verbose)
+    ui = TerminalBannerUI(console=console, verbose=verbose)
     if config.provider == OMNIROUTE_PROVIDER:
         return configure_omniroute_models_interactively(ui, current_models=current_models)
     if config.provider == OPENROUTER_PROVIDER:

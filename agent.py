@@ -125,15 +125,19 @@ class LocalAgent:
         client: Any,
         executor: SafeExecutor,
         config: AgentConfig | None = None,
+        *,
+        ui: AgentUI,
+        console: Console | None = None,
+        perf_logger: PerfLogger | None = None,
     ) -> None:
         self.client = client
         self.executor = executor
         self.config = config or AgentConfig()
         self._cache: dict[str, str] = {}
         self._state = RunState()
-        self.console = Console()
-        self._perf_logger = PerfLogger(executor.workspace)
-        self._ui = AgentUI(console=self.console, verbose=self.config.verbose, perf_logger=self._perf_logger)
+        self.console = console or Console()
+        self._perf_logger = perf_logger or PerfLogger(executor.workspace)
+        self._ui = ui
         # Loading tiktoken's rank table costs tens of MiB and is unnecessary
         # for session recovery and chat-only runs. count_tokens initializes it
         # on the first context-budget calculation.

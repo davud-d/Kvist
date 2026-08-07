@@ -375,8 +375,11 @@ from types import SimpleNamespace
 
 import llm_clients
 import main
+from rich.console import Console
+
 from agent import LocalAgent
 from agent_state import AgentConfig
+from terminal_banner import TerminalBannerUI
 
 SECRET = "{secret}"
 
@@ -427,7 +430,11 @@ def _build_chat_agent(
         stream=True,
         verbose=verbose,
     )
-    agent = LocalAgent(_ScriptedChatClient(), executor, config)
+    console = Console()
+    agent = LocalAgent(
+        _ScriptedChatClient(), executor, config,
+        ui=TerminalBannerUI(console=console, verbose=verbose), console=console,
+    )
     agent._init_tiktoken_encoding = lambda: None
     return agent, config, []
 
@@ -513,8 +520,11 @@ from types import SimpleNamespace
 
 import llm_clients
 import main
+from rich.console import Console
+
 from agent import LocalAgent
 from agent_state import AgentConfig
+from terminal_banner import TerminalBannerUI
 
 _started = threading.Event()
 
@@ -556,7 +566,11 @@ def _build(executor, max_steps, persist_logs, verbose,
         stream=True,
         verbose=verbose,
     )
-    agent = LocalAgent(_BlockingChatClient(), executor, config)
+    console = Console()
+    agent = LocalAgent(
+        _BlockingChatClient(), executor, config,
+        ui=TerminalBannerUI(console=console, verbose=verbose), console=console,
+    )
     agent._init_tiktoken_encoding = lambda: None
     return agent, config, []
 

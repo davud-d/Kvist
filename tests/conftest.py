@@ -171,8 +171,8 @@ def agent_factory(tmp_path):
             client=FakeLLMClient(),
             executor=SafeExecutor(tmp_path),
             config=config,
+            ui=NullUI(),
         )
-        agent._ui = NullUI()
         agent._perf_logger = NullPerfLogger()
         return agent
 

@@ -8,9 +8,12 @@ from __future__ import annotations
 
 import time
 
+from rich.console import Console
+
 import main
 from agent import LocalAgent
 from agent_state import AgentConfig
+from terminal_banner import TerminalBannerUI
 
 
 class _OfflineClient:
@@ -65,7 +68,13 @@ def _build_offline_agent(
         stream=False,
         verbose=verbose,
     )
-    return _OfflineAgent(_OfflineClient(), executor, config), config, []
+    console = Console()
+    ui = TerminalBannerUI(console=console, verbose=verbose)
+    return (
+        _OfflineAgent(_OfflineClient(), executor, config, ui=ui, console=console),
+        config,
+        [],
+    )
 
 
 main.build_agent = _build_offline_agent
