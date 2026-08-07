@@ -43,6 +43,7 @@ from command_policy import (
     is_exact_version_probe,
     is_find_action_token,
 )
+from approvals import ApprovalGate, TerminalApprovalGate
 from env_utils import read_int_env
 from permission_policy import append_allow_rule, load_policy
 from process_tree import (
@@ -611,7 +612,9 @@ class TerminalExecutor:
         profile: str = "dev",
         extra_allowed: dict[str, set[str] | None] | None = None,
         extra_forbidden: set[str] | None = None,
+        approvals: ApprovalGate | None = None,
     ) -> None:
+        self._approvals = approvals or TerminalApprovalGate()
         self.workspace = workspace.resolve()
         self.max_output_chars = max(1000, min(max_output_chars, 200_000))
         self._is_windows = os.name == "nt"
@@ -940,7 +943,7 @@ class TerminalExecutor:
             return
         pattern = _suggest_allow_pattern(command)
         try:
-            accepted = request_user_confirmation(
+            accepted = self._approvals.confirm(
                 title="Permission policy",
                 body=(
                     f"Save allow rule {pattern} to .kvist/permissions.json?\n"
@@ -1105,86 +1108,15 @@ class TerminalExecutor:
             timed_out=outcome.timed_out,
         )
 
-    @classmethod
-    def _request_user_approval(cls, command: list[str], error_message: str) -> bool:
-        """Interactive approval prompt (Human-in-the-Loop).
+    def _request_user_approval(self, command: list[str], reason: str) -> bool:
+        """Dangerous-command HITL gate, delegated to the injected approval gate.
 
-        Displays a warning panel via rich inside the terminal's alternate
-        screen buffer, then prompts for y/N via standard input(). Leaving the
-        alternate buffer restores the previous screen exactly, so the prompt
-        has hard boundaries and never erases output above it.
-
-        Before input:
-        - Pauses background Live TUI (via suspend callback)
-        - Sets global HITL flag (blocks update_live)
-
-        After input:
-        - Leaves the alternate screen buffer (previous screen restored)
-        - Clears HITL flag
-        - Resumes Live TUI (via resume callback)
-
-        If stdin is not a TTY (tests, CI, pipes) — raises the original
-        validation error.
+        Kept as a method with this exact ``(command, reason)`` signature so
+        the call site (``self._request_user_approval(command, reason)``) and
+        the test patch points remain stable. The default gate reproduces the
+        historical terminal prompt and stays fail-closed off a TTY.
         """
-        import sys
-
-        if not sys.stdin.isatty():
-            raise ApprovalRequiredError(error_message)
-
-        from rich.console import Console
-        from rich.panel import Panel
-        from rich.text import Text
-
-        # Pause background TUI rendering
-        if cls._hitl_suspend_fn is not None:
-            cls._hitl_suspend_fn()
-
-        _enter_hitl()
-        try:
-            console = Console()
-            command_text = sanitize_display_text(
-                json.dumps(command, ensure_ascii=False)
-            )
-            panel_content = Text()
-            panel_content.append(
-                "⚠️  DANGEROUS COMMAND DETECTED\n\n",
-                style="bold red",
-            )
-            panel_content.append("Argv: ", style="bold")
-            panel_content.append(command_text, style="yellow")
-            panel_content.append("\nReason: ", style="bold")
-            panel_content.append(
-                sanitize_display_text(error_message)
-            )
-            panel_content.append(
-                "\n\nThis command requires explicit authorization. "
-                "Proceed only if every argv element and the reason are expected.",
-                style="dim",
-            )
-            panel = Panel(
-                panel_content,
-                border_style="red",
-                title=Text(
-                    "Security Check — Human-in-the-Loop",
-                    style="bold",
-                ),
-                title_align="left",
-                padding=(1, 2),
-            )
-
-            with _alt_screen(console):
-                console.print(panel)
-                try:
-                    choice = input("Allow execution? [y/N]: ").strip().lower()
-                except EOFError:
-                    raise ApprovalRequiredError(error_message)
-
-            return choice in ("y", "yes")
-        finally:
-            _exit_hitl()
-            # Resume background TUI rendering
-            if cls._hitl_resume_fn is not None:
-                cls._hitl_resume_fn()
+        return self._approvals.confirm_command(command, reason)
 
     # ------------------------------------------------------------------
     # Validation

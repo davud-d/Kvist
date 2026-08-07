@@ -9,6 +9,7 @@ from rich.text import Text
 from tests.conftest import requires_posix
 
 import terminal as terminal_module
+from approvals import TerminalApprovalGate
 from command_policy import CommandAssessment, RiskLevel
 from terminal import ApprovalRequiredError, HardDenyError, TerminalError, TerminalExecutor
 
@@ -74,7 +75,7 @@ def test_hitl_panel_renders_untrusted_argv_as_literal_text(monkeypatch):
     monkeypatch.setattr(TerminalExecutor, "_hitl_suspend_fn", None)
     monkeypatch.setattr(TerminalExecutor, "_hitl_resume_fn", None)
 
-    accepted = TerminalExecutor._request_user_approval(
+    accepted = TerminalApprovalGate().confirm_command(
         ["docker", "[/yellow][green]safe[/green]", "\u202eevil"],
         "fixture reason",
     )

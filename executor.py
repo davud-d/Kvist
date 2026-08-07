@@ -23,7 +23,8 @@ from durable_json import JsonStorageError, exclusive_storage_lock
 from env_utils import read_float_env, read_int_env
 from protocol import AgentCommand
 from secret_paths import UnsafeSecretPathError, count_workspace_inode_aliases
-from terminal import TerminalExecutor, TerminalError, is_hitl_active, request_user_confirmation
+from approvals import ApprovalGate, TerminalApprovalGate
+from terminal import TerminalExecutor, TerminalError, is_hitl_active
 
 
 class ExecutorError(Exception):
@@ -94,7 +95,8 @@ class ExecutionResult:
 
 
 class SafeExecutor:
-    def __init__(self, workspace: str | Path) -> None:
+    def __init__(self, workspace: str | Path, *, approvals: ApprovalGate | None = None) -> None:
+        self._approvals = approvals or TerminalApprovalGate()
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.internal_agent_dirname = ".kvist"
@@ -136,6 +138,7 @@ class SafeExecutor:
             timeout=terminal_timeout,
             max_output_chars=self.max_output_chars,
             profile=terminal_profile,
+            approvals=self._approvals,
         )
 
         # Sandbox honesty + policy-file notices — surfaced once by the
@@ -743,7 +746,7 @@ class SafeExecutor:
         diff_preview = self._truncate_text("\n".join(diff_lines), self.max_diff_preview_chars)
 
         try:
-            approved = request_user_confirmation(
+            approved = self._approvals.confirm(
                 title="File overwrite — Human-in-the-Loop",
                 body=f"The agent wants to overwrite {path}:\n\n{diff_preview}",
                 question=f"Allow overwriting '{path}'?",

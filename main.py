@@ -415,7 +415,10 @@ def build_agent(
     provider_override: str | None = None,
     models_override: dict[str, str] | None = None,
     language_hint: str | None = None,
+    ui: AgentUI | None = None,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
+    # Captured before the missing-models wizard may rebind the local ``ui``.
+    provided_ui = ui
     provider = resolve_startup_provider(provider_override)
 
     # For custom providers, load models from the custom provider config
@@ -527,12 +530,16 @@ def build_agent(
     )
     agent_console = Console()
     perf_logger = PerfLogger(executor.workspace)
-    ui = TerminalBannerUI(console=agent_console, verbose=verbose, perf_logger=perf_logger)
+    agent_ui = (
+        provided_ui
+        if provided_ui is not None
+        else TerminalBannerUI(console=agent_console, verbose=verbose, perf_logger=perf_logger)
+    )
     agent = LocalAgent(
         client=client,
         executor=executor,
         config=config,
-        ui=ui,
+        ui=agent_ui,
         console=agent_console,
         perf_logger=perf_logger,
     )

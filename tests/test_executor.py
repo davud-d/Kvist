@@ -356,25 +356,28 @@ def test_overwrite_gate_skips_new_files_and_identical_content(tmp_path, monkeypa
 
 def test_overwrite_gate_shows_diff_and_respects_answer(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_WRITE_APPROVAL", "1")
-    executor = SafeExecutor(tmp_path)
-    executor._write_file("app.py", "old line\n")
 
     prompts: list = []
 
-    def fake_confirmation(title, body, question):
-        prompts.append(body)
-        return True
+    class FakeGate:
+        def __init__(self, answer):
+            self.answer = answer
 
-    import executor as executor_module
-    monkeypatch.setattr(executor_module, "request_user_confirmation", fake_confirmation)
+        def confirm(self, title, body, question):
+            prompts.append(body)
+            return self.answer
+
+        def confirm_command(self, command, reason):
+            raise AssertionError("command gate not expected in overwrite test")
+
+    executor = SafeExecutor(tmp_path, approvals=FakeGate(True))
+    executor._write_file("app.py", "old line\n")
 
     executor._write_file("app.py", "new line\n")
     assert executor._read_file("app.py").data["content"] == "new line\n"
     assert prompts and "-old line" in prompts[0] and "+new line" in prompts[0]
 
-    monkeypatch.setattr(
-        executor_module, "request_user_confirmation", lambda title, body, question: False
-    )
+    executor._approvals.answer = False
     with pytest.raises(ExecutorError, match="denied by user"):
         executor._write_file("app.py", "third version\n")
 
