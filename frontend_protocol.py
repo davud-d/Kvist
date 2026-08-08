@@ -8,9 +8,27 @@ from dataclasses import dataclass
 from typing import ClassVar
 
 
+# Protocol version. Bump on any breaking change to the event/response schema.
+# The transport emits a `hello` event carrying this so a frontend can check it
+# and refuse (or adapt) on mismatch. New event `type`s are NOT breaking: a
+# frontend MUST ignore event types it does not recognise (forward-compat).
+PROTOCOL_VERSION = 1
+
+
 # --- Out events (core -> frontend) -------------------------------------------
 # Pure data. No imports of agent/rich/redaction modules: redaction of action
 # args happens in the transport adapter, not here.
+
+
+@dataclass(slots=True)
+class HelloEvent:
+    """Handshake: always the first event a transport emits."""
+
+    protocol_version: int
+    type: ClassVar[str] = "hello"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "protocol_version": self.protocol_version}
 
 
 @dataclass(slots=True)

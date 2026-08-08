@@ -8,10 +8,12 @@ import time
 import pytest
 
 from frontend_protocol import (
+    PROTOCOL_VERSION,
     DebugEvent,
     ErrorEvent,
     FinalEvent,
     FrontendChannel,
+    HelloEvent,
     InputRequestEvent,
     InputResponse,
     LiveStartEvent,
@@ -29,6 +31,7 @@ from frontend_protocol import (
 
 def _all_sample_events():
     return [
+        (HelloEvent(PROTOCOL_VERSION), "hello"),
         (LiveStartEvent(), "live_start"),
         (LiveStopEvent(), "live_stop"),
         (
@@ -221,6 +224,12 @@ def test_request_after_close_returns_immediately():
     resp = ch.request("confirm", "Proceed?")
     assert resp.value is None
     assert resp.approved is None
+
+
+def test_hello_event_carries_protocol_version():
+    payload = HelloEvent(PROTOCOL_VERSION).to_dict()
+    assert payload == {"type": "hello", "protocol_version": PROTOCOL_VERSION}
+    assert json.loads(json.dumps(payload))["protocol_version"] == PROTOCOL_VERSION
 
 
 if __name__ == "__main__":  # pragma: no cover

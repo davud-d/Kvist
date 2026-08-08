@@ -17,7 +17,12 @@ import threading
 from event_session import EventApprovalGate, EventSession
 from event_stream_ui import EventStreamUI
 from executor import SafeExecutor
-from frontend_protocol import FrontendChannel, InputResponse
+from frontend_protocol import (
+    PROTOCOL_VERSION,
+    FrontendChannel,
+    HelloEvent,
+    InputResponse,
+)
 
 
 def _read_responses(session: EventSession, in_reader) -> None:
@@ -39,13 +44,20 @@ def _read_responses(session: EventSession, in_reader) -> None:
         )
 
 
+def _write_event(out_stream, payload: dict) -> None:
+    out_stream.write(json.dumps(payload) + "\n")
+    out_stream.flush()
+
+
 def pump(session: EventSession, out_stream, in_reader) -> None:
     """Stream session events to ``out_stream`` while feeding it responses.
 
+    The first line is always a ``hello`` handshake carrying the protocol version.
     Returns when the event stream ends (worker done + queue drained). The reader
     thread is a daemon: if it is still blocked on ``in_reader`` at that point,
     process teardown reclaims it.
     """
+    _write_event(out_stream, HelloEvent(PROTOCOL_VERSION).to_dict())
     reader = threading.Thread(
         target=_read_responses,
         args=(session, in_reader),
@@ -53,8 +65,23 @@ def pump(session: EventSession, out_stream, in_reader) -> None:
     )
     reader.start()
     for event in session.events():
-        out_stream.write(json.dumps(event.to_dict()) + "\n")
-        out_stream.flush()
+        _write_event(out_stream, event.to_dict())
+
+
+def serve_stdio(session: EventSession, goal: str | None = None) -> None:
+    """Run ``session`` over the real stdin/stdout as newline-delimited JSON.
+
+    stdout is redirected to stderr for the duration so that any stray ``print``
+    from library code cannot corrupt the JSON stream: only the saved real stdout
+    (``real_out``) carries events. The goal, when not given, is read as the first
+    stdin line — the parent process sends it before any responses.
+    """
+    real_out = sys.stdout
+    sys.stdout = sys.stderr
+    if goal is None:
+        goal = sys.stdin.readline().strip()
+    session.submit(goal)
+    pump(session, real_out, sys.stdin)
 
 
 def _parse_args(argv: list[str]) -> tuple[str, str]:
@@ -74,19 +101,22 @@ def main() -> None:
     from main import build_agent
 
     workspace, goal = _parse_args(sys.argv[1:])
+    # Redirect before building so nothing the agent build might print reaches the
+    # JSON stream; only ``real_out`` carries events.
+    real_out = sys.stdout
+    sys.stdout = sys.stderr
     channel = FrontendChannel()
-    ui = EventStreamUI(channel)
     executor = SafeExecutor(workspace, approvals=EventApprovalGate(channel))
     agent, _config, _warnings = build_agent(
         executor,
         max_steps=50,
         persist_logs=False,
         verbose=False,
-        ui=ui,
+        ui=EventStreamUI(channel),
     )
     session = EventSession(channel, agent)
     session.submit(goal)
-    pump(session, sys.stdout, sys.stdin)
+    pump(session, real_out, sys.stdin)
 
 
 if __name__ == "__main__":

@@ -234,6 +234,20 @@ tool results, verification evidence, and completion blockers.
 `chat` uses a lighter path: the model responds directly in Markdown, retains a
 short chat history, and has no file or terminal actions.
 
+## Frontends and the UI API
+
+The agent core is frontend-agnostic: it emits what it produces (status, reasoning,
+streaming, the final answer) and asks for what it needs (menu/text/secret input,
+dangerous-command confirmations) through two small protocols — `AgentUI` (`ui.py`)
+and `ApprovalGate` (`approvals.py`). The terminal is the default frontend; a web
+UI, GUI, Telegram bot, or IDE plugin is a thin adapter over the same contract,
+either by implementing the protocols in-process or by consuming a versioned JSON
+event stream (`frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
+`event_stdio.py`, `frontends.py`). Launch a non-terminal frontend with
+`kvist --workspace <dir> --frontend stdio` (newline-delimited JSON over
+stdout/stdin); defaults stay fail-closed without a TTY. Full guide:
+[UI_API.md](UI_API.md).
+
 ## Providers and models
 
 The configured `fast`, `smart`, and `planner` roles are model tiers, not agent
@@ -671,7 +685,12 @@ Execution and persistence:
 - `agent_logging.py` stores named sessions, checkpoints, and run logs.
 - `agent_web.py` limits when web actions may be used.
 - `deps.py` detects dependency versions from Python project and lock files.
-- `ui.py` and `render_throttle.py` render the terminal interface efficiently.
+- `ui.py` defines the frontend-agnostic `AgentUI` protocol; `terminal_banner.py`
+  is the default terminal frontend and `render_throttle.py` throttles its redraws.
+- `approvals.py`, `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
+  `event_stdio.py`, and `frontends.py` expose the core as an injectable UI/approval
+  API and a `--frontend`-selectable JSON event stream for non-terminal frontends
+  (see [UI_API.md](UI_API.md)).
 
 Packaging and integrations:
 

@@ -237,6 +237,20 @@ keyword-router.
 сохраняет короткую историю диалога и не имеет файловых или терминальных
 действий.
 
+## Фронтенды и UI API
+
+Ядро агента не зависит от фронтенда: оно отдаёт то, что производит (статус,
+рассуждения, стриминг, финальный ответ), и спрашивает то, что ему нужно (ввод
+меню/текста/секрета, подтверждение опасных команд) через два небольших протокола —
+`AgentUI` (`ui.py`) и `ApprovalGate` (`approvals.py`). Терминал — фронтенд по
+умолчанию; web-интерфейс, GUI, Telegram-бот или плагин IDE — тонкий адаптер поверх
+того же контракта: либо реализуя протоколы внутри процесса, либо потребляя
+версионированный поток JSON-событий (`frontend_protocol.py`, `event_stream_ui.py`,
+`event_session.py`, `event_stdio.py`, `frontends.py`). Не-терминальный фронтенд
+запускается как `kvist --workspace <dir> --frontend stdio` (NDJSON через
+stdout/stdin); по умолчанию всё остаётся fail-closed без TTY. Полное руководство:
+[UI_API.ru.md](UI_API.ru.md).
+
 ## Провайдеры и модели
 
 Настраиваемые `fast`, `smart` и `planner` — это уровни моделей, а не роли
@@ -673,7 +687,12 @@ web_search, fetch_url, delegate_task
 - `agent_logging.py` хранит именованные сессии, checkpoints и run logs;
 - `agent_web.py` ограничивает условия использования web-действий;
 - `deps.py` определяет версии зависимостей по Python project и lock-файлам;
-- `ui.py` и `render_throttle.py` эффективно отображают терминальный интерфейс.
+- `ui.py` определяет независимый от фронтенда протокол `AgentUI`; `terminal_banner.py`
+  — терминальный фронтенд по умолчанию, а `render_throttle.py` троттлит его перерисовку.
+- `approvals.py`, `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
+  `event_stdio.py` и `frontends.py` открывают ядро как инъектируемый UI/approval-API и
+  выбираемый через `--frontend` поток JSON-событий для не-терминальных фронтендов
+  (см. [UI_API.ru.md](UI_API.ru.md)).
 
 Сборка и интеграции:
 

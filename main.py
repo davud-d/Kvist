@@ -22,6 +22,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable the live banner and use the plain terminal interface.",
     )
+    parser.add_argument(
+        "--frontend",
+        default="terminal",
+        help=(
+            "Frontend to launch: 'terminal' (default REPL) or an event frontend "
+            "such as 'stdio' (newline-delimited JSON over stdout/stdin). See UI_API.md."
+        ),
+    )
     return parser
 
 
@@ -1588,6 +1596,23 @@ def main() -> None:
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
     slash_command_auto_suggest.set_verbose(verbose)
     session_language = detect_request_language(os.getenv("LANG", ""), fallback="en")
+
+    if getattr(args, "frontend", "terminal") != "terminal":
+        from frontends import run_frontend
+
+        try:
+            run_frontend(
+                args.frontend,
+                args.workspace,
+                max_steps=max_steps,
+                persist_logs=persist_logs,
+                verbose=verbose,
+                language_hint=session_language,
+            )
+        except RuntimeError as error:
+            print(sanitize_display_text(str(error)), file=sys.stderr)
+            sys.exit(2)
+        return
 
     try:
         workspace_path = resolve_workspace_path(args.workspace)
