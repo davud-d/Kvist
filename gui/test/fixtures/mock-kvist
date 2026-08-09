@@ -1,0 +1,143 @@
+#!/usr/bin/env node
+"use strict"
+
+const readline = require("node:readline")
+
+const lines = readline.createInterface({ input: process.stdin })
+let goalRead = false
+let stage = 0
+
+function emit(event) {
+  process.stdout.write(JSON.stringify(event) + "\n")
+}
+
+function request(kind, requestId, extra = {}) {
+  emit({
+    type: "input_request",
+    request_id: requestId,
+    kind,
+    title: `${kind[0].toUpperCase()}${kind.slice(1)} input`,
+    body: kind === "confirm" ? "argv: ['rm', 'generated.tmp']\nReason: remove generated output" : "",
+    options: kind === "choice"
+      ? [
+          { value: "fast", label: "Fast", description: "Use the fast model" },
+          { value: "smart", label: "Smart", description: "Use the smart model" },
+        ]
+      : null,
+    current_value: kind === "text" ? "Kvist" : "",
+    help_text: kind === "secret" ? "This value is never echoed." : "",
+    ...extra,
+  })
+}
+
+function begin(goal) {
+  emit({ type: "hello", protocol_version: 1 })
+  if (goal === "__error__") {
+    emit({
+      type: "status",
+      user_message: "The test task failed safely",
+      status: "error",
+      step: 1,
+      progress: 25,
+      plan_step: "verify",
+      is_error: true,
+    })
+    emit({ type: "error", message: "Synthetic bridge failure" })
+    lines.close()
+    setImmediate(() => process.exit(0))
+    return
+  }
+  emit({ type: "live_start" })
+  emit({
+    type: "plan",
+    goal,
+    complexity: "medium",
+    plan: ["Inspect the repository", "Apply the change", "Run tests"],
+    success_criteria: ["Tests pass"],
+    risks: ["Keep the Python core unchanged"],
+  })
+  emit({
+    type: "status",
+    user_message: "Inspecting the repository",
+    status: "working",
+    step: 1,
+    progress: 32,
+    plan_step: "inspect",
+    is_error: false,
+  })
+  emit({
+    type: "step",
+    step: 1,
+    plan_step: "inspect",
+    thought: "Locate the frontend boundary before editing.",
+    user_message: "Reading frontend protocol",
+    action_type: "read_file",
+    action_args: { path: "frontend_protocol.py" },
+    progress: 32,
+  })
+  emit({ type: "stream_start", stream_id: "demo-stream" })
+  emit({ type: "stream_chunk", stream_id: "demo-stream", text: "I found the **stdio boundary**." })
+  emit({
+    type: "stream_chunk",
+    stream_id: "demo-stream",
+    text: "I found the **stdio boundary**. The GUI is connected through NDJSON.",
+  })
+  emit({ type: "future_event", ignored: true })
+  request("choice", "choice-1")
+}
+
+lines.on("line", (line) => {
+  if (!goalRead) {
+    goalRead = true
+    begin(line)
+    return
+  }
+
+  let response
+  try {
+    response = JSON.parse(line)
+  } catch {
+    process.exitCode = 2
+    lines.close()
+    return
+  }
+
+  if (stage === 0 && response.request_id === "choice-1") {
+    stage = 1
+    request("text", "text-1")
+    return
+  }
+  if (stage === 1 && response.request_id === "text-1") {
+    stage = 2
+    request("secret", "secret-1")
+    return
+  }
+  if (stage === 2 && response.request_id === "secret-1") {
+    stage = 3
+    request("confirm", "confirm-1")
+    return
+  }
+  if (stage === 3 && response.request_id === "confirm-1") {
+    emit({
+      type: "stream_commit",
+      stream_id: "demo-stream",
+      text: "I found the **stdio boundary**. The GUI is connected through NDJSON.",
+    })
+    emit({
+      type: "status",
+      user_message: "Tests passed",
+      status: "done",
+      step: 3,
+      progress: 100,
+      plan_step: "verify",
+      is_error: false,
+    })
+    emit({
+      type: "final",
+      message: "Bridge test complete. Secret input was not emitted.",
+      user_messages: [],
+    })
+    lines.close()
+    setImmediate(() => process.exit(0))
+  }
+})

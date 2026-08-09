@@ -69,6 +69,22 @@ kvist --workspace /path/to/project --frontend stdio      # event stream over std
 kvist --workspace /path/to/project                       # default terminal REPL
 ```
 
+Optional per-run stdio overrides:
+
+```bash
+kvist --workspace /path/to/project --frontend stdio \
+  --provider omniroute \
+  --fast-model ds-web/deepseek-v4-flash \
+  --smart-model ds-web/deepseek-v4-pro \
+  --planner-model anthropic/claude-sonnet-4.6 \
+  --role devops \
+  --approval-mode ask
+```
+
+Model overrides are atomic: supply all three model flags or none. `--role` is
+one of `auto`, `coder`, `devops`, or `chat`. `--approval-mode` is `ask` or
+`deny`; there is deliberately no unsafe `allow-all` mode.
+
 - `--frontend terminal` (default) → the interactive terminal REPL.
 - `--frontend stdio` → newline-delimited JSON on stdout/stdin (§8).
 - `--frontend <name>` → an external frontend `kvist_frontends/<name>.py` (§9).
@@ -144,7 +160,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `protocol_version:int` | handshake; always first |
+| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str` | handshake and effective run configuration; always first |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int` | the action chosen for a step |
@@ -203,7 +219,7 @@ The cross-process, cross-language boundary. Rules:
 
 ```
 <<< do the thing
->>> {"type": "hello", "protocol_version": 1}
+>>> {"type": "hello", "protocol_version": 1, "provider": "omniroute", "models": {"fast": "ds-web/deepseek-v4-flash", "smart": "ds-web/deepseek-v4-pro", "planner": "anthropic/claude-sonnet-4.6"}, "role": "devops", "approval_mode": "ask"}
 >>> {"type": "status", "user_message": "Choosing provider", "status": "working", "step": 1, "progress": 10, "plan_step": "inspect", "is_error": false}
 >>> {"type": "input_request", "request_id": "b7dca6b0…", "kind": "choice", "title": "Pick provider", "body": "", "options": [{"value": "openai", "label": "OpenAI"}, {"value": "freeflow", "label": "FreeFlow"}], "current_value": "", "help_text": ""}
 <<< {"request_id": "b7dca6b0…", "value": "freeflow"}
@@ -295,7 +311,8 @@ The core does not change — only the transport.
   terminal, or ship a config. If a provider/model is missing and there is no TTY, the
   core exits with a non-zero status and a message on stderr (fail-closed).
 - **Approvals are fail-closed.** With no injected gate you get terminal prompts; over
-  events, a closed/silent frontend denies dangerous commands.
+  events, a closed/silent frontend denies dangerous commands. `--approval-mode deny`
+  rejects every approval request without showing a prompt.
 - **The agent loop is unchanged.** Frontends never call agent internals — they only
   render events and answer requests.
 - **The terminal is a special default.** Its REPL adds slash-commands, sessions, and

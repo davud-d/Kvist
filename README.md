@@ -132,10 +132,14 @@ With a built binary:
 kvist --workspace "<project_path>"
 ```
 
-`--workspace` is the only CLI option and is required. Kvist resolves the path,
+`--workspace` is required. Kvist resolves the path,
 creates the directory if it does not exist, and then confines its file actions
 to that workspace. Absolute paths are the least surprising; relative paths are
 resolved from the directory where Kvist was started.
+
+Use `--frontend stdio` for the versioned NDJSON frontend protocol. Configure the
+provider and credentials once in the interactive terminal before starting a
+headless frontend.
 
 On Windows, create the environment with `py -m venv .venv` and use
 `.venv\Scripts\python.exe` in place of `.venv/bin/python`.
@@ -152,6 +156,19 @@ Example requests:
 
 Use `Alt+Enter` or `Esc+Enter` for multiline input. Slash-command completion
 appears as soon as the input starts with `/`.
+
+### Electron GUI
+
+```bash
+cd gui
+npm ci
+npm start -- --workspace "<project_path>"
+```
+
+The GUI starts Kvist as a child process with `--frontend stdio`. It does not
+import Python modules or use HTTP, REST, or WebSocket. Packaging instructions
+are in `gui/README.md`. Its prompt bar exposes provider/model overrides, agent
+role, and fail-closed `ask`/`deny` approval modes for each run.
 
 ## Interactive commands
 
@@ -233,20 +250,6 @@ tool results, verification evidence, and completion blockers.
 
 `chat` uses a lighter path: the model responds directly in Markdown, retains a
 short chat history, and has no file or terminal actions.
-
-## Frontends and the UI API
-
-The agent core is frontend-agnostic: it emits what it produces (status, reasoning,
-streaming, the final answer) and asks for what it needs (menu/text/secret input,
-dangerous-command confirmations) through two small protocols — `AgentUI` (`ui.py`)
-and `ApprovalGate` (`approvals.py`). The terminal is the default frontend; a web
-UI, GUI, Telegram bot, or IDE plugin is a thin adapter over the same contract,
-either by implementing the protocols in-process or by consuming a versioned JSON
-event stream (`frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
-`event_stdio.py`, `frontends.py`). Launch a non-terminal frontend with
-`kvist --workspace <dir> --frontend stdio` (newline-delimited JSON over
-stdout/stdin); defaults stay fail-closed without a TTY. Full guide:
-[UI_API.md](UI_API.md).
 
 ## Providers and models
 
@@ -685,17 +688,15 @@ Execution and persistence:
 - `agent_logging.py` stores named sessions, checkpoints, and run logs.
 - `agent_web.py` limits when web actions may be used.
 - `deps.py` detects dependency versions from Python project and lock files.
-- `ui.py` defines the frontend-agnostic `AgentUI` protocol; `terminal_banner.py`
-  is the default terminal frontend and `render_throttle.py` throttles its redraws.
-- `approvals.py`, `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
-  `event_stdio.py`, and `frontends.py` expose the core as an injectable UI/approval
-  API and a `--frontend`-selectable JSON event stream for non-terminal frontends
-  (see [UI_API.md](UI_API.md)).
+- `ui.py` and `render_throttle.py` render the terminal interface efficiently.
 
 Packaging and integrations:
 
 - `kvist.spec` is the PyInstaller definition and bundles `prompts/`.
 - `package_script.py` creates a source archive from Git-visible files.
+- `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`, and
+  `event_stdio.py` implement the versioned NDJSON frontend boundary.
+- `gui/` contains the Electron frontend and its bridge tests.
 - `jetbrains-plugin/` contains the IntelliJ Platform integration for Windows and
   Linux, pinned to the 2025.3 platform line.
 
@@ -717,6 +718,12 @@ Run the static error gate:
 
 ```bash
 .venv/bin/python -m ruff check .
+```
+
+Run the GUI bridge tests:
+
+```bash
+cd gui && npm test
 ```
 
 Prompt-specific tests ensure the runtime uses the top-level `prompts/` directory

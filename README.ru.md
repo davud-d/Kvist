@@ -131,10 +131,14 @@ PyInstaller нужен только для сборки отдельного б�
 kvist --workspace "<project_path>"
 ```
 
-`--workspace` — единственный и обязательный аргумент CLI. Kvist разворачивает
+`--workspace` — обязательный аргумент CLI. Kvist разворачивает
 путь, при необходимости создаёт каталог и затем ограничивает им файловые
 действия. Абсолютный путь обычно понятнее; относительный считается от каталога,
 из которого запущен Kvist.
+
+Для версионированного NDJSON-протокола используйте `--frontend stdio`. Перед
+запуском headless-фронтенда один раз настройте провайдер и ключи в интерактивном
+терминале.
 
 В Windows создайте окружение командой `py -m venv .venv` и используйте
 `.venv\Scripts\python.exe` вместо `.venv/bin/python`.
@@ -151,6 +155,20 @@ kvist --workspace "<project_path>"
 
 Для многострочного ввода используйте `Alt+Enter` или `Esc+Enter`. Автодополнение
 slash-команд появляется, как только ввод начинается с `/`.
+
+### Electron GUI
+
+```bash
+cd gui
+npm ci
+npm start -- --workspace "<project_path>"
+```
+
+GUI запускает Kvist отдельным процессом с `--frontend stdio`. Он не импортирует
+Python-модули и не использует HTTP, REST или WebSocket. Инструкции по упаковке
+находятся в `gui/README.md`. В строке ввода доступны настройки провайдера и трёх
+моделей, роли агента и fail-closed режимов подтверждения `ask`/`deny` для каждого
+запуска.
 
 ## Интерактивные команды
 
@@ -236,20 +254,6 @@ keyword-router.
 `chat` работает по облегчённому пути: модель отвечает напрямую в Markdown,
 сохраняет короткую историю диалога и не имеет файловых или терминальных
 действий.
-
-## Фронтенды и UI API
-
-Ядро агента не зависит от фронтенда: оно отдаёт то, что производит (статус,
-рассуждения, стриминг, финальный ответ), и спрашивает то, что ему нужно (ввод
-меню/текста/секрета, подтверждение опасных команд) через два небольших протокола —
-`AgentUI` (`ui.py`) и `ApprovalGate` (`approvals.py`). Терминал — фронтенд по
-умолчанию; web-интерфейс, GUI, Telegram-бот или плагин IDE — тонкий адаптер поверх
-того же контракта: либо реализуя протоколы внутри процесса, либо потребляя
-версионированный поток JSON-событий (`frontend_protocol.py`, `event_stream_ui.py`,
-`event_session.py`, `event_stdio.py`, `frontends.py`). Не-терминальный фронтенд
-запускается как `kvist --workspace <dir> --frontend stdio` (NDJSON через
-stdout/stdin); по умолчанию всё остаётся fail-closed без TTY. Полное руководство:
-[UI_API.ru.md](UI_API.ru.md).
 
 ## Провайдеры и модели
 
@@ -687,17 +691,15 @@ web_search, fetch_url, delegate_task
 - `agent_logging.py` хранит именованные сессии, checkpoints и run logs;
 - `agent_web.py` ограничивает условия использования web-действий;
 - `deps.py` определяет версии зависимостей по Python project и lock-файлам;
-- `ui.py` определяет независимый от фронтенда протокол `AgentUI`; `terminal_banner.py`
-  — терминальный фронтенд по умолчанию, а `render_throttle.py` троттлит его перерисовку.
-- `approvals.py`, `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
-  `event_stdio.py` и `frontends.py` открывают ядро как инъектируемый UI/approval-API и
-  выбираемый через `--frontend` поток JSON-событий для не-терминальных фронтендов
-  (см. [UI_API.ru.md](UI_API.ru.md)).
+- `ui.py` и `render_throttle.py` эффективно отображают терминальный интерфейс.
 
 Сборка и интеграции:
 
 - `kvist.spec` задаёт сборку PyInstaller и включает `prompts/`;
 - `package_script.py` создаёт архив исходников из видимых Git файлов;
+- `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py` и
+  `event_stdio.py` реализуют версионированную NDJSON-границу фронтенда;
+- `gui/` содержит Electron-фронтенд и тесты его моста;
 - `jetbrains-plugin/` содержит интеграцию IntelliJ Platform для Windows и Linux,
   закреплённую на линейке платформы 2025.3.
 
@@ -719,6 +721,12 @@ web_search, fetch_url, delegate_task
 
 ```bash
 .venv/bin/python -m ruff check .
+```
+
+Тесты GUI-моста:
+
+```bash
+cd gui && npm test
 ```
 
 Отдельные prompt-тесты проверяют, что runtime использует верхний каталог

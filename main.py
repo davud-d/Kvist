@@ -24,11 +24,25 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
+        choices=("terminal", "stdio"),
         default="terminal",
-        help=(
-            "Frontend to launch: 'terminal' (default REPL) or an event frontend "
-            "such as 'stdio' (newline-delimited JSON over stdout/stdin). See UI_API.md."
-        ),
+        help="Frontend transport. Use 'stdio' for the NDJSON event protocol.",
+    )
+    parser.add_argument("--provider", help="Provider override for the stdio frontend.")
+    parser.add_argument("--fast-model", help="Fast model override for the stdio frontend.")
+    parser.add_argument("--smart-model", help="Smart model override for the stdio frontend.")
+    parser.add_argument("--planner-model", help="Planner model override for the stdio frontend.")
+    parser.add_argument(
+        "--role",
+        choices=("auto", "coder", "devops", "chat"),
+        default="auto",
+        help="Agent role override for the stdio frontend.",
+    )
+    parser.add_argument(
+        "--approval-mode",
+        choices=("ask", "deny"),
+        default="ask",
+        help="Dangerous-command approval mode for the stdio frontend.",
     )
     return parser
 
@@ -1591,28 +1605,46 @@ def main() -> None:
         else _build_cli_parser().parse_args()
     )
 
+    if args.frontend == "stdio":
+        from event_stdio import launch
+
+        goal = sys.stdin.readline().strip()
+        model_values = (args.fast_model, args.smart_model, args.planner_model)
+        if any(model_values) and not all(model_values):
+            print(
+                "Model overrides require --fast-model, --smart-model, and --planner-model together.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        models_override = (
+            {
+                "fast": args.fast_model,
+                "smart": args.smart_model,
+                "planner": args.planner_model,
+            }
+            if all(model_values)
+            else None
+        )
+        try:
+            launch(
+                args.workspace,
+                goal,
+                build_agent,
+                provider_override=args.provider,
+                models_override=models_override,
+                routed_role=None if args.role == "auto" else args.role,
+                approval_mode=args.approval_mode,
+            )
+        except RuntimeError as error:
+            print(sanitize_display_text(str(error)), file=sys.stderr)
+            raise SystemExit(2) from error
+        return
+
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "50"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
     slash_command_auto_suggest.set_verbose(verbose)
     session_language = detect_request_language(os.getenv("LANG", ""), fallback="en")
-
-    if getattr(args, "frontend", "terminal") != "terminal":
-        from frontends import run_frontend
-
-        try:
-            run_frontend(
-                args.frontend,
-                args.workspace,
-                max_steps=max_steps,
-                persist_logs=persist_logs,
-                verbose=verbose,
-                language_hint=session_language,
-            )
-        except RuntimeError as error:
-            print(sanitize_display_text(str(error)), file=sys.stderr)
-            sys.exit(2)
-        return
 
     try:
         workspace_path = resolve_workspace_path(args.workspace)

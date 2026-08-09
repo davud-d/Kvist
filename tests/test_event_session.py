@@ -14,7 +14,6 @@ from event_session import EventApprovalGate, EventSession
 from event_stream_ui import EventStreamUI
 from executor import SafeExecutor
 from frontend_protocol import (
-    PROTOCOL_VERSION,
     FinalEvent,
     FrontendChannel,
     InputRequestEvent,
@@ -145,6 +144,15 @@ def test_event_approval_gate_approves_and_fails_closed():
     assert denied["value"] is False
 
 
+def test_event_approval_gate_deny_mode_never_prompts():
+    channel = FrontendChannel()
+    gate = EventApprovalGate(channel, mode="deny")
+
+    assert gate.confirm_command(["rm", "generated.tmp"], "destructive") is False
+    assert gate.confirm("Overwrite file", "body", "continue?") is False
+    assert channel.get(timeout=0.01) is None
+
+
 def test_stdio_pump_writes_jsonl_ending_in_terminal_event():
     channel = FrontendChannel()
     ui = EventStreamUI(channel)
@@ -159,9 +167,7 @@ def test_stdio_pump_writes_jsonl_ending_in_terminal_event():
     payloads = [json.loads(line) for line in lines]
     for payload in payloads:
         assert "type" in payload
-    # First line is always the hello handshake; last is the terminal event.
-    assert payloads[0]["type"] == "hello"
-    assert payloads[0]["protocol_version"] == PROTOCOL_VERSION
+    assert payloads[0] == {"type": "hello", "protocol_version": 1}
     assert payloads[-1]["type"] == "final"
 
 

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Kvist</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="main-stage">
+        <section id="welcome" class="welcome">
+          <img class="logo-word" src="kvist-logo.svg" alt="Kvist" />
+        </section>
+
+        <section id="conversation" class="conversation is-hidden" aria-live="polite">
+          <div id="messages" class="messages"></div>
+        </section>
+
+        <section class="dock">
+          <div id="requestHost" class="request-host"></div>
+          <form id="composer" class="composer">
+            <textarea
+              id="promptInput"
+              rows="1"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder='Ask anything… "Fix broken tests"'
+              aria-label="Task"
+            ></textarea>
+            <div class="composer-meta">
+              <div class="model-meta">
+                <span class="mode-label">Kvist</span>
+                <span class="muted">·</span>
+                <button id="roleButton" class="config-chip" type="button">auto</button>
+                <button id="modelButton" class="config-chip" type="button">saved models</button>
+                <button id="approvalButton" class="config-chip" type="button">ask</button>
+                <span id="protocolLabel" class="muted">v1</span>
+              </div>
+              <div class="composer-hints">
+                <span><kbd>shift</kbd>+<kbd>enter</kbd> newline</span>
+                <span><kbd>ctrl</kbd>+<kbd>p</kbd> commands</span>
+              </div>
+            </div>
+          </form>
+          <div id="activity" class="activity">
+            <div class="activity-main">
+              <span id="activitySpinner" class="spinner is-hidden"></span>
+              <span id="activityText" class="muted">Ready</span>
+            </div>
+            <div class="activity-progress"><span id="progressBar"></span></div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        <button id="workspaceButton" class="workspace-button" type="button" title="Choose workspace">
+          <span class="status-dot"></span>
+          <span id="workspaceLabel">Loading workspace…</span>
+        </button>
+        <span class="footer-version">Kvist GUI 1.1.0</span>
+      </footer>
+    </div>
+
+    <div id="paletteBackdrop" class="overlay is-hidden" role="presentation">
+      <section class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+        <div class="palette-title">Commands</div>
+        <button type="button" data-command="new"><span>New task</span><kbd>ctrl+n</kbd></button>
+        <button type="button" data-command="workspace"><span>Choose workspace</span><kbd>enter</kbd></button>
+        <button type="button" data-command="settings"><span>Models and permissions</span><kbd>ctrl+m</kbd></button>
+        <button type="button" data-command="details"><span>Toggle tool details</span><kbd>d</kbd></button>
+        <button type="button" data-command="interrupt"><span>Interrupt Kvist</span><kbd>esc</kbd></button>
+      </section>
+    </div>
+
+    <div id="settingsBackdrop" class="overlay is-hidden" role="presentation">
+      <form id="settingsForm" class="settings-panel" role="dialog" aria-modal="true" aria-label="Run settings">
+        <div class="settings-header">
+          <div>
+            <div class="settings-title">Run configuration</div>
+            <div class="settings-subtitle">Applied to the next Kvist process</div>
+          </div>
+          <button id="settingsClose" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+
+        <div class="settings-grid">
+          <label>
+            <span>Provider</span>
+            <select id="providerSelect">
+              <option value="">Saved provider</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="omniroute">OmniRoute</option>
+              <option value="freeflow">FreeFlow</option>
+            </select>
+          </label>
+          <label>
+            <span>Custom provider ID</span>
+            <input id="customProviderInput" autocomplete="off" placeholder="custom:my-provider" />
+          </label>
+          <label>
+            <span>Role</span>
+            <select id="roleSelect">
+              <option value="auto">Auto</option>
+              <option value="coder">Coder</option>
+              <option value="devops">DevOps</option>
+              <option value="chat">Chat</option>
+            </select>
+          </label>
+          <label>
+            <span>Dangerous commands</span>
+            <select id="approvalModeSelect">
+              <option value="ask">Ask every time</option>
+              <option value="deny">Always deny</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="model-fields">
+          <label><span>Fast model</span><input id="fastModelInput" list="modelSuggestions" autocomplete="off" placeholder="Use saved model" /></label>
+          <label><span>Smart model</span><input id="smartModelInput" list="modelSuggestions" autocomplete="off" placeholder="Use saved model" /></label>
+          <label><span>Planner model</span><input id="plannerModelInput" list="modelSuggestions" autocomplete="off" placeholder="Use saved model" /></label>
+        </div>
+        <datalist id="modelSuggestions">
+          <option value="gpt-5.4-mini"></option>
+          <option value="gpt-5.4"></option>
+          <option value="claude-haiku-4-5"></option>
+          <option value="claude-sonnet-4-6"></option>
+          <option value="claude-opus-4-8"></option>
+          <option value="ds-web/deepseek-v4-flash"></option>
+          <option value="ds-web/deepseek-v4-pro"></option>
+          <option value="anthropic/claude-sonnet-4.6"></option>
+          <option value="google/gemini-3.5-pro"></option>
+        </datalist>
+        <div id="settingsError" class="settings-error" aria-live="polite"></div>
+        <div class="settings-note">Set all three model fields, or leave all empty. Missing provider credentials still fail closed.</div>
+        <div class="settings-actions">
+          <button id="settingsReset" type="button">Use saved defaults</button>
+          <span class="settings-spacer"></span>
+          <button id="settingsCancel" type="button">Cancel</button>
+          <button class="settings-save" type="submit">Apply</button>
+        </div>
+      </form>
+    </div>
+
+    <script src="../src/protocol-state.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

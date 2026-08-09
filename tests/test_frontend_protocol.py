@@ -8,7 +8,6 @@ import time
 import pytest
 
 from frontend_protocol import (
-    PROTOCOL_VERSION,
     DebugEvent,
     ErrorEvent,
     FinalEvent,
@@ -31,7 +30,7 @@ from frontend_protocol import (
 
 def _all_sample_events():
     return [
-        (HelloEvent(PROTOCOL_VERSION), "hello"),
+        (HelloEvent(), "hello"),
         (LiveStartEvent(), "live_start"),
         (LiveStopEvent(), "live_stop"),
         (
@@ -116,6 +115,26 @@ def test_status_event_fields_roundtrip():
         "progress": 42,
         "plan_step": "edit",
         "is_error": True,
+    }
+
+
+def test_hello_event_carries_protocol_version():
+    assert HelloEvent().to_dict() == {"type": "hello", "protocol_version": 1}
+
+
+def test_hello_event_carries_optional_runtime_configuration():
+    assert HelloEvent(
+        provider="omniroute",
+        models={"fast": "f", "smart": "s", "planner": "p"},
+        role="devops",
+        approval_mode="deny",
+    ).to_dict() == {
+        "type": "hello",
+        "protocol_version": 1,
+        "provider": "omniroute",
+        "models": {"fast": "f", "smart": "s", "planner": "p"},
+        "role": "devops",
+        "approval_mode": "deny",
     }
 
 
@@ -224,12 +243,6 @@ def test_request_after_close_returns_immediately():
     resp = ch.request("confirm", "Proceed?")
     assert resp.value is None
     assert resp.approved is None
-
-
-def test_hello_event_carries_protocol_version():
-    payload = HelloEvent(PROTOCOL_VERSION).to_dict()
-    assert payload == {"type": "hello", "protocol_version": PROTOCOL_VERSION}
-    assert json.loads(json.dumps(payload))["protocol_version"] == PROTOCOL_VERSION
 
 
 if __name__ == "__main__":  # pragma: no cover

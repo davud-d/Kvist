@@ -19,10 +19,15 @@ from frontend_protocol import ErrorEvent, FrontendChannel
 class EventApprovalGate:
     """`approvals.ApprovalGate` that confirms via a `FrontendChannel` request."""
 
-    def __init__(self, channel: FrontendChannel) -> None:
+    def __init__(self, channel: FrontendChannel, mode: str = "ask") -> None:
+        if mode not in {"ask", "deny"}:
+            raise ValueError("Approval mode must be 'ask' or 'deny'.")
         self._channel = channel
+        self._mode = mode
 
     def confirm_command(self, command: list[str], reason: str) -> bool:
+        if self._mode == "deny":
+            return False
         response = self._channel.request(
             "confirm",
             "Dangerous command",
@@ -32,6 +37,8 @@ class EventApprovalGate:
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         _ = question
+        if self._mode == "deny":
+            return False
         return bool(self._channel.request("confirm", title, body=body).approved)
 
 
