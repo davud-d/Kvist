@@ -31,6 +31,28 @@ test("treats stream chunks as cumulative snapshots", () => {
   assert.equal(protocol.streams.get("s1"), "Hello")
 })
 
+test("folds reasoning chunks and commit into snapshots", () => {
+  const protocol = new ProtocolState()
+  protocol.consume({ type: "hello", protocol_version: 1 })
+  protocol.consume({ type: "stream_start", stream_id: "s1" })
+
+  const start = protocol.consume({ type: "reasoning_start", stream_id: "s1" })
+  const chunk = protocol.consume({ type: "reasoning_chunk", stream_id: "s1", text: "thinking" })
+  const commit = protocol.consume({
+    type: "reasoning_commit",
+    stream_id: "s1",
+    duration_seconds: 4.2,
+  })
+
+  assert.deepEqual(start, { kind: "reasoning_start", streamId: "s1" })
+  assert.equal(chunk.kind, "reasoning_snapshot")
+  assert.equal(chunk.text, "thinking")
+  assert.equal(chunk.committed, false)
+  assert.equal(commit.kind, "reasoning_snapshot")
+  assert.equal(commit.committed, true)
+  assert.equal(commit.durationSeconds, 4.2)
+})
+
 test("ignores unknown events after the handshake", () => {
   const protocol = new ProtocolState()
   protocol.consume({ type: "hello", protocol_version: 1 })

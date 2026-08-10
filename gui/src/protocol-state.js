@@ -20,6 +20,9 @@
     "stream_start",
     "stream_chunk",
     "stream_commit",
+    "reasoning_start",
+    "reasoning_chunk",
+    "reasoning_commit",
     "message",
     "final",
     "debug",
@@ -70,6 +73,22 @@
           streamId: event.stream_id,
           text,
           committed: event.type === "stream_commit",
+        }
+      }
+
+      if (event.type === "reasoning_start") {
+        return { kind: "reasoning_start", streamId: event.stream_id }
+      }
+
+      if (event.type === "reasoning_chunk" || event.type === "reasoning_commit") {
+        const committed = event.type === "reasoning_commit"
+        return {
+          kind: "reasoning_snapshot",
+          streamId: event.stream_id,
+          text: typeof event.text === "string" ? event.text : "",
+          committed,
+          durationSeconds:
+            typeof event.duration_seconds === "number" ? event.duration_seconds : 0,
         }
       }
 

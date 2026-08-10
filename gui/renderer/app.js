@@ -226,16 +226,63 @@ function addAssistantMessage(text, streamId = "") {
   return card
 }
 
-function updateStream(streamId, text, committed) {
-  let card = Array.from(messages.querySelectorAll("[data-stream-id]")).find(
+function findStreamCard(streamId) {
+  return Array.from(messages.querySelectorAll("[data-stream-id]")).find(
     (candidate) => candidate.dataset.streamId === streamId,
   )
+}
+
+function updateStream(streamId, text, committed) {
+  let card = findStreamCard(streamId)
   if (!card) card = addAssistantMessage("", streamId)
   const content = card.querySelector(".markdown")
   renderMarkdown(content, text)
   card.classList.toggle("is-streaming", !committed)
   lastAssistantText = text
   scrollToBottom()
+}
+
+// The thinking block lives inside the answer card (shared stream_id), above the
+// answer. Its body deliberately is NOT `.markdown` so updateStream keeps
+// targeting the answer element.
+function ensureThinkingBlock(streamId) {
+  let card = findStreamCard(streamId)
+  if (!card) card = addAssistantMessage("", streamId)
+  let block = card.querySelector(".thinking-block")
+  if (block) return block
+  block = createElement("details", "thinking-block")
+  block.open = true
+  block.dataset.startedAt = String(Date.now())
+  const summary = createElement("summary", "thinking-summary")
+  summary.append(
+    createElement("span", "thinking-spinner"),
+    createElement("span", "thinking-label", "Thinking…"),
+  )
+  block.append(summary, createElement("div", "thinking-body"))
+  card.insertBefore(block, card.querySelector(".markdown"))
+  return block
+}
+
+function updateThinking(streamId, text) {
+  const block = ensureThinkingBlock(streamId)
+  renderMarkdown(block.querySelector(".thinking-body"), text)
+  scrollToBottom()
+}
+
+function commitThinkingBlock(streamId, durationSeconds) {
+  const card = findStreamCard(streamId)
+  const block = card && card.querySelector(".thinking-block")
+  if (!block) return
+  let seconds = durationSeconds
+  if (!seconds || seconds <= 0) {
+    const started = Number(block.dataset.startedAt || 0)
+    if (started) seconds = (Date.now() - started) / 1000
+  }
+  block.classList.add("is-committed")
+  block.open = false
+  block.querySelector(".thinking-spinner")?.remove()
+  const label = block.querySelector(".thinking-label")
+  if (label) label.textContent = `Thought for ${Math.max(1, Math.round(seconds))}s`
 }
 
 function addError(message) {
@@ -280,8 +327,13 @@ function addStep(event) {
   summary.append(
     createElement("span", "step-action", event.action_type || event.plan_step || "step"),
     createElement("span", "", event.user_message || `Step ${event.step}`),
-    createElement("span", "step-progress", `${event.progress ?? 0}%`),
   )
+  if (event.reasoning_seconds > 0) {
+    summary.append(
+      createElement("span", "step-thought", `🧠 ${Math.max(1, Math.round(event.reasoning_seconds))}s`),
+    )
+  }
+  summary.append(createElement("span", "step-progress", `${event.progress ?? 0}%`))
   const content = createElement("div", "step-content")
   if (event.thought) content.append(createElement("div", "", event.thought))
   if (event.action_args && Object.keys(event.action_args).length) {
@@ -399,6 +451,17 @@ function handleEvent(event) {
     return
   }
 
+  if (action.kind === "reasoning_start") {
+    ensureThinkingBlock(action.streamId)
+    return
+  }
+
+  if (action.kind === "reasoning_snapshot") {
+    if (action.committed) commitThinkingBlock(action.streamId, action.durationSeconds)
+    else updateThinking(action.streamId, action.text)
+    return
+  }
+
   switch (action.kind) {
     case "hello":
       protocolLabel.textContent = `v${event.protocol_version}`
@@ -448,7 +511,9 @@ function handleEvent(event) {
       if (showDetails) addNotice(event.message)
       break
     case "error":
+      // An `error` event is terminal (UI_API §8), so the run is over.
       addError(event.message || "Kvist reported an error.")
+      setRunning(false)
       setActivity("Kvist reported an error", { error: true })
       break
     case "input_request":
@@ -635,10 +700,14 @@ window.kvist.onProcessError(({ message }) => {
   setActivity("Kvist process failed", { error: true })
 })
 window.kvist.onExit(({ expected, code }) => {
-  if (running && !expected && code === 0) {
-    setRunning(false)
-    setActivity("Kvist process closed")
-  }
+  // One process = one run: a clean exit (code 0) is normal completion, even
+  // when the run ended without a `final` event (chat replies and streamed
+  // reports do not emit one). Quietly return to idle. Abnormal exits are
+  // surfaced separately via process-error, and a run that already finished
+  // (final/error → not running) keeps its own status.
+  if (expected || code !== 0 || !running) return
+  setRunning(false)
+  setActivity("Kvist", { progress: 0 })
 })
 
 updateConfigChips()

@@ -74,8 +74,17 @@ function begin(goal) {
     action_type: "read_file",
     action_args: { path: "frontend_protocol.py" },
     progress: 32,
+    reasoning_seconds: 12,
   })
   emit({ type: "stream_start", stream_id: "demo-stream" })
+  emit({ type: "reasoning_start", stream_id: "demo-stream" })
+  emit({ type: "reasoning_chunk", stream_id: "demo-stream", text: "Let me check where the frontend seam is" })
+  emit({
+    type: "reasoning_chunk",
+    stream_id: "demo-stream",
+    text: "Let me check where the frontend seam is. It is the NDJSON stdio boundary.",
+  })
+  emit({ type: "reasoning_commit", stream_id: "demo-stream", duration_seconds: 6 })
   emit({ type: "stream_chunk", stream_id: "demo-stream", text: "I found the **stdio boundary**." })
   emit({
     type: "stream_chunk",
