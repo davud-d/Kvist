@@ -106,7 +106,9 @@ kvist --workspace /path/to/project                       # терминальн�
 `render_user_markdown(message, fallback_style="") -> str`,
 и стриминг через `live_markdown()` — контекст-менеджер, отдающий callback
 `update(message)` (каждый вызов заменяет весь отрендеренный ответ новым кумулятивным
-текстом).
+текстом). У callback может быть атрибут `update.reasoning(message)` — второй канал,
+стримящий кумулятивный текст раздумий модели; вызывающий берёт его через
+`getattr(update, "reasoning", None)`, поэтому UI без канала раздумий продолжают работать.
 
 **Ввод (блокирующий, возвращает ответ):**
 `choose_option(title, options, current_value="", help_text="") -> str | None`,
@@ -147,16 +149,43 @@ fail-closed).
 | `hello` | `protocol_version:int` | handshake; всегда первым |
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу |
-| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int` | выбранное действие шага |
+| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int, reasoning_seconds:number` | выбранное действие шага; `reasoning_seconds` — сколько модель думала перед ним (0, если не думала) |
 | `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | план задачи |
 | `sandbox_notice` | `note:str` | одноразовое уведомление о песочнице |
 | `stream_start` | `stream_id:str` | начало стримингового ответа |
-| `stream_chunk` | `stream_id:str, text:str` | текущий кумулятивный текст (**снапшот**, не дельта) |
-| `stream_commit` | `stream_id:str, text:str` | финальный стрим-текст (однократно) |
+| `stream_chunk` | `stream_id:str, text:str` | текущий кумулятивный текст ответа (**снапшот**, не дельта) |
+| `stream_commit` | `stream_id:str, text:str` | финальный текст ответа (однократно) |
+| `reasoning_start` | `stream_id:str` | модель начала думать; тот же `stream_id`, что у ответа |
+| `reasoning_chunk` | `stream_id:str, text:str` | текущий кумулятивный текст **раздумий** (снапшот, отдельный канал от ответа) |
+| `reasoning_commit` | `stream_id:str, duration_seconds:number` | раздумья закончились (сейчас пойдёт ответ); несёт длительность |
 | `message` | `markdown:str` | не-стримовое Markdown-сообщение |
 | `final` | `message:str, user_messages:string[]` | финальный ответ прогона (терминальное событие) |
 | `debug` | `message:str` | verbose-диагностика |
 | `error` | `message:str` | строка ошибки (эмитится и если прогон бросил исключение) |
+
+### Думающие модели (reasoning)
+
+Некоторые модели «думают» перед ответом, иногда минутами. Kvist выносит эти раздумья
+на **отдельный канал**, чтобы они не смешивались с ответом:
+
+- **Детекция динамическая, без статического флага.** Фронтенд понимает, что модель
+  думает, в момент прихода `reasoning_start` — не по имени модели. Если ответ пошёл
+  без событий `reasoning_*`, значит модель не думала; рендерите как обычно.
+- **`stream_id` раздумий совпадает с `stream_id` ответа.** Привязывайте UI раздумий к
+  тому ответу, который они предваряют.
+- **Порядок** для думающего ответа: `stream_start` → `reasoning_start` →
+  `reasoning_chunk`* → `reasoning_commit` → `stream_chunk`* → `stream_commit`.
+  `reasoning_commit` всегда до первого `stream_chunk`, поэтому мысли и ответ не
+  перемешиваются. Типичный GUI показывает живой серый блок, пока модель думает, и
+  сворачивает его в ярлык «Thought for Ns» (из `duration_seconds`), когда пошёл ответ.
+- **Захват пассивный и провайдер-независимый**, только при включённом стриминге. Kvist
+  читает reasoning-токены, которые провайдер и так шлёт (`reasoning` /
+  `reasoning_content`), и ничего дополнительно не запрашивает. Учтите: собственные
+  reasoning-модели OpenAI (o-серия) **не** стримят текст раздумий через
+  `chat.completions` — придёт `reasoning_commit` (время), но серый блок останется
+  пустым, и это честно.
+- В структурном цикле coder/devops раздумья по шагу отдаются компактно через
+  `step.reasoning_seconds`, а не живым блоком.
 
 Входящий запрос / ответ:
 
@@ -262,9 +291,12 @@ proc.stdin.write("do the thing\n");                 // задача = перва
 readline.createInterface({ input: proc.stdout }).on("line", (line) => {
   const ev = JSON.parse(line);
   switch (ev.type) {
-    case "hello":        checkVersion(ev.protocol_version); break;
-    case "stream_chunk": appendStreaming(ev.text);          break;  // эффект живого набора
-    case "status":       showStatus(ev);                    break;
+    case "hello":            checkVersion(ev.protocol_version);        break;
+    case "stream_chunk":     appendStreaming(ev.stream_id, ev.text);   break;  // эффект живого набора
+    case "reasoning_start":  showThinking(ev.stream_id);               break;  // модель думает
+    case "reasoning_chunk":  updateThinking(ev.stream_id, ev.text);    break;  // серые живые мысли
+    case "reasoning_commit": collapseThinking(ev.stream_id, ev.duration_seconds); break; // «Thought for Ns»
+    case "status":           showStatus(ev);                           break;
     case "final":        showFinal(ev.message);             break;
     case "error":        showError(ev.message);             break;
     case "input_request":

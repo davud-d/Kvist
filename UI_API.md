@@ -123,7 +123,9 @@ A structural `typing.Protocol` (no subclassing needed). Methods, grouped:
 `render_user_markdown(message, fallback_style="") -> str`,
 and streaming via `live_markdown()` — a context manager yielding an
 `update(message)` callback (each call replaces the whole rendered response with
-the new cumulative text).
+the new cumulative text). The callback may also carry `update.reasoning(message)`,
+a second channel that streams the model's cumulative thinking text; callers probe it
+with `getattr(update, "reasoning", None)` so UIs without a reasoning channel still work.
 
 **Input (blocking, return the answer):**
 `choose_option(title, options, current_value="", help_text="") -> str | None`,
@@ -163,16 +165,45 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str` | handshake and effective run configuration; always first |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress |
-| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int` | the action chosen for a step |
+| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int, reasoning_seconds:number` | the action chosen for a step; `reasoning_seconds` is how long the model spent thinking before it (0 when it did not think) |
 | `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | the task plan |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
 | `stream_start` | `stream_id:str` | a streaming response begins |
-| `stream_chunk` | `stream_id:str, text:str` | current cumulative text (a **snapshot**, not a delta) |
-| `stream_commit` | `stream_id:str, text:str` | final streamed text (once) |
+| `stream_chunk` | `stream_id:str, text:str` | current cumulative answer text (a **snapshot**, not a delta) |
+| `stream_commit` | `stream_id:str, text:str` | final streamed answer text (once) |
+| `reasoning_start` | `stream_id:str` | the model started thinking; same `stream_id` as the answer it precedes |
+| `reasoning_chunk` | `stream_id:str, text:str` | current cumulative **thinking** text (a snapshot, separate channel from the answer) |
+| `reasoning_commit` | `stream_id:str, duration_seconds:number` | thinking ended (the answer is about to stream); carries how long it took |
 | `message` | `markdown:str` | a non-streamed Markdown message |
 | `final` | `message:str, user_messages:string[]` | the run's final answer (terminal event) |
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
+
+### Thinking / reasoning models
+
+Some models "think" before answering, sometimes for minutes. Kvist surfaces that
+thinking on a **separate channel** so it never contaminates the answer:
+
+- **Detection is dynamic, not a static flag.** A frontend learns the model is
+  thinking the moment a `reasoning_start` arrives — not from the model name. If the
+  answer streams with no `reasoning_*` events, the model simply did not think; render
+  it as usual.
+- **The reasoning `stream_id` equals the answer's `stream_id`.** Attach the thinking
+  UI to the reply it precedes.
+- **Ordering** for a thinking reply: `stream_start` → `reasoning_start` →
+  `reasoning_chunk`* → `reasoning_commit` → `stream_chunk`* → `stream_commit`.
+  `reasoning_commit` is always emitted before the first `stream_chunk`, so thinking
+  text and answer text never interleave. A typical GUI shows a live grey block while
+  thinking, then collapses it into a "Thought for Ns" label (from `duration_seconds`)
+  once the answer begins.
+- **Capture is passive and provider-agnostic**, and only happens when streaming is on.
+  Kvist reads whatever reasoning tokens the provider already emits (`reasoning` /
+  `reasoning_content`); it does not request extra thinking. Note that OpenAI's own
+  reasoning models (o-series) do **not** stream the thinking text over
+  `chat.completions` — you will get `reasoning_commit` (the elapsed time) but the grey
+  block stays empty, which is honest.
+- In the structured coder/devops loop, per-step thinking is reported compactly as
+  `step.reasoning_seconds` rather than a live block.
 
 Inbound request / response:
 
@@ -275,9 +306,12 @@ proc.stdin.write("do the thing\n");                 // the goal = first stdin li
 readline.createInterface({ input: proc.stdout }).on("line", (line) => {
   const ev = JSON.parse(line);
   switch (ev.type) {
-    case "hello":        checkVersion(ev.protocol_version); break;
-    case "stream_chunk": appendStreaming(ev.text);          break;  // live typing effect
-    case "status":       showStatus(ev);                    break;
+    case "hello":            checkVersion(ev.protocol_version);        break;
+    case "stream_chunk":     appendStreaming(ev.stream_id, ev.text);   break;  // live typing effect
+    case "reasoning_start":  showThinking(ev.stream_id);               break;  // model is thinking
+    case "reasoning_chunk":  updateThinking(ev.stream_id, ev.text);    break;  // grey live thoughts
+    case "reasoning_commit": collapseThinking(ev.stream_id, ev.duration_seconds); break; // "Thought for Ns"
+    case "status":           showStatus(ev);                           break;
     case "final":        showFinal(ev.message);             break;
     case "error":        showError(ev.message);             break;
     case "input_request":
