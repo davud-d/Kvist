@@ -62,6 +62,10 @@ jetbrains-plugin/bin/win/kvist.exe
 *.so
 *.dylib
 
+# Node / Electron GUI (installed deps and bundled build output)
+node_modules/
+gui/resources/bin/
+
 # Demo UI (local scratch, not part of the shipped app)
 Demo UI/
 
