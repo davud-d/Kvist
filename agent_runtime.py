@@ -126,7 +126,13 @@ def _build_report_context(self, user_goal: str, summary: str, result: str, issue
 
 def _render_report(self, context: str) -> str:
     """Call the chat model to render a report from agent context. Streams markdown to console."""
-    from agent_model import _load_role_prompt, call_model, safe_extract_stream_delta, _create_json_completion
+    from agent_model import (
+        _load_role_prompt,
+        call_model,
+        safe_extract_reasoning_delta,
+        safe_extract_stream_delta,
+        _create_json_completion,
+    )
 
     report_prompt = _load_role_prompt("report")
     stream_model = self.config.fast_model
@@ -142,9 +148,12 @@ def _render_report(self, context: str) -> str:
     ]
     stream = _create_json_completion(self, stream_model, messages, stream=True)
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
     last_update = __import__("time").monotonic()
+    last_reasoning_update = last_update
 
     with self._ui.live_markdown() as update_markdown:
+        reasoning_update = getattr(update_markdown, "reasoning", None)
         for chunk in stream:
             text = ""
             delta = safe_extract_stream_delta(chunk)
@@ -160,13 +169,27 @@ def _render_report(self, context: str) -> str:
             elif isinstance(chunk, str):
                 text = chunk
 
+            reasoning_text = safe_extract_reasoning_delta(delta)
+            if reasoning_text and reasoning_update is not None and not chunks:
+                reasoning_chunks.append(reasoning_text)
+                now = __import__("time").monotonic()
+                if now - last_reasoning_update > 0.1:
+                    reasoning_update("".join(reasoning_chunks))
+                    last_reasoning_update = now
+
             if text:
+                # The first answer token seals thinking: flush buffered
+                # reasoning so a fast stream never drops it.
+                if not chunks and reasoning_update is not None and reasoning_chunks:
+                    reasoning_update("".join(reasoning_chunks))
                 chunks.append(text)
                 now = __import__("time").monotonic()
                 if now - last_update > 0.1:
                     update_markdown("".join(chunks))
                     last_update = now
 
+        if reasoning_update is not None and reasoning_chunks and not chunks:
+            reasoning_update("".join(reasoning_chunks))
         update_markdown("".join(chunks))
 
     return "".join(chunks)
@@ -426,7 +449,9 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 )
                 continue
 
-            self._ui.print_step_header(step, command)
+            self._ui.print_step_header(
+                step, command, getattr(self, "_last_reasoning_seconds", 0.0)
+            )
 
             if command.action.type == "web_search":
                 web_error = self._prepare_web_search_command(user_goal, command)

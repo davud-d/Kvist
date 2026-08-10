@@ -88,6 +88,7 @@ class StepEvent:
     action_type: str
     action_args: dict
     progress: int
+    reasoning_seconds: float = 0.0
     type: ClassVar[str] = "step"
 
     def to_dict(self) -> dict:
@@ -100,6 +101,7 @@ class StepEvent:
             "action_type": self.action_type,
             "action_args": self.action_args,
             "progress": self.progress,
+            "reasoning_seconds": self.reasoning_seconds,
         }
 
 
@@ -182,6 +184,42 @@ class StreamCommitEvent:
 
     def to_dict(self) -> dict:
         return {"type": self.type, "stream_id": self.stream_id, "text": self.text}
+
+
+@dataclass(slots=True)
+class ReasoningStartEvent:
+    # Shares the answer's stream_id so a frontend can attach the thinking block
+    # to the reply it precedes. Emitted on the first reasoning token, which is
+    # how a frontend learns dynamically that the model is a thinking model.
+    stream_id: str
+    type: ClassVar[str] = "reasoning_start"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "stream_id": self.stream_id}
+
+
+@dataclass(slots=True)
+class ReasoningChunkEvent:
+    stream_id: str
+    text: str
+    type: ClassVar[str] = "reasoning_chunk"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "stream_id": self.stream_id, "text": self.text}
+
+
+@dataclass(slots=True)
+class ReasoningCommitEvent:
+    stream_id: str
+    duration_seconds: float
+    type: ClassVar[str] = "reasoning_commit"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "stream_id": self.stream_id,
+            "duration_seconds": self.duration_seconds,
+        }
 
 
 @dataclass(slots=True)

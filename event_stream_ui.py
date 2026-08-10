@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import time
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
@@ -15,6 +16,9 @@ from frontend_protocol import (
     LiveStopEvent,
     MessageEvent,
     PlanEvent,
+    ReasoningChunkEvent,
+    ReasoningCommitEvent,
+    ReasoningStartEvent,
     SandboxNoticeEvent,
     StatusEvent,
     StepEvent,
@@ -75,7 +79,9 @@ class EventStreamUI:
             )
         )
 
-    def print_step_header(self, step: int, command: Any) -> None:
+    def print_step_header(
+        self, step: int, command: Any, reasoning_seconds: float = 0.0
+    ) -> None:
         self._channel.emit(
             StepEvent(
                 step,
@@ -85,6 +91,7 @@ class EventStreamUI:
                 str(command.action.type),
                 redact_value(command.action.args),
                 command.progress,
+                reasoning_seconds,
             )
         )
 
@@ -96,15 +103,39 @@ class EventStreamUI:
         stream_id = uuid.uuid4().hex
         self._channel.emit(StreamStartEvent(stream_id))
         last = ""
+        reasoning_start: float | None = None
+        reasoning_committed = False
+
+        def commit_reasoning() -> None:
+            nonlocal reasoning_committed
+            if reasoning_start is None or reasoning_committed:
+                return
+            reasoning_committed = True
+            duration = time.monotonic() - reasoning_start
+            self._channel.emit(ReasoningCommitEvent(stream_id, duration))
+
+        def reasoning(message: str) -> None:
+            nonlocal reasoning_start
+            if reasoning_committed:
+                return
+            if reasoning_start is None:
+                reasoning_start = time.monotonic()
+                self._channel.emit(ReasoningStartEvent(stream_id))
+            self._channel.emit(ReasoningChunkEvent(stream_id, redact_text(message)))
 
         def update(message: str) -> None:
             nonlocal last
+            # The first answer token means thinking is over: seal the reasoning
+            # block so its text never leaks into the answer stream.
+            commit_reasoning()
             last = message
             self._channel.emit(StreamChunkEvent(stream_id, redact_text(message)))
 
+        update.reasoning = reasoning
         try:
             yield update
         finally:
+            commit_reasoning()
             self._channel.emit(StreamCommitEvent(stream_id, redact_text(last)))
 
     def render_user_markdown(self, message: str, fallback_style: str = "") -> str:

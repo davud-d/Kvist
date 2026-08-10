@@ -298,6 +298,9 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
     ]
     messages = trim_history(messages, max_recent=4)
 
+    # Reset so a non-thinking step never inherits the previous step's timing.
+    self._last_reasoning_seconds = 0.0
+
     # ── context metrics (computed once) ──────────────────────────
     _prompt_chars = len(system_prompt) + len(trimmed_prompt)
     _input_tokens = self._count_tokens(system_prompt) + self._count_tokens(trimmed_prompt)
@@ -432,12 +435,20 @@ def call_model_streaming(
     thought_shown = False
     stream_start = time.monotonic()
     first_token_time: float | None = None
+    reasoning_start_time: float | None = None
+    reasoning_end_time: float | None = None
     chunk_count = 0
     total_chunk_bytes = 0
     renderer = ThrottledRenderer(max_fps=10)
     for chunk in stream:
         delta = safe_extract_stream_delta(chunk)
+        reasoning_text = safe_extract_reasoning_delta(delta)
+        if reasoning_text and reasoning_start_time is None:
+            reasoning_start_time = time.monotonic()
         if delta and delta.content:
+            # The first answer token ends the thinking phase.
+            if reasoning_start_time is not None and reasoning_end_time is None:
+                reasoning_end_time = time.monotonic()
             if first_token_time is None:
                 first_token_time = time.monotonic()
             chunk_count += 1
@@ -456,6 +467,13 @@ def call_model_streaming(
             print(f"  [streaming] {leftover[:120]}...", flush=True)
     stream_end = time.monotonic()
     stream_duration = stream_end - stream_start
+
+    # Reasoning that never yielded content still counts up to stream end.
+    if reasoning_start_time is not None:
+        end = reasoning_end_time if reasoning_end_time is not None else stream_end
+        self._last_reasoning_seconds = end - reasoning_start_time
+    else:
+        self._last_reasoning_seconds = 0.0
 
     # store streaming metrics for the parent call_model to pick up
     self._last_ttft = (first_token_time - stream_start) if first_token_time is not None else None
@@ -841,3 +859,22 @@ def safe_extract_stream_delta(chunk: Any) -> Any | None:
     if not choices:
         return None
     return getattr(choices[0], "delta", None)
+
+
+def safe_extract_reasoning_delta(delta: Any) -> str:
+    """Extract a reasoning-token fragment from a stream delta, or "".
+
+    Providers expose thinking on different fields: ``reasoning`` (OpenRouter)
+    or ``reasoning_content`` (Moonshot/Kimi, DeepSeek). Both object and dict
+    delta shapes are handled; a model that does not think yields "".
+    """
+    if delta is None:
+        return ""
+    for field in ("reasoning", "reasoning_content"):
+        if isinstance(delta, dict):
+            value = delta.get(field)
+        else:
+            value = getattr(delta, field, None)
+        if isinstance(value, str) and value:
+            return value
+    return ""

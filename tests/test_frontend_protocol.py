@@ -19,6 +19,9 @@ from frontend_protocol import (
     LiveStopEvent,
     MessageEvent,
     PlanEvent,
+    ReasoningChunkEvent,
+    ReasoningCommitEvent,
+    ReasoningStartEvent,
     SandboxNoticeEvent,
     StatusEvent,
     StepEvent,
@@ -72,6 +75,9 @@ def _all_sample_events():
         (StreamStartEvent(stream_id="s1"), "stream_start"),
         (StreamChunkEvent(stream_id="s1", text="chunk"), "stream_chunk"),
         (StreamCommitEvent(stream_id="s1", text="full"), "stream_commit"),
+        (ReasoningStartEvent(stream_id="s1"), "reasoning_start"),
+        (ReasoningChunkEvent(stream_id="s1", text="think"), "reasoning_chunk"),
+        (ReasoningCommitEvent(stream_id="s1", duration_seconds=3.5), "reasoning_commit"),
         (DebugEvent(message="dbg"), "debug"),
         (ErrorEvent(message="boom"), "error"),
         (
@@ -116,6 +122,47 @@ def test_status_event_fields_roundtrip():
         "plan_step": "edit",
         "is_error": True,
     }
+
+
+def test_reasoning_events_to_dict():
+    assert ReasoningStartEvent(stream_id="s1").to_dict() == {
+        "type": "reasoning_start",
+        "stream_id": "s1",
+    }
+    assert ReasoningChunkEvent(stream_id="s1", text="think").to_dict() == {
+        "type": "reasoning_chunk",
+        "stream_id": "s1",
+        "text": "think",
+    }
+    assert ReasoningCommitEvent(stream_id="s1", duration_seconds=3.5).to_dict() == {
+        "type": "reasoning_commit",
+        "stream_id": "s1",
+        "duration_seconds": 3.5,
+    }
+
+
+def test_step_event_carries_reasoning_seconds():
+    d = StepEvent(
+        step=1,
+        plan_step="inspect",
+        thought="t",
+        user_message="m",
+        action_type="read_file",
+        action_args={"path": "a.py"},
+        progress=10,
+        reasoning_seconds=8.2,
+    ).to_dict()
+    assert d["reasoning_seconds"] == 8.2
+    # Defaults to 0.0 when the model does not think.
+    assert StepEvent(
+        step=1,
+        plan_step="inspect",
+        thought="t",
+        user_message="m",
+        action_type="read_file",
+        action_args={},
+        progress=10,
+    ).to_dict()["reasoning_seconds"] == 0.0
 
 
 def test_hello_event_carries_protocol_version():

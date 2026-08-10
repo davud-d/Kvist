@@ -14,6 +14,9 @@ from frontend_protocol import (
     LiveStopEvent,
     MessageEvent,
     PlanEvent,
+    ReasoningChunkEvent,
+    ReasoningCommitEvent,
+    ReasoningStartEvent,
     SandboxNoticeEvent,
     StatusEvent,
     StepEvent,
@@ -63,13 +66,23 @@ def test_print_plan_emits_plan_event():
 def test_print_step_header_emits_step_event():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)
-    ui.print_step_header(1, make_command("run_shell", {"command": "ls"}))
+    ui.print_step_header(1, make_command("run_shell", {"command": "ls"}), 7.4)
     (event,) = ch.drain()
     assert isinstance(event, StepEvent)
     assert event.step == 1
     assert event.action_type == "run_shell"
     assert isinstance(event.action_args, dict)
     assert event.action_args == {"command": "ls"}
+    assert event.reasoning_seconds == 7.4
+    assert event.to_dict()["reasoning_seconds"] == 7.4
+
+
+def test_print_step_header_defaults_reasoning_to_zero():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.print_step_header(1, make_command("run_shell", {"command": "ls"}))
+    (event,) = ch.drain()
+    assert event.reasoning_seconds == 0.0
 
 
 def test_sandbox_notice_emitted_only_when_present():
@@ -156,6 +169,58 @@ def test_live_markdown_stream_sequence():
     assert drained[1].text == "a"
     assert drained[2].text == "ab"
     assert drained[3].text == "ab"
+
+
+def test_live_markdown_without_reasoning_emits_no_reasoning_events():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    with ui.live_markdown() as update:
+        update("hi")
+    drained = ch.drain()
+    assert [type(e) for e in drained] == [
+        StreamStartEvent,
+        StreamChunkEvent,
+        StreamCommitEvent,
+    ]
+
+
+def test_live_markdown_reasoning_channel_sequence():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    with ui.live_markdown() as update:
+        update.reasoning("think")
+        update.reasoning("thinking")
+        update("answer")
+    drained = ch.drain()
+    assert [type(e) for e in drained] == [
+        StreamStartEvent,
+        ReasoningStartEvent,
+        ReasoningChunkEvent,
+        ReasoningChunkEvent,
+        ReasoningCommitEvent,
+        StreamChunkEvent,
+        StreamCommitEvent,
+    ]
+    stream_id = drained[0].stream_id
+    assert all(getattr(e, "stream_id", stream_id) == stream_id for e in drained)
+    # Reasoning is sealed before the first answer token so thoughts never leak.
+    reasoning_commit_index = [type(e) for e in drained].index(ReasoningCommitEvent)
+    first_answer_index = [type(e) for e in drained].index(StreamChunkEvent)
+    assert reasoning_commit_index < first_answer_index
+    commit = drained[reasoning_commit_index]
+    assert isinstance(commit.duration_seconds, float)
+    assert commit.duration_seconds >= 0.0
+
+
+def test_live_markdown_reasoning_start_only_on_first_token():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    with ui.live_markdown() as update:
+        update.reasoning("a")
+        update.reasoning("ab")
+    drained = ch.drain()
+    assert [type(e) for e in drained].count(ReasoningStartEvent) == 1
+    assert [type(e) for e in drained].count(ReasoningCommitEvent) == 1
 
 
 def test_choose_option_blocking_roundtrip():

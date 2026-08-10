@@ -44,8 +44,14 @@ class AgentUI(Protocol):
         """Surface the planned goal / steps / success criteria."""
         ...
 
-    def print_step_header(self, step: int, command: Any) -> None:
-        """Surface the reasoning and action taken for one loop step."""
+    def print_step_header(
+        self, step: int, command: Any, reasoning_seconds: float = 0.0
+    ) -> None:
+        """Surface the reasoning and action taken for one loop step.
+
+        ``reasoning_seconds`` is how long the model spent emitting reasoning
+        tokens before this action (0 when the model does not think).
+        """
         ...
 
     def debug_print(self, message: str) -> None:
@@ -57,7 +63,12 @@ class AgentUI(Protocol):
         """Open a streaming Markdown response.
 
         Yields an ``update(message)`` callback; each call replaces the current
-        rendered response with ``message``.
+        rendered response with ``message`` (a cumulative snapshot).
+
+        The callback may expose a ``update.reasoning(message)`` attribute that
+        streams the model's cumulative thinking text on a separate channel;
+        callers probe it with ``getattr(update, "reasoning", None)`` so
+        implementations without a reasoning channel keep working.
         """
         ...
 

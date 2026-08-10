@@ -41,6 +41,7 @@ from agent_model import (
     _TOKEN_ENCODING_UNINITIALIZED,
     prefer_smart_model,
     safe_extract_completion_content,
+    safe_extract_reasoning_delta,
     safe_extract_stream_delta,
     select_action_model_for_run,
     trim_prompt_to_token_limit,
@@ -573,44 +574,61 @@ class LocalAgent:
 
     def _consume_chat_stream(self, stream: Any) -> str:
         chunks: list[str] = []
+        reasoning_chunks: list[str] = []
 
         import time
         last_update = time.monotonic()
-        
+        last_reasoning_update = last_update
+
         with self._ui.live_markdown() as update_markdown:
+            reasoning_update = getattr(update_markdown, "reasoning", None)
             for chunk in stream:
                 text = ""
-                
+
                 # 1. OpenAI variant (strict objects with attributes)
                 delta = safe_extract_stream_delta(chunk)
                 if delta is not None:
                     text = getattr(delta, "content", "") if not isinstance(delta, dict) else delta.get("content", "")
-                
+
                 # 2. freeflow-llm variant (raw dicts)
                 elif isinstance(chunk, dict):
                     if "choices" in chunk and chunk["choices"]:
                         text = chunk["choices"][0].get("delta", {}).get("content", "")
                     else:
                         text = chunk.get("content", "")
-                
+
                 # 3. freeflow-llm variant (simple object with content field)
                 elif hasattr(chunk, "content"):
                     text = chunk.content
-                    
+
                 # 4. Fallback for raw string
                 elif isinstance(chunk, str):
                     text = chunk
 
+                reasoning_text = safe_extract_reasoning_delta(delta)
+                if reasoning_text and reasoning_update is not None and not chunks:
+                    reasoning_chunks.append(reasoning_text)
+                    now = time.monotonic()
+                    if now - last_reasoning_update > 0.1:
+                        reasoning_update("".join(reasoning_chunks))
+                        last_reasoning_update = now
+
                 if text:
+                    # The first answer token seals thinking: flush whatever
+                    # reasoning was buffered so a fast stream never drops it.
+                    if not chunks and reasoning_update is not None and reasoning_chunks:
+                        reasoning_update("".join(reasoning_chunks))
                     chunks.append(text)
-                    
+
                     # Throttle rendering to ~10 FPS to prevent CPU choke
                     now = time.monotonic()
                     if now - last_update > 0.1:
                         update_markdown("".join(chunks))
                         last_update = now
 
+            if reasoning_update is not None and reasoning_chunks and not chunks:
+                reasoning_update("".join(reasoning_chunks))
             # Final update to guarantee the last parts are rendered
             update_markdown("".join(chunks))
-                    
+
         return "".join(chunks)

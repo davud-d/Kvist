@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 from pathlib import Path
@@ -39,6 +40,14 @@ class NullUI:
 
     def print_step_header(self, *args, **kwargs):
         pass
+
+    @contextlib.contextmanager
+    def live_markdown(self):
+        def update(message):
+            _ = message
+
+        update.reasoning = lambda message: None
+        yield update
 
     def print_final(self, *args, **kwargs):
         pass

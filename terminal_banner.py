@@ -33,6 +33,22 @@ except ImportError:
     _PROMPT_TOOLKIT_AVAILABLE = False
 
 
+# Keep the live thinking preview short so a long chain of thought does not push
+# the rest of the banner off screen; the answer replaces it once it begins.
+_REASONING_PREVIEW_CHARS = 400
+
+
+def _reasoning_renderable(message: str) -> Text:
+    text = sanitize_display_text(message)
+    if len(text) > _REASONING_PREVIEW_CHARS:
+        text = "…" + text[-_REASONING_PREVIEW_CHARS:]
+    return Text(f"🤔 {text}", style="grey50")
+
+
+def _ignore_reasoning(message: str) -> None:
+    _ = message
+
+
 class TerminalBannerUI:
     """Terminal frontend for the agent UI API (``ui.AgentUI`` protocol).
 
@@ -199,6 +215,7 @@ class TerminalBannerUI:
                 nonlocal latest
                 latest = message
 
+            update.reasoning = _ignore_reasoning
             try:
                 yield update
             finally:
@@ -214,6 +231,10 @@ class TerminalBannerUI:
                 latest = message
                 self._screen.set_stream(self.render_user_markdown(message))
 
+            def reasoning(message: str) -> None:
+                self._screen.set_stream(_reasoning_renderable(message))
+
+            update.reasoning = reasoning
             self._screen.set_stream(self.render_user_markdown(latest))
             try:
                 yield update
@@ -230,6 +251,10 @@ class TerminalBannerUI:
             def update(message: str) -> None:
                 live.update(self.render_user_markdown(message))
 
+            def reasoning(message: str) -> None:
+                live.update(_reasoning_renderable(message))
+
+            update.reasoning = reasoning
             yield update
 
     def print_plan(self, plan_info: Any) -> None:
@@ -252,13 +277,17 @@ class TerminalBannerUI:
             for item in plan_info.success_criteria:
                 print(f"- {sanitize_display_text(str(item))}")
 
-    def print_step_header(self, step: int, command: Any) -> None:
+    def print_step_header(
+        self, step: int, command: Any, reasoning_seconds: float = 0.0
+    ) -> None:
         # In plain mode the compact per-step line comes from update_live.
         if not self.verbose:
             return
 
         print(f"\n[Step {step}]")
         print(f"Stage: {sanitize_display_text(str(command.plan_step))}")
+        if reasoning_seconds > 0:
+            print(f"Thought for {reasoning_seconds:.0f}s")
         print(f"Thought: {sanitize_display_text(str(command.thought))}")
         print(f"Message: {sanitize_display_text(str(command.user_message))}")
         print(
