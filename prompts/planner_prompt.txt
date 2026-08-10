@@ -165,6 +165,12 @@ plan must contain 1 to 7 steps.
 For trivial tasks (run a command and show output, search the web, list files) the plan may be 1-2 steps.
 For tasks that do not involve code changes (information gathering, command execution, web lookup) - keep the plan minimal: collect data, display result, done.
 
+Be generous for non-trivial tasks: besides the minimal happy path, include 2-3
+reserve/fallback steps to cover things going wrong (e.g. "if the check fails, inspect
+the error output and apply a targeted fix", "if the first approach does not work, try
+an alternative within the same file/module"). Do not use these reserve steps to inflate
+trivial tasks or exceed the 7-step limit.
+
 Each step:
 - one short action
 - no generic wording

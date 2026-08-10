@@ -212,6 +212,43 @@ function renderMarkdown(target, text) {
   target.innerHTML = window.kvist.renderMarkdown(text)
 }
 
+// Stream snapshots contain the complete reply.  Re-rendering all of it is
+// useful for Markdown, but made every newly received token appear abruptly.
+// Keep the completed portion visually stable and animate only the visible
+// suffix added by this snapshot.
+function animateStreamSuffix(target) {
+  const previousText = target.dataset.renderedText || ""
+  const renderedText = target.textContent || ""
+  target.dataset.renderedText = renderedText
+
+  if (!renderedText || !renderedText.startsWith(previousText)) return
+
+  let offset = 0
+  const textNodes = []
+  const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT)
+  while (walker.nextNode()) textNodes.push(walker.currentNode)
+
+  for (const node of textNodes) {
+    const start = offset
+    const end = start + node.data.length
+    offset = end
+    if (end <= previousText.length) continue
+
+    const suffixStart = Math.max(0, previousText.length - start)
+    const fragment = document.createDocumentFragment()
+    if (suffixStart) fragment.append(document.createTextNode(node.data.slice(0, suffixStart)))
+    const suffix = createElement("span", "stream-token")
+    suffix.textContent = node.data.slice(suffixStart)
+    fragment.append(suffix)
+    node.replaceWith(fragment)
+  }
+}
+
+function renderStreamingMarkdown(target, text) {
+  renderMarkdown(target, text)
+  animateStreamSuffix(target)
+}
+
 function addAssistantMessage(text, streamId = "") {
   enterConversation()
   const card = createElement("article", "message message-assistant")
@@ -236,7 +273,7 @@ function updateStream(streamId, text, committed) {
   let card = findStreamCard(streamId)
   if (!card) card = addAssistantMessage("", streamId)
   const content = card.querySelector(".markdown")
-  renderMarkdown(content, text)
+  renderStreamingMarkdown(content, text)
   card.classList.toggle("is-streaming", !committed)
   lastAssistantText = text
   scrollToBottom()
@@ -265,7 +302,7 @@ function ensureThinkingBlock(streamId) {
 
 function updateThinking(streamId, text) {
   const block = ensureThinkingBlock(streamId)
-  renderMarkdown(block.querySelector(".thinking-body"), text)
+  renderStreamingMarkdown(block.querySelector(".thinking-body"), text)
   scrollToBottom()
 }
 
