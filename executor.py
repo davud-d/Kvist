@@ -18,7 +18,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-from change_journal import record_baseline
+from change_journal import content_digest, record_baseline
 from durable_json import JsonStorageError, exclusive_storage_lock
 from env_utils import read_float_env, read_int_env
 from protocol import AgentCommand
@@ -104,6 +104,7 @@ class SafeExecutor:
             self.workspace / self.internal_agent_dirname / "source-writes"
         )
         self.active_role = "coder"
+        self._active_session = "default"
 
         self.max_read_chars = 20000
         self.max_output_chars = 12000
@@ -245,6 +246,11 @@ class SafeExecutor:
         """
         normalized = (role or "").strip().lower()
         self.active_role = normalized if normalized in {"coder", "devops", "chat"} else "coder"
+
+    def set_active_session(self, session: str) -> None:
+        """Record the active named session for change-journal attribution."""
+        normalized = (session or "").strip()
+        self._active_session = normalized or "default"
 
     def execute(self, command: AgentCommand) -> ExecutionResult:
         action_type = command.action.type
@@ -1028,13 +1034,28 @@ class SafeExecutor:
                 except OSError:
                     pass
 
-    def _record_change_baseline(self, target: Path, existed: bool, old_text: str | None) -> None:
+    def _record_change_baseline(
+        self,
+        target: Path,
+        existed: bool,
+        old_text: str | None,
+        new_content: str,
+    ) -> None:
+        """Write-ahead rollback record: called BEFORE the file mutation.
+
+        A crash after the mutation must never leave a changed file whose
+        pre-change content was not durably recorded. A record left behind by
+        a mutation that then failed is harmless — revert sees the on-disk
+        content still matching the baseline and drops the entry.
+        """
         relative_path = str(target.relative_to(self.workspace))
         record_baseline(
             self.workspace,
             relative_path=relative_path,
             existed=existed,
             content=old_text if existed else None,
+            session=self._active_session,
+            new_digest=content_digest(new_content),
         )
 
     def _write_file(self, path: str, content: str) -> ExecutionResult:
@@ -1063,8 +1084,8 @@ class SafeExecutor:
             self._require_unchanged_file(target, expected_identity)
             self._guard_destructive_overwrite(path, old_text, content)
             self._confirm_overwrite(path, old_text, content)
+        self._record_change_baseline(target, existed, old_text, content)
         self._atomic_replace_text(target, content, expected_identity)
-        self._record_change_baseline(target, existed, old_text)
 
         return ExecutionResult(
             ok=True,
@@ -1103,8 +1124,10 @@ class SafeExecutor:
             )
         if existed and content:
             self._confirm_overwrite(path, old_text, old_text + content)
+        self._record_change_baseline(
+            target, existed, old_text if existed else None, updated_text
+        )
         self._atomic_replace_text(target, updated_text, expected_identity)
-        self._record_change_baseline(target, existed, old_text if existed else None)
 
         return ExecutionResult(
             ok=True,
@@ -1171,8 +1194,8 @@ class SafeExecutor:
             )
         self._guard_destructive_overwrite(path, original_text, updated_text)
         self._confirm_overwrite(path, original_text, updated_text)
+        self._record_change_baseline(target, True, original_text, updated_text)
         self._atomic_replace_text(target, updated_text, expected_identity)
-        self._record_change_baseline(target, True, original_text)
 
         return ExecutionResult(
             ok=True,

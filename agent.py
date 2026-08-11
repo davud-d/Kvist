@@ -23,8 +23,10 @@ from agent_logging import (
     load_active_session,
     load_checkpoint,
     load_session,
+    peek_checkpoint,
     persist_logs,
     read_session_document,
+    reset_session,
     restore_session_document,
     sanitize_for_log,
     save_active_session,
@@ -148,6 +150,7 @@ class LocalAgent:
         # fallback when a new request has no detectable language.
         self._last_response_language: str | None = None
         self.current_session = load_active_session(self)
+        self.executor.set_active_session(self.current_session)
         self._session_history: list[dict[str, Any]] = []
         load_session(self)
 
@@ -181,7 +184,10 @@ class LocalAgent:
         self.save_session()
 
     def new_session(self, name: str | None = None) -> None:
-        """Reset to a fresh session — saves current, clears state, chat history, and checkpoint."""
+        """With a name: save the current session, then create and activate a
+        fresh empty session. Without a name: reset the active session in place
+        (history, chat, and checkpoint are cleared; the name is kept). Other
+        named sessions and the workspace change journal are never touched."""
         if name is not None and not is_valid_session_name(name):
             raise ValueError(f"Invalid session name: {name!r}")
         if name is not None:
@@ -192,6 +198,7 @@ class LocalAgent:
                 raise ValueError(f"Session {name!r} already exists")
             self._save_active_session(name)
             self.current_session = name
+            self.executor.set_active_session(name)
             self._reset_run_state()
             self._restore_session_document({})
             return
@@ -201,27 +208,34 @@ class LocalAgent:
         self._last_response_language = None
         if hasattr(self, "_chat_history"):
             del self._chat_history
-        self._clear_checkpoint()
-        self.save_session()
+        self._reset_session()
 
     def _save_session_marker(self) -> None:
         """Keep compatibility with callers that create an empty session marker."""
         self.save_session()
 
     def switch_session(self, name: str) -> None:
-        """Save current session and switch to another named session."""
+        """Save the current session, then activate an EXISTING named session.
+
+        Switching never creates a session: a missing target fails before any
+        state is mutated, so a typo cannot silently fork history. Creation is
+        the explicit job of ``new_session(name)``. Switching also never
+        touches the workspace: conversation state and workspace rollback
+        (change journal) are separate concepts.
+        """
         if not is_valid_session_name(name):
             raise ValueError(f"Invalid session name: {name!r}")
         if name == self.current_session:
             return
+        # Read (and thereby validate) the target before mutating anything:
+        # a corrupt or missing target must leave the active session intact.
         target_document = self._read_session_document(name)
+        if not target_document:
+            raise ValueError(f"Unknown session: {name!r}")
         self.save_session()
-        if not target_document and self._create_session(name):
-            target_document = {}
-        elif not target_document:
-            target_document = self._read_session_document(name)
         self._save_active_session(name)
         self.current_session = name
+        self.executor.set_active_session(name)
         self._reset_run_state()
         self._restore_session_document(target_document)
 
@@ -381,6 +395,8 @@ class LocalAgent:
     _load_checkpoint = load_checkpoint
     _clear_checkpoint = clear_checkpoint
     _create_session = create_session
+    _reset_session = reset_session
+    _peek_checkpoint = peek_checkpoint
     save_session = save_session
     _load_session = load_session
     _read_session_document = read_session_document

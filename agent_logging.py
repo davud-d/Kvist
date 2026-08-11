@@ -238,16 +238,50 @@ def list_sessions(self) -> list[str]:
 
 
 def delete_session(self, name: str) -> bool:
+    if name == getattr(self, "current_session", "default"):
+        raise ValueError(f"Cannot delete the active session {name!r}")
     path = get_state_path(self, name)
     if delete_json_object(path, boundary=self.executor.workspace):
-        marker = _read_json_object(
-            get_active_session_path(self),
-            boundary=self.executor.workspace,
-        )
-        if marker.get("session") == name:
-            save_active_session(self, "default")
+        # Re-assert the marker so a stale marker pointing at the deleted
+        # session can never resurrect it on the next start.
+        save_active_session(self)
         return True
     return False
+
+
+def reset_session(self) -> None:
+    """Durably reset the active session to an empty document (the /new
+    contract): history, chat, and checkpoint are gone; the name is kept."""
+    session = getattr(self, "current_session", "default")
+    _write_json_object(
+        get_state_path(self, session),
+        _empty_session_document(session),
+        boundary=self.executor.workspace,
+    )
+    save_active_session(self, session)
+
+
+def peek_checkpoint(
+    self,
+    session: str | None = None,
+) -> dict[str, Any] | None:
+    """Report the resumable checkpoint of a session without loading it into
+    the run state. Returns ``{"goal", "step", "progress"}`` or ``None``."""
+    resolved = session or getattr(self, "current_session", "default")
+    data = _read_json_object(
+        get_state_path(self, resolved),
+        boundary=self.executor.workspace,
+    )
+    if not data:
+        return None
+    checkpoint = _session_checkpoint(_validated_session_document(data, resolved))
+    if checkpoint is None:
+        return None
+    return {
+        "goal": str(checkpoint.get("goal", "")),
+        "step": checkpoint.get("step", 1),
+        "progress": checkpoint.get("progress", 0),
+    }
 
 
 def save_session(self) -> None:

@@ -97,6 +97,46 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         },
         "role": "chat",
         "approval_mode": "deny",
+        "session": "default",
+        "has_checkpoint": False,
     }
     assert events[-1]["type"] in {"final", "message", "stream_commit"}
     assert any("Kvist GUI is connected." in json.dumps(event) for event in events)
+
+
+def test_launch_hello_reports_resumable_checkpoint(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_LLM_PROVIDER", "openai")
+    from executor import SafeExecutor
+    from tests.conftest import NullUI
+
+    seed = LocalAgent(
+        FakeLLMClient(),
+        SafeExecutor(tmp_path),
+        AgentConfig(persist_logs=False, api_request_interval=0),
+        ui=NullUI(),
+    )
+    seed.new_session("feature")
+    seed._save_checkpoint("interrupted work", 3)
+
+    def build_agent(executor, *, ui, **kwargs):
+        agent = LocalAgent(
+            FakeLLMClient(content="ok"),
+            executor,
+            AgentConfig(persist_logs=False, api_request_interval=0, stream=False),
+            ui=ui,
+        )
+        return agent, AgentConfig(persist_logs=False, api_request_interval=0), []
+
+    output = io.StringIO()
+    event_stdio.launch(
+        str(tmp_path),
+        "say ok",
+        build_agent,
+        in_stream=io.StringIO(""),
+        out_stream=output,
+        routed_role="chat",
+    )
+
+    hello = json.loads(output.getvalue().splitlines()[0])
+    assert hello["session"] == "feature"
+    assert hello["has_checkpoint"] is True

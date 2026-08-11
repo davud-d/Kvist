@@ -38,6 +38,7 @@ def test_main_dispatches_stdio_frontend_without_starting_terminal(monkeypatch, t
         "models_override": None,
         "routed_role": None,
         "approval_mode": "ask",
+        "resume": False,
     }
 
 
@@ -87,6 +88,7 @@ def test_main_dispatches_stdio_run_overrides(monkeypatch, tmp_path):
             },
             "routed_role": "devops",
             "approval_mode": "deny",
+            "resume": False,
         },
     }
 
@@ -116,3 +118,24 @@ def test_main_rejects_partial_model_override(monkeypatch, tmp_path):
         main.main()
 
     assert raised.value.code == 2
+
+
+def test_main_dispatches_stdio_resume_without_reading_a_goal(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_launch(workspace, goal, build_agent_fn, **options):
+        captured.update(goal=goal, options=options)
+
+    monkeypatch.setattr(
+        main.sys,
+        "argv",
+        ["kvist", "--workspace", str(tmp_path), "--frontend", "stdio", "--resume"],
+    )
+    # stdin must stay untouched: resume has no goal line.
+    monkeypatch.setattr(main.sys, "stdin", io.StringIO(""))
+    monkeypatch.setattr(event_stdio, "launch", fake_launch)
+
+    main.main()
+
+    assert captured["goal"] == ""
+    assert captured["options"]["resume"] is True

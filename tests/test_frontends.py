@@ -44,3 +44,33 @@ def test_make_session_injects_event_stream_ui(tmp_path, monkeypatch):
 
     assert isinstance(session, EventSession)
     assert isinstance(captured["ui"], EventStreamUI)
+
+
+def test_cli_parser_accepts_session_lifecycle_flags():
+    from main import _build_cli_parser
+
+    parser = _build_cli_parser()
+    args = parser.parse_args(
+        [
+            "--workspace",
+            ".",
+            "--session-op",
+            "switch",
+            "--session-name",
+            "feature",
+        ]
+    )
+    assert args.session_op == "switch"
+    assert args.session_name == "feature"
+
+    resumed = parser.parse_args(["--workspace", ".", "--frontend", "stdio", "--resume"])
+    assert resumed.resume is True
+
+
+def test_stdio_launcher_import_is_valid():
+    from event_stdio import serve_stdio
+    from frontends import load_launcher
+
+    launcher = load_launcher("stdio")
+    assert callable(launcher)
+    assert callable(serve_stdio)

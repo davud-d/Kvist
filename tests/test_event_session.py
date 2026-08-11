@@ -14,6 +14,7 @@ from event_session import EventApprovalGate, EventSession
 from event_stream_ui import EventStreamUI
 from executor import SafeExecutor
 from frontend_protocol import (
+    ErrorEvent,
     FinalEvent,
     FrontendChannel,
     InputRequestEvent,
@@ -173,3 +174,38 @@ def test_stdio_pump_writes_jsonl_ending_in_terminal_event():
 
 if __name__ == "__main__":  # pragma: no cover - manual smoke helper
     pytest.main([__file__, "-q"])
+
+
+class _ResumableAgent:
+    """Minimal agent standing in for LocalAgent.resume()."""
+
+    def __init__(self, result: str | None) -> None:
+        self._result = result
+
+    def resume(self) -> str | None:
+        return self._result
+
+
+def test_submit_resume_returns_agent_result():
+    channel = FrontendChannel()
+    session = EventSession(channel, _ResumableAgent("finished the task"))
+    session.submit_resume()
+
+    _drain(session)
+
+    assert session.error is None
+    assert session.result == "finished the task"
+
+
+def test_submit_resume_without_checkpoint_emits_error_event():
+    channel = FrontendChannel()
+    session = EventSession(channel, _ResumableAgent(None))
+    session.submit_resume()
+
+    events = _drain(session)
+
+    assert session.result is None
+    assert any(
+        isinstance(event, ErrorEvent) and "checkpoint" in event.message
+        for event in events
+    )

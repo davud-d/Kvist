@@ -168,7 +168,12 @@ npm start -- --workspace "<project_path>"
 The GUI starts Kvist as a child process with `--frontend stdio`. It does not
 import Python modules or use HTTP, REST, or WebSocket. Packaging instructions
 are in `gui/README.md`. Its prompt bar exposes provider/model overrides, agent
-role, and fail-closed `ask`/`deny` approval modes for each run.
+role, and fail-closed `ask`/`deny` approval modes for each run. Every run
+executes in the workspace's active named session; the `hello` event reports
+that session and whether a resumable checkpoint exists. Frontends manage
+sessions through `kvist --session-op ...` and resume checkpoints with
+`kvist --frontend stdio --resume` (see `UI_API.md`); the GUI does not yet
+expose a session picker of its own.
 
 ## Interactive commands
 
@@ -181,6 +186,8 @@ role, and fail-closed `ask`/`deny` approval modes for each run.
 | `/role` | Select `auto`, `coder`, `devops`, or `chat`. The choice is saved globally. |
 | `/session` | Create, switch, or delete named workspace sessions. The active session cannot be deleted. |
 | `/resume` | Continue the checkpoint stored in the active session. |
+| `/changes` | Show a diff of files the agent changed in this workspace (all sessions) since the change journal was last cleared. |
+| `/revert` | Restore agent-changed files to their recorded pre-change contents. Files later modified by you (or by shell commands) are kept and reported as skipped. |
 | `/verbose <true\|false>` | Enable or disable verbose runtime output without restarting Kvist. |
 | `/strime <true\|false>` | Enable or disable streaming for the active custom provider. |
 | `/bye` | Save the session and exit. `/exit` and `/quit` are aliases. |
@@ -219,10 +226,37 @@ Session names contain 1-64 lowercase letters, digits, hyphens, or underscores
 and must start with a letter or digit. Kvist shows the last few tasks when a
 session is loaded and keeps up to ten completed task summaries in its context.
 
-> **Known issue:** named sessions (`/session`, `/resume`, `/new`) are currently
-> unreliable — checkpoint state can be lost or restored incorrectly between
-> runs. Avoid relying on session persistence for important work until this is
-> fixed.
+### Session lifecycle contract
+
+- Each named session owns its own conversation history, chat history, and
+  resumable execution checkpoint; nothing leaks between sessions.
+- The checkpoint is saved after every step, so an interrupted task (Ctrl+C,
+  crash, `kill`) resumes from its last completed step with `/resume`.
+- `/resume` operates only on the active session; completing a task clears only
+  that session's checkpoint.
+- Switching sessions saves the outgoing session first and fails without
+  touching it if the target is missing or corrupt. Switching never creates a
+  session and never rewrites workspace files — conversation state and
+  workspace rollback are separate concepts.
+- `/new` resets the active session in place (history, chat, checkpoint); other
+  named sessions and workspace change tracking are untouched.
+- The active session cannot be deleted; deleting an inactive session removes
+  both its file and its recovery copy.
+- A restart restores the last active session. If the active-session marker is
+  damaged, Kvist falls back to the most recent valid session and says so; a
+  corrupt session file fails loudly instead of being treated as empty.
+
+### Workspace change tracking
+
+The change journal (`.kvist/change_journal.json`) is workspace-global: all
+sessions share one working tree, so `/changes` and `/revert` cover the agent's
+file edits from every session, with per-file session attribution in the diff
+report. The journal records each file's pre-change contents *before* the file
+is mutated, so a crash between the two steps can never lose rollback data.
+`/revert` only overwrites content whose digest matches the agent's own last
+write — files you edited afterwards are skipped and keep their baselines in
+the journal. `/new` does not reset change tracking; only `/revert` clears the
+entries it successfully restores.
 
 ## How a request is processed
 
@@ -479,12 +513,19 @@ Kvist stores project-local state under `.kvist/`:
 ```text
 <workspace>/.kvist/
 ├── active_session.json
+├── change_journal.json
 ├── sessions/
 │   └── <name>.json
 └── logs/
     ├── run_001.json
     └── debug/logs.jsonl
 ```
+
+Session documents, the active-session marker, and the change journal are
+written atomically with a durable recovery copy (`*.json.bak`), private file
+modes, and credential redaction. Frontends must never touch these files
+directly — headless session management goes through `--session-op` (see
+`UI_API.md`).
 
 `logs/` appears only when run logging is enabled and a run is persisted.
 Performance JSONL logging is disabled in code by default. API keys remain in

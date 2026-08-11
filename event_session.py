@@ -53,15 +53,18 @@ class EventSession:
         self.error: Exception | None = None
 
     def submit(self, user_goal: str, routed_role: str | None = None) -> None:
+        self._start_worker(self._run, (user_goal, routed_role))
+
+    def submit_resume(self) -> None:
+        """Resume the active session's checkpoint instead of running a new goal."""
+        self._start_worker(self._run_resume, ())
+
+    def _start_worker(self, target, args: tuple) -> None:
         if self.is_running():
             raise RuntimeError("A run is already active on this session.")
         self.result = None
         self.error = None
-        worker = threading.Thread(
-            target=self._run,
-            args=(user_goal, routed_role),
-            daemon=True,
-        )
+        worker = threading.Thread(target=target, args=args, daemon=True)
         self._worker = worker
         worker.start()
 
@@ -73,6 +76,18 @@ class EventSession:
             # event stream, so a transport watching only events still sees it.
             self.error = exc
             self._channel.emit(ErrorEvent(str(exc)))
+
+    def _run_resume(self) -> None:
+        try:
+            result = self._agent.resume()
+        except Exception as exc:
+            self.error = exc
+            self._channel.emit(ErrorEvent(str(exc)))
+            return
+        if result is None:
+            self._channel.emit(ErrorEvent("No saved checkpoint to resume."))
+            return
+        self.result = result
 
     def events(self) -> Iterator:
         while True:

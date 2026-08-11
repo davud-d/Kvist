@@ -23,6 +23,12 @@ class HelloEvent:
     models: dict[str, str] | None = None
     role: str | None = None
     approval_mode: str | None = None
+    # Optional additive fields (still protocol v1: frontends ignore unknown
+    # fields): the active named session and whether it holds a resumable
+    # checkpoint. Session lifecycle operations themselves go through the
+    # separate --session-op mode, not this stream.
+    session: str | None = None
+    has_checkpoint: bool | None = None
     type: ClassVar[str] = "hello"
 
     def to_dict(self) -> dict:
@@ -38,6 +44,10 @@ class HelloEvent:
             payload["role"] = self.role
         if self.approval_mode is not None:
             payload["approval_mode"] = self.approval_mode
+        if self.session is not None:
+            payload["session"] = self.session
+        if self.has_checkpoint is not None:
+            payload["has_checkpoint"] = self.has_checkpoint
         return payload
 
 

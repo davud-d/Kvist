@@ -73,6 +73,16 @@ def pump(
         out_stream.flush()
 
 
+def serve_stdio(session: EventSession) -> None:
+    """Serve an already-built session over stdio (goal = first stdin line)."""
+    goal = sys.stdin.readline().strip()
+    session.submit(goal)
+    try:
+        pump(session, sys.stdout, sys.stdin)
+    finally:
+        session.close()
+
+
 def launch(
     workspace: str,
     goal: str,
@@ -84,6 +94,7 @@ def launch(
     models_override: dict[str, str] | None = None,
     routed_role: str | None = None,
     approval_mode: str = "ask",
+    resume: bool = False,
 ) -> None:
     """Run the real Kvist core behind the stdio frontend boundary."""
     source = in_stream if in_stream is not None else sys.stdin
@@ -122,7 +133,10 @@ def launch(
         finally:
             sys.stdin = original_stdin
         session = EventSession(channel, agent)
-        session.submit(goal, routed_role=routed_role)
+        if resume:
+            session.submit_resume()
+        else:
+            session.submit(goal, routed_role=routed_role)
         pump(
             session,
             destination,
@@ -136,6 +150,8 @@ def launch(
                 },
                 role=routed_role or "auto",
                 approval_mode=approval_mode,
+                session=agent.current_session,
+                has_checkpoint=agent._peek_checkpoint() is not None,
             ),
         )
         session.close()

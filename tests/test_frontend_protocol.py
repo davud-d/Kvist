@@ -294,3 +294,12 @@ def test_request_after_close_returns_immediately():
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_hello_event_carries_optional_session_state():
+    payload = HelloEvent(session="feature", has_checkpoint=True).to_dict()
+    assert payload["session"] == "feature"
+    assert payload["has_checkpoint"] is True
+    # Omitted when unknown, so protocol v1 consumers see no new fields.
+    assert "session" not in HelloEvent().to_dict()
+    assert "has_checkpoint" not in HelloEvent().to_dict()

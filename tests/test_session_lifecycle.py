@@ -256,3 +256,179 @@ def test_unknown_session_fields_are_ignored_without_losing_core_state(
 
     assert agent._load_session() is True
     assert agent._session_history == [{"goal": "known"}]
+
+
+def test_sessions_keep_independent_checkpoints_and_histories(agent_factory):
+    agent = agent_factory()
+    agent.new_session("alpha")
+    agent._session_history = [{"goal": "alpha history"}]
+    agent._save_checkpoint("alpha task", 3)
+
+    agent.new_session("beta")
+    agent._session_history = [{"goal": "beta history"}]
+    agent._save_checkpoint("beta task", 7)
+
+    agent.switch_session("alpha")
+    assert agent._session_history == [{"goal": "alpha history"}]
+    assert agent._load_checkpoint() == ("alpha task", 3)
+
+    agent.switch_session("beta")
+    assert agent._session_history == [{"goal": "beta history"}]
+    assert agent._load_checkpoint() == ("beta task", 7)
+
+
+def test_completing_one_session_task_keeps_other_checkpoints(agent_factory):
+    agent = agent_factory()
+    agent.new_session("alpha")
+    agent._save_checkpoint("alpha task", 3)
+    agent.new_session("beta")
+    agent._save_checkpoint("beta task", 2)
+
+    # The runtime clears the checkpoint of the completed task's own session.
+    agent._clear_checkpoint()
+
+    assert agent._load_checkpoint() is None
+    agent.switch_session("alpha")
+    assert agent._load_checkpoint() == ("alpha task", 3)
+
+
+def test_switch_to_missing_session_fails_without_creating_it(agent_factory):
+    agent = agent_factory()
+    agent._session_history = [{"goal": "keep"}]
+    agent.save_session()
+
+    with pytest.raises(ValueError, match="Unknown session"):
+        agent.switch_session("ghost")
+
+    assert agent.current_session == "default"
+    assert agent._session_history == [{"goal": "keep"}]
+    assert not _session_path(agent, "ghost").exists()
+
+
+def test_active_session_cannot_be_deleted(agent_factory):
+    agent = agent_factory()
+    agent.new_session("busy")
+
+    with pytest.raises(ValueError, match="active session"):
+        agent._delete_session("busy")
+
+    assert _session_path(agent, "busy").is_file()
+    assert agent.current_session == "busy"
+
+
+def test_new_resets_only_the_active_session(agent_factory):
+    agent = agent_factory()
+    agent.new_session("other")
+    agent._session_history = [{"goal": "other work"}]
+    agent._save_checkpoint("other task", 4)
+    agent.new_session("target")
+    agent._session_history = [{"goal": "target work"}]
+    agent._save_checkpoint("target task", 5)
+
+    agent.new_session()
+
+    assert agent.current_session == "target"
+    assert agent._session_history == []
+    assert agent._load_checkpoint() is None
+    agent.switch_session("other")
+    assert agent._session_history == [{"goal": "other work"}]
+    assert agent._load_checkpoint() == ("other task", 4)
+
+
+def test_interrupted_task_survives_switch_and_process_restart(tmp_path):
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "AGENT_SANDBOX_MODE": "workspace",
+            "AGENT_SANDBOX_NET": "deny",
+            "AGENT_WRITE_APPROVAL": "0",
+        }
+    )
+    interrupt_script = """
+import sys
+from pathlib import Path
+from agent import LocalAgent
+from agent_state import AgentConfig
+from executor import SafeExecutor
+from tests.conftest import FakeLLMClient, NullUI
+
+workspace = Path(sys.argv[1])
+agent = LocalAgent(
+    FakeLLMClient(),
+    SafeExecutor(workspace),
+    AgentConfig(persist_logs=False, api_request_interval=0),
+    ui=NullUI(),
+)
+agent.new_session("feature")
+agent._state.progress = 40
+agent._save_checkpoint("незавершённая задача 🌲", 6)
+agent.new_session("hotfix")
+agent._save_checkpoint("другая задача", 2)
+"""
+    resume_script = """
+import json
+import sys
+from pathlib import Path
+from agent import LocalAgent
+from agent_state import AgentConfig
+from executor import SafeExecutor
+from tests.conftest import FakeLLMClient, NullUI
+
+agent = LocalAgent(
+    FakeLLMClient(),
+    SafeExecutor(Path(sys.argv[1])),
+    AgentConfig(persist_logs=False, api_request_interval=0),
+    ui=NullUI(),
+)
+started_on = agent.current_session
+agent.switch_session("feature")
+checkpoint = agent._load_checkpoint()
+print(json.dumps({
+    "started_on": started_on,
+    "goal": checkpoint[0],
+    "step": checkpoint[1],
+    "progress": agent._state.progress,
+}, ensure_ascii=False))
+"""
+
+    subprocess.run(
+        [sys.executable, "-c", interrupt_script, str(tmp_path)],
+        check=True,
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    resumed = subprocess.run(
+        [sys.executable, "-c", resume_script, str(tmp_path)],
+        check=True,
+        cwd=Path(__file__).parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    payload = json.loads(resumed.stdout)
+    assert payload == {
+        "started_on": "hotfix",
+        "goal": "незавершённая задача 🌲",
+        "step": 6,
+        "progress": 40,
+    }
+
+
+def test_switching_away_and_back_preserves_checkpoint_exactly(agent_factory):
+    agent = agent_factory()
+    agent.new_session("alpha")
+    agent._state.progress = 55
+    agent._state.files_changed = ["app.py"]
+    agent._save_checkpoint("finish the feature", 9)
+
+    agent.new_session("beta")
+    agent.switch_session("alpha")
+
+    assert agent._load_checkpoint() == ("finish the feature", 9)
+    assert agent._state.progress == 55
+    assert agent._state.files_changed == ["app.py"]

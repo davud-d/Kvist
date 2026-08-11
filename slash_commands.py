@@ -40,8 +40,8 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
-    SlashCommand("changes", "Show file changes made since the last reset"),
-    SlashCommand("revert", "Restore the workspace to its pre-session state"),
+    SlashCommand("changes", "Show agent file changes across all sessions"),
+    SlashCommand("revert", "Restore agent-changed files to their baselines"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
     SlashCommand(
         "bye",

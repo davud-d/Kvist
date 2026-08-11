@@ -71,6 +71,10 @@ kvist --workspace /path/to/project                       # терминальн�
 - `--frontend terminal` (по умолчанию) → интерактивный терминальный REPL.
 - `--frontend stdio` → NDJSON в stdout/stdin (§8).
 - `--frontend <name>` → внешний фронтенд `kvist_frontends/<name>.py` (§9).
+- `--frontend stdio --resume` → возобновление checkpoint активной сессии вместо
+  новой задачи (строка задачи из stdin не читается; §8a).
+- `--session-op …` → одна headless-операция жизненного цикла сессий, JSON в
+  stdout (§8a).
 
 (В разработке, без собранного бинаря:
 `.venv/bin/python main.py --workspace … --frontend stdio`.)
@@ -146,7 +150,7 @@ fail-closed).
 
 | `type` | Поля | Смысл |
 |---|---|---|
-| `hello` | `protocol_version:int` | handshake; всегда первым |
+| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool` | handshake и эффективная конфигурация прогона; всегда первым |
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int, reasoning_seconds:number` | выбранное действие шага; `reasoning_seconds` — сколько модель думала перед ним (0, если не думала) |
@@ -234,12 +238,67 @@ fail-closed).
 
 ```
 <<< do the thing
->>> {"type": "hello", "protocol_version": 1}
+>>> {"type": "hello", "protocol_version": 1, "session": "default", "has_checkpoint": false}
 >>> {"type": "status", "user_message": "Choosing provider", "status": "working", "step": 1, "progress": 10, "plan_step": "inspect", "is_error": false}
 >>> {"type": "input_request", "request_id": "b7dca6b0…", "kind": "choice", "title": "Pick provider", "body": "", "options": [{"value": "openai", "label": "OpenAI"}, {"value": "freeflow", "label": "FreeFlow"}], "current_value": "", "help_text": ""}
 <<< {"request_id": "b7dca6b0…", "value": "freeflow"}
 >>> {"type": "final", "message": "picked freeflow …", "user_messages": []}
 ```
+
+---
+
+## 8a. Именованные сессии для фронтендов
+
+Каждый прогон выполняется в **активной именованной сессии** workspace (история
+диалога, история чата и возобновляемый checkpoint для `/resume` живут в каждой
+сессии отдельно). Событие `hello` сообщает это двумя аддитивными полями v1:
+`session` (имя активной сессии) и `has_checkpoint` (есть ли в ней
+возобновляемый checkpoint).
+
+**Никогда не читайте и не пишите файлы `.kvist/` напрямую.** Управление
+жизненным циклом сессий — отдельный one-shot режим того же бинаря без LLM:
+
+```bash
+kvist --workspace WS --session-op status
+kvist --workspace WS --session-op create --session-name feature
+kvist --workspace WS --session-op switch --session-name feature
+kvist --workspace WS --session-op delete --session-name old-work
+kvist --workspace WS --session-op reset
+```
+
+Каждый вызов печатает **один JSON-объект** в stdout и завершается с кодом `0`
+при успехе или `1` при ошибке:
+
+```json
+{"ok": true, "active_session": "feature", "sessions": ["default", "feature"],
+ "checkpoint": {"goal": "…", "step": 6, "progress": 40}, "warnings": []}
+```
+
+```json
+{"ok": false, "error": "Unknown session: 'ghost'"}
+```
+
+Семантика (идентична терминальным командам `/session` и `/new`):
+
+- `status` — активная сессия, список сессий, сводка checkpoint (`null`, если нет).
+- `create` — создать **и активировать** новую пустую сессию; ошибка, если есть.
+- `switch` — активировать **существующую** сессию; отсутствующая или
+  повреждённая цель даёт ошибку без смены активной сессии. Переключение никогда
+  не создаёт сессии и не трогает файлы workspace.
+- `delete` — удалить неактивную сессию (файл + резервная копия). Удаление
+  активной сессии отклоняется.
+- `reset` — опустошить активную сессию на месте (история, чат, checkpoint);
+  имя сохраняется, другие сессии не затрагиваются.
+
+Чтобы **возобновить** checkpoint активной сессии, запустите событийный фронтенд
+с `--resume` вместо строки задачи:
+
+```bash
+kvist --workspace WS --frontend stdio --resume
+```
+
+Поток — обычный поток из §8; если checkpoint нет, ядро отправляет событие
+`error` («No saved checkpoint to resume.») и завершает прогон.
 
 ---
 
@@ -270,9 +329,10 @@ def launch(session):
     session.close()
 ```
 
-API `EventSession`: `submit(user_goal, routed_role=None)`, `events()` (итератор;
-заканчивается, когда worker завершился и очередь пуста), `respond(request_id, *,
-value=None, approved=None)`, `close(timeout=5.0)`, `is_running()`.
+API `EventSession`: `submit(user_goal, routed_role=None)`, `submit_resume()`
+(продолжить checkpoint активной сессии), `events()` (итератор; заканчивается,
+когда worker завершился и очередь пуста), `respond(request_id, *, value=None,
+approved=None)`, `close(timeout=5.0)`, `is_running()`.
 
 ---
 
@@ -333,10 +393,16 @@ Electron просто спавнит бинарь `kvist`.
   события закрытый/молчащий фронтенд отклоняет опасные команды.
 - **Цикл агента не менялся.** Фронтенды не вызывают внутренности агента — только
   рендерят события и отвечают на запросы.
-- **Терминал — особый дефолт.** Его REPL добавляет slash-команды, сессии и визарды
-  конфигурации сверх событийной поверхности; они пока не выведены в события.
-- **Один процесс = один прогон/сессия** в v1. Для нескольких одновременных клиентов —
-  процесс на сессию или мультиплексирующий socket-транспорт.
+- **Терминал — особый дефолт.** Его REPL добавляет slash-команды и визарды
+  конфигурации сверх событийной поверхности. Управление же жизненным циклом
+  сессий полностью доступно headless-фронтендам через `--session-op` и
+  `--resume` (§8a) — с той же семантикой, что и терминальные команды.
+- **Один процесс = один прогон** в v1. Прогон выполняется в активной
+  именованной сессии workspace; между прогонами сессии переключаются через
+  `--session-op switch`. Для нескольких одновременных клиентов — процесс на
+  workspace или мультиплексирующий socket-транспорт. Само хранилище сессий
+  безопасно при конкурирующих записях (per-path блокировки + атомарная замена),
+  но одновременная работа двух агентов в одном workspace не поддерживается.
 
 ---
 
@@ -345,5 +411,7 @@ Electron просто спавнит бинарь `kvist`.
 Шов ядра: `ui.py`, `approvals.py`, `terminal_banner.py`.
 Протокол событий: `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
 `event_stdio.py`, `frontends.py`.
+Headless-сессии: `session_store.py` (за `--session-op`).
 Тесты: `tests/test_frontend_protocol.py`, `tests/test_event_stream_ui.py`,
-`tests/test_event_session.py`, `tests/test_frontends.py`.
+`tests/test_event_session.py`, `tests/test_frontends.py`,
+`tests/test_session_store.py`.

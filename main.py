@@ -44,6 +44,20 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         default="ask",
         help="Dangerous-command approval mode for the stdio frontend.",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume the active session's checkpoint (stdio frontend, no goal).",
+    )
+    parser.add_argument(
+        "--session-op",
+        choices=("status", "create", "switch", "delete", "reset"),
+        help="Run one headless session lifecycle operation, print JSON, exit.",
+    )
+    parser.add_argument(
+        "--session-name",
+        help="Session name for --session-op create/switch/delete.",
+    )
     return parser
 
 
@@ -913,7 +927,7 @@ def confirm_revert(file_count: int, verbose: bool) -> bool:
     """Ask the user to confirm a workspace revert. Returns True if confirmed."""
     ui = TerminalBannerUI(console=console, verbose=verbose)
     confirmed = ui.choose_option(
-        title=f"Revert {file_count} file(s) to their pre-session state?",
+        title=f"Revert {file_count} agent-changed file(s) to their baselines?",
         options=[
             {"value": "no", "label": "No, cancel"},
             {"value": "yes", "label": "Yes, revert"},
@@ -1605,10 +1619,32 @@ def main() -> None:
         else _build_cli_parser().parse_args()
     )
 
+    if args.session_op:
+        import json as _json
+
+        from durable_json import JsonStorageError
+        from session_store import run_session_op
+
+        try:
+            payload = run_session_op(
+                args.workspace,
+                args.session_op,
+                args.session_name,
+            )
+        except (ValueError, JsonStorageError, OSError) as error:
+            failure = {
+                "ok": False,
+                "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+            }
+            print(_json.dumps(failure, ensure_ascii=False))
+            raise SystemExit(1) from error
+        print(_json.dumps(payload, ensure_ascii=False))
+        return
+
     if args.frontend == "stdio":
         from event_stdio import launch
 
-        goal = sys.stdin.readline().strip()
+        goal = "" if args.resume else sys.stdin.readline().strip()
         model_values = (args.fast_model, args.smart_model, args.planner_model)
         if any(model_values) and not all(model_values):
             print(
@@ -1634,6 +1670,7 @@ def main() -> None:
                 models_override=models_override,
                 routed_role=None if args.role == "auto" else args.role,
                 approval_mode=args.approval_mode,
+                resume=args.resume,
             )
         except RuntimeError as error:
             print(sanitize_display_text(str(error)), file=sys.stderr)
@@ -1957,7 +1994,7 @@ def main() -> None:
                 report = build_diff_report(agent.executor.workspace)
                 console.print(Panel(
                     Text(report),
-                    title="Changes since last reset",
+                    title="Agent changes in this workspace (all sessions)",
                     border_style="bright_cyan",
                 ))
                 continue
@@ -1972,8 +2009,10 @@ def main() -> None:
 
                 console.print(
                     _display_text(
-                        f"This will restore {len(baseline)} file(s) to their state "
-                        "before the agent's first change and cannot be undone.",
+                        f"This will restore {len(baseline)} file(s) tracked by the "
+                        "workspace change journal (all sessions) to their state "
+                        "before the agent's first change and cannot be undone. "
+                        "Files changed outside the agent's writes are kept.",
                         "yellow",
                     )
                 )
@@ -1984,9 +2023,23 @@ def main() -> None:
                     continue
 
                 reverted = revert_workspace(agent.executor.workspace)
-                for item in reverted:
+                applied = [item for item in reverted if item.action != "skipped"]
+                skipped = [item for item in reverted if item.action == "skipped"]
+                for item in applied:
                     console.print(f"  [dim]{item.action}:[/dim] {item.path}")
-                console.print(_display_text(f"Reverted {len(reverted)} file(s).", "green"))
+                for item in skipped:
+                    console.print(
+                        f"  [yellow]skipped:[/yellow] {item.path} [dim]({item.reason})[/dim]"
+                    )
+                console.print(_display_text(f"Reverted {len(applied)} file(s).", "green"))
+                if skipped:
+                    console.print(
+                        _display_text(
+                            f"Kept {len(skipped)} file(s) that changed outside the "
+                            "agent's tracked writes; their baselines stay in the journal.",
+                            "yellow",
+                        )
+                    )
                 continue
 
             if user_goal.lower() == "/session":

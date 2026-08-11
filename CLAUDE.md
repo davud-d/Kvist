@@ -56,8 +56,13 @@ configured in-repo.
 - API keys + selected provider/models live in `~/.kvist/config.json` (Windows:
   `C:\Users\<USER>\.kvist\config.json`). On first run the agent prompts for the
   key the active provider needs and writes it there. Managed by `user_config.py`.
-- Per-project state (`/resume` checkpoint) is written to `<workspace>/.kvist/state.json`;
-  logs to `<workspace>/.kvist/logs/`.
+- Per-project state lives under `<workspace>/.kvist/`: named-session documents
+  (history, chat, `/resume` checkpoint) in `sessions/<name>.json`, the active-session
+  marker in `active_session.json`, the workspace-global change journal (for
+  `/changes`/`/revert`) in `change_journal.json`, logs in `logs/`. All are managed by
+  `agent_logging.py` / `change_journal.py` on top of `durable_json.py` (atomic
+  replace + `.bak` recovery copy). Headless frontends manage sessions via
+  `main.py --session-op ...` (`session_store.py`), never by touching the files.
 - Behavior overrides via env vars (see README "Knobs worth knowing"): `AGENT_LLM_PROVIDER`,
   `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`, `AGENT_PLANNER_MODEL`, `AGENT_MAX_STEPS`,
   `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`, `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
