@@ -229,7 +229,8 @@ instructions.
   `make_command`, `make_plan`) — no network. Mirror this when adding tests; gate any real
   LLM calls behind the `live_llm` marker.
 
-## Правила генерации кода
+## Code generation rules
+
 1. Code, comments, and internal reasoning: English.
 2. Final response to the user: Russian.
 3. No premature abstraction. Do not introduce a class, interface,
