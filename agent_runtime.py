@@ -1168,7 +1168,10 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
 
     raw_data = feedback.get("data", {}) if feedback.get("ok") else None
     if feedback.get("ok"):
-        payload["data"] = self._compact_for_prompt(redact_value(raw_data))
+        safe_data = redact_value(raw_data)
+        if command.action.type in {"run_shell", "delegate_task"}:
+            safe_data = _replace_empty_terminal_streams_for_model(safe_data)
+        payload["data"] = self._compact_for_prompt(safe_data)
     else:
         payload["normalized_error"] = self._feedback_error_for_model(feedback)
 
@@ -1183,6 +1186,21 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
             "</UNTRUSTED_TOOL_OUTPUT>"
         )
     return serialized
+
+
+def _replace_empty_terminal_streams_for_model(value: Any) -> Any:
+    """Make empty terminal stdout/stderr explicit in model-facing payloads."""
+    if isinstance(value, dict):
+        normalized: dict[Any, Any] = {}
+        for key, item in value.items():
+            if key in {"stdout", "stderr"} and item == "":
+                normalized[key] = "no output"
+            else:
+                normalized[key] = _replace_empty_terminal_streams_for_model(item)
+        return normalized
+    if isinstance(value, list):
+        return [_replace_empty_terminal_streams_for_model(item) for item in value]
+    return value
 
 
 def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
