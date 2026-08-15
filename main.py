@@ -153,6 +153,12 @@ slash_command_auto_suggest = SlashCommandAutoSuggest(
     fallback=AutoSuggestFromHistory()
 )
 
+_ROLE_HINTS = {
+    "fast": "Used for routing, planning, chat, and simple steps — pick something quick and cheap.",
+    "smart": "Used for complex coder/devops steps and error recovery — pick your most capable model.",
+    "planner": "Saved alongside fast/smart; usually fine to match the Smart model.",
+}
+
 
 def _display_text(value: object, style: str = "") -> Text:
     return Text(sanitize_display_text(str(value)), style=style)
@@ -1334,8 +1340,12 @@ def configure_custom_provider_models_interactively(
         title="Select action:",
         options=[
             {
-                "value": "custom",
-                "label": "Enter custom model id for all roles",
+                "value": "one",
+                "label": "Enter one model id for all roles",
+            },
+            {
+                "value": "each",
+                "label": "Enter a separate model id per role",
             },
             {
                 "value": "keep",
@@ -1349,7 +1359,7 @@ def configure_custom_provider_models_interactively(
     if action is None or action == "keep":
         return dict(current_models) if action == "keep" else None
 
-    if action == "custom":
+    if action == "one":
         first_model = current_models.get("fast", "")
         model_id = ui.prompt_text(
             title="Enter model ID for all roles:",
@@ -1369,6 +1379,21 @@ def configure_custom_provider_models_interactively(
                 "green",
             )
         )
+        return selected
+
+    if action == "each":
+        selected = {}
+        for role in MODEL_ROLES:
+            model_id = ui.prompt_text(
+                title=f"Enter model ID for {role_labels[role]} role:",
+                current_value=current_models.get(role, ""),
+                help_text=f"{_ROLE_HINTS[role]} Model identifier for this provider's endpoint.",
+            )
+            if model_id is None or not model_id.strip():
+                return None
+            selected[role] = model_id.strip()
+
+        console.print(_display_text("Models set per role.", "green"))
         return selected
 
     return None
@@ -1544,8 +1569,12 @@ def configure_omniroute_models_interactively(
         title="Select action:",
         options=[
             {
-                "value": "custom",
-                "label": "Enter custom model id for all roles",
+                "value": "one",
+                "label": "Enter one model id for all roles",
+            },
+            {
+                "value": "each",
+                "label": "Enter a separate model id per role",
             },
             {
                 "value": "keep",
@@ -1563,9 +1592,8 @@ def configure_omniroute_models_interactively(
         console.print("[green]Current models kept.[/green]")
         return dict(current_models)
 
-    # ── Custom model id input ═══════════════════════════════════════════
-    if action == "custom":
-        # Show a single prompt — apply to all roles
+    # ── One model id for all roles ═══════════════════════════════════════
+    if action == "one":
         first_model = current_models.get("fast", "")
         model_id = ui.prompt_text(
             title="Enter OmniRoute model id for all roles:",
@@ -1584,7 +1612,6 @@ def configure_omniroute_models_interactively(
             console.print("[yellow]Model id cannot be empty.[/yellow]")
             return None
 
-        # Validate
         validation_error = validate_omniroute_model_id(model_id)
         if validation_error:
             console.print(
@@ -1595,7 +1622,6 @@ def configure_omniroute_models_interactively(
             )
             return None
 
-        # Apply to all roles
         selected: dict[str, str] = {}
         for role in MODEL_ROLES:
             selected[role] = model_id
@@ -1606,6 +1632,41 @@ def configure_omniroute_models_interactively(
                 "green",
             )
         )
+        return selected
+
+    # ── Separate model id per role ═══════════════════════════════════════
+    if action == "each":
+        selected = {}
+        for role in MODEL_ROLES:
+            model_id = ui.prompt_text(
+                title=f"Enter OmniRoute model id for {role_labels[role]} role:",
+                current_value=current_models.get(role, ""),
+                help_text=(
+                    f"{_ROLE_HINTS[role]}\n"
+                    "Format: provider/model (e.g. ds-web/deepseek-v4-pro). "
+                    "Type 'auto' for OmniRoute auto-routing."
+                ),
+            )
+            if model_id is None:
+                return None
+            if not model_id:
+                console.print(
+                    _display_text(f"Model id for {role} cannot be empty.", "yellow")
+                )
+                return None
+
+            validation_error = validate_omniroute_model_id(model_id)
+            if validation_error:
+                console.print(
+                    _display_text(
+                        f"Invalid model id for {role}: {validation_error}",
+                        "red",
+                    )
+                )
+                return None
+            selected[role] = model_id
+
+        console.print(_display_text("Models set per role.", "green"))
         return selected
 
     # Unknown action (shouldn't happen with choose_option, but defensive)
