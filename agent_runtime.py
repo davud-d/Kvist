@@ -163,6 +163,7 @@ def _build_report_context(self, user_goal: str, summary: str, result: str, issue
 def _render_report(self, context: str) -> str:
     """Call the chat model to render a report from agent context. Streams markdown to console."""
     from agent_model import (
+        _emit_usage,
         _load_role_prompt,
         call_model,
         safe_extract_reasoning_delta,
@@ -174,7 +175,13 @@ def _render_report(self, context: str) -> str:
     stream_model = self.config.fast_model
 
     if not getattr(self.config, "stream", True):
-        raw = call_model(self, model=stream_model, system_prompt=report_prompt, user_prompt=context)
+        raw = call_model(
+            self,
+            model=stream_model,
+            system_prompt=report_prompt,
+            user_prompt=context,
+            usage_kind="report",
+        )
         self._ui.print_user_markdown(raw)
         return raw
 
@@ -227,6 +234,16 @@ def _render_report(self, context: str) -> str:
         if reasoning_update is not None and reasoning_chunks and not chunks:
             reasoning_update("".join(reasoning_chunks))
         update_markdown("".join(chunks))
+
+    # Real tiktoken usage of the report call; thinking tokens count as output.
+    _emit_usage(
+        self,
+        model=stream_model,
+        input_tokens=self._count_tokens(report_prompt) + self._count_tokens(context),
+        output_tokens=self._count_tokens("".join(chunks))
+        + self._count_tokens("".join(reasoning_chunks)),
+        kind="report",
+    )
 
     return "".join(chunks)
 

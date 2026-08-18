@@ -27,6 +27,7 @@
     "final",
     "debug",
     "error",
+    "usage",
     "input_request",
   ])
 

@@ -269,6 +269,7 @@ def call_action_model(self, prompt: str) -> str:
             model=preferred_model,
             system_prompt=system_prompt,
             user_prompt=prompt,
+            usage_kind="step",
         )
     except Exception:
         self._retries_exhausted = True
@@ -290,7 +291,42 @@ def select_action_model_for_run(self) -> str:
     return selected_model
 
 
-def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
+def _emit_usage(
+    self,
+    *,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    kind: str,
+) -> None:
+    """Report one model call's token usage to UIs exposing ``print_usage``.
+
+    Optional capability (like the streaming reasoning channel): probed with
+    ``getattr`` so UIs without a usage channel keep working. Counts are real
+    tiktoken measurements of the exact prompt/response text, not estimates.
+    """
+    callback = getattr(getattr(self, "_ui", None), "print_usage", None)
+    if callback is None:
+        return
+    callback(
+        {
+            "input_tokens": max(0, int(input_tokens)),
+            "output_tokens": max(0, int(output_tokens)),
+            "model": str(model),
+            "kind": str(kind),
+            "step": int(getattr(self, "_current_step", 0) or 0),
+        }
+    )
+
+
+def call_model(
+    self,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    usage_kind: str = "model",
+) -> str:
     trimmed_prompt = self._trim_prompt_to_token_limit(system_prompt, user_prompt)
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
@@ -349,6 +385,15 @@ def call_model(self, model: str, system_prompt: str, user_prompt: str) -> str:
                     raise RuntimeError("Model returned an empty response")
                 if self.config.cache_enabled:
                     self._cache[cache_key] = content
+                # Real usage for this API call; cache hits emit nothing (they
+                # consume no tokens).
+                _emit_usage(
+                    self,
+                    model=current_model,
+                    input_tokens=_input_tokens,
+                    output_tokens=self._count_tokens(content),
+                    kind=usage_kind,
+                )
                 # ── log successful API request ───────────────────
                 self._perf_logger.log_api_request(
                     step=getattr(self, "_current_step", 0),

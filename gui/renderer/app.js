@@ -31,6 +31,12 @@ const plannerModelInput = document.querySelector("#plannerModelInput")
 const roleButton = document.querySelector("#roleButton")
 const modelButton = document.querySelector("#modelButton")
 const approvalButton = document.querySelector("#approvalButton")
+const tokenSpeedLabel = document.querySelector("#tokenSpeed")
+const metricsBar = document.querySelector("#metricsBar")
+const metricTokens = document.querySelector("#metricTokens")
+const metricSteps = document.querySelector("#metricSteps")
+const metricThinking = document.querySelector("#metricThinking")
+const metricElapsed = document.querySelector("#metricElapsed")
 
 const CONFIG_STORAGE_KEY = "kvist.run-options.v1"
 const BUILTIN_PROVIDERS = new Set(["", "openai", "anthropic", "openrouter", "omniroute", "freeflow"])
@@ -42,6 +48,32 @@ let showDetails = false
 let lastAssistantText = ""
 let interruptDeadline = 0
 let runtimeConfig = null
+
+// Live output-speed indicator. The protocol carries cumulative text snapshots
+// (no token counts), so the rate is estimated from text growth: chars ÷ 4, the
+// same fallback the core uses in count_tokens. Snapshots arrive at the core's
+// ~10 FPS render throttle, which preserves the true average output rate.
+const TOKEN_RATE_WINDOW_MS = 2000
+const CHARS_PER_TOKEN = 4
+let tokenSamples = []
+const streamTextLengths = new Map()
+let tokenSpeedTimer = 0
+
+// Run metrics for the top bar. Token totals come from the core's `usage`
+// events (real tiktoken counts per model call); while a response is still
+// streaming, the not-yet-committed text is added as a live estimate.
+let runStats = freshRunStats()
+
+function freshRunStats() {
+  return {
+    tokensIn: 0,
+    tokensOut: 0,
+    steps: 0,
+    reasoningSeconds: 0,
+    startedAt: 0,
+    frozenAt: 0,
+  }
+}
 
 function normalizedRunOptions(value = {}) {
   const role = new Set(["auto", "coder", "devops", "chat"]).has(value.role)
@@ -122,6 +154,83 @@ function scrollToBottom() {
   })
 }
 
+function noteStreamTokens(streamId, text, committed) {
+  const previous = streamTextLengths.get(streamId) || 0
+  if (committed) streamTextLengths.delete(streamId)
+  else streamTextLengths.set(streamId, text.length)
+  const added = text.length - previous
+  if (added <= 0) return
+  tokenSamples.push({ time: performance.now(), tokens: added / CHARS_PER_TOKEN })
+  renderTokenSpeed()
+}
+
+function renderTokenSpeed() {
+  const now = performance.now()
+  const cutoff = now - TOKEN_RATE_WINDOW_MS
+  tokenSamples = tokenSamples.filter((sample) => sample.time >= cutoff)
+  if (!running || tokenSamples.length === 0) {
+    tokenSpeedLabel.classList.add("is-hidden")
+    return
+  }
+  const tokens = tokenSamples.reduce((sum, sample) => sum + sample.tokens, 0)
+  const spanSeconds = Math.max(0.25, (now - tokenSamples[0].time) / 1000)
+  tokenSpeedLabel.textContent = `${Math.round(tokens / spanSeconds)} tok/s`
+  tokenSpeedLabel.classList.remove("is-hidden")
+}
+
+function resetTokenSpeed() {
+  if (tokenSpeedTimer) window.clearInterval(tokenSpeedTimer)
+  tokenSpeedTimer = 0
+  tokenSamples = []
+  streamTextLengths.clear()
+  tokenSpeedLabel.classList.add("is-hidden")
+}
+
+function formatTokens(value) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
+  return String(Math.round(value))
+}
+
+function formatElapsed(seconds) {
+  const total = Math.max(0, Math.floor(seconds))
+  const minutes = Math.floor(total / 60)
+  const rest = total % 60
+  return `${minutes}:${String(rest).padStart(2, "0")}`
+}
+
+function renderRunStats() {
+  // Text still streaming has no usage event yet; add it as a live estimate.
+  let pending = 0
+  for (const length of streamTextLengths.values()) pending += length / CHARS_PER_TOKEN
+  const tokensIn = runStats.tokensIn
+  const tokensOut = runStats.tokensOut + pending
+  metricTokens.textContent = `↓ ${formatTokens(tokensIn)} in · ↑ ${formatTokens(tokensOut)} out`
+  metricTokens.title =
+    `Tokens consumed this run (core tiktoken counts): ${Math.round(tokensIn)} in, ` +
+    `${Math.round(runStats.tokensOut)} out${pending >= 1 ? ` (+~${Math.round(pending)} streaming)` : ""}`
+
+  metricSteps.classList.toggle("is-hidden", runStats.steps === 0)
+  if (runStats.steps > 0) {
+    metricSteps.textContent = `${runStats.steps} step${runStats.steps === 1 ? "" : "s"}`
+  }
+
+  metricThinking.classList.toggle("is-hidden", runStats.reasoningSeconds < 0.5)
+  if (runStats.reasoningSeconds >= 0.5) {
+    metricThinking.textContent = `🧠 ${Math.round(runStats.reasoningSeconds)}s`
+  }
+
+  if (runStats.startedAt) {
+    const end = runStats.frozenAt || Date.now()
+    metricElapsed.textContent = formatElapsed((end - runStats.startedAt) / 1000)
+  }
+}
+
+function resetRunStats() {
+  runStats = freshRunStats()
+  renderRunStats()
+}
+
 function setRunning(value) {
   running = value
   promptInput.disabled = value || requestHost.childElementCount > 0
@@ -130,6 +239,18 @@ function setRunning(value) {
   roleButton.disabled = value
   modelButton.disabled = value
   approvalButton.disabled = value
+  if (value) {
+    if (!tokenSpeedTimer) {
+      tokenSpeedTimer = window.setInterval(() => {
+        renderTokenSpeed()
+        renderRunStats()
+      }, 500)
+    }
+  } else {
+    resetTokenSpeed()
+    if (runStats.startedAt && !runStats.frozenAt) runStats.frozenAt = Date.now()
+    renderRunStats()
+  }
   if (!promptInput.disabled) promptInput.focus()
 }
 
@@ -199,6 +320,7 @@ function setActivity(text, { busy = false, progress = null, error = false } = {}
 
 function enterConversation() {
   welcome.classList.add("is-hidden")
+  metricsBar.classList.remove("is-hidden")
   conversation.classList.remove("is-hidden")
 }
 
@@ -484,6 +606,7 @@ function handleEvent(event) {
   if (action.kind === "ignore") return
 
   if (action.kind === "stream_snapshot") {
+    noteStreamTokens(action.streamId, action.text, action.committed)
     updateStream(action.streamId, action.text, action.committed)
     return
   }
@@ -494,8 +617,18 @@ function handleEvent(event) {
   }
 
   if (action.kind === "reasoning_snapshot") {
-    if (action.committed) commitThinkingBlock(action.streamId, action.durationSeconds)
-    else updateThinking(action.streamId, action.text)
+    // Reasoning shares the answer's stream_id, so track it as its own channel:
+    // thinking text and answer text are separate cumulative sequences.
+    noteStreamTokens(`${action.streamId}:reasoning`, action.text, action.committed)
+    if (action.committed) {
+      if (action.durationSeconds > 0) {
+        runStats.reasoningSeconds += action.durationSeconds
+        renderRunStats()
+      }
+      commitThinkingBlock(action.streamId, action.durationSeconds)
+    } else {
+      updateThinking(action.streamId, action.text)
+    }
     return
   }
 
@@ -528,7 +661,15 @@ function handleEvent(event) {
       addPlan(event)
       break
     case "step":
+      runStats.steps = Math.max(runStats.steps, Number(event.step) || 0)
+      runStats.reasoningSeconds += Number(event.reasoning_seconds) || 0
+      renderRunStats()
       addStep(event)
+      break
+    case "usage":
+      runStats.tokensIn += Number(event.input_tokens) || 0
+      runStats.tokensOut += Number(event.output_tokens) || 0
+      renderRunStats()
       break
     case "sandbox_notice":
       addNotice(event.note)
@@ -564,6 +705,9 @@ async function startGoal(goal) {
   if (!value || running) return
   protocol = new ProtocolState()
   lastAssistantText = ""
+  resetTokenSpeed()
+  resetRunStats()
+  runStats.startedAt = Date.now()
   requestHost.replaceChildren()
   enterConversation()
   addUserMessage(value)
@@ -584,8 +728,11 @@ function resetView() {
   if (running) return
   protocol = new ProtocolState()
   lastAssistantText = ""
+  resetTokenSpeed()
+  resetRunStats()
   messages.replaceChildren()
   requestHost.replaceChildren()
+  metricsBar.classList.add("is-hidden")
   conversation.classList.add("is-hidden")
   welcome.classList.remove("is-hidden")
   progressBar.style.width = "0%"

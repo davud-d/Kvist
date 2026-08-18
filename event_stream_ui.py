@@ -25,6 +25,7 @@ from frontend_protocol import (
     StreamChunkEvent,
     StreamCommitEvent,
     StreamStartEvent,
+    UsageEvent,
 )
 from redaction import redact_text, redact_value
 
@@ -97,6 +98,17 @@ class EventStreamUI:
 
     def debug_print(self, message: str) -> None:
         self._channel.emit(DebugEvent(redact_text(message)))
+
+    def print_usage(self, usage: dict) -> None:
+        self._channel.emit(
+            UsageEvent(
+                input_tokens=max(0, int(usage.get("input_tokens", 0))),
+                output_tokens=max(0, int(usage.get("output_tokens", 0))),
+                model=redact_text(str(usage.get("model", ""))),
+                kind=str(usage.get("kind", "")),
+                step=max(0, int(usage.get("step", 0))),
+            )
+        )
 
     @contextlib.contextmanager
     def live_markdown(self) -> Iterator[Callable[[str], None]]:

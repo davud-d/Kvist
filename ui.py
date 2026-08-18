@@ -72,6 +72,11 @@ class AgentUI(Protocol):
         """
         ...
 
+    # Optional capability, probed with ``getattr(ui, "print_usage", None)``:
+    # ``print_usage(usage: dict)`` receives per-model-call token usage
+    # (``input_tokens``/``output_tokens`` ints, plus ``model``, ``kind``,
+    # ``step``). Implementations without a metrics surface simply omit it.
+
     def render_user_markdown(self, message: str, fallback_style: str = "") -> Any:
         """Return a renderable for ``message`` (frontend-specific)."""
         ...

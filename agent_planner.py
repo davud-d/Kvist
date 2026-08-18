@@ -44,6 +44,7 @@ def create_plan(self, user_goal: str) -> PlanInfo:
             model=self.config.fast_model,
             system_prompt=PLANNER_PROMPT,
             user_prompt=prompt,
+            usage_kind="plan",
         )
         data = self._parse_json_dict(raw)
         plan = data.get("plan")

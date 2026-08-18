@@ -242,6 +242,33 @@ class DebugEvent:
 
 
 @dataclass(slots=True)
+class UsageEvent:
+    """Token usage of one model call (real tiktoken counts, not estimates).
+
+    Emitted after each completed model call so a frontend can accumulate run
+    totals. ``kind`` names the call site ("step", "plan", "chat", "report",
+    "model" when unspecified); ``step`` is the agent loop step (0 outside it).
+    """
+
+    input_tokens: int
+    output_tokens: int
+    model: str = ""
+    kind: str = ""
+    step: int = 0
+    type: ClassVar[str] = "usage"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "model": self.model,
+            "kind": self.kind,
+            "step": self.step,
+        }
+
+
+@dataclass(slots=True)
 class ErrorEvent:
     message: str
     type: ClassVar[str] = "error"

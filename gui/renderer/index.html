@@ -17,6 +17,18 @@
           <img class="logo-word" src="kvist-logo.svg" alt="Kvist" />
         </section>
 
+        <section id="metricsBar" class="metrics-bar is-hidden" aria-label="Run metrics">
+          <span
+            id="metricTokens"
+            class="metric"
+            title="Tokens consumed this run, counted by the core (tiktoken). ↑ output includes live estimate while streaming"
+          >↓ 0 in · ↑ 0 out</span>
+          <span id="metricSteps" class="metric is-hidden" title="Agent steps taken">0 steps</span>
+          <span id="metricThinking" class="metric is-hidden" title="Time the model spent thinking">🧠 0s</span>
+          <span class="metrics-spacer"></span>
+          <span id="metricElapsed" class="metric" title="Elapsed run time">0:00</span>
+        </section>
+
         <section id="conversation" class="conversation is-hidden" aria-live="polite">
           <div id="messages" class="messages"></div>
         </section>
@@ -62,7 +74,14 @@
           <span class="status-dot"></span>
           <span id="workspaceLabel">Loading workspace…</span>
         </button>
-        <span class="footer-version">Kvist GUI 1.1.0</span>
+        <div class="footer-right">
+          <span
+            id="tokenSpeed"
+            class="token-speed is-hidden"
+            title="Model output speed, estimated from streamed text (chars ÷ 4)"
+          ></span>
+          <span class="footer-version">Kvist GUI 1.1.0</span>
+        </div>
       </footer>
     </div>
 

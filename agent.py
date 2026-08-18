@@ -40,6 +40,7 @@ from agent_model import (
     call_model,
     call_model_streaming,
     _create_json_completion,
+    _emit_usage,
     count_tokens,
     init_tiktoken_encoding,
     _TOKEN_ENCODING_UNINITIALIZED,
@@ -728,7 +729,23 @@ class LocalAgent:
         except KeyboardInterrupt as error:
             raise ChatRequestCancelled from error
         try:
-            return self._consume_chat_stream(stream)
+            content = self._consume_chat_stream(stream)
+            # Real tiktoken usage of the completed chat call (thinking tokens
+            # are billed output too, so they are counted alongside the answer).
+            input_tokens = sum(
+                self._count_tokens(str(message.get("content", "")))
+                for message in safe_messages
+                if isinstance(message, dict)
+            )
+            _emit_usage(
+                self,
+                model=stream_model,
+                input_tokens=input_tokens,
+                output_tokens=self._count_tokens(content)
+                + self._count_tokens("".join(getattr(self, "_last_chat_reasoning", []) or [])),
+                kind="chat",
+            )
+            return content
         except KeyboardInterrupt as error:
             raise ChatRequestCancelled from error
         finally:
@@ -808,4 +825,6 @@ class LocalAgent:
             # Final update to guarantee the last parts are rendered
             update_markdown("".join(chunks))
 
+        # Kept for the caller's usage accounting: thinking tokens are billed.
+        self._last_chat_reasoning = reasoning_chunks
         return "".join(chunks)

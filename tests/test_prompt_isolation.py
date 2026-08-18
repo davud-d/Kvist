@@ -24,7 +24,7 @@ def test_action_model_uses_current_agent_role_prompt():
         def _prefer_smart_model(self):
             return False
         
-        def _call_model(self, model, system_prompt, user_prompt):
+        def _call_model(self, model, system_prompt, user_prompt, **kwargs):
             captured["model"] = model
             captured["system_prompt"] = system_prompt
             captured["user_prompt"] = user_prompt
@@ -73,7 +73,7 @@ def test_planner_uses_planner_prompt_not_role_prompt():
     class Agent:
         config = SimpleNamespace(fast_model="fast")
 
-        def _call_model(self, model, system_prompt, user_prompt):
+        def _call_model(self, model, system_prompt, user_prompt, **kwargs):
             captured["model"] = model
             captured["system_prompt"] = system_prompt
             captured["user_prompt"] = user_prompt

@@ -346,6 +346,15 @@ class TerminalBannerUI:
         if self.verbose:
             print(sanitize_display_text(message))
 
+    def print_usage(self, usage: dict) -> None:
+        """Optional token-usage channel. Verbose-only in the terminal; event
+        frontends (GUI) surface it as live run metrics instead."""
+        self.debug_print(
+            "tokens: "
+            f"in={usage.get('input_tokens', 0)} out={usage.get('output_tokens', 0)} "
+            f"model={usage.get('model', '')} kind={usage.get('kind', '')}"
+        )
+
     def print_result(self, message: str) -> None:
         """Print a success/result message (backward-compatible)."""
         if self._plain:

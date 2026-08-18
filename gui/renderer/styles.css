@@ -114,8 +114,24 @@ button {
   box-shadow: 0 0 8px rgba(99, 221, 161, 0.55);
 }
 
+.footer-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
 .footer-version {
   flex: 0 0 auto;
+}
+
+.token-speed {
+  flex: 0 0 auto;
+  min-width: 56px;
+  text-align: right;
+  color: var(--primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .main-stage {
@@ -144,6 +160,32 @@ button {
   height: auto;
   display: block;
   filter: drop-shadow(0 0 18px rgba(45, 187, 255, 0.13));
+}
+
+.metrics-bar {
+  width: min(900px, 100%);
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 0 auto;
+  padding: 0 2px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  user-select: none;
+}
+
+.metric {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#metricTokens {
+  color: var(--primary);
+}
+
+.metrics-spacer {
+  flex: 1 1 auto;
 }
 
 .conversation {

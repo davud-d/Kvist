@@ -28,6 +28,7 @@ from frontend_protocol import (
     StreamChunkEvent,
     StreamCommitEvent,
     StreamStartEvent,
+    UsageEvent,
 )
 
 
@@ -80,6 +81,16 @@ def _all_sample_events():
         (ReasoningCommitEvent(stream_id="s1", duration_seconds=3.5), "reasoning_commit"),
         (DebugEvent(message="dbg"), "debug"),
         (ErrorEvent(message="boom"), "error"),
+        (
+            UsageEvent(
+                input_tokens=1200,
+                output_tokens=300,
+                model="gpt-test",
+                kind="step",
+                step=2,
+            ),
+            "usage",
+        ),
         (
             InputRequestEvent(
                 request_id="r1",
