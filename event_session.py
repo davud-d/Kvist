@@ -52,6 +52,11 @@ class EventSession:
         self.result: str | None = None
         self.error: Exception | None = None
 
+    @property
+    def agent(self):
+        """The wrapped LocalAgent. Read-only handle for launch-time metadata."""
+        return self._agent
+
     def submit(self, user_goal: str, routed_role: str | None = None) -> None:
         self._start_worker(self._run, (user_goal, routed_role))
 

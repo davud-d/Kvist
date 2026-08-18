@@ -73,14 +73,71 @@ def pump(
         out_stream.flush()
 
 
-def serve_stdio(session: EventSession) -> None:
-    """Serve an already-built session over stdio (goal = first stdin line)."""
-    goal = sys.stdin.readline().strip()
-    session.submit(goal)
+def build_session_hello(
+    agent,
+    *,
+    routed_role: str | None = None,
+    approval_mode: str | None = None,
+) -> HelloEvent:
+    """One authoritative launch-time hello snapshot for every stdio entrypoint.
+
+    Sampled from the agent BEFORE the worker starts, so ``session``/
+    ``has_checkpoint`` describe the state at connection time and cannot race a
+    worker that clears the checkpoint (e.g. a fast ``--resume`` run).
+    """
+    config = agent.config
+    return HelloEvent(
+        provider=config.provider,
+        models={
+            "fast": config.fast_model,
+            "smart": config.smart_model,
+            "planner": config.planner_model,
+        },
+        role=routed_role or "auto",
+        approval_mode=approval_mode,
+        session=agent.current_session,
+        has_checkpoint=agent._peek_checkpoint() is not None,
+    )
+
+
+def serve_session(
+    session: EventSession,
+    *,
+    out_stream,
+    in_reader,
+    goal: str | None = None,
+    resume: bool = False,
+    routed_role: str | None = None,
+    approval_mode: str | None = None,
+) -> None:
+    """The single stdio lifecycle: snapshot hello, submit work, pump, close.
+
+    Every stdio entrypoint (the CLI ``launch`` and the builtin frontend
+    ``serve_stdio``) routes through here so hello/session semantics can never
+    diverge between them. ``goal is None`` reads the goal from ``in_reader``;
+    ``resume=True`` continues the active checkpoint instead.
+    """
+    hello = build_session_hello(
+        session.agent,
+        routed_role=routed_role,
+        approval_mode=approval_mode,
+    )
+    if resume:
+        session.submit_resume()
+    elif goal is None:
+        first_line = in_reader.readline()
+        session.submit(first_line.strip(), routed_role=routed_role)
+    else:
+        session.submit(goal, routed_role=routed_role)
     try:
-        pump(session, sys.stdout, sys.stdin)
+        pump(session, out_stream, in_reader, hello_event=hello)
     finally:
         session.close()
+
+
+def serve_stdio(session: EventSession) -> None:
+    """Serve an already-built session over real stdio (goal = first stdin line)."""
+    serve_session(session, out_stream=sys.stdout, in_reader=sys.stdin)
 
 
 def launch(
@@ -132,29 +189,15 @@ def launch(
                 )
         finally:
             sys.stdin = original_stdin
-        session = EventSession(channel, agent)
-        if resume:
-            session.submit_resume()
-        else:
-            session.submit(goal, routed_role=routed_role)
-        pump(
-            session,
-            destination,
-            source,
-            hello_event=HelloEvent(
-                provider=_config.provider,
-                models={
-                    "fast": _config.fast_model,
-                    "smart": _config.smart_model,
-                    "planner": _config.planner_model,
-                },
-                role=routed_role or "auto",
-                approval_mode=approval_mode,
-                session=agent.current_session,
-                has_checkpoint=agent._peek_checkpoint() is not None,
-            ),
+        serve_session(
+            EventSession(channel, agent),
+            out_stream=destination,
+            in_reader=source,
+            goal=None if resume else goal,
+            resume=resume,
+            routed_role=routed_role,
+            approval_mode=approval_mode,
         )
-        session.close()
 
 
 def _parse_args(argv: list[str]) -> tuple[str, str]:
