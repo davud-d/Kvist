@@ -12,13 +12,14 @@ from change_journal import (
     content_digest,
     journal_path,
     load_baseline,
+    promote_baseline,
     record_baseline,
     revert_workspace,
 )
 
 
 def _record_write(workspace, relative_path, *, old_content, new_content, session="default"):
-    """Mirror the executor's write-ahead call: record, then mutate."""
+    """Mirror the executor's write-ahead + promote flow around a successful write."""
     existed = (workspace / relative_path).is_file()
     record_baseline(
         workspace,
@@ -26,11 +27,12 @@ def _record_write(workspace, relative_path, *, old_content, new_content, session
         existed=existed,
         content=old_content if existed else None,
         session=session,
-        new_digest=content_digest(new_content),
+        pending_digest=content_digest(new_content),
     )
     target = workspace / relative_path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(new_content, encoding="utf-8")
+    promote_baseline(workspace, relative_path, content_digest(new_content))
 
 
 def test_baseline_keeps_first_state_and_refreshes_last_digest(tmp_path):
@@ -74,15 +76,18 @@ def test_revert_skips_files_changed_outside_agent_writes(tmp_path):
     assert load_baseline(tmp_path)["user.py"]["content"] == "before\n"
 
 
-def test_revert_restores_file_deleted_after_agent_write(tmp_path):
+def test_revert_does_not_resurrect_a_pre_existing_file_the_user_deleted(tmp_path):
+    # A user deleting a pre-existing file after the agent edited it is an
+    # external change: file absence is state, and revert must not resurrect it.
     (tmp_path / "gone.py").write_text("before\n", encoding="utf-8")
     _record_write(tmp_path, "gone.py", old_content="before\n", new_content="agent\n")
     (tmp_path / "gone.py").unlink()
 
     reverted = revert_workspace(tmp_path)
 
-    assert [(item.path, item.action) for item in reverted] == [("gone.py", "restored")]
-    assert (tmp_path / "gone.py").read_text(encoding="utf-8") == "before\n"
+    assert [(item.path, item.action) for item in reverted] == [("gone.py", "skipped")]
+    assert not (tmp_path / "gone.py").exists()
+    assert "gone.py" in load_baseline(tmp_path)
 
 
 def test_revert_is_idempotent_after_interruption(tmp_path):
@@ -109,7 +114,7 @@ def test_stale_write_ahead_record_is_harmless(tmp_path):
         existed=True,
         content="untouched\n",
         session="default",
-        new_digest=content_digest("never written\n"),
+        pending_digest=content_digest("never written\n"),
     )
 
     reverted = revert_workspace(tmp_path)
@@ -203,7 +208,7 @@ def test_revert_refuses_paths_through_symlinks(tmp_path):
         relative_path="link/file.py",
         existed=True,
         content="baseline\n",
-        new_digest=content_digest("agent\n"),
+        pending_digest=content_digest("agent\n"),
     )
     (outside / "file.py").write_text("agent\n", encoding="utf-8")
 
@@ -215,22 +220,29 @@ def test_revert_refuses_paths_through_symlinks(tmp_path):
     assert (outside / "file.py").read_text(encoding="utf-8") == "agent\n"
 
 
-def test_corrupt_journal_never_blocks_writes_and_reads_empty(tmp_path):
+def test_corrupt_journal_is_surfaced_not_silently_treated_as_empty(tmp_path):
+    # The write-ahead journal is a safety mechanism: corruption must be
+    # surfaced (so a mutation can be refused), never mistaken for empty history.
+    from change_journal import JournalUnavailableError
+
     journal = journal_path(tmp_path)
     journal.parent.mkdir(parents=True, exist_ok=True)
     journal.write_text("{broken", encoding="utf-8")
     journal.with_suffix(".json.bak").write_text("{broken", encoding="utf-8")
 
-    record_baseline(
-        tmp_path,
-        relative_path="any.py",
-        existed=False,
-        content=None,
-        new_digest=content_digest("x"),
-    )
+    with pytest.raises(JournalUnavailableError):
+        record_baseline(
+            tmp_path,
+            relative_path="any.py",
+            existed=False,
+            content=None,
+            pending_digest=content_digest("x"),
+        )
 
-    assert load_baseline(tmp_path) == {}
-    assert revert_workspace(tmp_path) == []
+    with pytest.raises(JournalUnavailableError):
+        load_baseline(tmp_path)
+    with pytest.raises(JournalUnavailableError):
+        revert_workspace(tmp_path)
 
 
 def test_clear_journal_removes_primary_and_backup(tmp_path):

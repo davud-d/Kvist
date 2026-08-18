@@ -63,6 +63,39 @@ configured in-repo.
   `agent_logging.py` / `change_journal.py` on top of `durable_json.py` (atomic
   replace + `.bak` recovery copy). Headless frontends manage sessions via
   `main.py --session-op ...` (`session_store.py`), never by touching the files.
+  Crash-consistency: a mutating executor action follows record-pending →
+  atomic replace → compare-and-promote (`change_journal.record_baseline` /
+  `promote_baseline(expected_pending_digest)`, splitting `pending_digest` from
+  the committed `last_digest`), and `run_loop` writes a `pending_action` into the
+  checkpoint *before* every externally visible action (`_build_pending_action`).
+  Reconcilable file writes carry pre/intended digests; non-reconcilable side
+  effects (`run_shell`, `delegate_task`) carry only identity and are never
+  replayed. A new `run()` stamps a `run_id` and durably supersedes the prior
+  checkpoint before planning, so `/resume` cannot revive a superseded run. On
+  `/resume`, `agent._reconcile_pending_action` uses
+  `change_journal.classify_pending_write` — which separates provenance
+  (`agent_committed`, proven via promoted `last_digest`) from intent
+  (`desired_present`, content matches but authorship unproven → advance, no
+  ownership) — reconstructs post-write runtime state via `mark_file_write_applied`
+  (re-arms verification), and stops safely (ambiguous) rather than guessing.
+  `/revert` overwrites only content whose `last_digest` proves agent authorship.
+  A `run()` also durably activates the new run via `agent_logging.begin_run`
+  (phase=`planning` checkpoint) before planning, so a crash during planning
+  re-plans NEW rather than losing it or reviving OLD. Journal identity is
+  transaction-bound: `record_baseline`/`promote_baseline` carry `run_id`+
+  `action_id` (set on the executor by `run_loop` via `begin_action_transaction`),
+  and promotion is compare-and-promote on `(digest, run_id, action_id)`. A
+  filesystem write whose journal promotion fails is a partial commit: the
+  executor marks it `commit_unconfirmed` and raises (the action is NOT reported
+  as success). The journal is a *required* safety record — `record_baseline`
+  raises `JournalUnavailableError` on corruption and the executor refuses the
+  mutation before touching the file; `load_baseline`/`build_diff_report`/
+  `revert_workspace` surface corruption instead of treating it as empty. All
+  journal-driven filesystem access goes through TOCTOU-safe fd-relative
+  primitives (`change_journal._SafeChild`, O_NOFOLLOW per component + dir_fd
+  read/rename/unlink) that reuse the executor's inode-alias hardlink policy
+  (`secret_paths.count_workspace_inode_aliases`); `journal_path_violation` is the
+  lexical pre-gate (`..`, `.kvist` case-insensitively, secret paths).
 - Behavior overrides via env vars (see README "Knobs worth knowing"): `AGENT_LLM_PROVIDER`,
   `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`, `AGENT_PLANNER_MODEL`, `AGENT_MAX_STEPS`,
   `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`, `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),

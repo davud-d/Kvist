@@ -249,6 +249,30 @@ def delete_session(self, name: str) -> bool:
     return False
 
 
+def begin_run(self, user_goal: str, run_id: str) -> None:
+    """Durably activate a NEW run before planning starts.
+
+    Writes a ``phase="planning"`` checkpoint that atomically replaces any prior
+    resumable checkpoint in a single durable write — so a crash during planning
+    leaves NEW (re-plannable, no external side effect yet) recoverable and OLD
+    unreachable, never a window where neither exists.
+    """
+    session = getattr(self, "current_session", "default")
+    checkpoint = {
+        "goal": user_goal,
+        "run_id": run_id,
+        "phase": "planning",
+        "step": 0,
+        "pending_action": None,
+    }
+    _write_json_object(
+        get_state_path(self, session),
+        _session_document(self, checkpoint=checkpoint),
+        boundary=self.executor.workspace,
+    )
+    save_active_session(self, session)
+
+
 def reset_session(self) -> None:
     """Durably reset the active session to an empty document (the /new
     contract): history, chat, and checkpoint are gone; the name is kept."""
@@ -416,11 +440,29 @@ def persist_logs(self, user_goal: str) -> None:
         )
 
 
-def save_checkpoint(self, user_goal: str, step: int) -> None:
+def save_checkpoint(
+    self,
+    user_goal: str,
+    step: int,
+    pending_action: dict[str, Any] | None = None,
+) -> None:
     session = getattr(self, "current_session", "default")
     state_path = get_state_path(self, session)
     checkpoint = {
         "goal": user_goal,
+        # Identifies the run this checkpoint belongs to. A new run supersedes the
+        # previous one before execution, so a stale checkpoint can never be
+        # reconciled against a different run's pending action.
+        "run_id": getattr(self, "_run_id", None),
+        # Lifecycle phase: an executing checkpoint carries real step state; a
+        # "planning" checkpoint (written by begin_run) represents an accepted
+        # run whose plan is not yet built, so resume re-plans rather than
+        # reviving an older run.
+        "phase": "executing",
+        # A mutating action that is about to run is recorded here BEFORE it
+        # executes, so a crash in the mutation window is reconciled on resume
+        # instead of blindly replayed. Cleared (None) on the post-action save.
+        "pending_action": pending_action,
         "current_agent_role": self._state.current_agent_role,
         "task_language": self._state.task_language,
         "response_language": self._state.response_language,
@@ -505,7 +547,13 @@ def load_checkpoint(self) -> tuple[str, int] | None:
 
     data = _session_checkpoint(session_data)
     if data is None:
+        self._pending_action = None
         return None
+
+    pending = data.get("pending_action")
+    self._pending_action = pending if isinstance(pending, dict) else None
+    self._run_id = data.get("run_id")
+    self._resumed_phase = data.get("phase", "executing")
 
     plan_data = data.get("plan_info")
     if isinstance(plan_data, dict):

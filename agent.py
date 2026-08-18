@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from rich.console import Console
@@ -25,6 +26,7 @@ from agent_logging import (
     load_session,
     peek_checkpoint,
     persist_logs,
+    begin_run,
     read_session_document,
     reset_session,
     restore_session_document,
@@ -82,6 +84,7 @@ from agent_runtime import (
     render_feedback,
     required_followup_error,
     reset_run_state,
+    mark_file_write_applied,
     run_loop,
     set_required_next_actions,
     update_completed_plan_steps,
@@ -91,6 +94,7 @@ from agent_runtime import (
     _is_report_artifact_blocked,
     _is_read_only_violation,
 )
+from change_journal import JournalUnavailableError, classify_pending_write
 from deps import detect_dependency_versions
 from agent_state import AgentConfig, RunState
 from agent_web import (
@@ -152,6 +156,12 @@ class LocalAgent:
         self.current_session = load_active_session(self)
         self.executor.set_active_session(self.current_session)
         self._session_history: list[dict[str, Any]] = []
+        # Set by load_checkpoint; describes a mutation interrupted mid-flight.
+        self._pending_action: dict[str, Any] | None = None
+        # Identifies the active run; a new run() stamps a fresh id.
+        self._run_id: str | None = None
+        # Lifecycle phase of a resumed checkpoint (set by load_checkpoint).
+        self._resumed_phase: str = "executing"
         load_session(self)
 
     def _add_to_session_history(self, user_goal: str, role: str, result: str) -> None:
@@ -203,12 +213,16 @@ class LocalAgent:
             self._restore_session_document({})
             return
 
+        # Durable-first: commit the empty session to disk before discarding any
+        # in-memory state. If persistence fails, the exception propagates with
+        # both the on-disk and in-memory session still intact and usable.
+        self._reset_session()
         self._reset_run_state()
         self._session_history = []
         self._last_response_language = None
+        self._pending_action = None
         if hasattr(self, "_chat_history"):
             del self._chat_history
-        self._reset_session()
 
     def _save_session_marker(self) -> None:
         """Keep compatibility with callers that create an empty session marker."""
@@ -277,6 +291,14 @@ class LocalAgent:
             return result
 
         # ── Standard path (coder / devops): single run_loop ──────
+        # Run identity: durably activate this run BEFORE any planner/tool call.
+        # begin_run atomically replaces any prior resumable checkpoint with a
+        # NEW phase="planning" record, so a crash during planning leaves NEW
+        # recoverable (re-plannable, no side effect yet) and OLD unreachable —
+        # never a window where neither exists.
+        self._run_id = uuid.uuid4().hex
+        self._pending_action = None
+        self._begin_run(user_goal, self._run_id)
         self._state.plan_info = self._create_plan(user_goal)
         if not self._state.selected_action_model:
             self._select_action_model_for_run()
@@ -293,6 +315,19 @@ class LocalAgent:
         if result is None:
             return None
         user_goal, last_step = result
+        resumed_phase = getattr(self, "_resumed_phase", "executing")
+
+        # Reconcile a mutation that was in-flight when the process died. The
+        # checkpoint carries the intended write's pre/intended digests, so we
+        # can prove whether it executed instead of blindly replaying it.
+        start_step = last_step + 1
+        pending = getattr(self, "_pending_action", None)
+        if isinstance(pending, dict):
+            reconciliation = self._reconcile_pending_action(pending)
+            if reconciliation is None:
+                return self._report_ambiguous_resume(pending)
+            start_step = reconciliation
+
         # Environment facts are recomputed for the current machine rather than
         # restored: run() sets them, resume() must too or the prompt shows blanks.
         self._state.system_os = current_os_context()
@@ -316,9 +351,133 @@ class LocalAgent:
         self._ui.debug_print(
             f"Execution model restored: tier={self._state.selected_action_role}, model={self._state.selected_action_model}"
         )
-        result = self._run_loop(user_goal, start_step=last_step + 1)
+        # A run interrupted during planning has no durable plan and made no
+        # external side effect: re-plan NEW and start fresh from step 1 rather
+        # than reviving the superseded run or forgetting NEW.
+        if resumed_phase == "planning" or self._state.plan_info is None:
+            self._state.plan_info = self._create_plan(user_goal)
+            self._ui.print_plan(self._state.plan_info)
+            start_step = 1
+        result = self._run_loop(user_goal, start_step=start_step)
         self._add_to_session_history(user_goal, self._state.current_agent_role, result)
         return result
+
+    def _reconcile_pending_action(self, pending: dict[str, Any]) -> int | None:
+        """Decide where to resume given an interrupted action.
+
+        Returns the step to resume at, or ``None`` when the outcome is ambiguous
+        and Kvist must stop and ask instead of guessing. Distinguishes intent
+        (the agent meant to produce content) from provenance (the agent is
+        proven to have produced it): matching the intended content alone never
+        grants ``/revert`` ownership.
+        """
+        pending_step = pending.get("step")
+        if not isinstance(pending_step, int):
+            return None
+        # Action identity: a pending action stamped with a different run must
+        # never be reconciled against this run.
+        run_id = pending.get("run_id")
+        if run_id is not None and self._run_id is not None and run_id != self._run_id:
+            return None
+
+        # Non-reconcilable side effects (run_shell, delegate_task): their effect
+        # cannot be proven from workspace state after a crash, so they are never
+        # replayed — the only safe answer is ambiguous.
+        if pending.get("action_kind") == "side_effect":
+            return None
+
+        path = pending.get("path")
+        intended_digest = pending.get("intended_digest")
+        if not isinstance(path, str) or not isinstance(intended_digest, str):
+            return None
+        try:
+            outcome = classify_pending_write(
+                self.executor.workspace,
+                path,
+                pending.get("pre_digest"),
+                intended_digest,
+                run_id=pending.get("run_id"),
+                action_id=pending.get("action_id"),
+            )
+        except JournalUnavailableError:
+            # The recovery journal itself is unreadable: we cannot prove anything.
+            return None
+        if outcome == "ambiguous":
+            return None
+        if outcome in ("agent_committed", "desired_present"):
+            # The desired file state is on disk, so the write must NOT be
+            # replayed. Reconstruct the FULL logical post-action runtime state
+            # via the same transition normal success uses, then resume past the
+            # step. `agent_committed` already carries journal ownership (promoted
+            # in-process); `desired_present` is left unowned — authorship is
+            # unproven, so `/revert` will not destroy it.
+            self._apply_recovered_file_write(pending)
+            return pending_step + 1
+        # not_executed: the workspace still holds the pre-mutation content, so
+        # the step can safely be retried from scratch.
+        return pending_step
+
+    def _apply_recovered_file_write(self, pending: dict[str, Any]) -> None:
+        """Replay the logical success transition of a recovered file write.
+
+        Routes a synthetic successful command+feedback through the SAME
+        ``_register_feedback`` path as normal execution, so plan progression,
+        progress, verification re-arm, recent-result state, and step logs are
+        reconstructed identically — without re-executing the write.
+        """
+        from protocol import Action, AgentCommand
+
+        action_type = str(pending.get("action_type") or "write_file")
+        path = str(pending.get("path") or "")
+        step = int(pending.get("step") or self._current_step or 1)
+        command = AgentCommand(
+            thought="[recovered after interruption]",
+            plan_step=str(pending.get("plan_step") or "edit"),
+            progress=int(pending.get("progress") or self._state.progress),
+            user_message="[recovered after interruption]",
+            action=Action(type=action_type, args={"path": path}),
+            step_summary="",
+        )
+        feedback = {"ok": True, "action_type": action_type, "data": {"path": path}}
+        self._register_feedback(step, command, feedback)
+
+    def _report_ambiguous_resume(self, pending: dict[str, Any]) -> str:
+        if pending.get("action_kind") == "side_effect":
+            action = str(pending.get("action_type", "command"))
+            if self._last_response_language == "ru":
+                message = (
+                    f"Возобновление остановлено: прерванное действие «{action}» "
+                    f"могло уже выполниться, и повторять его небезопасно. Проверьте "
+                    f"его эффект вручную; checkpoint сохранён. При необходимости "
+                    f"начните заново через /new."
+                )
+            else:
+                message = (
+                    f"Resume stopped safely: the interrupted '{action}' may have "
+                    f"already run, and replaying it is unsafe. Verify its effect "
+                    f"manually; the checkpoint is kept. Start over with /new if "
+                    f"needed."
+                )
+            self.console.print(Text(message, style="yellow"))
+            return message
+
+        path = str(pending.get("path", "?"))
+        if self._last_response_language == "ru":
+            message = (
+                f"Возобновление остановлено: невозможно определить, выполнилось ли "
+                f"прерванное изменение файла «{path}». Проверьте файл вручную; "
+                f"checkpoint сохранён. Исправьте состояние и повторите /resume, "
+                f"либо начните заново через /new."
+            )
+        else:
+            message = (
+                f"Resume stopped safely: cannot determine whether the interrupted "
+                f"write to '{path}' completed. Inspect the file manually; the "
+                f"checkpoint is kept. Fix the state and retry /resume, or start "
+                f"over with /new."
+            )
+        self.console.print(Text(message, style="yellow"))
+        return message
 
     _reset_run_state = reset_run_state
     _run_loop = run_loop
@@ -355,6 +514,7 @@ class LocalAgent:
     _register_language_error = register_language_error
     _register_feedback = register_feedback
     _update_state_from_success = update_state_from_success
+    _mark_file_write_applied = mark_file_write_applied
     _update_progress = update_progress
     _register_final_answer = register_final_answer
     _plan_progress = plan_progress
@@ -396,6 +556,7 @@ class LocalAgent:
     _clear_checkpoint = clear_checkpoint
     _create_session = create_session
     _reset_session = reset_session
+    _begin_run = begin_run
     _peek_checkpoint = peek_checkpoint
     save_session = save_session
     _load_session = load_session

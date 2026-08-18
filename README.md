@@ -232,6 +232,23 @@ session is loaded and keeps up to ten completed task summaries in its context.
   resumable execution checkpoint; nothing leaks between sessions.
 - The checkpoint is saved after every step, so an interrupted task (Ctrl+C,
   crash, `kill`) resumes from its last completed step with `/resume`.
+- Every externally visible action is recorded durably *before* it runs. For a
+  file write, if Kvist dies in the write window, `/resume` reconciles the
+  intended write against the file's content (via content hashes) instead of
+  blindly replaying it: it continues past a write whose content is present and
+  retries one that never happened. If the outcome is genuinely ambiguous (the
+  file is neither the old nor the intended content), `/resume` stops and asks
+  you to inspect the file rather than risk applying a change twice — the
+  checkpoint is preserved so you can retry.
+- Actions whose effect cannot be proven from the workspace after a crash —
+  `run_shell` and `delegate_task` (they may deploy, send, or build, and their
+  output is lost in the crash) — are **never replayed**. `/resume` reports them
+  as ambiguous and asks you to verify their effect. A safe refusal is
+  intentional: Kvist does not guess whether an irreversible command already ran.
+- Recovering "the intended content is present" is not the same as "the agent
+  wrote it": if Kvist cannot prove authorship after a crash, it still continues
+  (without re-writing) but does not grant `/revert` ownership of that content,
+  so a change you made yourself is never destroyed.
 - `/resume` operates only on the active session; completing a task clears only
   that session's checkpoint.
 - Switching sessions saves the outgoing session first and fails without
@@ -252,11 +269,22 @@ The change journal (`.kvist/change_journal.json`) is workspace-global: all
 sessions share one working tree, so `/changes` and `/revert` cover the agent's
 file edits from every session, with per-file session attribution in the diff
 report. The journal records each file's pre-change contents *before* the file
-is mutated, so a crash between the two steps can never lose rollback data.
-`/revert` only overwrites content whose digest matches the agent's own last
-write — files you edited afterwards are skipped and keep their baselines in
-the journal. `/new` does not reset change tracking; only `/revert` clears the
-entries it successfully restores.
+is mutated, so a crash between the two steps can never lose rollback data (the
+"last successful write" hash advances only after the write returns, so a failed
+write never makes the previous agent content unrevertable). `/revert` only
+overwrites content whose hash matches the agent's own last successful write —
+files you edited afterwards, and pre-existing files you deleted, are skipped and
+keep their baselines in the journal. Restores are atomic, so an interrupted
+`/revert` never leaves a half-written file and can simply be re-run. `/new` does
+not reset change tracking; only `/revert` clears the entries it restores.
+
+Because the journal is the *safety* record for rollback, it is not best-effort:
+if it is corrupt, a reversible agent write is **refused before the file is
+touched** (so the pre-change content is never lost with no way to recover it),
+and `/changes`/`/revert` report the corruption instead of pretending history is
+empty. If a write reaches disk but its journal commit cannot be confirmed
+(a partial commit), the action is reported as failed rather than a clean
+success, and the content is treated as unowned so `/revert` will not touch it.
 
 ## How a request is processed
 

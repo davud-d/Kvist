@@ -2152,7 +2152,22 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/new":
-                agent.new_session()
+                from durable_json import JsonStorageError
+
+                try:
+                    agent.new_session()
+                except (JsonStorageError, OSError, ValueError) as error:
+                    safe_error = sanitize_display_text(
+                        str(error).strip() or type(error).__name__
+                    )
+                    console.print(
+                        _display_text(
+                            f"Reset failed safely: {safe_error}. "
+                            "The current session is unchanged.",
+                            "red",
+                        )
+                    )
+                    continue
                 console.print("[green]Session reset — fresh start.[/green]")
                 continue
 
@@ -2168,9 +2183,24 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/revert":
-                from change_journal import load_baseline, revert_workspace
+                from change_journal import (
+                    JournalUnavailableError,
+                    load_baseline,
+                    revert_workspace,
+                )
 
-                baseline = load_baseline(agent.executor.workspace)
+                try:
+                    baseline = load_baseline(agent.executor.workspace)
+                except JournalUnavailableError:
+                    console.print(
+                        _display_text(
+                            "The change journal is corrupt; revert is unavailable "
+                            "until it is reset (remove .kvist/change_journal.json). "
+                            "No files were touched.",
+                            "red",
+                        )
+                    )
+                    continue
                 if not baseline:
                     console.print("[yellow]Nothing to revert — no tracked changes.[/yellow]")
                     continue

@@ -18,7 +18,13 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-from change_journal import content_digest, record_baseline
+from change_journal import (
+    JournalUnavailableError,
+    content_digest,
+    mark_commit_unconfirmed,
+    promote_baseline,
+    record_baseline,
+)
 from durable_json import JsonStorageError, exclusive_storage_lock
 from env_utils import read_float_env, read_int_env
 from protocol import AgentCommand
@@ -105,6 +111,11 @@ class SafeExecutor:
         )
         self.active_role = "coder"
         self._active_session = "default"
+        # Identity of the action currently being executed, bound into the
+        # write-ahead journal so a pending write can only be promoted by the
+        # exact action that recorded it. Set per action by the run loop.
+        self._txn_run_id: str | None = None
+        self._txn_action_id: str | None = None
 
         self.max_read_chars = 20000
         self.max_output_chars = 12000
@@ -251,6 +262,15 @@ class SafeExecutor:
         """Record the active named session for change-journal attribution."""
         normalized = (session or "").strip()
         self._active_session = normalized or "default"
+
+    def begin_action_transaction(self, run_id: str | None, action_id: str | None) -> None:
+        """Bind the write-ahead journal for the action about to execute."""
+        self._txn_run_id = run_id
+        self._txn_action_id = action_id
+
+    def end_action_transaction(self) -> None:
+        self._txn_run_id = None
+        self._txn_action_id = None
 
     def execute(self, command: AgentCommand) -> ExecutionResult:
         action_type = command.action.type
@@ -1044,19 +1064,107 @@ class SafeExecutor:
         """Write-ahead rollback record: called BEFORE the file mutation.
 
         A crash after the mutation must never leave a changed file whose
-        pre-change content was not durably recorded. A record left behind by
-        a mutation that then failed is harmless — revert sees the on-disk
-        content still matching the baseline and drops the entry.
+        pre-change content was not durably recorded. Only ``pending_digest``
+        (the intended content) is stored here; ``last_digest`` is advanced by
+        :meth:`_promote_change_baseline` only after the write succeeds, so a
+        mutation that then fails leaves the last successful agent content
+        revertable. A record left behind by a failed mutation is harmless —
+        revert sees the on-disk content still matching the baseline.
         """
         relative_path = str(target.relative_to(self.workspace))
-        record_baseline(
-            self.workspace,
-            relative_path=relative_path,
-            existed=existed,
-            content=old_text if existed else None,
-            session=self._active_session,
-            new_digest=content_digest(new_content),
-        )
+        try:
+            record_baseline(
+                self.workspace,
+                relative_path=relative_path,
+                existed=existed,
+                content=old_text if existed else None,
+                session=self._active_session,
+                pending_digest=content_digest(new_content),
+                run_id=self._txn_run_id,
+                action_id=self._txn_action_id,
+            )
+        except JournalUnavailableError as error:
+            # Write-ahead recovery could not be recorded. Refuse the mutation
+            # BEFORE touching the file so its pre-change content stays revertable.
+            raise ExecutorError(
+                "Refusing to modify the file: the change journal is corrupt, so "
+                "the pre-change content cannot be recorded for /revert. Reset "
+                "the journal (.kvist/change_journal.json) and retry."
+            ) from error
+
+    def _promote_change_baseline(self, target: Path, new_content: str) -> None:
+        """Confirm the journal commit of the content already written to disk.
+
+        Compare-and-promote bound to this action's identity. The filesystem
+        write has already landed, so a promotion that does not happen is a
+        PARTIAL COMMIT (fs committed, journal unconfirmed): it is flagged in the
+        journal and surfaced as a failed action rather than reported as an
+        ordinary success — the caller must not pretend the transaction completed.
+        """
+        relative_path = str(target.relative_to(self.workspace))
+        try:
+            promoted = promote_baseline(
+                self.workspace,
+                relative_path,
+                content_digest(new_content),
+                run_id=self._txn_run_id,
+                action_id=self._txn_action_id,
+            )
+        except JournalUnavailableError as error:
+            mark_commit_unconfirmed(self.workspace, relative_path)
+            raise ExecutorError(
+                "Filesystem write committed but the change journal could not be "
+                "updated (corrupt journal). The change is on disk but unconfirmed "
+                "for /revert; do not assume the action fully succeeded."
+            ) from error
+        if not promoted:
+            mark_commit_unconfirmed(self.workspace, relative_path)
+            raise ExecutorError(
+                "Filesystem write committed but its journal transaction no longer "
+                "matches (concurrent/stale journal state). The change is on disk "
+                "but unconfirmed for /revert; the action is not a clean success."
+            )
+
+    def preview_write(self, command: AgentCommand) -> dict[str, Any] | None:
+        """Read-only preview of a mutating action for crash-consistent
+        checkpointing. Returns the target's workspace-relative path plus the
+        pre-mutation and intended content digests, or ``None`` for a
+        non-mutating action or any path/derivation the executor would reject.
+        The real execution re-validates independently; this never mutates.
+        """
+        action_type = command.action.type
+        if action_type not in ("write_file", "append_file", "replace_in_file"):
+            return None
+        args = command.action.args
+        path = args.get("path")
+        if not isinstance(path, str):
+            return None
+        try:
+            target = self._guard_env_file_access(path)
+            existed = target.is_file()
+            pre_text = self._read_existing_text_for_diff(target) if existed else None
+            if action_type == "write_file":
+                intended = str(args.get("content", ""))
+            elif action_type == "append_file":
+                intended = (pre_text or "") + str(args.get("content", ""))
+            else:
+                old_text = str(args.get("old_text", ""))
+                if not existed or pre_text is None or not old_text:
+                    return None
+                if old_text not in pre_text:
+                    return None
+                count = args.get("count", 1)
+                count = count if isinstance(count, int) and count > 0 else 1
+                intended = pre_text.replace(old_text, str(args.get("new_text", "")), count)
+            relative_path = str(target.relative_to(self.workspace))
+        except (ExecutorError, UnsafeSecretPathError, OSError, ValueError):
+            return None
+        return {
+            "path": relative_path,
+            "existed": existed,
+            "pre_digest": content_digest(pre_text) if pre_text is not None else None,
+            "intended_digest": content_digest(intended),
+        }
 
     def _write_file(self, path: str, content: str) -> ExecutionResult:
         try:
@@ -1086,6 +1194,7 @@ class SafeExecutor:
             self._confirm_overwrite(path, old_text, content)
         self._record_change_baseline(target, existed, old_text, content)
         self._atomic_replace_text(target, content, expected_identity)
+        self._promote_change_baseline(target, content)
 
         return ExecutionResult(
             ok=True,
@@ -1128,6 +1237,7 @@ class SafeExecutor:
             target, existed, old_text if existed else None, updated_text
         )
         self._atomic_replace_text(target, updated_text, expected_identity)
+        self._promote_change_baseline(target, updated_text)
 
         return ExecutionResult(
             ok=True,
@@ -1196,6 +1306,7 @@ class SafeExecutor:
         self._confirm_overwrite(path, original_text, updated_text)
         self._record_change_baseline(target, True, original_text, updated_text)
         self._atomic_replace_text(target, updated_text, expected_identity)
+        self._promote_change_baseline(target, updated_text)
 
         return ExecutionResult(
             ok=True,

@@ -5,8 +5,44 @@ import json
 import re
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any
+
+# Externally visible actions whose effect cannot be reconciled from workspace
+# state after a crash (their stdout/exit status are lost). Resume never replays
+# them; it stops and reports the state as ambiguous.
+_NON_RECONCILABLE_SIDE_EFFECTS = frozenset({"run_shell", "delegate_task"})
+
+
+def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, Any] | None:
+    """Build the durable pending-action record for an externally visible action.
+
+    Reconcilable file mutations carry pre/intended digests; non-reconcilable
+    side effects carry only identity. Returns ``None`` for read-only actions,
+    which have no side effect worth protecting and are safe to re-issue.
+    """
+    common = {
+        "step": step,
+        "run_id": getattr(self, "_run_id", None),
+        "action_id": uuid.uuid4().hex,
+    }
+    preview = self.executor.preview_write(command)
+    if preview is not None:
+        # Descriptor sufficient to deterministically replay the *logical* success
+        # transition (plan progression, progress, verification re-arm) on resume
+        # without re-executing the write.
+        return {
+            **common,
+            "action_kind": "file",
+            "action_type": command.action.type,
+            "plan_step": command.plan_step,
+            "progress": command.progress,
+            **preview,
+        }
+    if command.action.type in _NON_RECONCILABLE_SIDE_EFFECTS:
+        return {**common, "action_kind": "side_effect", "action_type": command.action.type}
+    return None
 
 from agent_state import RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
@@ -585,7 +621,26 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 task_completed = True
                 break
 
-            feedback = self._execute_command(command)
+            # Crash-consistent side effects: durably record the pending action
+            # BEFORE it executes so a process death in the action window is
+            # reconciled on resume rather than blindly replayed. File mutations
+            # are reconcilable from content digests; run_shell/delegate_task are
+            # not (their effect cannot be proven after a crash) and resume treats
+            # them as ambiguous. The post-step checkpoint clears the record.
+            pending_action = _build_pending_action(self, command, step)
+            if pending_action is not None:
+                # Bind the executor's journal transaction to the SAME identity
+                # recorded in the checkpoint, so a pending journal write can only
+                # be promoted by this exact action.
+                self.executor.begin_action_transaction(
+                    pending_action.get("run_id"), pending_action["action_id"]
+                )
+                self._save_checkpoint(user_goal, step, pending_action=pending_action)
+            try:
+                feedback = self._execute_command(command)
+            finally:
+                if pending_action is not None:
+                    self.executor.end_action_transaction()
             self._register_feedback(step, command, feedback)
 
             # Store rolling summary on interval steps (every Nth step)
@@ -941,6 +996,21 @@ def register_feedback(
     self._ui.debug_print(self._render_feedback(summary_line, feedback))
 
 
+def mark_file_write_applied(self, path: str) -> None:
+    """The single runtime transition for "a file write to ``path`` succeeded".
+
+    Used by both normal execution (``update_state_from_success``) and crash
+    reconciliation (``_reconcile_pending_action``) so the two paths can never
+    disagree about what a successful write means to agent state — in particular
+    that the changed path re-enters ``pending_verification_paths`` and must be
+    verified again before the task can complete.
+    """
+    if not path:
+        return
+    self._push_unique(self._state.files_changed, path)
+    self._push_unique(self._state.pending_verification_paths, path)
+
+
 def update_state_from_success(
     self,
     command: AgentCommand,
@@ -961,8 +1031,7 @@ def update_state_from_success(
 
     elif action_type in {"write_file", "append_file", "replace_in_file"}:
         path = str(data.get("path", "")).strip()
-        self._push_unique(self._state.files_changed, path)
-        self._push_unique(self._state.pending_verification_paths, path)
+        self._mark_file_write_applied(path)
         if self._state.web_facts:
             self._state.applied_facts.append({
                 "path": path,
