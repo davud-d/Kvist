@@ -39,7 +39,19 @@ exe = EXE(
     [],
     name='kvist',
     debug=False,
-    bootloader_ignore_signals=False,
+    # Onefile builds run a bootloader parent process plus a child process
+    # (the real interpreter). Both sit in the same foreground process group,
+    # so the kernel already delivers Ctrl+C (SIGINT) straight to the child.
+    # With the default False, the bootloader *also* forwards the signal to
+    # the child itself, so the child receives SIGINT twice in quick
+    # succession. A second SIGINT arriving while CPython's `threading`/
+    # `queue` internals are mid-cleanup from the first one (re-acquiring a
+    # Condition's lock) corrupts that lock's state and raises an unhandled
+    # "release unlocked lock" RuntimeError before the app's own
+    # KeyboardInterrupt handling ever runs. Setting this to True stops the
+    # bootloader from re-forwarding, so the child gets exactly one SIGINT,
+    # matching `python main.py` behavior.
+    bootloader_ignore_signals=True,
     strip=False,
     upx=True,
     upx_exclude=[],
