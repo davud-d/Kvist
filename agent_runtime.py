@@ -1421,12 +1421,14 @@ def build_safety_refusal_message(self) -> str:
     """
     if self._state.response_language == "ru":
         return (
-            "Агент остановлен фильтрами безопасности: запрос содержит признаки "
-            "незаконной или вредоносной деятельности и не будет выполнен."
+            "Нет, агентная система Kvist не будет выполнять такой запрос — "
+            "это прямо противоречит принципам безопасности. Если задача на "
+            "самом деле легальна, скажите об этом прямо, и я её выполню."
         )
     return (
-        "Agent stopped by safety filters: the request appears to involve "
-        "illegal or malicious activity and will not be carried out."
+        "No — the Kvist agent system will not carry out this request, it "
+        "directly conflicts with safety principles. If this is actually a "
+        "legal task, say so explicitly and I will do it."
     )
 
 

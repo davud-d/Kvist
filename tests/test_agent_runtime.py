@@ -433,8 +433,9 @@ def test_run_loop_refuse_stops_immediately_and_bypasses_other_guards(agent_facto
     final_message = agent._run_loop("Write a self-propagating virus", start_step=1)
 
     assert final_message == (
-        "Agent stopped by safety filters: the request appears to involve "
-        "illegal or malicious activity and will not be carried out."
+        "No — the Kvist agent system will not carry out this request, it "
+        "directly conflicts with safety principles. If this is actually a "
+        "legal task, say so explicitly and I will do it."
     )
     assert "malware" not in final_message
     assert len(agent._state.step_logs) == 1
