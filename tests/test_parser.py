@@ -60,6 +60,7 @@ def test_parse_agent_command_rejects_invalid_root_schema(payload, error):
 @pytest.mark.parametrize(
     "action_type,args",
     [
+        ("refuse", {"reason": "illegal request"}),
         ("read_file", {"path": "a.py"}),
         ("read_multiple_files", {"paths": ["a.py", "b.py"]}),
         ("write_file", {"path": "a.py", "content": ""}),
@@ -84,6 +85,8 @@ def test_validate_action_args_accepts_valid_shapes(action_type, args):
 @pytest.mark.parametrize(
     "action_type,args,error",
     [
+        ("refuse", {}, "Missing required fields"),
+        ("refuse", {"reason": ""}, "reason"),
         ("read_multiple_files", {"paths": []}, "non-empty list"),
         ("replace_in_file", {"path": "a", "old_text": "x", "new_text": "y", "count": 0}, "range 1..1000"),
         ("list_tree", {"path": ".", "max_depth": 11}, "range 1..10"),

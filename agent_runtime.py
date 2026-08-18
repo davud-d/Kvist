@@ -376,6 +376,25 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 )
                 continue
 
+            # Safety refusal takes priority over every other guard (language,
+            # repeat-block, report-artifact, read-only, completion-readiness):
+            # an illegal/malicious request must stop immediately, unconditionally,
+            # not queue behind corrective retries that assume the task is legitimate.
+            if command.action.type == "refuse":
+                reason = str(command.action.args["reason"])
+                self._register_safety_refusal(step, reason)
+                final_message = self._build_safety_refusal_message()
+                self._ui.update_live(
+                    user_message=final_message,
+                    status="stopped by safety filters",
+                    step=step,
+                    progress=self._state.progress,
+                    plan_step=command.plan_step,
+                    is_error=True,
+                )
+                task_completed = True
+                break
+
             language_error = self._command_language_error(command)
             if language_error:
                 self._register_language_error(step, command, language_error)
@@ -1168,6 +1187,17 @@ def register_final_answer(self, step: int, message: str) -> None:
     self._ui.debug_print(f"Result: final answer at step {step}")
 
 
+def register_safety_refusal(self, step: int, reason: str) -> None:
+    self._state.step_logs.append(
+        {
+            "step": step,
+            "status": "safety_refusal",
+            "reason": redact_text(reason),
+        }
+    )
+    self._ui.debug_print(f"Result: safety refusal at step {step}: {reason}")
+
+
 def plan_progress(self) -> int:
     if not self._state.plan_info or not self._state.plan_info.plan:
         return self._state.progress
@@ -1379,6 +1409,25 @@ def build_auto_completion_message(self) -> str:
     if self._state.files_changed:
         return f"Done. Modified files: {files_summary}. Verification confirmed."
     return "Done. All checks passed."
+
+
+def build_safety_refusal_message(self) -> str:
+    """Fixed, model-independent stop message for the 'refuse' action.
+
+    The wording is not taken from the model's own text (only the internal
+    'reason' arg is, and that is logged, never surfaced) so a jailbroken or
+    manipulated model cannot smuggle unsafe content into the final answer
+    by pretending to refuse.
+    """
+    if self._state.response_language == "ru":
+        return (
+            "Агент остановлен фильтрами безопасности: запрос содержит признаки "
+            "незаконной или вредоносной деятельности и не будет выполнен."
+        )
+    return (
+        "Agent stopped by safety filters: the request appears to involve "
+        "illegal or malicious activity and will not be carried out."
+    )
 
 
 def _summarize_recent_errors(self) -> str:

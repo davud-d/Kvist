@@ -407,6 +407,44 @@ def test_run_loop_clears_stale_checkpoint_after_completed_final_answer(
     assert restarted._load_checkpoint() is None
 
 
+def test_run_loop_refuse_stops_immediately_and_bypasses_other_guards(agent_factory):
+    """'refuse' must win over every other guard (here: modify_goal with no
+    files_changed, which would otherwise block completion) and stop on the
+    very first step, with a fixed message that never echoes the model's
+    internal reason."""
+    agent = agent_factory(max_steps=5)
+    agent._state.plan_info = make_plan()
+    agent._state.modify_goal = True
+    agent._state.files_changed = []
+    agent._save_checkpoint("Write a self-propagating virus", 0)
+    agent._call_action_model = lambda prompt: json.dumps(
+        {
+            "thought": "Task requests malware; refusing",
+            "plan_step": "done",
+            "progress": 0,
+            "user_message": "Cannot proceed with this request",
+            "action": {
+                "type": "refuse",
+                "args": {"reason": "task asks to write self-propagating malware"},
+            },
+        }
+    )
+
+    final_message = agent._run_loop("Write a self-propagating virus", start_step=1)
+
+    assert final_message == (
+        "Agent stopped by safety filters: the request appears to involve "
+        "illegal or malicious activity and will not be carried out."
+    )
+    assert "malware" not in final_message
+    assert len(agent._state.step_logs) == 1
+    assert agent._state.step_logs[0]["status"] == "safety_refusal"
+    assert "malware" in agent._state.step_logs[0]["reason"]
+
+    restarted = agent_factory(max_steps=5)
+    assert restarted._load_checkpoint() is None
+
+
 def test_run_loop_attempts_all_cleanup_after_ui_stop_failure(agent_factory):
     agent = agent_factory(max_steps=1)
     agent._state.plan_info = PlanInfo(

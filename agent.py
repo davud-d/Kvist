@@ -63,6 +63,7 @@ from agent_runtime import (
     build_error_feedback,
     build_limit_reached_message,
     build_auto_completion_message,
+    build_safety_refusal_message,
     command_language_error,
     execute_command,
     feedback_error_for_model,
@@ -82,6 +83,7 @@ from agent_runtime import (
     register_final_answer,
     register_language_error,
     register_parse_error,
+    register_safety_refusal,
     render_feedback,
     required_followup_error,
     reset_run_state,
@@ -518,6 +520,7 @@ class LocalAgent:
     _mark_file_write_applied = mark_file_write_applied
     _update_progress = update_progress
     _register_final_answer = register_final_answer
+    _register_safety_refusal = register_safety_refusal
     _plan_progress = plan_progress
     _refresh_completion_requirements = refresh_completion_requirements
     _record_error = record_error
@@ -527,6 +530,7 @@ class LocalAgent:
     _build_early_stop_message = build_early_stop_message
     _build_limit_reached_message = build_limit_reached_message
     _build_auto_completion_message = build_auto_completion_message
+    _build_safety_refusal_message = build_safety_refusal_message
     _is_repeat_blocked = is_repeat_blocked
     _action_signature = action_signature
     _record_user_message = record_user_message

@@ -10,6 +10,7 @@ from protocol import AgentCommand, Action
 
 ALLOWED_ACTIONS = {
     "final_answer",
+    "refuse",
     "read_file",
     "read_multiple_files",
     "write_file",
@@ -133,6 +134,11 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_keys(args, {"message"})
         require_only_allowed_keys(args, {"message"})
         require_str(args, "message")
+
+    elif action_type == "refuse":
+        require_keys(args, {"reason"})
+        require_only_allowed_keys(args, {"reason"})
+        require_str(args, "reason")
 
     elif action_type == "read_file":
         require_keys(args, {"path"})

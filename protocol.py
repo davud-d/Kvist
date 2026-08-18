@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 ActionType = Literal[
     "final_answer",
+    "refuse",
     "read_file",
     "read_multiple_files",
     "write_file",
