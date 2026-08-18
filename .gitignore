@@ -72,6 +72,9 @@ Demo UI/
 # Review-agent run logs (local scratch output)
 review-logs/
 
+# Local PR review workspaces
+review-workspaces/
+
 # Local development metadata (kept locally, not tracked)
 /.agent/
 /.output.txt
