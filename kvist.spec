@@ -6,7 +6,7 @@ import os
 # source file that is reached only via a dynamic/lazy import. New files added to
 # the project root are picked up automatically without touching this spec.
 _ENTRY_SCRIPT = 'main.py'
-_NON_APP_MODULES = frozenset({'run_task', 'package_script'})
+_NON_APP_MODULES = frozenset({'run_task', 'package_script', 'install'})
 local_hiddenimports = sorted(
     name[:-3]
     for name in os.listdir(SPECPATH)
