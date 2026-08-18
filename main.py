@@ -131,6 +131,8 @@ from user_config import (
     save_models_for_provider,
     get_saved_role,
     save_role_selection,
+    secret_label_for_key,
+    set_provider_secret,
 )
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
@@ -653,6 +655,7 @@ def render_startup_banner(
     console.print("[red]Type '/bye' to exit. For multiline input, use Alt+Enter or Esc+Enter.[/red]")
     console.print("[dim]Command '/resume' — resume an interrupted task.[/dim]")
     console.print("[dim]Command '/provider' — switch the LLM provider.[/dim]")
+    console.print("[dim]Command '/change-api' — update the current provider's API key.[/dim]")
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
     console.print("[dim]Command '/role' — select agent role (auto/coder/devops/chat).[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
@@ -768,6 +771,51 @@ def choose_provider(current_provider: str, verbose: bool) -> str | None:
         return None
 
     return selected
+
+
+def change_provider_api_key(config: AgentConfig, verbose: bool) -> bool:
+    """Prompt for and save new API key(s) for the currently active provider.
+
+    Returns True if at least one key was updated, False if the user left every
+    prompt empty (kept the current key) or cancelled.
+    """
+    ui = TerminalBannerUI(console=console, verbose=verbose)
+    provider = config.provider
+
+    if is_custom_provider(provider):
+        name = extract_custom_provider_name(provider)
+        info = get_custom_provider_by_name(name) or {}
+        new_key = ui.prompt_secret(
+            title=f"New API key for {provider_label(provider)}",
+            current_value=info.get("api_key", ""),
+            help_text="Leave empty and press Enter to keep the current key.",
+        )
+        if not new_key:
+            return False
+        info["api_key"] = new_key
+        save_custom_provider(name, info)
+        return True
+
+    keys_to_update = required_secret_keys_for_provider(
+        provider, [config.fast_model, config.smart_model, config.planner_model]
+    )
+    if not keys_to_update:
+        return False
+
+    updated_any = False
+    for key_name in keys_to_update:
+        label = secret_label_for_key(key_name)
+        existing = load_available_credentials((key_name,)).get(key_name, "")
+        new_value = ui.prompt_secret(
+            title=f"New {label}",
+            current_value=existing,
+            help_text="Leave empty and press Enter to keep the current key.",
+        )
+        if not new_value:
+            continue
+        set_provider_secret(key_name, new_value)
+        updated_any = True
+    return updated_any
 
 
 def choose_session(agent, verbose: bool) -> str | None:
@@ -1945,6 +1993,65 @@ def main() -> None:
                     _display_text(
                         "Provider changed to "
                         f"{provider_label(config.provider)}.",
+                        "green",
+                    )
+                )
+                if interactive_screen is None:
+                    print_runtime_banner(config, max_steps, verbose, model_warnings)
+                else:
+                    for warning in model_warnings:
+                        console.print(_display_text(warning, "yellow"))
+                continue
+
+            if user_goal.lower() == "/change-api":
+                with paused_interactive_screen(interactive_screen), wizard_screen():
+                    changed = change_provider_api_key(config, verbose)
+
+                if not changed:
+                    console.print("[yellow]API key change cancelled.[/yellow]")
+                    continue
+
+                build_error: str | None = None
+                with paused_interactive_screen(interactive_screen), wizard_screen():
+                    try:
+                        agent, config, model_warnings = build_agent(
+                            executor=executor,
+                            max_steps=max_steps,
+                            persist_logs=persist_logs,
+                            verbose=verbose,
+                            provider_override=config.provider,
+                            language_hint=session_language,
+                        )
+                    except Exception as error:
+                        build_error = sanitize_display_text(
+                            str(error).strip() or type(error).__name__
+                        )
+
+                if build_error is not None:
+                    console.print(
+                        _display_text(
+                            f"Failed to apply new API key: {build_error}",
+                            "red",
+                        )
+                    )
+                    continue
+
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                    agent._ui.attach_screen(interactive_screen)
+                    executor.set_hitl_callbacks(
+                        suspend_fn=interactive_screen.suspend,
+                        resume_fn=interactive_screen.resume,
+                    )
+                else:
+                    executor.set_hitl_callbacks(
+                        suspend_fn=agent._ui.stop_live,
+                        resume_fn=agent._ui.start_live,
+                    )
+
+                console.print(
+                    _display_text(
+                        f"API key updated for {provider_label(config.provider)}.",
                         "green",
                     )
                 )

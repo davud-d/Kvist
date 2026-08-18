@@ -361,6 +361,25 @@ def load_available_credentials(
     return resolved
 
 
+def secret_label_for_key(key_name: str) -> str:
+    return _SECRET_LABELS.get(key_name, key_name)
+
+
+def set_provider_secret(
+    key_name: str,
+    value: str,
+    config_path: Path | None = None,
+) -> None:
+    """Overwrite a single provider secret in the user config, replacing any prior value."""
+    trimmed = value.strip()
+
+    def save_secret(payload: dict[str, object]) -> dict[str, object]:
+        payload[key_name] = trimmed
+        return payload
+
+    _update_user_config(save_secret, config_path)
+
+
 def prompt_api_key() -> str:
     return prompt_secret("OpenAI API key")
 

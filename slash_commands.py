@@ -35,6 +35,11 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     ),
     SlashCommand("new", "Reset the active session and start fresh"),
     SlashCommand("provider", "Switch or configure the LLM provider"),
+    SlashCommand(
+        "change-api",
+        "Update the API key for the current provider",
+        aliases=("change_api", "apikey"),
+    ),
     SlashCommand("models", "Select fast, smart and planner models"),
     SlashCommand("role", "Choose auto, coder, devops or chat role"),
     SlashCommand("session", "Create, switch or delete saved sessions"),
