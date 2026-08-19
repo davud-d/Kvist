@@ -49,6 +49,7 @@ from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
 from redaction import redact_text, redact_value
+from agent_planner import infer_task_kind
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -297,6 +298,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.modify_goal = modify_goal
     self._state.read_only_goal = read_only_goal
     self._state.verify_only_goal = verify_only_goal
+    self._state.report_goal = _resolve_report_goal(self, user_goal)
     if not self._state.required_artifacts and not read_only_goal:
         self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
     self._refresh_completion_requirements()
@@ -622,6 +624,27 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     )
                     continue
                 final_message = str(command.action.args["message"])
+                if self._state.report_goal and not _is_substantive_answer(final_message):
+                    substance_retries = self._state.seen_actions.get("report_substance_retries", 0)
+                    if substance_retries < 1:
+                        self._state.seen_actions["report_substance_retries"] = substance_retries + 1
+                        self._register_feedback(
+                            step,
+                            command,
+                            {
+                                "ok": False,
+                                "action_type": "final_answer",
+                                "result": _build_report_substance_instruction(self._state.task_language),
+                            },
+                        )
+                        self._set_required_next_actions(
+                            ["final_answer", "report_to_user"],
+                            _build_report_substance_instruction(self._state.task_language),
+                        )
+                        continue
+                    # The model would not answer substantively — report the miss
+                    # honestly instead of surfacing a content-free final answer.
+                    final_message = self._build_report_failure_message()
                 self._register_final_answer(step, final_message)
                 task_completed = True
                 break
@@ -686,16 +709,31 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             ):
                 self._state.rolling_summaries[step] = command.step_summary
 
-            # Immediate completion check: if task just became ready, finish now
+            # Immediate completion check: if task just became ready, finish now.
+            # A report task is excluded: it must be closed by the model's own
+            # final_answer with real findings, not a synthetic stub. Leaving it
+            # unbroken lets the completion guard push the model to answer.
             if (
                 self._state.completion_ready
                 and feedback.get("ok")
+                and not self._state.report_goal
                 and (self._state.create_goal or self._state.verify_only_goal)
             ):
                 final_message = self._build_auto_completion_message()
                 self._register_final_answer(step, final_message)
                 task_completed = True
                 break
+
+            if (
+                self._state.completion_ready
+                and feedback.get("ok")
+                and self._state.report_goal
+                and not self._state.required_next_actions
+            ):
+                self._set_required_next_actions(
+                    ["final_answer", "report_to_user"],
+                    _build_report_substance_instruction(self._state.task_language),
+                )
 
             if (
                 create_goal
@@ -1395,6 +1433,11 @@ def build_limit_reached_message(self) -> str:
 
 def build_auto_completion_message(self) -> str:
     """Build automatic completion message when task is verified but model doesn't call final_answer."""
+    # A report task must never be closed with a synthetic "checks passed" —
+    # that is exactly the false-positive success we are fixing.
+    if self._state.report_goal:
+        return self._build_report_failure_message()
+
     files_summary = ", ".join(self._state.files_changed[:5])
     if len(self._state.files_changed) > 5:
         extra = len(self._state.files_changed) - 5
@@ -2078,6 +2121,81 @@ def _is_verify_only_goal(user_goal: str) -> bool:
     if any(pattern in lowered for pattern in ru_patterns + en_phrases):
         return True
     return any(_token_match(marker, lowered) for marker in en_token_markers)
+
+
+def _resolve_report_goal(self, user_goal: str) -> bool:
+    """A report task expects a substantive spoken answer, not just a mutation.
+
+    The planner already classifies task intent, so its ``task_kind`` is the
+    source of truth. The keyword heuristic (``_is_report_goal``) is used only
+    when the planner produced no usable classification (e.g. the planner call
+    failed), so intent detection is not duplicated in two live code paths.
+    """
+    plan = self._state.plan_info
+    task_kind = getattr(plan, "task_kind", "") if plan is not None else ""
+    if task_kind in {"report", "action"}:
+        return task_kind == "report"
+    return _is_report_goal(user_goal)
+
+
+def _is_report_goal(user_goal: str) -> bool:
+    """Fallback keyword heuristic for 'report vs action'. See _resolve_report_goal."""
+    return infer_task_kind(user_goal) == "report"
+
+
+def _is_substantive_answer(message: str) -> bool:
+    """Reject the auto-completion stub and other content-free final answers.
+
+    A genuine report answer is long enough to carry findings; the known stubs
+    ("Готово, все проверки пройдены." / "Done. All checks passed.") are short
+    and self-referential.
+    """
+    stripped = message.strip()
+    if len(stripped) < 80:
+        return False
+    lowered = stripped.casefold()
+    stub_phrases = (
+        "все проверки пройдены",
+        "all checks passed",
+        "проверка пройдена",
+        "verification confirmed",
+    )
+    if len(stripped) < 160 and any(phrase in lowered for phrase in stub_phrases):
+        return False
+    return True
+
+
+def build_report_failure_message(self) -> str:
+    """Honest failure for a report task the model never actually answered.
+
+    Never claims success: a green "checks passed" here would hide the miss
+    until the user goes digging.
+    """
+    if self._state.response_language == "ru":
+        return (
+            "Не удалось сформировать содержательный ответ на запрос. "
+            "Нужные данные прочитаны, но выводы не были выданы — "
+            "попробуйте повторить или переформулировать запрос."
+        )
+    return (
+        "Could not produce a substantive answer to the request. "
+        "The needed data was read, but no findings were returned — "
+        "please retry or rephrase the request."
+    )
+
+
+def _build_report_substance_instruction(language: str) -> str:
+    if language == "ru":
+        return (
+            "Ответь по сути на вопрос пользователя в final_answer.args.message: "
+            "приведи конкретные находки и рекомендации со ссылками на прочитанные "
+            "файлы. Шаблонные фразы вроде «все проверки пройдены» запрещены."
+        )
+    return (
+        "Answer the user's question in final_answer.args.message: give concrete "
+        "findings and recommendations that reference the files you read. Template "
+        "phrases like 'all checks passed' are forbidden."
+    )
 
 
 def _build_create_guidance(language: str) -> str:

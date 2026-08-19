@@ -43,6 +43,10 @@ class PlanInfo:
     plan: list[str]
     success_criteria: list[str]
     risks: list[str]
+    # "report" when the user expects a substantive spoken answer/analysis,
+    # "action" for pure mutation/run tasks. Classified by the planner (which
+    # already reads task intent); a keyword heuristic is the fallback only.
+    task_kind: str = "action"
 
 
 @dataclass(slots=True)
@@ -59,6 +63,11 @@ class RunState:
     modify_goal: bool = False
     read_only_goal: bool = False
     verify_only_goal: bool = False
+    # The user asked for a substantive spoken answer (explain/describe/list/
+    # "what would you change"), not just a file mutation or a yes/no check.
+    # Such a task must end with the model's own final_answer, never with the
+    # synthetic auto-completion stub.
+    report_goal: bool = False
     plan_info: PlanInfo | None = None
     selected_action_role: str = ""
     selected_action_model: str = ""

@@ -47,7 +47,27 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Repeated errors:": 1,
     "Additional instruction:": 0,
     "Step summaries:": 1,
+    "Final answer style:": 0,
 }
+
+# Injected only on steps where a final answer is imminent (completion is ready
+# or a terminal action is required), so its cost is paid once at the end of a
+# run rather than on every intermediate step.
+_FINAL_ANSWER_STYLE = (
+    "Final answer style:\n"
+    "- Directly answer what the user actually asked. Lead with the answer or the "
+    "findings, not with a preamble about what you did.\n"
+    "- If the user asked a question or for analysis/recommendations, the message "
+    "MUST carry that substance (concrete findings, specific paths, line "
+    "references, concrete suggestions) — not a status line.\n"
+    "- Be concise and specific. No filler, no restating the task, no "
+    "\"I have completed...\" wind-up, no sign-off pleasantries.\n"
+    "- NEVER answer with a canned completion phrase (\"all checks passed\", "
+    "\"все проверки пройдены\", \"готово\") when the user wanted content. A status "
+    "phrase is only acceptable for a pure action task with no findings to report.\n"
+    "- Match length to the request: a one-line ask gets one line; an analysis ask "
+    "gets the full findings. Do not pad."
+)
 
 # Build a regex that matches any known section header at the start of a line.
 _SECTION_HEADERS_RE = re.compile(
@@ -276,6 +296,13 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         )
     rolling_summaries_text = "\n".join(rolling_summary_lines) if rolling_summary_lines else text["none"]
 
+    finalization_imminent = (
+        self._state.completion_ready
+        or "final_answer" in self._state.required_next_actions
+        or "report_to_user" in self._state.required_next_actions
+    )
+    final_answer_style = f"{_FINAL_ANSWER_STYLE}\n\n" if finalization_imminent else ""
+
     dynamic = (
         f"{text['step']}: {step}\n"
         f"{text['current_progress']}: {self._state.progress}%\n\n"
@@ -296,6 +323,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['recent_details']}:\n{detailed_results or text['none']}\n\n"
         f"{text['repeated_errors']}:\n{repeated_errors or text['none']}\n\n"
         f"{text['additional_instruction']}:\n{pending_instruction}\n\n"
+        f"{final_answer_style}"
     )
 
     return cached_prefix + dynamic + cached_suffix

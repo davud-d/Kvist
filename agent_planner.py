@@ -14,6 +14,33 @@ try:
 except FileNotFoundError:
     raise FileNotFoundError("Could not find the planner prompt.")
 
+
+# Fallback classification only. The planner's own task_kind is authoritative;
+# this list catches the case where the planner call fails or omits the field.
+_REPORT_MARKERS: tuple[str, ...] = (
+    # RU
+    "скажи", "скажите", "опиши", "опишите", "объясни", "объясните",
+    "перечисли", "перечислите", "сравни", "сравните",
+    "проанализируй", "проанализируйте", "оцени", "оцените",
+    "предложи", "предложите", "посоветуй", "порекомендуй", "расскажи",
+    "разбери", "какие бы", "что бы ты", "что бы вы", "мнение",
+    "что не так", "узкие места", "где узкие", "что думаешь", "стоит ли",
+    "как лучше", "в чём проблема", "в чем проблема",
+    "улучшить", "улучшил бы", "что улучшить",
+    # EN
+    "explain", "describe", "summarize", "summarise", "analyze", "analyse",
+    "compare", "evaluate", "assess", "recommend", "suggest", "review",
+    "what would you", "how would you", "which parts", "what changes",
+    "what's wrong", "whats wrong", "wrong with", "what do you think",
+    "thoughts on", "how can i improve", "what could be better",
+)
+
+
+def infer_task_kind(user_goal: str) -> str:
+    """Heuristic 'report' vs 'action' classification used only as a fallback."""
+    lowered = user_goal.casefold()
+    return "report" if any(marker in lowered for marker in _REPORT_MARKERS) else "action"
+
 def _reset_client_disabled_backends(agent_self: Any) -> None:
     """Clear any disabled-backend state on the LLM client.
 
@@ -51,6 +78,9 @@ def create_plan(self, user_goal: str) -> PlanInfo:
         success_criteria = data.get("success_criteria")
         risks = data.get("risks")
         complexity = str(data.get("complexity", "simple")).strip().lower()
+        task_kind = str(data.get("task_kind", "")).strip().lower()
+        if task_kind not in {"report", "action"}:
+            task_kind = infer_task_kind(user_goal)
 
         if not isinstance(plan, list) or not plan:
             raise ValueError("planner returned empty plan")
@@ -76,6 +106,7 @@ def create_plan(self, user_goal: str) -> PlanInfo:
                 if str(item).strip()
             ],
             risks=[str(item).strip() for item in risks if str(item).strip()],
+            task_kind=task_kind,
         )
     except Exception:
         # Reset any backend-disabled state that the planner call may have set so
@@ -106,6 +137,7 @@ def fallback_plan(self, user_goal: str) -> PlanInfo:
             "model may loop on a single action",
             "part of the environment may be unavailable",
         ],
+        task_kind=infer_task_kind(user_goal),
     )
 
 
