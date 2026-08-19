@@ -5,12 +5,13 @@ Uses fast_model (cheap model, e.g. gpt-4o-mini) to classify
 the user request into one of the roles: coder, devops, chat.
 
 Priority (first-match-wins):
-  1. direct devops action  (deterministic regex)
-  2. direct coder action   (deterministic regex)
-  3. direct chat question  (deterministic regex)
-  4. LLM router            (fast_model call)
-  5. keyword fallback      (LLM error → lightweight keyword match)
-  6. default               ("chat")
+  1. explicit read-only    (no-write marker → reader, beats topic)
+  2. direct devops action  (deterministic regex)
+  3. direct coder action   (deterministic regex)
+  4. direct chat question  (deterministic regex)
+  5. LLM router            (fast_model call)
+  6. keyword fallback      (LLM error → lightweight keyword match)
+  7. default               ("chat")
 
 Fallback: keyword-based classification if LLM is unavailable.
 """
@@ -23,8 +24,32 @@ from typing import Any
 
 from redaction import redact_text, redact_value
 
-_VALID_ROLES = frozenset({"coder", "devops", "chat"})
+_VALID_ROLES = frozenset({"coder", "devops", "chat", "reader"})
 _DEFAULT_ROLE = "chat"
+
+# Explicit "do not modify" phrasing. When present, the request is read-only no
+# matter what the router or the model would otherwise pick — this is the hard
+# guarantee (a tool-level gate, not a prompt line) that an inspection task
+# cannot mutate the workspace.
+_NO_WRITE_MARKERS: tuple[str, ...] = (
+    "ничего не меняй", "ничего не меняйте",
+    "не изменяй", "не изменяйте",
+    "не меняй", "не меняйте",
+    "без изменений", "не трогай", "не трогайте",
+    "только прочитай", "только прочитайте", "только просмотри",
+    "read-only", "read only", "readonly",
+    "don't modify", "dont modify", "do not modify",
+    "don't change", "do not change",
+    "don't edit", "do not edit",
+    "don't touch", "do not touch",
+    "without changes", "without making changes", "without modifying",
+)
+
+
+def has_no_write_marker(text: str) -> bool:
+    """True when the user explicitly forbids modifying anything."""
+    lowered = text.casefold()
+    return any(marker in lowered for marker in _NO_WRITE_MARKERS)
 
 _ROUTER_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "router_prompt.txt"
 _ROUTER_PROMPT_CACHE: str | None = None
@@ -161,9 +186,16 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
     """Check if a direct deterministic rule matches the user goal.
 
     Returns (role, matched_rule_label, pattern) or None.
-    Checks in priority order: devops → coder → chat.
+    Checks in priority order: reader → devops → coder → chat.
     """
     lowered = user_goal.casefold()
+
+    # An explicit no-modification request is read-only regardless of topic.
+    # Reader reads any file equally well, so a devops-flavoured inspection
+    # ("прочитай systemd unit, ничего не меняй") does not need the devops
+    # prompt/toolset — that would only add input tokens on every step.
+    if has_no_write_marker(user_goal):
+        return ("reader", "explicit read-only", "no_write_marker")
 
     for pattern, label in _DIRECT_DEVOPS_PATTERNS:
         if re.search(pattern, lowered):
@@ -220,8 +252,12 @@ _CHAT_KEYWORDS: tuple[str, ...] = (
 
 
 def _keyword_route(user_goal: str) -> str:
-    """Keyword-based fallback routing. Priority: devops → coder → chat → default."""
+    """Keyword-based fallback routing. Priority: reader → devops → coder → chat → default."""
     lowered = user_goal.casefold()
+
+    # Reader: an explicit "do not modify" wins over any topic keyword.
+    if has_no_write_marker(user_goal):
+        return "reader"
 
     # DevOps: infrastructure/deployment keywords
     for keyword in _DEVOPS_KEYWORDS:
@@ -265,16 +301,17 @@ def route_role_decision_with_llm(
     """Determines role with full observability (RoleRouteResult).
 
     Priority:
-      1. direct devops action
-      2. direct coder action
-      3. direct chat question
-      4. LLM router
-      5. keyword fallback
-      6. default
+      1. explicit read-only (no-write marker → reader)
+      2. direct devops action
+      3. direct coder action
+      4. direct chat question
+      5. LLM router
+      6. keyword fallback
+      7. default
 
     Returns a RoleRouteResult with role + source + metadata.
     """
-    # ── Step 1–3: Direct deterministic rules ──────────────────
+    # ── Step 1–4: Direct deterministic rules ──────────────────
     direct = _match_direct_rule(user_goal)
     if direct is not None:
         direct_role, rule_label, rule_pattern = direct

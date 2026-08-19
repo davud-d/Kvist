@@ -50,6 +50,7 @@ from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
 from redaction import redact_text, redact_value
 from agent_planner import infer_task_kind
+from role_router import has_no_write_marker
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -293,6 +294,14 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     modify_goal = _is_modify_goal(user_goal)
     read_only_goal = _is_read_only_goal(user_goal)
     verify_only_goal = _is_verify_only_goal(user_goal)
+    # Reader role and any explicit "do not modify" phrasing are authoritative:
+    # force read-only so _is_read_only_violation hard-blocks every write, even
+    # if the goal text also tripped a create/modify heuristic. Clearing
+    # create/modify avoids the runtime demanding a write it will then refuse.
+    if self._state.current_agent_role == "reader" or has_no_write_marker(user_goal):
+        create_goal = False
+        modify_goal = False
+        read_only_goal = True
     self._state.user_goal = user_goal
     self._state.create_goal = create_goal
     self._state.modify_goal = modify_goal

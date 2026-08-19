@@ -34,7 +34,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--planner-model", help="Planner model override for the stdio frontend.")
     parser.add_argument(
         "--role",
-        choices=("auto", "coder", "devops", "chat"),
+        choices=("auto", "coder", "reader", "devops", "chat"),
         default="auto",
         help="Agent role override for the stdio frontend.",
     )
@@ -657,7 +657,7 @@ def render_startup_banner(
     console.print("[dim]Command '/provider' — switch the LLM provider.[/dim]")
     console.print("[dim]Command '/change-api' — update the current provider's API key.[/dim]")
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
-    console.print("[dim]Command '/role' — select agent role (auto/coder/devops/chat).[/dim]")
+    console.print("[dim]Command '/role' — select agent role (auto/coder/reader/devops/chat).[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
     console.print("[dim]Command '/new' — reset to a fresh session.[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
@@ -675,7 +675,7 @@ def render_startup_banner(
     if history:
         console.print("[dim]── Previous in this session ──[/dim]")
         for entry in history[-3:]:
-            role_color = {"coder": "green", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
+            role_color = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
             history_line = Text("  ")
             history_line.append(
                 sanitize_display_text(str(entry.get("role", "?"))),
@@ -688,7 +688,7 @@ def render_startup_banner(
 
     saved_role = get_saved_role()
     if saved_role and saved_role != "auto":
-        role_colors = {"coder": "green", "devops": "magenta", "chat": "cyan"}
+        role_colors = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}
         role_color = role_colors.get(saved_role, "white")
         console.print(
             _display_text(
@@ -920,7 +920,7 @@ def choose_session(agent, verbose: bool) -> str | None:
         if history:
             console.print("[dim]── Session context ──[/dim]")
             for entry in history[-3:]:
-                role_color = {"coder": "green", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
+                role_color = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
                 history_line = Text("  ")
                 history_line.append(
                     sanitize_display_text(str(entry.get("role", "?"))),
@@ -945,12 +945,17 @@ def choose_role(current_role: str | None, verbose: bool) -> str | None:
         {
             "value": "auto",
             "label": "Auto (automatic role detection)",
-            "description": "Agent automatically detects role from your request (coder/devops/chat)",
+            "description": "Agent automatically detects role from your request (coder/reader/devops/chat)",
         },
         {
             "value": "coder",
             "label": "Coder",
             "description": "Code generation, editing, debugging, refactoring, testing",
+        },
+        {
+            "value": "reader",
+            "label": "Reader",
+            "description": "Read-only: inspect/analyze files and report; writes are disabled",
         },
         {
             "value": "devops",
@@ -2338,7 +2343,7 @@ Support:
                     decision = None
                 if decision is not None:
                     detected_role = decision.role
-            role_colors = {"coder": "green", "devops": "magenta", "chat": "cyan"}
+            role_colors = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}
             role_color = role_colors.get(detected_role, "white")
             source_tag = f" ({decision.source})" if decision else ""
             # Show "(manual)" when user has overridden automatic detection

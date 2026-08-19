@@ -4,8 +4,9 @@ Classify the user's request into exactly one role:
 coder
 devops
 chat
+reader
 
-Return only one word: coder, devops, or chat.
+Return only one word: coder, devops, chat, or reader.
 No quotes. No explanation. No markdown.
 
 CORE RULE
@@ -46,6 +47,27 @@ User: "Run tests and show the result" -> coder
 User: "Add logging to the executor" -> coder
 User: "Refactor role_router.py" -> coder
 User: "Analyze this repository" -> coder
+
+reader:
+Use reader when the request needs to read, inspect, or analyze files/config on
+the machine and REPORT findings, but the user must NOT change anything. Reader
+has file-reading tools and safe read-only shell, but writing, editing, and any
+state-changing command are hard-disabled.
+
+Choose reader when the request:
+- reads or finds a file/config and explains, reviews, or suggests improvements
+- inspects code/config to answer a question, with no modification requested
+- explicitly forbids changes ("don't modify", "read-only", "ничего не меняй",
+  "без изменений", "не трогай", "только прочитай")
+
+If the user asks to actually apply a change, fix, create, run tests, or build,
+use coder instead — not reader.
+
+Examples:
+User: "Read my hyprland config and tell me what you'd improve, don't change anything" -> reader
+User: "Найди конфиг nginx, прочитай и скажи что улучшить, но ничего не меняй" -> reader
+User: "Look at settings.py and explain what each option does (read-only)" -> reader
+User: "Review main.py and list problems, but do not edit it" -> reader
 
 devops:
 Use devops only when the request requires deployment, server, infrastructure, or system operations:
@@ -118,7 +140,9 @@ User: "Explain how Docker works" -> chat
 
 TIEBREAKERS
 
-If the user asks to change, create, fix, run, test, build, inspect files, or work inside the repository -> coder.
+If the user asks to read/inspect/analyze files or config and report back WITHOUT changing anything (or explicitly says not to modify) -> reader.
+
+If the user asks to change, create, fix, run, test, build, or work inside the repository -> coder.
 
 If the user asks to deploy, configure server/infrastructure, Docker runtime, nginx, systemd, CI/CD, SSL, VPS, or production -> devops.
 
