@@ -9,11 +9,13 @@ from pathlib import Path
 
 import pytest
 
+
 from tests.conftest import requires_posix
 
 import durable_json
 from durable_json import JsonStorageError
 
+pytestmark = pytest.mark.slow
 
 def _session_path(agent, name: str):
     return (

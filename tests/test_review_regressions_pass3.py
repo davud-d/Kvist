@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+
 from agent import LocalAgent
 from tests.conftest import requires_posix
 
+pytestmark = pytest.mark.slow
 
 # --- F4: current==intended is desired-state, NOT agent authorship -------------
 

@@ -4,10 +4,12 @@ import json
 
 import pytest
 
+
 from agent import LocalAgent
 from change_journal import load_baseline, revert_workspace
 from tests.conftest import make_command
 
+pytestmark = pytest.mark.slow
 
 def _write(agent, path, content):
     return agent._execute_command(make_command("write_file", {"path": path, "content": content}))

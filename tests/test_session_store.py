@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
+
 from session_store import SessionStore, run_session_op
 
+pytestmark = pytest.mark.slow
 
 def test_status_reports_active_session_and_checkpoint(agent_factory):
     agent = agent_factory()

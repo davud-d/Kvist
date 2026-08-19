@@ -340,9 +340,16 @@ def call_model(
 
     # ── context metrics (computed once) ──────────────────────────
     _prompt_chars = len(system_prompt) + len(trimmed_prompt)
-    _input_tokens = self._count_tokens(system_prompt) + self._count_tokens(trimmed_prompt)
+    _system_tokens = self._count_tokens(system_prompt)
+    _prompt_tokens = self._count_tokens(trimmed_prompt)
+    _input_tokens = _system_tokens + _prompt_tokens
     _estimated_tokens = _prompt_chars // 4
     _history_size_kb = sys.getsizeof(trimmed_prompt) / 1024.0
+    self._ui.debug_print(
+        f"[tokens] step={getattr(self, '_current_step', 0)} kind={usage_kind} "
+        f"input={_input_tokens} (system={_system_tokens}, prompt={_prompt_tokens}), "
+        f"chars={_prompt_chars}"
+    )
 
     models_to_try = list(
         fallback_candidates_for_model(

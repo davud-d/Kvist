@@ -19,10 +19,12 @@ from pathlib import Path
 
 import pytest
 
+
 from tests.conftest import requires_posix
 
 import terminal as terminal_module
 from process_tree import (
+
     ProcessSupervisionError,
     _BoundedReader,
     cgroup_supervision_available,
@@ -42,6 +44,8 @@ from terminal import (
     _controlled_child_path,
     _parse_shebang,
 )
+
+pytestmark = pytest.mark.slow
 
 BWRAP = resolve_bubblewrap_path()
 requires_bwrap = pytest.mark.skipif(BWRAP is None, reason="bubblewrap not installed")

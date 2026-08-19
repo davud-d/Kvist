@@ -25,12 +25,15 @@ from pathlib import Path
 
 import pytest
 
+
 from tests.conftest import requires_posix
 
 import terminal as terminal_module
 from sandbox import resolve_bubblewrap_path, SandboxMode
 from secret_paths import UnsafeSecretPathError, enumerate_secret_targets
 from terminal import ApprovalRequiredError, HardDenyError, TerminalExecutor
+
+pytestmark = pytest.mark.slow
 
 BWRAP = resolve_bubblewrap_path()
 requires_bwrap = pytest.mark.skipif(BWRAP is None, reason="bubblewrap not installed")

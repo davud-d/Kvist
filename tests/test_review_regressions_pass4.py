@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+
 from agent import LocalAgent
 from tests.conftest import make_command, requires_posix
 
+pytestmark = pytest.mark.slow
 
 # --- F2: fs write succeeds but journal promotion fails -> not ordinary success
 
