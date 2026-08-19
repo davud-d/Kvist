@@ -129,6 +129,29 @@ class ChatRequestCancelled(Exception):
     """
 
 
+# How much read/searched content a run contributes to session history, so a
+# later turn in a different role can cite it instead of re-reading. Kept small:
+# session history is persisted and re-injected into every subsequent prompt.
+_SESSION_READ_CONTENT_CHARS = 1200
+_SESSION_MULTI_READ_CONTENT_CHARS = 600
+_SESSION_MULTI_READ_MAX_FILES = 5
+_SESSION_MAX_HARVESTED_OUTPUTS = 8
+
+# Preamble that hands harvested session output to a later chat turn. It states
+# the content is available (so the role uses it) but must NOT forbid admitting
+# absence: if the harvester missed something, the role has to say "no data"
+# rather than invent it. Positive availability + explicit honesty, no gag.
+_CHAT_HISTORY_PREAMBLE = (
+    "(Before you respond: here is what happened earlier in this session. "
+    "The 'Output:' blocks below are real command results and real file "
+    "contents that were read for you — treat them as available to you, "
+    "exactly as if you had produced them yourself, and answer the user's "
+    "question directly from them when they contain the answer. If the answer "
+    "is not present in the content below, say so honestly and ask to read it "
+    "rather than inventing it.)"
+)
+
+
 class LocalAgent:
     def __init__(
         self,
@@ -167,19 +190,65 @@ class LocalAgent:
         self._resumed_phase: str = "executing"
         load_session(self)
 
-    def _add_to_session_history(self, user_goal: str, role: str, result: str) -> None:
-        """Record a completed run in session history for context."""
-        # Collect key technical outputs from this run
+    def _harvest_run_outputs(self) -> list[str]:
+        """Collect the substantive content a later turn needs to answer about.
+
+        Beyond shell stdout this captures the *contents* of files the run read
+        (read_file / read_multiple_files) and code-search hits. Without it a
+        follow-up handled by another role (e.g. chat after coder) receives only
+        the request text and truthfully reports it has no file content — the
+        role change silently drops the very data the user is asking about.
+        """
         outputs: list[str] = []
         for log_entry in self._state.step_logs[-10:]:
-            if log_entry.get("status") == "ok":
-                action_type = log_entry.get("command", {}).get("action", {}).get("type", "")
-                if action_type == "run_shell":
-                    stdout = log_entry.get("feedback", {}).get("data", {}).get("stdout", "")
-                    if stdout:
-                        outputs.append(stdout[:300])
-                elif action_type == "final_answer":
-                    outputs.append(log_entry.get("message", "")[:200])
+            if log_entry.get("status") != "ok":
+                continue
+            action_type = log_entry.get("command", {}).get("action", {}).get("type", "")
+            data = log_entry.get("feedback", {}).get("data", {})
+            if action_type == "run_shell":
+                stdout = data.get("stdout", "")
+                if stdout:
+                    outputs.append(stdout[:300])
+            elif action_type == "read_file":
+                content = data.get("content", "")
+                if content:
+                    outputs.append(
+                        f"[read {data.get('path', '')}]\n{content[:_SESSION_READ_CONTENT_CHARS]}"
+                    )
+            elif action_type == "read_multiple_files":
+                files = data.get("files", [])
+                for file_item in files[:_SESSION_MULTI_READ_MAX_FILES]:
+                    content = file_item.get("content", "")
+                    if content:
+                        outputs.append(
+                            f"[read {file_item.get('path', '')}]\n"
+                            f"{content[:_SESSION_MULTI_READ_CONTENT_CHARS]}"
+                        )
+                # Never drop files silently — a hidden gap here is BUG-1 again.
+                if len(files) > _SESSION_MULTI_READ_MAX_FILES:
+                    hidden = files[_SESSION_MULTI_READ_MAX_FILES:]
+                    hidden_paths = ", ".join(
+                        str(item.get("path", "")) for item in hidden
+                    )
+                    outputs.append(
+                        f"[{len(hidden)} more file(s) were read this step but not "
+                        f"stored in history: {hidden_paths}]"
+                    )
+            elif action_type == "search_code":
+                hits = data.get("results", [])
+                if hits:
+                    lines = [
+                        f"{hit.get('path', '')}:{hit.get('line', '')}: {hit.get('text', '')}"
+                        for hit in hits[:10]
+                    ]
+                    outputs.append(
+                        f"[search '{data.get('query', '')}']\n" + "\n".join(lines)
+                    )
+        return outputs[-_SESSION_MAX_HARVESTED_OUTPUTS:]
+
+    def _add_to_session_history(self, user_goal: str, role: str, result: str) -> None:
+        """Record a completed run in session history for context."""
+        outputs = self._harvest_run_outputs()
 
         entry = {
             "goal": user_goal,
@@ -603,11 +672,7 @@ class LocalAgent:
         # Inject session history context
         session_context = ""
         if hasattr(self, "_session_history") and self._session_history:
-            history_lines = [
-                "(Before you respond: here is what happened earlier in this session. "
-                "Use this context to understand what the user is referring to. "
-                "The 'outputs' field contains actual command results, NOT descriptions.)",
-            ]
+            history_lines = [_CHAT_HISTORY_PREAMBLE]
             for entry in self._session_history[-5:]:
                 history_lines.append(
                     f"- [{entry['role']}] Asked: \"{entry['goal']}\""
