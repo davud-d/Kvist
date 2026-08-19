@@ -65,6 +65,7 @@ _PROMPT_CACHE: dict[str, str] = {}
 _ROLE_PROMPT_FILES: dict[str, str] = {
     "coder": "coder_prompt.txt",
     "devops": "devops_prompt.txt",
+    "reader": "reader_prompt.txt",
     "chat": "chat_prompt.txt",
     "report": "report_prompt.txt",
 }
