@@ -239,8 +239,18 @@ def sleep(seconds: int):
 _MIN_PROMPT_LENGTH = 10
 
 
-def validate_user_goal(user_goal: str, language_hint: str = "en") -> str | None:
-    """Return an error message if the prompt is invalid, or None if it is acceptable."""
+def validate_user_goal(
+    user_goal: str,
+    language_hint: str = "en",
+    has_session_context: bool = False,
+) -> str | None:
+    """Return an error message if the prompt is invalid, or None if it is acceptable.
+
+    The minimum-length gate only applies to a fresh turn. Once the session has a
+    completed turn, a short reply ("всмысле?", "why?") is a follow-up on that
+    context, not an underspecified new task — rejecting it by length alone is
+    what made an 8-char message fail while a 10-char one went through.
+    """
     stripped = user_goal.strip()
 
     if not stripped:
@@ -254,7 +264,7 @@ def validate_user_goal(user_goal: str, language_hint: str = "en") -> str | None:
     if stripped.startswith("/"):
         return None
 
-    if len(stripped) < _MIN_PROMPT_LENGTH:
+    if len(stripped) < _MIN_PROMPT_LENGTH and not has_session_context:
         return choose_localized_text(
             ru_text='Опиши задачу подробнее. Например: "Исправь ошибку в main.py" или "Создай parser.py для CSV".',
             en_text='Please describe the task more specifically. Example: "Fix the bug in main.py" or "Create parser.py for CSV".',
@@ -2278,7 +2288,12 @@ def main() -> None:
                 )
                 continue
 
-            validation_error = validate_user_goal(user_goal, language_hint=session_language)
+            has_session_context = bool(getattr(agent, "_session_history", []))
+            validation_error = validate_user_goal(
+                user_goal,
+                language_hint=session_language,
+                has_session_context=has_session_context,
+            )
             if validation_error:
                 console.print(_display_text(validation_error, "yellow"))
                 continue

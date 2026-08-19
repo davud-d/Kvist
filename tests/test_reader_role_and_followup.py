@@ -117,3 +117,26 @@ def test_run_loop_reader_role_blocks_file_writes(agent_factory):
         "read-only" in str(log.get("feedback", {}).get("result", "")).lower()
         for log in agent._state.step_logs
     )
+
+
+# ── BUG-4: short follow-up is accepted once the session has context ─────────
+
+def test_validate_user_goal_rejects_short_input_without_context():
+    from main import validate_user_goal
+
+    error = validate_user_goal("всмысле?", language_hint="ru", has_session_context=False)
+    assert error is not None
+
+
+def test_validate_user_goal_accepts_short_followup_with_context():
+    from main import validate_user_goal
+
+    error = validate_user_goal("всмысле?", language_hint="ru", has_session_context=True)
+    assert error is None
+
+
+def test_validate_user_goal_still_rejects_empty_even_with_context():
+    from main import validate_user_goal
+
+    error = validate_user_goal("   ", language_hint="ru", has_session_context=True)
+    assert error is not None
