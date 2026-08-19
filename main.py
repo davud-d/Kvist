@@ -1156,10 +1156,10 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
             continue
         if not base_url.startswith(("http://", "https://")):
             choice = ui.choose_option(
-                title="base URL должен начинаться с https://.",
+                title="base URL must start with https://.",
                 options=[
-                    {"value": "add_https", "label": "Добавить https:// автоматически"},
-                    {"value": "retry", "label": "Ввести заново"},
+                    {"value": "add_https", "label": "Add https:// automatically"},
+                    {"value": "retry", "label": "Enter again"},
                 ],
                 current_value="add_https",
                 help_text="Enter — confirm, Esc — cancel",
@@ -1186,12 +1186,12 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         if not path:
             choice = ui.choose_option(
                 title=(
-                    "base URL не содержит суффикса пути, большинство OpenAI-совместимых эндпоинтов требуют /v1, "
-                    "без него запросы вернут 404."
+                    "base URL has no path suffix; most OpenAI-compatible endpoints "
+                    "require /v1, and requests will 404 without it."
                 ),
                 options=[
-                    {"value": "add", "label": "Добавить /v1 (рекомендуется)"},
-                    {"value": "keep", "label": "Оставить как есть"},
+                    {"value": "add", "label": "Add /v1 (recommended)"},
+                    {"value": "keep", "label": "Keep as is"},
                 ],
                 current_value="add",
                 help_text="Enter — confirm, Esc — cancel",

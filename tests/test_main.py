@@ -434,7 +434,7 @@ def test_configure_custom_provider_interactively_url_normalization(monkeypatch):
     }
     ui.option_selections = {
         "Select protocol": "openai",
-        "base URL не содержит": "add",
+        "no path suffix": "add",
         "streaming": "no",
         "Model configuration": "one",
         "Create this provider?": "yes",
@@ -444,14 +444,14 @@ def test_configure_custom_provider_interactively_url_normalization(monkeypatch):
 
     # 2. Test URL "https://api.example.dev" and "keep"
     ui.prompt_selections["provider ID"] = "test-provider-2"
-    ui.option_selections["base URL не содержит"] = "keep"
+    ui.option_selections["no path suffix"] = "keep"
     main.configure_custom_provider_interactively(ui, False)
     assert saved_providers["test-provider-2"]["base_url"] == "https://api.example.dev"
 
     # 3. Test URL "https://api.example.dev/" and "add"
     ui.prompt_selections["provider ID"] = "test-provider-3"
     ui.prompt_selections["base URL"] = "https://api.example.dev/"
-    ui.option_selections["base URL не содержит"] = "add"
+    ui.option_selections["no path suffix"] = "add"
     main.configure_custom_provider_interactively(ui, False)
     assert saved_providers["test-provider-3"]["base_url"] == "https://api.example.dev/v1"
 
@@ -483,9 +483,9 @@ def test_configure_custom_provider_interactively_url_normalization(monkeypatch):
         "model ID": "gpt-4",
     }
     ui.option_selections = {
-        "base URL должен начинаться": "add_https",
+        "must start with https": "add_https",
         "Select protocol": "openai",
-        "base URL не содержит": "add",
+        "no path suffix": "add",
         "streaming": "no",
         "Model configuration": "one",
         "Create this provider?": "yes",
@@ -495,7 +495,7 @@ def test_configure_custom_provider_interactively_url_normalization(monkeypatch):
 
     # 8. Test URL without scheme "api.example.dev" and "add_https" auto-add, and then "keep" as is
     ui.prompt_selections["provider ID"] = "test-provider-8"
-    ui.option_selections["base URL не содержит"] = "keep"
+    ui.option_selections["no path suffix"] = "keep"
     main.configure_custom_provider_interactively(ui, False)
     assert saved_providers["test-provider-8"]["base_url"] == "https://api.example.dev"
 
