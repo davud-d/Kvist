@@ -6,7 +6,10 @@ import sys
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any, Iterator
+
+import banner
 
 from rich import box
 from rich.align import Align
@@ -71,6 +74,11 @@ class TerminalBannerUI:
         # force it either way. An attached TUI screen overrides this per-call.
         self._plain = not self.console.is_terminal
         self._last_log_line: str | None = None
+        # Live telemetry accumulated across a run and pushed to the pinned
+        # banner. Kept here (not in the persisted RunState) because it is a
+        # transient view concern that must not enter the /resume checkpoint.
+        self._live_panel = banner.LivePanelState()
+        self._live_run_start = 0.0
 
     def attach_screen(self, screen: Any | None) -> None:
         """Route transient agent output through a persistent TUI screen.
@@ -81,7 +89,42 @@ class TerminalBannerUI:
         """
         self._screen = screen
 
+    def _publish_live(self) -> None:
+        """Push a snapshot of the live telemetry to the pinned banner."""
+        screen = self._screen
+        setter = getattr(screen, "set_live", None)
+        if setter is None:
+            return
+        if self._live_panel.running and self._live_run_start:
+            self._live_panel.elapsed_seconds = (
+                time.monotonic() - self._live_run_start
+            )
+        setter(replace(self._live_panel))
+
+    def set_run_context(
+        self,
+        *,
+        action: str | None = None,
+        files_changed: int | None = None,
+        model_tier: str | None = None,
+    ) -> None:
+        """Merge per-step run facts the status channel does not already carry."""
+        if action is not None:
+            self._live_panel.action = sanitize_display_text(str(action))
+        if files_changed is not None:
+            self._live_panel.files_changed = max(0, int(files_changed))
+        if model_tier is not None:
+            self._live_panel.model_tier = str(model_tier)
+            self._live_panel.escalated = str(model_tier) not in ("", "fast")
+        self._publish_live()
+
     def start_live(self) -> None:
+        self._live_panel = banner.LivePanelState(
+            running=True, state_label="working"
+        )
+        self._live_run_start = time.monotonic()
+        self._publish_live()
+
         if self.verbose or is_hitl_active():
             return
         if self._plain and self._screen is None:
@@ -109,6 +152,20 @@ class TerminalBannerUI:
         self._live.start()
 
     def stop_live(self) -> None:
+        if self._live_run_start:
+            # Keep the finished run's totals on screen instead of snapping the
+            # panel back to zero; only a fresh UI shows the not-started state.
+            self._live_panel.elapsed_seconds = (
+                time.monotonic() - self._live_run_start
+            )
+            self._live_panel.running = False
+            self._live_panel.finished = True
+            self._live_panel.state_label = "done"
+        else:
+            self._live_panel = banner.LivePanelState()
+        self._live_run_start = 0.0
+        self._publish_live()
+
         if self._screen is not None:
             self._screen.set_status(None)
 
@@ -150,6 +207,14 @@ class TerminalBannerUI:
         plan_step: str = "working",
         is_error: bool = False,
     ) -> None:
+        _, _, state_label = self._status_light(status, is_error)
+        self._live_panel.running = True
+        self._live_panel.state_label = state_label
+        self._live_panel.step = step
+        self._live_panel.progress = max(0, min(progress, 100))
+        self._live_panel.plan_step = sanitize_display_text(str(plan_step))
+        self._publish_live()
+
         if self._plain and self._screen is None:
             if not self.verbose:
                 self._log_status(user_message, status, step, is_error)
@@ -233,6 +298,8 @@ class TerminalBannerUI:
 
             def reasoning(message: str) -> None:
                 self._screen.set_stream(_reasoning_renderable(message))
+                self._live_panel.thinking = message
+                self._publish_live()
 
             update.reasoning = reasoning
             self._screen.set_stream(self.render_user_markdown(latest))
@@ -349,6 +416,16 @@ class TerminalBannerUI:
     def print_usage(self, usage: dict) -> None:
         """Optional token-usage channel. Verbose-only in the terminal; event
         frontends (GUI) surface it as live run metrics instead."""
+        self._live_panel.tokens_in += max(0, int(usage.get("input_tokens", 0)))
+        step_output = max(0, int(usage.get("output_tokens", 0)))
+        self._live_panel.tokens_out += step_output
+        # Real generation speed: output tokens over the model call's own wall
+        # time, not the gap between steps (which folds in idle/execute time).
+        duration = float(usage.get("duration_seconds", 0.0) or 0.0)
+        if duration > 0 and step_output > 0:
+            self._live_panel.tokens_per_second = step_output / duration
+        self._publish_live()
+
         self.debug_print(
             "tokens: "
             f"in={usage.get('input_tokens', 0)} out={usage.get('output_tokens', 0)} "

@@ -299,6 +299,7 @@ def _emit_usage(
     input_tokens: int,
     output_tokens: int,
     kind: str,
+    duration_seconds: float = 0.0,
 ) -> None:
     """Report one model call's token usage to UIs exposing ``print_usage``.
 
@@ -316,6 +317,7 @@ def _emit_usage(
             "model": str(model),
             "kind": str(kind),
             "step": int(getattr(self, "_current_step", 0) or 0),
+            "duration_seconds": max(0.0, float(duration_seconds)),
         }
     )
 
@@ -401,6 +403,7 @@ def call_model(
                     input_tokens=_input_tokens,
                     output_tokens=self._count_tokens(content),
                     kind=usage_kind,
+                    duration_seconds=total_duration,
                 )
                 # ── log successful API request ───────────────────
                 self._perf_logger.log_api_request(

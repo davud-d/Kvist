@@ -15,6 +15,7 @@ import queue
 import re
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, TextIO
@@ -63,6 +64,11 @@ _BANNER_HEIGHT = 17
 _MIN_SCREEN_HEIGHT = 31
 _MAX_INPUT_HEIGHT = 8
 _MAX_TRANSIENT_HEIGHT = 10
+# Re-render the status slot on a time tick so its Rich spinner keeps animating
+# between the seconds-apart status updates the agent emits. Without this the
+# generation-keyed cache freezes the spinner (a regression from the old Rich
+# Live path, which refreshed unconditionally).
+_TRANSIENT_ANIM_FPS = 12
 _MAX_TRANSCRIPT_CHARS = 500_000
 _TRANSCRIPT_RETAIN_CHARS = 400_000
 _MAX_TRANSCRIPT_ENTRIES = 2_000
@@ -252,20 +258,6 @@ def _extend_lines(
     target.extend(addition[1:])
 
 
-def _banner_block(content: AnyFormattedText) -> list[StyleAndTextTuples]:
-    """Split banner fragments into lines the transcript can carry.
-
-    The trailing empty line is what makes transcript output start on its own
-    row instead of being joined onto the banner's bottom border.
-    """
-    fragments = list(to_formatted_text(content))
-    if not fragments:
-        return []
-    lines = list(split_lines(fragments))
-    lines.append([])
-    return lines
-
-
 class _TranscriptControl(UIControl):
     """Transcript view that keeps its lines split between render passes.
 
@@ -424,9 +416,7 @@ class InteractiveScreen:
         self._transcript_prefix_entries = 0
         self._last_entry_lines: list[StyleAndTextTuples] = []
         self._last_entry_key: tuple[int, int] | None = None
-        self._banner_lines: list[StyleAndTextTuples] | None = None
-        self._banner_frame: Any = None
-        self._banner_line_count = 0
+        self._live: Any = banner.LivePanelState()
         self._transcript_generation = 0
         self._transcript_plain_parts: list[str] = []
         self._transcript_plain_cache: str | None = ""
@@ -443,7 +433,9 @@ class InteractiveScreen:
         self._status: Any | None = None
         self._stream: Any | None = None
         self._slot_generation = 0
-        self._slot_cache: tuple[int, int, list[tuple[str, str]]] | None = None
+        self._slot_cache: (
+            tuple[int, int, int, list[tuple[str, str]]] | None
+        ) = None
         self._transient_render_cursor = Point(x=0, y=0)
 
         self._layout: Layout | None = None
@@ -712,6 +704,16 @@ class InteractiveScreen:
             self._slot_cache = None
         self.invalidate()
 
+    def set_live(self, snapshot: Any) -> None:
+        """Replace the live-telemetry snapshot rendered in the pinned banner."""
+        with self._state_lock:
+            self._live = snapshot
+        self.invalidate()
+
+    def _get_live(self) -> Any:
+        with self._state_lock:
+            return self._live
+
     def set_stream(self, content: Any | None) -> None:
         with self._state_lock:
             self._stream = content
@@ -932,42 +934,13 @@ class InteractiveScreen:
             return list(split_lines(_ansi_formatted(_ansi_entry_text(value))))
         return list(split_lines(value))
 
-    def _banner_is_visible(self) -> bool:
-        """True while the banner block is still on screen.
-
-        Before the first render there is no scroll position yet, and the
-        transcript starts at the top, so the banner is visible by definition.
-        """
-        window = self._transcript_window
-        render_info = window.render_info if window is not None else None
-        if render_info is None:
-            return True
-        # A hidden banner has no lines, so the top of the transcript is what
-        # decides whether it may come back after a resize.
-        return render_info.vertical_scroll < max(1, self._banner_line_count)
-
-    def _refresh_banner_lines_locked(self) -> bool:
-        """Re-render the banner block; return whether its lines changed.
-
-        The animation only advances while the block is on screen.  Scrolled
-        out of view it keeps its last frame, which costs nothing and picks the
-        loop back up wherever it stands once the user scrolls back up.
-        """
-        forced = self._banner_lines is None
-        if not forced and not self._banner_is_visible():
-            return False
-
-        content = self._get_banner() if self._show_banner() else []
-        if not forced and content is self._banner_frame:
-            return False
-
-        self._banner_frame = content
-        self._banner_lines = _banner_block(content)
-        self._banner_line_count = max(0, len(self._banner_lines) - 1)
-        return True
-
     def _build_transcript_lines_locked(self) -> list[StyleAndTextTuples]:
-        """Split only what changed: every entry but the last is immutable."""
+        """Split only what changed: every entry but the last is immutable.
+
+        The banner is no longer part of the transcript: it lives in its own
+        pinned window, so the transcript starts at line 0 and its scroll math
+        carries no banner offset.
+        """
         entries = self._transcript_entries
         while self._transcript_prefix_entries < len(entries) - 1:
             kind, value = entries[self._transcript_prefix_entries]
@@ -977,7 +950,7 @@ class InteractiveScreen:
             )
             self._transcript_prefix_entries += 1
 
-        lines = list(self._banner_lines or [])
+        lines: list[StyleAndTextTuples] = []
         _extend_lines(lines, self._transcript_prefix_lines)
         if entries:
             _extend_lines(lines, self._last_entry_lines_locked())
@@ -1002,8 +975,6 @@ class InteractiveScreen:
         mutated in place, so the caller may hold it without copying.
         """
         with self._state_lock:
-            if self._refresh_banner_lines_locked():
-                self._invalidate_transcript_lines_locked()
             if self._transcript_line_cache is None:
                 self._transcript_line_cache = (
                     self._build_transcript_lines_locked()
@@ -1022,7 +993,7 @@ class InteractiveScreen:
             )
 
     def _last_transcript_line_locked(self) -> int:
-        return self._banner_line_count + max(0, self._transcript_line_count)
+        return max(0, self._transcript_line_count)
 
     def _page_size(self) -> int:
         """One page measured in transcript lines, not in screen rows.
@@ -1098,7 +1069,19 @@ class InteractiveScreen:
             self._banner_content = banner.make_banner_content(
                 lambda: self._config,
                 self._terminal_width,
+                self._get_live,
             )
+
+        banner_window = ConditionalContainer(
+            Window(
+                FormattedTextControl(self._get_banner, show_cursor=False),
+                height=Dimension.exact(_BANNER_HEIGHT),
+                dont_extend_height=True,
+                wrap_lines=False,
+                always_hide_cursor=True,
+            ),
+            filter=Condition(self._show_banner),
+        )
 
         transcript_control = _TranscriptControl(self._transcript_content)
         transcript = Window(
@@ -1161,6 +1144,7 @@ class InteractiveScreen:
         )
         root = HSplit(
             [
+                banner_window,
                 transcript,
                 transient,
                 Window(height=1, char=" "),
@@ -1327,15 +1311,19 @@ class InteractiveScreen:
         width = self._terminal_width()
         with self._state_lock:
             content = self._stream if self._stream is not None else self._status
+            # Only the status slot carries an animated spinner; a committed
+            # stream is static, so it keeps the cheap generation-only cache.
+            animated = self._stream is None and self._status is not None
+            tick = int(time.monotonic() * _TRANSIENT_ANIM_FPS) if animated else 0
             generation = self._slot_generation
             cached = self._slot_cache
-            if cached is not None and cached[0:2] == (generation, width):
-                return list(cached[2])
+            if cached is not None and cached[0:3] == (generation, width, tick):
+                return list(cached[3])
 
         fragments = self._format_content(content, width)
         with self._state_lock:
             if generation == self._slot_generation:
-                self._slot_cache = (generation, width, fragments)
+                self._slot_cache = (generation, width, tick, fragments)
             plain = "".join(fragment[1] for fragment in fragments)
             lines = plain.split("\n")
             self._transient_render_cursor = Point(

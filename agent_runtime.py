@@ -60,6 +60,17 @@ _READ_ONLY_ACTIONS = {
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
+
+def _note_run_context(self, **facts: Any) -> None:
+    """Forward per-step run facts to a UI that exposes the live-panel channel.
+
+    Optional capability: UIs without ``set_run_context`` (headless, tests) are
+    skipped, exactly like the ``print_usage`` usage channel.
+    """
+    notify = getattr(self._ui, "set_run_context", None)
+    if notify is not None:
+        notify(**facts)
+
 # Read-only inspections still permitted while a corrective action is required.
 _CORRECTIVE_READ_BUDGET = 3
 
@@ -322,6 +333,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             prompt = self._build_runtime_prompt(user_goal, step)
             self._current_step = step
+            _note_run_context(self, action="generating command")
             loop_pre = time.monotonic()
             try:
                 raw_text = self._call_action_model(prompt)
@@ -566,6 +578,12 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     )
                     continue
 
+            _note_run_context(
+                self,
+                action=command.action.type,
+                files_changed=len(self._state.files_changed),
+                model_tier=self._state.selected_action_role or "fast",
+            )
             self._ui.update_live(
                 user_message=command.user_message,
                 status="executing action",
