@@ -74,6 +74,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the saved run configuration as JSON and exit (no LLM call).",
     )
+    parser.add_argument(
+        "--journal-op",
+        choices=("changes", "revert"),
+        help="Run one headless change-journal operation, print JSON, exit.",
+    )
     return parser
 
 
@@ -1797,6 +1802,38 @@ def main() -> None:
         try:
             payload = build_config_info()
         except (OSError, ValueError) as error:
+            failure = {
+                "ok": False,
+                "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+            }
+            print(_json.dumps(failure, ensure_ascii=False))
+            raise SystemExit(1) from error
+        print(_json.dumps(payload, ensure_ascii=False))
+        return
+
+    if args.journal_op:
+        import json as _json
+
+        from change_journal import (
+            JournalUnavailableError,
+            build_diff_report,
+            revert_workspace,
+        )
+
+        try:
+            workspace = resolve_workspace_path(args.workspace)
+            if args.journal_op == "changes":
+                payload = {"ok": True, "report": build_diff_report(workspace)}
+            else:
+                reverted = revert_workspace(workspace)
+                payload = {
+                    "ok": True,
+                    "reverted": [
+                        {"path": item.path, "action": item.action, "reason": item.reason}
+                        for item in reverted
+                    ],
+                }
+        except (JournalUnavailableError, RuntimeError, OSError, ValueError) as error:
             failure = {
                 "ok": False,
                 "error": sanitize_display_text(str(error).strip() or type(error).__name__),

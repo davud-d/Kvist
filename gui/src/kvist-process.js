@@ -87,8 +87,15 @@ class KvistProcess extends EventEmitter {
     if (this.child) throw new Error("Kvist is already running.")
     const normalizedGoal = String(goal).replace(/\r?\n/g, " ").trim()
     if (!normalizedGoal) throw new Error("Task cannot be empty.")
-    const runOptions = normalizeRunOptions(options)
+    this._launch(normalizeRunOptions(options), { goal: normalizedGoal })
+  }
 
+  resume(options = {}) {
+    if (this.child) throw new Error("Kvist is already running.")
+    this._launch(normalizeRunOptions(options), { resume: true })
+  }
+
+  _launch(runOptions, { goal = "", resume = false } = {}) {
     const args = [
       ...this.prefixArgs,
       "--workspace",
@@ -96,6 +103,7 @@ class KvistProcess extends EventEmitter {
       "--frontend",
       "stdio",
     ]
+    if (resume) args.push("--resume")
     if (runOptions.provider) args.push("--provider", runOptions.provider)
     if (runOptions.models.fast) {
       args.push(
@@ -130,7 +138,8 @@ class KvistProcess extends EventEmitter {
       this.emit("exit", { code, signal, expected: this.stopping })
     })
 
-    child.stdin.write(normalizedGoal + "\n")
+    if (resume) child.stdin.end()
+    else child.stdin.write(goal + "\n")
   }
 
   handleEvent(event) {

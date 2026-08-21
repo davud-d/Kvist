@@ -123,6 +123,35 @@ async function runConfigInfo() {
   return payload
 }
 
+async function runJournalOp(op) {
+  const resolved = validateWorkspace(workspace)
+  const command = resolveCommand()
+  const args = [...command.prefixArgs, "--workspace", resolved, "--journal-op", op]
+  let stdout = ""
+  try {
+    const completed = await execFileAsync(command.command, args, {
+      cwd: resolved,
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true,
+    })
+    stdout = completed.stdout
+  } catch (error) {
+    stdout = typeof error.stdout === "string" ? error.stdout : ""
+    if (!stdout.trim()) throw new Error("Kvist could not read its change journal.")
+  }
+  const line = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1)
+  let payload
+  try {
+    payload = JSON.parse(line || "")
+  } catch {
+    throw new Error("Kvist returned an invalid change-journal response.")
+  }
+  if (!payload.ok) throw new Error(payload.error || "Change-journal operation failed.")
+  return payload
+}
+
 async function projectSnapshot(project) {
   try {
     const status = await runSessionOp(project.path, "status")
@@ -236,6 +265,20 @@ function registerIpc() {
 
   ipcMain.handle("kvist:config-info", () => runConfigInfo())
 
+  ipcMain.handle("kvist:changes", () => runJournalOp("changes"))
+
+  ipcMain.handle("kvist:revert", async () => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runJournalOp("revert")
+  })
+
+  ipcMain.handle("kvist:delete-session", async (_event, payload) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    const resolved = rememberWorkspace(payload?.workspace || workspace)
+    await runSessionOp(resolved, "delete", payload?.name || "")
+    return { navigation: await navigationSnapshot() }
+  })
+
   ipcMain.handle("kvist:choose-workspace", async () => {
     const result = await dialog.showOpenDialog(windowRef, {
       title: "Choose Kvist workspace",
@@ -282,6 +325,22 @@ function registerIpc() {
     runner = active
     attachRunner(active)
     active.start(payload?.goal || "", payload?.options || {})
+    return { ok: true }
+  })
+
+  ipcMain.handle("kvist:resume", async (_event, payload) => {
+    if (runner) throw new Error("A Kvist task is already running.")
+    workspace = rememberWorkspace(payload?.workspace || workspace)
+    lastDiagnostic = ""
+    const command = resolveCommand()
+    const active = new KvistProcess({
+      workspace,
+      command: command.command,
+      prefixArgs: command.prefixArgs,
+    })
+    runner = active
+    attachRunner(active)
+    active.resume(payload?.options || {})
     return { ok: true }
   })
 

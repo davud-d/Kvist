@@ -33,8 +33,16 @@ const approvalModeSelect = document.querySelector("#approvalModeSelect")
 const fastModelInput = document.querySelector("#fastModelInput")
 const smartModelInput = document.querySelector("#smartModelInput")
 const plannerModelInput = document.querySelector("#plannerModelInput")
+const customProviderField = document.querySelector("#customProviderField")
 const providerStatus = document.querySelector("#providerStatus")
 const providerDetail = document.querySelector("#providerDetail")
+const paletteFilter = document.querySelector("#paletteFilter")
+const paletteList = document.querySelector("#paletteList")
+const infoBackdrop = document.querySelector("#infoBackdrop")
+const infoTitle = document.querySelector("#infoTitle")
+const infoBody = document.querySelector("#infoBody")
+const infoClose = document.querySelector("#infoClose")
+const infoActions = document.querySelector("#infoActions")
 const roleHint = document.querySelector("#roleHint")
 const approvalHint = document.querySelector("#approvalHint")
 const modelSuggestions = document.querySelector("#modelSuggestions")
@@ -282,14 +290,25 @@ function renderNavigation() {
         const button = createElement("button", "session-row")
         button.type = "button"
         button.title = `${item.title}\n${item.name}`
+        const isActive = project.path === workspace && item.name === activeSessionName
         button.append(createElement("span", "navigation-label", item.title))
-        if (project.path === workspace && item.name === activeSessionName) {
-          button.classList.add("is-active")
-        }
+        if (isActive) button.classList.add("is-active")
         button.addEventListener("click", (event) => {
           event.stopPropagation()
           void selectSession(project.path, item.name)
         })
+        // The core refuses to delete the active session, so only offer it on the
+        // others; switch away first to remove the current one.
+        if (!isActive) {
+          const remove = createElement("span", "session-delete", "×")
+          remove.title = "Delete session"
+          remove.setAttribute("role", "button")
+          remove.addEventListener("click", (event) => {
+            event.stopPropagation()
+            void deleteSession(project.path, item.name)
+          })
+          button.append(remove)
+        }
         sessions.append(button)
       }
       group.append(sessions)
@@ -519,9 +538,12 @@ function providerLabel(id) {
   return providerSummary(id)?.label || BUILTIN_PROVIDER_LABELS[id] || id
 }
 
+function addingCustomProvider() {
+  return providerSelect.value === "__new__"
+}
+
 function effectiveProviderId() {
-  const typed = customProviderInput.value.trim()
-  if (typed) return typed
+  if (addingCustomProvider()) return customProviderInput.value.trim()
   if (providerSelect.value) return providerSelect.value
   return configInfo?.saved_provider || ""
 }
@@ -560,6 +582,8 @@ function renderProviderOptions() {
     for (const entry of custom) group.append(new Option(providerOptionText(entry), entry.id))
     providerSelect.append(group)
   }
+
+  providerSelect.append(new Option("＋ Add custom provider…", "__new__"))
 
   if (optionExists(previous)) providerSelect.value = previous
 }
@@ -651,6 +675,7 @@ function renderModelFields() {
 }
 
 function refreshSettingsDetail() {
+  customProviderField.hidden = !addingCustomProvider()
   roleHint.textContent = ROLE_HINTS[roleSelect.value] || ""
   approvalHint.textContent = APPROVAL_HINTS[approvalModeSelect.value] || ""
   renderProviderDetail()
@@ -664,7 +689,7 @@ function populateSettings() {
     providerSelect.value = provider
     customProviderInput.value = ""
   } else if (provider) {
-    providerSelect.value = ""
+    providerSelect.value = "__new__"
     customProviderInput.value = provider
   } else {
     providerSelect.value = ""
@@ -712,12 +737,12 @@ function saveSettings() {
     return false
   }
   const customProvider = customProviderInput.value.trim()
-  if (customProvider && !/^custom:[a-z0-9][a-z0-9_-]{0,63}$/i.test(customProvider)) {
+  if (addingCustomProvider() && !/^custom:[a-z0-9][a-z0-9_-]{0,63}$/i.test(customProvider)) {
     settingsError.textContent = "Custom provider ID must look like custom:provider-name."
     return false
   }
   runOptions = normalizedRunOptions({
-    provider: customProvider || providerSelect.value,
+    provider: addingCustomProvider() ? customProvider : providerSelect.value,
     role: roleSelect.value,
     approvalMode: approvalModeSelect.value,
     models,
@@ -1179,9 +1204,218 @@ async function interrupt() {
   setActivity("Interrupted", { error: true })
 }
 
+function activeCheckpointAvailable() {
+  const project = currentProject()
+  return Boolean(sessionItem(project, activeSessionName)?.has_checkpoint)
+}
+
+async function resumeCheckpoint() {
+  if (running || !workspace) return
+  if (!activeCheckpointAvailable()) {
+    setActivity("No saved checkpoint to resume", { error: true })
+    return
+  }
+  protocol = new ProtocolState()
+  lastAssistantText = ""
+  resetTokenSpeed()
+  resetRunStats()
+  runStats.startedAt = Date.now()
+  requestHost.replaceChildren()
+  enterConversation()
+  setRunning(true)
+  setActivity("Resuming checkpoint…", { busy: true, progress: 0 })
+  try {
+    await window.kvist.resume(workspace, runOptions)
+  } catch (error) {
+    setRunning(false)
+    addError(error.message)
+    setActivity("Could not resume", { error: true })
+  }
+}
+
+async function deleteSession(projectPath, name) {
+  if (running || !name) return
+  showConfirm(
+    "Delete session",
+    `Delete “${name}”? Its chat history and checkpoint are removed permanently.`,
+    "Delete",
+    async () => {
+      try {
+        const result = await window.kvist.deleteSession(projectPath, name)
+        updateNavigation(result.navigation)
+        const project = currentProject()
+        if (name === activeSessionName) {
+          displaySession(sessionItem(project, project?.status?.active_session))
+        }
+        renderNavigation()
+      } catch (error) {
+        addError(error.message)
+      }
+    },
+  )
+}
+
+async function showChanges() {
+  if (!workspace) return
+  setActivity("Reading changes…", { busy: true })
+  try {
+    const result = await window.kvist.changes()
+    showInfo("Agent file changes", result.report || "No tracked agent changes.", { mono: true })
+    setActivity("Ready")
+  } catch (error) {
+    addError(error.message)
+    setActivity("Could not read changes", { error: true })
+  }
+}
+
+function confirmRevert() {
+  if (running || !workspace) return
+  showConfirm(
+    "Revert agent changes",
+    "Restore every file the agent changed (across all sessions) to its recorded baseline. "
+      + "Your own later edits are kept. Continue?",
+    "Revert",
+    async () => {
+      setActivity("Reverting…", { busy: true })
+      try {
+        const result = await window.kvist.revert()
+        const changed = (result.reverted || []).filter((item) => item.action !== "skipped")
+        const summary = changed.length
+          ? changed.map((item) => `${item.action}: ${item.path}`).join("\n")
+          : "No files needed reverting."
+        showInfo("Revert complete", summary, { mono: true })
+        setActivity("Reverted")
+        void refreshNavigation()
+      } catch (error) {
+        addError(error.message)
+        setActivity("Could not revert", { error: true })
+      }
+    },
+  )
+}
+
+function showAbout() {
+  const lines = [
+    "Kvist — local, terminal-native coding agent.",
+    "",
+    `Protocol ${protocolLabel.textContent}`,
+    `Workspace: ${workspace || "none"}`,
+    "",
+    "Ctrl+P — command palette",
+    "Ctrl+N — new chat",
+    "Ctrl+M — run configuration",
+    "Esc — interrupt run or close a dialog",
+  ]
+  showInfo("About Kvist", lines.join("\n"))
+}
+
+function showInfo(title, body, { mono = false } = {}) {
+  infoTitle.textContent = title
+  infoBody.textContent = body
+  infoBody.classList.toggle("is-mono", mono)
+  infoActions.replaceChildren(actionButton("Close", "", hideInfo))
+  infoBackdrop.classList.remove("is-hidden")
+  infoActions.querySelector("button")?.focus()
+}
+
+function showConfirm(title, body, confirmLabel, onConfirm) {
+  infoTitle.textContent = title
+  infoBody.textContent = body
+  infoBody.classList.remove("is-mono")
+  const cancel = actionButton("Cancel", "", hideInfo)
+  const confirm = actionButton(confirmLabel, "danger-button", () => {
+    hideInfo()
+    void onConfirm()
+  })
+  infoActions.replaceChildren(cancel, confirm)
+  infoBackdrop.classList.remove("is-hidden")
+  cancel.focus()
+}
+
+function hideInfo() {
+  infoBackdrop.classList.add("is-hidden")
+  infoBody.classList.remove("is-mono")
+  if (!promptInput.disabled) promptInput.focus()
+}
+
+const PALETTE_COMMANDS = [
+  { id: "new", label: "New chat", hint: "Reset the session and start fresh", keys: "ctrl+n" },
+  {
+    id: "resume",
+    label: "Resume checkpoint",
+    hint: "Continue the latest unfinished task",
+    enabled: () => activeCheckpointAvailable(),
+  },
+  {
+    id: "settings",
+    label: "Provider, models & role",
+    hint: "Pick provider, models, role and approvals",
+    keys: "ctrl+m",
+  },
+  { id: "workspace", label: "Open project…", hint: "Switch to another workspace folder" },
+  { id: "changes", label: "Show agent changes", hint: "Diff of every file the agent changed" },
+  {
+    id: "revert",
+    label: "Revert agent changes",
+    hint: "Restore changed files to their baselines",
+    enabled: () => !running,
+  },
+  { id: "details", label: "Toggle tool details", hint: "Expand or collapse step cards" },
+  {
+    id: "interrupt",
+    label: "Interrupt Kvist",
+    hint: "Stop the current run",
+    keys: "esc",
+    enabled: () => running,
+  },
+  { id: "about", label: "About Kvist", hint: "Shortcuts and build info" },
+]
+
+async function runCommand(id) {
+  hidePalette()
+  if (id === "new") await createNewSession()
+  else if (id === "resume") await resumeCheckpoint()
+  else if (id === "settings") await showSettings()
+  else if (id === "workspace") { if (!running) await chooseProject() }
+  else if (id === "changes") await showChanges()
+  else if (id === "revert") confirmRevert()
+  else if (id === "details") toggleDetails()
+  else if (id === "interrupt") await interrupt()
+  else if (id === "about") showAbout()
+}
+
+function renderPalette() {
+  const query = paletteFilter.value.trim().toLowerCase()
+  paletteList.replaceChildren()
+  const items = PALETTE_COMMANDS.filter((command) => {
+    if (command.enabled && !command.enabled()) return false
+    if (!query) return true
+    return `${command.label} ${command.hint}`.toLowerCase().includes(query)
+  })
+  if (!items.length) {
+    paletteList.append(createElement("div", "empty-navigation", "No matching commands"))
+    return
+  }
+  for (const command of items) {
+    const button = createElement("button", "palette-item")
+    button.type = "button"
+    const copy = createElement("span", "palette-copy")
+    copy.append(
+      createElement("span", "palette-label", command.label),
+      createElement("small", "", command.hint),
+    )
+    button.append(copy)
+    if (command.keys) button.append(createElement("kbd", "", command.keys))
+    button.addEventListener("click", () => void runCommand(command.id))
+    paletteList.append(button)
+  }
+}
+
 function showPalette() {
+  paletteFilter.value = ""
+  renderPalette()
   paletteBackdrop.classList.remove("is-hidden")
-  paletteBackdrop.querySelector("button")?.focus()
+  paletteFilter.focus()
 }
 
 function hidePalette() {
@@ -1258,19 +1492,23 @@ paletteBackdrop.addEventListener("keydown", (event) => {
   hidePalette()
 })
 
-for (const button of paletteBackdrop.querySelectorAll("[data-command]")) {
-  button.addEventListener("click", async () => {
-    const command = button.dataset.command
-    hidePalette()
-    if (command === "new") await createNewSession()
-    if (command === "workspace" && !running) {
-      await chooseProject()
-    }
-    if (command === "settings") showSettings()
-    if (command === "details") toggleDetails()
-    if (command === "interrupt") await interrupt()
-  })
-}
+paletteFilter.addEventListener("input", renderPalette)
+paletteFilter.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return
+  event.preventDefault()
+  paletteList.querySelector("button")?.click()
+})
+
+infoClose.addEventListener("click", hideInfo)
+infoBackdrop.addEventListener("click", (event) => {
+  if (event.target === infoBackdrop) hideInfo()
+})
+infoBackdrop.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return
+  event.preventDefault()
+  event.stopPropagation()
+  hideInfo()
+})
 
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
@@ -1290,6 +1528,7 @@ document.addEventListener("keydown", (event) => {
     event.key === "Escape"
     && paletteBackdrop.classList.contains("is-hidden")
     && settingsBackdrop.classList.contains("is-hidden")
+    && infoBackdrop.classList.contains("is-hidden")
   ) {
     void interrupt()
   }
@@ -1328,5 +1567,7 @@ window.kvist.bootstrap().then((state) => {
   renderNavigation()
   promptInput.focus()
   if (state.initialGoal) void startGoal(state.initialGoal)
-  if (new URLSearchParams(location.search).get("panel") === "settings") void showSettings()
+  const panel = new URLSearchParams(location.search).get("panel")
+  if (panel === "settings") void showSettings()
+  else if (panel === "palette") showPalette()
 })

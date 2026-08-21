@@ -65,6 +65,13 @@ contextBridge.exposeInMainWorld("kvist", {
     "kvist:start",
     { goal, workspace, options },
   ),
+  resume: (workspace, options) => ipcRenderer.invoke("kvist:resume", { workspace, options }),
+  deleteSession: (workspace, name) => ipcRenderer.invoke(
+    "kvist:delete-session",
+    { workspace, name },
+  ),
+  changes: () => ipcRenderer.invoke("kvist:changes"),
+  revert: () => ipcRenderer.invoke("kvist:revert"),
   respond: (payload) => ipcRenderer.invoke("kvist:respond", payload),
   stop: () => ipcRenderer.invoke("kvist:stop"),
   renderMarkdown,
