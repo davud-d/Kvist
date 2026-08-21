@@ -18,6 +18,17 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Path to the project workspace directory.",
     )
     parser.add_argument(
+        "--allow-read",
+        action="append",
+        default=[],
+        metavar="DIR",
+        dest="allow_read",
+        help=(
+            "Extra directory the read-only actions may read outside the "
+            "workspace. Repeatable. Writes and shell stay workspace-only."
+        ),
+    )
+    parser.add_argument(
         "--no-banner",
         action="store_true",
         help="Disable the live banner and use the plain terminal interface.",
@@ -232,24 +243,54 @@ def multiline_input() -> str:
     ).strip()
 
 
+def restore_input_draft(interactive_screen, text: str) -> None:
+    """Put a rejected or cancelled prompt back into the input field.
+
+    The user typed it once; losing it to a length rejection or a cancelled
+    turn means retyping. Only the live screen can hold a draft, so the plain
+    fallback interface silently skips it.
+    """
+    if interactive_screen is None or not text or text.startswith("/"):
+        return
+    try:
+        interactive_screen.set_input_text(text)
+    except Exception:
+        # A draft is a convenience; never let restoring one break the loop.
+        pass
+
+
 def sleep(seconds: int):
     time.sleep(seconds)
 
 
-_MIN_PROMPT_LENGTH = 10
+# Minimum prompt length before the conversation has real turns behind it, and
+# after. The gate answers one question: is there anything for the agent to
+# answer at all? On a cold conversation a one-character prompt is a typo or a
+# liveness check. Once turns exist, a short reply ("зачем?", "why?") is a
+# follow-up on them and its length says nothing about its worth.
+_MIN_PROMPT_LENGTH = 8
+_MIN_FOLLOWUP_PROMPT_LENGTH = 4
+_FOLLOWUP_TURN_THRESHOLD = 2
+
+
+def minimum_prompt_length(completed_turns: int) -> int:
+    if completed_turns >= _FOLLOWUP_TURN_THRESHOLD:
+        return _MIN_FOLLOWUP_PROMPT_LENGTH
+    return _MIN_PROMPT_LENGTH
 
 
 def validate_user_goal(
     user_goal: str,
     language_hint: str = "en",
-    has_session_context: bool = False,
+    completed_turns: int = 0,
 ) -> str | None:
-    """Return an error message if the prompt is invalid, or None if it is acceptable.
+    """Return an error message if the prompt is invalid, or None if acceptable.
 
-    The minimum-length gate only applies to a fresh turn. Once the session has a
-    completed turn, a short reply ("всмысле?", "why?") is a follow-up on that
-    context, not an underspecified new task — rejecting it by length alone is
-    what made an 8-char message fail while a 10-char one went through.
+    ``completed_turns`` counts agent runs finished in *this process*. It must
+    not be derived from the persisted session history: that history is restored
+    from disk during ``LocalAgent.__init__``, so any workspace used once would
+    disable the gate permanently and a bare "." would reach the model on a
+    conversation that has no context to answer it from.
     """
     stripped = user_goal.strip()
 
@@ -264,7 +305,7 @@ def validate_user_goal(
     if stripped.startswith("/"):
         return None
 
-    if len(stripped) < _MIN_PROMPT_LENGTH and not has_session_context:
+    if len(stripped) < minimum_prompt_length(completed_turns):
         return choose_localized_text(
             ru_text='Опиши задачу подробнее. Например: "Исправь ошибку в main.py" или "Создай parser.py для CSV".',
             en_text='Please describe the task more specifically. Example: "Fix the bug in main.py" or "Create parser.py for CSV".',
@@ -1809,7 +1850,10 @@ def main() -> None:
 
     try:
         workspace_path = resolve_workspace_path(args.workspace)
-        executor = SafeExecutor(workspace=workspace_path)
+        executor = SafeExecutor(
+            workspace=workspace_path,
+            read_roots=tuple(args.allow_read),
+        )
         agent, config, model_warnings = build_agent(
             executor=executor,
             max_steps=max_steps,
@@ -1817,7 +1861,7 @@ def main() -> None:
             verbose=verbose,
             language_hint=session_language,
         )
-    except RuntimeError as error:
+    except (RuntimeError, ValueError) as error:
         print(sanitize_display_text(str(error)), file=sys.stderr)
         sys.exit(2)
 
@@ -1877,6 +1921,9 @@ def main() -> None:
             console.print(_display_text(warning, "yellow"))
 
     interrupted = False
+    # Turns finished in this process. Drives the prompt-length gate; the
+    # persisted session history must not be used for it.
+    completed_turns = 0
     try:
         while True:
             if interactive_screen is None:
@@ -1884,7 +1931,11 @@ def main() -> None:
             else:
                 user_goal = interactive_screen.read_input()
             user_goal = normalize_slash_command(user_goal)
-            if user_goal and not user_goal.startswith("/"):
+            # A bare Enter is a no-op in every shell. Re-prompt silently instead
+            # of answering it with a "describe the task" lecture.
+            if not user_goal:
+                continue
+            if not user_goal.startswith("/"):
                 session_language = detect_request_language(user_goal, fallback=session_language)
             if user_goal.lower() == "/bye":
                 save_session_for_shutdown(agent)
@@ -2288,14 +2339,14 @@ def main() -> None:
                 )
                 continue
 
-            has_session_context = bool(getattr(agent, "_session_history", []))
             validation_error = validate_user_goal(
                 user_goal,
                 language_hint=session_language,
-                has_session_context=has_session_context,
+                completed_turns=completed_turns,
             )
             if validation_error:
                 console.print(_display_text(validation_error, "yellow"))
+                restore_input_draft(interactive_screen, user_goal)
                 continue
 
             if user_goal.lower() == "/commands":
@@ -2352,6 +2403,11 @@ Support:
                             "yellow",
                         )
                     )
+                    # Cancelled before the action model saw the goal: nothing
+                    # ran, so handing the text back is honest. Later stages
+                    # have already spent tokens or touched files and must not
+                    # pretend the turn never happened.
+                    restore_input_draft(interactive_screen, user_goal)
                     continue
                 except Exception:
                     detected_role = route_role(user_goal)
@@ -2385,6 +2441,7 @@ Support:
                     )
                 )
                 continue
+            completed_turns += 1
             if verbose:
                 print(f"\n[Final Answer]\n{sanitize_display_text(result)}")
     except KeyboardInterrupt:

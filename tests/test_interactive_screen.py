@@ -549,3 +549,81 @@ def test_page_keys_scroll_transcript_without_recalling_input_history(
     _wait_until(lambda: "scroll line 099" in _rendered_text(screen_runtime))
 
     assert screen_runtime.session.default_buffer.text == ""
+
+
+# ── Draft restore: a rejected or cancelled prompt returns to the input ──────
+
+
+def test_set_input_text_places_the_draft_with_the_cursor_at_the_end():
+    from unittest.mock import MagicMock
+
+    from interactive_screen import InteractiveScreen
+
+    screen = MagicMock()
+    buffer = MagicMock()
+    screen.session.default_buffer = buffer
+    screen._app = None
+
+    InteractiveScreen.set_input_text(screen, "почини reader")
+
+    assert buffer.document.text == "почини reader"
+    assert buffer.document.cursor_position == len("почини reader")
+
+
+def test_set_input_text_ignores_empty_text():
+    from unittest.mock import MagicMock
+
+    from interactive_screen import InteractiveScreen
+
+    screen = MagicMock()
+    screen.session.default_buffer = MagicMock()
+    screen._app = None
+
+    InteractiveScreen.set_input_text(screen, "")
+
+    screen.invalidate.assert_not_called()
+
+
+def test_set_input_text_schedules_on_the_running_loop():
+    """The main thread must not mutate the buffer the render thread owns."""
+    from unittest.mock import MagicMock
+
+    from interactive_screen import InteractiveScreen
+
+    scheduled = []
+    screen = MagicMock()
+    screen.session.default_buffer = MagicMock()
+    screen._app.loop.is_running.return_value = True
+    screen._app.loop.call_soon_threadsafe = scheduled.append
+
+    InteractiveScreen.set_input_text(screen, "текст")
+
+    assert len(scheduled) == 1
+
+
+def test_restore_input_draft_skips_nothing_worth_restoring():
+    from unittest.mock import MagicMock
+
+    from main import restore_input_draft
+
+    restored = []
+    screen = MagicMock()
+    screen.set_input_text = restored.append
+
+    restore_input_draft(None, "текст")
+    restore_input_draft(screen, "")
+    restore_input_draft(screen, "/bye")
+    restore_input_draft(screen, "почини reader")
+
+    assert restored == ["почини reader"]
+
+
+def test_restore_input_draft_never_breaks_the_loop():
+    from unittest.mock import MagicMock
+
+    from main import restore_input_draft
+
+    screen = MagicMock()
+    screen.set_input_text = MagicMock(side_effect=RuntimeError("loop closed"))
+
+    restore_input_draft(screen, "текст")

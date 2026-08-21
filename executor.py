@@ -28,7 +28,11 @@ from change_journal import (
 from durable_json import JsonStorageError, exclusive_storage_lock
 from env_utils import read_float_env, read_int_env
 from protocol import AgentCommand
-from secret_paths import UnsafeSecretPathError, count_workspace_inode_aliases
+from secret_paths import (
+    UnsafeSecretPathError,
+    count_workspace_inode_aliases,
+    is_secret_path,
+)
 from approvals import ApprovalGate, TerminalApprovalGate
 from terminal import TerminalExecutor, TerminalError, is_hitl_active
 
@@ -100,11 +104,53 @@ class ExecutionResult:
     data: dict[str, Any]
 
 
+def _validated_read_roots(
+    raw_roots: tuple[str | Path, ...],
+    workspace: Path,
+) -> tuple[Path, ...]:
+    """Resolve the extra read-only roots, dropping ones that mean nothing.
+
+    The user is the trust root here: these come from an explicit CLI flag, so
+    the check is narrow on purpose.  ``/`` is refused because it turns every
+    later containment test into a tautology, and a root that already contains
+    the workspace is refused because it would give the same file two different
+    guard chains.
+    """
+    roots: list[Path] = []
+    for raw in raw_roots:
+        try:
+            resolved = Path(raw).expanduser().resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ValueError(f"Read root does not exist: {raw}") from error
+        if not resolved.is_dir():
+            raise ValueError(f"Read root must be a directory: {resolved}")
+        if resolved == Path(resolved.anchor):
+            raise ValueError("Refusing the filesystem root as a read root")
+        if workspace == resolved or workspace.is_relative_to(resolved):
+            raise ValueError(
+                f"Read root already contains the workspace: {resolved}"
+            )
+        if resolved not in roots:
+            roots.append(resolved)
+    return tuple(roots)
+
+
 class SafeExecutor:
-    def __init__(self, workspace: str | Path, *, approvals: ApprovalGate | None = None) -> None:
+    def __init__(
+        self,
+        workspace: str | Path,
+        *,
+        approvals: ApprovalGate | None = None,
+        read_roots: tuple[str | Path, ...] = (),
+    ) -> None:
         self._approvals = approvals or TerminalApprovalGate()
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
+        # Extra directories the read-only actions may leave the workspace for.
+        # Opt-in only: an empty tuple keeps the historical workspace boundary.
+        self.read_roots: tuple[Path, ...] = _validated_read_roots(
+            read_roots, self.workspace
+        )
         self.internal_agent_dirname = ".kvist"
         self._source_write_lock = (
             self.workspace / self.internal_agent_dirname / "source-writes"
@@ -556,6 +602,98 @@ class SafeExecutor:
                 "proven to stay inside the workspace"
             )
 
+    def _read_boundary_for(self, target: Path) -> Path | None:
+        """Return the boundary that contains ``target``, or None if none does."""
+        if target == self.workspace or target.is_relative_to(self.workspace):
+            return self.workspace
+        return next(
+            (
+                root
+                for root in self.read_roots
+                if target == root or target.is_relative_to(root)
+            ),
+            None,
+        )
+
+    def _resolve_read_path(self, user_path: str | None) -> Path:
+        """Resolve a path for a read-only action.
+
+        Anything landing inside the workspace keeps the full guard chain of
+        ``_resolve_path``.  Only a path that canonically lands inside an
+        explicitly configured read root takes the external branch, which trades
+        the symlink/hardlink containment checks (meaningless outside the
+        workspace) for a lexical secret check.
+        """
+        raw = self._normalize_user_path(user_path)
+        try:
+            candidate = (self.workspace / Path(raw).expanduser()).resolve()
+        except (OSError, RuntimeError) as error:
+            raise ExecutorError(
+                "Failed to resolve path: " + self._path_error_details(raw, error=error)
+            ) from error
+
+        if candidate == self.workspace or candidate.is_relative_to(self.workspace):
+            return self._resolve_path(raw)
+
+        if self._read_boundary_for(candidate) is None:
+            raise ExecutorError(
+                f"Access outside workspace is forbidden: {candidate} is not "
+                "inside the workspace or any configured read root. This is a "
+                "final denial, not a transient error: do not retry this path or "
+                "a variant of it. Report to the user that reading it requires "
+                f"restarting Kvist with --allow-read {candidate.parent}."
+            )
+
+        self._check_env_file(candidate)
+        if is_secret_path(candidate):
+            raise ExecutorError(
+                "Access denied: the path is classified as secret material "
+                "(key, credential, or .env). Read roots do not lift this rule. "
+                "Do not retry; report it to the user."
+            )
+        return candidate
+
+    def _resolve_read_dir(self, user_path: str | None) -> Path:
+        target = self._resolve_read_path(user_path)
+        safe_path = self._normalize_user_path(user_path)
+        try:
+            if not target.exists():
+                raise ExecutorError(
+                    "Path not found: " + self._path_error_details(safe_path, target)
+                )
+            if not target.is_dir():
+                raise ExecutorError(
+                    "Not a directory: " + self._path_error_details(safe_path, target)
+                )
+        except PermissionError as error:
+            raise ExecutorError(
+                "Permission denied while checking directory: "
+                + self._path_error_details(safe_path, target, error)
+            ) from error
+        return target
+
+    def _canonical_read_target(self, target: Path) -> Path:
+        """Read-sink resolution that also accepts the configured read roots."""
+        try:
+            canonical = target.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ExecutorError(
+                f"Cannot safely resolve file for reading: {target.name}"
+            ) from error
+        boundary = self._read_boundary_for(canonical)
+        if boundary is None:
+            raise ExecutorError(
+                "Access outside workspace is forbidden while reading a file"
+            )
+        if boundary == self.workspace:
+            return self._canonical_workspace_read_target(target)
+        self._check_env_file(canonical)
+        if is_secret_path(canonical):
+            raise ExecutorError(
+                "Access denied: the path is classified as secret material"
+            )
+        return canonical
+
     def _canonical_workspace_read_target(self, target: Path) -> Path:
         """Resolve a discovered file again at the read sink and enforce guards."""
         try:
@@ -597,6 +735,24 @@ class SafeExecutor:
 
     def _relative_path(self, target: Path) -> str:
         return target.relative_to(self.workspace).as_posix()
+
+    def _skip_during_walk(self, path: Path) -> bool:
+        """Skip secret material found while walking an external read root.
+
+        A walk must not abort on one protected file: ``find_files`` and
+        ``search_code`` scan whole trees, and raising there would turn a single
+        key file into a failure for the entire search.
+        """
+        if self._read_boundary_for(path) == self.workspace:
+            return False
+        return is_secret_path(path)
+
+    def _display_path(self, target: Path) -> str:
+        """Workspace-relative when possible, absolute for a read-root path."""
+        try:
+            return self._relative_path(target)
+        except ValueError:
+            return target.as_posix()
 
     _INTERNAL_PATH_TOKEN_RE = re.compile(
         r"(?<![A-Za-z0-9_.-])(?:\./)?\.kvist(?:[\\/]|$)",
@@ -668,14 +824,16 @@ class SafeExecutor:
                 "If you need to update environment variables, ask the user to do it manually."
             )
 
-    def _guard_env_file_access(self, path: str) -> Path:
+    def _guard_env_file_access(self, path: str, *, read_only: bool = False) -> Path:
         self._check_env_file(path)
-        target = self._resolve_path(path)
+        target = (
+            self._resolve_read_path(path) if read_only else self._resolve_path(path)
+        )
         self._check_env_file(target)
         return target
 
     def _read_file(self, path: str) -> ExecutionResult:
-        target = self._guard_env_file_access(path)
+        target = self._guard_env_file_access(path, read_only=True)
 
         if not target.exists():
             raise ExecutorError(f"File not found: {path}")
@@ -700,7 +858,7 @@ class SafeExecutor:
     def _read_multiple_files(self, paths: list[str]) -> ExecutionResult:
         files: list[dict[str, Any]] = []
         for path in paths:
-            target = self._guard_env_file_access(path)
+            target = self._guard_env_file_access(path, read_only=True)
             if not target.exists() or not target.is_file():
                 raise ExecutorError(f"File not found: {path}")
             content, truncated = self._safe_read_text(target)
@@ -1321,7 +1479,7 @@ class SafeExecutor:
 
     def _list_dir(self, path: str | None) -> ExecutionResult:
         path = self._normalize_user_path(path)
-        target = self._resolve_path(path)
+        target = self._resolve_read_path(path)
 
         try:
             if not target.exists():
@@ -1367,7 +1525,7 @@ class SafeExecutor:
         )
 
     def _list_tree(self, path: str, max_depth: int = 5) -> ExecutionResult:
-        target = self._resolve_path(path)
+        target = self._resolve_read_path(path)
 
         if not target.exists():
             raise ExecutorError(f"Path not found: {path}")
@@ -1432,13 +1590,15 @@ class SafeExecutor:
                 counter[0] += 1
 
     def _find_files(self, pattern: str, path: str = "") -> ExecutionResult:
-        base_dir = self._resolve_dir(path)
+        base_dir = self._resolve_read_dir(path)
         matches: list[str] = []
 
         try:
             files = self._iter_files(base_dir)
             for file_path in files:
-                relative = self._relative_path(file_path.resolve())
+                if self._skip_during_walk(file_path):
+                    continue
+                relative = self._display_path(file_path.resolve())
                 if fnmatch.fnmatch(file_path.name, pattern) or fnmatch.fnmatch(relative, pattern):
                     matches.append(relative)
                 if len(matches) >= 200:
@@ -1474,17 +1634,19 @@ class SafeExecutor:
         results: list[dict[str, Any]] = []
         safe_limit = max(1, min(max_results, self.max_search_results))
 
-        target = self._resolve_path(path) if path else self.workspace
+        target = self._resolve_read_path(path) if path else self.workspace
         if target.is_file():
             files_to_search = [target]
         else:
-            base_dir = self._resolve_dir(path)
+            base_dir = self._resolve_read_dir(path)
             files_to_search = self._iter_files(base_dir)
 
         for file_path in files_to_search:
             if self._ENV_PATTERN.search(file_path.name):
                 continue
-            readable_path = self._canonical_workspace_read_target(file_path)
+            if self._skip_during_walk(file_path):
+                continue
+            readable_path = self._canonical_read_target(file_path)
             try:
                 text = readable_path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
@@ -1494,7 +1656,7 @@ class SafeExecutor:
                 if query_folded in line.casefold():
                     results.append(
                         {
-                            "path": self._relative_path(readable_path),
+                            "path": self._display_path(readable_path),
                             "line": line_number,
                             "text": self._truncate_text(line.strip(), 300),
                         }
@@ -2212,7 +2374,7 @@ class SafeExecutor:
             raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
 
     def _safe_read_text(self, target: Path) -> tuple[str, bool]:
-        target = self._canonical_workspace_read_target(target)
+        target = self._canonical_read_target(target)
         try:
             raw = target.read_text(encoding="utf-8", errors="replace")
         except OSError as error:

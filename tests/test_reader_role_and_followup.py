@@ -119,24 +119,55 @@ def test_run_loop_reader_role_blocks_file_writes(agent_factory):
     )
 
 
-# ── BUG-4: short follow-up is accepted once the session has context ─────────
+# ── BUG-4: the length gate scales with turns completed in this process ──────
 
-def test_validate_user_goal_rejects_short_input_without_context():
+
+def test_validate_user_goal_rejects_short_input_on_a_cold_conversation():
     from main import validate_user_goal
 
-    error = validate_user_goal("всмысле?", language_hint="ru", has_session_context=False)
+    error = validate_user_goal("зачем?", language_hint="ru", completed_turns=0)
     assert error is not None
 
 
-def test_validate_user_goal_accepts_short_followup_with_context():
+def test_validate_user_goal_accepts_short_followup_after_two_turns():
     from main import validate_user_goal
 
-    error = validate_user_goal("всмысле?", language_hint="ru", has_session_context=True)
+    error = validate_user_goal("зачем?", language_hint="ru", completed_turns=2)
     assert error is None
 
 
-def test_validate_user_goal_still_rejects_empty_even_with_context():
+def test_validate_user_goal_keeps_the_cold_threshold_after_one_turn():
+    """One finished turn is not yet a conversation; the gate must not relax."""
     from main import validate_user_goal
 
-    error = validate_user_goal("   ", language_hint="ru", has_session_context=True)
+    assert validate_user_goal("зачем?", language_hint="ru", completed_turns=1)
+
+
+def test_validate_user_goal_rejects_a_bare_dot_regardless_of_turns():
+    from main import validate_user_goal
+
+    for turns in (0, 1, 2, 50):
+        assert validate_user_goal(".", language_hint="ru", completed_turns=turns)
+
+
+def test_validate_user_goal_still_rejects_empty_after_many_turns():
+    from main import validate_user_goal
+
+    error = validate_user_goal("   ", language_hint="ru", completed_turns=50)
     assert error is not None
+
+
+def test_validate_user_goal_defaults_to_the_cold_threshold():
+    """A caller that forgets the counter must get the strict gate, not the loose one."""
+    from main import validate_user_goal
+
+    assert validate_user_goal("зачем?", language_hint="ru")
+
+
+def test_minimum_prompt_length_tiers():
+    from main import minimum_prompt_length
+
+    assert minimum_prompt_length(0) == 8
+    assert minimum_prompt_length(1) == 8
+    assert minimum_prompt_length(2) == 4
+    assert minimum_prompt_length(99) == 4

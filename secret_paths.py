@@ -121,6 +121,18 @@ def is_secret_dir_name(name: str) -> bool:
     return name.casefold() in {d.casefold() for d in _SECRET_DIR_NAMES}
 
 
+def is_secret_path(path: Path) -> bool:
+    """Lexical secret classification for a path outside the sandbox mask.
+
+    Bubblewrap masking only covers the workspace.  Extra read-only roots are
+    plain host paths read by the Python layer, so they need the same
+    classification applied by name before any content is opened.
+    """
+    if any(is_secret_dir_name(part) for part in path.parts):
+        return True
+    return is_secret_basename(path.name)
+
+
 def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
     """Return (secret_files, secret_dirs) that must be masked under ``workspace``.
 

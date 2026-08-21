@@ -24,6 +24,7 @@ if os.name != "nt":
     import termios
 
 from prompt_toolkit.application import Application
+from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, has_completions, has_focus
 from prompt_toolkit.formatted_text import (
     ANSI,
@@ -607,6 +608,32 @@ class InteractiveScreen:
     # ------------------------------------------------------------------
     # Synchronous input
     # ------------------------------------------------------------------
+    def set_input_text(self, text: str) -> None:
+        """Put ``text`` back into the input buffer, cursor at the end.
+
+        Called from the synchronous main thread while the prompt_toolkit event
+        loop runs in the render thread, so the buffer mutation is scheduled on
+        that loop rather than performed here.  A no-op for empty text and for a
+        screen that is not currently running.
+        """
+        if not text:
+            return
+        app = self._app
+        buffer = self.session.default_buffer
+
+        def restore() -> None:
+            buffer.document = Document(text, len(text))
+
+        try:
+            loop = app.loop if app is not None else None
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(restore)
+        else:
+            restore()
+        self.invalidate()
+
     def read_input(self) -> str:
         """Wait for the next accepted input without stopping the renderer."""
 
@@ -662,6 +689,12 @@ class InteractiveScreen:
 
     def _accept_input(self, buffer: Any) -> bool:
         value = buffer.document.text.strip()
+        if not value:
+            # Never wake the main loop for an empty line: it has nothing to run
+            # and would only print a validation message. Returning False lets
+            # prompt_toolkit reset the buffer and redraw the prompt.
+            self.invalidate()
+            return False
         if value:
             fragments = list(_INPUT_PROMPT)
             fragments.extend(
