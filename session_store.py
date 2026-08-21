@@ -33,6 +33,7 @@ from agent_logging import (
     reset_session,
     save_active_session,
 )
+from durable_json import JsonStorageCorruptError
 
 SESSION_OPS = ("status", "create", "switch", "delete", "reset")
 
@@ -56,10 +57,71 @@ class SessionStore:
         self._storage_warnings: list[str] = []
         self.current_session = load_active_session(self)
 
+    def _session_items(self, sessions: list[str]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for name in sessions:
+            try:
+                document = read_session_document(self, name)
+            except JsonStorageCorruptError:
+                self._storage_warnings.append(
+                    f"Session {name!r} is damaged and was hidden from the session list."
+                )
+                continue
+
+            session_history = document.get("session_history")
+            if not isinstance(session_history, list):
+                session_history = []
+            chat_history = document.get("chat_history")
+            if not isinstance(chat_history, list):
+                chat_history = []
+
+            title = ""
+            for entry in session_history:
+                if isinstance(entry, dict) and isinstance(entry.get("goal"), str):
+                    title = entry["goal"].strip()
+                    if title:
+                        break
+            if not title:
+                for message in chat_history:
+                    if (
+                        isinstance(message, dict)
+                        and message.get("role") == "user"
+                        and isinstance(message.get("content"), str)
+                    ):
+                        title = message["content"].strip()
+                        if title:
+                            break
+            checkpoint = document.get("checkpoint")
+            if (
+                not title
+                and isinstance(checkpoint, dict)
+                and isinstance(checkpoint.get("goal"), str)
+            ):
+                title = checkpoint["goal"].strip()
+
+            updated_at = document.get("updated_at")
+            items.append(
+                {
+                    "name": name,
+                    "title": title or name,
+                    "updated_at": (
+                        float(updated_at)
+                        if isinstance(updated_at, (int, float))
+                        else 0.0
+                    ),
+                    "session_history": session_history,
+                    "chat_history": chat_history,
+                    "has_checkpoint": isinstance(checkpoint, dict),
+                }
+            )
+        return sorted(items, key=lambda item: item["updated_at"], reverse=True)
+
     def status(self) -> dict[str, Any]:
+        sessions = list_sessions(self)
         return {
             "active_session": self.current_session,
-            "sessions": list_sessions(self),
+            "sessions": sessions,
+            "session_items": self._session_items(sessions),
             "checkpoint": peek_checkpoint(self),
             "warnings": list(self._storage_warnings),
         }
