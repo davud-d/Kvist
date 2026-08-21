@@ -437,6 +437,9 @@ class InteractiveScreen:
         self._slot_cache: (
             tuple[int, int, int, list[tuple[str, str]]] | None
         ) = None
+        self._status_cache: (
+            tuple[int, int, int, list[tuple[str, str]]] | None
+        ) = None
         self._transient_render_cursor = Point(x=0, y=0)
 
         self._layout: Layout | None = None
@@ -1116,6 +1119,17 @@ class InteractiveScreen:
             filter=Condition(self._show_banner),
         )
 
+        status = ConditionalContainer(
+            Window(
+                FormattedTextControl(self._get_status, show_cursor=False),
+                height=Dimension(min=1, max=_MAX_TRANSIENT_HEIGHT),
+                dont_extend_height=True,
+                wrap_lines=True,
+                always_hide_cursor=True,
+            ),
+            filter=Condition(self._has_status),
+        )
+
         transcript_control = _TranscriptControl(self._transcript_content)
         transcript = Window(
             transcript_control,
@@ -1142,6 +1156,9 @@ class InteractiveScreen:
         )
 
         buffer = self.session.default_buffer
+        # Lock out typing while a run's status panel is live so nothing can be
+        # entered mid-run; the input row is also hidden (see ``input_area``).
+        buffer.read_only = Condition(self._has_status)
         input_control = BufferControl(
             buffer=buffer,
             lexer=self.session.lexer,
@@ -1175,13 +1192,22 @@ class InteractiveScreen:
             ),
             filter=has_completions,
         )
+        input_area = ConditionalContainer(
+            HSplit(
+                [
+                    Window(height=1, char=" "),
+                    input_window,
+                ]
+            ),
+            filter=Condition(self._input_visible),
+        )
         root = HSplit(
             [
                 banner_window,
+                status,
                 transcript,
                 transient,
-                Window(height=1, char=" "),
-                input_window,
+                input_area,
                 completion_menu,
             ]
         )
@@ -1336,27 +1362,62 @@ class InteractiveScreen:
             return SLASH_COMMAND_PROMPT_CONTINUATION
         return ""
 
+    def _has_status(self) -> bool:
+        with self._state_lock:
+            return self._status is not None
+
+    def _input_visible(self) -> bool:
+        """Hide the input row while a run's status panel is live."""
+        with self._state_lock:
+            return self._status is None
+
     def _has_transient(self) -> bool:
         with self._state_lock:
-            return self._stream is not None or self._status is not None
+            return self._stream is not None
 
-    def _get_transient(self) -> AnyFormattedText:
+    def _get_status(self) -> AnyFormattedText:
+        """Render the run-status panel pinned under the banner.
+
+        The status slot carries an animated spinner, so its cache key includes
+        the animation tick.
+        """
         width = self._terminal_width()
         with self._state_lock:
-            content = self._stream if self._stream is not None else self._status
-            # Only the status slot carries an animated spinner; a committed
-            # stream is static, so it keeps the cheap generation-only cache.
-            animated = self._stream is None and self._status is not None
-            tick = int(time.monotonic() * _TRANSIENT_ANIM_FPS) if animated else 0
+            content = self._status
+            if content is None:
+                return []
+            tick = int(time.monotonic() * _TRANSIENT_ANIM_FPS)
             generation = self._slot_generation
-            cached = self._slot_cache
+            cached = self._status_cache
             if cached is not None and cached[0:3] == (generation, width, tick):
                 return list(cached[3])
 
         fragments = self._format_content(content, width)
         with self._state_lock:
             if generation == self._slot_generation:
-                self._slot_cache = (generation, width, tick, fragments)
+                self._status_cache = (generation, width, tick, fragments)
+        return fragments
+
+    def _get_transient(self) -> AnyFormattedText:
+        """Render the streaming-reply slot at the bottom, above the input.
+
+        A committed stream is static, so it keeps the cheap generation-only
+        cache and tracks the cursor for the typing indicator.
+        """
+        width = self._terminal_width()
+        with self._state_lock:
+            content = self._stream
+            if content is None:
+                return []
+            generation = self._slot_generation
+            cached = self._slot_cache
+            if cached is not None and cached[0:2] == (generation, width):
+                return list(cached[3])
+
+        fragments = self._format_content(content, width)
+        with self._state_lock:
+            if generation == self._slot_generation:
+                self._slot_cache = (generation, width, 0, fragments)
             plain = "".join(fragment[1] for fragment in fragments)
             lines = plain.split("\n")
             self._transient_render_cursor = Point(

@@ -145,6 +145,33 @@ def test_banner_is_fixed_at_top_and_prompt_is_below_it(screen_runtime):
     assert any("❯" in line for line in lines[17:])
 
 
+def test_running_status_pins_under_banner_and_hides_input(screen_runtime):
+    screen = screen_runtime.screen
+    buffer = screen.session.default_buffer
+
+    # Idle: input is visible and editable.
+    assert any("❯" in line for line in _rendered_lines(screen_runtime))
+    assert not buffer.read_only()
+
+    screen.set_status("WORKING-STATUS")
+    _wait_until(lambda: "WORKING-STATUS" in _rendered_text(screen_runtime))
+    lines = _rendered_lines(screen_runtime)
+
+    # The status panel sits directly under the pinned banner (row 16 is its
+    # bottom border), not down by the input.
+    status_row = next(i for i, line in enumerate(lines) if "WORKING-STATUS" in line)
+    assert status_row > 16
+    # Input is hidden and locked while the run is live.
+    assert not any("❯" in line for line in lines)
+    assert buffer.read_only()
+
+    screen.set_status(None)
+    _wait_until(
+        lambda: any("❯" in line for line in _rendered_lines(screen_runtime))
+    )
+    assert not buffer.read_only()
+
+
 def test_slash_menu_opens_below_pinned_banner(screen_runtime):
     # A long transcript must not steal a row from the fixed command menu, and
     # the pinned banner keeps its rows at the top the whole time.
@@ -239,13 +266,15 @@ def test_config_replacement_clears_long_model_tail(screen_runtime):
     assert "Planner:  [x]" in text
 
 
-def test_stream_slot_commits_once_and_restores_status(screen_runtime):
+def test_stream_slot_commits_once_beside_pinned_status(screen_runtime):
+    # Status is pinned in its own slot under the banner; a stream renders in the
+    # separate bottom slot, so both stay visible at once.
     screen_runtime.screen.set_status("STATUS-ONLY")
     _wait_until(lambda: "STATUS-ONLY" in _rendered_text(screen_runtime))
 
     screen_runtime.screen.set_stream("PARTIAL-STREAM")
     _wait_until(lambda: "PARTIAL-STREAM" in _rendered_text(screen_runtime))
-    assert "STATUS-ONLY" not in _rendered_text(screen_runtime)
+    assert "STATUS-ONLY" in _rendered_text(screen_runtime)
 
     screen_runtime.screen.set_stream("FINAL-STREAM")
     screen_runtime.screen.commit_stream()
@@ -277,10 +306,10 @@ def test_dynamic_control_cursor_uses_same_snapshot_as_rendered_content(
     assert new_generation != generation
     assert new_cursor.y == len(new_lines) - 1 == cursor.y + 1
 
-    screen.set_status("one line")
+    screen.set_stream("one line")
     screen._get_transient()
     transient_cursor = screen._transient_cursor()
-    screen.set_status("first\nsecond")
+    screen.set_stream("first\nsecond")
     assert screen._transient_cursor() == transient_cursor
     screen._get_transient()
     assert screen._transient_cursor().y == 1
@@ -303,13 +332,13 @@ def test_status_slot_reanimates_on_a_time_tick(screen_runtime, monkeypatch):
     )
 
     screen.set_status("working on the task")
-    screen._get_transient()
+    screen._get_status()
     after_first = len(renders)
-    screen._get_transient()
+    screen._get_status()
     assert len(renders) == after_first  # same tick -> cached, spinner slot reused
 
     now[0] += 0.2  # advance past one 1/12s animation tick
-    screen._get_transient()
+    screen._get_status()
     assert len(renders) > after_first  # re-rendered so the spinner can advance
 
 
