@@ -142,58 +142,77 @@
           <button id="settingsClose" class="icon-button" type="button" aria-label="Close">×</button>
         </div>
 
-        <div class="settings-grid">
-          <label>
-            <span>Provider</span>
-            <select id="providerSelect">
-              <option value="">Saved provider</option>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="openrouter">OpenRouter</option>
-              <option value="omniroute">OmniRoute</option>
-              <option value="freeflow">FreeFlow</option>
-            </select>
-          </label>
-          <label>
-            <span>Custom provider ID</span>
-            <input id="customProviderInput" autocomplete="off" placeholder="custom:my-provider" />
-          </label>
-          <label>
-            <span>Role</span>
-            <select id="roleSelect">
-              <option value="auto">Auto</option>
-              <option value="coder">Coder</option>
-              <option value="devops">DevOps</option>
-              <option value="chat">Chat</option>
-            </select>
-          </label>
-          <label>
-            <span>Dangerous commands</span>
-            <select id="approvalModeSelect">
-              <option value="ask">Ask every time</option>
-              <option value="deny">Always deny</option>
-            </select>
-          </label>
+        <div class="settings-body">
+          <section class="settings-block">
+            <div class="block-head">
+              <span class="block-title">Provider</span>
+              <span id="providerStatus" class="status-pill" data-tone="neutral"></span>
+            </div>
+            <div class="field-grid two">
+              <label class="field">
+                <span>Use provider</span>
+                <select id="providerSelect"></select>
+              </label>
+              <label class="field">
+                <span>Add custom provider</span>
+                <input id="customProviderInput" autocomplete="off" placeholder="custom:my-provider" />
+              </label>
+            </div>
+            <div id="providerDetail" class="provider-detail"></div>
+          </section>
+
+          <section class="settings-block">
+            <div class="field-grid two">
+              <label class="field">
+                <span>Role</span>
+                <select id="roleSelect">
+                  <option value="auto">Auto (route each request)</option>
+                  <option value="coder">Coder</option>
+                  <option value="devops">DevOps</option>
+                  <option value="chat">Chat</option>
+                </select>
+                <small id="roleHint" class="field-hint"></small>
+              </label>
+              <label class="field">
+                <span>Dangerous commands</span>
+                <select id="approvalModeSelect">
+                  <option value="ask">Ask every time</option>
+                  <option value="deny">Always deny</option>
+                </select>
+                <small id="approvalHint" class="field-hint"></small>
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-block">
+            <div class="block-head">
+              <span class="block-title">Models</span>
+              <span class="block-note">Leave a field empty to use the provider default</span>
+            </div>
+            <div class="field-grid three">
+              <label class="field">
+                <span>Fast</span>
+                <input id="fastModelInput" list="modelSuggestions" autocomplete="off" />
+                <small id="fastHint" class="field-hint"></small>
+              </label>
+              <label class="field">
+                <span>Smart</span>
+                <input id="smartModelInput" list="modelSuggestions" autocomplete="off" />
+                <small id="smartHint" class="field-hint"></small>
+              </label>
+              <label class="field">
+                <span>Planner</span>
+                <input id="plannerModelInput" list="modelSuggestions" autocomplete="off" />
+                <small id="plannerHint" class="field-hint"></small>
+              </label>
+            </div>
+            <datalist id="modelSuggestions"></datalist>
+          </section>
+
+          <div id="settingsError" class="settings-error" aria-live="polite"></div>
+          <div class="settings-note">Set all three model fields, or leave all empty. Missing provider credentials still fail closed.</div>
         </div>
 
-        <div class="model-fields">
-          <label><span>Fast model</span><input id="fastModelInput" list="modelSuggestions" autocomplete="off" placeholder="Use saved model" /></label>
-          <label><span>Smart model</span><input id="smartModelInput" list="modelSuggestions" autocomplete="off" placeholder="Use saved model" /></label>
-          <label><span>Planner model</span><input id="plannerModelInput" list="modelSuggestions" autocomplete="off" placeholder="Use saved model" /></label>
-        </div>
-        <datalist id="modelSuggestions">
-          <option value="gpt-5.4-mini"></option>
-          <option value="gpt-5.4"></option>
-          <option value="claude-haiku-4-5"></option>
-          <option value="claude-sonnet-4-6"></option>
-          <option value="claude-opus-4-8"></option>
-          <option value="ds-web/deepseek-v4-flash"></option>
-          <option value="ds-web/deepseek-v4-pro"></option>
-          <option value="anthropic/claude-sonnet-4.6"></option>
-          <option value="google/gemini-3.5-pro"></option>
-        </datalist>
-        <div id="settingsError" class="settings-error" aria-live="polite"></div>
-        <div class="settings-note">Set all three model fields, or leave all empty. Missing provider credentials still fail closed.</div>
         <div class="settings-actions">
           <button id="settingsReset" type="button">Use saved defaults</button>
           <span class="settings-spacer"></span>

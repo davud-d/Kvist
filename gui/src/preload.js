@@ -53,6 +53,7 @@ function subscribe(channel, listener) {
 contextBridge.exposeInMainWorld("kvist", {
   bootstrap: () => ipcRenderer.invoke("kvist:bootstrap"),
   navigation: () => ipcRenderer.invoke("kvist:navigation"),
+  configInfo: () => ipcRenderer.invoke("kvist:config-info"),
   chooseWorkspace: () => ipcRenderer.invoke("kvist:choose-workspace"),
   activateProject: (workspace) => ipcRenderer.invoke("kvist:activate-project", workspace),
   newSession: (workspace) => ipcRenderer.invoke("kvist:new-session", workspace),

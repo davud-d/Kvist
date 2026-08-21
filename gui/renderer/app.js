@@ -33,6 +33,21 @@ const approvalModeSelect = document.querySelector("#approvalModeSelect")
 const fastModelInput = document.querySelector("#fastModelInput")
 const smartModelInput = document.querySelector("#smartModelInput")
 const plannerModelInput = document.querySelector("#plannerModelInput")
+const providerStatus = document.querySelector("#providerStatus")
+const providerDetail = document.querySelector("#providerDetail")
+const roleHint = document.querySelector("#roleHint")
+const approvalHint = document.querySelector("#approvalHint")
+const modelSuggestions = document.querySelector("#modelSuggestions")
+const modelInputs = {
+  fast: fastModelInput,
+  smart: smartModelInput,
+  planner: plannerModelInput,
+}
+const modelHints = {
+  fast: document.querySelector("#fastHint"),
+  smart: document.querySelector("#smartHint"),
+  planner: document.querySelector("#plannerHint"),
+}
 const roleButton = document.querySelector("#roleButton")
 const modelButton = document.querySelector("#modelButton")
 const approvalButton = document.querySelector("#approvalButton")
@@ -44,7 +59,27 @@ const metricThinking = document.querySelector("#metricThinking")
 const metricElapsed = document.querySelector("#metricElapsed")
 
 const CONFIG_STORAGE_KEY = "kvist.run-options.v1"
-const BUILTIN_PROVIDERS = new Set(["", "openai", "anthropic", "openrouter", "omniroute", "freeflow"])
+const MODEL_ROLES = ["fast", "smart", "planner"]
+
+const BUILTIN_PROVIDER_LABELS = {
+  openai: "OpenAI",
+  anthropic: "Anthropic",
+  openrouter: "OpenRouter",
+  omniroute: "OmniRoute",
+  freeflow: "FreeFlow LLM",
+}
+
+const ROLE_HINTS = {
+  auto: "Kvist inspects each request and routes it to Coder, DevOps, or Chat.",
+  coder: "Reads and edits code, then verifies. Best for implementing changes.",
+  devops: "Shell-first: builds, tests, git, and environment or system tasks.",
+  chat: "Plain conversation — answers and explains, no file edits or shell.",
+}
+
+const APPROVAL_HINTS = {
+  ask: "Pause and ask for confirmation before each dangerous shell command.",
+  deny: "Automatically refuse every dangerous command without asking.",
+}
 
 let workspace = ""
 let running = false
@@ -53,6 +88,7 @@ let showDetails = false
 let lastAssistantText = ""
 let interruptDeadline = 0
 let runtimeConfig = null
+let configInfo = null
 let navigationProjects = []
 let activeSessionName = ""
 const expandedProjects = new Set()
@@ -473,24 +509,189 @@ function setRunning(value) {
   if (!promptInput.disabled) promptInput.focus()
 }
 
-function populateSettings() {
-  const provider = runOptions.provider
-  providerSelect.value = BUILTIN_PROVIDERS.has(provider) ? provider : ""
-  customProviderInput.value = BUILTIN_PROVIDERS.has(provider) ? "" : provider
-  roleSelect.value = runOptions.role
-  approvalModeSelect.value = runOptions.approvalMode
-  fastModelInput.value = runOptions.models.fast
-  smartModelInput.value = runOptions.models.smart
-  plannerModelInput.value = runOptions.models.planner
-  settingsError.textContent = ""
+function providerSummary(id) {
+  if (!configInfo || !id) return null
+  const all = [...(configInfo.providers || []), ...(configInfo.custom_providers || [])]
+  return all.find((entry) => entry.id === id) || null
 }
 
-function showSettings() {
+function providerLabel(id) {
+  return providerSummary(id)?.label || BUILTIN_PROVIDER_LABELS[id] || id
+}
+
+function effectiveProviderId() {
+  const typed = customProviderInput.value.trim()
+  if (typed) return typed
+  if (providerSelect.value) return providerSelect.value
+  return configInfo?.saved_provider || ""
+}
+
+function optionExists(value) {
+  return Array.from(providerSelect.options).some((option) => option.value === value)
+}
+
+function providerOptionText(entry) {
+  return `${entry.has_credentials ? "● " : "○ "}${entry.label}`
+}
+
+function renderProviderOptions() {
+  const previous = providerSelect.value
+  providerSelect.replaceChildren()
+  const savedId = configInfo?.saved_provider || ""
+  const savedSuffix = savedId ? ` · ${providerLabel(savedId)}` : ""
+  providerSelect.append(new Option(`Saved default${savedSuffix}`, ""))
+
+  const builtin = configInfo?.providers || []
+  if (builtin.length) {
+    const group = document.createElement("optgroup")
+    group.label = "Providers"
+    for (const entry of builtin) group.append(new Option(providerOptionText(entry), entry.id))
+    providerSelect.append(group)
+  } else {
+    for (const [id, label] of Object.entries(BUILTIN_PROVIDER_LABELS)) {
+      providerSelect.append(new Option(label, id))
+    }
+  }
+
+  const custom = configInfo?.custom_providers || []
+  if (custom.length) {
+    const group = document.createElement("optgroup")
+    group.label = "Custom providers"
+    for (const entry of custom) group.append(new Option(providerOptionText(entry), entry.id))
+    providerSelect.append(group)
+  }
+
+  if (optionExists(previous)) providerSelect.value = previous
+}
+
+function setProviderStatus(text, tone) {
+  providerStatus.textContent = text
+  providerStatus.dataset.tone = tone
+  providerStatus.classList.toggle("is-hidden", !text)
+}
+
+function detailLine(text, tone) {
+  return createElement("div", tone ? `detail-line is-${tone}` : "detail-line", text)
+}
+
+function summariseModels(models) {
+  const values = MODEL_ROLES.map((role) => models[role]).filter(Boolean)
+  if (values.length === MODEL_ROLES.length && values.every((value) => value === values[0])) {
+    return values[0]
+  }
+  return MODEL_ROLES.map((role) => models[role] || "—").join(" · ")
+}
+
+function renderProviderDetail() {
+  const id = effectiveProviderId()
+  const summary = providerSummary(id)
+  providerDetail.replaceChildren()
+
+  if (!configInfo) {
+    setProviderStatus("Loading…", "neutral")
+    return
+  }
+  if (!summary) {
+    if (id.startsWith("custom:")) {
+      setProviderStatus("New custom provider", "warn")
+      providerDetail.append(detailLine(
+        "Kvist will prompt for this provider's base URL and API key on the next run.",
+      ))
+    } else {
+      setProviderStatus("", "neutral")
+    }
+    return
+  }
+
+  if (summary.has_credentials) setProviderStatus("API key ready", "ok")
+  else setProviderStatus(`Missing ${summary.missing_keys.join(", ") || "credentials"}`, "warn")
+
+  if (summary.base_url) providerDetail.append(detailLine(`Endpoint: ${summary.base_url}`))
+  if (summary.requires_manual_models && MODEL_ROLES.every((role) => !summary.defaults[role])) {
+    providerDetail.append(detailLine("No built-in defaults — set a model for each role below."))
+  } else {
+    providerDetail.append(detailLine(`Defaults: ${summariseModels(summary.defaults)}`))
+  }
+  if (!summary.has_credentials) {
+    providerDetail.append(detailLine(
+      "No key saved yet — add it in the terminal app or this provider fails closed.",
+      "warn",
+    ))
+  }
+}
+
+function renderModelFields() {
+  const summary = providerSummary(effectiveProviderId())
+  modelSuggestions.replaceChildren()
+  const seen = new Set()
+  const suggestions = summary?.options?.length
+    ? summary.options
+    : MODEL_ROLES.map((role) => ({ value: summary?.saved_models?.[role] }))
+  for (const option of suggestions) {
+    if (!option.value || seen.has(option.value)) continue
+    seen.add(option.value)
+    modelSuggestions.append(new Option(option.label || "", option.value))
+  }
+
+  for (const role of MODEL_ROLES) {
+    const fallback = summary?.saved_models?.[role] || summary?.defaults?.[role] || ""
+    modelInputs[role].placeholder = fallback
+      || (summary?.requires_manual_models ? "required" : "provider default")
+    const hint = modelHints[role]
+    if (!summary) {
+      hint.textContent = ""
+    } else if (summary.saved_models[role]) {
+      hint.textContent = `Saved: ${summary.saved_models[role]}`
+    } else if (summary.defaults[role]) {
+      hint.textContent = `Default: ${summary.defaults[role]}`
+    } else {
+      hint.textContent = summary.requires_manual_models ? "Required for this provider" : ""
+    }
+  }
+}
+
+function refreshSettingsDetail() {
+  roleHint.textContent = ROLE_HINTS[roleSelect.value] || ""
+  approvalHint.textContent = APPROVAL_HINTS[approvalModeSelect.value] || ""
+  renderProviderDetail()
+  renderModelFields()
+}
+
+function populateSettings() {
+  renderProviderOptions()
+  const provider = runOptions.provider
+  if (provider && optionExists(provider)) {
+    providerSelect.value = provider
+    customProviderInput.value = ""
+  } else if (provider) {
+    providerSelect.value = ""
+    customProviderInput.value = provider
+  } else {
+    providerSelect.value = ""
+    customProviderInput.value = ""
+  }
+  roleSelect.value = runOptions.role
+  approvalModeSelect.value = runOptions.approvalMode
+  for (const role of MODEL_ROLES) modelInputs[role].value = runOptions.models[role]
+  settingsError.textContent = ""
+  refreshSettingsDetail()
+}
+
+async function showSettings() {
   if (running) return
   hidePalette()
-  populateSettings()
   settingsBackdrop.classList.remove("is-hidden")
+  populateSettings()
   providerSelect.focus()
+  if (configInfo) return
+  setProviderStatus("Loading…", "neutral")
+  try {
+    configInfo = await window.kvist.configInfo()
+  } catch (error) {
+    settingsError.textContent = `Could not read saved configuration: ${error.message}`
+    return
+  }
+  if (!settingsBackdrop.classList.contains("is-hidden")) populateSettings()
 }
 
 function hideSettings() {
@@ -1026,6 +1227,11 @@ settingsBackdrop.addEventListener("keydown", (event) => {
   hideSettings()
 })
 
+for (const control of [providerSelect, roleSelect, approvalModeSelect]) {
+  control.addEventListener("change", refreshSettingsDetail)
+}
+customProviderInput.addEventListener("input", refreshSettingsDetail)
+
 settingsClose.addEventListener("click", hideSettings)
 settingsCancel.addEventListener("click", hideSettings)
 settingsReset.addEventListener("click", () => {
@@ -1122,4 +1328,5 @@ window.kvist.bootstrap().then((state) => {
   renderNavigation()
   promptInput.focus()
   if (state.initialGoal) void startGoal(state.initialGoal)
+  if (new URLSearchParams(location.search).get("panel") === "settings") void showSettings()
 })

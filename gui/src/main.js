@@ -95,6 +95,34 @@ async function runSessionOp(projectPath, op, name = "") {
   return payload
 }
 
+async function runConfigInfo() {
+  const command = resolveCommand()
+  const args = [...command.prefixArgs, "--workspace", workspace, "--config-info"]
+  let stdout = ""
+  try {
+    const completed = await execFileAsync(command.command, args, {
+      cwd: workspace,
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 4 * 1024 * 1024,
+      windowsHide: true,
+    })
+    stdout = completed.stdout
+  } catch (error) {
+    stdout = typeof error.stdout === "string" ? error.stdout : ""
+    if (!stdout.trim()) throw new Error("Kvist could not read its configuration.")
+  }
+  const line = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1)
+  let payload
+  try {
+    payload = JSON.parse(line || "")
+  } catch {
+    throw new Error("Kvist returned an invalid configuration response.")
+  }
+  if (!payload.ok) throw new Error(payload.error || "Could not read configuration.")
+  return payload
+}
+
 async function projectSnapshot(project) {
   try {
     const status = await runSessionOp(project.path, "status")
@@ -206,6 +234,8 @@ function registerIpc() {
 
   ipcMain.handle("kvist:navigation", () => navigationSnapshot())
 
+  ipcMain.handle("kvist:config-info", () => runConfigInfo())
+
   ipcMain.handle("kvist:choose-workspace", async () => {
     const result = await dialog.showOpenDialog(windowRef, {
       title: "Choose Kvist workspace",
@@ -285,7 +315,11 @@ function createWindow() {
     },
   })
 
-  windowRef.loadFile(path.join(__dirname, "../renderer/index.html"))
+  const openPanel = process.env.KVIST_CAPTURE_PANEL
+  windowRef.loadFile(
+    path.join(__dirname, "../renderer/index.html"),
+    openPanel ? { query: { panel: openPanel } } : undefined,
+  )
   windowRef.webContents.setWindowOpenHandler(({ url }) => {
     if (/^(https?:|mailto:)/i.test(url)) void shell.openExternal(url)
     return { action: "deny" }

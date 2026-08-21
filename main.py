@@ -69,6 +69,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "--session-name",
         help="Session name for --session-op create/switch/delete.",
     )
+    parser.add_argument(
+        "--config-info",
+        action="store_true",
+        help="Print the saved run configuration as JSON and exit (no LLM call).",
+    )
     return parser
 
 
@@ -1783,6 +1788,23 @@ def main() -> None:
         if _DIRECT_CLI_ARGS is not None
         else _build_cli_parser().parse_args()
     )
+
+    if args.config_info:
+        import json as _json
+
+        from config_info import build_config_info
+
+        try:
+            payload = build_config_info()
+        except (OSError, ValueError) as error:
+            failure = {
+                "ok": False,
+                "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+            }
+            print(_json.dumps(failure, ensure_ascii=False))
+            raise SystemExit(1) from error
+        print(_json.dumps(payload, ensure_ascii=False))
+        return
 
     if args.session_op:
         import json as _json
