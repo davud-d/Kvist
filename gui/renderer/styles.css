@@ -58,6 +58,42 @@ button {
   color: var(--text-muted);
 }
 
+/* A soft blue glow that trails the cursor. Purely decorative: it sits above the
+   opaque panels but below every dialog, never intercepts pointer events, and
+   uses screen blending so it lifts colour without hiding text. */
+.cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 440px;
+  height: 440px;
+  margin: -220px 0 0 -220px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 4;
+  background: radial-gradient(
+    circle,
+    rgba(67, 211, 255, 0.22),
+    rgba(38, 169, 255, 0.09) 42%,
+    transparent 68%
+  );
+  filter: blur(16px);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 450ms ease;
+  will-change: transform;
+}
+
+.cursor-glow.is-active {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor-glow {
+    display: none;
+  }
+}
+
 .app-shell {
   height: 100%;
   display: flex;

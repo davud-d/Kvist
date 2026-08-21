@@ -1558,6 +1558,38 @@ window.kvist.onExit(({ expected, code }) => {
 })
 
 updateConfigChips()
+installCursorGlow()
+
+function installCursorGlow() {
+  const glow = document.querySelector("#cursorGlow")
+  if (!glow || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+  const pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
+  const target = { x: pos.x, y: pos.y }
+  let frame = 0
+
+  const paint = () => {
+    glow.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`
+  }
+  const step = () => {
+    pos.x += (target.x - pos.x) * 0.16
+    pos.y += (target.y - pos.y) * 0.16
+    paint()
+    frame = (Math.abs(target.x - pos.x) > 0.4 || Math.abs(target.y - pos.y) > 0.4)
+      ? requestAnimationFrame(step)
+      : 0
+  }
+
+  paint()
+  glow.classList.add("is-active")
+  window.addEventListener("pointermove", (event) => {
+    target.x = event.clientX
+    target.y = event.clientY
+    glow.classList.add("is-active")
+    if (!frame) frame = requestAnimationFrame(step)
+  })
+  document.addEventListener("mouseleave", () => glow.classList.remove("is-active"))
+  window.addEventListener("blur", () => glow.classList.remove("is-active"))
+}
 
 window.kvist.bootstrap().then((state) => {
   updateNavigation(state)
