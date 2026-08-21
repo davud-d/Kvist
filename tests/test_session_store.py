@@ -13,6 +13,7 @@ from session_store import SessionStore, run_session_op
 
 pytestmark = pytest.mark.slow
 
+
 def test_status_reports_active_session_and_checkpoint(agent_factory):
     agent = agent_factory()
     agent.new_session("feature")
@@ -24,6 +25,29 @@ def test_status_reports_active_session_and_checkpoint(agent_factory):
     assert payload["active_session"] == "feature"
     assert "feature" in payload["sessions"]
     assert payload["checkpoint"] == {"goal": "do the thing", "step": 4, "progress": 0}
+    assert payload["session_items"][0]["name"] == "feature"
+    assert payload["session_items"][0]["title"] == "do the thing"
+    assert payload["session_items"][0]["has_checkpoint"] is True
+
+
+def test_status_reports_session_titles_history_and_recency(agent_factory):
+    agent = agent_factory()
+    agent.new_session("older")
+    agent._session_history = [
+        {"goal": "Build the sidebar", "role": "coder", "result": "Done"}
+    ]
+    agent.save_session()
+    agent.new_session("newer")
+    agent._session_history = [
+        {"goal": "Fix the tests", "role": "coder", "result": "Green"}
+    ]
+    agent.save_session()
+
+    payload = run_session_op(agent.executor.workspace, "status")
+
+    assert [item["name"] for item in payload["session_items"]][:2] == ["newer", "older"]
+    assert payload["session_items"][0]["title"] == "Fix the tests"
+    assert payload["session_items"][0]["session_history"][0]["result"] == "Green"
 
 
 def test_create_activates_a_fresh_empty_session(tmp_path):

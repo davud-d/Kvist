@@ -73,10 +73,14 @@ def _rendered_text(runtime) -> str:
 
 
 def _transcript_fragments(screen) -> list[tuple[str, str]]:
-    """Flatten the transcript lines below the banner into one fragment list."""
+    """Flatten the transcript lines into one fragment list.
+
+    The banner is pinned in its own window now, so the transcript no longer
+    carries banner rows and starts at line 0.
+    """
     _, lines, _ = screen._transcript_content()
     fragments: list[tuple[str, str]] = []
-    for index, line in enumerate(lines[screen._banner_line_count:]):
+    for index, line in enumerate(lines):
         if index:
             fragments.append(("", "\n"))
         fragments.extend(line)
@@ -141,15 +145,15 @@ def test_banner_is_fixed_at_top_and_prompt_is_below_it(screen_runtime):
     assert any("❯" in line for line in lines[17:])
 
 
-def test_slash_menu_opens_below_banner_at_minimum_height(screen_runtime):
-    # A long transcript must not steal a row from the fixed command menu.
+def test_slash_menu_opens_below_pinned_banner(screen_runtime):
+    # A long transcript must not steal a row from the fixed command menu, and
+    # the pinned banner keeps its rows at the top the whole time.
     screen_runtime.screen._append_output("old output\n" * 30, "stdout")
-    screen_runtime.output.rows = 31
     screen_runtime.screen.invalidate()
     screen_runtime.input.send_text("/")
 
     _wait_until(
-        lambda: "Save the active session and exit Kvist"
+        lambda: "List all available slash commands"
         in _rendered_text(screen_runtime)
     )
     lines = _rendered_lines(screen_runtime)
@@ -159,11 +163,9 @@ def test_slash_menu_opens_below_banner_at_minimum_height(screen_runtime):
         if "List all available slash commands" in line
     )
 
-    # The banner has scrolled away with the output, so every row above the
-    # menu belongs to the transcript.
-    assert not any("▀" in line or "╭" in line for line in lines)
-    assert command_row > 0
-    assert "Save the active session and exit Kvist" in _rendered_text(screen_runtime)
+    # The banner is pinned at the top; the menu opens well below it.
+    assert lines[0].startswith("╭")
+    assert command_row > 17
 
 
 def test_five_submissions_do_not_duplicate_banner(screen_runtime):
@@ -284,6 +286,33 @@ def test_dynamic_control_cursor_uses_same_snapshot_as_rendered_content(
     assert screen._transient_cursor().y == 1
 
 
+def test_status_slot_reanimates_on_a_time_tick(screen_runtime, monkeypatch):
+    screen = screen_runtime.screen
+    screen.suspend()  # stop the background render thread for a deterministic count
+
+    now = [1000.0]
+    monkeypatch.setattr(
+        interactive_screen_module.time, "monotonic", lambda: now[0]
+    )
+    renders = []
+    real_format = screen._format_content
+    monkeypatch.setattr(
+        screen,
+        "_format_content",
+        lambda content, width: (renders.append(1), real_format(content, width))[1],
+    )
+
+    screen.set_status("working on the task")
+    screen._get_transient()
+    after_first = len(renders)
+    screen._get_transient()
+    assert len(renders) == after_first  # same tick -> cached, spinner slot reused
+
+    now[0] += 0.2  # advance past one 1/12s animation tick
+    screen._get_transient()
+    assert len(renders) > after_first  # re-rendered so the spinner can advance
+
+
 def test_split_ansi_does_not_corrupt_plain_cursor_state(screen_runtime):
     screen = screen_runtime.screen
     screen.suspend()
@@ -292,7 +321,7 @@ def test_split_ansi_does_not_corrupt_plain_cursor_state(screen_runtime):
     screen._append_output("31mcolored\x1b[0m\n", "stdout")
 
     assert screen._transcript_plain == "colored\n"
-    assert screen._last_transcript_line_locked() == screen._banner_line_count + 1
+    assert screen._last_transcript_line_locked() == 1
     fragments = _transcript_fragments(screen)
     assert "".join(fragment[1] for fragment in fragments) == "colored\n"
     assert fragments[0][0] == "ansired"
@@ -305,54 +334,37 @@ def _fill_past_the_banner(screen) -> None:
     )
 
 
-def _scroll_to_top(runtime) -> None:
-    """Page up until the transcript reports the top.
-
-    ``_page_up`` steps from the last rendered scroll position, so the calls
-    have to be spaced by at least one refresh interval.
-    """
-    deadline = time.monotonic() + 4.0
-    while time.monotonic() < deadline:
-        if _transcript_scroll(runtime) == 0:
-            return
-        runtime.screen._page_up()
-        time.sleep(0.05)
-    pytest.fail("transcript did not scroll back to the top")
-
-
-def test_banner_scrolls_away_with_output_and_comes_back(screen_runtime):
+def test_banner_stays_pinned_when_output_scrolls(screen_runtime):
+    """The pinned banner keeps its top rows even as the transcript scrolls."""
     screen = screen_runtime.screen
     _fill_past_the_banner(screen)
 
     _wait_until(lambda: "scrolling line 199" in _rendered_text(screen_runtime))
-    assert not any("▀" in line for line in _rendered_lines(screen_runtime))
 
-    _scroll_to_top(screen_runtime)
+    lines = _rendered_lines(screen_runtime)
+    assert lines[0].startswith("╭")
+    assert lines[16].startswith("╰")
+    assert any("▀" in line for line in lines[:17])
+    # The banner is no longer part of the transcript body.
+    assert "▀" not in _rendered_text(screen_runtime).split("╰", 1)[-1]
 
-    _wait_until(
-        lambda: any("▀" in line for line in _rendered_lines(screen_runtime))
-    )
-    assert _rendered_lines(screen_runtime)[0].startswith("╭")
 
-
-def test_banner_animation_runs_only_while_the_banner_is_on_screen(
-    screen_runtime,
-):
+def test_set_live_snapshot_reaches_the_banner(screen_runtime):
+    # The live panel only renders once the banner is wide enough for it.
+    screen_runtime.output.columns = 200
     screen = screen_runtime.screen
-    _fill_past_the_banner(screen)
-    _wait_until(lambda: "scrolling line 199" in _rendered_text(screen_runtime))
-
-    scrolled_away = screen._transcript_content()[0]
-    time.sleep(0.15)
-    assert screen._transcript_content()[0] == scrolled_away
-
-    _scroll_to_top(screen_runtime)
-    _wait_until(
-        lambda: any("▀" in line for line in _rendered_lines(screen_runtime))
+    screen.invalidate()
+    snapshot = banner.LivePanelState(
+        running=True,
+        state_label="working",
+        step=4,
+        tokens_in=8000,
+        tokens_out=1000,
     )
+    screen.set_live(snapshot)
 
-    at_top = screen._transcript_content()[0]
-    _wait_until(lambda: screen._transcript_content()[0] != at_top)
+    _wait_until(lambda: "Σ 9.0k" in _rendered_text(screen_runtime))
+    assert "working" in _rendered_text(screen_runtime)
 
 
 def _transcript_scroll(runtime):
@@ -390,8 +402,7 @@ def test_transcript_lines_merge_across_entry_boundaries(screen_runtime):
     screen._append_output("third\n", "stdout")
 
     _, lines, _ = screen._transcript_content()
-    below_banner = lines[screen._banner_line_count:]
-    text = "\n".join("".join(item[1] for item in line) for line in below_banner)
+    text = "\n".join("".join(item[1] for item in line) for line in lines)
 
     assert text == "first second\nthird\n"
     assert screen._transcript_prefix_entries == 2
