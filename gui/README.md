@@ -25,6 +25,12 @@ has separate fast, smart, and planner models, so either set all three or keep al
 three empty to use the saved configuration. Approval mode supports `ask` and the
 fail-closed `deny`; unsafe automatic approval is intentionally unavailable.
 
+The sidebar contains only operations backed by Kvist's session lifecycle API.
+Projects are workspaces previously opened by the GUI. Expanding a project shows
+its saved sessions; selecting a session activates it through `--session-op
+switch` and restores its persisted conversation. Recents combines sessions from
+all remembered projects and sorts them by the session's `updated_at` value.
+
 ## Tests
 
 ```bash
@@ -50,7 +56,7 @@ packages.
 - `Escape` twice: interrupt the active process
 - `Ctrl+P`: command palette
 - `Ctrl+M`: models, role, and permissions
-- `Ctrl+N`: clear the current task
+- `Ctrl+N`: create a new named session in the active project
 
 Approvals default to `ask`. Closing the window, selecting `deny`, or losing the
 renderer denies dangerous-command confirmation before the child is stopped.

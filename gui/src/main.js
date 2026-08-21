@@ -2,16 +2,23 @@
 
 const fs = require("node:fs")
 const path = require("node:path")
+const { execFile } = require("node:child_process")
+const { promisify } = require("node:util")
 
 const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron")
 
+const { resolveKvistCommand } = require("./command-resolver")
 const { KvistProcess } = require("./kvist-process")
+const { ProjectStore } = require("./project-store")
 const { PROTOCOL_VERSION } = require("./protocol-state")
+
+const execFileAsync = promisify(execFile)
 
 let windowRef = null
 let runner = null
 let workspace = null
 let lastDiagnostic = ""
+let projectStore = null
 
 function argumentValue(name) {
   const index = process.argv.indexOf(name)
@@ -22,31 +29,15 @@ function argumentValue(name) {
 function defaultWorkspace() {
   const requested = argumentValue("--workspace")
   if (requested) return path.resolve(requested)
-  return app.isPackaged ? app.getPath("documents") : path.resolve(__dirname, "../..")
+  return app.isPackaged ? null : path.resolve(__dirname, "../..")
 }
 
 function resolveCommand() {
-  const explicitBinary = process.env.KVIST_BINARY
-  if (explicitBinary) {
-    return { command: path.resolve(explicitBinary), prefixArgs: [] }
-  }
-
-  if (app.isPackaged) {
-    const binaryName = process.platform === "win32" ? "kvist.exe" : "kvist"
-    return {
-      command: path.join(process.resourcesPath, "bin", binaryName),
-      prefixArgs: [],
-    }
-  }
-
-  const projectRoot = path.resolve(__dirname, "../..")
-  const venvPython = process.platform === "win32"
-    ? path.join(projectRoot, ".venv", "Scripts", "python.exe")
-    : path.join(projectRoot, ".venv", "bin", "python")
-  const command = fs.existsSync(venvPython)
-    ? venvPython
-    : process.env.KVIST_PYTHON || (process.platform === "win32" ? "python" : "python3")
-  return { command, prefixArgs: [path.join(projectRoot, "main.py")] }
+  return resolveKvistCommand({
+    appIsPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    projectRoot: path.resolve(__dirname, "../.."),
+  })
 }
 
 function validateWorkspace(value) {
@@ -64,18 +55,111 @@ function validateWorkspace(value) {
   return resolved
 }
 
-async function resolveInitialWorkspace() {
+function rememberWorkspace(value) {
+  const resolved = validateWorkspace(value)
+  projectStore.remember(resolved)
+  return resolved
+}
+
+async function runSessionOp(projectPath, op, name = "") {
+  const resolved = validateWorkspace(projectPath)
+  const command = resolveCommand()
+  const args = [
+    ...command.prefixArgs,
+    "--workspace", resolved,
+    "--session-op", op,
+  ]
+  if (name) args.push("--session-name", name)
+  let stdout = ""
   try {
-    return validateWorkspace(defaultWorkspace())
-  } catch (error) {
-    const result = await dialog.showOpenDialog({
-      title: error.message,
-      defaultPath: app.getPath("documents"),
-      properties: ["openDirectory", "createDirectory"],
+    const completed = await execFileAsync(command.command, args, {
+      cwd: resolved,
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 4 * 1024 * 1024,
+      windowsHide: true,
     })
-    if (result.canceled || !result.filePaths[0]) return null
-    return validateWorkspace(result.filePaths[0])
+    stdout = completed.stdout
+  } catch (error) {
+    stdout = typeof error.stdout === "string" ? error.stdout : ""
+    if (!stdout.trim()) throw new Error("Kvist session process failed.")
   }
+  const line = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1)
+  let payload
+  try {
+    payload = JSON.parse(line || "")
+  } catch {
+    throw new Error("Kvist returned an invalid session response.")
+  }
+  if (!payload.ok) throw new Error(payload.error || "Session operation failed.")
+  return payload
+}
+
+async function projectSnapshot(project) {
+  try {
+    const status = await runSessionOp(project.path, "status")
+    return { ...project, available: true, status }
+  } catch (error) {
+    return { ...project, available: false, error: error.message, status: null }
+  }
+}
+
+async function navigationSnapshot() {
+  const stored = projectStore.load()
+  const projects = new Array(stored.length)
+  let nextIndex = 0
+  async function worker() {
+    while (nextIndex < stored.length) {
+      const index = nextIndex
+      nextIndex += 1
+      projects[index] = await projectSnapshot(stored[index])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, stored.length) }, worker))
+  return { workspace, projects }
+}
+
+function newSessionName(existingNames) {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)
+  const base = `chat-${stamp}`
+  if (!existingNames.has(base)) return base
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${base}-${suffix}`
+    if (!existingNames.has(candidate)) return candidate
+  }
+  throw new Error("Could not allocate a new session name.")
+}
+
+async function resolveInitialWorkspace() {
+  const requested = argumentValue("--workspace")
+  if (requested) {
+    try {
+      return validateWorkspace(requested)
+    } catch {
+      // Fall through to the workspace picker for an invalid explicit path.
+    }
+  } else {
+    for (const project of projectStore.load()) {
+      try {
+        return validateWorkspace(project.path)
+      } catch {
+        // Keep missing projects in the sidebar, but do not activate one.
+      }
+    }
+  }
+  const fallback = defaultWorkspace()
+  try {
+    if (fallback) return validateWorkspace(fallback)
+  } catch (error) {
+    // Fall through to the workspace picker.
+  }
+  const result = await dialog.showOpenDialog({
+    title: "Choose Kvist workspace",
+    defaultPath: app.getPath("documents"),
+    properties: ["openDirectory", "createDirectory"],
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+  return validateWorkspace(result.filePaths[0])
 }
 
 function send(channel, payload) {
@@ -114,11 +198,13 @@ function attachRunner(active) {
 }
 
 function registerIpc() {
-  ipcMain.handle("kvist:bootstrap", () => ({
-    workspace,
+  ipcMain.handle("kvist:bootstrap", async () => ({
+    ...(await navigationSnapshot()),
     protocolVersion: PROTOCOL_VERSION,
     initialGoal: process.env.KVIST_INITIAL_GOAL || "",
   }))
+
+  ipcMain.handle("kvist:navigation", () => navigationSnapshot())
 
   ipcMain.handle("kvist:choose-workspace", async () => {
     const result = await dialog.showOpenDialog(windowRef, {
@@ -127,13 +213,35 @@ function registerIpc() {
       properties: ["openDirectory", "createDirectory"],
     })
     if (result.canceled || !result.filePaths[0]) return null
-    workspace = validateWorkspace(result.filePaths[0])
+    workspace = rememberWorkspace(result.filePaths[0])
     return workspace
+  })
+
+  ipcMain.handle("kvist:activate-project", async (_event, projectPath) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    workspace = rememberWorkspace(projectPath)
+    return navigationSnapshot()
+  })
+
+  ipcMain.handle("kvist:new-session", async (_event, projectPath) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    workspace = rememberWorkspace(projectPath || workspace)
+    const status = await runSessionOp(workspace, "status")
+    const name = newSessionName(new Set(status.sessions || []))
+    await runSessionOp(workspace, "create", name)
+    return { name, navigation: await navigationSnapshot() }
+  })
+
+  ipcMain.handle("kvist:switch-session", async (_event, payload) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    workspace = rememberWorkspace(payload?.workspace)
+    const status = await runSessionOp(workspace, "switch", payload?.name || "")
+    return { status, navigation: await navigationSnapshot() }
   })
 
   ipcMain.handle("kvist:start", async (_event, payload) => {
     if (runner) throw new Error("A Kvist task is already running.")
-    workspace = validateWorkspace(payload?.workspace || workspace)
+    workspace = rememberWorkspace(payload?.workspace || workspace)
     lastDiagnostic = ""
     const command = resolveCommand()
     const active = new KvistProcess({
@@ -204,11 +312,13 @@ function createWindow() {
 }
 
 app.whenReady().then(async () => {
+  projectStore = new ProjectStore(path.join(app.getPath("userData"), "projects.json"))
   workspace = await resolveInitialWorkspace()
   if (!workspace) {
     app.quit()
     return
   }
+  workspace = rememberWorkspace(workspace)
   registerIpc()
   createWindow()
 }).catch((error) => {

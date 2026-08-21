@@ -5,6 +5,11 @@ const { ProtocolState } = window.KvistProtocol
 const welcome = document.querySelector("#welcome")
 const conversation = document.querySelector("#conversation")
 const messages = document.querySelector("#messages")
+const sidebar = document.querySelector("#sidebar")
+const newChatButton = document.querySelector("#newChatButton")
+const addProjectButton = document.querySelector("#addProjectButton")
+const projectList = document.querySelector("#projectList")
+const recentList = document.querySelector("#recentList")
 const composer = document.querySelector("#composer")
 const promptInput = document.querySelector("#promptInput")
 const workspaceButton = document.querySelector("#workspaceButton")
@@ -48,6 +53,9 @@ let showDetails = false
 let lastAssistantText = ""
 let interruptDeadline = 0
 let runtimeConfig = null
+let navigationProjects = []
+let activeSessionName = ""
+const expandedProjects = new Set()
 
 // Live output-speed indicator. The protocol carries cumulative text snapshots
 // (no token counts), so the rate is estimated from text growth: chars ÷ 4, the
@@ -141,6 +149,216 @@ function updateWorkspace(value) {
   workspace = value
   workspaceLabel.textContent = shortWorkspace(value)
   workspaceButton.title = value
+}
+
+function projectName(value) {
+  const normalized = String(value || "").replace(/\\/g, "/").replace(/\/$/, "")
+  return normalized.split("/").filter(Boolean).at(-1) || normalized || "Project"
+}
+
+function folderIcon() {
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+  svg.classList.add("folder-icon")
+  svg.setAttribute("viewBox", "0 0 24 24")
+  svg.setAttribute("aria-hidden", "true")
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
+  path.setAttribute("d", "M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z")
+  svg.append(path)
+  return svg
+}
+
+function sessionItem(project, name) {
+  return (project?.status?.session_items || []).find((item) => item.name === name) || null
+}
+
+function currentProject() {
+  return navigationProjects.find((project) => project.path === workspace) || null
+}
+
+function displaySession(item) {
+  resetView()
+  if (!item) return
+  activeSessionName = item.name
+  const chatHistory = (item.chat_history || []).filter(
+    (message) => message?.role === "user" || message?.role === "assistant",
+  )
+  const hasUserChat = chatHistory.some((message) => message.role === "user")
+  const sessionHistory = Array.isArray(item.session_history) ? item.session_history : []
+  if (!hasUserChat && !sessionHistory.length) {
+    setActivity(item.has_checkpoint ? "Unfinished task" : "Ready")
+    return
+  }
+
+  enterConversation()
+  if (hasUserChat) {
+    for (const message of chatHistory) {
+      const content = typeof message.content === "string" ? message.content : ""
+      if (!content) continue
+      if (message.role === "user") addUserMessage(content)
+      else addAssistantMessage(content)
+    }
+  } else {
+    for (const entry of sessionHistory) {
+      if (!entry || typeof entry !== "object") continue
+      if (typeof entry.goal === "string" && entry.goal) addUserMessage(entry.goal)
+      if (typeof entry.result === "string" && entry.result) addAssistantMessage(entry.result)
+    }
+  }
+  setActivity(item.has_checkpoint ? "Unfinished task" : "Ready")
+}
+
+function renderNavigation() {
+  projectList.replaceChildren()
+  recentList.replaceChildren()
+
+  if (!navigationProjects.length) {
+    projectList.append(createElement("div", "empty-navigation", "No projects yet"))
+  }
+
+  for (const project of navigationProjects) {
+    const group = createElement("div", "project-group")
+    const row = createElement("button", "project-row")
+    row.type = "button"
+    row.title = project.path
+    row.disabled = !project.available
+    const expanded = expandedProjects.has(project.path)
+    row.setAttribute("aria-expanded", String(expanded))
+    if (project.path === workspace) row.classList.add("is-active")
+    row.append(
+      createElement("span", "project-chevron", "›"),
+      folderIcon(),
+      createElement("span", "navigation-label", projectName(project.path)),
+      createElement(
+        "span",
+        `project-status-dot${project.available ? "" : " is-unavailable"}`,
+      ),
+    )
+    row.addEventListener("click", () => void toggleProject(project))
+    group.append(row)
+
+    if (expanded) {
+      const sessions = createElement("div", "project-sessions")
+      const items = project.status?.session_items || []
+      if (!items.length) {
+        sessions.append(createElement("div", "empty-navigation", "No sessions"))
+      }
+      for (const item of items) {
+        const button = createElement("button", "session-row")
+        button.type = "button"
+        button.title = `${item.title}\n${item.name}`
+        button.append(createElement("span", "navigation-label", item.title))
+        if (project.path === workspace && item.name === activeSessionName) {
+          button.classList.add("is-active")
+        }
+        button.addEventListener("click", (event) => {
+          event.stopPropagation()
+          void selectSession(project.path, item.name)
+        })
+        sessions.append(button)
+      }
+      group.append(sessions)
+    }
+    projectList.append(group)
+  }
+
+  const recents = navigationProjects
+    .flatMap((project) => (project.status?.session_items || []).map((item) => ({ project, item })))
+    .sort((left, right) => Number(right.item.updated_at) - Number(left.item.updated_at))
+    .slice(0, 14)
+  if (!recents.length) {
+    recentList.append(createElement("div", "empty-navigation", "No recent sessions"))
+  }
+  for (const { project, item } of recents) {
+    const button = createElement("button", "recent-row")
+    button.type = "button"
+    button.title = `${projectName(project.path)} · ${item.title}`
+    button.append(createElement("span", "navigation-label", item.title))
+    if (project.path === workspace && item.name === activeSessionName) {
+      button.classList.add("is-active")
+    }
+    button.addEventListener("click", () => void selectSession(project.path, item.name))
+    recentList.append(button)
+  }
+}
+
+function updateNavigation(state) {
+  navigationProjects = Array.isArray(state?.projects) ? state.projects : []
+  updateWorkspace(state?.workspace || workspace)
+  const project = currentProject()
+  activeSessionName = project?.status?.active_session || ""
+  if (workspace) expandedProjects.add(workspace)
+  renderNavigation()
+}
+
+async function refreshNavigation() {
+  try {
+    updateNavigation(await window.kvist.navigation())
+  } catch (error) {
+    setActivity(error.message, { error: true })
+  }
+}
+
+async function toggleProject(project) {
+  if (running || !project.available) return
+  if (project.path === workspace) {
+    if (expandedProjects.has(project.path)) expandedProjects.delete(project.path)
+    else expandedProjects.add(project.path)
+    renderNavigation()
+    return
+  }
+  try {
+    expandedProjects.add(project.path)
+    const state = await window.kvist.activateProject(project.path)
+    updateNavigation(state)
+    const selected = currentProject()
+    displaySession(sessionItem(selected, selected?.status?.active_session))
+    renderNavigation()
+  } catch (error) {
+    addError(error.message)
+  }
+}
+
+async function selectSession(projectPath, name) {
+  if (running) return
+  try {
+    expandedProjects.add(projectPath)
+    const result = await window.kvist.switchSession(projectPath, name)
+    updateNavigation(result.navigation)
+    const project = currentProject()
+    displaySession(sessionItem(project, name))
+    renderNavigation()
+  } catch (error) {
+    addError(error.message)
+  }
+}
+
+async function createNewSession() {
+  if (running || !workspace) return
+  try {
+    const result = await window.kvist.newSession(workspace)
+    expandedProjects.add(workspace)
+    updateNavigation(result.navigation)
+    resetView()
+    activeSessionName = result.name
+    renderNavigation()
+  } catch (error) {
+    addError(error.message)
+  }
+}
+
+async function chooseProject() {
+  if (running) return
+  try {
+    const selected = await window.kvist.chooseWorkspace()
+    if (!selected) return
+    expandedProjects.add(selected)
+    await refreshNavigation()
+    const project = currentProject()
+    displaySession(sessionItem(project, project?.status?.active_session))
+    renderNavigation()
+  } catch (error) {
+    addError(error.message)
+  }
 }
 
 function resizePrompt() {
@@ -239,6 +457,7 @@ function setRunning(value) {
   roleButton.disabled = value
   modelButton.disabled = value
   approvalButton.disabled = value
+  sidebar.classList.toggle("is-disabled", value)
   if (value) {
     if (!tokenSpeedTimer) {
       tokenSpeedTimer = window.setInterval(() => {
@@ -684,6 +903,7 @@ function handleEvent(event) {
       if (event.message && event.message !== lastAssistantText) addAssistantMessage(event.message)
       setRunning(false)
       setActivity("Done", { progress: 100 })
+      void refreshNavigation()
       break
     case "debug":
       if (showDetails) addNotice(event.message)
@@ -787,11 +1007,9 @@ promptInput.addEventListener("keydown", (event) => {
   composer.requestSubmit()
 })
 
-workspaceButton.addEventListener("click", async () => {
-  if (running) return
-  const selected = await window.kvist.chooseWorkspace()
-  if (selected) updateWorkspace(selected)
-})
+newChatButton.addEventListener("click", () => void createNewSession())
+addProjectButton.addEventListener("click", () => void chooseProject())
+workspaceButton.addEventListener("click", () => void chooseProject())
 
 for (const button of [roleButton, modelButton, approvalButton]) {
   button.addEventListener("click", showSettings)
@@ -838,10 +1056,9 @@ for (const button of paletteBackdrop.querySelectorAll("[data-command]")) {
   button.addEventListener("click", async () => {
     const command = button.dataset.command
     hidePalette()
-    if (command === "new") resetView()
+    if (command === "new") await createNewSession()
     if (command === "workspace" && !running) {
-      const selected = await window.kvist.chooseWorkspace()
-      if (selected) updateWorkspace(selected)
+      await chooseProject()
     }
     if (command === "settings") showSettings()
     if (command === "details") toggleDetails()
@@ -857,7 +1074,7 @@ document.addEventListener("keydown", (event) => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
     event.preventDefault()
-    resetView()
+    void createNewSession()
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "m") {
     event.preventDefault()
@@ -892,13 +1109,17 @@ window.kvist.onExit(({ expected, code }) => {
   if (expected || code !== 0 || !running) return
   setRunning(false)
   setActivity("Kvist", { progress: 0 })
+  void refreshNavigation()
 })
 
 updateConfigChips()
 
 window.kvist.bootstrap().then((state) => {
-  updateWorkspace(state.workspace)
+  updateNavigation(state)
   protocolLabel.textContent = `v${state.protocolVersion}`
+  const project = currentProject()
+  displaySession(sessionItem(project, project?.status?.active_session))
+  renderNavigation()
   promptInput.focus()
   if (state.initialGoal) void startGoal(state.initialGoal)
 })

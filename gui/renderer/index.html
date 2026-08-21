@@ -12,7 +12,42 @@
   </head>
   <body>
     <div class="app-shell">
-      <main class="main-stage">
+      <aside id="sidebar" class="sidebar" aria-label="Sessions">
+        <header class="sidebar-header">
+          <div class="sidebar-brand">Kvist</div>
+        </header>
+
+        <button id="newChatButton" class="new-chat-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h8M16 3l5 5-9 9-4 1 1-4 9-9Z" />
+          </svg>
+          <span>New chat</span>
+        </button>
+
+        <div class="sidebar-scroll">
+          <section class="sidebar-section" aria-labelledby="projectsHeading">
+            <h2 id="projectsHeading">Projects</h2>
+            <div id="projectList" class="navigation-list"></div>
+          </section>
+
+          <section class="sidebar-section recents-section" aria-labelledby="recentsHeading">
+            <h2 id="recentsHeading">Recents</h2>
+            <div id="recentList" class="navigation-list"></div>
+          </section>
+        </div>
+
+        <footer class="sidebar-footer">
+          <button id="addProjectButton" class="sidebar-footer-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Zm9 4v5m-2.5-2.5h5" />
+            </svg>
+            <span>Open project</span>
+          </button>
+        </footer>
+      </aside>
+
+      <div class="content-shell">
+        <main class="main-stage">
         <section id="welcome" class="welcome">
           <img class="logo-word" src="kvist-logo.svg" alt="Kvist" />
         </section>
@@ -67,28 +102,29 @@
             <div class="activity-progress"><span id="progressBar"></span></div>
           </div>
         </section>
-      </main>
+        </main>
 
-      <footer class="app-footer">
-        <button id="workspaceButton" class="workspace-button" type="button" title="Choose workspace">
-          <span class="status-dot"></span>
-          <span id="workspaceLabel">Loading workspace…</span>
-        </button>
-        <div class="footer-right">
-          <span
-            id="tokenSpeed"
-            class="token-speed is-hidden"
-            title="Model output speed, estimated from streamed text (chars ÷ 4)"
-          ></span>
-          <span class="footer-version">Kvist GUI 1.1.0</span>
-        </div>
-      </footer>
+        <footer class="app-footer">
+          <button id="workspaceButton" class="workspace-button" type="button" title="Choose workspace">
+            <span class="status-dot"></span>
+            <span id="workspaceLabel">Loading workspace…</span>
+          </button>
+          <div class="footer-right">
+            <span
+              id="tokenSpeed"
+              class="token-speed is-hidden"
+              title="Model output speed, estimated from streamed text (chars ÷ 4)"
+            ></span>
+            <span class="footer-version">Kvist GUI 1.2.0</span>
+          </div>
+        </footer>
+      </div>
     </div>
 
     <div id="paletteBackdrop" class="overlay is-hidden" role="presentation">
       <section class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
         <div class="palette-title">Commands</div>
-        <button type="button" data-command="new"><span>New task</span><kbd>ctrl+n</kbd></button>
+        <button type="button" data-command="new"><span>New chat</span><kbd>ctrl+n</kbd></button>
         <button type="button" data-command="workspace"><span>Choose workspace</span><kbd>enter</kbd></button>
         <button type="button" data-command="settings"><span>Models and permissions</span><kbd>ctrl+m</kbd></button>
         <button type="button" data-command="details"><span>Toggle tool details</span><kbd>d</kbd></button>
