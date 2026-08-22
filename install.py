@@ -149,6 +149,10 @@ def find_default_binary() -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def is_already_installed(lib_dir: Path) -> bool:
+    return (lib_dir / CORE_NAME).is_file()
+
+
 def make_executable(path: Path) -> None:
     if IS_WINDOWS:
         return
@@ -209,10 +213,20 @@ def main() -> None:
 
     binary = args.binary
     if binary is None:
-        binary = None if args.rebuild else find_default_binary()
-        if binary is None:
-            print(f"No {BINARY_NAME} found in dist/, building it ...")
+        # A leftover dist/ binary is only trustworthy on a first install. Once
+        # kvist is already installed, re-running install.py means "update", so a
+        # stale dist/ artifact must be rebuilt rather than reused.
+        reinstalling = is_already_installed(args.lib_dir)
+        if args.rebuild:
             binary = build_binary()
+        elif reinstalling and find_default_binary() is not None:
+            print(f"kvist is already installed and a {BINARY_NAME} exists in dist/; rebuilding it ...")
+            binary = build_binary()
+        else:
+            binary = find_default_binary()
+            if binary is None:
+                print(f"No {BINARY_NAME} found in dist/, building it ...")
+                binary = build_binary()
 
     wrapper_path = install(binary.resolve(), args.lib_dir, args.bin_dir)
 
