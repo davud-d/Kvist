@@ -500,6 +500,9 @@ class LivePanelState:
     model_tier: str = ""
     escalated: bool = False
     thinking: str = ""
+    # True once any reasoning delta has arrived this run; distinguishes a
+    # provider that never streams reasoning from a transient empty gap.
+    reasoning_seen: bool = False
 
 
 def _format_tokens(count: int) -> str:
@@ -559,10 +562,17 @@ def live_panel_fields(state: LivePanelState) -> list[tuple[str, str]]:
 
 
 def _thinking_source(state: LivePanelState) -> str:
-    """Text for the thinking column: reasoning, a no-reasoning note, or hints."""
-    if state.running:
-        return state.thinking or NO_REASONING_NOTE
-    return IDLE_HINT
+    """Text for the thinking column: reasoning, a no-reasoning note, or hints.
+
+    The note only appears when reasoning has never arrived this run, so a
+    provider that does stream reasoning never gets mislabelled during the brief
+    gaps when the thinking buffer is momentarily empty.
+    """
+    if not state.running:
+        return IDLE_HINT
+    if state.thinking:
+        return state.thinking
+    return "" if state.reasoning_seen else NO_REASONING_NOTE
 
 
 def wrap_thinking(text: str, width: int, height: int) -> list[str]:

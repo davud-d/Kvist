@@ -81,6 +81,18 @@ def test_running_without_reasoning_shows_a_note_not_a_blank_column():
     assert "does not stream" in joined
 
 
+def test_empty_thinking_gap_after_reasoning_seen_hides_the_note():
+    # A streaming provider whose thinking buffer is momentarily empty must not
+    # be mislabelled as "does not stream reasoning".
+    state = LivePanelState(
+        running=True, state_label="working", thinking="", reasoning_seen=True
+    )
+    rows = render_live_panel(
+        state, metrics_width=26, thinking_width=40, height=8
+    )
+    assert "does not stream" not in " ".join(rows)
+
+
 def test_wrap_thinking_keeps_only_the_last_lines():
     text = "word " * 200
     lines = wrap_thinking(text, width=20, height=3)

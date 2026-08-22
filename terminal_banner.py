@@ -299,6 +299,8 @@ class TerminalBannerUI:
             def reasoning(message: str) -> None:
                 self._screen.set_stream(_reasoning_renderable(message))
                 self._live_panel.thinking = message
+                if message:
+                    self._live_panel.reasoning_seen = True
                 self._publish_live()
 
             update.reasoning = reasoning
