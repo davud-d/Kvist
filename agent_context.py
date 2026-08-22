@@ -185,12 +185,21 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         required_artifacts = ", ".join(self._state.required_artifacts[-12:]) or text["none"]
         dependency_versions = self._format_dependency_versions_for_prompt("en")
         current_time = current_time_context()["current_time"]
-        system_block = (
-            f"System environment:\n"
-            f"- OS: {self._state.system_os}\n"
-            f"- Shell: {self._state.system_shell}\n"
-            f"- Current datetime: {current_time}\n\n"
-        )
+        system_lines = [
+            "System environment:",
+            f"- OS: {self._state.system_os}",
+            f"- Shell: {self._state.system_shell}",
+            f"- Current datetime: {current_time}",
+            f"- Sandbox: {self._state.system_sandbox}",
+        ]
+        # Optional facts only appear when actually detected, so an unrelated
+        # workspace (no git repo, unrecognised project type) doesn't pay for
+        # lines it has no use for.
+        if self._state.system_project:
+            system_lines.append(f"- Project: {self._state.system_project}")
+        if self._state.system_git:
+            system_lines.append(f"- Git: {self._state.system_git}")
+        system_block = "\n".join(system_lines) + "\n\n"
         # ── Session history context ─────────────────────────────────
         session_history = ""
         if hasattr(self, "_session_history") and self._session_history:

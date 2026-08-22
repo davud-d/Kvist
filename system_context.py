@@ -10,12 +10,27 @@ For example:
 
 ### IMPORT
 from datetime import datetime
+from pathlib import Path
 import os
 import platform
 import shutil
 import sys
 import distro
 import subprocess
+
+
+_PROJECT_MARKERS = (
+    ("pyproject.toml", "python"),
+    ("requirements.txt", "python"),
+    ("package.json", "node"),
+    ("Cargo.toml", "rust"),
+    ("go.mod", "go"),
+    ("pom.xml", "java"),
+    ("build.gradle", "java"),
+    ("build.gradle.kts", "java"),
+    ("Gemfile", "ruby"),
+    ("composer.json", "php"),
+)
 
 
 ### SYSTEM CONTEXT
@@ -76,3 +91,34 @@ def current_shell_context():
 
     else:
         return "unknown"
+
+
+def current_project_context(workspace) -> str | None:
+    """One compact 'kind1+kind2, venv=NAME' line from filesystem markers, or None.
+
+    Pure filesystem checks (no subprocess), same trust level as reading any
+    other workspace file — kept separate from the sandboxed git summary,
+    which does shell out and lives on the executor instead.
+    """
+    root = Path(workspace)
+    kinds: list[str] = []
+    for filename, kind in _PROJECT_MARKERS:
+        if kind not in kinds and (root / filename).is_file():
+            kinds.append(kind)
+
+    venv = next(
+        (name for name in (".venv", "venv") if (root / name / "pyvenv.cfg").is_file()),
+        None,
+    )
+
+    if not kinds and not venv:
+        return None
+    parts = ["+".join(kinds)] if kinds else []
+    if venv:
+        parts.append(f"venv={venv}")
+    return ", ".join(parts)
+
+
+def current_sandbox_context(sandbox_mode: str, network_allowed: bool) -> str:
+    """One compact line describing the active sandbox mode and network policy."""
+    return f"{sandbox_mode}, net {'allowed' if network_allowed else 'denied'}"

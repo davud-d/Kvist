@@ -117,7 +117,14 @@ from executor import SafeExecutor
 from performance_logger import PerfLogger
 from redaction import redact_text, redact_value
 from role_router import route_role_with_llm, route_role
-from system_context import current_os_context, current_shell_context, current_time_context
+from system_context import (
+    current_os_context,
+    current_project_context,
+    current_sandbox_context,
+    current_shell_context,
+    current_time_context,
+)
+from sandbox import sandbox_network_allowed
 from ui import AgentUI
 from language_utils import detect_request_language
 from language_policy import resolve_response_language, response_language_name
@@ -327,6 +334,21 @@ class LocalAgent:
         self._reset_run_state()
         self._restore_session_document(target_document)
 
+    def _set_environment_facts(self) -> None:
+        """Recompute the cheap, per-run environment facts shown in the prompt.
+
+        Each fact is a single compact line (or empty) so the always-on
+        "System environment" section stays small no matter how much is added
+        here — one line per fact, never a dump.
+        """
+        self._state.system_os = current_os_context()
+        self._state.system_shell = current_shell_context()
+        self._state.system_project = current_project_context(self.executor.workspace) or ""
+        self._state.system_git = self.executor.git_context_summary() or ""
+        self._state.system_sandbox = current_sandbox_context(
+            self.executor.sandbox_mode, sandbox_network_allowed()
+        )
+
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
         self._reset_run_state()
         self._state.task_language = detect_request_language(user_goal)
@@ -336,8 +358,7 @@ class LocalAgent:
             user_goal, previous_language=self._last_response_language
         )
         self._last_response_language = self._state.response_language
-        self._state.system_os = current_os_context()
-        self._state.system_shell = current_shell_context()
+        self._set_environment_facts()
 
         # ── Role routing: either passed from outside or detected locally ─────
         self._state.current_agent_role = routed_role or self._route_role(user_goal)
@@ -408,8 +429,7 @@ class LocalAgent:
 
         # Environment facts are recomputed for the current machine rather than
         # restored: run() sets them, resume() must too or the prompt shows blanks.
-        self._state.system_os = current_os_context()
-        self._state.system_shell = current_shell_context()
+        self._set_environment_facts()
         # Re-detect for the current workspace like run() does; the restored
         # versions may be stale after an interrupted run.
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)

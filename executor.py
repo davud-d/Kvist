@@ -204,6 +204,7 @@ class SafeExecutor:
         self.sandbox_note = "\n".join(
             note for note in (self._terminal._sandbox_note, self._terminal._policy_note) if note
         )
+        self.sandbox_mode = self._terminal.sandbox_mode.value
 
         self.ignored_dirs = {
             ".git",
@@ -1678,6 +1679,24 @@ class SafeExecutor:
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
+
+    def git_context_summary(self) -> str | None:
+        """One-line 'branch (clean|N uncommitted)' summary for prompt context.
+
+        Reuses the sandboxed ``git status`` path used by the ``git_status``
+        action, so this pays the same cost/policy as a real action rather than
+        opening a second, unsandboxed way to shell out to git.
+        """
+        result = self._git_status()
+        if not result.data.get("git_available"):
+            return None
+        lines = [line for line in result.data.get("stdout", "").splitlines() if line.strip()]
+        if not lines:
+            return None
+        branch = lines[0].lstrip("#").strip().split("...")[0].strip() or "HEAD"
+        dirty = len(lines) - 1
+        status = "clean" if dirty == 0 else f"{dirty} uncommitted"
+        return f"{branch} ({status})"
 
     def _git_status(self) -> ExecutionResult:
         try:
