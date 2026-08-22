@@ -189,6 +189,7 @@ expose a session picker of its own.
 | `/changes` | Show a diff of files the agent changed in this workspace (all sessions) since the change journal was last cleared. |
 | `/revert` | Restore agent-changed files to their recorded pre-change contents. Files later modified by you (or by shell commands) are kept and reported as skipped. |
 | `/verbose <true\|false>` | Enable or disable verbose runtime output without restarting Kvist. |
+| `/plan <true\|false>` | Enable or disable the planning stage. Disabling it skips a whole LLM round-trip, so the agent starts acting faster. The choice is saved globally. |
 | `/strime <true\|false>` | Enable or disable streaming for the active custom provider. |
 | `/bye` | Save the session and exit. `/exit` and `/quit` are aliases. |
 
@@ -206,6 +207,25 @@ You can also enter `/verbose <true>` or `/verbose <false>` manually. Entering
 `/verbose` without an argument toggles the current state. The change applies to
 the active runtime immediately; after a restart, the initial value is read from
 `AGENT_VERBOSE` again.
+
+### Planning stage
+
+Before a coder/devops task, Kvist normally makes a separate planner call to
+build a short plan and success criteria. That is an extra LLM round-trip before
+the first action. Typing `/plan` toggles this stage: it shows `<false>` when
+planning is enabled (press `Tab` to skip it) and `<true>` when it is disabled.
+
+```text
+/plan <false>
+```
+
+You can also enter `/plan <true>` or `/plan <false>` manually; a bare `/plan`
+toggles the current state. With planning disabled the agent skips the planner
+call and starts the action loop immediately with a minimal self-orient step —
+it is explicitly told no plan was generated and must orient itself first. The
+choice is **saved globally** (`planning_enabled` in `~/.kvist/config.json`) and
+restored on the next launch. `AGENT_SKIP_PLANNING=1` overrides the saved value
+at startup.
 
 ### Custom-provider streaming
 
@@ -456,6 +476,7 @@ AGENT_PLANNER_MODEL=gpt-5.4-mini
 AGENT_MAX_STEPS=50
 AGENT_PERSIST_LOGS=1
 AGENT_VERBOSE=0
+AGENT_SKIP_PLANNING=0        # 1 skips the planner stage at startup (see /plan)
 AGENT_API_INTERVAL=
 AGENT_SANDBOX_MODE=auto
 AGENT_SANDBOX_NET=deny
@@ -475,6 +496,8 @@ AGENT_FETCH_EXTRA_DOMAINS= # comma-separated extra fetch_url domains
 - `AGENT_PERSIST_LOGS=0` disables completed run logs but does not disable
   session files or `/resume` checkpoints.
 - `AGENT_VERBOSE=1` prints model selection, retries, and other diagnostics.
+- `AGENT_SKIP_PLANNING=1` starts with the planning stage off (see `/plan`),
+  overriding the saved `planning_enabled` preference for that launch.
 - `AGENT_API_INTERVAL` overrides the delay between API calls. Without it,
   OpenAI, Anthropic, and OpenRouter use 2.5 seconds; other providers use the
   configured 5-second default.

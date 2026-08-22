@@ -32,6 +32,10 @@ class AgentConfig:
     runtime_model_fallbacks_enabled: bool = False
     stream: bool = True
     verbose: bool = False
+    # When true, the LLM planning round-trip is skipped: the run starts the
+    # action loop immediately with a minimal self-orient plan. Trades the
+    # planner's guidance for a faster time-to-first-action.
+    skip_planning: bool = False
     api_request_interval: float = 5.0
     api_timeout: float = 60.0
 

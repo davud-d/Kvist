@@ -45,6 +45,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
+    SlashCommand("plan", "Enable or disable the planning stage"),
     SlashCommand("changes", "Show agent file changes across all sessions"),
     SlashCommand("revert", "Restore agent-changed files to their baselines"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
@@ -114,7 +115,7 @@ def has_slash_command_completion(text: str) -> bool:
 
     # Once a toggle command is complete, its inline <true>/<false> suggestion
     # takes over and the regular command row should disappear.
-    if text.casefold() in {"/verbose", "/strime"}:
+    if text.casefold() in {"/verbose", "/plan", "/strime"}:
         return False
     return _has_slash_command_prefix(text)
 
@@ -125,17 +126,22 @@ class SlashCommandAutoSuggest(AutoSuggest):
     def __init__(
         self,
         verbose_enabled: bool = False,
+        plan_enabled: bool = True,
         streaming_enabled: bool = False,
         streaming_available: bool = False,
         fallback: AutoSuggest | None = None,
     ) -> None:
         self.verbose_enabled = verbose_enabled
+        self.plan_enabled = plan_enabled
         self.streaming_enabled = streaming_enabled
         self.streaming_available = streaming_available
         self.fallback = fallback
 
     def set_verbose(self, enabled: bool) -> None:
         self.verbose_enabled = enabled
+
+    def set_plan(self, enabled: bool) -> None:
+        self.plan_enabled = enabled
 
     def set_streaming(self, enabled: bool, *, available: bool) -> None:
         self.streaming_enabled = enabled
@@ -152,6 +158,12 @@ class SlashCommandAutoSuggest(AutoSuggest):
                 return Suggestion(f" <{value}>")
             if document.text.casefold() == "/verbose ":
                 return Suggestion(f"<{value}>")
+
+            plan_value = "false" if self.plan_enabled else "true"
+            if document.text.casefold() == "/plan":
+                return Suggestion(f" <{plan_value}>")
+            if document.text.casefold() == "/plan ":
+                return Suggestion(f"<{plan_value}>")
 
             if self.streaming_available:
                 value = "false" if self.streaming_enabled else "true"
@@ -219,7 +231,7 @@ def accept_inline_suggestion(buffer: Buffer) -> bool:
     if (
         buffer.document.is_cursor_at_the_end
         and buffer.text.casefold()
-        in {"/verbose", "/verbose ", "/strime", "/strime "}
+        in {"/verbose", "/verbose ", "/plan", "/plan ", "/strime", "/strime "}
         and buffer.suggestion is not None
     ):
         buffer.insert_text(buffer.suggestion.text)

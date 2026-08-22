@@ -117,6 +117,32 @@ def create_plan(self, user_goal: str) -> PlanInfo:
         return self._fallback_plan(user_goal)
 
 
+def no_plan_info(self, user_goal: str) -> PlanInfo:
+    """Minimal plan used when planning is skipped (`/plan false`).
+
+    No LLM planner call is made. The single plan step explicitly tells the
+    action model that no plan was generated, so it self-orients in the first
+    step (inspect what it needs) instead of assuming a plan exists.
+    """
+    return PlanInfo(
+        goal=user_goal,
+        complexity="complex" if self._is_complex_goal(user_goal) else "simple",
+        plan=[
+            "No plan was generated for this task (planning skipped). "
+            "Orient yourself first: inspect the files/state you need, "
+            "then act directly toward the task.",
+        ],
+        success_criteria=[
+            "the user's task is fully accomplished",
+            "result verified by available means",
+        ],
+        risks=[
+            "no upfront plan: verify assumptions before mutating",
+        ],
+        task_kind=infer_task_kind(user_goal),
+    )
+
+
 def fallback_plan(self, user_goal: str) -> PlanInfo:
     complexity = "complex" if self._is_complex_goal(user_goal) else "simple"
     return PlanInfo(

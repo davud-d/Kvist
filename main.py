@@ -152,6 +152,8 @@ from user_config import (
     save_models_for_provider,
     get_saved_role,
     save_role_selection,
+    get_saved_planning_enabled,
+    save_planning_enabled,
     secret_label_for_key,
     set_provider_secret,
 )
@@ -344,6 +346,29 @@ def parse_verbose_value(raw: str, current: bool) -> bool | None:
     return None
 
 
+def parse_plan_value(raw: str, current: bool) -> bool | None:
+    """Parse /plan, accepting true/false with optional angle brackets.
+
+    ``current`` and the return value are "planning enabled": ``/plan true``
+    keeps the planning stage, ``/plan false`` skips it. A bare ``/plan`` flips.
+    """
+
+    parts = raw.strip().split(maxsplit=1)
+    if not parts or parts[0].casefold() != "/plan":
+        return None
+    if len(parts) == 1:
+        return not current
+
+    value = parts[1].strip().casefold()
+    if value.startswith("<") and value.endswith(">"):
+        value = value[1:-1].strip()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    return None
+
+
 def parse_strime_value(raw: str, current: bool) -> bool | None:
     """Parse /strime, accepting true/false with optional angle brackets."""
 
@@ -371,6 +396,13 @@ def apply_verbose_mode(agent, enabled: bool) -> None:
     if hasattr(agent.client, "_verbose"):
         agent.client._verbose = enabled
     slash_command_auto_suggest.set_verbose(enabled)
+
+
+def apply_plan_mode(agent, planning_enabled: bool) -> None:
+    """Apply a planning-stage change to the active runtime objects."""
+
+    agent.config.skip_planning = not planning_enabled
+    slash_command_auto_suggest.set_plan(planning_enabled)
 
 
 def sync_strime_suggestion(provider: str, enabled: bool) -> None:
@@ -521,6 +553,7 @@ def build_agent(
     models_override: dict[str, str] | None = None,
     language_hint: str | None = None,
     ui: AgentUI | None = None,
+    skip_planning: bool = False,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
     # Captured before the missing-models wizard may rebind the local ``ui``.
     provided_ui = ui
@@ -632,6 +665,7 @@ def build_agent(
         persist_logs=persist_logs,
         stream=provider_supports_streaming(provider),
         verbose=verbose,
+        skip_planning=skip_planning,
     )
     agent_console = Console()
     perf_logger = PerfLogger(executor.workspace)
@@ -1905,6 +1939,13 @@ def main() -> None:
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
     slash_command_auto_suggest.set_verbose(verbose)
+    # Persisted preference is the default; AGENT_SKIP_PLANNING overrides if set.
+    planning_enabled = get_saved_planning_enabled()
+    env_skip = os.getenv("AGENT_SKIP_PLANNING")
+    if env_skip is not None:
+        planning_enabled = env_skip not in {"1", "true", "True", "yes", "on"}
+    skip_planning = not planning_enabled
+    slash_command_auto_suggest.set_plan(planning_enabled)
     session_language = detect_request_language(os.getenv("LANG", ""), fallback="en")
 
     try:
@@ -1918,6 +1959,7 @@ def main() -> None:
             max_steps=max_steps,
             persist_logs=persist_logs,
             verbose=verbose,
+            skip_planning=skip_planning,
             language_hint=session_language,
         )
     except (RuntimeError, ValueError) as error:
@@ -2042,6 +2084,45 @@ def main() -> None:
 
             if (
                 user_goal
+                and user_goal.split(maxsplit=1)[0].casefold() == "/plan"
+            ):
+                planning_enabled = parse_plan_value(
+                    user_goal, not agent.config.skip_planning
+                )
+                if planning_enabled is None:
+                    console.print(
+                        "[yellow]Usage: /plan <true> or /plan <false>[/yellow]"
+                    )
+                    continue
+
+                skip_planning = not planning_enabled
+                apply_plan_mode(agent, planning_enabled)
+                try:
+                    save_planning_enabled(planning_enabled)
+                except RuntimeError as error:
+                    console.print(
+                        _display_text(
+                            "Planning preference not saved: "
+                            f"{sanitize_display_text(str(error))}",
+                            "yellow",
+                        )
+                    )
+                if planning_enabled:
+                    console.print(
+                        _display_text("Planning stage enabled.", "green")
+                    )
+                else:
+                    console.print(
+                        _display_text(
+                            "Planning stage disabled — the agent starts acting "
+                            "immediately, without an upfront plan.",
+                            "green",
+                        )
+                    )
+                continue
+
+            if (
+                user_goal
                 and user_goal.split(maxsplit=1)[0].casefold() == "/strime"
             ):
                 if not is_custom_provider(config.provider):
@@ -2084,6 +2165,7 @@ def main() -> None:
                                 max_steps=max_steps,
                                 persist_logs=persist_logs,
                                 verbose=verbose,
+                                skip_planning=skip_planning,
                                 provider_override=selected_provider,
                                 language_hint=session_language,
                             )
@@ -2144,6 +2226,7 @@ def main() -> None:
                             max_steps=max_steps,
                             persist_logs=persist_logs,
                             verbose=verbose,
+                            skip_planning=skip_planning,
                             provider_override=config.provider,
                             language_hint=session_language,
                         )
@@ -2230,6 +2313,7 @@ def main() -> None:
                                     max_steps=max_steps,
                                     persist_logs=persist_logs,
                                     verbose=verbose,
+                                    skip_planning=skip_planning,
                                     provider_override=config.provider,
                                     models_override=selected_models,
                                     language_hint=session_language,

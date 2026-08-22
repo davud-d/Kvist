@@ -56,6 +56,8 @@ configured in-repo.
 - API keys + selected provider/models live in `~/.kvist/config.json` (Windows:
   `C:\Users\<USER>\.kvist\config.json`). On first run the agent prompts for the
   key the active provider needs and writes it there. Managed by `user_config.py`.
+  Also persists the global `role_selection` and `planning_enabled` (the `/plan`
+  toggle; default true) preferences.
 - Per-project state lives under `<workspace>/.kvist/`: named-session documents
   (history, chat, `/resume` checkpoint) in `sessions/<name>.json`, the active-session
   marker in `active_session.json`, the workspace-global change journal (for
@@ -98,7 +100,10 @@ configured in-repo.
   lexical pre-gate (`..`, `.kvist` case-insensitively, secret paths).
 - Behavior overrides via env vars (see README "Knobs worth knowing"): `AGENT_LLM_PROVIDER`,
   `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`, `AGENT_PLANNER_MODEL`, `AGENT_MAX_STEPS`,
-  `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`, `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
+  `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`,
+  `AGENT_SKIP_PLANNING` (1 skips the planner LLM round-trip at startup; overrides
+  the persisted `planning_enabled` preference — runtime-toggled by `/plan`),
+  `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
   `AGENT_SANDBOX_NET` (allow|deny, default deny under bubblewrap),
   `AGENT_CHILD_ENV_ALLOW` (comma-separated safe child variables),
   `AGENT_TOOL_PATHS` (os.pathsep-separated absolute toolchain dirs added to the

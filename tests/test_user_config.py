@@ -22,6 +22,18 @@ def test_load_and_save_user_config(tmp_path):
     assert user_config.load_user_config(tmp_path / "missing.json") == {}
 
 
+def test_planning_enabled_defaults_true_and_round_trips(tmp_path):
+    path = tmp_path / "config.json"
+    assert user_config.get_saved_planning_enabled(path) is True
+
+    user_config.save_planning_enabled(False, path)
+    assert user_config.get_saved_planning_enabled(path) is False
+    assert json.loads(path.read_text(encoding="utf-8"))["planning_enabled"] is False
+
+    user_config.save_planning_enabled(True, path)
+    assert user_config.get_saved_planning_enabled(path) is True
+
+
 @requires_posix
 def test_user_config_file_is_owner_only(tmp_path):
     path = tmp_path / "config.json"

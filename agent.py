@@ -55,6 +55,7 @@ from agent_planner import (
     create_plan,
     fallback_plan,
     is_complex_goal,
+    no_plan_info,
     parse_json_dict,
 )
 from agent_runtime import (
@@ -372,7 +373,11 @@ class LocalAgent:
         self._run_id = uuid.uuid4().hex
         self._pending_action = None
         self._begin_run(user_goal, self._run_id)
-        self._state.plan_info = self._create_plan(user_goal)
+        self._state.plan_info = (
+            self._no_plan_info(user_goal)
+            if self.config.skip_planning
+            else self._create_plan(user_goal)
+        )
         if not self._state.selected_action_model:
             self._select_action_model_for_run()
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
@@ -428,7 +433,11 @@ class LocalAgent:
         # external side effect: re-plan NEW and start fresh from step 1 rather
         # than reviving the superseded run or forgetting NEW.
         if resumed_phase == "planning" or self._state.plan_info is None:
-            self._state.plan_info = self._create_plan(user_goal)
+            self._state.plan_info = (
+                self._no_plan_info(user_goal)
+                if self.config.skip_planning
+                else self._create_plan(user_goal)
+            )
             self._ui.print_plan(self._state.plan_info)
             start_step = 1
         result = self._run_loop(user_goal, start_step=start_step)
@@ -558,6 +567,7 @@ class LocalAgent:
 
     _create_plan = create_plan
     _fallback_plan = fallback_plan
+    _no_plan_info = no_plan_info
     _is_complex_goal = is_complex_goal
     _parse_json_dict = parse_json_dict
 
