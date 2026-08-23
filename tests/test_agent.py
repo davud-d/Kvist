@@ -42,6 +42,41 @@ def test_chat_redacts_credentials_before_provider_request(
     assert "[REDACTED]" in str(client.requests)
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_freeflow_chat_history_stays_below_hard_input_limit(
+    agent_factory,
+    monkeypatch,
+    stream,
+):
+    agent = _chat_agent(agent_factory, monkeypatch, stream=stream)
+    agent.config.provider = "freeflow"
+    agent._count_tokens = lambda text: len(text)
+    agent.client = FakeLLMClient(content="safe response", stream_chunks=["safe response"])
+
+    result = agent._run_chat("x" * 20000)
+
+    assert result == "safe response"
+    request_messages = agent.client.requests[0]["messages"]
+    assert sum(len(message["content"]) for message in request_messages) <= 11000
+    assert "context trimmed" in str(request_messages)
+    assert str(request_messages[-1]["content"]).endswith("x" * 100)
+
+
+def test_freeflow_chat_history_under_limit_is_not_trimmed(
+    agent_factory,
+    monkeypatch,
+):
+    agent = _chat_agent(agent_factory, monkeypatch, stream=False)
+    agent.config.provider = "freeflow"
+    agent._count_tokens = lambda text: len(text)
+    agent.client = FakeLLMClient(content="safe response")
+
+    agent._run_chat("short request")
+
+    request_messages = agent.client.requests[0]["messages"]
+    assert "CONTEXT TRIMMED" not in str(request_messages)
+
+
 def test_chat_failure_does_not_echo_provider_credentials(
     agent_factory,
     monkeypatch,

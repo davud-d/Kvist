@@ -50,6 +50,7 @@ from agent_model import (
     safe_extract_stream_delta,
     select_action_model_for_run,
     trim_prompt_to_token_limit,
+    trim_chat_messages_to_token_limit,
 )
 from agent_planner import (
     create_plan,
@@ -605,6 +606,7 @@ class LocalAgent:
     _init_tiktoken_encoding = staticmethod(init_tiktoken_encoding)
     _count_tokens = count_tokens
     _trim_prompt_to_token_limit = trim_prompt_to_token_limit
+    _trim_chat_messages_to_token_limit = trim_chat_messages_to_token_limit
     _prefer_smart_model = prefer_smart_model
     _select_action_model_for_run = select_action_model_for_run
 
@@ -737,6 +739,7 @@ class LocalAgent:
 
         # Trim history to keep only last 10 messages + system prompt
         self._chat_history = trim_history(self._chat_history, max_recent=10)
+        self._chat_history = self._trim_chat_messages_to_token_limit(self._chat_history)
 
         content = ""
         last_error: str | None = None

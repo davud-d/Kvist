@@ -30,6 +30,7 @@ from agent_context import (
 from context_utils import trim_history
 from llm_clients import (
     fallback_candidates_for_model,
+    FREEFLOW_PROVIDER,
     is_custom_provider,
     extract_custom_provider_name,
     provider_supports_json_mode,
@@ -745,6 +746,75 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
         f"Prompt trimmed: sys={system_tokens}, user={prompt_tokens} "
         f"-> {sum(section_tokens)} tokens in {kept_count}/{len(sections)} sections "
         f"(limit {max_tokens}, available {available})"
+    )
+    return trimmed
+
+
+def trim_chat_messages_to_token_limit(
+    self,
+    messages: list[ChatCompletionMessageParam],
+) -> list[ChatCompletionMessageParam]:
+    """Keep FreeFlow chat requests below the backend's hard input limit."""
+    if self.config.provider != FREEFLOW_PROVIDER:
+        return messages
+
+    max_tokens = 11000
+    normalized = [
+        message for message in messages
+        if isinstance(message, dict) and isinstance(message.get("content"), str)
+    ]
+    total_tokens = sum(self._count_tokens(message["content"]) for message in normalized)
+    if total_tokens <= max_tokens:
+        return normalized
+
+    def truncate_content(text: str, token_budget: int) -> str:
+        marker = "\n[... context trimmed ...]\n"
+        if token_budget <= self._count_tokens(marker):
+            return ""
+
+        low = 0
+        high = len(text)
+        while low < high:
+            kept_chars = (low + high + 1) // 2
+            head_chars = kept_chars // 2
+            candidate = text[:head_chars] + marker + text[-(kept_chars - head_chars):]
+            if self._count_tokens(candidate) <= token_budget:
+                low = kept_chars
+            else:
+                high = kept_chars - 1
+
+        head_chars = low // 2
+        return text[:head_chars] + marker + text[-(low - head_chars):]
+
+    system = normalized[:1] if normalized and normalized[0].get("role") == "system" else []
+    tail = normalized[1:] if system else normalized
+    if system:
+        system_budget = max_tokens - 600
+        if self._count_tokens(system[0]["content"]) > system_budget:
+            system = [{**system[0], "content": truncate_content(system[0]["content"], system_budget)}]
+    system_tokens = sum(self._count_tokens(message["content"]) for message in system)
+    available = max_tokens - system_tokens
+
+    kept_reversed: list[ChatCompletionMessageParam] = []
+    used = 0
+    for message in reversed(tail):
+        tokens = self._count_tokens(message["content"])
+        if used + tokens <= available:
+            kept_reversed.append(message)
+            used += tokens
+            continue
+        remaining = available - used
+        if remaining > 0:
+            content = truncate_content(message["content"], remaining)
+            if content:
+                kept_reversed.append({**message, "content": content})
+        break
+
+    trimmed = system + list(reversed(kept_reversed))
+    self._ui.debug_print(
+        f"Chat history trimmed for FreeFlow: {total_tokens} -> "
+        f"{sum(self._count_tokens(message['content']) for message in trimmed)} tokens "
+        f"(limit {max_tokens})"
     )
     return trimmed
 
