@@ -50,6 +50,7 @@ from prompt_toolkit.layout.controls import (
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import AppendAutoSuggestion, BeforeInput
 from prompt_toolkit.layout.screen import Point
+from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from rich.console import Console
 
 import banner
@@ -65,6 +66,11 @@ _BANNER_HEIGHT = 17
 _MIN_SCREEN_HEIGHT = 31
 _MAX_INPUT_HEIGHT = 8
 _MAX_TRANSIENT_HEIGHT = 10
+_MOUSE_SCROLL_LINES = 3
+# Keep at least this many transcript rows visible while a reply streams, so
+# scrolling/selecting the existing history never becomes physically impossible
+# just because the growing streamed reply is claiming all the vertical space.
+_MIN_TRANSCRIPT_ROWS_WHILE_STREAMING = 4
 # Re-render the status slot on a time tick so its Rich spinner keeps animating
 # between the seconds-apart status updates the agent emits. Without this the
 # generation-keyed cache freezes the spinner (a regression from the old Rich
@@ -272,10 +278,24 @@ class _TranscriptControl(UIControl):
     def __init__(
         self,
         get_content: Callable[[], tuple[int, list[StyleAndTextTuples], Point]],
+        scroll_up: Callable[[int], None] | None = None,
+        scroll_down: Callable[[int], None] | None = None,
     ) -> None:
         self._get_content = get_content
+        self._scroll_up = scroll_up
+        self._scroll_down = scroll_down
         self._content: UIContent | None = None
         self._content_key: tuple[int, int, Point] | None = None
+
+    def mouse_handler(self, mouse_event: MouseEvent) -> Any:
+        event_type = mouse_event.event_type
+        if event_type == MouseEventType.SCROLL_UP and self._scroll_up is not None:
+            self._scroll_up(_MOUSE_SCROLL_LINES)
+            return None
+        if event_type == MouseEventType.SCROLL_DOWN and self._scroll_down is not None:
+            self._scroll_down(_MOUSE_SCROLL_LINES)
+            return None
+        return NotImplemented
 
     def create_content(self, width: int, height: int | None = None) -> UIContent:
         generation, lines, cursor = self._get_content()
@@ -1047,41 +1067,38 @@ class InteractiveScreen:
         return max(1, len(set(render_info.displayed_lines)) - 1)
 
     def _page_up(self) -> None:
-        with self._state_lock:
-            render_info = (
-                self._transcript_window.render_info
-                if self._transcript_window is not None
-                else None
-            )
-            current_top = (
-                render_info.vertical_scroll
-                if render_info is not None
-                else self._transcript_cursor_line
-            )
-            self._follow_tail = False
-            self._transcript_cursor_line = max(
-                0,
-                current_top - self._page_size(),
-            )
-        self.invalidate()
+        self._scroll_up(self._page_size())
 
     def _page_down(self) -> None:
+        self._scroll_down(2 * self._page_size())
+
+    def _current_scroll_top_locked(self) -> int:
+        render_info = (
+            self._transcript_window.render_info
+            if self._transcript_window is not None
+            else None
+        )
+        return (
+            render_info.vertical_scroll
+            if render_info is not None
+            else self._transcript_cursor_line
+        )
+
+    def _scroll_up(self, amount: int) -> None:
+        with self._state_lock:
+            current_top = self._current_scroll_top_locked()
+            self._follow_tail = False
+            self._transcript_cursor_line = max(0, current_top - amount)
+        self.invalidate()
+
+    def _scroll_down(self, amount: int) -> None:
         with self._state_lock:
             last = self._last_transcript_line_locked()
-            render_info = (
-                self._transcript_window.render_info
-                if self._transcript_window is not None
-                else None
-            )
-            current_top = (
-                render_info.vertical_scroll
-                if render_info is not None
-                else self._transcript_cursor_line
-            )
-            # Put the virtual cursor one viewport below the current bottom.
-            # prompt_toolkit then positions it at the next page instead of
-            # merely keeping the old tail visible.
-            target = current_top + 2 * self._page_size()
+            current_top = self._current_scroll_top_locked()
+            # Put the virtual cursor past the current bottom so prompt_toolkit
+            # advances the viewport instead of merely keeping the old tail
+            # visible.
+            target = current_top + amount
             if target >= last:
                 self._follow_tail = True
                 self._transcript_cursor_line = last
@@ -1130,7 +1147,11 @@ class InteractiveScreen:
             filter=Condition(self._has_status),
         )
 
-        transcript_control = _TranscriptControl(self._transcript_content)
+        transcript_control = _TranscriptControl(
+            self._transcript_content,
+            scroll_up=lambda amount: self._scroll_up(amount),
+            scroll_down=lambda amount: self._scroll_down(amount),
+        )
         transcript = Window(
             transcript_control,
             height=Dimension(min=1, weight=1),
@@ -1147,7 +1168,13 @@ class InteractiveScreen:
                     show_cursor=False,
                     get_cursor_position=self._transient_cursor,
                 ),
-                height=Dimension(min=1, max=_MAX_TRANSIENT_HEIGHT),
+                # A fixed small cap here clips the growing reply into a tiny
+                # box instead of letting it fill down from where it started;
+                # an unbounded one instead starves the transcript window of
+                # any rows, making it unscrollable/unselectable mid-stream.
+                # ``_transient_height`` recomputes the cap against the current
+                # terminal size on every render, keeping a scrollable floor.
+                height=self._transient_height,
                 dont_extend_height=True,
                 wrap_lines=True,
                 always_hide_cursor=True,
@@ -1220,7 +1247,7 @@ class InteractiveScreen:
             key_bindings=key_bindings,
             style=self.session.style,
             include_default_pygments_style=self.session.include_default_pygments_style,
-            mouse_support=self.session.mouse_support,
+            mouse_support=True,
             editing_mode=self.session.app.editing_mode,
             color_depth=self.session.color_depth,
             refresh_interval=0.045,
@@ -1374,6 +1401,25 @@ class InteractiveScreen:
     def _has_transient(self) -> bool:
         with self._state_lock:
             return self._stream is not None
+
+    def _transient_height(self) -> Dimension:
+        """Cap the streaming-reply window so history stays scrollable.
+
+        The reply is allowed to grow well past the old fixed 10-line cap (see
+        module docstring context), but never so far that it starves the
+        transcript window below ``_MIN_TRANSCRIPT_ROWS_WHILE_STREAMING`` —
+        otherwise scrolling/selecting the existing history becomes physically
+        impossible while a reply is streaming in.
+        """
+        _, rows = self._terminal_size()
+        reserved = _MIN_TRANSCRIPT_ROWS_WHILE_STREAMING
+        if self._show_banner():
+            reserved += _BANNER_HEIGHT
+        if self._has_status():
+            reserved += 1
+        if self._input_visible():
+            reserved += self._input_height()
+        return Dimension(min=1, max=max(1, rows - reserved))
 
     def _get_status(self) -> AnyFormattedText:
         """Render the run-status panel pinned under the banner.

@@ -46,19 +46,34 @@ workspace за раз: читает и редактирует файлы про�
 
 ## Превью
 
-### Первый запуск
+У Kvist две пользовательские точки входа. Ниже каждая показана в полном цикле
+одной короткой read-only задачи: `start` — интерфейс готов, `working` — агент
+действительно изучает workspace, `end` — ответ завершён, файлы не изменены.
 
-Ввод API key намеренно скрыт.
+### Терминальный UI в Kitty
 
-![Первый запуск Kvist со скрытым вводом API key](preview/start.png)
+При первом запуске выполните `kvist` в каталоге проекта. Выберите провайдера и
+введите его API key в замаскированном prompt `API key:`. Значение сохраняется в
+`~/.kvist/config.json` и не выводится в терминал.
 
-### Работа агента
+![Терминальный UI Kvist готов к задаче](preview/terminal-start.png)
 
-![Kvist работает в терминале](preview/working.png)
+![Терминальный агент Kvist работает над задачей](preview/terminal-working.png)
 
-### Финальный отчёт
+![Терминальная задача Kvist завершена](preview/terminal-end.png)
 
-![Финальный отчёт Kvist в терминале](preview/end.png)
+### Electron GUI
+
+Electron frontend использует тот же runtime и NDJSON-протокол. Выберите или
+откройте проект, введите задачу в composer и отвечайте на появившиеся карточки
+подтверждений или input-запросов. API key настраивается runtime, а не вставляется
+в текст задачи.
+
+![GUI Kvist готов в Hyprland](preview/gui-start.png)
+
+![GUI-агент Kvist работает над задачей в Hyprland](preview/gui-working.png)
+
+![GUI-задача Kvist завершена в Hyprland](preview/gui-end.png)
 
 ## Возможности
 

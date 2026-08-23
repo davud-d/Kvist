@@ -45,19 +45,35 @@ frontend protocol for other clients.
 
 ## Preview
 
-### First launch
+Kvist has two user-facing entry points. Each preview below shows the same short
+read-only task through its full lifecycle: `start` means the interface is ready,
+`working` means the agent is actively inspecting the workspace, and `end` means
+the answer is complete with no files edited.
 
-API key input is intentionally hidden.
+### Terminal UI in Kitty
 
-![Kvist first launch with hidden API key input](preview/start.png)
+On the first terminal launch, run `kvist` in the project directory. Choose a
+provider, then enter its API key at the masked `API key:` prompt. The value is
+stored in `~/.kvist/config.json`; it is not echoed in the terminal.
 
-### Agent at work
+![Kvist terminal ready in Kitty](preview/terminal-start.png)
 
-![Kvist working in the terminal](preview/working.png)
+![Kvist terminal agent working in Kitty](preview/terminal-working.png)
 
-### Final report
+![Kvist terminal completed task in Kitty](preview/terminal-end.png)
 
-![Kvist final report in the terminal](preview/end.png)
+### Electron GUI
+
+The Electron frontend uses the same runtime and NDJSON protocol. Select or open
+a project, type the task in the composer, and answer any approval or input card
+shown in the conversation. Provider credentials are configured by the runtime,
+not pasted into the task prompt.
+
+![Kvist GUI ready on Hyprland](preview/gui-start.png)
+
+![Kvist GUI agent working on Hyprland](preview/gui-working.png)
+
+![Kvist GUI completed task on Hyprland](preview/gui-end.png)
 
 ## What it does
 
