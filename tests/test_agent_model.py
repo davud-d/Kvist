@@ -184,3 +184,42 @@ def test_call_model_raises_after_non_retryable_error(agent_factory, monkeypatch)
     with pytest.raises(RuntimeError, match="Failed to get model response") as caught:
         agent._call_model("model", "system", "user")
     assert synthetic not in str(caught.value)
+
+
+def _prime_pipeline_agent(agent_factory, content):
+    from tests.conftest import make_plan
+
+    agent = agent_factory(stream=False)
+    agent.client = FakeLLMClient(content=content)
+    agent._state.plan_info = make_plan()
+    agent._state.selected_action_role = "fast"
+    agent._state.selected_action_model = agent.config.fast_model
+    agent._state.current_agent_role = "coder"
+    return agent
+
+
+def test_matching_prefetch_is_consumed_without_a_second_call(agent_factory):
+    agent = _prime_pipeline_agent(agent_factory, '{"thought":"prefetched"}')
+    agent_model._launch_action_prefetch(agent, "PROMPT-A")
+
+    def _forbidden(**_kwargs):
+        raise AssertionError("call_action_model made a duplicate model call")
+
+    agent._call_model = _forbidden
+
+    result = agent._call_action_model("PROMPT-A")
+
+    assert result == '{"thought":"prefetched"}'
+    assert agent._prefetch is None
+
+
+def test_mispredicted_prefetch_falls_back_to_a_normal_call(agent_factory):
+    agent = _prime_pipeline_agent(agent_factory, '{"thought":"live"}')
+    agent_model._launch_action_prefetch(agent, "PROMPT-A")
+
+    # A different prompt must drop the stale prefetch and call normally, never
+    # reuse the wrong step's response.
+    result = agent._call_action_model("PROMPT-B")
+
+    assert result == '{"thought":"live"}'
+    assert agent._prefetch is None

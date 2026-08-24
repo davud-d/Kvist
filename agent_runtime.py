@@ -71,6 +71,33 @@ def _note_run_context(self, **facts: Any) -> None:
     if notify is not None:
         notify(**facts)
 
+
+def _run_pipeline_dwell(self, user_goal: str, step: int) -> None:
+    """Prefetch the next step's action call while holding the current one on screen.
+
+    Off-loads only the pure LLM call for ``step + 1`` and then sleeps a short,
+    latency-matched dwell so the user reads the current step while the next is
+    prepared — the perceived-latency pipeline. Disabled when there is no request
+    interval (tests, ``api_request_interval=0``) and in verbose mode, whose
+    debug stream must stay strictly sequential.
+    """
+    from agent_model import (
+        _get_api_interval,
+        _launch_action_prefetch,
+        _pipeline_dwell_seconds,
+    )
+
+    if self.config.verbose or _get_api_interval(self) <= 0:
+        return
+    next_step = step + 1
+    if next_step > self.config.max_steps:
+        return
+    if self._state.plan_info is None or self._build_early_stop_message(next_step):
+        return
+    next_prompt = self._build_runtime_prompt(user_goal, next_step)
+    _launch_action_prefetch(self, next_prompt)
+    time.sleep(_pipeline_dwell_seconds(self))
+
 # Read-only inspections still permitted while a corrective action is required.
 _CORRECTIVE_READ_BUDGET = 3
 
@@ -268,7 +295,10 @@ def finalize_run(
     primary_error: BaseException | None,
 ) -> None:
     """Attempt every lifecycle cleanup without replacing a primary failure."""
+    from agent_model import _join_pending_prefetch
+
     cleanup_steps: list[tuple[str, Any]] = [
+        ("join pending prefetch", lambda: _join_pending_prefetch(self)),
         ("stop live UI", self._ui.stop_live),
         ("persist run log", lambda: self._persist_logs(user_goal)),
         ("flush performance log", self._perf_logger.flush),
@@ -785,6 +815,12 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             # workspace. The atomic write is negligible next to the LLM call.
             self._save_checkpoint(user_goal, step)
 
+            # Only pipeline off a clean, successful step: after an error the
+            # model tier and pending instruction are volatile, so predicting the
+            # next prompt is unreliable (a mismatch just wastes the prefetch).
+            if feedback.get("ok"):
+                _run_pipeline_dwell(self, user_goal, step)
+
         if not final_message:
             final_message = self._build_limit_reached_message()
     finally:
@@ -801,6 +837,9 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
 
 def reset_run_state(self) -> None:
+    from agent_model import _join_pending_prefetch
+
+    _join_pending_prefetch(self)
     self._state = RunState()
 
 

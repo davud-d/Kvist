@@ -186,6 +186,10 @@ class LocalAgent:
         # on the first context-budget calculation.
         self._encoding = _TOKEN_ENCODING_UNINITIALIZED
         self._current_step = 0
+        # Perceived-latency pipeline: single in-flight prefetch of the next
+        # step's action call, and the last call's wall-clock (dwell tuning).
+        self._prefetch: dict[str, Any] | None = None
+        self._last_model_duration = 0.0
         # Last resolved user-facing language for this session; used as the
         # fallback when a new request has no detectable language.
         self._last_response_language: str | None = None

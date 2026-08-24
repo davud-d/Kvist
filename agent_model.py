@@ -91,8 +91,171 @@ def _get_api_interval(self) -> float:
             return float(env_override)
         except ValueError:
             pass
+    # An explicit interval of 0 disables all artificial spacing; the per-provider
+    # table only lowers the positive default, it never overrides "off".
+    if self.config.api_request_interval <= 0:
+        return 0.0
     provider = getattr(self.config, "provider", "")
     return _API_PROVIDER_INTERVALS.get(provider, self.config.api_request_interval)
+
+
+def _throttle_request_rate(self) -> None:
+    """Keep consecutive API request *starts* at least one interval apart.
+
+    Rate-limit protection only needs a minimum gap between when requests start.
+    The model call itself already spends several seconds streaming its response,
+    so measuring the gap from the previous request start collapses the wait to
+    whatever the call did not already cover — usually nothing. The old code
+    instead slept the full interval *after* every call, stacking a fixed
+    2.5–5 s pause on top of each step; that dead time is the tedious wait
+    between steps. Fast calls (or the first call) still get spaced apart.
+    """
+    interval = _get_api_interval(self)
+    now = time.monotonic()
+    last_start = getattr(self, "_last_request_start_ts", None)
+    if interval > 0 and last_start is not None:
+        remaining = interval - (now - last_start)
+        if remaining > 0:
+            time.sleep(remaining)
+            now = time.monotonic()
+    self._last_request_start_ts = now
+
+
+# ── Perceived-latency pipeline ───────────────────────────────────────────────
+# While the current step is on screen, the *next* step's action call is computed
+# off the main loop so it is ready (or nearly so) when the loop asks for it. Only
+# the pure LLM call runs ahead — never the executor — so journaling, checkpoints,
+# and crash-consistency are untouched. Correctness is guaranteed because a
+# prefetched response is used only when its prompt and model match exactly what
+# the foreground would send anyway; any mismatch is discarded and re-called.
+_PIPELINE_DWELL_MIN = 0.5
+_PIPELINE_DWELL_CAP = 2.5
+
+
+def _speculative_action_call(
+    self, prompt: str, model: str, system_prompt: str
+) -> tuple[str, int, int, float]:
+    """Compute one action-model response off the main loop, side-effect free.
+
+    Touches none of the shared per-call state (``self._last_*``, usage, perf
+    logs): the foreground step emits usage when it consumes the result, so
+    accounting stays attributed to the right step. Returns
+    ``(content, input_tokens, output_tokens, duration)``.
+    """
+    trimmed = self._trim_prompt_to_token_limit(system_prompt, prompt)
+    messages: list[ChatCompletionMessageParam] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": trimmed},
+    ]
+    messages = trim_history(messages, max_recent=4)
+    input_tokens = self._count_tokens(system_prompt) + self._count_tokens(trimmed)
+
+    _throttle_request_rate(self)
+    started = time.monotonic()
+    response = self._create_json_completion(model=model, messages=messages)
+    content = safe_extract_completion_content(response, self.config.provider, model)
+    duration = time.monotonic() - started
+    if not content:
+        raise RuntimeError("Model returned an empty response")
+    return content, input_tokens, self._count_tokens(content), duration
+
+
+def _launch_action_prefetch(self, prompt: str) -> None:
+    """Start computing *prompt*'s action response in a daemon thread.
+
+    At most one prefetch is in flight: a still-running worker is left alone; a
+    finished-but-unconsumed one (a prior mispredict) is dropped first. The
+    consuming side guarantees a single request is ever active by joining a stale
+    worker before falling back to a normal call.
+    """
+    import threading
+
+    holder = getattr(self, "_prefetch", None)
+    if holder is not None:
+        if holder["thread"].is_alive():
+            return
+        self._prefetch = None
+
+    model = str(getattr(self._state, "selected_action_model", "")).strip()
+    if not model:
+        return
+    system_prompt = _load_role_prompt(getattr(self._state, "current_agent_role", "coder"))
+    holder = {
+        "prompt": prompt,
+        "model": model,
+        "content": None,
+        "error": None,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "duration": 0.0,
+    }
+
+    def _worker() -> None:
+        try:
+            content, input_tokens, output_tokens, duration = _speculative_action_call(
+                self, prompt, model, system_prompt
+            )
+            holder["content"] = content
+            holder["input_tokens"] = input_tokens
+            holder["output_tokens"] = output_tokens
+            holder["duration"] = duration
+        except Exception as error:
+            holder["error"] = error
+
+    thread = threading.Thread(target=_worker, name="kvist-prefetch", daemon=True)
+    holder["thread"] = thread
+    self._prefetch = holder
+    thread.start()
+
+
+def _consume_action_prefetch(self, prompt: str, model: str) -> str | None:
+    """Return a matching prefetched response, or ``None`` to call normally.
+
+    A mismatch joins and drops the stale worker so at most one API request is
+    ever in flight (a rare mispredict may briefly stall here — acceptable). A
+    prefetch that errored also returns ``None`` so the foreground retries.
+    """
+    holder = getattr(self, "_prefetch", None)
+    if holder is None:
+        return None
+    self._prefetch = None
+    holder["thread"].join()
+    if holder["prompt"] != prompt or holder["model"] != model or holder["error"] is not None:
+        return None
+    _emit_usage(
+        self,
+        model=model,
+        input_tokens=holder["input_tokens"],
+        output_tokens=holder["output_tokens"],
+        kind="step",
+        duration_seconds=holder["duration"],
+    )
+    self._last_reasoning_seconds = 0.0
+    self._last_model_duration = holder["duration"]
+    return holder["content"]
+
+
+def _pipeline_dwell_seconds(self) -> float:
+    """On-screen dwell for the current step ≈ last model latency, clamped.
+
+    Matching the dwell to the last call's duration means the prefetched next
+    step is usually ready exactly as the dwell ends, so the pipeline adds no net
+    wall-clock: latency that used to be a dead spinner is spent reading the
+    current step instead.
+    """
+    last = float(getattr(self, "_last_model_duration", 0.0) or 0.0)
+    return max(_PIPELINE_DWELL_MIN, min(last, _PIPELINE_DWELL_CAP))
+
+
+def _join_pending_prefetch(self) -> None:
+    """Wait out any in-flight prefetch so no worker thread outlives the run."""
+    holder = getattr(self, "_prefetch", None)
+    if holder is None:
+        return
+    thread = holder.get("thread")
+    if thread is not None:
+        thread.join(timeout=self.config.api_timeout)
+    self._prefetch = None
 
 
 def _format_llm_error(error: Exception, provider: str | None = None) -> str:
@@ -263,11 +426,19 @@ def call_action_model(self, prompt: str) -> str:
     preferred_model = str(getattr(self._state, "selected_action_model", "")).strip()
     if not preferred_model:
         preferred_model = self._select_action_model_for_run()
+
+    # Consume a pipeline prefetch computed while the previous step was on screen,
+    # but only when it matches this exact prompt+model; otherwise call normally.
+    prefetched = _consume_action_prefetch(self, prompt, preferred_model)
+    if prefetched is not None:
+        return prefetched
+
     role = getattr(self._state, "current_agent_role", "coder")
     system_prompt = _load_role_prompt(role)
     self._retries_exhausted = False
+    started = time.monotonic()
     try:
-        return self._call_model(
+        content = self._call_model(
             model=preferred_model,
             system_prompt=system_prompt,
             user_prompt=prompt,
@@ -276,6 +447,8 @@ def call_action_model(self, prompt: str) -> str:
     except Exception:
         self._retries_exhausted = True
         raise
+    self._last_model_duration = time.monotonic() - started
+    return content
 
 
 def select_action_model_for_run(self) -> str:
@@ -379,6 +552,7 @@ def call_model(
             return self._cache[cache_key]
 
         for attempt in range(1, self.config.max_retries + 1):
+            _throttle_request_rate(self)
             request_start = time.monotonic()
             try:
                 if self.config.stream:
@@ -424,11 +598,6 @@ def call_model(
                     chunks_per_second=getattr(self, "_last_chunks_per_second", None),
                     ok=True,
                 )
-                
-                # interval API request
-                interval = _get_api_interval(self)
-                if interval > 0:
-                    time.sleep(interval)
 
                 return content
             except Exception as error:
