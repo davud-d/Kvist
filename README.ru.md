@@ -120,6 +120,33 @@ python3 -m venv .venv
 
 В Windows используйте `py -m venv .venv` и `.venv\\Scripts\\python.exe`.
 
+## Быстрый старт
+
+Для Unix-подобных систем (Linux, FreeBSD, OpenBSD) в терминале:
+
+```bash
+git clone https://github.com/davud-d/Kvist && echo "Clone OK" || echo "error clone"
+cd Kvist
+python -m venv .venv && echo "venv OK" || echo "error venv"
+source .venv/bin/activate && echo "venv activated" || echo "error activate"
+uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
+python install.py && echo "Install OK" || echo "error install"
+```
+**Нюанс**: *работает только для bash, если у вас другой shell - адаптируйте*
+
+Для Windows PowerShell:
+
+```powershell
+git clone https://github.com/davud-d/Kvist; if ($?) { echo "Clone OK" } else { echo "error clone" }
+cd Kvist
+python -m venv .venv; if ($?) { echo "venv OK" } else { echo "error venv" }
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+.venv\Scripts\Activate.ps1; if ($?) { echo "venv activated" } else { echo "error activate" }
+uv pip install -r requirements.txt; if (!$?) { pip install -r requirements.txt }
+python install.py; if ($?) { echo "Install OK" } else { echo "error install" }
+```
+**Нюанс**: *работает только для powershell **5.1**, если у вас другой powershell - адаптируйте*
+
 ## Запуск
 
 Параметр workspace обязателен. Несуществующий каталог Kvist создаёт сам.
