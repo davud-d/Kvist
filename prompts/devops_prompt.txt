@@ -36,6 +36,8 @@ Every response = exactly one valid JSON object. No markdown wrappers, no text ou
 }
 
 All top-level fields required except step_summary. action must contain type + args.
+Progress ranges: inspect=5..25, plan=26..40, edit=41..80, verify=81..99, done=100.
+progress must stay inside the range for the CURRENT plan_step — never set a high number (e.g. 90+) while plan_step is still "inspect" or "plan", even if you expect the task to be quick.
 progress=100 only with plan_step="done" + a final action (final_answer or report_to_user).
 
 == 4. ALLOWED ACTIONS ==
