@@ -120,6 +120,33 @@ For development and tests:
 
 On Windows use `py -m venv .venv` and `.venv\\Scripts\\python.exe`.
 
+## Quick start
+
+For Unix-like systems (Linux, FreeBSD, OpenBSD) in a terminal:
+
+```bash
+git clone https://github.com/davud-d/Kvist && echo "Clone OK" || echo "error clone"
+cd Kvist
+python -m venv .venv && echo "venv OK" || echo "error venv"
+source .venv/bin/activate && echo "venv activated" || echo "error activate"
+uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
+python install.py && echo "Install OK" || echo "error install"
+```
+**Note**: *works in bash only; if you use a different shell - adapt it*
+
+For Windows PowerShell:
+
+```powershell
+git clone https://github.com/davud-d/Kvist; if ($?) { echo "Clone OK" } else { echo "error clone" }
+cd Kvist
+python -m venv .venv; if ($?) { echo "venv OK" } else { echo "error venv" }
+Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+.venv\Scripts\Activate.ps1; if ($?) { echo "venv activated" } else { echo "error activate" }
+uv pip install -r requirements.txt; if (!$?) { pip install -r requirements.txt }
+python install.py; if ($?) { echo "Install OK" } else { echo "error install" }
+```
+**Note**: *works in PowerShell **5.1** only; if you use a different PowerShell version - adapt it*
+
 ## Run
 
 The workspace argument is required. If the directory does not exist, Kvist
