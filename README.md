@@ -19,7 +19,7 @@
   <img alt="Electron GUI" src="https://img.shields.io/badge/Interface-Electron_GUI-47848F?style=flat-square&logo=electron&logoColor=white">
   <img alt="Local workspace agent" src="https://img.shields.io/badge/Agent-local_workspace-6f42c1?style=flat-square&logo=robotframework&logoColor=white">
   <img alt="Four agent roles plus auto" src="https://img.shields.io/badge/Roles-coder_%7C_reader_%7C_devops_%7C_chat-8A2BE2?style=flat-square">
-  <img alt="Five built-in providers" src="https://img.shields.io/badge/LLM_providers-5_builtin-0A7EA4?style=flat-square">
+  <img alt="Six built-in providers" src="https://img.shields.io/badge/LLM_providers-6_builtin-0A7EA4?style=flat-square">
   <img alt="Seven prompts" src="https://img.shields.io/badge/System_prompts-7-5C2D91?style=flat-square">
   <img alt="NDJSON protocol" src="https://img.shields.io/badge/Protocol-NDJSON_v1-000000?style=flat-square&logo=json&logoColor=white">
   <img alt="Human in the loop" src="https://img.shields.io/badge/Safety-human--in--the--loop-2EA44F?style=flat-square">
@@ -30,6 +30,7 @@
 <p align="center">
   <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-supported-412991?style=flat-square&logo=openai&logoColor=white">
   <img alt="Anthropic" src="https://img.shields.io/badge/Anthropic-supported-D97757?style=flat-square&logo=anthropic&logoColor=white">
+  <img alt="DeepSeek" src="https://img.shields.io/badge/DeepSeek-supported-4D6BFE?style=flat-square&logo=deepseek&logoColor=white">
   <img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-supported-6467F2?style=flat-square">
   <img alt="OmniRoute" src="https://img.shields.io/badge/OmniRoute-supported-008080?style=flat-square">
   <img alt="FreeFlow LLM" src="https://img.shields.io/badge/FreeFlow_LLM-beta-orange?style=flat-square">
@@ -98,9 +99,9 @@ and not a complete security boundary: review the diff and command output.
 The CLI is tested on Linux and Windows. macOS is experimental. The optional
 JetBrains plugin supports Linux and Windows and targets IntelliJ Platform 2025.3.
 
-Built-in providers are OpenAI, Anthropic, OpenRouter, OmniRoute, and FreeFlow
-LLM (beta). You can also add custom OpenAI-compatible or Anthropic-compatible
-endpoints from `/provider`.
+Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
+FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
+Anthropic-compatible endpoints from `/provider`.
 
 ## Install from source
 

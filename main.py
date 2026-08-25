@@ -799,7 +799,7 @@ def render_startup_banner(
 def choose_provider(current_provider: str, verbose: bool) -> str | None:
     ui = TerminalBannerUI(console=console, verbose=verbose)
 
-    # Built-in providers in order: OpenAI, Anthropic, OpenRouter, OmniRoute
+    # Built-in providers in order: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute
     options: list[dict[str, str]] = [
         {
             "value": "openai",
@@ -810,6 +810,11 @@ def choose_provider(current_provider: str, verbose: bool) -> str | None:
             "value": "anthropic",
             "label": "Anthropic",
             "description": "Native Claude models (Opus, Sonnet, Haiku)",
+        },
+        {
+            "value": "deepseek",
+            "label": "DeepSeek",
+            "description": "Native DeepSeek models (V4 Pro, V4 Flash)",
         },
         {
             "value": "openrouter",

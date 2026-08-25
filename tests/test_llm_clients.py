@@ -423,3 +423,77 @@ def test_anthropic_fallback():
 
 def test_anthropic_normalize_model_name():
     assert llm_clients.normalize_model_name("anthropic", "  claude-sonnet-4-6  ") == "claude-sonnet-4-6"
+
+
+# ── DeepSeek provider tests ──────────────────────────────────────────────────
+
+
+def test_deepseek_provider_normalization():
+    assert llm_clients.normalize_provider("deepseek") == "deepseek"
+    assert llm_clients.normalize_provider("ds") == "deepseek"
+    assert llm_clients.provider_label("deepseek") == "DeepSeek"
+
+
+def test_deepseek_model_options():
+    options = llm_clients.get_model_options("deepseek")
+    assert len(options) > 0
+    values = [o["value"] for o in options]
+    assert "deepseek-v4-pro" in values
+    assert "deepseek-v4-flash" in values
+
+
+def test_deepseek_model_defaults():
+    models, warnings = llm_clients.resolve_models_for_provider("deepseek", {})
+    assert models["fast"] == "deepseek-v4-flash"
+    assert models["smart"] == "deepseek-v4-pro"
+    assert models["planner"] == "deepseek-v4-pro"
+    assert warnings == []
+
+
+def test_deepseek_streaming_and_json_mode():
+    assert llm_clients.provider_supports_streaming("deepseek") is True
+    assert llm_clients.provider_supports_json_mode("deepseek") is True
+
+
+def test_deepseek_required_keys():
+    assert llm_clients.required_secret_keys_for_provider("deepseek", ["deepseek-v4-pro"]) == ("deepseek_api_key",)
+
+
+def test_deepseek_model_support():
+    assert llm_clients.is_model_supported_by_provider("deepseek", "deepseek-v4-pro") is True
+    assert llm_clients.is_model_supported_by_provider("deepseek", "any-model") is True
+
+
+def test_deepseek_fallback():
+    # DeepSeek has no fallback chain (like Anthropic)
+    assert llm_clients.fallback_models_for_provider("deepseek") == ()
+    assert llm_clients.fallback_candidates_for_model("deepseek", "deepseek-v4-pro") == ("deepseek-v4-pro",)
+
+
+def test_deepseek_normalize_model_name():
+    assert llm_clients.normalize_model_name("deepseek", "  deepseek-v4-pro  ") == "deepseek-v4-pro"
+
+
+def test_deepseek_create_client(monkeypatch):
+    created_clients = []
+
+    def mock_openai(api_key, base_url=None, **kwargs):
+        created_clients.append({"api_key": api_key, "base_url": base_url})
+        return f"client-{api_key}"
+
+    monkeypatch.setattr(llm_clients, "OpenAI", mock_openai)
+
+    # With base URL
+    client = llm_clients.create_llm_client(
+        "deepseek",
+        {"deepseek_api_key": "sk-ds-test", "deepseek_base_url": "https://custom.deepseek.example/v1"},
+    )
+    assert client == "client-sk-ds-test"
+    assert created_clients[-1]["api_key"] == "sk-ds-test"
+    assert created_clients[-1]["base_url"] == "https://custom.deepseek.example/v1"
+
+    # Without base URL - should use default
+    client = llm_clients.create_llm_client("deepseek", {"deepseek_api_key": "sk-ds-test2"})
+    assert client == "client-sk-ds-test2"
+    assert created_clients[-1]["base_url"] == llm_clients.DEEPSEEK_DEFAULT_BASE_URL
+

@@ -24,7 +24,8 @@ FREEFLOW_PROVIDER = "freeflow"
 OMNIROUTE_PROVIDER = "omniroute"
 OPENROUTER_PROVIDER = "openrouter"
 ANTHROPIC_PROVIDER = "anthropic"
-SUPPORTED_LLM_PROVIDERS = (OPENAI_PROVIDER, ANTHROPIC_PROVIDER, FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+DEEPSEEK_PROVIDER = "deepseek"
+SUPPORTED_LLM_PROVIDERS = (OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
 
 # API key environment keys.
 OPENAI_API_KEY_KEY = "openai_api_key"
@@ -39,6 +40,9 @@ OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 ANTHROPIC_API_KEY_KEY = "anthropic_api_key"
 ANTHROPIC_BASE_URL_KEY = "anthropic_base_url"
 ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
+DEEPSEEK_API_KEY_KEY = "deepseek_api_key"
+DEEPSEEK_BASE_URL_KEY = "deepseek_base_url"
+DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 CUSTOM_PROVIDER_PREFIX = "custom:"
 CUSTOM_PROVIDER_PLACEHOLDER = "custom"
 MODEL_ROLES = ("fast", "smart", "planner")
@@ -63,6 +67,12 @@ _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
         "fast": "claude-haiku-4-5",
         "smart": "claude-sonnet-4-6",
         "planner": "claude-sonnet-4-6",
+    },
+    DEEPSEEK_PROVIDER: {
+        # DeepSeek models — fast tier uses Flash, smart/planner use Pro.
+        "fast": "deepseek-v4-flash",
+        "smart": "deepseek-v4-pro",
+        "planner": "deepseek-v4-pro",
     },
 }
 
@@ -172,6 +182,19 @@ _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
             "value": "claude-haiku-4-5",
             "label": "Claude Haiku 4.5",
             "description": "Fastest Claude for lightweight tasks",
+        },
+    ],
+    DEEPSEEK_PROVIDER: [
+        # DeepSeek models — official model IDs on api.deepseek.com.
+        {
+            "value": "deepseek-v4-pro",
+            "label": "DeepSeek V4 Pro",
+            "description": "Advanced reasoning and coding tasks",
+        },
+        {
+            "value": "deepseek-v4-flash",
+            "label": "DeepSeek V4 Flash",
+            "description": "Fast and cost-effective for everyday tasks",
         },
     ],
     OPENROUTER_PROVIDER: [
@@ -320,6 +343,9 @@ def normalize_provider(provider: str | None) -> str:
     # Anthropic aliases
     if candidate in {"anthropic", "claude", "ant"}:
         return ANTHROPIC_PROVIDER
+    # DeepSeek aliases
+    if candidate in {"deepseek", "ds"}:
+        return DEEPSEEK_PROVIDER
     # Custom provider: "custom" alone is a placeholder that triggers the wizard;
     # "custom:<name>" is a concrete provider and passes through as-is below.
     if candidate.startswith(CUSTOM_PROVIDER_PREFIX):
@@ -340,6 +366,8 @@ def provider_label(provider: str) -> str:
         return "OpenRouter"
     if normalized == ANTHROPIC_PROVIDER:
         return "Anthropic"
+    if normalized == DEEPSEEK_PROVIDER:
+        return "DeepSeek"
     if is_custom_provider(normalized):
         name = extract_custom_provider_name(normalized)
         return f"Custom: {name}"
@@ -372,6 +400,9 @@ def normalize_model_name(provider: str, model: str) -> str:
         return candidate
     if normalized_provider == ANTHROPIC_PROVIDER:
         # Anthropic: only strip whitespace, preserve exact model id
+        return candidate
+    if normalized_provider == DEEPSEEK_PROVIDER:
+        # DeepSeek: only strip whitespace, preserve exact model id
         return candidate
     if is_custom_provider(normalized_provider):
         # Custom providers: only strip whitespace, preserve exact model id
@@ -438,6 +469,8 @@ def is_model_supported_by_provider(provider: str, model: str) -> bool:
     if normalized_provider == OPENAI_PROVIDER:
         return True
     if normalized_provider == ANTHROPIC_PROVIDER:
+        return True
+    if normalized_provider == DEEPSEEK_PROVIDER:
         return True
     if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER):
         return is_valid_omniroute_model_id(model)
@@ -571,6 +604,8 @@ def fallback_models_for_provider(provider: str) -> tuple[str, ...]:
         return _OPENAI_GENERIC_FALLBACKS
     if normalized_provider == ANTHROPIC_PROVIDER:
         return ()
+    if normalized_provider == DEEPSEEK_PROVIDER:
+        return ()
     if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER) or is_custom_provider(normalized_provider):
         # OmniRoute, OpenRouter and custom providers have no fallback chain - models are user-specified
         return ()
@@ -628,13 +663,13 @@ def provider_supports_streaming(provider: str) -> bool:
         from user_config import get_custom_provider_by_name
         info = get_custom_provider_by_name(extract_custom_provider_name(normalized))
         return bool(info.get("streaming", False)) if info else False
-    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER)
+    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER)
 
 
 def provider_supports_json_mode(provider: str) -> bool:
     """Return True if the provider supports native JSON mode (response_format)."""
     normalized = normalize_provider(provider)
-    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER)
+    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, DEEPSEEK_PROVIDER)
 
 
 def configured_freeflow_backends(credentials: dict[str, str]) -> tuple[str, ...]:
@@ -745,6 +780,9 @@ def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[s
     if normalized_provider == ANTHROPIC_PROVIDER:
         return (ANTHROPIC_API_KEY_KEY,)
 
+    if normalized_provider == DEEPSEEK_PROVIDER:
+        return (DEEPSEEK_API_KEY_KEY,)
+
     if is_custom_provider(normalized_provider):
         # Custom providers store their API key in the provider config
         return ()
@@ -824,6 +862,17 @@ def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool 
         if not base_url:
             base_url = ANTHROPIC_DEFAULT_BASE_URL
         return AnthropicCompatibleClient(api_key=api_key, base_url=base_url, verbose=verbose)
+
+    if normalized_provider == DEEPSEEK_PROVIDER:
+        api_key = credentials.get(DEEPSEEK_API_KEY_KEY, "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "DeepSeek API key is missing. Get one at https://platform.deepseek.com/."
+            )
+        base_url = credentials.get(DEEPSEEK_BASE_URL_KEY, "").strip()
+        if not base_url:
+            base_url = DEEPSEEK_DEFAULT_BASE_URL
+        return _build_openai_client(api_key, base_url=base_url)
 
     if is_custom_provider(normalized_provider):
         name = extract_custom_provider_name(normalized_provider)

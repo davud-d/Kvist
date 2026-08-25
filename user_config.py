@@ -18,7 +18,7 @@ from durable_json import (
 )
 from llm_clients import (
     FREEFLOW_PROVIDER, OPENAI_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
-    ANTHROPIC_PROVIDER,
+    ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
     CUSTOM_PROVIDER_PREFIX, is_custom_provider, extract_custom_provider_name,
     normalize_provider,
 )
@@ -42,6 +42,8 @@ OPENROUTER_API_KEY_KEY = "openrouter_api_key"
 OPENROUTER_BASE_URL_KEY = "openrouter_base_url"
 ANTHROPIC_API_KEY_KEY = "anthropic_api_key"
 ANTHROPIC_BASE_URL_KEY = "anthropic_base_url"
+DEEPSEEK_API_KEY_KEY = "deepseek_api_key"
+DEEPSEEK_BASE_URL_KEY = "deepseek_base_url"
 CUSTOM_PROVIDERS_KEY = "custom_providers"
 
 _ENV_KEY_ALIASES = {
@@ -54,6 +56,8 @@ _ENV_KEY_ALIASES = {
     OPENROUTER_BASE_URL_KEY: ("OPENROUTER_BASE_URL",),
     ANTHROPIC_API_KEY_KEY: ("ANTHROPIC_API_KEY",),
     ANTHROPIC_BASE_URL_KEY: ("ANTHROPIC_BASE_URL",),
+    DEEPSEEK_API_KEY_KEY: ("DEEPSEEK_API_KEY",),
+    DEEPSEEK_BASE_URL_KEY: ("DEEPSEEK_BASE_URL",),
 }
 
 _SECRET_LABELS = {
@@ -63,6 +67,7 @@ _SECRET_LABELS = {
     OMNIROUTE_API_KEY_KEY: "OmniRoute API key",
     OPENROUTER_API_KEY_KEY: "OpenRouter API key",
     ANTHROPIC_API_KEY_KEY: "Anthropic API key",
+    DEEPSEEK_API_KEY_KEY: "DeepSeek API key",
 }
 
 
@@ -283,6 +288,10 @@ def ensure_provider_credentials(
                 raise RuntimeError(
                     f"{_SECRET_LABELS.get(key_name, key_name)} is required for Anthropic."
                 )
+            if normalized_provider == DEEPSEEK_PROVIDER:
+                raise RuntimeError(
+                    f"{_SECRET_LABELS.get(key_name, key_name)} is required for DeepSeek."
+                )
             raise RuntimeError("OpenAI API key is required.")
 
         secret = secret.strip()
@@ -312,6 +321,12 @@ def ensure_provider_credentials(
             collected[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
             payload[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
             changed_values[ANTHROPIC_BASE_URL_KEY] = base_url.strip()
+    elif normalized_provider == DEEPSEEK_PROVIDER:
+        base_url = _resolve_secret(payload, DEEPSEEK_BASE_URL_KEY)
+        if base_url:
+            collected[DEEPSEEK_BASE_URL_KEY] = base_url.strip()
+            payload[DEEPSEEK_BASE_URL_KEY] = base_url.strip()
+            changed_values[DEEPSEEK_BASE_URL_KEY] = base_url.strip()
 
     # Custom providers: credentials are stored in provider config, not as separate keys
     if is_custom_provider(normalized_provider):
@@ -342,9 +357,10 @@ def prompt_provider_choice() -> str:
     print("Select LLM provider:")
     print("1. OpenAI")
     print("2. Anthropic (Claude)")
-    print("3. FreeFlow LLM (Gemini/Groq)")
-    print("4. OmniRoute")
-    print("5. OpenRouter")
+    print("3. DeepSeek")
+    print("4. FreeFlow LLM (Gemini/Groq)")
+    print("5. OmniRoute")
+    print("6. OpenRouter")
 
     while True:
         choice = input("> ").strip().lower()
@@ -355,16 +371,19 @@ def prompt_provider_choice() -> str:
         if choice in {"2", "anthropic", "claude", "ant", "a"}:
             return ANTHROPIC_PROVIDER
 
-        if choice in {"3", "freeflow", "free", "f"}:
+        if choice in {"3", "deepseek", "ds"}:
+            return DEEPSEEK_PROVIDER
+
+        if choice in {"4", "freeflow", "free", "f"}:
             return FREEFLOW_PROVIDER
 
-        if choice in {"4", "omniroute", "omni", "or"}:
+        if choice in {"5", "omniroute", "omni", "or"}:
             return OMNIROUTE_PROVIDER
 
-        if choice in {"5", "openrouter", "openroute", "openrt", "router"}:
+        if choice in {"6", "openrouter", "openroute", "openrt", "router"}:
             return OPENROUTER_PROVIDER
 
-        print("Enter 1-5: OpenAI, Anthropic, FreeFlow, OmniRoute, OpenRouter.")
+        print("Enter 1-6: OpenAI, Anthropic, DeepSeek, FreeFlow, OmniRoute, OpenRouter.")
 
 
 

@@ -72,6 +72,7 @@ const MODEL_ROLES = ["fast", "smart", "planner"]
 const BUILTIN_PROVIDER_LABELS = {
   openai: "OpenAI",
   anthropic: "Anthropic",
+  deepseek: "DeepSeek",
   openrouter: "OpenRouter",
   omniroute: "OmniRoute",
   freeflow: "FreeFlow LLM",

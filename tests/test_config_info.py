@@ -44,7 +44,8 @@ def test_build_config_info_reports_saved_defaults_and_credentials(isolated_confi
     assert info["saved_role"] == "coder"
 
     by_id = {provider["id"]: provider for provider in info["providers"]}
-    assert set(by_id) == {"openai", "anthropic", "openrouter", "omniroute", "freeflow"}
+    assert set(by_id) == {"openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow"}
+    assert [p["id"] for p in info["providers"]][:3] == ["openai", "anthropic", "deepseek"]
 
     openai = by_id["openai"]
     assert openai["has_credentials"] is True
