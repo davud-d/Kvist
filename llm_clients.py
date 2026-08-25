@@ -2,16 +2,17 @@
 """
 This module configures LLM clients and model lists for Kvist.
 
-The defaults and model options have been updated to reflect the most recent
-officially supported model IDs from OpenAI, Google Gemini, Groq and DeepSeek.
-Please do not modify these IDs without verifying them against official
-documentation; see MODEL_UPDATE_REPORT.md for details and sources.
+Model availability is discovered live from each provider's ``/v1/models``
+endpoint on every launch (see :func:`fetch_available_models`). The static
+lists below are only offline fallbacks used when discovery is unavailable.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
+import time
 from typing import Any
 
 from language_utils import choose_localized_text
@@ -561,6 +562,232 @@ def resolve_models_for_provider(
     return resolved, warnings
 
 
+# ── Live model discovery (/v1/models) ════════════════════════════════════════
+
+# How long a /v1/models discovery result stays fresh within one process. Every
+# fresh launch rediscovers; the cache only prevents duplicate hits when the
+# same process asks for the catalog several times (e.g. /models wizards).
+_MODEL_DISCOVERY_TTL_SECONDS = 300.0
+
+# Gemini exposes an OpenAI-compatible layer, so both FreeFlow backends can be
+# discovered with the same OpenAI client against their /models endpoints.
+_GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+_GROQ_OPENAI_BASE_URL = "https://api.groq.com/openai/v1"
+
+_MODEL_DISCOVERY_CACHE: dict[str, tuple[float, tuple[str, ...]]] = {}
+
+
+def clear_model_discovery_cache() -> None:
+    """Drop cached /v1/models discovery results (tests, key rotation)."""
+    _MODEL_DISCOVERY_CACHE.clear()
+
+
+def _extract_model_ids(data: Any) -> list[str]:
+    """Collect non-empty ``id`` fields from a models.list() payload."""
+    ids: list[str] = []
+    for item in data or []:
+        raw = getattr(item, "id", None)
+        if raw is None and isinstance(item, dict):
+            raw = item.get("id")
+        candidate = str(raw or "").strip()
+        if candidate:
+            ids.append(candidate)
+    return ids
+
+
+def _list_models_via_openai(api_key: str, base_url: str | None) -> list[str]:
+    client = _build_openai_client(api_key, base_url=base_url or None)
+    return _extract_model_ids(client.models.list().data)
+
+
+def _list_models_via_anthropic(api_key: str, base_url: str | None) -> list[str]:
+    try:
+        import anthropic  # type: ignore
+    except ImportError as error:
+        raise RuntimeError(
+            "Anthropic SDK is not installed. Install dependency 'anthropic'."
+        ) from error
+    client = anthropic.Anthropic(
+        api_key=api_key,
+        base_url=(base_url or ANTHROPIC_DEFAULT_BASE_URL).strip(),
+    )
+    return _extract_model_ids(client.models.list(limit=1000).data)
+
+
+def _discovery_endpoints(normalized_provider: str, credentials: dict[str, str]) -> list[dict[str, str]]:
+    """Return the /models-capable endpoints to query for a provider.
+
+    Each entry has ``kind`` (openai|anthropic), ``base_url``, ``api_key`` and
+    ``label``. Endpoints without a usable API key are skipped.
+    """
+    endpoints: list[dict[str, str]] = []
+
+    def add(kind: str, base_url: str | None, api_key: object, label: str) -> None:
+        key = str(api_key or "").strip()
+        if not key:
+            return
+        endpoints.append(
+            {
+                "kind": kind,
+                "base_url": str(base_url or "").strip(),
+                "api_key": key,
+                "label": label,
+            }
+        )
+
+    if normalized_provider == OPENAI_PROVIDER:
+        add("openai", None, credentials.get(OPENAI_API_KEY_KEY), "OpenAI")
+    elif normalized_provider == OMNIROUTE_PROVIDER:
+        add(
+            "openai",
+            credentials.get(OMNIROUTE_BASE_URL_KEY) or OMNIROUTE_DEFAULT_BASE_URL,
+            credentials.get(OMNIROUTE_API_KEY_KEY),
+            "OmniRoute",
+        )
+    elif normalized_provider == OPENROUTER_PROVIDER:
+        add(
+            "openai",
+            credentials.get(OPENROUTER_BASE_URL_KEY) or OPENROUTER_DEFAULT_BASE_URL,
+            credentials.get(OPENROUTER_API_KEY_KEY),
+            "OpenRouter",
+        )
+    elif normalized_provider == ANTHROPIC_PROVIDER:
+        add(
+            "anthropic",
+            credentials.get(ANTHROPIC_BASE_URL_KEY) or ANTHROPIC_DEFAULT_BASE_URL,
+            credentials.get(ANTHROPIC_API_KEY_KEY),
+            "Anthropic",
+        )
+    elif normalized_provider == DEEPSEEK_PROVIDER:
+        add(
+            "openai",
+            credentials.get(DEEPSEEK_BASE_URL_KEY) or DEEPSEEK_DEFAULT_BASE_URL,
+            credentials.get(DEEPSEEK_API_KEY_KEY),
+            "DeepSeek",
+        )
+    elif is_custom_provider(normalized_provider):
+        from user_config import get_custom_provider_by_name
+        info = get_custom_provider_by_name(extract_custom_provider_name(normalized_provider)) or {}
+        protocol = str(info.get("protocol", "openai")).strip()
+        add(
+            protocol if protocol in ("openai", "anthropic") else "openai",
+            info.get("base_url"),
+            info.get("api_key"),
+            provider_label(normalized_provider),
+        )
+    else:
+        # FreeFlow: discover each configured backend separately and merge.
+        add("openai", _GEMINI_OPENAI_BASE_URL, credentials.get(GEMINI_API_KEY_KEY), "Gemini")
+        add("openai", _GROQ_OPENAI_BASE_URL, credentials.get(GROQ_API_KEY_KEY), "Groq")
+    return endpoints
+
+
+def fetch_available_models(
+    provider: str,
+    credentials: dict[str, str],
+    force_refresh: bool = False,
+) -> tuple[list[str], str | None]:
+    """Ask the provider's /v1/models endpoint which models it currently serves.
+
+    Returns ``(sorted_model_ids, error_message)`` where ``error_message`` is
+    ``None`` on success (including an empty but reachable catalog). When every
+    endpoint fails, returns an empty list plus a human-readable reason so the
+    caller can degrade gracefully to configured/static models.
+    """
+    normalized_provider = normalize_provider(provider)
+    endpoints = _discovery_endpoints(normalized_provider, credentials)
+    if not endpoints:
+        return [], None
+
+    fingerprint = hashlib.sha1(
+        "\n".join(
+            f"{item['kind']}|{item['base_url']}|{item['api_key']}" for item in endpoints
+        ).encode("utf-8")
+    ).hexdigest()
+    now = time.monotonic()
+    cached = _MODEL_DISCOVERY_CACHE.get(fingerprint)
+    if not force_refresh and cached is not None and now - cached[0] < _MODEL_DISCOVERY_TTL_SECONDS:
+        return list(cached[1]), None
+
+    collected: set[str] = set()
+    errors: list[str] = []
+    succeeded = False
+    for endpoint in endpoints:
+        try:
+            if endpoint["kind"] == "anthropic":
+                ids = _list_models_via_anthropic(endpoint["api_key"], endpoint["base_url"])
+            else:
+                ids = _list_models_via_openai(endpoint["api_key"], endpoint["base_url"])
+            collected.update(ids)
+            succeeded = True
+        except Exception as error:
+            errors.append(f"{endpoint['label']}: {redact_text(str(error))}")
+
+    if succeeded:
+        ordered = tuple(sorted(collected))
+        _MODEL_DISCOVERY_CACHE[fingerprint] = (now, ordered)
+        return list(ordered), None
+
+    detail = "; ".join(errors) if errors else "unknown error"
+    return [], (
+        f"Could not fetch the model catalog from {provider_label(normalized_provider)} "
+        f"({detail}). Using configured models."
+    )
+
+
+def resolve_accessible_models(
+    provider: str,
+    requested_models: dict[str, str],
+    available_models: list[str] | set[str],
+    language_hint: str | None = None,
+) -> tuple[dict[str, str], list[str]]:
+    """Reconcile requested role models against the provider's live catalog.
+
+    Models missing from the catalog fall back to the closest available entry
+    of the provider fallback chain; if nothing matches, the request is kept
+    unchanged with a warning. An empty catalog (discovery unavailable) leaves
+    everything untouched.
+    """
+    normalized_provider = normalize_provider(provider)
+    available = {str(item).strip() for item in available_models if str(item).strip()}
+    resolved: dict[str, str] = {}
+    warnings: list[str] = []
+    if not available:
+        return dict(requested_models), warnings
+
+    label = provider_label(normalized_provider)
+    for role, requested in requested_models.items():
+        requested_model = normalize_model_name(normalized_provider, str(requested).strip())
+        if requested_model in available:
+            resolved[role] = requested_model
+            continue
+        candidates = [
+            normalize_model_name(normalized_provider, item)
+            for item in fallback_candidates_for_model(normalized_provider, requested_model, True)
+        ]
+        selected_model = next((item for item in candidates if item in available), None)
+        if selected_model is not None:
+            warnings.append(
+                choose_localized_text(
+                    f"Модель '{requested_model}' недоступна у провайдера {label}. Использую '{selected_model}' для роли {role}.",
+                    f"Model '{requested_model}' is unavailable on {label}. Using '{selected_model}' for role {role}.",
+                    language_hint,
+                )
+            )
+        else:
+            selected_model = requested_model
+            warnings.append(
+                choose_localized_text(
+                    f"Модель '{requested_model}' не найдена в каталоге {label}. Оставляю её для роли {role}.",
+                    f"Model '{requested_model}' was not found in the {label} catalog. Keeping it for role {role}.",
+                    language_hint,
+                )
+            )
+        resolved[role] = selected_model
+
+    return resolved, warnings
+
+
 def resolve_openai_accessible_models(
     api_key: str,
     requested_models: dict[str, str],
@@ -568,33 +795,13 @@ def resolve_openai_accessible_models(
 ) -> tuple[dict[str, str], list[str]]:
     """Filter requested models down to those actually accessible for the given OpenAI API key."""
     client = OpenAI(api_key=api_key)
-    available_models = {
-        str(getattr(item, "id", "")).strip()
-        for item in client.models.list().data
-        if str(getattr(item, "id", "")).strip()
-    }
-    if not available_models:
-        return requested_models, []
-
-    resolved: dict[str, str] = {}
-    warnings: list[str] = []
-
-    for role, requested_model in requested_models.items():
-        candidates = [requested_model, *_OPENAI_ROLE_FALLBACKS.get(role, _OPENAI_GENERIC_FALLBACKS)]
-        selected_model = next((item for item in candidates if item in available_models), None)
-        if selected_model is None:
-            selected_model = requested_model
-        elif selected_model != requested_model:
-            warnings.append(
-                choose_localized_text(
-                    f"Модель '{requested_model}' недоступна для этого OpenAI API key. Использую '{selected_model}' для роли {role}.",
-                    f"Model '{requested_model}' is unavailable for this OpenAI API key. Using '{selected_model}' for role {role}.",
-                    language_hint,
-                )
-            )
-        resolved[role] = selected_model
-
-    return resolved, warnings
+    available_models = _extract_model_ids(client.models.list().data)
+    return resolve_accessible_models(
+        OPENAI_PROVIDER,
+        requested_models,
+        available_models,
+        language_hint=language_hint,
+    )
 
 
 def fallback_models_for_provider(provider: str) -> tuple[str, ...]:
@@ -756,8 +963,23 @@ def validate_model_selection(
     return issues
 
 
-def get_model_options(provider: str) -> list[dict[str, str]]:
-    """Return a deep copy of the model options list for the given provider."""
+def get_model_options(
+    provider: str,
+    available_models: list[str] | set[str] | None = None,
+) -> list[dict[str, str]]:
+    """Return selectable model options for the given provider.
+
+    Pass ``available_models`` (from :func:`fetch_available_models`) to build
+    the list from the provider's live /v1/models catalog; when it is empty or
+    omitted, the static curated hints are used instead.
+    """
+    if available_models is not None:
+        live_ids = sorted({str(item).strip() for item in available_models if str(item).strip()})
+        if live_ids:
+            return [
+                {"value": item, "label": item, "description": ""}
+                for item in live_ids
+            ]
     normalized_provider = normalize_provider(provider)
     if normalized_provider == OMNIROUTE_PROVIDER or is_custom_provider(normalized_provider):
         # OmniRoute and custom providers use manual input, no predefined options

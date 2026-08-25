@@ -121,10 +121,11 @@ from llm_clients import (
     OMNIROUTE_PROVIDER,
     OPENROUTER_PROVIDER,
     provider_supports_streaming,
-    resolve_openai_accessible_models,
+    fetch_available_models,
     normalize_provider,
     provider_label,
     required_secret_keys_for_provider,
+    resolve_accessible_models,
     resolve_models_for_provider,
     validate_model_selection,
     validate_omniroute_model_id,
@@ -634,15 +635,21 @@ def build_agent(
         credentials.update(
             load_available_credentials(("gemini_api_key", "groq_api_key"))
         )
-    if provider == OPENAI_PROVIDER:
-        resolved_openai_models, access_warnings = resolve_openai_accessible_models(
-            credentials[OPENAI_API_KEY_KEY],
+    # Discover the live model catalog from the provider's /v1/models endpoint
+    # on every launch, then reconcile configured models against it. Discovery
+    # is best-effort: on failure we keep configured/static models and warn.
+    live_models, discovery_error = fetch_available_models(provider, credentials)
+    if discovery_error:
+        warnings.append(discovery_error)
+    else:
+        models, access_warnings = resolve_accessible_models(
+            provider,
             models,
+            live_models,
             language_hint=language_hint,
         )
-        models = resolved_openai_models
         warnings.extend(access_warnings)
-    elif provider == FREEFLOW_PROVIDER:
+    if provider == FREEFLOW_PROVIDER:
         warnings.append(
             "For FreeFlow LLM, streaming is disabled: the library handles stream responses unstably."
         )
@@ -1097,9 +1104,28 @@ def confirm_revert(file_count: int, verbose: bool) -> bool:
     return confirmed == "yes"
 
 
+def _model_picker_options(provider: str) -> tuple[list[dict[str, str]], bool]:
+    """Return model picker options for a provider, preferring the live catalog.
+
+    Queries the provider's /v1/models endpoint using stored credentials and
+    falls back to the static curated hints when discovery fails or returns
+    nothing. The second element marks whether the options are live.
+    """
+    try:
+        required_keys = required_secret_keys_for_provider(provider, [])
+        credentials = load_available_credentials(required_keys)
+        available_models, _error = fetch_available_models(provider, credentials)
+        options = get_model_options(provider, available_models)
+        if options:
+            return options, True
+    except Exception:
+        pass
+    return get_model_options(provider), False
+
+
 def choose_models(provider: str, current_models: dict[str, str], verbose: bool) -> dict[str, str] | None:
     ui = TerminalBannerUI(console=console, verbose=verbose)
-    options = get_model_options(provider)
+    options, _is_live = _model_picker_options(provider)
     if not options:
         return None
 
@@ -1587,13 +1613,18 @@ def configure_openrouter_models_interactively(
         _print_model_row(label, model)
 
     # ── Menu ════════════════════════════════════════════════════════════
+    picker_options, picker_is_live = _model_picker_options(OPENROUTER_PROVIDER)
     console.print()
     action = ui.choose_option(
         title="Select action:",
         options=[
             {
                 "value": "pick",
-                "label": "Choose from popular OpenRouter models",
+                "label": (
+                    "Choose from the live OpenRouter model catalog"
+                    if picker_is_live
+                    else "Choose from popular OpenRouter models"
+                ),
             },
             {
                 "value": "custom",
@@ -1617,7 +1648,7 @@ def configure_openrouter_models_interactively(
 
     # ── Pick from predefined options ═════════════════════════════════════
     if action == "pick":
-        options = get_model_options(OPENROUTER_PROVIDER)
+        options = picker_options
         selected = dict(current_models)
         original = dict(current_models)
 

@@ -50,7 +50,12 @@ def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "openai")
     monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
     monkeypatch.setattr(main, "ensure_provider_credentials", lambda **kwargs: {"openai_api_key": "key"})
-    monkeypatch.setattr(main, "resolve_openai_accessible_models", lambda key, models, language_hint=None: (models, ["warn"]))
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: (["gpt-test"], None))
+    monkeypatch.setattr(
+        main,
+        "resolve_accessible_models",
+        lambda provider, models, available, language_hint=None: (models, ["warn"]),
+    )
     monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
 
     agent, config, warnings = main.build_agent(

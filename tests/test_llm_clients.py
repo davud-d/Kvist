@@ -1,8 +1,33 @@
 from __future__ import annotations
 
+import sys
+import types
 from types import SimpleNamespace
 
+import pytest
+
 import llm_clients
+
+
+def _fake_openai_models_client(ids_by_url: dict[str | None, list[str]], calls: list[str | None] | None = None):
+    def factory(api_key, base_url=None, **kwargs):
+        if calls is not None:
+            calls.append(base_url)
+        ids = ids_by_url.get(base_url, [])
+        return SimpleNamespace(
+            models=SimpleNamespace(
+                list=lambda: SimpleNamespace(data=[SimpleNamespace(id=item) for item in ids])
+            )
+        )
+
+    return factory
+
+
+@pytest.fixture(autouse=True)
+def _clear_discovery_cache():
+    llm_clients.clear_model_discovery_cache()
+    yield
+    llm_clients.clear_model_discovery_cache()
 
 
 def test_provider_and_model_normalization():
@@ -497,3 +522,179 @@ def test_deepseek_create_client(monkeypatch):
     assert client == "client-sk-ds-test2"
     assert created_clients[-1]["base_url"] == llm_clients.DEEPSEEK_DEFAULT_BASE_URL
 
+
+def test_fetch_available_models_deepseek_queries_v1_models(monkeypatch):
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        llm_clients,
+        "OpenAI",
+        _fake_openai_models_client(
+            {llm_clients.DEEPSEEK_DEFAULT_BASE_URL: ["deepseek-v4-flash"]},
+            calls,
+        ),
+    )
+
+    ids, error = llm_clients.fetch_available_models("deepseek", {"deepseek_api_key": "k"})
+
+    assert error is None
+    assert ids == ["deepseek-v4-flash"]
+    assert calls == [llm_clients.DEEPSEEK_DEFAULT_BASE_URL]
+
+
+# ── Live model discovery (/v1/models) tests ──────────────────────────────────
+
+
+def test_fetch_available_models_openrouter_queries_v1_models(monkeypatch):
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        llm_clients,
+        "OpenAI",
+        _fake_openai_models_client(
+            {llm_clients.OPENROUTER_DEFAULT_BASE_URL: ["b-model", "a-model"]},
+            calls,
+        ),
+    )
+
+    ids, error = llm_clients.fetch_available_models("openrouter", {"openrouter_api_key": "k"})
+
+    assert error is None
+    assert ids == ["a-model", "b-model"]
+    assert calls == [llm_clients.OPENROUTER_DEFAULT_BASE_URL]
+
+    # Second call is served from the short-lived cache (no new client).
+    monkeypatch.setattr(llm_clients, "OpenAI", lambda *a, **k: pytest.fail("cache miss"))
+    cached_ids, cached_error = llm_clients.fetch_available_models("openrouter", {"openrouter_api_key": "k"})
+    assert cached_error is None
+    assert cached_ids == ["a-model", "b-model"]
+
+
+def test_fetch_available_models_openai_without_base_url(monkeypatch):
+    calls: list[str | None] = []
+    monkeypatch.setattr(
+        llm_clients,
+        "OpenAI",
+        _fake_openai_models_client({None: ["gpt-x"]}, calls),
+    )
+
+    ids, error = llm_clients.fetch_available_models("openai", {"openai_api_key": "key"})
+
+    assert error is None
+    assert ids == ["gpt-x"]
+    assert calls == [None]
+
+
+def test_fetch_available_models_freeflow_merges_backends(monkeypatch):
+    urls = [
+        llm_clients._GEMINI_OPENAI_BASE_URL,
+        llm_clients._GROQ_OPENAI_BASE_URL,
+    ]
+    monkeypatch.setattr(
+        llm_clients,
+        "OpenAI",
+        _fake_openai_models_client({urls[0]: ["gemini-x"], urls[1]: ["llama-y"]}),
+    )
+
+    ids, error = llm_clients.fetch_available_models(
+        "freeflow",
+        {"gemini_api_key": "g", "groq_api_key": "q"},
+    )
+
+    assert error is None
+    assert set(ids) == {"gemini-x", "llama-y"}
+
+
+def test_fetch_available_models_reports_total_failure(monkeypatch):
+    def failing_client(api_key, base_url=None, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(llm_clients, "OpenAI", failing_client)
+
+    ids, error = llm_clients.fetch_available_models("openai", {"openai_api_key": "key"})
+
+    assert ids == []
+    assert error is not None
+    assert "boom" in error
+    assert "OpenAI" in error
+
+    # Failures are not cached — a retry hits the endpoint again.
+    monkeypatch.setattr(llm_clients, "OpenAI", _fake_openai_models_client({None: ["gpt-x"]}))
+    retry_ids, retry_error = llm_clients.fetch_available_models("openai", {"openai_api_key": "key"})
+    assert retry_error is None
+    assert retry_ids == ["gpt-x"]
+
+
+def test_fetch_available_models_skips_endpoints_without_keys():
+    ids, error = llm_clients.fetch_available_models("freeflow", {})
+    assert ids == []
+    assert error is None
+
+
+def test_fetch_available_models_custom_anthropic_uses_sdk(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class FakeAnthropic:
+        def __init__(self, api_key=None, base_url=None):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            self.models = SimpleNamespace(
+                list=lambda limit=20: SimpleNamespace(data=[SimpleNamespace(id="claude-live")])
+            )
+
+    fake_module = types.SimpleNamespace(Anthropic=FakeAnthropic)
+    monkeypatch.setitem(sys.modules, "anthropic", fake_module)
+    monkeypatch.setattr(
+        "user_config.get_custom_provider_by_name",
+        lambda name: {
+            "protocol": "anthropic",
+            "base_url": "https://gw.example.com",
+            "api_key": "secret-key",
+        },
+    )
+
+    ids, error = llm_clients.fetch_available_models("custom:my-gw", {})
+
+    assert error is None
+    assert ids == ["claude-live"]
+    assert captured["base_url"] == "https://gw.example.com"
+
+
+def test_resolve_accessible_models_falls_back_within_catalog():
+    models, warnings = llm_clients.resolve_accessible_models(
+        "openai",
+        {"fast": "gone-model", "smart": "kept-model"},
+        ["kept-model", "gpt-5-mini"],
+        language_hint="en",
+    )
+
+    assert models["smart"] == "kept-model"
+    assert models["fast"] == "gpt-5-mini"
+    assert len(warnings) == 1
+    assert "gone-model" in warnings[0]
+
+
+def test_resolve_accessible_models_keeps_unknown_when_no_candidate_matches():
+    models, warnings = llm_clients.resolve_accessible_models(
+        "openrouter",
+        {"fast": "vendor/custom-model"},
+        ["other/model"],
+    )
+
+    assert models == {"fast": "vendor/custom-model"}
+    assert len(warnings) == 1
+
+
+def test_resolve_accessible_models_empty_catalog_is_noop():
+    requested = {"fast": "x", "smart": "y"}
+    models, warnings = llm_clients.resolve_accessible_models("openai", requested, [])
+
+    assert models == requested
+    assert warnings == []
+
+
+def test_get_model_options_from_live_catalog_overrides_static():
+    options = llm_clients.get_model_options("openai", ["zeta", "alpha"])
+    assert [(item["value"], item["label"]) for item in options] == [("alpha", "alpha"), ("zeta", "zeta")]
+
+    # Empty live catalog falls back to the static curated hints.
+    fallback = llm_clients.get_model_options("openai", [])
+    assert fallback == llm_clients.get_model_options("openai")
