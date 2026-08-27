@@ -319,6 +319,17 @@ class InputResponse:
         )
 
 
+# The one inbound control message that is not an InputResponse: it asks the
+# active run to stop and carries no fields. A plain InputResponse never has a
+# "type" key, so the transport routes on that discriminator alone and every
+# pre-existing frontend keeps parsing unchanged.
+CANCEL_MESSAGE_TYPE = "cancel"
+
+
+def is_cancel_message(d: dict) -> bool:
+    return d.get("type") == CANCEL_MESSAGE_TYPE
+
+
 # --- Channel -----------------------------------------------------------------
 
 

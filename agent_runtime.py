@@ -44,7 +44,7 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
         return {**common, "action_kind": "side_effect", "action_type": command.action.type}
     return None
 
-from agent_state import RunState
+from agent_state import RunCancelled, RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
@@ -367,6 +367,13 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             loop_pre = time.monotonic()
             try:
                 raw_text = self._call_action_model(prompt)
+            except RunCancelled:
+                # Cancelled mid-generation: the stream was closed and no action
+                # ran, so exit through the same safe-stop finalization as a
+                # between-steps cancel — report rendered, session/checkpoint
+                # written, no half-applied work.
+                final_message = self._build_cancellation_message()
+                break
             except Exception as error:
                 error_text = redact_text(
                     str(error).strip() or type(error).__name__
@@ -1442,8 +1449,18 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
     )
 
 
+def build_cancellation_message(self) -> str:
+    if self._state.response_language == "ru":
+        return "Ход остановлен по запросу. Показано то, что агент успел сделать."
+    return "Run stopped on request. Showing what the agent completed so far."
+
+
 def build_early_stop_message(self, step: int) -> str | None:
     is_ru = self._state.response_language == "ru"
+    # Highest priority: a cancellation requested between steps stops the loop on
+    # this safe-stop path before any error/stagnation heuristic is consulted.
+    if self._cancel_event.is_set():
+        return build_cancellation_message(self)
     if self._state.consecutive_errors >= self.config.max_consecutive_errors:
         errors = _summarize_recent_errors(self)
         if is_ru:

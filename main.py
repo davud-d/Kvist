@@ -35,9 +35,13 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
-        choices=("terminal", "stdio"),
+        choices=("terminal", "stdio", "stdio-multi"),
         default="terminal",
-        help="Frontend transport. Use 'stdio' for the NDJSON event protocol.",
+        help=(
+            "Frontend transport. Use 'stdio' for the single-turn NDJSON event "
+            "protocol, 'stdio-multi' for a long-lived process serving one goal "
+            "per stdin line."
+        ),
     )
     parser.add_argument("--provider", help="Provider override for the stdio frontend.")
     parser.add_argument("--fast-model", help="Fast model override for the stdio frontend.")
@@ -1933,6 +1937,39 @@ def main() -> None:
             print(_json.dumps(failure, ensure_ascii=False))
             raise SystemExit(1) from error
         print(_json.dumps(payload, ensure_ascii=False))
+        return
+
+    if args.frontend == "stdio-multi":
+        from event_stdio import launch_multi
+
+        model_values = (args.fast_model, args.smart_model, args.planner_model)
+        if any(model_values) and not all(model_values):
+            print(
+                "Model overrides require --fast-model, --smart-model, and --planner-model together.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        models_override = (
+            {
+                "fast": args.fast_model,
+                "smart": args.smart_model,
+                "planner": args.planner_model,
+            }
+            if all(model_values)
+            else None
+        )
+        try:
+            launch_multi(
+                args.workspace,
+                build_agent,
+                provider_override=args.provider,
+                models_override=models_override,
+                routed_role=None if args.role == "auto" else args.role,
+                approval_mode=args.approval_mode,
+            )
+        except RuntimeError as error:
+            print(sanitize_display_text(str(error)), file=sys.stderr)
+            raise SystemExit(2) from error
         return
 
     if args.frontend == "stdio":

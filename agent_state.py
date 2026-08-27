@@ -5,6 +5,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class RunCancelled(Exception):
+    """The user interrupted an action-loop run while the model was generating.
+
+    Raised from the streaming action call when a cancellation was requested, so
+    the loop stops on its normal safe-stop path instead of running the model
+    call to completion. Cancellation surfaces the work already done; it never
+    rolls anything back and never aborts an action that is already executing.
+    """
+
+
 @dataclass(slots=True)
 class AgentConfig:
     provider: str = "openai"

@@ -38,6 +38,7 @@ from llm_clients import (
     ANTHROPIC_PROVIDER,
     OPENROUTER_PROVIDER,
 )
+from agent_state import RunCancelled
 from redaction import redact_text, redact_value
 from render_throttle import ThrottledRenderer
 
@@ -444,6 +445,9 @@ def call_action_model(self, prompt: str) -> str:
             user_prompt=prompt,
             usage_kind="step",
         )
+    except RunCancelled:
+        # Not a model error: don't mark retries exhausted, just propagate.
+        raise
     except Exception:
         self._retries_exhausted = True
         raise
@@ -600,6 +604,11 @@ def call_model(
                 )
 
                 return content
+            except RunCancelled:
+                # A cancellation is not a provider failure: never retried,
+                # never logged as an API error — it propagates straight to the
+                # loop's safe-stop path.
+                raise
             except Exception as error:
                 total_duration = time.monotonic() - request_start
                 # ── log failed API request ───────────────────────
@@ -666,26 +675,44 @@ def call_model_streaming(
     chunk_count = 0
     total_chunk_bytes = 0
     renderer = ThrottledRenderer(max_fps=10)
-    for chunk in stream:
-        delta = safe_extract_stream_delta(chunk)
-        reasoning_text = safe_extract_reasoning_delta(delta)
-        if reasoning_text and reasoning_start_time is None:
-            reasoning_start_time = time.monotonic()
-        if delta and delta.content:
-            # The first answer token ends the thinking phase.
-            if reasoning_start_time is not None and reasoning_end_time is None:
-                reasoning_end_time = time.monotonic()
-            if first_token_time is None:
-                first_token_time = time.monotonic()
-            chunk_count += 1
-            total_chunk_bytes += len(delta.content)
-            chunks.append(delta.content)
-            renderer.feed(delta.content)
-            if self.config.verbose and not thought_shown:
-                rendered = renderer.maybe_render()
-                if rendered and '"thought"' in rendered and len(rendered) > 80:
-                    thought_shown = True
-                    print(f"  [streaming] {rendered[:120]}...", flush=True)
+    try:
+        for chunk in stream:
+            # Checked each chunk so a cancellation stops generation without
+            # waiting for the model to finish. The finally closes the HTTP
+            # stream; the loop then unwinds through call_model to run_loop's
+            # RunCancelled handler.
+            if self._cancel_event.is_set():
+                raise RunCancelled
+            delta = safe_extract_stream_delta(chunk)
+            reasoning_text = safe_extract_reasoning_delta(delta)
+            if reasoning_text and reasoning_start_time is None:
+                reasoning_start_time = time.monotonic()
+            if delta and delta.content:
+                # The first answer token ends the thinking phase.
+                if reasoning_start_time is not None and reasoning_end_time is None:
+                    reasoning_end_time = time.monotonic()
+                if first_token_time is None:
+                    first_token_time = time.monotonic()
+                chunk_count += 1
+                total_chunk_bytes += len(delta.content)
+                chunks.append(delta.content)
+                renderer.feed(delta.content)
+                if self.config.verbose and not thought_shown:
+                    rendered = renderer.maybe_render()
+                    if rendered and '"thought"' in rendered and len(rendered) > 80:
+                        thought_shown = True
+                        print(f"  [streaming] {rendered[:120]}...", flush=True)
+    finally:
+        # An abandoned HTTP stream would otherwise hold its connection open;
+        # applies to cancellation, provider failure, and normal completion.
+        close = getattr(stream, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception as error:
+                self._ui.debug_print(
+                    f"Action stream close failed: {redact_text(str(error))}"
+                )
     # flush any remaining buffered output
     if self.config.verbose and not thought_shown:
         leftover = renderer.flush()

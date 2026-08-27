@@ -109,6 +109,14 @@ class EventSession:
     def respond(self, request_id: str, *, value=None, approved=None) -> None:
         self._channel.respond(request_id, value=value, approved=approved)
 
+    def cancel(self) -> None:
+        """Ask the active run to stop at its next safe point.
+
+        Delegates straight to the agent's transport-agnostic ``request_cancel``.
+        Harmless when idle: the flag is cleared at the start of the next run.
+        """
+        self._agent.request_cancel()
+
     def close(self, timeout: float = 5.0) -> None:
         self._channel.close()
         worker = self._worker

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import threading
 import uuid
 from typing import Any
 
@@ -61,6 +62,7 @@ from agent_planner import (
 )
 from agent_runtime import (
     action_signature,
+    build_cancellation_message,
     build_early_stop_message,
     build_error_feedback,
     build_limit_reached_message,
@@ -178,6 +180,11 @@ class LocalAgent:
         self.config = config or AgentConfig()
         self._cache: dict[str, str] = {}
         self._state = RunState()
+        # Set from any thread (e.g. a transport reader) to stop the current
+        # action-loop turn between steps or mid-generation. Lives on the agent,
+        # not on RunState, so it survives a per-run state reset and is cleared
+        # explicitly at the start of every turn. Transport-agnostic on purpose.
+        self._cancel_event = threading.Event()
         self.console = console or Console()
         self._perf_logger = perf_logger or PerfLogger(executor.workspace)
         self._ui = ui
@@ -354,7 +361,23 @@ class LocalAgent:
             self.executor.sandbox_mode, sandbox_network_allowed()
         )
 
+    def request_cancel(self) -> None:
+        """Request that the current action-loop turn stop at the next safe point.
+
+        Callable from any thread. It sets a flag only — it never touches an
+        in-flight action or the transport. The loop observes it between steps
+        (safe-stop) and while consuming a model stream (mid-generation).
+        """
+        self._cancel_event.set()
+
+    def _reset_cancel(self) -> None:
+        """Clear a pending cancellation so it cannot leak into the next turn."""
+        self._cancel_event.clear()
+
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
+        # Cleared before routing/planning so a cancel requested during a
+        # previous turn never aborts this one's setup.
+        self._reset_cancel()
         self._reset_run_state()
         self._state.task_language = detect_request_language(user_goal)
         # User-facing response language is resolved by the runtime layer
@@ -414,6 +437,7 @@ class LocalAgent:
         return result
 
     def resume(self) -> str | None:
+        self._reset_cancel()
         self._reset_run_state()
         result = self._load_checkpoint()
         if result is None:
@@ -634,6 +658,7 @@ class LocalAgent:
     _feedback_to_detail = feedback_to_detail
     _render_feedback = render_feedback
     _build_early_stop_message = build_early_stop_message
+    _build_cancellation_message = build_cancellation_message
     _build_limit_reached_message = build_limit_reached_message
     _build_auto_completion_message = build_auto_completion_message
     _build_safety_refusal_message = build_safety_refusal_message

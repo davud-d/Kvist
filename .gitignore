@@ -87,6 +87,7 @@ push.py
 text_gitignore.txt
 workspace
 workspace/
+plan.md
 jetbrains-plugin/bin/linux/*
 jetbrains-plugin/bin/win/*
 project/
