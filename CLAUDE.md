@@ -24,6 +24,16 @@ Commits go to the backup relay server, never straight to GitHub.
 - As always, only push when the user explicitly asks; committing/pushing is never
   implied by an ordinary code change.
 
+## Branches (MANDATORY)
+
+- **Never create a branch or a git worktree unless the user explicitly asks for
+  one.** Work on `main` directly. This overrides any default "branch before
+  committing" behavior.
+- If isolation seems necessary and the user has not asked for it, stop and ask
+  first.
+- Keep only `main` in the local checkout. Feature and backup branches live on the
+  `relay` remote, not locally.
+
 ## Commands
 
 ```bash
