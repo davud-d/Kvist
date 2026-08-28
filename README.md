@@ -169,8 +169,9 @@ To install a reusable `kvist` launcher and build a standalone binary when needed
 The installer uses `dist/kvist` or `dist/kvist.exe` when available, otherwise
 builds it with PyInstaller. It installs the binary under the per-user data
 directory and a launcher under `~/.local/bin` on Linux or `%LOCALAPPDATA%\\Kvist\\bin`
-on Windows. Add that bin directory to `PATH` if the installer reports it is
-missing. Re-run with `--rebuild` after changing the source.
+on Windows. On Windows the installer adds that bin directory to your user `PATH`
+automatically (open a new terminal afterwards); on Linux add it yourself if the
+installer reports it is missing. Re-run with `--rebuild` after changing the source.
 
 The installed launcher uses the current directory as the workspace:
 

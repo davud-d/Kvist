@@ -168,8 +168,10 @@ python install.py; if ($?) { echo "Install OK" } else { echo "error install" }
 Установщик использует `dist/kvist` или `dist/kvist.exe`, а при отсутствии
 собирает его PyInstaller-ом. Реальный binary кладётся в пользовательский
 каталог данных, launcher — в `~/.local/bin` (Linux) или
-`%LOCALAPPDATA%\\Kvist\\bin` (Windows). Добавьте этот каталог в `PATH`, если
-установщик предупредит. Для пересборки используйте `--rebuild`.
+`%LOCALAPPDATA%\\Kvist\\bin` (Windows). На Windows установщик сам добавляет этот
+каталог в пользовательский `PATH` (после этого откройте новый терминал); на Linux
+добавьте его вручную, если установщик предупредит. Для пересборки используйте
+`--rebuild`.
 
 Установленный launcher использует текущий каталог как workspace:
 

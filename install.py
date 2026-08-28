@@ -53,8 +53,9 @@ exec "$CORE" --workspace "$PWD" "$@"
 
 WINDOWS_WRAPPER = """@echo off
 setlocal
-set "CORE={core_path}"
-"%CORE%" --workspace "%CD%" %*
+set "KVIST_CORE={core_path}"
+"%KVIST_CORE%" --workspace "%CD%" %*
+exit /b %ERRORLEVEL%
 """
 
 
@@ -166,13 +167,25 @@ def install(binary: Path, lib_dir: Path, bin_dir: Path) -> Path:
 
     lib_dir.mkdir(parents=True, exist_ok=True)
     core_path = lib_dir / CORE_NAME
-    shutil.copy2(binary, core_path)
+    try:
+        shutil.copy2(binary, core_path)
+    except PermissionError:
+        # Windows keeps a running executable locked; a plain copy over it fails.
+        raise SystemExit(
+            f"error: cannot overwrite {core_path}. Close every running kvist "
+            "session and re-run install.py."
+        )
     make_executable(core_path)
 
     bin_dir.mkdir(parents=True, exist_ok=True)
     wrapper_path = bin_dir / WRAPPER_NAME
     template = WINDOWS_WRAPPER if IS_WINDOWS else UNIX_WRAPPER
-    wrapper_path.write_text(template.format(core_path=core_path))
+    wrapper_text = template.format(core_path=core_path)
+    if IS_WINDOWS:
+        # cmd.exe wants CRLF; newline="" keeps write_text from retranslating it.
+        wrapper_path.write_text(wrapper_text.replace("\n", "\r\n"), newline="")
+    else:
+        wrapper_path.write_text(wrapper_text)
     make_executable(wrapper_path)
 
     return wrapper_path
@@ -182,6 +195,51 @@ def path_contains(bin_dir: Path) -> bool:
     entries = os.environ.get("PATH", "").split(os.pathsep)
     target = os.path.normcase(os.path.normpath(str(bin_dir)))
     return any(os.path.normcase(os.path.normpath(e)) == target for e in entries if e)
+
+
+def add_to_user_path_windows(bin_dir: Path) -> bool:
+    """Append bin_dir to the persistent per-user PATH via the registry.
+
+    `setx` truncates PATH at 1024 chars and would mangle a real user's PATH, so
+    edit HKCU\\Environment directly, then broadcast the change so newly started
+    shells inherit it. Returns True once the entry is present.
+    """
+    import winreg
+
+    target = os.path.normcase(os.path.normpath(str(bin_dir)))
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, "Environment", 0, winreg.KEY_READ | winreg.KEY_WRITE
+        ) as key:
+            try:
+                current, value_type = winreg.QueryValueEx(key, "Path")
+            except FileNotFoundError:
+                current, value_type = "", winreg.REG_EXPAND_SZ
+            entries = [e for e in str(current).split(os.pathsep) if e]
+            if any(os.path.normcase(os.path.normpath(e)) == target for e in entries):
+                return True
+            entries.append(str(bin_dir))
+            winreg.SetValueEx(
+                key, "Path", 0, value_type or winreg.REG_EXPAND_SZ, os.pathsep.join(entries)
+            )
+    except OSError:
+        return False
+
+    _broadcast_environment_change()
+    return True
+
+
+def _broadcast_environment_change() -> None:
+    import ctypes
+
+    try:
+        ctypes.windll.user32.SendMessageTimeoutW(
+            0xFFFF, 0x001A, 0, "Environment", 0x0002, 5000, ctypes.byref(ctypes.c_ulong())
+        )
+    except (OSError, AttributeError):
+        # The PATH entry is already written; a missed broadcast only means
+        # already-open programs keep the old environment until relaunch.
+        pass
 
 
 def main() -> None:
@@ -234,10 +292,18 @@ def main() -> None:
     print(f"Installed launcher to {wrapper_path}")
 
     if not path_contains(args.bin_dir):
-        if IS_WINDOWS:
+        if IS_WINDOWS and add_to_user_path_windows(args.bin_dir):
             print(
-                f"\nWarning: {args.bin_dir} is not on your PATH. Add it, e.g. in PowerShell:\n"
-                f'  [Environment]::SetEnvironmentVariable("Path", $env:Path + ";{args.bin_dir}", "User")\n'
+                f"\nAdded {args.bin_dir} to your user PATH. Open a new terminal, "
+                "then run `kvist` in any directory to start the agent there."
+            )
+        elif IS_WINDOWS:
+            print(
+                f"\nWarning: could not update PATH automatically. Add {args.bin_dir} "
+                "yourself, e.g. in PowerShell:\n"
+                '  [Environment]::SetEnvironmentVariable("Path", '
+                '[Environment]::GetEnvironmentVariable("Path", "User") + '
+                f'";{args.bin_dir}", "User")\n'
                 "  (then restart your terminal)"
             )
         else:
