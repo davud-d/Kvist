@@ -185,7 +185,9 @@ def install(binary: Path, lib_dir: Path, bin_dir: Path) -> Path:
         # cmd.exe wants CRLF; newline="" keeps write_text from retranslating it.
         wrapper_path.write_text(wrapper_text.replace("\n", "\r\n"), newline="")
     else:
-        wrapper_path.write_text(wrapper_text)
+        # A bash wrapper must keep LF endings even when install.py runs on Windows
+        # (the test suite exercises this path there).
+        wrapper_path.write_text(wrapper_text, newline="\n")
     make_executable(wrapper_path)
 
     return wrapper_path

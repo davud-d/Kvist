@@ -18,6 +18,15 @@ from change_journal import (
 )
 
 
+def _write(path, text):
+    """Write a workspace file the way the executor does: raw UTF-8 bytes with
+    newlines kept verbatim. Path.write_text translates "\\n" to "\\r\\n" on
+    Windows, which would desync the content digests the journal compares against.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(text.encode("utf-8"))
+
+
 def _record_write(workspace, relative_path, *, old_content, new_content, session="default"):
     """Mirror the executor's write-ahead + promote flow around a successful write."""
     existed = (workspace / relative_path).is_file()
@@ -29,14 +38,12 @@ def _record_write(workspace, relative_path, *, old_content, new_content, session
         session=session,
         pending_digest=content_digest(new_content),
     )
-    target = workspace / relative_path
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(new_content, encoding="utf-8")
+    _write(workspace / relative_path, new_content)
     promote_baseline(workspace, relative_path, content_digest(new_content))
 
 
 def test_baseline_keeps_first_state_and_refreshes_last_digest(tmp_path):
-    (tmp_path / "app.py").write_text("original\n", encoding="utf-8")
+    _write(tmp_path / "app.py", "original\n")
     _record_write(tmp_path, "app.py", old_content="original\n", new_content="v1\n")
     _record_write(tmp_path, "app.py", old_content="v1\n", new_content="v2\n")
 
@@ -49,7 +56,7 @@ def test_baseline_keeps_first_state_and_refreshes_last_digest(tmp_path):
 
 
 def test_revert_restores_modified_and_deletes_created_files(tmp_path):
-    (tmp_path / "kept.py").write_text("before\n", encoding="utf-8")
+    _write(tmp_path / "kept.py", "before\n")
     _record_write(tmp_path, "kept.py", old_content="before\n", new_content="after\n")
     _record_write(tmp_path, "made.py", old_content=None, new_content="new file\n")
 
@@ -63,10 +70,10 @@ def test_revert_restores_modified_and_deletes_created_files(tmp_path):
 
 
 def test_revert_skips_files_changed_outside_agent_writes(tmp_path):
-    (tmp_path / "user.py").write_text("before\n", encoding="utf-8")
+    _write(tmp_path / "user.py", "before\n")
     _record_write(tmp_path, "user.py", old_content="before\n", new_content="agent\n")
     # The user (or a shell command) edits the file after the agent's write.
-    (tmp_path / "user.py").write_text("user edit\n", encoding="utf-8")
+    _write(tmp_path / "user.py", "user edit\n")
 
     reverted = revert_workspace(tmp_path)
 
@@ -79,7 +86,7 @@ def test_revert_skips_files_changed_outside_agent_writes(tmp_path):
 def test_revert_does_not_resurrect_a_pre_existing_file_the_user_deleted(tmp_path):
     # A user deleting a pre-existing file after the agent edited it is an
     # external change: file absence is state, and revert must not resurrect it.
-    (tmp_path / "gone.py").write_text("before\n", encoding="utf-8")
+    _write(tmp_path / "gone.py", "before\n")
     _record_write(tmp_path, "gone.py", old_content="before\n", new_content="agent\n")
     (tmp_path / "gone.py").unlink()
 
@@ -91,13 +98,13 @@ def test_revert_does_not_resurrect_a_pre_existing_file_the_user_deleted(tmp_path
 
 
 def test_revert_is_idempotent_after_interruption(tmp_path):
-    (tmp_path / "a.py").write_text("base-a\n", encoding="utf-8")
+    _write(tmp_path / "a.py", "base-a\n")
     _record_write(tmp_path, "a.py", old_content="base-a\n", new_content="agent-a\n")
     _record_write(tmp_path, "b.py", old_content=None, new_content="agent-b\n")
 
     # Simulate a crash mid-revert: one file already back at its baseline, the
     # journal untouched. Re-running must finish the rest without damage.
-    (tmp_path / "a.py").write_text("base-a\n", encoding="utf-8")
+    _write(tmp_path / "a.py", "base-a\n")
     reverted = revert_workspace(tmp_path)
 
     assert [(item.path, item.action) for item in reverted] == [("b.py", "deleted")]
@@ -107,7 +114,7 @@ def test_revert_is_idempotent_after_interruption(tmp_path):
 
 def test_stale_write_ahead_record_is_harmless(tmp_path):
     # Write-ahead ordering: the baseline lands, then the mutation fails.
-    (tmp_path / "same.py").write_text("untouched\n", encoding="utf-8")
+    _write(tmp_path / "same.py", "untouched\n")
     record_baseline(
         tmp_path,
         relative_path="same.py",
@@ -127,7 +134,7 @@ def test_stale_write_ahead_record_is_harmless(tmp_path):
 def test_entries_without_digest_never_overwrite_existing_content(tmp_path):
     # A journal written by an older Kvist has no last_digest; content that
     # cannot be attributed to the agent is preserved, not overwritten.
-    (tmp_path / "legacy.py").write_text("current\n", encoding="utf-8")
+    _write(tmp_path / "legacy.py", "current\n")
     record_baseline(
         tmp_path,
         relative_path="legacy.py",
@@ -142,7 +149,7 @@ def test_entries_without_digest_never_overwrite_existing_content(tmp_path):
 
 
 def test_sessions_share_one_workspace_journal_with_attribution(tmp_path):
-    (tmp_path / "shared.py").write_text("origin\n", encoding="utf-8")
+    _write(tmp_path / "shared.py", "origin\n")
     _record_write(
         tmp_path, "shared.py", old_content="origin\n", new_content="from-a\n", session="alpha"
     )
@@ -182,7 +189,7 @@ def test_revert_refuses_tampered_journal_paths(tmp_path):
         ),
         encoding="utf-8",
     )
-    (tmp_path.parent / "outside.py").write_text("outside\n", encoding="utf-8")
+    _write(tmp_path.parent / "outside.py", "outside\n")
 
     reverted = revert_workspace(tmp_path)
 
@@ -210,7 +217,7 @@ def test_revert_refuses_paths_through_symlinks(tmp_path):
         content="baseline\n",
         pending_digest=content_digest("agent\n"),
     )
-    (outside / "file.py").write_text("agent\n", encoding="utf-8")
+    _write(outside / "file.py", "agent\n")
 
     reverted = revert_workspace(tmp_path)
 
@@ -258,13 +265,13 @@ def test_clear_journal_removes_primary_and_backup(tmp_path):
 
 
 def test_diff_report_lists_changes_and_net_noop(tmp_path):
-    (tmp_path / "mod.py").write_text("one\n", encoding="utf-8")
+    _write(tmp_path / "mod.py", "one\n")
     _record_write(tmp_path, "mod.py", old_content="one\n", new_content="two\n")
 
     report = build_diff_report(tmp_path)
     assert "-one" in report and "+two" in report
 
-    (tmp_path / "mod.py").write_text("one\n", encoding="utf-8")
+    _write(tmp_path / "mod.py", "one\n")
     assert "No net agent changes remain" in build_diff_report(tmp_path)
 
     clear_journal(tmp_path)
@@ -277,7 +284,7 @@ def test_executor_records_baseline_before_mutating(agent_factory, monkeypatch):
     baseline is durably recorded before the file changes (write-ahead)."""
     agent = agent_factory()
     workspace = agent.executor.workspace
-    (workspace / "code.py").write_text("precious\n", encoding="utf-8")
+    _write(workspace / "code.py", "precious\n")
 
     def crash_replace(self, target, content, expected):
         raise OSError("simulated crash during atomic replace")

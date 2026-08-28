@@ -36,7 +36,9 @@ def test_create_source_archive_contains_only_committed_tree(tmp_path):
         cwd=repository,
         check=True,
     )
-    (repository / "tracked.txt").write_text("committed\n", encoding="utf-8")
+    # write_bytes, not write_text: Path.write_text would turn "\n" into "\r\n"
+    # on Windows and the committed blob (autocrlf is off here) would carry it.
+    (repository / "tracked.txt").write_bytes(b"committed\n")
     subprocess.run(["git", "add", "tracked.txt"], cwd=repository, check=True)
     subprocess.run(
         ["git", "commit", "-m", "fixture"],
