@@ -281,6 +281,7 @@ def test_theme_directories_order(tmp_path, monkeypatch):
     dirs = theme.theme_directories(workspace=workspace, cwd=cwd)
     assert dirs == [
         (Path(theme.__file__).resolve().parent / "themes"),
+        (home / ".config" / "opencode" / "themes").resolve(),
         (home / ".kvist" / "themes").resolve(),
         (workspace / ".kvist" / "themes").resolve(),
         (cwd / ".kvist" / "themes").resolve(),
@@ -327,6 +328,40 @@ def test_load_available_skips_broken_file(user_themes):
     assert "good" in names and "kvist" in names
     assert any(i.path == user_themes.dir / "broken.json" for i in issues)
     assert "broken" not in names
+
+
+def test_opencode_theme_directory_is_searched(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    cwd = tmp_path / "cwd"
+    home.mkdir()
+    cwd.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    opencode_dir = home / ".config" / "opencode" / "themes"
+    kvist_dir = home / ".kvist" / "themes"
+    opencode_dir.mkdir(parents=True)
+    kvist_dir.mkdir(parents=True)
+
+    _write_theme(opencode_dir / "borrowed.json", theme_slots=_full_theme(primary="#0b0b0b"))
+    assert theme.load_theme("borrowed", cwd=cwd).color("primary", "dark") == "#0b0b0b"
+
+    # a name clash is still won by ~/.kvist/themes, which comes later in the list
+    _write_theme(opencode_dir / "clash.json", theme_slots=_full_theme(primary="#aaaaaa"))
+    _write_theme(kvist_dir / "clash.json", theme_slots=_full_theme(primary="#bbbbbb"))
+    assert theme.load_theme("clash", cwd=cwd).color("primary", "dark") == "#bbbbbb"
+
+
+def test_system_theme_resolves_in_both_modes(user_themes):
+    from prompt_toolkit.styles import Style
+    from rich.color import Color
+
+    loaded = _load(user_themes, "system")
+    assert loaded.inherited == frozenset()
+    for mode in ("dark", "light"):
+        table = loaded.dark if mode == "dark" else loaded.light
+        assert len(table) == 50
+        for slot in theme.SLOT_NAMES:
+            Style.from_dict({"x": loaded.prompt_toolkit_color(slot, mode)})
+            Color.parse(loaded.rich_color(slot, mode))
 
 
 def test_works_with_no_user_directories(tmp_path, monkeypatch):

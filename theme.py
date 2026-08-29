@@ -327,12 +327,19 @@ def theme_directories(
     """Theme search roots, lowest priority first (later entries win on name).
 
     1. ``<module_dir>/themes`` — built-in
-    2. ``~/.kvist/themes`` — user (kept next to the existing ``~/.kvist/config.json``)
-    3. ``<workspace>/.kvist/themes``
-    4. ``<cwd>/.kvist/themes`` (dropped if it is the same directory as 3)
+    2. ``~/.config/opencode/themes`` — opencode's own directory (see TODO below)
+    3. ``~/.kvist/themes`` — user (kept next to the existing ``~/.kvist/config.json``)
+    4. ``<workspace>/.kvist/themes``
+    5. ``<cwd>/.kvist/themes`` (dropped if it is the same directory as 4)
     """
     base = Path.cwd() if cwd is None else Path(cwd)
-    candidates = [_BUILTIN_THEME_DIR, Path.home() / _USER_THEME_SUBPATH]
+    # TODO: temporary bridge — read opencode's own theme directory so its themes
+    # load without being copied. Remove once Kvist ships its own theme install path.
+    candidates = [
+        _BUILTIN_THEME_DIR,
+        Path.home() / ".config" / "opencode" / "themes",
+        Path.home() / _USER_THEME_SUBPATH,
+    ]
     if workspace is not None:
         candidates.append(Path(workspace) / _USER_THEME_SUBPATH)
     candidates.append(base / _USER_THEME_SUBPATH)

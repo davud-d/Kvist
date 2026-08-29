@@ -1,0 +1,61 @@
+{
+  "$schema": "https://opencode.ai/theme.json",
+  "theme": {
+    "primary": "ansicyan",
+    "secondary": "ansiblue",
+    "accent": "ansimagenta",
+    "error": "ansired",
+    "warning": "ansiyellow",
+    "success": "ansigreen",
+    "info": "ansicyan",
+
+    "text": "none",
+    "textMuted": "ansibrightblack",
+
+    "background": "none",
+    "backgroundPanel": "none",
+    "backgroundElement": "none",
+
+    "border": "ansibrightblack",
+    "borderActive": "ansicyan",
+    "borderSubtle": "ansibrightblack",
+
+    "diffAdded": "ansigreen",
+    "diffRemoved": "ansired",
+    "diffContext": "ansibrightblack",
+    "diffHunkHeader": "ansicyan",
+    "diffHighlightAdded": "ansibrightgreen",
+    "diffHighlightRemoved": "ansibrightred",
+    "diffAddedBg": "none",
+    "diffRemovedBg": "none",
+    "diffContextBg": "none",
+    "diffLineNumber": "ansibrightblack",
+    "diffAddedLineNumberBg": "none",
+    "diffRemovedLineNumberBg": "none",
+
+    "markdownText": "none",
+    "markdownHeading": "ansicyan",
+    "markdownLink": "ansiblue",
+    "markdownLinkText": "ansibrightblue",
+    "markdownCode": "ansigreen",
+    "markdownBlockQuote": "ansibrightblack",
+    "markdownEmph": "ansiyellow",
+    "markdownStrong": "none",
+    "markdownHorizontalRule": "ansibrightblack",
+    "markdownListItem": "ansicyan",
+    "markdownListEnumeration": "ansimagenta",
+    "markdownImage": "ansiblue",
+    "markdownImageText": "ansibrightblue",
+    "markdownCodeBlock": "none",
+
+    "syntaxComment": "ansibrightblack",
+    "syntaxKeyword": "ansimagenta",
+    "syntaxFunction": "ansicyan",
+    "syntaxVariable": "none",
+    "syntaxString": "ansigreen",
+    "syntaxNumber": "ansibrightmagenta",
+    "syntaxType": "ansibrightblue",
+    "syntaxOperator": "ansiblue",
+    "syntaxPunctuation": "ansibrightblack"
+  }
+}
