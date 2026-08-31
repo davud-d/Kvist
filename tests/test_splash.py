@@ -142,9 +142,45 @@ def test_column_is_horizontally_centred():
     for width in (90, 100, 120):
         lines = render(width, 30)
         assert _accent_column(lines) == (width - splash.COLUMN_WIDTH + 1) // 2, width
-        logo = next(line for line in lines if line.strip() and set(line) <= _BLOCK)
-        logo_mid = (len(logo) + (len(logo) - len(logo.lstrip()))) / 2
+        # The logo rows differ in fill (the top row is just K and i's dot), so
+        # centre the union box, not any single line.
+        logo_rows = [line for line in lines if line.strip() and set(line) <= _BLOCK]
+        left = min(len(row) - len(row.lstrip()) for row in logo_rows)
+        right = max(len(row.rstrip()) for row in logo_rows)
+        logo_mid = (left + right) / 2
         assert abs(logo_mid - width / 2) <= 2, width
+
+
+# ── 3b. the block logo is shaded: Kvi in secondary, st in primary ──────
+
+
+def test_block_logo_has_two_shade_classes():
+    width, height = 120, 40
+    lines = render(width, height)
+    at = render_attrs(width, height)
+
+    loaded = theme.load_theme("kvist")
+    secondary = loaded.prompt_toolkit_color("secondary", "dark").lstrip("#")
+    primary = loaded.prompt_toolkit_color("primary", "dark").lstrip("#")
+    assert secondary != primary
+
+    logo_rows = [i for i, line in enumerate(lines) if line.strip() and set(line) <= _BLOCK]
+    assert logo_rows
+
+    cells = [
+        (x, at(y, x)[1].color)
+        for y in logo_rows
+        for x in range(width)
+        if lines[y][x:x + 1].strip()
+    ]
+    by_col = sorted(cells)
+    assert by_col[0][1] == secondary  # leftmost pixel: the K stem
+    assert by_col[-1][1] == primary  # rightmost pixel: the t crossbar
+    assert {colour for _, colour in cells} == {secondary, primary}
+    # Every shaded pixel sits left of every primary pixel: a clean vertical seam.
+    shade_max = max(x for x, colour in cells if colour == secondary)
+    primary_min = min(x for x, colour in cells if colour == primary)
+    assert shade_max < primary_min
 
 
 # ── 4. narrow terminal: block logo gives way to plain text ─────────────

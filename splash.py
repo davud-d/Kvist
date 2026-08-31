@@ -46,6 +46,41 @@ from theme import Mode, Theme, ThemeError, load_theme
 
 LOGO_TEXT = "Kvist"
 
+# ── logo font ───────────────────────────────────────────────────────────
+#
+# Glyphs drawn on the terminal grid: one "#" is one filled cell, one space is
+# one empty cell. banner.FONT is a 5x7 pixel raster that has to be squeezed
+# two-pixel-rows-per-cell to fit; the diagonals of K and v disintegrate into
+# dots. These glyphs are authored at cell resolution instead, so nothing is
+# squeezed and the module never imports banner (nor the OpenAI SDK behind it).
+GLYPH_HEIGHT = 6
+
+# A terminal cell is about twice as tall as it is wide, so each font pixel is
+# drawn as this many cells across to keep the letters from reading as columns.
+# Named so 2 and 3 can be tried against the ASCII dump; 3 crowds the 75-column
+# input block and coarsens the diagonals.
+GLYPH_X_SCALE = 2
+
+# Cap height 6, x-height 4 (rows 2-5), baseline row 5. K is 6 wide (wider than
+# lowercase v), its bend on the single row 3, arm and leg both one pixel thick
+# and mirrored top/bottom. i keeps a real gap under its dot (row 0 set, row 1
+# clear); t and s both rise to row 1 (a 4-row s could not close its lower bowl
+# at one-pixel stroke weight without reading as a z).
+LOGO_FONT: dict[str, tuple[str, ...]] = {
+    "K": ("#    #", "#   # ", "#  #  ", "###   ", "#   # ", "#    #"),
+    "v": ("     ", "     ", "#   #", "#   #", " # # ", "  #  "),
+    "i": ("#", " ", "#", "#", "#", "#"),
+    "s": ("     ", " ####", "#    ", "#####", "    #", " ####"),
+    "t": ("   ", " # ", "###", " # ", " # ", " ##"),
+}
+
+_BLANK_GLYPH = ("   ",) * GLYPH_HEIGHT
+
+# The first three letters (Kvi) are drawn in the shade colour, the last two (st)
+# in the primary colour, so the word reads with a lit near edge like opencode's
+# logo. The blank column between i and s stays with the shaded run.
+_SHADE_GROUP = "Kvi"
+
 # Left half-block. opencode draws the input frame's edge as a solid rule; the
 # left-quarter block read as a stray dash against Kvist's darker screen.
 ACCENT_BAR_CHAR = "▌"
@@ -66,11 +101,12 @@ ACCENT_BAR_CHAR = "▌"
 PAD_MIN_HEIGHT = 17
 GAP_MIN_HEIGHT = 15
 HINTS_MIN_HEIGHT = 12
-LOGO_MIN_HEIGHT = 9
+LOGO_MIN_HEIGHT = 11
 TEXT_LOGO_MIN_HEIGHT = 5
 
-# The block glyphs for "Kvist" are 29 columns wide; the rest is breathing room.
-LOGO_MIN_WIDTH = 46
+# The block glyphs for "Kvist" are 48 columns wide once GLYPH_X_SCALE is applied;
+# the rest (17 columns) is breathing room, and the floor stays below COLUMN_WIDTH.
+LOGO_MIN_WIDTH = 65
 
 # The input block: a one-column accent bar, then a padded background slab. The
 # accent bar sits at column c, the slab spans c+1 onward, the text starts at
@@ -81,10 +117,7 @@ ACCENT_BAR_WIDTH = 1
 BLOCK_INNER_PAD = 2
 BLOCK_TEXT_INDENT = ACCENT_BAR_WIDTH + BLOCK_INNER_PAD
 
-# banner.FONT glyphs are 7 px tall, two px per half-block cell -> 4 rows. Kept as
-# a literal so the layout never imports banner (and the OpenAI SDK behind it)
-# just to size a Window that a narrow terminal will not even show.
-BLOCK_LOGO_HEIGHT = 4
+BLOCK_LOGO_HEIGHT = GLYPH_HEIGHT
 
 # The centred column is capped so long lines do not span a wide terminal, and
 # floored so a narrow one still shows a usable frame. 75 is the opencode block
@@ -113,6 +146,7 @@ if list(_ORDERED_HEIGHT_THRESHOLDS) != sorted(_ORDERED_HEIGHT_THRESHOLDS, revers
 _STYLE_SLOTS: dict[str, tuple[str, ...]] = {
     "splash.body": ("text", "background"),
     "splash.logo": ("primary",),
+    "splash.logo.shade": ("secondary",),
     "splash.accent": ("accent",),
     "splash.block": ("text", "backgroundPanel"),
     "splash.input": ("text",),
@@ -143,35 +177,36 @@ def build_style(theme: Theme, mode: Mode) -> Style:
 
 @lru_cache(maxsize=4)
 def logo_lines(text: str) -> tuple[str, ...]:
-    """Render ``text`` as four rows of half-block glyphs from ``banner.FONT``.
+    """Render ``text`` as ``GLYPH_HEIGHT`` rows of block glyphs from ``LOGO_FONT``.
 
-    The import is deferred: ``banner`` transitively pulls the OpenAI SDK
-    (``banner.py`` -> ``llm_clients`` -> ``openai``), which the splash otherwise
-    never needs. A narrow terminal that shows the plain text logo never pays it.
+    Each font pixel becomes ``GLYPH_X_SCALE`` cells wide. Rows are padded to a
+    common width, never right-trimmed: ``WindowAlign.CENTER`` centres every line
+    on its own width, so a ragged top row (K plus i's dot) would drift right of
+    the fuller rows below it.
     """
-    from banner import FONT, GLYPH_HEIGHT, GLYPH_WIDTH
-
+    glyphs = [LOGO_FONT.get(char) or _BLANK_GLYPH for char in text]
+    width = sum(len(glyph[0]) for glyph in glyphs) + max(0, len(glyphs) - 1)
     rows: list[str] = []
-    for cell_row in range((GLYPH_HEIGHT + 1) // 2):
-        top = 2 * cell_row
-        bottom = top + 1
-        line: list[str] = []
-        for char in text:
-            bitmap = FONT.get(char) or FONT[" "]
-            for column in range(GLYPH_WIDTH):
-                top_on = top < GLYPH_HEIGHT and bitmap[top][column] == "#"
-                bot_on = bottom < GLYPH_HEIGHT and bitmap[bottom][column] == "#"
-                line.append("█" if top_on and bot_on else "▀" if top_on else "▄" if bot_on else " ")
-            line.append(" ")
-        rows.append("".join(line).rstrip())
+    for row in range(GLYPH_HEIGHT):
+        raw = " ".join(glyph[row] for glyph in glyphs).ljust(width)
+        rows.append("".join(cell * GLYPH_X_SCALE for cell in raw).replace("#", "█"))
     return tuple(rows)
 
 
+def _shade_split() -> int:
+    """Scaled column where the primary ``st`` run starts; the blank column before
+    ``s`` is counted into the shaded ``Kvi`` run."""
+    unscaled = sum(len(LOGO_FONT[char][0]) for char in _SHADE_GROUP) + len(_SHADE_GROUP)
+    return unscaled * GLYPH_X_SCALE
+
+
 def _logo_fragments() -> list[tuple[str, str]]:
+    split = _shade_split()
     out: list[tuple[str, str]] = []
     lines = logo_lines(LOGO_TEXT)
     for index, line in enumerate(lines):
-        out.append(("class:splash.logo", line))
+        out.append(("class:splash.logo.shade", line[:split]))
+        out.append(("class:splash.logo", line[split:]))
         if index < len(lines) - 1:
             out.append(("", "\n"))
     return out
