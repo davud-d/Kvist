@@ -3,10 +3,51 @@
 from __future__ import annotations
 
 import importlib
+import sys
+from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "installer"))
+
 install = importlib.import_module("install")
+_common = importlib.import_module("_common")
+
+
+def test_remove_path_deletes_regular_dir_and_file(tmp_path):
+    directory = tmp_path / "d"
+    (directory / "sub").mkdir(parents=True)
+    (directory / "sub" / "f").write_text("x")
+    file = tmp_path / "f"
+    file.write_text("x")
+
+    assert _common.remove_path(directory) is True
+    assert _common.remove_path(file) is True
+    assert not directory.exists() and not file.exists()
+
+
+def test_remove_path_is_noop_when_absent(tmp_path):
+    assert _common.remove_path(tmp_path / "missing") is False
+
+
+def test_remove_path_unlinks_symlinked_dir_without_touching_target(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "keep").write_text("x")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+
+    assert _common.remove_path(link) is True
+    assert not link.exists()
+    assert (real / "keep").read_text() == "x"
+
+
+def test_remove_path_clears_broken_symlink(tmp_path):
+    link = tmp_path / "dangling"
+    link.symlink_to(tmp_path / "nowhere")
+
+    assert _common.remove_path(link) is True
+    assert not link.is_symlink()
 
 
 def _reload_as(monkeypatch: pytest.MonkeyPatch, system: str):

@@ -130,7 +130,7 @@ cd Kvist
 python -m venv .venv && echo "venv OK" || echo "error venv"
 source .venv/bin/activate && echo "venv activated" || echo "error activate"
 uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
-python install.py && echo "Install OK" || echo "error install"
+python installer/install.py && echo "Install OK" || echo "error install"
 ```
 **Note**: *works in bash only; if you use a different shell - adapt it*
 
@@ -143,7 +143,7 @@ python -m venv .venv; if ($?) { echo "venv OK" } else { echo "error venv" }
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 .venv\Scripts\Activate.ps1; if ($?) { echo "venv activated" } else { echo "error activate" }
 uv pip install -r requirements.txt; if (!$?) { pip install -r requirements.txt }
-python install.py; if ($?) { echo "Install OK" } else { echo "error install" }
+python installer\install.py; if ($?) { echo "Install OK" } else { echo "error install" }
 ```
 **Note**: *works in PowerShell **5.1** only; if you use a different PowerShell version - adapt it*
 
@@ -163,7 +163,15 @@ terminal in the project and run Kvist again to reuse that configuration.
 To install a reusable `kvist` launcher and build a standalone binary when needed:
 
 ```bash
-.venv/bin/python install.py
+.venv/bin/python installer/install.py
+```
+
+The `installer/` directory also holds two desktop installers, both cross-platform
+(Linux + Windows):
+
+```bash
+.venv/bin/python installer/install_jetbrains.py   # install the plugin into every JetBrains IDE found
+.venv/bin/python installer/install_gui.py         # install the GUI app + launcher/desktop shortcut
 ```
 
 The installer uses `dist/kvist` or `dist/kvist.exe` when available, otherwise

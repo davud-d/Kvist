@@ -49,13 +49,23 @@
       "category": "Development",
       "maintainer": "Davud <noreply@users.noreply.github.com>",
       "syncDesktopName": true,
+      "icon": "build/icon.png",
       "target": [
         "AppImage",
         "deb"
       ]
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   }
 }

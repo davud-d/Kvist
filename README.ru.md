@@ -130,7 +130,7 @@ cd Kvist
 python -m venv .venv && echo "venv OK" || echo "error venv"
 source .venv/bin/activate && echo "venv activated" || echo "error activate"
 uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
-python install.py && echo "Install OK" || echo "error install"
+python installer/install.py && echo "Install OK" || echo "error install"
 ```
 **Нюанс**: *работает только для bash, если у вас другой shell - адаптируйте*
 
@@ -143,7 +143,7 @@ python -m venv .venv; if ($?) { echo "venv OK" } else { echo "error venv" }
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
 .venv\Scripts\Activate.ps1; if ($?) { echo "venv activated" } else { echo "error activate" }
 uv pip install -r requirements.txt; if (!$?) { pip install -r requirements.txt }
-python install.py; if ($?) { echo "Install OK" } else { echo "error install" }
+python installer\install.py; if ($?) { echo "Install OK" } else { echo "error install" }
 ```
 **Нюанс**: *работает только для powershell **5.1**, если у вас другой powershell - адаптируйте*
 
@@ -162,7 +162,15 @@ python install.py; if ($?) { echo "Install OK" } else { echo "error install" }
 Чтобы установить команду `kvist` и при необходимости собрать standalone binary:
 
 ```bash
-.venv/bin/python install.py
+.venv/bin/python installer/install.py
+```
+
+В каталоге `installer/` есть ещё два desktop-установщика, оба кроссплатформенные
+(Linux + Windows):
+
+```bash
+.venv/bin/python installer/install_jetbrains.py   # ставит плагин во все найденные JetBrains IDE
+.venv/bin/python installer/install_gui.py         # ставит GUI и ярлык / пункт меню приложений
 ```
 
 Установщик использует `dist/kvist` или `dist/kvist.exe`, а при отсутствии
