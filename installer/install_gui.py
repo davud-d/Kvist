@@ -51,6 +51,10 @@ else:
 
 # --------------------------------------------------------------------------- build
 
+def is_already_installed() -> bool:
+    return INSTALL_ROOT.is_dir()
+
+
 def build_gui() -> None:
     npm = shutil.which("npm")
     if npm is None:
@@ -290,7 +294,12 @@ def main() -> None:
         (uninstall_windows if IS_WINDOWS else uninstall_linux)()
         return
 
+    # Re-running the installer over an existing install means "update", so a
+    # stale gui/dist artifact must be rebuilt rather than reused.
     if args.build:
+        build_gui()
+    elif is_already_installed():
+        log("Kvist GUI is already installed; rebuilding it ...")
         build_gui()
 
     (install_windows if IS_WINDOWS else install_linux)()

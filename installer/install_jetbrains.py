@@ -59,6 +59,14 @@ def find_plugin_zip() -> Path | None:
     return None
 
 
+def plugin_already_installed(ides: list[tuple[str, Path]]) -> bool:
+    return any(
+        (plugins_dir_for(config_dir) / name).is_dir()
+        for _, config_dir in ides
+        for name in (PLUGIN_FOLDER_NAME, JETBRAINS_PLUGIN_ID)
+    )
+
+
 def build_plugin_zip() -> Path:
     script = PLUGIN_DIR / ("build-plugin.bat" if IS_WINDOWS else "build-plugin.sh")
     if not script.is_file():
@@ -157,7 +165,15 @@ def main() -> None:
     if zip_path is not None and not zip_path.is_file():
         raise SystemExit(f"error: plugin ZIP not found: {zip_path}")
     if zip_path is None:
-        zip_path = build_plugin_zip() if args.build else find_plugin_zip()
+        if args.build:
+            zip_path = build_plugin_zip()
+        elif plugin_already_installed(ides):
+            # Re-running over an existing install means "update", so a stale
+            # distributions/ ZIP must be rebuilt rather than reused.
+            log("plugin is already installed; rebuilding the ZIP ...")
+            zip_path = build_plugin_zip()
+        else:
+            zip_path = find_plugin_zip()
     if zip_path is None:
         raise SystemExit(
             "error: no plugin ZIP found. Re-run with --build, or build it via "
