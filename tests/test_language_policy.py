@@ -101,10 +101,31 @@ def test_role_prompts_have_no_conflicting_english_only_directive():
         assert "only in English" not in content, name
 
 
+def test_role_prompts_do_not_pin_user_facing_copy_to_one_language():
+    """Fixed wording that survives the language directive silently overrides it."""
+    from pathlib import Path
+
+    prompts_dir = Path(__file__).resolve().parent.parent / "prompts"
+    for path in sorted(prompts_dir.glob("*_prompt.txt")):
+        content = path.read_text(encoding="utf-8").lower()
+        assert "regardless of the language" not in content, path.name
+
+
+def test_chat_prompt_does_not_script_the_refusal():
+    """A verbatim refusal script contradicts the same prompt's no-templates rule."""
+    from pathlib import Path
+
+    content = (
+        Path(__file__).resolve().parent.parent / "prompts" / "chat_prompt.txt"
+    ).read_text(encoding="utf-8")
+    assert "I apologize" not in content
+    assert "Respond: \"" not in content
+
+
 # ── final answer enforcement ─────────────────────────────────────────────────
 
 def _final_answer_command(message: str):
-    return make_command("final_answer", {"message": message}, progress=100, plan_step="done")
+    return make_command("final_answer", {"message": message}, plan_step="done")
 
 
 def test_english_final_rejected_for_russian_request(agent_factory):
