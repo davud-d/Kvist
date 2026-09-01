@@ -72,6 +72,17 @@ def _note_run_context(self, **facts: Any) -> None:
         notify(**facts)
 
 
+def _note_thought(self, thought: str) -> None:
+    """Give the live panel the latest action's thought.
+
+    It is the thinking column's fallback for providers that stream no
+    reasoning. Optional channel, skipped by UIs without ``set_last_thought``.
+    """
+    notify = getattr(self._ui, "set_last_thought", None)
+    if notify is not None:
+        notify(thought)
+
+
 def _run_pipeline_dwell(self, user_goal: str, step: int) -> None:
     """Prefetch the next step's action call while holding the current one on screen.
 
@@ -435,6 +446,8 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     is_error=True,
                 )
                 continue
+
+            _note_thought(self, command.thought)
 
             # Safety refusal takes priority over every other guard (language,
             # repeat-block, report-artifact, read-only, completion-readiness):

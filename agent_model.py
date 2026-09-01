@@ -233,6 +233,9 @@ def _consume_action_prefetch(self, prompt: str, model: str) -> str | None:
     )
     self._last_reasoning_seconds = 0.0
     self._last_model_duration = holder["duration"]
+    # The prefetch is a non-streaming call, so it produced no reasoning: drop
+    # the previous step's thinking instead of leaving it on the live panel.
+    _note_thinking(self, "")
     return holder["content"]
 
 
@@ -656,6 +659,17 @@ def call_model(
     raise RuntimeError(f"Failed to get model response: {safe_error}")
 
 
+def _note_thinking(self, text: str) -> None:
+    """Forward streamed reasoning to a UI that shows a live thinking panel.
+
+    Optional capability: UIs without ``set_thinking`` (headless, tests) are
+    skipped, exactly like the ``print_usage`` usage channel.
+    """
+    notify = getattr(self._ui, "set_thinking", None)
+    if notify is not None:
+        notify(text)
+
+
 def call_model_streaming(
     self,
     model: str,
@@ -667,6 +681,8 @@ def call_model_streaming(
         stream=True,
     )
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
+    last_reasoning_push = 0.0
     thought_shown = False
     stream_start = time.monotonic()
     first_token_time: float | None = None
@@ -675,6 +691,9 @@ def call_model_streaming(
     chunk_count = 0
     total_chunk_bytes = 0
     renderer = ThrottledRenderer(max_fps=10)
+    # A new call owns the thinking column: drop the previous step's reasoning
+    # so a provider that streams none does not leave stale text on screen.
+    _note_thinking(self, "")
     try:
         for chunk in stream:
             # Checked each chunk so a cancellation stops generation without
@@ -685,12 +704,21 @@ def call_model_streaming(
                 raise RunCancelled
             delta = safe_extract_stream_delta(chunk)
             reasoning_text = safe_extract_reasoning_delta(delta)
-            if reasoning_text and reasoning_start_time is None:
-                reasoning_start_time = time.monotonic()
+            if reasoning_text:
+                if reasoning_start_time is None:
+                    reasoning_start_time = time.monotonic()
+                reasoning_chunks.append(reasoning_text)
+                now = time.monotonic()
+                if now - last_reasoning_push > 0.1:
+                    _note_thinking(self, "".join(reasoning_chunks))
+                    last_reasoning_push = now
             if delta and delta.content:
                 # The first answer token ends the thinking phase.
                 if reasoning_start_time is not None and reasoning_end_time is None:
                     reasoning_end_time = time.monotonic()
+                    # Seal thinking with everything buffered: a fast stream can
+                    # otherwise end inside the throttle window and drop the tail.
+                    _note_thinking(self, "".join(reasoning_chunks))
                 if first_token_time is None:
                     first_token_time = time.monotonic()
                 chunk_count += 1
@@ -720,6 +748,10 @@ def call_model_streaming(
             print(f"  [streaming] {leftover[:120]}...", flush=True)
     stream_end = time.monotonic()
     stream_duration = stream_end - stream_start
+
+    # Reasoning that never yielded a content token was never sealed in the loop.
+    if reasoning_chunks and reasoning_end_time is None:
+        _note_thinking(self, "".join(reasoning_chunks))
 
     # Reasoning that never yielded content still counts up to stream end.
     if reasoning_start_time is not None:

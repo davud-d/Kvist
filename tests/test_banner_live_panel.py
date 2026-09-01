@@ -157,3 +157,34 @@ def _demo() -> None:
 
 if __name__ == "__main__":
     _demo()
+
+
+def test_last_thought_fills_the_column_when_no_reasoning_streams():
+    # Providers without a reasoning channel still write a thought per action.
+    state = LivePanelState(
+        running=True,
+        state_label="working",
+        thinking="",
+        last_thought="Reading the executor to find the shell gate.",
+    )
+    joined = " ".join(
+        render_live_panel(state, metrics_width=26, thinking_width=60, height=8)
+    )
+    assert "find the shell gate" in joined
+    assert "no live reasoning" in joined
+    assert "does not stream" not in joined
+
+
+def test_live_reasoning_wins_over_the_last_thought():
+    state = LivePanelState(
+        running=True,
+        state_label="working",
+        thinking="Streaming right now",
+        last_thought="Stale thought",
+        reasoning_seen=True,
+    )
+    joined = " ".join(
+        render_live_panel(state, metrics_width=26, thinking_width=60, height=8)
+    )
+    assert "Streaming right now" in joined
+    assert "Stale thought" not in joined

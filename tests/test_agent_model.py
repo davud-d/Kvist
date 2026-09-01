@@ -223,3 +223,43 @@ def test_mispredicted_prefetch_falls_back_to_a_normal_call(agent_factory):
 
     assert result == '{"thought":"live"}'
     assert agent._prefetch is None
+
+
+class _ReasoningClient:
+    """Streams reasoning deltas before the answer, like OpenRouter/Kimi do."""
+
+    def __init__(self):
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(self, **kwargs):
+        deltas = [
+            SimpleNamespace(content=None, reasoning="I should "),
+            SimpleNamespace(content=None, reasoning="read the file."),
+            SimpleNamespace(content='{"thought":"ok"}', reasoning=None),
+        ]
+        return [SimpleNamespace(choices=[SimpleNamespace(delta=delta)]) for delta in deltas]
+
+
+def test_streaming_reasoning_reaches_the_live_thinking_panel(agent_factory):
+    agent = agent_factory(stream=True, verbose=False)
+    agent.client = _ReasoningClient()
+    pushed: list[str] = []
+    agent._ui.set_thinking = pushed.append
+
+    content = agent._call_model_streaming("gpt-test", [{"role": "user", "content": "x"}])
+
+    assert content == '{"thought":"ok"}'
+    # Cleared for the new call, then filled, then sealed by the first answer token.
+    assert pushed[0] == ""
+    assert pushed[-1] == "I should read the file."
+
+
+def test_action_call_clears_thinking_when_provider_streams_no_reasoning(agent_factory):
+    agent = agent_factory(stream=True, verbose=False)
+    agent.client = FakeLLMClient(stream_chunks=['{"thought"', ':"ok"}'])
+    pushed: list[str] = []
+    agent._ui.set_thinking = pushed.append
+
+    agent._call_model_streaming("gpt-test", [{"role": "user", "content": "x"}])
+
+    assert pushed == [""]

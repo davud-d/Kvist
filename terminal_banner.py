@@ -118,6 +118,25 @@ class TerminalBannerUI:
             self._live_panel.escalated = str(model_tier) not in ("", "fast")
         self._publish_live()
 
+    def set_thinking(self, text: str) -> None:
+        """Stream the model's reasoning into the pinned banner.
+
+        An empty ``text`` clears the buffer at the start of a model call so a
+        finished step's reasoning is never shown as the next step's thinking.
+        """
+        self._live_panel.thinking = text
+        if text:
+            self._live_panel.reasoning_seen = True
+        self._publish_live()
+
+    def set_last_thought(self, text: str) -> None:
+        """Record the thought of the latest action for the thinking column.
+
+        This is what fills the column for providers that stream no reasoning.
+        """
+        self._live_panel.last_thought = sanitize_display_text(str(text))
+        self._publish_live()
+
     def start_live(self) -> None:
         self._live_panel = banner.LivePanelState(
             running=True, state_label="working"

@@ -1235,3 +1235,25 @@ def test_devops_systemctl_nonzero_exit_includes_stderr_in_error(agent_factory):
     )
     assert error_text != "Action failed"
     assert "Action failed" not in error_text
+
+
+def test_run_loop_feeds_each_thought_to_the_live_panel(agent_factory):
+    # The thinking column's fallback for providers that stream no reasoning.
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = make_plan()
+    thoughts: list[str] = []
+    agent._ui.set_last_thought = thoughts.append
+
+    response = {
+        "thought": "list the workspace before editing",
+        "plan_step": "inspect",
+        "progress": 10,
+        "user_message": "listing",
+        "action": {"type": "list_dir", "args": {"path": "."}},
+    }
+    agent._call_action_model = lambda prompt: json.dumps(response)
+    agent.executor.execute = lambda cmd: ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert thoughts == ["list the workspace before editing"]

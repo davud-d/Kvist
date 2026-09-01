@@ -83,8 +83,12 @@ IDLE_HINT = (
     "Ctrl+C interrupts the current run."
 )
 # Shown in the thinking column while running when the provider streams no
-# reasoning deltas, so the space reads as informational rather than broken.
+# reasoning deltas and the model has not produced a thought yet, so the space
+# reads as informational rather than broken.
 NO_REASONING_NOTE = "This model does not stream its reasoning."
+# Marks the fallback shown for providers without a reasoning channel: the
+# thought the model wrote in its last action, which is not live thinking.
+THOUGHT_FALLBACK_PREFIX = "Last thought (no live reasoning): "
 
 Bitmap = tuple[str, ...]
 Cell = tuple[str, str, str]
@@ -500,6 +504,9 @@ class LivePanelState:
     model_tier: str = ""
     escalated: bool = False
     thinking: str = ""
+    # ``thought`` of the most recently parsed action, shown in place of live
+    # reasoning for providers that expose no reasoning channel.
+    last_thought: str = ""
     # True once any reasoning delta has arrived this run; distinguishes a
     # provider that never streams reasoning from a transient empty gap.
     reasoning_seen: bool = False
@@ -562,16 +569,20 @@ def live_panel_fields(state: LivePanelState) -> list[tuple[str, str]]:
 
 
 def _thinking_source(state: LivePanelState) -> str:
-    """Text for the thinking column: reasoning, a no-reasoning note, or hints.
+    """Text for the thinking column: reasoning, the last thought, or hints.
 
-    The note only appears when reasoning has never arrived this run, so a
-    provider that does stream reasoning never gets mislabelled during the brief
-    gaps when the thinking buffer is momentarily empty.
+    Providers without a reasoning channel still write a ``thought`` in every
+    action, so the column falls back to it instead of staying empty. The
+    no-reasoning note is only left for the gap before the first action, and
+    only when reasoning has never arrived this run, so a provider that does
+    stream reasoning is never mislabelled during a momentarily empty buffer.
     """
     if not state.running:
         return IDLE_HINT
     if state.thinking:
         return state.thinking
+    if state.last_thought:
+        return f"{THOUGHT_FALLBACK_PREFIX}{state.last_thought}"
     return "" if state.reasoning_seen else NO_REASONING_NOTE
 
 
