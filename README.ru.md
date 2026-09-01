@@ -149,11 +149,15 @@ python installer\install.py; if ($?) { echo "Install OK" } else { echo "error in
 
 ## Запуск
 
-Параметр workspace обязателен. Несуществующий каталог Kvist создаёт сам.
+Если workspace не указан, Kvist автоматически создаёт и использует каталог
+`Документы/Kvist Workspace` (на Linux учитывается каталог документов из XDG).
+Несуществующий явно указанный каталог Kvist создаёт сам.
 Относительные пути разрешаются от каталога, из которого запущен Kvist.
 
 ```bash
 .venv/bin/python main.py --workspace /path/to/project
+# Без --workspace используется Документы/Kvist Workspace
+.venv/bin/python main.py
 ```
 
 При первом запуске в терминале выберите провайдера, модели и credentials. Они

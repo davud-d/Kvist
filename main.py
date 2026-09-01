@@ -14,8 +14,10 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local AI agent")
     parser.add_argument(
         "--workspace",
-        required=True,
-        help="Path to the project workspace directory.",
+        help=(
+            "Path to the project workspace directory. Defaults to "
+            "Documents/Kvist Workspace."
+        ),
     )
     parser.add_argument(
         "--allow-read",
@@ -238,8 +240,39 @@ def _get_session() -> PromptSession:
     return _session
 
 
-def resolve_workspace_path(raw_path: str) -> Path:
-    candidate = Path(raw_path).expanduser().resolve()
+def _documents_directory() -> Path:
+    """Return the user's standard documents directory on the current OS."""
+    if os.name == "nt":
+        return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Documents"
+
+    # Respect a localized XDG documents directory when it is configured.
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    user_dirs = config_home / "user-dirs.dirs"
+    try:
+        for line in user_dirs.read_text(encoding="utf-8").splitlines():
+            if line.startswith("XDG_DOCUMENTS_DIR="):
+                value = line.partition("=")[2].strip().strip('"')
+                if value.startswith("$HOME/"):
+                    return Path.home() / value[6:]
+                if value:
+                    return Path(value).expanduser()
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise RuntimeError(f"Cannot read user directories configuration: {error}") from error
+    return Path.home() / "Documents"
+
+
+def default_workspace_path() -> Path:
+    return _documents_directory() / "Kvist Workspace"
+
+
+def resolve_workspace_path(raw_path: str | None = None) -> Path:
+    candidate = (
+        Path(raw_path).expanduser().resolve()
+        if raw_path and raw_path.strip()
+        else default_workspace_path().expanduser().resolve()
+    )
     if not candidate.exists():
         candidate.mkdir(parents=True, exist_ok=True)
     if not candidate.exists():
@@ -1884,6 +1917,13 @@ def main() -> None:
             raise SystemExit(1) from error
         print(_json.dumps(payload, ensure_ascii=False))
         return
+
+    # All execution frontends share the same safe default workspace.
+    try:
+        args.workspace = str(resolve_workspace_path(args.workspace))
+    except (RuntimeError, OSError, ValueError) as error:
+        print(sanitize_display_text(str(error)), file=sys.stderr)
+        raise SystemExit(2) from error
 
     if args.journal_op:
         import json as _json

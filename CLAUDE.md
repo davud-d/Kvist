@@ -40,7 +40,7 @@ Commits go to the backup relay server, never straight to GitHub.
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 
-.venv/bin/python main.py --workspace "<project_path>"  # run the agent (--workspace is required)
+.venv/bin/python main.py --workspace "<project_path>"  # optional; defaults to Documents/Kvist Workspace
 .venv/bin/python run_task.py "<task prompt>"           # non-interactive single-task entry (hardcodes /tmp/kvist_test)
 
 .venv/bin/python -m pytest                              # full test suite

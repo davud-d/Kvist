@@ -12,6 +12,7 @@ const { KvistProcess } = require("./kvist-process")
 const { ProjectStore } = require("./project-store")
 const { buildWindowOptions, applyMaximizeOnShow } = require("./window-config")
 const { PROTOCOL_VERSION } = require("./protocol-state")
+const { ensureDefaultWorkspace } = require("./workspace-path")
 
 const execFileAsync = promisify(execFile)
 
@@ -30,7 +31,7 @@ function argumentValue(name) {
 function defaultWorkspace() {
   const requested = argumentValue("--workspace")
   if (requested) return path.resolve(requested)
-  return app.isPackaged ? null : path.resolve(__dirname, "../..")
+  return app.isPackaged ? ensureDefaultWorkspace(app.getPath("documents")) : path.resolve(__dirname, "../..")
 }
 
 function resolveCommand() {
@@ -206,11 +207,7 @@ async function resolveInitialWorkspace() {
     }
   }
   const fallback = defaultWorkspace()
-  try {
-    if (fallback) return validateWorkspace(fallback)
-  } catch (error) {
-    // Fall through to the workspace picker.
-  }
+  if (fallback) return validateWorkspace(fallback)
   const result = await dialog.showOpenDialog({
     title: "Choose Kvist workspace",
     defaultPath: app.getPath("documents"),

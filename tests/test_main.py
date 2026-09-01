@@ -46,6 +46,15 @@ def test_resolve_workspace_path_creates_directory_and_rejects_file(tmp_path):
         main.resolve_workspace_path(str(file_path))
 
 
+def test_resolve_workspace_path_defaults_to_documents_workspace(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "_documents_directory", lambda: tmp_path / "Documents")
+
+    workspace = main.resolve_workspace_path()
+
+    assert workspace == (tmp_path / "Documents" / "Kvist Workspace").resolve()
+    assert workspace.is_dir()
+
+
 def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "openai")
     monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
