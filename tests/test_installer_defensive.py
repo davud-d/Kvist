@@ -20,6 +20,14 @@ gui = importlib.import_module("install_gui")
 jetbrains = importlib.import_module("install_jetbrains")
 common = importlib.import_module("_common")
 
+@pytest.fixture(autouse=True)
+def _fresh_installer_modules():
+    """Undo any platform monkeypatching a sibling test file left on the shared
+    installer modules (test_install.py reloads `install` as Windows)."""
+    importlib.reload(install)
+    yield
+
+
 def _zip(path: Path, *members: tuple[str, bytes]) -> Path:
     with zipfile.ZipFile(path, "w") as archive:
         for name, data in members:
