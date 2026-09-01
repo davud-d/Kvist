@@ -5,11 +5,12 @@ const path = require("node:path")
 const { execFile } = require("node:child_process")
 const { promisify } = require("node:util")
 
-const { app, BrowserWindow, dialog, ipcMain, shell } = require("electron")
+const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require("electron")
 
 const { resolveKvistCommand } = require("./command-resolver")
 const { KvistProcess } = require("./kvist-process")
 const { ProjectStore } = require("./project-store")
+const { buildWindowOptions, applyMaximizeOnShow } = require("./window-config")
 const { PROTOCOL_VERSION } = require("./protocol-state")
 
 const execFileAsync = promisify(execFile)
@@ -357,15 +358,10 @@ function registerIpc() {
 }
 
 function createWindow() {
+  const capture = Boolean(process.env.KVIST_CAPTURE_PATH)
   windowRef = new BrowserWindow({
-    width: 1180,
-    height: 780,
-    minWidth: 760,
-    minHeight: 560,
-    show: !process.env.KVIST_CAPTURE_PATH,
-    backgroundColor: "#080d12",
-    title: "Kvist",
-    autoHideMenuBar: true,
+    ...buildWindowOptions(screen),
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -373,6 +369,7 @@ function createWindow() {
       sandbox: false,
     },
   })
+  applyMaximizeOnShow(windowRef, { capture })
 
   const openPanel = process.env.KVIST_CAPTURE_PANEL
   windowRef.loadFile(
