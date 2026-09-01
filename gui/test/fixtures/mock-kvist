@@ -73,7 +73,6 @@ function begin(goal) {
     user_message: "Reading frontend protocol",
     action_type: "read_file",
     action_args: { path: "frontend_protocol.py" },
-    progress: 32,
     reasoning_seconds: 12,
   })
   emit({ type: "stream_start", stream_id: "demo-stream" })

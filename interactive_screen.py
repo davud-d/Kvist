@@ -453,6 +453,12 @@ class InteractiveScreen:
 
         self._status: Any | None = None
         self._stream: Any | None = None
+        # Arrow-key question asked from the agent thread and answered by the
+        # UI thread. It renders inside the running application, directly under
+        # the banner, so the live panel keeps updating while the user chooses.
+        self._choice: dict[str, Any] | None = None
+        self._choice_answer: str | None = None
+        self._choice_done = threading.Event()
         self._slot_generation = 0
         self._slot_cache: (
             tuple[int, int, int, list[tuple[str, str]]] | None
@@ -600,6 +606,10 @@ class InteractiveScreen:
     def _shutdown(self, *, final: bool) -> None:
         app = self._app
         thread = self._thread
+
+        # A worker thread may be blocked inside ask_choice; releasing it with
+        # no answer is what keeps the screen from taking the run down with it.
+        self._close_choice(None)
 
         if app is not None:
             self._request_exit(app)
@@ -769,6 +779,85 @@ class InteractiveScreen:
     def _get_live(self) -> Any:
         with self._state_lock:
             return self._live
+
+    def ask_choice(
+        self, title: str, options: list[tuple[str, str]]
+    ) -> str | None:
+        """Ask the user to pick one option; blocks the calling worker thread.
+
+        Returns the chosen value, or ``None`` when the question was cancelled
+        (Esc) or the screen shut down while it was open — callers must treat
+        ``None`` as "no answer" and fall back to their safe default.
+        """
+        if not options or not self.is_running:
+            return None
+
+        with self._state_lock:
+            if self._choice is not None:
+                return None
+            self._choice_answer = None
+            self._choice_done.clear()
+            self._choice = {"title": title, "options": list(options), "index": 0}
+        self.invalidate()
+
+        self._choice_done.wait()
+        with self._state_lock:
+            answer = self._choice_answer
+            self._choice = None
+            self._choice_answer = None
+        self.invalidate()
+        return answer
+
+    def _close_choice(self, answer: str | None) -> None:
+        with self._state_lock:
+            if self._choice is None:
+                return
+            self._choice_answer = answer
+        self._choice_done.set()
+
+    def _move_choice(self, delta: int) -> None:
+        with self._state_lock:
+            if self._choice is None:
+                return
+            total = len(self._choice["options"])
+            self._choice["index"] = (self._choice["index"] + delta) % total
+        self.invalidate()
+
+    def _has_choice(self) -> bool:
+        with self._state_lock:
+            return self._choice is not None
+
+    def _choice_height(self) -> int:
+        with self._state_lock:
+            if self._choice is None:
+                return 0
+            # title + blank + one row per option + hint
+            return len(self._choice["options"]) + 3
+
+    def _get_choice(self) -> AnyFormattedText:
+        with self._state_lock:
+            choice = self._choice
+            if choice is None:
+                return []
+            title = str(choice["title"])
+            options = list(choice["options"])
+            index = int(choice["index"])
+
+        fragments: list[tuple[str, str]] = [
+            ("class:choice.title", f"  {title}\n\n")
+        ]
+        for position, (_, label) in enumerate(options):
+            selected = position == index
+            fragments.append(
+                (
+                    "class:choice.option.current" if selected else "class:choice.option",
+                    f"{'❯' if selected else ' '} {label}\n",
+                )
+            )
+        fragments.append(
+            ("class:choice.hint", "\n  ↑/↓ — выбор, Enter — подтвердить\n")
+        )
+        return fragments
 
     def set_stream(self, content: Any | None) -> None:
         with self._state_lock:
@@ -1228,9 +1317,19 @@ class InteractiveScreen:
             ),
             filter=Condition(self._input_visible),
         )
+        choice = ConditionalContainer(
+            Window(
+                FormattedTextControl(self._get_choice, show_cursor=False),
+                height=self._choice_height,
+                dont_extend_height=True,
+                always_hide_cursor=True,
+            ),
+            filter=Condition(self._has_choice),
+        )
         root = HSplit(
             [
                 banner_window,
+                choice,
                 status,
                 transcript,
                 transient,
@@ -1258,6 +1357,31 @@ class InteractiveScreen:
 
     def _create_key_bindings(self) -> Any:
         bindings = KeyBindings()
+        choosing = Condition(self._has_choice)
+
+        @bindings.add(Keys.Up, filter=choosing, eager=True)
+        def choice_up(event: Any) -> None:
+            self._move_choice(-1)
+
+        @bindings.add(Keys.Down, filter=choosing, eager=True)
+        def choice_down(event: Any) -> None:
+            self._move_choice(1)
+
+        @bindings.add(Keys.Enter, filter=choosing, eager=True)
+        def choice_accept(event: Any) -> None:
+            with self._state_lock:
+                current = self._choice
+                value = (
+                    current["options"][current["index"]][0]
+                    if current is not None
+                    else None
+                )
+            self._close_choice(value)
+
+        @bindings.add(Keys.Escape, filter=choosing, eager=True)
+        def choice_cancel(event: Any) -> None:
+            self._close_choice(None)
+
         buffer_focused = has_focus(self.session.default_buffer)
         single_line = Condition(
             lambda: "\n" not in self.session.default_buffer.text

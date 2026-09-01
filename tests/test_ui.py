@@ -116,7 +116,7 @@ def test_user_visible_output_redacts_credentials(capsys):
             user_message=f"retry token={synthetic}",
             status="error",
             step=1,
-            progress=10,
+            progress=50,
             plan_step=f"recover api_key={synthetic}",
             is_error=True,
         )

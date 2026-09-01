@@ -47,11 +47,11 @@ def test_runtime_feedback_updates_read_write_web_and_verification_state(agent_fa
     assert agent._state.files_read == ["ui.py"]
 
     agent._state.web_facts = ["external fact"]
-    agent._register_feedback(2, make_command("write_file", {"path": "app.py"}, plan_step="edit", progress=80), {"ok": True, "data": {"path": "app.py"}})
+    agent._register_feedback(2, make_command("write_file", {"path": "app.py"}, plan_step="edit"), {"ok": True, "data": {"path": "app.py"}})
     assert agent._state.files_changed == ["app.py"]
     assert agent._state.applied_facts[-1]["fact"] == "external fact"
 
-    agent._register_feedback(3, make_command("run_shell", {"command": ["python", "-m", "pytest"]}, plan_step="verify", progress=99), {"ok": True, "data": {"command": ["python", "-m", "pytest"], "returncode": 0}})
+    agent._register_feedback(3, make_command("run_shell", {"command": ["python", "-m", "pytest"]}, plan_step="verify"), {"ok": True, "data": {"command": ["python", "-m", "pytest"], "returncode": 0}})
     assert "run_shell: python -m pytest" in agent._state.verification_evidence
 
     agent._register_feedback(4, make_command("web_search", {"query": "q"}), {"ok": True, "data": {"provider": "mock", "query": "q", "results": [{"title": "A", "url": "https://docs.python.org/3/"}]}})
@@ -556,7 +556,7 @@ def test_rolling_summary_stored_on_summary_step(agent_factory, tmp_path):
 
     command = make_command(
         "write_file", {"path": "test.py", "content": "print(1)"},
-        progress=50, plan_step="edit",
+        plan_step="edit",
         step_summary="Steps 1-5: Created test.py with basic print"
     )
 
@@ -580,7 +580,7 @@ def test_rolling_summary_not_stored_without_summary_field(agent_factory):
 
     command = make_command(
         "read_file", {"path": "test.py"},
-        progress=10, plan_step="inspect",
+        plan_step="inspect",
         step_summary=""  # empty — model didn't provide summary
     )
 
@@ -1257,3 +1257,111 @@ def test_run_loop_feeds_each_thought_to_the_live_panel(agent_factory):
     agent._run_loop("Investigate files", start_step=1)
 
     assert thoughts == ["list the workspace before editing"]
+
+
+def test_unverified_write_surfaces_a_blocker_label(agent_factory):
+    """The panel needs a short reason; the blocker text itself is model-facing."""
+    from agent_runtime import _plan_position
+
+    agent = agent_factory()
+    agent._state.response_language = "ru"
+    agent._state.files_changed = ["main.py"]
+    agent._refresh_completion_requirements()
+
+    assert "unverified" in agent._state.completion_blocker_kinds
+    assert _plan_position(agent)["blocker"] == "ждёт проверки правок"
+
+    agent._state.response_language = "en"
+    assert _plan_position(agent)["blocker"] == "changes not verified"
+
+
+def test_no_blocker_label_once_the_change_is_verified(agent_factory):
+    from agent_runtime import _plan_position
+
+    agent = agent_factory()
+    agent._state.files_changed = ["main.py"]
+    agent._state.verification_evidence = ["git_diff: main.py"]
+    agent._refresh_completion_requirements()
+
+    assert _plan_position(agent)["blocker"] == ""
+
+
+# ── step budget ──────────────────────────────────────────────────────────────
+
+def _endless_reader(agent):
+    """An action model that never finishes, so only the budget can stop it."""
+    agent._state.plan_info = PlanInfo(
+        goal="Посмотреть файлы",
+        complexity="simple",
+        plan=["осмотреть содержимое", "показать результат"],
+        success_criteria=["список получен"],
+        risks=[],
+    )
+    calls = {"value": 0}
+
+    def fake_call_action_model(prompt: str) -> str:
+        calls["value"] += 1
+        return json.dumps(
+            {
+                "thought": "Reading again",
+                "plan_step": "inspect",
+                "user_message": "Reading",
+                "action": {"type": "list_dir", "args": {"path": "."}},
+            }
+        )
+
+    agent._call_action_model = fake_call_action_model
+    return calls
+
+
+def test_budget_is_a_hard_stop_without_an_interactive_ui(agent_factory):
+    """Headless frontends and run_task.py have nobody to ask — keep the cap."""
+    agent = agent_factory(max_steps=3)
+    calls = _endless_reader(agent)
+
+    result = agent._run_loop("Посмотри файлы", start_step=1)
+
+    assert calls["value"] == 3
+    assert not hasattr(agent._ui, "ask_choice")
+    assert "лимит" in result or "limit" in result
+
+
+def test_answering_continue_extends_the_budget(agent_factory):
+    agent = agent_factory(max_steps=3)
+    calls = _endless_reader(agent)
+    asked: list[str] = []
+
+    def ask_choice(title, options):
+        asked.append(title)
+        return "continue" if len(asked) == 1 else "finish"
+
+    agent._ui.ask_choice = ask_choice
+
+    agent._run_loop("Посмотри файлы", start_step=1)
+
+    assert len(asked) == 2
+    assert calls["value"] == 6
+    assert agent._state.step_budget == 6
+
+
+def test_answering_finish_stops_exactly_like_the_old_limit(agent_factory):
+    agent = agent_factory(max_steps=3)
+    calls = _endless_reader(agent)
+    agent._ui.ask_choice = lambda title, options: "finish"
+
+    result = agent._run_loop("Посмотри файлы", start_step=1)
+
+    assert calls["value"] == 3
+    assert agent._state.step_budget == 3
+    assert "лимит" in result or "limit" in result
+
+
+def test_cancelled_question_does_not_extend_the_budget(agent_factory):
+    """Esc, or a screen that shut down mid-question, must not grant more steps."""
+    agent = agent_factory(max_steps=2)
+    _endless_reader(agent)
+    agent._ui.ask_choice = lambda title, options: None
+
+    agent._run_loop("Посмотри файлы", start_step=1)
+
+    assert agent._state.step_budget == 2

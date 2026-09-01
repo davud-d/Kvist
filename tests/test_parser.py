@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from parser import CommandValidationError, load_single_json_object, parse_agent_command, validate_action_args
@@ -40,13 +42,19 @@ def test_parse_agent_command_returns_typed_command():
     assert command.action.args["path"] == "ui.py"
 
 
+def test_parse_agent_command_ignores_a_declared_progress():
+    """The runtime derives progress; a model still emitting one must not cost a step."""
+    command = parse_agent_command(json.dumps({**valid_payload(), "progress": 101}))
+    assert command.action.type == "final_answer"
+    assert not hasattr(command, "progress")
+
+
 @pytest.mark.parametrize(
     "payload,error",
     [
         ({**valid_payload(), "extra": 1}, "Extra fields"),
         ({**valid_payload(), "thought": ""}, "thought"),
         ({**valid_payload(), "plan_step": "unknown"}, "plan_step"),
-        ({**valid_payload(), "progress": 101}, "range 0..100"),
         ({**valid_payload(), "action": {"type": "missing", "args": {}}}, "Invalid action"),
     ],
 )

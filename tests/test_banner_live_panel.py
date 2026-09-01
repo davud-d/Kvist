@@ -35,7 +35,6 @@ def test_running_state_fields_have_no_cost_row():
         state_label="working",
         action="generating JSON",
         step=7,
-        progress=62,
         plan_step="verify",
         tokens_in=12400,
         tokens_out=3100,
@@ -44,6 +43,7 @@ def test_running_state_fields_have_no_cost_row():
         tokens_per_second=142,
         model_tier="smart",
         escalated=True,
+        max_steps=50,
     )
     values = dict(live_panel_fields(state))
     assert "Cost" not in values
@@ -52,7 +52,7 @@ def test_running_state_fields_have_no_cost_row():
     assert values["Elapsed"] == "1m 04s"
     assert values["Speed"] == "142 tok/s"
     assert values["Model"] == "smart ↑"
-    assert values["Step"] == "7 · verify · 62%"
+    assert values["Step"] == "7/50 · verify"
 
 
 def test_finished_run_keeps_totals_instead_of_zeroing():
@@ -110,7 +110,6 @@ def test_render_live_panel_has_fixed_height_and_bounded_width():
         state_label="working",
         action="run_shell",
         step=4,
-        progress=40,
         plan_step="edit",
         tokens_in=8000,
         tokens_out=1200,
@@ -133,7 +132,6 @@ def _demo() -> None:
         state_label="working",
         action="generating JSON command",
         step=7,
-        progress=62,
         plan_step="verify",
         tokens_in=12400,
         tokens_out=3100,
@@ -188,3 +186,94 @@ def test_live_reasoning_wins_over_the_last_thought():
     )
     assert "Streaming right now" in joined
     assert "Stale thought" not in joined
+
+
+# ── bottom-right status strip ────────────────────────────────────────────────
+
+def _running(**overrides) -> LivePanelState:
+    base = dict(
+        running=True,
+        state_label="working",
+        step=4,
+        plan_step="edit",
+        plan_done=3,
+        plan_total=6,
+        plan_current="внести минимальную правку в модуль запуска",
+    )
+    base.update(overrides)
+    return LivePanelState(**base)
+
+
+def _strip(state: LivePanelState, room: int) -> str:
+    return banner.live_footer_text(banner.live_footer_segments(state, room))
+
+
+def test_strip_shows_plan_position_and_current_step():
+    strip = _strip(_running(), 70)
+    assert strip.startswith("3/6")
+    assert "внести минимальную правку в модуль запуска" in strip
+    assert "stalling" not in strip
+
+
+def test_strip_adds_a_stall_warning_only_once_the_run_stalls():
+    assert "stalling" not in _strip(_running(stall=0, stall_limit=6), 70)
+    assert "! stalling 3/6" in _strip(_running(stall=3, stall_limit=6), 70)
+
+
+def test_strip_drops_the_step_text_before_the_measured_values():
+    strip = _strip(_running(stall=3, stall_limit=6), 30)
+    assert strip == "3/6  ·  ! stalling 3/6"
+
+
+def test_strip_keeps_the_warning_when_only_one_value_fits():
+    assert _strip(_running(stall=3, stall_limit=6), 20) == "! stalling 3/6"
+
+
+def test_strip_is_empty_without_a_plan_and_without_a_stall():
+    assert _strip(_running(plan_total=0, plan_current=""), 70) == ""
+
+
+def test_strip_never_exceeds_the_room_it_is_given():
+    for room in range(1, 80):
+        segments = banner.live_footer_segments(_running(stall=4, stall_limit=6), room)
+        assert banner.live_footer_width(segments) <= room
+
+
+def test_finished_run_keeps_the_final_position_without_a_step_text():
+    strip = _strip(
+        LivePanelState(finished=True, plan_done=6, plan_total=6, plan_current="x"), 70
+    )
+    assert strip == "6/6"
+
+
+def test_idle_panel_has_no_strip_and_keeps_full_thinking_height():
+    rows = render_live_panel(
+        LivePanelState(), metrics_width=26, thinking_width=60, height=10
+    )
+    assert not any("stalling" in row or "/6" in row for row in rows)
+
+
+def test_strip_occupies_the_last_row_of_the_rendered_panel():
+    rows = render_live_panel(
+        _running(stall=2, stall_limit=6), metrics_width=26, thinking_width=60, height=10
+    )
+    assert "3/6" in rows[-1]
+    assert "! stalling 2/6" in rows[-1]
+    assert not any("3/6" in row for row in rows[:-1])
+
+
+def test_step_row_shows_the_budget_and_drops_it_when_unbounded():
+    counted = LivePanelState(running=True, step=17, plan_step="verify", max_steps=50)
+    assert dict(live_panel_fields(counted))["Step"] == "17/50 · verify"
+
+    unbounded = LivePanelState(running=True, step=17, plan_step="verify", max_steps=0)
+    assert dict(live_panel_fields(unbounded))["Step"] == "17 · verify"
+
+
+def test_strip_shows_the_blocker_once_the_plan_is_exhausted():
+    """While plan steps remain the step text wins; after that the strip says why."""
+    working = _running(plan_done=6, plan_total=6, plan_current="", blocker="ждёт проверки правок")
+    assert _strip(working, 70) == "6/6  ·  ждёт проверки правок"
+
+    mid_plan = _running(blocker="ждёт проверки правок")
+    assert "ждёт проверки правок" not in _strip(mid_plan, 70)

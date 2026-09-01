@@ -37,7 +37,6 @@ class Action:
 class AgentCommand:
     thought: str
     plan_step: str
-    progress: int
     user_message: str
     action: Action
     step_summary: str = ""

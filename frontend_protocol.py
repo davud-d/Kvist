@@ -97,7 +97,6 @@ class StepEvent:
     user_message: str
     action_type: str
     action_args: dict
-    progress: int
     reasoning_seconds: float = 0.0
     type: ClassVar[str] = "step"
 
@@ -110,7 +109,6 @@ class StepEvent:
             "user_message": self.user_message,
             "action_type": self.action_type,
             "action_args": self.action_args,
-            "progress": self.progress,
             "reasoning_seconds": self.reasoning_seconds,
         }
 

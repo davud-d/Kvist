@@ -117,7 +117,8 @@ A structural `typing.Protocol` (no subclassing needed). Methods, grouped:
 
 **Live status / reasoning (fire-and-forget):**
 `start_live()`, `stop_live()`,
-`update_live(user_message, status, step, progress=0, plan_step="working", is_error=False)`,
+`update_live(user_message, status, step, progress=0, plan_step="working", is_error=False)`
+(`progress` is derived by the runtime from completed plan steps and `plan_step`; the model never reports one),
 `print_plan(plan_info)`, `print_step_header(step, command)`, `debug_print(message)`.
 
 **Responses:**
@@ -168,7 +169,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool` | handshake and effective run configuration; always first |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress |
-| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int, reasoning_seconds:number` | the action chosen for a step; `reasoning_seconds` is how long the model spent thinking before it (0 when it did not think) |
+| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number` | the action chosen for a step; `reasoning_seconds` is how long the model spent thinking before it (0 when it did not think) |
 | `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | the task plan |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
 | `stream_start` | `stream_id:str` | a streaming response begins |

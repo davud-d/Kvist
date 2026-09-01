@@ -157,7 +157,12 @@ configured in-repo.
 ### The action protocol (the contract everything revolves around)
 Each loop step the LLM returns a single JSON object parsed by `parser.py` into an
 `AgentCommand` (`protocol.py`): `thought`, `plan_step` (inspect/plan/edit/verify/done),
-`progress` (0–100), `user_message`, and an `action` with a `type` + `args`. The closed
+`user_message`, and an `action` with a `type` + `args`. There is deliberately no
+`progress` field: a self-declared percentage carried no information the runtime did
+not already have, so `agent_runtime.update_progress` derives `RunState.progress` from
+completed plan steps (`_plan_progress`) with `_PLAN_STEP_BANDS` as the floor when
+planning is off. The parser still accepts and discards a stray `"progress"` key so a
+model prompted from a cached older schema does not lose a step. The closed
 set of action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
 git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, final_answer,
@@ -182,8 +187,23 @@ the request into **coder / devops / chat** → `LocalAgent.run()`:
 - **chat** role takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol.
 - **coder / devops** build a plan (`agent_planner.py`) then enter `run_loop` (`agent_runtime.py`),
   which calls the action model, parses, executes via `SafeExecutor`, registers feedback,
-  tracks progress/verification, and enforces stop conditions (max steps, stagnation,
+  tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
   consecutive errors, repeated-action blocking, write-required-on-create-tasks).
+
+### Step budget (`AGENT_MAX_STEPS`, default 50)
+`run_loop` counts against `RunState.step_budget`, seeded from `config.max_steps`.
+Exhausting it is **not** a silent stop: `_extend_step_budget` asks through the UI's
+optional `ask_choice` channel ("keep going, N more" / "finish with a report") and
+extends the budget by another `max_steps` on "continue". The question is an
+arrow-key widget rendered *inside* the running prompt_toolkit application, in its
+own `ConditionalContainer` directly under the pinned banner
+(`InteractiveScreen.ask_choice` blocks the agent thread on an event that the UI
+thread sets), so the live panel keeps updating while the user chooses — unlike
+`choose_option`/shell HITL, which tear the screen down via `suspend()`.
+A UI without `ask_choice` (headless frontends, `run_task.py`, no TTY) has nobody to
+ask, so the budget stays a hard stop with `_build_limit_reached_message` exactly as
+before; a cancelled question (Esc, or the screen shutting down mid-question) is
+treated the same way.
 
 ### Role routing (`role_router.py`)
 First-match-wins priority: deterministic regex rules (devops → coder → chat, bilingual

@@ -56,7 +56,6 @@ def _all_sample_events():
                 user_message="looking",
                 action_type="read_file",
                 action_args={"path": "a.py"},
-                progress=10,
             ),
             "step",
         ),
@@ -160,7 +159,6 @@ def test_step_event_carries_reasoning_seconds():
         user_message="m",
         action_type="read_file",
         action_args={"path": "a.py"},
-        progress=10,
         reasoning_seconds=8.2,
     ).to_dict()
     assert d["reasoning_seconds"] == 8.2
@@ -172,7 +170,6 @@ def test_step_event_carries_reasoning_seconds():
         user_message="m",
         action_type="read_file",
         action_args={},
-        progress=10,
     ).to_dict()["reasoning_seconds"] == 0.0
 
 

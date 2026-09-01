@@ -77,6 +77,12 @@ SLASH_COMMAND_STYLE = Style.from_dict(
             "fg:#cdd6f4 bg:default noreverse"
         ),
         "auto-suggestion": "fg:#585b70 italic",
+        # In-screen arrow-key question (step-budget prompt), styled like the
+        # palette above so the two selection surfaces read as one thing.
+        "choice.title": "fg:#f9e2af bold",
+        "choice.option": "fg:#a6adc8",
+        "choice.option.current": "fg:#f5e0dc bold noreverse",
+        "choice.hint": "fg:#6c7086",
         "scrollbar.background": "bg:default",
         "scrollbar.button": "bg:default",
     }

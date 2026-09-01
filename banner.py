@@ -74,6 +74,12 @@ LIVE_HEIGHT = 10
 LIVE_MIN_WIDTH = 144
 STATE_ACCENT = "#3fb950"
 THINK_BAR = "#4b5563"
+FOOTER_ACCENT = "#9fc1ff"
+FOOTER_WARN = "#d29922"
+# The strip is joined with this and needs room for a readable step text; below
+# that the step is dropped rather than truncated to a stub.
+FOOTER_SEPARATOR = "  ·  "
+FOOTER_MIN_STEP_ROOM = 12
 
 # Fills the otherwise-empty thinking column while no run is active, so the idle
 # banner does not leave a large blank zone.
@@ -404,12 +410,29 @@ def _draw_live_panel(
 
     think_column = LIVE_COLUMN + LIVE_METRICS_WIDTH + LIVE_GAP
     think_room = (width - 1) - think_column - 2
+    footer = live_footer_segments(live, think_room)
+    think_height = LIVE_HEIGHT - 1 if footer else LIVE_HEIGHT
+
     for index, line in enumerate(
-        wrap_thinking(_thinking_source(live), think_room, LIVE_HEIGHT)
+        wrap_thinking(_thinking_source(live), think_room, think_height)
     ):
         row = LIVE_TOP + index
         _write_cells(grid, row, think_column, "▏", THINK_BAR, width=width)
         _write_cells(grid, row, think_column + 2, line, MUTED, width=width)
+
+    if not footer:
+        return
+
+    # Bottom-right of the panel, right-aligned so the strip reads as a footer
+    # rather than as another wrapped line of reasoning.
+    column = think_column + 2 + max(0, think_room - live_footer_width(footer))
+    for text, color in footer:
+        _write_cells(grid, LIVE_TOP + LIVE_HEIGHT - 1, column, text, color, width=width)
+        column += len(text)
+        _write_cells(
+            grid, LIVE_TOP + LIVE_HEIGHT - 1, column, FOOTER_SEPARATOR, DIVIDER, width=width
+        )
+        column += len(FOOTER_SEPARATOR)
 
 
 def _cell_style(foreground: str, background: str) -> str:
@@ -494,7 +517,6 @@ class LivePanelState:
     state_label: str = "not started"
     action: str = ""
     step: int = 0
-    progress: int = 0
     plan_step: str = ""
     tokens_in: int = 0
     tokens_out: int = 0
@@ -510,6 +532,20 @@ class LivePanelState:
     # True once any reasoning delta has arrived this run; distinguishes a
     # provider that never streams reasoning from a transient empty gap.
     reasoning_seen: bool = False
+    # Footer strip. All four are measured by the runtime, never declared by the
+    # model: plan position, the plan step being worked on, and how close the
+    # run is to the stagnation limit.
+    plan_done: int = 0
+    plan_total: int = 0
+    plan_current: str = ""
+    # Why completion is being withheld. Shown once the plan is exhausted but
+    # the run continues — the moment the strip would otherwise go quiet.
+    blocker: str = ""
+    stall: int = 0
+    stall_limit: int = 0
+    # Step budget for the run. 0 means unbounded, and the row then drops the
+    # denominator instead of showing a ceiling that does not exist.
+    max_steps: int = 0
 
 
 def _format_tokens(count: int) -> str:
@@ -559,13 +595,84 @@ def live_panel_fields(state: LivePanelState) -> list[tuple[str, str]]:
     return [
         ("State", state.state_label),
         ("Action", state.action or "—"),
-        ("Step", f"{state.step} · {state.plan_step} · {state.progress}%"),
+        ("Step", f"{_step_position(state)} · {state.plan_step}"),
         ("Tokens", f"Σ {_format_tokens(total)}"),
         ("Files", f"{state.files_changed} edited"),
         ("Elapsed", _format_elapsed(state.elapsed_seconds)),
         ("Speed", _format_speed(state.tokens_per_second)),
         ("Model", tier),
     ]
+
+
+def _step_position(state: LivePanelState) -> str:
+    """Steps used out of the run's budget — the one bound known exactly upfront."""
+    if state.max_steps <= 0:
+        return str(state.step)
+    return f"{state.step}/{state.max_steps}"
+
+
+def live_footer_segments(state: LivePanelState, room: int) -> list[tuple[str, str]]:
+    """Colored segments of the bottom-right strip, fitted into ``room`` columns.
+
+    This is what replaced the model's self-declared progress percentage. Each
+    segment is measured by the runtime — position in the plan, the plan step
+    being worked on, and how close the run is to the stagnation limit — so the
+    strip can be stale but never invented.
+
+    The step text is the flexible one: it takes what room the fixed segments
+    leave and is dropped entirely when too little is left to read.
+    """
+    if not state.running and not state.finished:
+        return []
+
+    position = ""
+    if state.plan_total > 0:
+        position = f"{min(state.plan_done, state.plan_total)}/{state.plan_total}"
+
+    warning = ""
+    if state.running and state.stall > 0 and state.stall_limit > 0:
+        warning = f"! stalling {state.stall}/{state.stall_limit}"
+
+    fixed = [item for item in (position, warning) if item]
+    step_room = room - _joined_width(fixed) - len(FOOTER_SEPARATOR) * len(fixed)
+    detail = state.plan_current or state.blocker
+    step = " ".join(sanitize_display_text(detail).split()) if state.running else ""
+    if step_room < FOOTER_MIN_STEP_ROOM:
+        step = ""
+
+    segments = [
+        (text, color)
+        for text, color in (
+            (position, FOOTER_ACCENT),
+            (_truncate_head(step, step_room), MUTED),
+            (warning, FOOTER_WARN),
+        )
+        if text
+    ]
+    if live_footer_width(segments) <= room:
+        return segments
+
+    # Only the two fixed segments can still overflow here, and the warning is
+    # the one that changes what the user should do, so it outranks position.
+    survivor = warning or position
+    color = FOOTER_WARN if warning else FOOTER_ACCENT
+    return [(_truncate_head(survivor, room), color)] if survivor else []
+
+
+def _joined_width(parts: list[str]) -> int:
+    return sum(len(part) for part in parts)
+
+
+def live_footer_width(segments: list[tuple[str, str]]) -> int:
+    if not segments:
+        return 0
+    return _joined_width([text for text, _ in segments]) + len(FOOTER_SEPARATOR) * (
+        len(segments) - 1
+    )
+
+
+def live_footer_text(segments: list[tuple[str, str]]) -> str:
+    return FOOTER_SEPARATOR.join(text for text, _ in segments)
 
 
 def _thinking_source(state: LivePanelState) -> str:
@@ -617,7 +724,9 @@ def render_live_panel(
     fields = live_panel_fields(state)[:height]
     label_room = max((len(label) for label, _ in fields), default=0)
 
-    think_lines = wrap_thinking(_thinking_source(state), thinking_width, height)
+    footer = live_footer_segments(state, thinking_width)
+    think_height = height - 1 if footer else height
+    think_lines = wrap_thinking(_thinking_source(state), thinking_width, think_height)
 
     rows: list[str] = []
     for index in range(height):
@@ -631,6 +740,8 @@ def render_live_panel(
         think = think_lines[index] if index < len(think_lines) else ""
         prefix = "🤔 " if index == 0 and think else "   "
         right = (prefix + think) if think else ""
+        if footer and index == height - 1:
+            right = live_footer_text(footer).rjust(thinking_width)
         rows.append(f"{left}  {right}".rstrip())
 
     return rows

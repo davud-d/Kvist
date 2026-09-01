@@ -688,7 +688,7 @@ button {
   color: var(--secondary);
 }
 
-.step-progress {
+.step-phase {
   margin-left: auto;
   color: var(--text-muted);
 }

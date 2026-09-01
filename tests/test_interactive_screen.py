@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 import time
 from types import SimpleNamespace
 
@@ -656,3 +657,65 @@ def test_restore_input_draft_never_breaks_the_loop():
     screen.set_input_text = MagicMock(side_effect=RuntimeError("loop closed"))
 
     restore_input_draft(screen, "текст")
+
+
+def test_ask_choice_returns_the_selected_value(screen_runtime):
+    """The question is answered by the UI thread while the worker blocks."""
+    screen = screen_runtime.screen
+    answer: list[str | None] = []
+
+    def worker() -> None:
+        answer.append(
+            screen.ask_choice(
+                "Продолжить?", [("more", "ещё 50 шагов"), ("stop", "завершить")]
+            )
+        )
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    try:
+        _wait_until(screen._has_choice)
+        _wait_until(lambda: "ещё 50 шагов" in _rendered_text(screen_runtime))
+
+        screen._move_choice(1)
+        assert screen._choice["index"] == 1
+        screen._close_choice(screen._choice["options"][1][0])
+    finally:
+        thread.join(timeout=3)
+
+    assert answer == ["stop"]
+    assert not screen._has_choice()
+
+
+def test_choice_renders_under_the_banner(screen_runtime):
+    screen = screen_runtime.screen
+    thread = threading.Thread(
+        target=lambda: screen.ask_choice("Продолжить?", [("more", "ещё 50 шагов")])
+    )
+    thread.start()
+    try:
+        _wait_until(lambda: "ещё 50 шагов" in _rendered_text(screen_runtime))
+        lines = _rendered_lines(screen_runtime)
+        banner_close = next(i for i, line in enumerate(lines) if line.startswith("╰"))
+        question = next(i for i, line in enumerate(lines) if "ещё 50 шагов" in line)
+        assert question > banner_close
+    finally:
+        screen._close_choice(None)
+        thread.join(timeout=3)
+
+
+def test_shutdown_releases_a_pending_choice(screen_runtime):
+    """A screen going down must not leave the agent thread blocked forever."""
+    screen = screen_runtime.screen
+    answer: list[str | None] = ["unset"]
+
+    def worker() -> None:
+        answer[0] = screen.ask_choice("Продолжить?", [("more", "ещё")])
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    _wait_until(screen._has_choice)
+
+    screen.stop()
+    thread.join(timeout=3)
+    assert answer[0] is None

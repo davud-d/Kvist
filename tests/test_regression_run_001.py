@@ -60,11 +60,10 @@ def _fix_plan() -> PlanInfo:
     )
 
 
-def _command(action_type: str, args: dict, plan_step: str = "edit", progress: int = 60) -> AgentCommand:
+def _command(action_type: str, args: dict, plan_step: str = "edit") -> AgentCommand:
     return AgentCommand(
         thought="step under test",
         plan_step=plan_step,
-        progress=progress,
         user_message="работаю",
         action=Action(type=action_type, args=args),
     )
@@ -215,7 +214,7 @@ def test_non_read_actions_still_blocked(agent_factory):
     """The hatch is for inspection only. Completion stays blocked."""
     agent = agent_factory()
     agent._set_required_next_actions({"write_file"}, "make a change")
-    final_cmd = _command("final_answer", {"message": "готово"}, plan_step="done", progress=100)
+    final_cmd = _command("final_answer", {"message": "готово"}, plan_step="done")
     assert agent._required_followup_error(final_cmd) is not None
 
 
@@ -312,7 +311,7 @@ def test_mass_deletion_diff_is_not_verification(agent_factory):
     agent._push_unique(agent._state.files_changed, "main.py")
     agent._push_unique(agent._state.pending_verification_paths, "main.py")
 
-    cmd = _command("git_diff", {"path": "main.py"}, plan_step="verify", progress=90)
+    cmd = _command("git_diff", {"path": "main.py"}, plan_step="verify")
     agent._update_verification_evidence(cmd, {
         "returncode": 0,
         "command": ["git", "diff", "--", "main.py"],
@@ -334,7 +333,7 @@ def test_targeted_diff_still_counts_as_verification(agent_factory):
     agent._push_unique(agent._state.files_changed, "main.py")
     agent._push_unique(agent._state.pending_verification_paths, "main.py")
 
-    cmd = _command("git_diff", {"path": "main.py"}, plan_step="verify", progress=90)
+    cmd = _command("git_diff", {"path": "main.py"}, plan_step="verify")
     agent._update_verification_evidence(cmd, {
         "returncode": 0,
         "stdout": (
@@ -352,7 +351,7 @@ def test_clean_diff_clears_destructive_flag(agent_factory):
     """Restoring the file must be a way out of the block."""
     agent = agent_factory()
     agent._state.destructive_diff = "previous destruction"
-    cmd = _command("git_diff", {"path": "main.py"}, plan_step="verify", progress=90)
+    cmd = _command("git_diff", {"path": "main.py"}, plan_step="verify")
     agent._update_verification_evidence(cmd, {"returncode": 0, "stdout": ""})
     assert agent._state.destructive_diff == ""
 
@@ -366,7 +365,7 @@ def test_destructive_block_permits_honest_report(agent_factory):
 
     assert "final_answer" in agent._state.required_next_actions
     assert "read_file" in agent._state.required_next_actions
-    final_cmd = _command("final_answer", {"message": "Я удалил файл"}, plan_step="done", progress=100)
+    final_cmd = _command("final_answer", {"message": "Я удалил файл"}, plan_step="done")
     assert agent._required_followup_error(final_cmd) is None
 
 

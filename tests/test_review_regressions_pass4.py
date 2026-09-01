@@ -130,7 +130,7 @@ def test_committed_reconciliation_matches_normal_success_state(agent_factory):
     normal._state.create_goal = True
     (normal.executor.workspace / "feature.py").write_text("", encoding="utf-8")
     cmd = make_command("write_file", {"path": "feature.py", "content": "code\n"},
-                       plan_step="edit implementation", progress=60)
+                       plan_step="edit implementation")
     normal.executor.begin_action_transaction("run-x", "act-1")
     fb = normal._execute_command(cmd)
     normal.executor.end_action_transaction()

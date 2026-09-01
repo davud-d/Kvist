@@ -8,7 +8,6 @@ def make_web_command(query: str, thought: str = "Need current SDK docs"):
     return AgentCommand(
         thought=thought,
         plan_step="inspect",
-        progress=10,
         user_message="Searching docs",
         action=Action(type="web_search", args={"query": query}),
     )
@@ -48,7 +47,6 @@ def test_fetch_url_defaults_and_fact_summaries(agent_factory):
     command = AgentCommand(
         thought="Read docs",
         plan_step="inspect",
-        progress=10,
         user_message="Reading URL",
         action=Action(type="fetch_url", args={"url": "https://docs.python.org/3/"}),
     )
@@ -56,7 +54,7 @@ def test_fetch_url_defaults_and_fact_summaries(agent_factory):
     assert agent._prepare_fetch_url_command(command) is None
     assert command.action.args["max_chars"] == 12000
     assert agent._prepare_fetch_url_command(
-        AgentCommand("x", "inspect", 1, "x", Action("fetch_url", {"url": "ftp://x"}))
+        AgentCommand("x", "inspect", "x", Action("fetch_url", {"url": "ftp://x"}))
     ).startswith("fetch_url only")
     assert agent._extract_version_token(">=1.2.3,<2") == "1.2.3"
     assert agent._summarize_search_results([{"title": "A"}, {"title": "B"}, {"title": ""}, {"title": "C"}]) == "A; B; C"

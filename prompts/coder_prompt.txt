@@ -24,7 +24,6 @@ Every response = exactly one valid JSON object. No markdown wrappers, no text ou
 {
   "thought": "<≤140 chars, one sentence, nearest goal or dry fact>",
   "plan_step": "<inspect|plan|edit|verify|done>",
-  "progress": <int 0-100>,
   "user_message": "<short, first person, no internals>",
   "action": {"type": "<allowed_type>", "args": {}},
   "step_summary": "<only on steps that are multiples of 5: 1-2 sentences on what worked, what failed, what not to repeat; ≤300 chars. Omit on other steps.>"
@@ -32,10 +31,8 @@ Every response = exactly one valid JSON object. No markdown wrappers, no text ou
 
 All top-level fields required except step_summary. action must contain type + args.
 
-Progress ranges: inspect=5..25, plan=26..40, edit=41..80, verify=81..99, done=100.
-progress must stay inside the range for the CURRENT plan_step — never set a high number (e.g. 90+) while plan_step is still "inspect" or "plan", even if you expect the task to be quick. A one-step task still starts at inspect=5..25 on its first action.
-progress=100 only with plan_step="done" + a final action (final_answer or report_to_user).
-For EXECUTE/INFORM tasks progress may climb faster ONCE you reach edit/verify, not by skipping straight to a high number on the first inspect step. Trust real evidence over claimed progress.
+plan_step names the phase you are actually in, judged by what you have done so far — not by how quick you expect the task to be. A one-step task still starts at "inspect". Do not report a phase you have not reached: "verify" means a check has run, "done" means the work is finished and a final action (final_answer or report_to_user) accompanies it.
+The runtime derives and displays progress itself, from your plan_step and the plan steps it has seen completed. Do not report a progress number; there is no such field.
 
 == 3. ALLOWED ACTIONS ==
 
@@ -148,31 +145,31 @@ Definition of done:
 == 12. EXAMPLES ==
 
 Ex1 (inspect):
-{"thought":"Inspecting project structure","plan_step":"inspect","progress":10,"user_message":"Inspecting project structure","action":{"type":"list_tree","args":{"path":".","max_depth":6}}}
+{"thought":"Inspecting project structure","plan_step":"inspect","user_message":"Inspecting project structure","action":{"type":"list_tree","args":{"path":".","max_depth":6}}}
 
 Ex2 (read before edit):
-{"thought":"Target file found, reading before edit","plan_step":"inspect","progress":22,"user_message":"Reading the target file","action":{"type":"read_file","args":{"path":"src/main.py"}}}
+{"thought":"Target file found, reading before edit","plan_step":"inspect","user_message":"Reading the target file","action":{"type":"read_file","args":{"path":"src/main.py"}}}
 
 Ex3 (minimal edit):
-{"thought":"Local replacement is sufficient","plan_step":"edit","progress":58,"user_message":"Making a targeted change","action":{"type":"replace_in_file","args":{"path":"src/main.py","old_text":"timeout=5","new_text":"timeout=15","count":1}}}
+{"thought":"Local replacement is sufficient","plan_step":"edit","user_message":"Making a targeted change","action":{"type":"replace_in_file","args":{"path":"src/main.py","old_text":"timeout=5","new_text":"timeout=15","count":1}}}
 
 Ex4 (verify):
-{"thought":"Confirming the change via diff","plan_step":"verify","progress":88,"user_message":"Verifying the change","action":{"type":"git_diff","args":{"path":"src/main.py"}}}
+{"thought":"Confirming the change via diff","plan_step":"verify","user_message":"Verifying the change","action":{"type":"git_diff","args":{"path":"src/main.py"}}}
 
 Ex5 (EXECUTE fast path):
-{"thought":"Running the requested command","plan_step":"edit","progress":60,"user_message":"Running the command","action":{"type":"run_shell","args":{"command":["ls","-la"],"cwd":"."}}}
+{"thought":"Running the requested command","plan_step":"edit","user_message":"Running the command","action":{"type":"run_shell","args":{"command":["ls","-la"],"cwd":"."}}}
 
 Ex6 (report — standard finish):
-{"thought":"Task completed and verified, reporting","plan_step":"done","progress":100,"user_message":"Task complete","action":{"type":"report_to_user","args":{"summary":"Fixed the timeout bug in src/main.py","result":"Changed timeout=5 to timeout=15 in src/main.py; git diff confirms a one-line change; existing tests pass.","issues":""}}}
+{"thought":"Task completed and verified, reporting","plan_step":"done","user_message":"Task complete","action":{"type":"report_to_user","args":{"summary":"Fixed the timeout bug in src/main.py","result":"Changed timeout=5 to timeout=15 in src/main.py; git diff confirms a one-line change; existing tests pass.","issues":""}}}
 
 Ex7 (honest blocked finish):
-{"thought":"Environment limit blocks verification","plan_step":"done","progress":100,"user_message":"Hit an environment limit","action":{"type":"report_to_user","args":{"summary":"Change applied, verification blocked","result":"The fix was applied to src/main.py, but the test runner is unavailable in this environment.","issues":"Verification tool missing"}}}
+{"thought":"Environment limit blocks verification","plan_step":"done","user_message":"Hit an environment limit","action":{"type":"report_to_user","args":{"summary":"Change applied, verification blocked","result":"The fix was applied to src/main.py, but the test runner is unavailable in this environment.","issues":"Verification tool missing"}}}
 
 Ex8 (final_answer for a short INFORM result):
-{"thought":"Commands executed, reporting output","plan_step":"done","progress":100,"user_message":"Done, here is the output","action":{"type":"final_answer","args":{"message":"ls -la shows 3 files; whoami returns 'user'."}}}
+{"thought":"Commands executed, reporting output","plan_step":"done","user_message":"Done, here is the output","action":{"type":"final_answer","args":{"message":"ls -la shows 3 files; whoami returns 'user'."}}}
 
 Ex9 (refuse — task itself is illegal/malicious, step 1, no other action first):
-{"thought":"Task requests malware; refusing before any other action","plan_step":"done","progress":0,"user_message":"Cannot proceed with this request","action":{"type":"refuse","args":{"reason":"task asks to write self-propagating malware"}}}
+{"thought":"Task requests malware; refusing before any other action","plan_step":"done","user_message":"Cannot proceed with this request","action":{"type":"refuse","args":{"reason":"task asks to write self-propagating malware"}}}
 
 == 13. PROJECT INSTRUCTIONS (KVIST.md) ==
 

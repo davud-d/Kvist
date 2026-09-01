@@ -98,6 +98,9 @@ class RunState:
     missing_artifacts: list[str] = field(default_factory=list)
     verification_evidence: list[str] = field(default_factory=list)
     completion_blockers: list[str] = field(default_factory=list)
+    # Kind slug per blocker, same order. The UI labels these; the blocker
+    # texts themselves are written for the model and are never shown.
+    completion_blocker_kinds: list[str] = field(default_factory=list)
     required_next_actions: list[str] = field(default_factory=list)
     completion_ready: bool = False
     recent_feedback: list[str] = field(default_factory=list)
@@ -126,6 +129,9 @@ class RunState:
     applied_facts: list[dict[str, str]] = field(default_factory=list)
     consecutive_errors: int = 0
     stagnation_count: int = 0
+    # Steps this run may still use. Seeded from config.max_steps and
+    # extended only when the user answers the budget question.
+    step_budget: int = 0
     parse_errors: int = 0
     read_only_streak: int = 0
     pending_instruction: str = ""

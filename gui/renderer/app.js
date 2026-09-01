@@ -938,7 +938,7 @@ function addStep(event) {
       createElement("span", "step-thought", `🧠 ${Math.max(1, Math.round(event.reasoning_seconds))}s`),
     )
   }
-  summary.append(createElement("span", "step-progress", `${event.progress ?? 0}%`))
+  if (event.plan_step) summary.append(createElement("span", "step-phase", event.plan_step))
   const content = createElement("div", "step-content")
   if (event.thought) content.append(createElement("div", "", event.thought))
   if (event.action_args && Object.keys(event.action_args).length) {

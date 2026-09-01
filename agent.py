@@ -564,7 +564,6 @@ class LocalAgent:
         command = AgentCommand(
             thought="[recovered after interruption]",
             plan_step=str(pending.get("plan_step") or "edit"),
-            progress=int(pending.get("progress") or self._state.progress),
             user_message="[recovered after interruption]",
             action=Action(type=action_type, args={"path": path}),
             step_summary="",

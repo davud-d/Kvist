@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import itertools
 import json
 import re
 import sys
@@ -37,7 +38,6 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
             "action_kind": "file",
             "action_type": command.action.type,
             "plan_step": command.plan_step,
-            "progress": command.progress,
             **preview,
         }
     if command.action.type in _NON_RECONCILABLE_SIDE_EFFECTS:
@@ -60,6 +60,11 @@ _READ_ONLY_ACTIONS = {
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
+# Floor per declared phase, used only when there is no plan to count completed
+# steps against (planning disabled). "done" is absent: 100 belongs to the
+# terminal action, not to a phase label.
+_PLAN_STEP_BANDS = {"inspect": 15, "plan": 30, "edit": 55, "verify": 85}
+
 
 def _note_run_context(self, **facts: Any) -> None:
     """Forward per-step run facts to a UI that exposes the live-panel channel.
@@ -70,6 +75,73 @@ def _note_run_context(self, **facts: Any) -> None:
     notify = getattr(self._ui, "set_run_context", None)
     if notify is not None:
         notify(**facts)
+
+
+_BLOCKER_LABELS = {
+    "destructive": ("массовое удаление — нужна сверка", "mass deletion — needs review"),
+    "not_created": ("файл ещё не создан", "file not created yet"),
+    "not_modified": ("правки ещё не внесены", "no changes made yet"),
+    "plan_incomplete": ("план не завершён", "plan not finished"),
+    "artifacts_missing": ("не хватает файлов", "required files missing"),
+    "unverified": ("ждёт проверки правок", "changes not verified"),
+}
+
+
+def _extend_step_budget(self) -> bool:
+    """Ask whether to keep going past the step budget.
+
+    Only an interactive screen can answer. Without one — headless frontends,
+    run_task.py, a piped terminal — there is nobody to ask, so the budget stays
+    a hard stop exactly as before.
+    """
+    ask = getattr(self._ui, "ask_choice", None)
+    if ask is None:
+        return False
+
+    extra = self.config.max_steps
+    if self._state.response_language == "ru":
+        title = f"Пройдено {self._state.step_budget} шагов, задача не завершена."
+        options = [("continue", f"продолжить, ещё {extra}"), ("finish", "завершить отчётом")]
+    else:
+        title = f"{self._state.step_budget} steps used, the task is not finished."
+        options = [("continue", f"keep going, {extra} more"), ("finish", "finish with a report")]
+
+    if ask(title, options) != "continue":
+        return False
+    self._state.step_budget += extra
+    return True
+
+
+def _plan_position(self) -> dict[str, Any]:
+    """Measured facts the live panel shows in place of a declared percentage.
+
+    Position in the plan, the plan step still being worked on, why completion
+    is being withheld, and how close the run is to the stagnation limit.
+    """
+    plan = self._state.plan_info.plan if self._state.plan_info else []
+    remaining = _remaining_plan_steps(self)
+    return {
+        "plan_done": len(plan) - len(remaining),
+        "plan_total": len(plan),
+        "plan_current": remaining[0] if remaining else "",
+        "blocker": _first_blocker_label(self),
+        "stall": self._state.stagnation_count,
+        "stall_limit": self.config.stagnation_limit,
+        "max_steps": self._state.step_budget,
+    }
+
+
+def _first_blocker_label(self) -> str:
+    """Short user-facing reason the run cannot finish yet, or empty.
+
+    The blocker texts themselves are instructions addressed to the model, so
+    the panel shows a label keyed off the blocker's kind instead.
+    """
+    for kind in self._state.completion_blocker_kinds:
+        label = _BLOCKER_LABELS.get(kind)
+        if label:
+            return label[0] if self._state.response_language == "ru" else label[1]
+    return ""
 
 
 def _note_thought(self, thought: str) -> None:
@@ -101,7 +173,7 @@ def _run_pipeline_dwell(self, user_goal: str, step: int) -> None:
     if self.config.verbose or _get_api_interval(self) <= 0:
         return
     next_step = step + 1
-    if next_step > self.config.max_steps:
+    if next_step > self._state.step_budget:
         return
     if self._state.plan_info is None or self._build_early_stop_message(next_step):
         return
@@ -363,10 +435,15 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     if not self._state.required_artifacts and not read_only_goal:
         self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
     self._refresh_completion_requirements()
+    self._state.step_budget = max(self._state.step_budget, self.config.max_steps)
     report_rendered = False
     task_completed = False
     try:
-        for step in range(start_step, self.config.max_steps + 1):
+        for step in itertools.count(start_step):
+            if step > self._state.step_budget and not _extend_step_budget(self):
+                final_message = self._build_limit_reached_message()
+                break
+
             early_stop_message = self._build_early_stop_message(step)
             if early_stop_message:
                 final_message = early_stop_message
@@ -512,7 +589,6 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                         "command": {
                             "thought": command.thought,
                             "plan_step": command.plan_step,
-                            "progress": command.progress,
                             "user_message": command.user_message,
                             "action": {
                                 "type": command.action.type,
@@ -633,12 +709,13 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 action=command.action.type,
                 files_changed=len(self._state.files_changed),
                 model_tier=self._state.selected_action_role or "fast",
+                **_plan_position(self),
             )
             self._ui.update_live(
                 user_message=command.user_message,
                 status="executing action",
                 step=step,
-                progress=command.progress,
+                progress=self._state.progress,
                 plan_step=command.plan_step,
             )
 
@@ -682,7 +759,6 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                             "command": {
                                 "thought": command.thought,
                                 "plan_step": command.plan_step,
-                                "progress": command.progress,
                                 "user_message": command.user_message,
                                 "action": {
                                     "type": command.action.type,
@@ -963,7 +1039,6 @@ def register_language_error(
             "command": {
                 "thought": command.thought,
                 "plan_step": command.plan_step,
-                "progress": command.progress,
                 "user_message": command.user_message,
                 "action": {
                     "type": command.action.type,
@@ -1142,7 +1217,6 @@ def register_feedback(
             "command": {
                 "thought": command.thought,
                 "plan_step": command.plan_step,
-                "progress": command.progress,
                 "user_message": command.user_message,
                 "action": {
                     "type": command.action.type,
@@ -1285,11 +1359,16 @@ def update_state_from_success(
 
 
 def update_progress(self, command: AgentCommand, ok: bool) -> None:
-    plan_progress = self._plan_progress()
-    target_progress = max(self._state.progress, plan_progress)
+    """Advance progress from evidence only, never from a model-declared number.
+
+    Completed plan steps are the real measure; the plan_step band is the
+    fallback for runs with planning turned off, where there is no plan to
+    count against. Both are monotonic, so progress never walks backwards.
+    """
+    target_progress = max(self._state.progress, self._plan_progress())
 
     if ok:
-        target_progress = max(target_progress, min(command.progress, _progress_ceiling(self._state, command.action.type)))
+        target_progress = max(target_progress, _PLAN_STEP_BANDS.get(command.plan_step, 0))
 
     self._state.last_progress = self._state.progress
     self._state.progress = max(0, min(target_progress, 99))
@@ -1608,7 +1687,6 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
                     "status": "repeat_blocked",
                     "command": {
                         "plan_step": command.plan_step,
-                        "progress": command.progress,
                         "user_message": command.user_message,
                         "action": {
                             "type": command.action.type,
@@ -1635,7 +1713,6 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
                     "status": "repeat_blocked",
                     "command": {
                         "plan_step": command.plan_step,
-                        "progress": command.progress,
                         "user_message": command.user_message,
                         "action": {
                             "type": command.action.type,
@@ -1671,7 +1748,6 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
                         "path": path,
                         "command": {
                             "plan_step": command.plan_step,
-                            "progress": command.progress,
                             "user_message": command.user_message,
                             "action": {
                                 "type": command.action.type,
@@ -1949,9 +2025,10 @@ def update_verification_evidence(self, command: AgentCommand, data: dict[str, An
 
 
 def refresh_completion_requirements(self, force_enforcement: bool = False) -> None:
-    blockers, required_actions = _compute_completion_status(self)
+    blockers, kinds, required_actions = _compute_completion_status(self)
     self._state.missing_artifacts = _missing_required_artifacts(self)
     self._state.completion_blockers = blockers
+    self._state.completion_blocker_kinds = kinds
 
     # Set completion_ready flag: task is ready when no blockers and verification exists
     self._state.completion_ready = (
@@ -2427,11 +2504,15 @@ def _missing_required_artifacts(self) -> list[str]:
     return missing
 
 
-def _compute_completion_status(self) -> tuple[list[str], list[str]]:
+def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
+    """Blocker texts for the model, matching kind slugs for the UI, and the
+    actions that would clear them."""
     blockers: list[str] = []
+    kinds: list[str] = []
     required_actions: set[str] = set()
 
     if self._state.destructive_diff:
+        kinds.append("destructive")
         blockers.append(
             self._state.destructive_diff
             + " Do not report success. Either restore the file from git "
@@ -2458,10 +2539,12 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
     )
 
     if self._state.create_goal and not self._state.files_changed:
+        kinds.append("not_created")
         blockers.append(_build_premature_final_answer_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
     if self._state.modify_goal and not self._state.files_changed:
+        kinds.append("not_modified")
         blockers.append(_build_missing_implementation_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
@@ -2471,10 +2554,12 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
         and not self._state.files_changed
         and _plan_requires_file_changes(self)
     ):
+        kinds.append("not_modified")
         blockers.append(_build_missing_implementation_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
     if actionable_remaining_plan_steps and not verify_only_complete:
+        kinds.append("plan_incomplete")
         blockers.append(_build_incomplete_plan_error(self._state.task_language, actionable_remaining_plan_steps))
         if all(_PLAN_VERIFY_RE.search(item.casefold()) for item in actionable_remaining_plan_steps):
             required_actions.update(_VERIFY_ONLY_ACTIONS)
@@ -2484,14 +2569,17 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
         # let the agent continue with whatever actions are appropriate
 
     if missing and not (self._state.read_only_goal and not self._state.files_changed):
+        kinds.append("artifacts_missing")
         blockers.append(_build_missing_artifacts_error(self._state.task_language, missing))
         required_actions.update(_WRITE_ACTIONS)
 
     if self._state.files_changed and not self._state.verification_evidence:
+        kinds.append("unverified")
         blockers.append(_build_missing_verification_error(self._state.task_language))
         required_actions.update(_VERIFY_ONLY_ACTIONS)
 
     if self._state.pending_verification_paths:
+        kinds.append("unverified")
         joined = ", ".join(self._state.pending_verification_paths[:5])
         blockers.append(
             f"Task cannot finish: verification required for recently changed files: {joined}. "
@@ -2500,7 +2588,7 @@ def _compute_completion_status(self) -> tuple[list[str], list[str]]:
         )
         required_actions.update(_VERIFY_ONLY_ACTIONS)
 
-    return blockers, sorted(required_actions)
+    return blockers, kinds, sorted(required_actions)
 
 
 def _plan_requires_file_changes(self) -> bool:
@@ -2508,18 +2596,6 @@ def _plan_requires_file_changes(self) -> bool:
     if not plan_info or not plan_info.plan:
         return self._state.create_goal
     return any(_PLAN_EDIT_RE.search(item.casefold()) for item in plan_info.plan)
-
-
-def _progress_ceiling(state: RunState, action_type: str) -> int:
-    if action_type in _WRITE_ACTIONS:
-        return 80
-    if action_type in {"git_status", "git_diff", "run_shell"}:
-        return 99 if state.files_changed else 35
-    if action_type in {"list_tree", "find_files", "read_file"}:
-        return 99 if state.files_changed else 25
-    if action_type in {"read_multiple_files", "list_dir", "search_code", "web_search", "fetch_url"}:
-        return 25
-    return 40
 
 
 def _remaining_plan_steps(self) -> list[str]:

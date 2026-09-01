@@ -107,6 +107,13 @@ class TerminalBannerUI:
         action: str | None = None,
         files_changed: int | None = None,
         model_tier: str | None = None,
+        plan_done: int | None = None,
+        plan_total: int | None = None,
+        plan_current: str | None = None,
+        blocker: str | None = None,
+        stall: int | None = None,
+        stall_limit: int | None = None,
+        max_steps: int | None = None,
     ) -> None:
         """Merge per-step run facts the status channel does not already carry."""
         if action is not None:
@@ -116,7 +123,33 @@ class TerminalBannerUI:
         if model_tier is not None:
             self._live_panel.model_tier = str(model_tier)
             self._live_panel.escalated = str(model_tier) not in ("", "fast")
+        if plan_done is not None:
+            self._live_panel.plan_done = max(0, int(plan_done))
+        if plan_total is not None:
+            self._live_panel.plan_total = max(0, int(plan_total))
+        if plan_current is not None:
+            self._live_panel.plan_current = sanitize_display_text(str(plan_current))
+        if blocker is not None:
+            self._live_panel.blocker = sanitize_display_text(str(blocker))
+        if stall is not None:
+            self._live_panel.stall = max(0, int(stall))
+        if stall_limit is not None:
+            self._live_panel.stall_limit = max(0, int(stall_limit))
+        if max_steps is not None:
+            self._live_panel.max_steps = max(0, int(max_steps))
         self._publish_live()
+
+    def ask_choice(self, title: str, options: list[tuple[str, str]]) -> str | None:
+        """Ask an arrow-key question inside the pinned screen, if there is one.
+
+        Returns None without a screen (plain mode, no TTY, headless frontend),
+        which callers must treat as "no answer" and resolve their own way.
+        """
+        screen = self._screen
+        ask = getattr(screen, "ask_choice", None)
+        if ask is None:
+            return None
+        return ask(title, options)
 
     def set_thinking(self, text: str) -> None:
         """Stream the model's reasoning into the pinned banner.
@@ -230,7 +263,6 @@ class TerminalBannerUI:
         self._live_panel.running = True
         self._live_panel.state_label = state_label
         self._live_panel.step = step
-        self._live_panel.progress = max(0, min(progress, 100))
         self._live_panel.plan_step = sanitize_display_text(str(plan_step))
         self._publish_live()
 
@@ -382,7 +414,6 @@ class TerminalBannerUI:
             f"Action: {command.action.type} "
             f"{redact_value(command.action.args)}"
         )
-        print(f"Reported progress: {command.progress}%")
 
     def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
         _ = user_messages

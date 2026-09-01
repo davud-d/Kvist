@@ -101,7 +101,8 @@ kvist --workspace /path/to/project                       # терминальн�
 
 **Живой статус / рассуждения (fire-and-forget):**
 `start_live()`, `stop_live()`,
-`update_live(user_message, status, step, progress=0, plan_step="working", is_error=False)`,
+`update_live(user_message, status, step, progress=0, plan_step="working", is_error=False)`
+(`progress` вычисляется рантаймом из выполненных шагов плана и `plan_step`; модель его не сообщает),
 `print_plan(plan_info)`, `print_step_header(step, command)`, `debug_print(message)`.
 
 **Ответы:**
@@ -153,7 +154,7 @@ fail-closed).
 | `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool` | handshake и эффективная конфигурация прогона; всегда первым |
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу |
-| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, progress:int, reasoning_seconds:number` | выбранное действие шага; `reasoning_seconds` — сколько модель думала перед ним (0, если не думала) |
+| `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number` | выбранное действие шага; `reasoning_seconds` — сколько модель думала перед ним (0, если не думала) |
 | `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | план задачи |
 | `sandbox_notice` | `note:str` | одноразовое уведомление о песочнице |
 | `stream_start` | `stream_id:str` | начало стримингового ответа |

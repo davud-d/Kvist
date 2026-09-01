@@ -73,11 +73,13 @@ def parse_agent_command(text: str) -> AgentCommand:
     if not isinstance(raw, dict):
         raise CommandValidationError("Root object must be a JSON object")
 
+    # "progress" is accepted and discarded: the runtime derives progress from the
+    # plan and plan_step, but a model prompted from a cached older schema still
+    # emits the key, and rejecting it would cost a step for nothing.
     require_only_allowed_keys(raw, {"thought", "plan_step", "progress", "user_message", "action", "step_summary"})
 
     thought = raw.get("thought")
     plan_step = raw.get("plan_step")
-    progress = raw.get("progress")
     user_message = raw.get("user_message")
     action = raw.get("action")
     step_summary = raw.get("step_summary")
@@ -92,12 +94,6 @@ def parse_agent_command(text: str) -> AgentCommand:
         raise CommandValidationError(
             "Field 'plan_step' must be one of: inspect, plan, edit, verify, done"
         )
-
-    if not isinstance(progress, int):
-        raise CommandValidationError("Field 'progress' must be an integer")
-
-    if progress < 0 or progress > 100:
-        raise CommandValidationError("Field 'progress' must be in range 0..100")
 
     if not isinstance(user_message, str) or not user_message.strip():
         raise CommandValidationError("Field 'user_message' must be a non-empty string")
@@ -122,7 +118,6 @@ def parse_agent_command(text: str) -> AgentCommand:
     return AgentCommand(
         thought=thought.strip(),
         plan_step=plan_step.strip(),
-        progress=progress,
         user_message=user_message.strip(),
         action=Action(type=action_type, args=args),
         step_summary=step_summary.strip() if isinstance(step_summary, str) else "",
