@@ -1213,7 +1213,7 @@ class InteractiveScreen:
                     )
                 ],
                 height=Dimension(
-                    min=SLASH_COMMAND_MENU_HEIGHT,
+                    min=1,
                     max=SLASH_COMMAND_MENU_HEIGHT,
                 ),
             ),

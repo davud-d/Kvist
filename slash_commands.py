@@ -88,7 +88,10 @@ SLASH_COMMAND_PROMPT = FormattedText(
 SLASH_COMMAND_PROMPT_CONTINUATION = FormattedText(
     [("class:slash-command.prompt-continuation", "  · ")]
 )
-SLASH_COMMAND_MENU_HEIGHT = len(SLASH_COMMANDS)
+# Cap the palette so a growing command list can never outgrow the terminal.
+# Extra matches stay reachable by scrolling the selection with the arrow keys.
+SLASH_COMMAND_MENU_MAX_ROWS = 6
+SLASH_COMMAND_MENU_HEIGHT = min(len(SLASH_COMMANDS), SLASH_COMMAND_MENU_MAX_ROWS)
 
 
 def _matching_name(command: SlashCommand, query: str) -> str | None:
