@@ -348,6 +348,25 @@ def redact_text(text: str) -> str:
     return redacted
 
 
+# ── Prompt-boundary containment ─────────────────────────────────────────
+# Untrusted content is quoted into prompts inside tagged blocks. Content that
+# carries one of those tags could close its own block and continue as if it
+# were the system prompt again, so the syntax is defanged wherever untrusted
+# content is embedded. Replacement is visible rather than silent: content that
+# legitimately documents these tags stays readable and the edit is auditable.
+DEFANGED_TAG = "[tag removed by Kvist]"
+
+_PROMPT_BOUNDARY_TAG_RE = re.compile(
+    r"</?\s*(?:PROJECT_INSTRUCTIONS|UNTRUSTED_TOOL_OUTPUT)\b[^>]*>",
+    re.IGNORECASE,
+)
+
+
+def defang_prompt_boundary_tags(text: str) -> str:
+    """Neutralize prompt-boundary tags forged inside untrusted content."""
+    return _PROMPT_BOUNDARY_TAG_RE.sub(DEFANGED_TAG, text)
+
+
 def escape_terminal_controls(
     text: str,
     *,

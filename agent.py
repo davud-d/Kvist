@@ -721,15 +721,19 @@ class LocalAgent:
 
     def _run_chat(self, user_goal: str) -> str:
         """Lightweight chat mode: direct markdown streaming, no JSON protocol."""
-        from agent_model import _load_role_prompt, safe_extract_completion_content
+        from agent_model import build_role_system_prompt, safe_extract_completion_content
         from context_utils import trim_history
         from llm_clients import fallback_candidates_for_model
 
-        system_prompt = _load_role_prompt("chat")
+        system_prompt = build_role_system_prompt(self, "chat")
 
         # Initialize chat history if it doesn't exist
         if not hasattr(self, "_chat_history"):
             self._chat_history = [{"role": "system", "content": system_prompt}]
+        elif self._chat_history and self._chat_history[0]["role"] == "system":
+            # Refreshed every turn so an edit to KVIST-CHAT.md lands on the
+            # next message instead of the next session.
+            self._chat_history[0] = {"role": "system", "content": system_prompt}
 
         # Add new call messages (from user, system, and function calls)
         # Inject session history context

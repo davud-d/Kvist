@@ -48,7 +48,7 @@ from agent_state import RunCancelled, RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_command
 from protocol import AgentCommand
-from redaction import redact_text, redact_value
+from redaction import defang_prompt_boundary_tags, redact_text, redact_value
 from agent_planner import infer_task_kind
 from role_router import has_no_write_marker
 
@@ -1419,10 +1419,13 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
     serialized = self._truncate_for_prompt(serialized, self.config.prompt_result_char_limit)
 
     if isinstance(raw_data, dict) and raw_data.get("untrusted"):
+        # JSON encoding leaves "</UNTRUSTED_TOOL_OUTPUT>" intact inside a
+        # string, so a fetched page could otherwise close its own block and
+        # continue as if it were the system prompt.
         return (
             f'<UNTRUSTED_TOOL_OUTPUT source="{command.action.type}">\n'
             f"{UNTRUSTED_CONTENT_NOTICE}\n"
-            f"{serialized}\n"
+            f"{defang_prompt_boundary_tags(serialized)}\n"
             "</UNTRUSTED_TOOL_OUTPUT>"
         )
     return serialized

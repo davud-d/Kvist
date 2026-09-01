@@ -285,6 +285,21 @@ include `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`,
 `AGENT_SANDBOX_NET`. Prefer `/provider`, `/models`, and `/role` for interactive
 configuration; do not commit keys or local `.kvist` data.
 
+Two instruction files sit in the workspace root: `KVIST.md` for the action-loop
+roles (coder, reader, devops) and `KVIST-CHAT.md` for chat. Kvist creates both
+from a template on first launch and appends their contents to the role system
+prompt, so a project states its build commands, layout and conventions once
+instead of repeating them in every task; edits take effect from the next step.
+If the workspace already has a `.gitignore`, both names are appended to it once
+under a comment — without a `.gitignore` nothing is written. Because these files
+live in the workspace, their contents are treated as untrusted: they are quoted
+into the prompt as delimited data, bounded by instructions that scope them to
+commands, layout and conventions and rule out changing the agent's role, safety
+rules or action protocol. That raises the cost of a hostile instruction file and
+makes the attempt reportable; it is not a guarantee. The gates that do not read
+the prompt — command validation, secret masking, the workspace boundary, and the
+approval prompts — remain the actual boundary.
+
 Writes and shell commands stay inside the workspace. Read-only actions may use
 repeatable `--allow-read DIR` paths. Project command policy is stored at
 `.kvist/permissions.json` with `allow`, `deny`, and `ask` patterns; deny and

@@ -7,11 +7,12 @@ from agent_model import call_action_model, _load_role_prompt
 from agent_planner import create_plan, PLANNER_PROMPT
 
 
-def test_action_model_uses_current_agent_role_prompt():
+def test_action_model_uses_current_agent_role_prompt(tmp_path):
     captured = {}
 
     class Agent:
         config = SimpleNamespace(fast_model="fast", smart_model="smart")
+        executor = SimpleNamespace(workspace=tmp_path)
         _state = SimpleNamespace(
             current_agent_role="devops",
             selected_action_model="",

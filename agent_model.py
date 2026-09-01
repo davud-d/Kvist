@@ -39,6 +39,7 @@ from llm_clients import (
     OPENROUTER_PROVIDER,
 )
 from agent_state import RunCancelled
+from system_context import workspace_instructions_context
 from redaction import redact_text, redact_value
 from render_throttle import ThrottledRenderer
 
@@ -180,7 +181,9 @@ def _launch_action_prefetch(self, prompt: str) -> None:
     model = str(getattr(self._state, "selected_action_model", "")).strip()
     if not model:
         return
-    system_prompt = _load_role_prompt(getattr(self._state, "current_agent_role", "coder"))
+    system_prompt = build_role_system_prompt(
+        self, getattr(self._state, "current_agent_role", "coder")
+    )
     holder = {
         "prompt": prompt,
         "model": model,
@@ -415,6 +418,17 @@ def _load_role_prompt(role: str) -> str:
     return text
 
 
+def build_role_system_prompt(self, role: str) -> str:
+    """Role prompt plus this workspace's own instruction file, if it has one.
+
+    Read per call rather than cached, so editing KVIST.md takes effect on the
+    next step instead of the next session.
+    """
+    base = _load_role_prompt(role)
+    project = workspace_instructions_context(self.executor.workspace, role)
+    return f"{base}\n\n{project}" if project else base
+
+
 def call_action_model(self, prompt: str) -> str:
     # The model is pinned once per run, so the escalation conditions inside
     # _prefer_smart_model (errors, parse failures, stagnation) could never fire
@@ -438,7 +452,7 @@ def call_action_model(self, prompt: str) -> str:
         return prefetched
 
     role = getattr(self._state, "current_agent_role", "coder")
-    system_prompt = _load_role_prompt(role)
+    system_prompt = build_role_system_prompt(self, role)
     self._retries_exhausted = False
     started = time.monotonic()
     try:

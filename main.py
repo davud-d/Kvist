@@ -137,6 +137,7 @@ from llm_clients import (
     validate_omniroute_model_id,
 )
 from redaction import sanitize_display_text
+from system_context import ensure_workspace_instructions
 from ui import AgentUI
 from terminal_banner import TerminalBannerUI
 from performance_logger import PerfLogger
@@ -727,6 +728,12 @@ def build_agent(
         perf_logger=perf_logger,
     )
     warnings.extend(getattr(agent, "_storage_warnings", []))
+    try:
+        ensure_workspace_instructions(executor.workspace)
+    except OSError as error:
+        warnings.append(
+            f"Could not prepare KVIST.md / KVIST-CHAT.md in the workspace: {error}"
+        )
     return agent, config, warnings
 
 

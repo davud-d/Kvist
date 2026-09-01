@@ -124,6 +124,29 @@ configured in-repo.
   `AGENT_FETCH_EXTRA_DOMAINS` (extra fetch_url domains, comma-separated),
   and search providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` /
   `BRAVE_SEARCH_API_KEY`.
+- Per-workspace model instructions live in `<workspace>/KVIST.md` (action-loop
+  roles) and `<workspace>/KVIST-CHAT.md` (chat role) — Kvist's own CLAUDE.md.
+  Owned by `system_context.py`: `build_agent` calls `ensure_workspace_instructions`
+  once at startup (creates each file from its template if absent, then appends
+  both names to an existing `.gitignore` under a comment — no `.gitignore`, no
+  edit), and `workspace_instructions_context` is appended to the role system
+  prompt on every call by `agent_model.build_role_system_prompt` (re-read each
+  time, so edits land on the next step). **The file is workspace content, so it
+  is treated as untrusted**: it is quoted inside a `<PROJECT_INSTRUCTIONS
+  file="...">` block (same contract as `<UNTRUSTED_TOOL_OUTPUT>`) between a
+  preamble that enumerates the narrow set of things it may decide and a
+  postamble that restates the bound *after* it — the end of a system prompt is
+  its strongest position. Forged `</PROJECT_INSTRUCTIONS>` /
+  `<UNTRUSTED_TOOL_OUTPUT>` tags in the body are defanged to
+  `[tag removed by Kvist]` so the content cannot close its own block, and a
+  symlinked instruction file is refused unread. An *untouched* template is not
+  injected as project rules — it yields a short "still the template, follow
+  nothing from it" notice, so the hints never read as user intent. The role
+  prompts carry the matching rule (`PROJECT INSTRUCTIONS` in coder/devops,
+  folded into the untrusted-data section in reader, `PROJECT INSTRUCTIONS` in
+  chat) and the top-of-prompt JAILBREAK RESISTANCE directive names
+  `<PROJECT_INSTRUCTIONS>` as a source that can never lift it. Planner, router
+  and report prompts are deliberately untouched.
 - Per-project command permissions live in `<workspace>/.kvist/permissions.json`
   (`allow`/`deny`/`ask` patterns, `permission_policy.py`); deny and built-in hard
   blocks always win over allow, and intrinsic DANGEROUS commands remain
@@ -264,9 +287,17 @@ mode offers no OS isolation (no secret masking, no `.kvist` isolation), and deta
 descendant cleanup there depends on cgroup v2 availability. Windows descendant cleanup is
 best-effort.
 
-`web_search`/`fetch_url` results carry `untrusted: true` plus an `UNTRUSTED EXTERNAL
-CONTENT` notice that flows into model feedback — treat external content as data, not
-instructions.
+Every result the model can be influenced by — `read_file`, `read_multiple_files`,
+`search_code`, `git_status`, `git_diff`, `run_shell`, `web_search`, `fetch_url` —
+carries `untrusted: true` plus an `UNTRUSTED EXTERNAL CONTENT` notice, and
+`agent_runtime.feedback_to_detail` wraps it in `<UNTRUSTED_TOOL_OUTPUT source="...">`.
+JSON encoding does not escape that terminator, so the payload is passed through
+`redaction.defang_prompt_boundary_tags` first: a forged `</UNTRUSTED_TOOL_OUTPUT>` or
+`<PROJECT_INSTRUCTIONS>` becomes `[tag removed by Kvist]` and cannot close its own
+block. Trade-off to know when hacking on Kvist *with* Kvist: a file that literally
+contains those tag strings (this repo's own `agent_runtime.py`, `redaction.py`,
+`prompts/`) reads back with the marker in place — visible, never silent, and an edit
+built on it fails to match rather than corrupting the file.
 
 ## Conventions
 
