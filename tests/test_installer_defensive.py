@@ -199,6 +199,29 @@ def test_linux_gui_failure_does_not_destroy_previous_payload(tmp_path, monkeypat
     assert (old / "old.txt").read_text() == "keep"
 
 
+def test_linux_gui_keeps_appimage_after_successful_install(tmp_path, monkeypatch):
+    payload = tmp_path / "Kvist-1.2.0.AppImage"
+    payload.write_bytes(b"appimage")
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "icon.svg").write_text("svg")
+    for size in gui.LINUX_ICON_SIZES:
+        (assets / f"icon-{size}.png").write_bytes(b"icon")
+
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(gui, "INSTALL_ROOT", home / ".local" / "share" / "kvist-gui")
+    monkeypatch.setattr(gui, "ASSETS_DIR", assets)
+    monkeypatch.setattr(gui, "_find_linux_payload", lambda: ("appimage", payload))
+
+    gui.install_linux()
+
+    installed = gui.INSTALL_ROOT / "Kvist.AppImage"
+    assert installed.read_bytes() == b"appimage"
+    assert installed.stat().st_mode & stat.S_IXUSR
+    assert (home / ".local" / "share" / "applications" / "kvist.desktop").is_file()
+
+
 def test_linux_gui_failure_preserves_previous_unpacked_payload(tmp_path, monkeypatch):
     payload = tmp_path / "payload"
     payload.mkdir()
@@ -215,6 +238,22 @@ def test_linux_gui_failure_preserves_previous_unpacked_payload(tmp_path, monkeyp
         gui.install_linux()
 
     assert (previous / "old.txt").read_text() == "keep"
+
+
+def test_windows_gui_prefers_setup_executable(tmp_path, monkeypatch):
+    setup = tmp_path / "Kvist Setup 1.2.0.exe"
+    setup.write_bytes(b"setup")
+    monkeypatch.setattr(gui, "GUI_DIST", tmp_path)
+
+    assert gui._find_windows_payload() == ("setup", setup)
+
+
+def test_windows_gui_falls_back_to_unpacked_directory(tmp_path, monkeypatch):
+    unpacked = tmp_path / "win-unpacked"
+    unpacked.mkdir()
+    monkeypatch.setattr(gui, "GUI_DIST", tmp_path)
+
+    assert gui._find_windows_payload() == ("dir", unpacked)
 
 
 def test_empty_and_multi_root_plugin_archives_are_rejected(tmp_path):
@@ -304,6 +343,8 @@ def test_linux_gui_failure_cleans_payload_and_launcher(tmp_path, monkeypatch):
     payload.mkdir()
     (payload / "kvist-gui").write_bytes(b"new")
     install_root = tmp_path / "installed"
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.setattr(gui, "INSTALL_ROOT", install_root)
     monkeypatch.setattr(gui, "ASSETS_DIR", tmp_path / "assets")
     (tmp_path / "assets").mkdir()

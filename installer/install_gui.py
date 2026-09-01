@@ -86,7 +86,6 @@ def _linux_unpacked_exe(unpacked: Path) -> Path:
 
 def install_linux() -> None:
     kind, payload = _find_linux_payload()
-    had_install_root = INSTALL_ROOT.exists() or INSTALL_ROOT.is_symlink()
     INSTALL_ROOT.parent.mkdir(parents=True, exist_ok=True)
     staged_root = Path(tempfile.mkdtemp(prefix=".kvist-gui.", dir=INSTALL_ROOT.parent))
     committed_root = False
@@ -158,8 +157,6 @@ def install_linux() -> None:
             remove_path(staged_root)
         if backup_root.exists() or backup_root.is_symlink():
             remove_path(backup_root)
-        if not had_install_root and INSTALL_ROOT.exists():
-            remove_path(INSTALL_ROOT)
 
 
 def uninstall_linux() -> None:
