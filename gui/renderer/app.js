@@ -229,6 +229,27 @@ function currentProject() {
   return navigationProjects.find((project) => project.path === workspace) || null
 }
 
+// No real usage numbers survive a session switch — the core only reports
+// them live, mid-run, via `usage` events. The best a reopened session can
+// show is the size of what's actually stored for it, estimated with the same
+// chars/4 fallback the live speed indicator uses. Good enough to replace a
+// stale "0 in · 0 out" with a number that reflects the session just loaded.
+function estimateSessionContextTokens(item) {
+  let chars = 0
+  for (const message of item?.chat_history || []) {
+    if (typeof message?.content === "string") chars += message.content.length
+  }
+  for (const entry of item?.session_history || []) {
+    if (!entry || typeof entry !== "object") continue
+    if (typeof entry.goal === "string") chars += entry.goal.length
+    if (typeof entry.result === "string") chars += entry.result.length
+    for (const output of entry.outputs || []) {
+      if (typeof output === "string") chars += output.length
+    }
+  }
+  return chars / CHARS_PER_TOKEN
+}
+
 function displaySession(item) {
   resetView()
   if (!item) return
@@ -238,6 +259,13 @@ function displaySession(item) {
   )
   const hasUserChat = chatHistory.some((message) => message.role === "user")
   const sessionHistory = Array.isArray(item.session_history) ? item.session_history : []
+
+  const estimatedTokens = estimateSessionContextTokens(item)
+  if (estimatedTokens > 0) {
+    runStats.contextTokens = estimatedTokens
+    renderRunStats()
+  }
+
   if (!hasUserChat && !sessionHistory.length) {
     setActivity(item.has_checkpoint ? "Unfinished task" : "Ready")
     return
@@ -752,12 +780,27 @@ function hideSettings() {
   if (!promptInput.disabled) promptInput.focus()
 }
 
-function saveSettings() {
-  const models = {
-    fast: fastModelInput.value.trim(),
-    smart: smartModelInput.value.trim(),
-    planner: plannerModelInput.value.trim(),
+// Pin the models the dialog is actually showing for the chosen provider, so a
+// launch is fully determined by these settings. A blank field means "whatever
+// this provider shows" (its saved override, else its built-in default) — not
+// "whatever the terminal happened to use last", which is a different provider's
+// leftover and makes the run lie about which model is serving it.
+function resolvedModels() {
+  const summary = providerSummary(effectiveProviderId())
+  const pick = (role, typed) =>
+    typed
+    || summary?.saved_models?.[role]
+    || summary?.defaults?.[role]
+    || ""
+  return {
+    fast: pick("fast", fastModelInput.value.trim()),
+    smart: pick("smart", smartModelInput.value.trim()),
+    planner: pick("planner", plannerModelInput.value.trim()),
   }
+}
+
+function saveSettings() {
+  const models = resolvedModels()
   const modelValues = Object.values(models)
   if (modelValues.some(Boolean) && !modelValues.every(Boolean)) {
     settingsError.textContent = "Fill all three model fields, or clear all three."

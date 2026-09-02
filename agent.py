@@ -812,13 +812,27 @@ class LocalAgent:
         # Snapshot before the turn mutates history: a cancelled or failed turn
         # must not leave a user message that no answer ever replies to.
         history_before = list(self._chat_history)
-        self._chat_history.append(
-            {"role": "user", "content": language_note + model_note + session_context + user_goal}
-        )
+        # Persisted/displayed history keeps the clean user text — the runtime
+        # directives are per-turn scaffolding for the model, not part of what
+        # the user said, and must not show up as their message in the GUI or
+        # get baked permanently into every future turn's context.
+        self._chat_history.append({"role": "user", "content": user_goal})
 
         # Trim history to keep only last 10 messages + system prompt
         self._chat_history = trim_history(self._chat_history, max_recent=10)
         self._chat_history = self._trim_chat_messages_to_token_limit(self._chat_history)
+
+        # Wire history sent to the model decorates only the current turn with
+        # the runtime directives; earlier turns are sent as the clean text
+        # that was actually stored. Re-trim afterwards so the decoration
+        # itself can't push the request back over the hard input limit.
+        wire_history = self._chat_history[:-1] + [
+            {
+                "role": "user",
+                "content": language_note + model_note + session_context + user_goal,
+            }
+        ]
+        wire_history = self._trim_chat_messages_to_token_limit(wire_history)
 
         content = ""
         last_error: str | None = None
@@ -840,9 +854,9 @@ class LocalAgent:
         for attempt, model in enumerate(models_to_try):
             try:
                 if self.config.stream:
-                    content = self._stream_chat_response(self._chat_history, model=model)
+                    content = self._stream_chat_response(wire_history, model=model)
                 else:
-                    safe_history = redact_value(self._chat_history)
+                    safe_history = redact_value(wire_history)
                     assert isinstance(safe_history, list)
                     response = self.client.chat.completions.create(
                         model=model,
