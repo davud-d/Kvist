@@ -62,6 +62,6 @@ def test_reader_prompt_stays_within_token_budget():
         pytest.skip("tiktoken unavailable")
     enc = tiktoken.get_encoding("cl100k_base")
     tokens = len(enc.encode(_load_role_prompt("reader")))
-    # Raised from 1500 to fit section 11 (KVIST.md): the read-only role still
-    # has to report a project rule it disproved. Nothing else may grow into it.
-    assert tokens <= 1600, f"reader prompt is {tokens} tokens (budget 1600)"
+    # 1500 → 1600 for section 11 (KVIST.md); → 1900 for the HANDOFF path
+    # (delegate_task to coder/devops). Nothing else may grow into it.
+    assert tokens <= 1900, f"reader prompt is {tokens} tokens (budget 1900)"
