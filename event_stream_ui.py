@@ -106,6 +106,8 @@ class EventStreamUI:
                 model=redact_text(str(usage.get("model", ""))),
                 kind=str(usage.get("kind", "")),
                 step=max(0, int(usage.get("step", 0))),
+                context_tokens=max(0, int(usage.get("context_tokens", 0))),
+                context_limit=max(0, int(usage.get("context_limit", 0))),
             )
         )
 

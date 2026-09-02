@@ -263,3 +263,47 @@ def test_action_call_clears_thinking_when_provider_streams_no_reasoning(agent_fa
     agent._call_model_streaming("gpt-test", [{"role": "user", "content": "x"}])
 
     assert pushed == [""]
+
+
+class _UsageCapturingUI(NullUI):
+    def __init__(self):
+        self.usages = []
+
+    def print_usage(self, usage):
+        self.usages.append(usage)
+
+
+def _emit(agent, *, kind, input_tokens=9000):
+    agent_model._emit_usage(
+        agent,
+        model="m",
+        input_tokens=input_tokens,
+        output_tokens=120,
+        kind=kind,
+    )
+    return agent._ui.usages[-1]
+
+
+def test_usage_reports_context_only_for_conversation_calls(agent_factory):
+    agent = agent_factory(max_context_tokens=120000)
+    agent._ui = _UsageCapturingUI()
+
+    for kind in ("step", "chat"):
+        usage = _emit(agent, kind=kind)
+        assert usage["context_tokens"] == usage["input_tokens"] == 9000
+
+    # A plan or report call sends its own one-off prompt: counting it as the
+    # conversation size would make the context appear to shrink mid-run.
+    for kind in ("plan", "report"):
+        assert _emit(agent, kind=kind)["context_tokens"] == 0
+
+
+def test_usage_carries_the_limit_the_prompt_is_trimmed_to(agent_factory):
+    agent = agent_factory(max_context_tokens=120000)
+    agent._ui = _UsageCapturingUI()
+    assert _emit(agent, kind="step")["context_limit"] == 120000
+
+    freeflow = agent_factory(provider="freeflow", max_context_tokens=120000)
+    freeflow._ui = _UsageCapturingUI()
+    assert _emit(freeflow, kind="step")["context_limit"] == 11000
+    assert agent_model.context_token_limit(freeflow) == 11000

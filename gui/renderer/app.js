@@ -62,6 +62,7 @@ const approvalButton = document.querySelector("#approvalButton")
 const tokenSpeedLabel = document.querySelector("#tokenSpeed")
 const metricsBar = document.querySelector("#metricsBar")
 const metricTokens = document.querySelector("#metricTokens")
+const metricContext = document.querySelector("#metricContext")
 const metricSteps = document.querySelector("#metricSteps")
 const metricThinking = document.querySelector("#metricThinking")
 const metricElapsed = document.querySelector("#metricElapsed")
@@ -115,12 +116,20 @@ let tokenSpeedTimer = 0
 // Run metrics for the top bar. Token totals come from the core's `usage`
 // events (real tiktoken counts per model call); while a response is still
 // streaming, the not-yet-committed text is added as a live estimate.
+//
+// Two quantities, deliberately kept apart: `tokensIn`/`tokensOut` are the run's
+// cumulative spend — every step resends the whole conversation, so a 12k
+// conversation over 25 steps legitimately spends 300k input tokens — while
+// `contextTokens` is the size of the latest prompt, which is the number that
+// matches what a user sees on screen.
 let runStats = freshRunStats()
 
 function freshRunStats() {
   return {
     tokensIn: 0,
     tokensOut: 0,
+    contextTokens: 0,
+    contextLimit: 0,
     steps: 0,
     reasoningSeconds: 0,
     startedAt: 0,
@@ -460,6 +469,20 @@ function resetTokenSpeed() {
   tokenSpeedLabel.classList.add("is-hidden")
 }
 
+function renderContextMetric() {
+  const used = runStats.contextTokens
+  metricContext.classList.toggle("is-hidden", used <= 0)
+  if (used <= 0) return
+  const limit = runStats.contextLimit
+  const share = limit > 0 ? Math.round((used / limit) * 100) : 0
+  metricContext.textContent = limit > 0
+    ? `ctx ${formatTokens(used)}/${formatTokens(limit)} · ${share}%`
+    : `ctx ${formatTokens(used)}`
+  metricContext.title =
+    `Conversation currently sent to the model: ${Math.round(used)} tokens` +
+    (limit > 0 ? ` of a ${Math.round(limit)} limit (the core trims above it)` : "")
+}
+
 function formatTokens(value) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
@@ -479,10 +502,13 @@ function renderRunStats() {
   for (const length of streamTextLengths.values()) pending += length / CHARS_PER_TOKEN
   const tokensIn = runStats.tokensIn
   const tokensOut = runStats.tokensOut + pending
-  metricTokens.textContent = `↓ ${formatTokens(tokensIn)} in · ↑ ${formatTokens(tokensOut)} out`
+  metricTokens.textContent = `Σ ${formatTokens(tokensIn)} in · ${formatTokens(tokensOut)} out`
   metricTokens.title =
-    `Tokens consumed this run (core tiktoken counts): ${Math.round(tokensIn)} in, ` +
+    `Total spent this run across ${runStats.steps || 0} step(s) — the context is resent ` +
+    `every step, so this is not the conversation size: ${Math.round(tokensIn)} in, ` +
     `${Math.round(runStats.tokensOut)} out${pending >= 1 ? ` (+~${Math.round(pending)} streaming)` : ""}`
+
+  renderContextMetric()
 
   metricSteps.classList.toggle("is-hidden", runStats.steps === 0)
   if (runStats.steps > 0) {
@@ -1112,11 +1138,17 @@ function handleEvent(event) {
       renderRunStats()
       addStep(event)
       break
-    case "usage":
+    case "usage": {
       runStats.tokensIn += Number(event.input_tokens) || 0
       runStats.tokensOut += Number(event.output_tokens) || 0
+      // Context replaces rather than accumulates, and only calls carrying the
+      // conversation report it (0 = keep the last known size).
+      const context = Number(event.context_tokens) || 0
+      if (context > 0) runStats.contextTokens = context
+      runStats.contextLimit = Math.max(runStats.contextLimit, Number(event.context_limit) || 0)
       renderRunStats()
       break
+    }
     case "sandbox_notice":
       addNotice(event.note)
       break

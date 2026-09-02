@@ -165,6 +165,7 @@ fail-closed).
 | `reasoning_commit` | `stream_id:str, duration_seconds:number` | раздумья закончились (сейчас пойдёт ответ); несёт длительность |
 | `message` | `markdown:str` | не-стримовое Markdown-сообщение |
 | `final` | `message:str, user_messages:string[]` | финальный ответ прогона (терминальное событие) |
+| `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | расход токенов одного завершённого вызова модели. `input_tokens`/`output_tokens` — это **траты**: их суммируют по прогону. `context_tokens` — **размер именно этого промпта**, то есть самого диалога, поэтому его надо *заменять*, а не суммировать (0 у вызовов, не несущих диалог, например `kind` `plan` или `report` — тогда сохраняйте прошлое значение). Контекст пересылается на каждом шаге, поэтому сумма трат уходит далеко вперёд от `context_tokens`: показ суммы под словом «токены» читается как гигантский диалог, которого нет. `context_limit` — бюджет, до которого ядро подрезает промпт. |
 | `debug` | `message:str` | verbose-диагностика |
 | `error` | `message:str` | строка ошибки (эмитится и если прогон бросил исключение) |
 

@@ -55,10 +55,15 @@
 
         <section id="metricsBar" class="metrics-bar is-hidden" aria-label="Run metrics">
           <span
+            id="metricContext"
+            class="metric is-hidden"
+            title="How large the conversation sent to the model is right now, against the limit the core trims to"
+          >ctx 0</span>
+          <span
             id="metricTokens"
             class="metric"
-            title="Tokens consumed this run, counted by the core (tiktoken). ↑ output includes live estimate while streaming"
-          >↓ 0 in · ↑ 0 out</span>
+            title="Total tokens consumed this run, counted by the core (tiktoken). Every step resends the context, so this grows far faster than the context itself"
+          >Σ 0 in · 0 out</span>
           <span id="metricSteps" class="metric is-hidden" title="Agent steps taken">0 steps</span>
           <span id="metricThinking" class="metric is-hidden" title="Time the model spent thinking">🧠 0s</span>
           <span class="metrics-spacer"></span>

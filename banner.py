@@ -520,6 +520,11 @@ class LivePanelState:
     plan_step: str = ""
     tokens_in: int = 0
     tokens_out: int = 0
+    # Cumulative spend (tokens_in/out) and current conversation size are
+    # different quantities: every step resends the context, so the totals run
+    # far ahead of it. Both are shown, never one standing in for the other.
+    context_tokens: int = 0
+    context_limit: int = 0
     files_changed: int = 0
     elapsed_seconds: float = 0.0
     tokens_per_second: float = 0.0
@@ -565,6 +570,15 @@ def _format_speed(tokens_per_second: float) -> str:
     return f"{tokens_per_second:.0f} tok/s"
 
 
+def _format_context(state: LivePanelState) -> str:
+    """Size of the last prompt against the trim budget, e.g. ``12.4k/120k``."""
+    if state.context_tokens <= 0:
+        return "—"
+    if state.context_limit <= 0:
+        return _format_tokens(state.context_tokens)
+    return f"{_format_tokens(state.context_tokens)}/{_format_tokens(state.context_limit)}"
+
+
 def live_panel_fields(state: LivePanelState) -> list[tuple[str, str]]:
     """Left metrics column of the live panel as ``(label, value)`` rows.
 
@@ -581,6 +595,7 @@ def live_panel_fields(state: LivePanelState) -> list[tuple[str, str]]:
             ("Action", "—"),
             ("Step", "—"),
             ("Tokens", "0"),
+            ("Context", "—"),
             ("Files", "0"),
             ("Elapsed", "—"),
             ("Speed", "—"),
@@ -597,6 +612,7 @@ def live_panel_fields(state: LivePanelState) -> list[tuple[str, str]]:
         ("Action", state.action or "—"),
         ("Step", f"{_step_position(state)} · {state.plan_step}"),
         ("Tokens", f"Σ {_format_tokens(total)}"),
+        ("Context", _format_context(state)),
         ("Files", f"{state.files_changed} edited"),
         ("Elapsed", _format_elapsed(state.elapsed_seconds)),
         ("Speed", _format_speed(state.tokens_per_second)),

@@ -311,3 +311,26 @@ def test_hello_event_carries_optional_session_state():
     # Omitted when unknown, so protocol v1 consumers see no new fields.
     assert "session" not in HelloEvent().to_dict()
     assert "has_checkpoint" not in HelloEvent().to_dict()
+
+
+def test_usage_event_separates_spend_from_context_size():
+    payload = UsageEvent(
+        input_tokens=9000,
+        output_tokens=200,
+        model="m",
+        kind="step",
+        step=4,
+        context_tokens=9000,
+        context_limit=120000,
+    ).to_dict()
+
+    assert payload["input_tokens"] == 9000
+    assert payload["context_tokens"] == 9000
+    assert payload["context_limit"] == 120000
+
+
+def test_usage_event_defaults_context_to_zero():
+    payload = UsageEvent(input_tokens=10, output_tokens=2).to_dict()
+
+    assert payload["context_tokens"] == 0
+    assert payload["context_limit"] == 0

@@ -471,6 +471,14 @@ class TerminalBannerUI:
         self._live_panel.tokens_in += max(0, int(usage.get("input_tokens", 0)))
         step_output = max(0, int(usage.get("output_tokens", 0)))
         self._live_panel.tokens_out += step_output
+        # Context replaces rather than accumulates, and only calls that carry
+        # the conversation report it (0 = keep the last known size).
+        context_tokens = max(0, int(usage.get("context_tokens", 0)))
+        if context_tokens:
+            self._live_panel.context_tokens = context_tokens
+        self._live_panel.context_limit = max(
+            self._live_panel.context_limit, int(usage.get("context_limit", 0) or 0)
+        )
         # Real generation speed: output tokens over the model call's own wall
         # time, not the gap between steps (which folds in idle/execute time).
         duration = float(usage.get("duration_seconds", 0.0) or 0.0)

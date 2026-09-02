@@ -18,6 +18,7 @@ def test_idle_state_shows_zeroed_scaffold():
         "Action",
         "Step",
         "Tokens",
+        "Context",
         "Files",
         "Elapsed",
         "Speed",
@@ -26,6 +27,7 @@ def test_idle_state_shows_zeroed_scaffold():
     values = dict(fields)
     assert values["State"] == "not started"
     assert values["Tokens"] == "0"
+    assert values["Context"] == "—"
     assert values["Files"] == "0"
 
 
@@ -38,6 +40,8 @@ def test_running_state_fields_have_no_cost_row():
         plan_step="verify",
         tokens_in=12400,
         tokens_out=3100,
+        context_tokens=9800,
+        context_limit=120000,
         files_changed=3,
         elapsed_seconds=64,
         tokens_per_second=142,
@@ -48,6 +52,8 @@ def test_running_state_fields_have_no_cost_row():
     values = dict(live_panel_fields(state))
     assert "Cost" not in values
     assert values["Tokens"] == "Σ 15.5k"
+    # Spend and conversation size are separate rows: 15.5k spent, 9.8k in context.
+    assert values["Context"] == "9.8k/120.0k"
     assert values["Files"] == "3 edited"
     assert values["Elapsed"] == "1m 04s"
     assert values["Speed"] == "142 tok/s"
@@ -277,3 +283,13 @@ def test_strip_shows_the_blocker_once_the_plan_is_exhausted():
 
     mid_plan = _running(blocker="ждёт проверки правок")
     assert "ждёт проверки правок" not in _strip(mid_plan, 70)
+
+
+def test_context_row_falls_back_when_no_limit_is_known():
+    state = LivePanelState(running=True, context_tokens=4200)
+    assert dict(live_panel_fields(state))["Context"] == "4.2k"
+
+
+def test_context_row_is_dash_until_a_conversation_call_reports_one():
+    state = LivePanelState(running=True, tokens_in=9000, context_limit=120000)
+    assert dict(live_panel_fields(state))["Context"] == "—"

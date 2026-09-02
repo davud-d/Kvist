@@ -487,6 +487,19 @@ def select_action_model_for_run(self) -> str:
     return selected_model
 
 
+# Call kinds whose prompt *is* the run's conversation context. A plan, report
+# or router call sends its own one-off prompt, so it must never be mistaken for
+# how full the conversation has grown.
+_CONTEXT_USAGE_KINDS = frozenset({"step", "chat"})
+
+
+def context_token_limit(self) -> int:
+    """Tokens one call may occupy — the budget ``_trim_prompt_to_token_limit`` enforces."""
+    if self.config.provider == "freeflow":
+        return 11000
+    return self.config.max_context_tokens
+
+
 def _emit_usage(
     self,
     *,
@@ -501,14 +514,24 @@ def _emit_usage(
     Optional capability (like the streaming reasoning channel): probed with
     ``getattr`` so UIs without a usage channel keep working. Counts are real
     tiktoken measurements of the exact prompt/response text, not estimates.
+
+    Two different quantities travel here and must not be confused. ``input_tokens``
+    /``output_tokens`` are *spend*: every step resends the whole conversation, so
+    a UI summing them across a run reaches hundreds of thousands of tokens while
+    the conversation itself is a fraction of that. ``context_tokens`` is that
+    conversation — the size of this one prompt — and is reported only for the
+    kinds that carry it (0 otherwise, meaning "leave the last known value").
     """
     callback = getattr(getattr(self, "_ui", None), "print_usage", None)
     if callback is None:
         return
+    normalized_input = max(0, int(input_tokens))
     callback(
         {
-            "input_tokens": max(0, int(input_tokens)),
+            "input_tokens": normalized_input,
             "output_tokens": max(0, int(output_tokens)),
+            "context_tokens": normalized_input if kind in _CONTEXT_USAGE_KINDS else 0,
+            "context_limit": max(0, int(context_token_limit(self))),
             "model": str(model),
             "kind": str(kind),
             "step": int(getattr(self, "_current_step", 0) or 0),
@@ -861,7 +884,7 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
       2 – medium   (truncated to ~30% when space is tight)
       3 – low      (dropped first, truncated to ~20% if kept)
     """
-    max_tokens = 11000 if self.config.provider == "freeflow" else self.config.max_context_tokens
+    max_tokens = context_token_limit(self)
     system_tokens = self._count_tokens(system_prompt)
     prompt_tokens = self._count_tokens(user_prompt)
 
