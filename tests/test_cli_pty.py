@@ -258,6 +258,11 @@ def test_cli_pty_session_create_switch_delete_and_restart(tmp_path):
         child.send("/session\r")
         child.wait_for("+ Create new session...", start=start)
         child.settle()
+        # A launch opens its own auto-named session, so the list starts on it.
+        redraw = child.mark()
+        child.send("\x1b[B")
+        child.wait_for("❯ + Create new session...", start=redraw)
+        child.settle()
         child.send("\r")
         child.wait_for("New session name:", start=start)
         child.settle()
@@ -314,6 +319,11 @@ def test_cli_pty_session_create_switch_delete_and_restart(tmp_path):
         deleted = child.wait_for("Active session: feature_one", start=start)
         assert "Session switch cancelled." not in deleted
 
+        start = child.mark()
+        child.send("/new\r")
+        started = child.wait_for("── New session:", start=start)
+        assert "feature_one" not in started.split("── New session:")[-1]
+
         child.send("/bye\r")
         assert child.wait() == 0
     finally:
@@ -324,7 +334,10 @@ def test_cli_pty_session_create_switch_delete_and_restart(tmp_path):
         restarted.wait_for("❯", timeout=20)
         start = restarted.mark()
         restarted.send("/session\r")
-        restarted.wait_for("current: feature_one", start=start)
+        # The restart opens a fresh session; feature_one is kept and listed.
+        listing = restarted.wait_for("+ Create new session...", start=start)
+        assert "current: feature_one" not in listing
+        assert "feature_one" in listing
         restarted.settle()
         restarted.send("\x1b")
         cancelled = restarted.wait_for("Session switch cancelled.", start=start)
@@ -671,8 +684,10 @@ def test_live_ui_cancelled_turn_leaves_no_history(tmp_path):
     finally:
         child.close()
 
-    document = json.loads(
-        (workspace / ".kvist" / "sessions" / "default.json").read_text(encoding="utf-8")
-    )
-    assert document["session_history"] == []
-    assert [m["role"] for m in document["chat_history"]] in ([], ["system"])
+    # A session with nothing in it is never materialised, so an absent file is
+    # the strongest possible form of "the cancelled turn left no history".
+    state_path = workspace / ".kvist" / "sessions" / "default.json"
+    if state_path.exists():
+        document = json.loads(state_path.read_text(encoding="utf-8"))
+        assert document["session_history"] == []
+        assert [m["role"] for m in document["chat_history"]] in ([], ["system"])

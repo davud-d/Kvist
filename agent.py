@@ -20,6 +20,9 @@ from agent_logging import (
     clear_checkpoint,
     create_session,
     delete_session,
+    discard_session_if_empty,
+    find_resumable_session,
+    generate_session_name,
     is_valid_session_name,
     list_sessions,
     load_active_session,
@@ -29,7 +32,6 @@ from agent_logging import (
     persist_logs,
     begin_run,
     read_session_document,
-    reset_session,
     restore_session_document,
     sanitize_for_log,
     save_active_session,
@@ -103,6 +105,7 @@ from agent_runtime import (
     _is_read_only_violation,
 )
 from change_journal import JournalUnavailableError, classify_pending_write
+from durable_json import JsonStorageCorruptError
 from deps import detect_dependency_versions
 from agent_state import AgentConfig, RunState
 from agent_web import (
@@ -286,36 +289,51 @@ class LocalAgent:
             self._session_history = self._session_history[-10:]
         self.save_session()
 
-    def new_session(self, name: str | None = None) -> None:
-        """With a name: save the current session, then create and activate a
-        fresh empty session. Without a name: reset the active session in place
-        (history, chat, and checkpoint are cleared; the name is kept). Other
-        named sessions and the workspace change journal are never touched."""
+    def new_session(self, name: str | None = None) -> str:
+        """Save the current session, then create and activate a fresh empty one.
+
+        Without a name Kvist allocates a timestamped one. This is the ``/new``
+        contract: a new session always *starts*, it never overwrites — the
+        previous conversation stays on disk and is reachable through
+        ``/session``. Other named sessions and the workspace change journal are
+        never touched. Returns the new session's name.
+
+        Durable-first: the new session is committed to disk before any
+        in-memory state is discarded, so a failed write leaves both the on-disk
+        and the in-memory session intact and usable.
+        """
         if name is not None and not is_valid_session_name(name):
             raise ValueError(f"Invalid session name: {name!r}")
-        if name is not None:
-            if name == self.current_session:
-                raise ValueError(f"Session {name!r} already exists")
-            self.save_session()
-            if not self._create_session(name):
-                raise ValueError(f"Session {name!r} already exists")
-            self._save_active_session(name)
-            self.current_session = name
-            self.executor.set_active_session(name)
-            self._reset_run_state()
-            self._restore_session_document({})
-            return
-
-        # Durable-first: commit the empty session to disk before discarding any
-        # in-memory state. If persistence fails, the exception propagates with
-        # both the on-disk and in-memory session still intact and usable.
-        self._reset_session()
+        if name is not None and name == self.current_session:
+            raise ValueError(f"Session {name!r} already exists")
+        self.save_session()
+        previous = self.current_session
+        resolved = name or self._generate_session_name()
+        if not self._create_session(resolved):
+            raise ValueError(f"Session {resolved!r} already exists")
+        self._save_active_session(resolved)
+        self.current_session = resolved
+        self.executor.set_active_session(resolved)
         self._reset_run_state()
-        self._session_history = []
-        self._last_response_language = None
+        self._restore_session_document({})
         self._pending_action = None
-        if hasattr(self, "_chat_history"):
-            del self._chat_history
+        self._discard_session_if_empty(previous)
+        return resolved
+
+    def start_fresh_session(self) -> tuple[str, str | None]:
+        """Open a launch in its own session.
+
+        Starting Kvist never continues the previous launch's conversation — a
+        new request would otherwise be planned against stale context. Returns
+        the new session's name plus the session still holding a resumable
+        checkpoint (``None`` when there is none), so the caller can point the
+        user at ``/resume``; ``resume`` itself walks there on its own.
+        """
+        try:
+            resumable = self._find_resumable_session()
+        except JsonStorageCorruptError:
+            resumable = None
+        return self.new_session(), resumable
 
     def _save_session_marker(self) -> None:
         """Keep compatibility with callers that create an empty session marker."""
@@ -328,7 +346,8 @@ class LocalAgent:
         state is mutated, so a typo cannot silently fork history. Creation is
         the explicit job of ``new_session(name)``. Switching also never
         touches the workspace: conversation state and workspace rollback
-        (change journal) are separate concepts.
+        (change journal) are separate concepts. Leaving an auto-named session
+        that was never used drops it, exactly as starting a new one does.
         """
         if not is_valid_session_name(name):
             raise ValueError(f"Invalid session name: {name!r}")
@@ -340,11 +359,13 @@ class LocalAgent:
         if not target_document:
             raise ValueError(f"Unknown session: {name!r}")
         self.save_session()
+        previous = self.current_session
         self._save_active_session(name)
         self.current_session = name
         self.executor.set_active_session(name)
         self._reset_run_state()
         self._restore_session_document(target_document)
+        self._discard_session_if_empty(previous)
 
     def _set_environment_facts(self) -> None:
         """Recompute the cheap, per-run environment facts shown in the prompt.
@@ -439,6 +460,7 @@ class LocalAgent:
     def resume(self) -> str | None:
         self._reset_cancel()
         self._reset_run_state()
+        self._follow_checkpoint_to_its_session()
         result = self._load_checkpoint()
         if result is None:
             return None
@@ -492,6 +514,29 @@ class LocalAgent:
         result = self._run_loop(user_goal, start_step=start_step)
         self._add_to_session_history(user_goal, self._state.current_agent_role, result)
         return result
+
+    def _follow_checkpoint_to_its_session(self) -> None:
+        """Activate the session holding the interrupted run, if it is elsewhere.
+
+        A launch opens its own session, so the checkpoint the user means by
+        ``/resume`` usually lives in the session they were in before. Resuming
+        into it also restores that conversation, which is the context the
+        interrupted run belongs to.
+        """
+        try:
+            if self._peek_checkpoint() is not None:
+                return
+            holder = self._find_resumable_session()
+        except JsonStorageCorruptError:
+            return
+        if holder is None or holder == self.current_session:
+            return
+        self.switch_session(holder)
+        if self._last_response_language == "ru":
+            message = f"Возобновляю прерванную задачу из сессии «{holder}»."
+        else:
+            message = f"Resuming the interrupted task from session '{holder}'."
+        self.console.print(Text(message, style="dim"))
 
     def _reconcile_pending_action(self, pending: dict[str, Any]) -> int | None:
         """Decide where to resume given an interrupted action.
@@ -691,7 +736,9 @@ class LocalAgent:
     _load_checkpoint = load_checkpoint
     _clear_checkpoint = clear_checkpoint
     _create_session = create_session
-    _reset_session = reset_session
+    _generate_session_name = generate_session_name
+    _find_resumable_session = find_resumable_session
+    _discard_session_if_empty = discard_session_if_empty
     _begin_run = begin_run
     _peek_checkpoint = peek_checkpoint
     save_session = save_session

@@ -160,3 +160,35 @@ def test_session_op_cli_round_trip_in_subprocess(tmp_path):
     failure = cli("--session-op", "switch", "--session-name", "ghost")
     assert failure["ok"] is False
     assert "Unknown session" in failure["error"]
+
+
+def test_new_op_activates_a_fresh_session_and_keeps_the_previous(agent_factory):
+    agent = agent_factory()
+    agent.new_session("feature")
+    agent._session_history = [{"goal": "shipped work"}]
+    agent.save_session()
+
+    payload = run_session_op(agent.executor.workspace, "new")
+
+    assert payload["ok"] is True
+    assert payload["active_session"] != "feature"
+    assert "feature" in payload["sessions"]
+
+
+def test_launch_op_always_rotates_and_points_at_the_interrupted_session(agent_factory):
+    agent = agent_factory()
+    agent.new_session("feature")
+    agent._session_history = [{"goal": "shipped work"}]
+    agent.save_session()
+
+    rotated = run_session_op(agent.executor.workspace, "launch")
+    assert rotated["active_session"] != "feature"
+    assert rotated["resumable_session"] is None
+
+    agent.switch_session("feature")
+    agent._save_checkpoint("interrupted task", 2)
+
+    relaunched = run_session_op(agent.executor.workspace, "launch")
+    assert relaunched["active_session"] != "feature"
+    assert relaunched["checkpoint"] is None
+    assert relaunched["resumable_session"] == "feature"

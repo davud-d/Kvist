@@ -207,6 +207,7 @@ def test_corrupt_active_marker_falls_back_to_usable_session(agent_factory):
 
 def test_active_marker_symlink_is_a_hard_storage_error(agent_factory):
     agent = agent_factory()
+    agent._session_history = [{"goal": "materialise the session"}]
     agent.save_session()
     marker = agent.executor.workspace / ".kvist" / "active_session.json"
     outside = agent.executor.workspace.parent / "outside-active-session.json"
@@ -318,7 +319,7 @@ def test_active_session_cannot_be_deleted(agent_factory):
     assert agent.current_session == "busy"
 
 
-def test_new_resets_only_the_active_session(agent_factory):
+def test_new_starts_a_fresh_session_and_keeps_every_previous_one(agent_factory):
     agent = agent_factory()
     agent.new_session("other")
     agent._session_history = [{"goal": "other work"}]
@@ -327,11 +328,15 @@ def test_new_resets_only_the_active_session(agent_factory):
     agent._session_history = [{"goal": "target work"}]
     agent._save_checkpoint("target task", 5)
 
-    agent.new_session()
+    started = agent.new_session()
 
-    assert agent.current_session == "target"
+    assert agent.current_session == started
+    assert started not in ("other", "target")
     assert agent._session_history == []
     assert agent._load_checkpoint() is None
+    agent.switch_session("target")
+    assert agent._session_history == [{"goal": "target work"}]
+    assert agent._load_checkpoint() == ("target task", 5)
     agent.switch_session("other")
     assert agent._session_history == [{"goal": "other work"}]
     assert agent._load_checkpoint() == ("other task", 4)
@@ -434,3 +439,119 @@ def test_switching_away_and_back_preserves_checkpoint_exactly(agent_factory):
     assert agent._load_checkpoint() == ("finish the feature", 9)
     assert agent._state.progress == 55
     assert agent._state.files_changed == ["app.py"]
+
+
+def test_launch_starts_its_own_session_and_keeps_the_previous_one(agent_factory):
+    agent = agent_factory()
+    agent.new_session("yesterday")
+    agent._session_history = [{"goal": "yesterday's work"}]
+    agent.save_session()
+
+    started, resumable = agent.start_fresh_session()
+
+    assert resumable is None
+    assert agent.current_session == started
+    assert started != "yesterday"
+    assert agent._session_history == []
+    assert "yesterday" in agent._list_sessions()
+
+
+def test_launch_rotates_away_from_an_interrupted_task_but_reports_it(agent_factory):
+    agent = agent_factory()
+    agent.new_session("interrupted")
+    agent._save_checkpoint("half-finished task", 3)
+
+    started, resumable = agent.start_fresh_session()
+
+    assert started != "interrupted"
+    assert resumable == "interrupted"
+    assert agent._load_checkpoint() is None
+
+
+def test_resume_walks_to_the_session_holding_the_checkpoint(agent_factory):
+    agent = agent_factory()
+    agent.new_session("interrupted")
+    agent._session_history = [{"goal": "the task being corrected"}]
+    agent._save_checkpoint("half-finished task", 3)
+    agent.start_fresh_session()
+
+    resumed: dict[str, object] = {}
+
+    def fake_run_loop(goal, start_step):
+        resumed["goal"] = goal
+        resumed["session"] = agent.current_session
+        return "done"
+
+    agent._run_loop = fake_run_loop
+
+    assert agent.resume() == "done"
+    assert resumed["goal"] == "half-finished task"
+    assert resumed["session"] == "interrupted"
+    assert agent.current_session == "interrupted"
+    # Resuming restores the conversation the interrupted run belongs to.
+    assert agent._session_history[0]["goal"] == "the task being corrected"
+
+
+def test_resume_without_any_checkpoint_anywhere_returns_none(agent_factory):
+    agent = agent_factory()
+    agent.new_session("finished")
+    agent._session_history = [{"goal": "all done"}]
+    agent.save_session()
+    started, _ = agent.start_fresh_session()
+
+    assert agent.resume() is None
+    assert agent.current_session == started
+
+
+def test_resume_picks_the_most_recent_of_several_checkpoints(agent_factory):
+    agent = agent_factory()
+    agent.new_session("older")
+    agent._save_checkpoint("older task", 1)
+    agent.new_session("newer")
+    agent._save_checkpoint("newer task", 2)
+    agent.start_fresh_session()
+
+    agent._run_loop = lambda goal, start_step: goal
+
+    assert agent.resume() == "newer task"
+    assert agent.current_session == "newer"
+
+
+def test_unused_auto_sessions_do_not_pile_up_across_launches(agent_factory):
+    agent = agent_factory()
+    first, _ = agent.start_fresh_session()
+    second, _ = agent.start_fresh_session()
+
+    assert second != first
+    assert agent._list_sessions() == [second]
+
+
+def test_a_named_session_left_empty_is_never_dropped(agent_factory):
+    agent = agent_factory()
+    agent.new_session("scratch")
+
+    agent.new_session()
+
+    assert "scratch" in agent._list_sessions()
+
+
+def test_an_untouched_session_is_never_written_to_disk(agent_factory):
+    agent = agent_factory()
+
+    agent.save_session()
+
+    assert agent._list_sessions() == []
+    assert not _session_path(agent, "default").exists()
+
+
+def test_switching_away_drops_an_unused_launch_session(agent_factory):
+    agent = agent_factory()
+    agent.new_session("keeper")
+    agent._session_history = [{"goal": "real work"}]
+    agent.save_session()
+    launched, _ = agent.start_fresh_session()
+
+    agent.switch_session("keeper")
+
+    assert agent._list_sessions() == ["keeper"]
+    assert launched not in agent._list_sessions()

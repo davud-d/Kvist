@@ -276,6 +276,8 @@ is a separate, LLM-free one-shot mode of the same binary:
 
 ```bash
 kvist --workspace WS --session-op status
+kvist --workspace WS --session-op launch
+kvist --workspace WS --session-op new
 kvist --workspace WS --session-op create --session-name feature
 kvist --workspace WS --session-op switch --session-name feature
 kvist --workspace WS --session-op delete --session-name old-work
@@ -287,8 +289,13 @@ or `1` on failure:
 
 ```json
 {"ok": true, "active_session": "feature", "sessions": ["default", "feature"],
- "checkpoint": {"goal": "…", "step": 6, "progress": 40}, "warnings": []}
+ "checkpoint": {"goal": "…", "step": 6, "progress": 40},
+ "resumable_session": "feature", "warnings": []}
 ```
+
+`checkpoint` describes the **active** session only; `resumable_session` names
+whichever session holds the newest resumable checkpoint (`null` if none), which
+after a `launch` is normally not the active one.
 
 ```json
 {"ok": false, "error": "Unknown session: 'ghost'"}
@@ -297,14 +304,22 @@ or `1` on failure:
 Semantics (identical to the terminal `/session` and `/new` commands):
 
 - `status` — active session, session list, checkpoint summary (`null` if none).
-- `create` — create **and activate** a fresh empty session; fails if it exists.
+- `launch` — **run this once when your app starts.** A launch always opens its
+  own fresh session instead of reopening the previous one. An interrupted run is
+  not lost: `status` names the session that still holds it in
+  `resumable_session`, and `--frontend stdio --resume` switches into that
+  session on its own.
+- `new` — create **and activate** a fresh session under a name Kvist allocates
+  (the terminal `/new`). The outgoing session is kept and stays switchable.
+- `create` — the same, under a name you choose; fails if it exists.
 - `switch` — activate an **existing** session; a missing or corrupt target
   fails without changing the active session. Switching never creates sessions
   and never touches workspace files.
 - `delete` — remove an inactive session (file + recovery copy). Deleting the
   active session is refused.
 - `reset` — empty the active session in place (history, chat, checkpoint); the
-  name is kept, other sessions are untouched.
+  name is kept, other sessions are untouched. Unlike `new`, this **destroys**
+  the conversation it is called on.
 
 To **resume** the active session's checkpoint, run the event frontend with
 `--resume` instead of writing a goal line:
@@ -313,8 +328,10 @@ To **resume** the active session's checkpoint, run the event frontend with
 kvist --workspace WS --frontend stdio --resume
 ```
 
-The stream is the ordinary §8 stream; if there is no checkpoint, the core
-emits an `error` event ("No saved checkpoint to resume.") and ends the run.
+The stream is the ordinary §8 stream; if there is no checkpoint **in any
+session**, the core emits an `error` event ("No saved checkpoint to resume.")
+and ends the run. Otherwise the core activates the session that holds it, so
+the `hello` event's `session` may differ from the one you launched in.
 
 ---
 

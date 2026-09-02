@@ -328,7 +328,8 @@ def test_deleted_session_backup_is_not_restored(agent_factory):
     )
     assert state_path.with_suffix(".json.bak").is_file()
 
-    agent.switch_session("default")
+    # Leave "temporary" for a fresh session; the active one cannot be deleted.
+    agent.new_session()
     assert agent._delete_session("temporary") is True
 
     assert "temporary" not in agent._list_sessions()
@@ -360,12 +361,12 @@ def test_new_named_session_refuses_to_overwrite_existing_data(agent_factory):
     agent.new_session("preserved")
     agent._session_history = [{"goal": "keep me"}]
     agent.save_session()
-    agent.switch_session("default")
+    agent.new_session("elsewhere")
 
     with pytest.raises(ValueError, match="already exists"):
         agent.new_session("preserved")
 
-    assert agent.current_session == "default"
+    assert agent.current_session == "elsewhere"
     agent.switch_session("preserved")
     assert agent._session_history == [{"goal": "keep me"}]
 

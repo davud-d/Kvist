@@ -214,6 +214,9 @@ def test_main_recovers_from_redacted_task_failure(tmp_path, monkeypatch):
 
     class FakeAgent:
         current_session = "default"
+
+        def start_fresh_session(self):
+            return self.current_session, True
         _ui = FakeUI()
         client = object()
 
@@ -304,6 +307,9 @@ def test_interrupted_session_save_does_not_crash_shutdown(tmp_path, monkeypatch)
 
     class FakeAgent:
         current_session = "default"
+
+        def start_fresh_session(self):
+            return self.current_session, True
         _ui = _ShutdownUI()
         client = object()
 
@@ -336,6 +342,9 @@ def test_failed_session_save_is_redacted_on_shutdown(tmp_path, monkeypatch):
 
     class FakeAgent:
         current_session = "default"
+
+        def start_fresh_session(self):
+            return self.current_session, True
         _ui = _ShutdownUI()
         client = object()
 
@@ -390,6 +399,9 @@ def test_bye_and_interrupt_share_one_shutdown_path(tmp_path, monkeypatch):
 
     class FakeAgent:
         current_session = "default"
+
+        def start_fresh_session(self):
+            return self.current_session, True
         _ui = _ShutdownUI()
         client = object()
 

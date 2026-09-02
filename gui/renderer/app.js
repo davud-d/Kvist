@@ -1207,7 +1207,10 @@ async function interrupt() {
 
 function activeCheckpointAvailable() {
   const project = currentProject()
-  return Boolean(sessionItem(project, activeSessionName)?.has_checkpoint)
+  if (sessionItem(project, activeSessionName)?.has_checkpoint) return true
+  // A launch opens its own session, so the interrupted run usually sits in
+  // another one; the core walks there on resume.
+  return Boolean(project?.status?.resumable_session)
 }
 
 async function resumeCheckpoint() {

@@ -178,17 +178,6 @@ async function navigationSnapshot() {
   return { workspace, projects }
 }
 
-function newSessionName(existingNames) {
-  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)
-  const base = `chat-${stamp}`
-  if (!existingNames.has(base)) return base
-  for (let suffix = 2; suffix < 1000; suffix += 1) {
-    const candidate = `${base}-${suffix}`
-    if (!existingNames.has(candidate)) return candidate
-  }
-  throw new Error("Could not allocate a new session name.")
-}
-
 async function resolveInitialWorkspace() {
   const requested = argumentValue("--workspace")
   if (requested) {
@@ -297,10 +286,8 @@ function registerIpc() {
   ipcMain.handle("kvist:new-session", async (_event, projectPath) => {
     if (runner) throw new Error("Finish or interrupt the current task first.")
     workspace = rememberWorkspace(projectPath || workspace)
-    const status = await runSessionOp(workspace, "status")
-    const name = newSessionName(new Set(status.sessions || []))
-    await runSessionOp(workspace, "create", name)
-    return { name, navigation: await navigationSnapshot() }
+    const status = await runSessionOp(workspace, "new")
+    return { name: status.active_session, navigation: await navigationSnapshot() }
   })
 
   ipcMain.handle("kvist:switch-session", async (_event, payload) => {
@@ -406,6 +393,14 @@ app.whenReady().then(async () => {
     return
   }
   workspace = rememberWorkspace(workspace)
+  // A launch starts in its own session instead of reopening the previous
+  // run's conversation. An interrupted task keeps its session so it stays
+  // resumable, so a failure here must not block startup.
+  try {
+    await runSessionOp(workspace, "launch")
+  } catch (error) {
+    lastDiagnostic = error.message
+  }
   registerIpc()
   createWindow()
 }).catch((error) => {

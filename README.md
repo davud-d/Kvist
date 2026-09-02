@@ -210,7 +210,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/role` | Select `auto`, `coder`, `reader`, `devops`, or `chat` |
 | `/session` | Create, switch, or delete named sessions |
 | `/resume` | Continue the active session's latest checkpoint |
-| `/new` | Reset the active session history and checkpoint |
+| `/new` | Start a new session; the current one stays available in `/session` |
 | `/changes` | Show agent changes recorded in this workspace |
 | `/revert` | Restore recorded agent changes when safe |
 | `/verbose` | Toggle diagnostic output |

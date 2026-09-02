@@ -261,6 +261,8 @@ fail-closed).
 
 ```bash
 kvist --workspace WS --session-op status
+kvist --workspace WS --session-op launch
+kvist --workspace WS --session-op new
 kvist --workspace WS --session-op create --session-name feature
 kvist --workspace WS --session-op switch --session-name feature
 kvist --workspace WS --session-op delete --session-name old-work
@@ -272,8 +274,13 @@ kvist --workspace WS --session-op reset
 
 ```json
 {"ok": true, "active_session": "feature", "sessions": ["default", "feature"],
- "checkpoint": {"goal": "…", "step": 6, "progress": 40}, "warnings": []}
+ "checkpoint": {"goal": "…", "step": 6, "progress": 40},
+ "resumable_session": "feature", "warnings": []}
 ```
+
+`checkpoint` описывает только **активную** сессию; `resumable_session` называет
+сессию с самым свежим checkpoint (`null`, если такой нет) — после `launch` это,
+как правило, не активная сессия.
 
 ```json
 {"ok": false, "error": "Unknown session: 'ghost'"}
@@ -282,14 +289,22 @@ kvist --workspace WS --session-op reset
 Семантика (идентична терминальным командам `/session` и `/new`):
 
 - `status` — активная сессия, список сессий, сводка checkpoint (`null`, если нет).
-- `create` — создать **и активировать** новую пустую сессию; ошибка, если есть.
+- `launch` — **вызывайте один раз при старте вашего приложения.** Запуск всегда
+  открывает собственную новую сессию вместо предыдущей. Прерванный запуск не
+  теряется: `status` называет сессию, где он остался, в `resumable_session`, а
+  `--frontend stdio --resume` сам переключается в неё.
+- `new` — создать **и активировать** новую сессию с именем, которое подбирает
+  Kvist (терминальная `/new`). Уходящая сессия сохраняется и доступна для
+  переключения.
+- `create` — то же самое, но с вашим именем; ошибка, если такая уже есть.
 - `switch` — активировать **существующую** сессию; отсутствующая или
   повреждённая цель даёт ошибку без смены активной сессии. Переключение никогда
   не создаёт сессии и не трогает файлы workspace.
 - `delete` — удалить неактивную сессию (файл + резервная копия). Удаление
   активной сессии отклоняется.
 - `reset` — опустошить активную сессию на месте (история, чат, checkpoint);
-  имя сохраняется, другие сессии не затрагиваются.
+  имя сохраняется, другие сессии не затрагиваются. В отличие от `new`, это
+  **уничтожает** ту переписку, на которой вызвано.
 
 Чтобы **возобновить** checkpoint активной сессии, запустите событийный фронтенд
 с `--resume` вместо строки задачи:
@@ -298,8 +313,10 @@ kvist --workspace WS --session-op reset
 kvist --workspace WS --frontend stdio --resume
 ```
 
-Поток — обычный поток из §8; если checkpoint нет, ядро отправляет событие
-`error` («No saved checkpoint to resume.») и завершает прогон.
+Поток — обычный поток из §8; если checkpoint нет **ни в одной сессии**, ядро
+отправляет событие `error` («No saved checkpoint to resume.») и завершает
+прогон. Иначе ядро само активирует сессию, где он лежит, — поэтому поле
+`session` в событии `hello` может отличаться от той, с которой вы запустились.
 
 ---
 

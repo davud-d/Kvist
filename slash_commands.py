@@ -33,7 +33,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         "List all available slash commands",
         aliases=("cmds",),
     ),
-    SlashCommand("new", "Reset the active session and start fresh"),
+    SlashCommand("new", "Start a new session (the current one is kept)"),
     SlashCommand("provider", "Switch or configure the LLM provider"),
     SlashCommand(
         "change-api",

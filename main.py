@@ -68,7 +68,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--session-op",
-        choices=("status", "create", "switch", "delete", "reset"),
+        choices=("status", "create", "new", "launch", "switch", "delete", "reset"),
         help="Run one headless session lifecycle operation, print JSON, exit.",
     )
     parser.add_argument(
@@ -783,6 +783,14 @@ def render_exit_message(agent: LocalAgent) -> None:
     console.print(message)
 
 
+def render_new_session_notice(name: str) -> None:
+    """Mark the start of a new session right above the input field."""
+    line = Text("── New session: ", style="green")
+    line.append(sanitize_display_text(name), style="bold green")
+    line.append(" — the previous one is kept in /session ──", style="green")
+    console.print(line)
+
+
 def render_startup_banner(
     agent: LocalAgent,
     config: AgentConfig,
@@ -805,7 +813,7 @@ def render_startup_banner(
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
     console.print("[dim]Command '/role' — select agent role (auto/coder/reader/devops/chat).[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
-    console.print("[dim]Command '/new' — reset to a fresh session.[/dim]")
+    console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
     console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
     console.print("[dim]Command /about — to get more info about agent.[/dim]")
@@ -2088,6 +2096,20 @@ def main() -> None:
 
     sync_strime_suggestion(config.provider, config.stream)
 
+    # A launch never continues the previous one's conversation. An interrupted
+    # run stays reachable: /resume walks to whichever session holds it.
+    from durable_json import JsonStorageError
+
+    try:
+        _, resumable_session = agent.start_fresh_session()
+    except (JsonStorageError, OSError, ValueError) as error:
+        resumable_session = None
+        model_warnings.append(
+            "Could not start a fresh session "
+            f"({sanitize_display_text(str(error).strip() or type(error).__name__)}); "
+            f"continuing in {agent.current_session}."
+        )
+
     interactive_screen: InteractiveScreen | None = None
     interactive_screen_error: str | None = None
     if (
@@ -2140,6 +2162,15 @@ def main() -> None:
     else:
         for warning in model_warnings:
             console.print(_display_text(warning, "yellow"))
+
+    if resumable_session is not None:
+        console.print(
+            _display_text(
+                f"An interrupted task is waiting in session {resumable_session} — "
+                "'/resume' continues it there.",
+                "yellow",
+            )
+        )
 
     interrupted = False
     # Turns finished in this process. Drives the prompt-length gate; the
@@ -2481,23 +2512,21 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/new":
-                from durable_json import JsonStorageError
-
                 try:
-                    agent.new_session()
+                    started = agent.new_session()
                 except (JsonStorageError, OSError, ValueError) as error:
                     safe_error = sanitize_display_text(
                         str(error).strip() or type(error).__name__
                     )
                     console.print(
                         _display_text(
-                            f"Reset failed safely: {safe_error}. "
+                            f"New session failed safely: {safe_error}. "
                             "The current session is unchanged.",
                             "red",
                         )
                     )
                     continue
-                console.print("[green]Session reset — fresh start.[/green]")
+                render_new_session_notice(started)
                 continue
 
             if user_goal.lower() == "/changes":

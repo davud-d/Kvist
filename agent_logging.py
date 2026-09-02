@@ -146,6 +146,96 @@ def _empty_session_document(session: str) -> dict[str, Any]:
     }
 
 
+# Prefix of the names Kvist allocates on its own (app launch, ``/new``). Only
+# such a session may be dropped automatically when it is left empty; a session
+# the user named is always kept.
+_AUTO_SESSION_PREFIX = "chat-"
+
+
+def generate_session_name(self) -> str:
+    """Allocate an unused, timestamped name for an auto-created session."""
+    base = _AUTO_SESSION_PREFIX + time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    taken = set(list_sessions(self))
+    if base not in taken:
+        return base
+    for suffix in range(2, 1000):
+        candidate = f"{base}-{suffix}"
+        if candidate not in taken:
+            return candidate
+    raise ValueError("Could not allocate a new session name")
+
+
+def session_is_empty(self, session: str) -> bool:
+    """True when a session holds no history, no chat, and no checkpoint.
+
+    A damaged session counts as non-empty: it may still hold the user's work,
+    and destroying what cannot be read is never the safe answer.
+    """
+    try:
+        document = read_session_document(self, session)
+    except JsonStorageCorruptError:
+        return False
+    if not document:
+        return True
+    return not (
+        document.get("session_history")
+        or document.get("chat_history")
+        or document.get("checkpoint")
+    )
+
+
+def discard_session_if_empty(self, session: str) -> bool:
+    """Drop an auto-created session that was left without any content."""
+    if not session.startswith(_AUTO_SESSION_PREFIX):
+        return False
+    if session == getattr(self, "current_session", "default"):
+        return False
+    if not session_is_empty(self, session):
+        return False
+    return delete_session(self, session)
+
+
+def find_resumable_session(self) -> str | None:
+    """Name the session holding the most recent resumable checkpoint.
+
+    A launch opens its own session, so an interrupted run's checkpoint is
+    usually not in the active one any more. Scanning is what keeps ``/resume``
+    reachable without pinning a launch to the previous conversation. Damaged
+    sessions are skipped rather than reported as resumable.
+    """
+    newest: tuple[float, str] | None = None
+    for session in list_sessions(self):
+        try:
+            document = read_session_document(self, session)
+        except JsonStorageCorruptError:
+            continue
+        if not document or _session_checkpoint(document) is None:
+            continue
+        updated_at = document.get("updated_at")
+        stamp = float(updated_at) if isinstance(updated_at, (int, float)) else 0.0
+        if newest is None or stamp > newest[0]:
+            newest = (stamp, session)
+    return newest[1] if newest else None
+
+
+def rotate_to_new_session(self) -> str:
+    """Create, activate, and return a fresh auto-named session.
+
+    Storage only: the caller owns whatever in-memory state belongs to the
+    outgoing session. The outgoing session is dropped when Kvist created it
+    automatically and it was never used, so repeated launches cannot litter
+    the session list with empty entries.
+    """
+    previous = getattr(self, "current_session", "default")
+    session = generate_session_name(self)
+    if not create_session(self, session):
+        raise ValueError(f"Session {session!r} already exists")
+    save_active_session(self, session)
+    self.current_session = session
+    discard_session_if_empty(self, previous)
+    return session
+
+
 def create_session(self, session: str) -> bool:
     if not is_valid_session_name(session):
         raise ValueError(f"Invalid session name: {session!r}")
@@ -308,9 +398,20 @@ def peek_checkpoint(
     }
 
 
+def _has_session_content(self) -> bool:
+    """True when the in-memory session holds something worth persisting."""
+    return bool(getattr(self, "_session_history", None)) or bool(
+        _serializable_chat_history(self)
+    )
+
+
 def save_session(self) -> None:
     session = getattr(self, "current_session", "default")
     state_path = get_state_path(self, session)
+    # An untouched session is never materialised: starting Kvist and leaving
+    # without saying anything must not add an entry to the session list.
+    if not _has_session_content(self) and not state_path.exists():
+        return
     update_json_object(
         state_path,
         lambda existing: _session_document(

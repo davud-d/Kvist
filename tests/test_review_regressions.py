@@ -342,20 +342,17 @@ def test_crash_after_append_does_not_duplicate_on_resume(tmp_path):
 
 # --- Finding 6: /new leaves the session intact when persistence fails ----------
 
-def test_new_reset_failure_preserves_session_in_memory_and_on_disk(agent_factory, monkeypatch):
-    import agent as agent_module
-
+def test_new_session_failure_preserves_session_in_memory_and_on_disk(agent_factory, monkeypatch):
     agent = agent_factory()
     agent.new_session("keeper")
     agent._session_history = [{"goal": "important work"}]
     agent._chat_history = [{"role": "user", "content": "keep me"}]
     agent.save_session()
 
-    def boom(_self):
-        raise OSError("simulated storage failure during reset")
+    def boom(_self, _session):
+        raise OSError("simulated storage failure while creating a session")
 
-    monkeypatch.setattr(agent_module, "reset_session", boom)
-    monkeypatch.setattr(type(agent), "_reset_session", boom)
+    monkeypatch.setattr(type(agent), "_create_session", boom)
 
     with pytest.raises(OSError):
         agent.new_session()

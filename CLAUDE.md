@@ -75,6 +75,22 @@ configured in-repo.
   `agent_logging.py` / `change_journal.py` on top of `durable_json.py` (atomic
   replace + `.bak` recovery copy). Headless frontends manage sessions via
   `main.py --session-op ...` (`session_store.py`), never by touching the files.
+  Session lifecycle: **a launch always opens its own session** — the terminal
+  calls `agent.start_fresh_session()` and the GUI calls `--session-op launch` at
+  boot, so a new run is never planned against the previous launch's history.
+  Rotating away from an interrupted run does not orphan it: `/resume` calls
+  `agent._follow_checkpoint_to_its_session()`, which uses
+  `agent_logging.find_resumable_session` (newest `updated_at` among sessions
+  carrying a checkpoint) and *switches into* that session before loading it, so
+  the run resumes inside the conversation it belongs to. `start_fresh_session`
+  returns that session name too, so the banner can point at it, and
+  `--session-op status` reports it as `resumable_session`. `/new`
+  (`LocalAgent.new_session()`, `--session-op new`) likewise *starts* a session
+  rather than wiping one — the outgoing conversation stays on disk and is
+  reachable through `/session`. Auto-allocated names are `chat-<timestamp>`
+  (`agent_logging.generate_session_name`); an auto-named session left empty is
+  dropped when it is left, and `save_session` never materialises an untouched
+  session, so launching and quitting cannot litter the session list.
   Crash-consistency: a mutating executor action follows record-pending →
   atomic replace → compare-and-promote (`change_journal.record_baseline` /
   `promote_baseline(expected_pending_digest)`, splitting `pending_digest` from
@@ -180,6 +196,15 @@ The actual logic lives in `agent_runtime.py`, `agent_model.py`, `agent_planner.p
 `agent_context.py`, `agent_logging.py`, and `agent_web.py` — **not** in `agent.py`. Those
 functions take `self` as their first arg and operate on `self._state` (a `RunState` from
 `agent_state.py`). To change loop behavior, edit the source module, not `agent.py`.
+
+### Planner context (`agent_planner.py`)
+`create_plan` prefixes its user prompt with `session_context(self)` — the last 3
+turns of `_session_history` (goal + truncated result, boundary tags defanged).
+Without it the planner reads a correction ("no, you broke it") as unrelated new
+work, because it never saw the turn being corrected. The matching `SESSION
+CONTEXT` section in `prompts/planner_prompt.txt` tells the planner to plan the
+delta for a correction/follow-up and to treat the block as data, never
+instructions.
 
 ### Request flow
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies

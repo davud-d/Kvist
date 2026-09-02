@@ -3,15 +3,17 @@
 
 Frontends must never read or write ``.kvist`` session files directly. This
 module is the supported core boundary for the lifecycle operations that need
-no model call: status, create, switch, delete, and reset. Operations that run
+no model call: status, create, new, launch, switch, delete, and reset. Operations that run
 the agent (submitting a goal, resuming a checkpoint) go through the event
 frontend (``event_stdio``) instead, which reports the active session and
 checkpoint presence in its hello event.
 
 Semantics match the terminal UI exactly: ``create`` creates AND activates a
-fresh empty session (like ``/session`` → new), ``switch`` activates an
-existing session and fails on a missing or corrupt target, ``delete`` refuses
-the active session, ``reset`` empties the active session in place (``/new``).
+named empty session (like ``/session`` → new), ``new`` does the same with a
+name Kvist allocates (``/new``), ``launch`` starts an app in its own fresh
+session, ``switch`` activates an existing session and fails on a missing or corrupt target,
+``delete`` refuses the active session, and ``reset`` empties the active
+session in place.
 A headless process has no in-memory conversation to save, so ``switch`` only
 moves the active marker — the outgoing session was already persisted by the
 process that owned it.
@@ -28,14 +30,16 @@ from agent_logging import (
     is_valid_session_name,
     list_sessions,
     load_active_session,
+    find_resumable_session,
     peek_checkpoint,
     read_session_document,
     reset_session,
+    rotate_to_new_session,
     save_active_session,
 )
 from durable_json import JsonStorageCorruptError
 
-SESSION_OPS = ("status", "create", "switch", "delete", "reset")
+SESSION_OPS = ("status", "create", "switch", "delete", "reset", "new", "launch")
 
 
 @dataclass(slots=True)
@@ -123,6 +127,7 @@ class SessionStore:
             "sessions": sessions,
             "session_items": self._session_items(sessions),
             "checkpoint": peek_checkpoint(self),
+            "resumable_session": find_resumable_session(self),
             "warnings": list(self._storage_warnings),
         }
 
@@ -157,6 +162,20 @@ class SessionStore:
         reset_session(self)
         return self.status()
 
+    def new(self) -> dict[str, Any]:
+        rotate_to_new_session(self)
+        return self.status()
+
+    def launch(self) -> dict[str, Any]:
+        """Start an app run in its own session (the launch contract).
+
+        An interrupted run stays reachable through ``resumable_session`` in the
+        returned status, and ``--frontend stdio --resume`` walks to it, so a
+        launch never has to inherit the previous conversation to keep it.
+        """
+        rotate_to_new_session(self)
+        return self.status()
+
 
 def run_session_op(
     workspace: str | Path,
@@ -167,10 +186,8 @@ def run_session_op(
     if op not in SESSION_OPS:
         raise ValueError(f"Unknown session operation: {op!r}")
     store = SessionStore(workspace)
-    if op == "status":
-        payload = store.status()
-    elif op == "reset":
-        payload = store.reset()
+    if op in ("status", "reset", "new", "launch"):
+        payload = getattr(store, op)()
     else:
         if not name:
             raise ValueError(f"Session operation {op!r} requires a session name")
