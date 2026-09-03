@@ -85,6 +85,16 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         choices=("changes", "revert"),
         help="Run one headless change-journal operation, print JSON, exit.",
     )
+    parser.add_argument(
+        "--config-op",
+        choices=("add-custom-provider", "delete-custom-provider"),
+        help="Run one headless config operation, print JSON, exit (no LLM call).",
+    )
+    parser.add_argument(
+        "--config-payload",
+        help="JSON payload for --config-op. Omit to read it from stdin (used so "
+        "an API key never lands in argv).",
+    )
     return parser
 
 
@@ -137,6 +147,11 @@ from llm_clients import (
     validate_omniroute_model_id,
 )
 from redaction import sanitize_display_text
+from custom_provider import (
+    CustomProviderError,
+    normalize_custom_provider_payload,
+    validate_provider_name,
+)
 from system_context import ensure_workspace_instructions
 from ui import AgentUI
 from terminal_banner import TerminalBannerUI
@@ -1256,13 +1271,10 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         if name is None:
             console.print("[yellow]Provider creation cancelled.[/yellow]")
             return None
-        name = name.strip().lower()
-        if not name:
-            console.print("[red]Provider name cannot be empty.[/red]")
-            continue
-        # Validate characters
-        if not all(c.islower() or c.isdigit() or c in "-_" for c in name):
-            console.print("[red]Name can only contain lowercase letters, digits, hyphens and underscores.[/red]")
+        try:
+            name = validate_provider_name(name)
+        except CustomProviderError as error:
+            console.print(_display_text(str(error), "red"))
             continue
         if name in existing_names:
             console.print(
@@ -1529,7 +1541,11 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         return None
 
     # ── Save ──────────────────────────────────────────────────────────
-    save_custom_provider(name, {
+    # Route through the same normaliser the GUI uses so the persisted shape is
+    # defined in exactly one place. The wizard already applied these rules
+    # interactively, so this pass is idempotent.
+    name, provider_config = normalize_custom_provider_payload({
+        "name": name,
         "label": label,
         "protocol": protocol,
         "base_url": base_url,
@@ -1537,6 +1553,7 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
         "models": models,
         "streaming": streaming,
     })
+    save_custom_provider(name, provider_config)
     provider_id = f"{CUSTOM_PROVIDER_PREFIX}{name}"
     console.print(
         _display_text(
@@ -1924,6 +1941,40 @@ def main() -> None:
         try:
             payload = build_config_info()
         except (OSError, ValueError) as error:
+            failure = {
+                "ok": False,
+                "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+            }
+            print(_json.dumps(failure, ensure_ascii=False))
+            raise SystemExit(1) from error
+        print(_json.dumps(payload, ensure_ascii=False))
+        return
+
+    if args.config_op:
+        import json as _json
+
+        from config_info import build_config_info
+
+        try:
+            # The payload can carry an API key, so the frontend pipes it on
+            # stdin rather than argv (argv is visible in `ps` / `/proc`).
+            payload_text = args.config_payload
+            if payload_text is None:
+                payload_text = sys.stdin.read()
+            raw = _json.loads(payload_text or "null")
+            if args.config_op == "add-custom-provider":
+                name, provider_config = normalize_custom_provider_payload(raw)
+                save_custom_provider(name, provider_config)
+            else:
+                name = str(raw.get("name", "")).strip() if isinstance(raw, dict) else ""
+                if not name or not delete_custom_provider(name):
+                    raise CustomProviderError(f"Custom provider {name!r} not found.")
+            payload = {
+                "ok": True,
+                "provider_id": f"{CUSTOM_PROVIDER_PREFIX}{name}",
+                "info": build_config_info(),
+            }
+        except (CustomProviderError, ValueError, OSError) as error:
             failure = {
                 "ok": False,
                 "error": sanitize_display_text(str(error).strip() or type(error).__name__),

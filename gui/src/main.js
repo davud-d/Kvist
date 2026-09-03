@@ -2,7 +2,7 @@
 
 const fs = require("node:fs")
 const path = require("node:path")
-const { execFile } = require("node:child_process")
+const { execFile, spawn } = require("node:child_process")
 const { promisify } = require("node:util")
 
 const { app, BrowserWindow, dialog, ipcMain, screen, shell } = require("electron")
@@ -123,6 +123,42 @@ async function runConfigInfo() {
   }
   if (!payload.ok) throw new Error(payload.error || "Could not read configuration.")
   return payload
+}
+
+// The payload can hold an API key, so it goes in on stdin — never argv, which
+// is world-readable via `ps` and `/proc`.
+function runConfigOp(op, payload) {
+  const command = resolveCommand()
+  const args = [...command.prefixArgs, "--workspace", workspace, "--config-op", op]
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.command, args, {
+      cwd: workspace,
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    })
+    let stdout = ""
+    const timer = setTimeout(() => child.kill("SIGKILL"), 30000)
+    child.stdout.setEncoding("utf8")
+    child.stdout.on("data", (chunk) => { stdout += chunk })
+    child.on("error", () => {
+      clearTimeout(timer)
+      reject(new Error("Kvist could not update its configuration."))
+    })
+    child.on("close", () => {
+      clearTimeout(timer)
+      const line = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1)
+      let result
+      try {
+        result = JSON.parse(line || "")
+      } catch {
+        reject(new Error("Kvist returned an invalid configuration response."))
+        return
+      }
+      if (!result.ok) reject(new Error(result.error || "Configuration update failed."))
+      else resolve(result)
+    })
+    child.stdin.end(JSON.stringify(payload ?? {}))
+  })
 }
 
 async function runJournalOp(op) {
@@ -251,6 +287,16 @@ function registerIpc() {
   ipcMain.handle("kvist:navigation", () => navigationSnapshot())
 
   ipcMain.handle("kvist:config-info", () => runConfigInfo())
+
+  ipcMain.handle("kvist:add-custom-provider", async (_event, payload) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runConfigOp("add-custom-provider", payload)
+  })
+
+  ipcMain.handle("kvist:delete-custom-provider", async (_event, payload) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runConfigOp("delete-custom-provider", payload)
+  })
 
   ipcMain.handle("kvist:changes", () => runJournalOp("changes"))
 

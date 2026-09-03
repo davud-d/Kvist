@@ -36,6 +36,31 @@ const plannerModelInput = document.querySelector("#plannerModelInput")
 const customProviderField = document.querySelector("#customProviderField")
 const providerStatus = document.querySelector("#providerStatus")
 const providerDetail = document.querySelector("#providerDetail")
+const addCustomProviderButton = document.querySelector("#addCustomProviderButton")
+const customProviderBackdrop = document.querySelector("#customProviderBackdrop")
+const customProviderForm = document.querySelector("#customProviderForm")
+const customProviderClose = document.querySelector("#customProviderClose")
+const customProviderCancel = document.querySelector("#customProviderCancel")
+const customProviderError = document.querySelector("#customProviderError")
+const cpConfirmView = document.querySelector("#cpConfirmView")
+const cpFormView = document.querySelector("#cpFormView")
+const cpConfirmCancel = document.querySelector("#cpConfirmCancel")
+const cpConfirmContinue = document.querySelector("#cpConfirmContinue")
+const cpFields = {
+  name: document.querySelector("#cpName"),
+  label: document.querySelector("#cpLabel"),
+  protocol: document.querySelector("#cpProtocol"),
+  apiKey: document.querySelector("#cpApiKey"),
+  baseUrl: document.querySelector("#cpBaseUrl"),
+  addV1: document.querySelector("#cpAddV1"),
+  addV1Field: document.querySelector("#cpAddV1Field"),
+  streaming: document.querySelector("#cpStreaming"),
+  oneModel: document.querySelector("#cpOneModel"),
+  fast: document.querySelector("#cpModelFast"),
+  smart: document.querySelector("#cpModelSmart"),
+  planner: document.querySelector("#cpModelPlanner"),
+  fastHint: document.querySelector("#cpModelFastHint"),
+}
 const paletteFilter = document.querySelector("#paletteFilter")
 const paletteList = document.querySelector("#paletteList")
 const infoBackdrop = document.querySelector("#infoBackdrop")
@@ -778,6 +803,107 @@ function hideSettings() {
   settingsBackdrop.classList.add("is-hidden")
   settingsError.textContent = ""
   if (!promptInput.disabled) promptInput.focus()
+}
+
+// ── Custom provider creation ────────────────────────────────────────────────
+// The terminal walks the user through a wizard; the GUI collects the same
+// fields in one form and hands them to `--config-op add-custom-provider`, which
+// runs `custom_provider.normalize_custom_provider_payload` — the single source
+// of truth for what a saved provider looks like.
+
+function syncCustomProviderForm() {
+  const openai = cpFields.protocol.value === "openai"
+  cpFields.addV1Field.hidden = !openai
+  const one = cpFields.oneModel.checked
+  for (const role of ["smart", "planner"]) {
+    cpFields[role].disabled = one
+    cpFields[role].closest(".field").hidden = one
+  }
+  cpFields.fastHint.textContent = one ? "Used for every role" : ""
+}
+
+function openCustomProviderForm() {
+  customProviderError.textContent = ""
+  customProviderForm.reset()
+  cpFields.addV1.checked = true
+  cpFields.oneModel.checked = true
+  syncCustomProviderForm()
+  cpConfirmView.hidden = false
+  cpFormView.hidden = true
+  hidePalette()
+  customProviderBackdrop.classList.remove("is-hidden")
+  cpConfirmContinue.focus()
+}
+
+function revealCustomProviderFields() {
+  cpConfirmView.hidden = true
+  cpFormView.hidden = false
+  cpFields.name.focus()
+}
+
+function hideCustomProviderForm() {
+  customProviderBackdrop.classList.add("is-hidden")
+  customProviderError.textContent = ""
+}
+
+function customProviderPayload() {
+  let baseUrl = cpFields.baseUrl.value.trim()
+  const openai = cpFields.protocol.value === "openai"
+  if (openai && cpFields.addV1.checked && baseUrl) {
+    const withScheme = /^https?:\/\//i.test(baseUrl) ? baseUrl : `https://${baseUrl}`
+    try {
+      if (!new URL(withScheme).pathname.replace(/\/+$/, "").replace(/^\/+/, "")) {
+        baseUrl = `${baseUrl.replace(/\/+$/, "")}/v1`
+      }
+    } catch {
+      // Let the backend reject a malformed URL with its own message.
+    }
+  }
+  const models = {}
+  for (const role of MODEL_ROLES) {
+    models[role] = cpFields.oneModel.checked
+      ? cpFields.fast.value.trim()
+      : cpFields[role].value.trim()
+  }
+  return {
+    name: cpFields.name.value.trim(),
+    label: cpFields.label.value.trim(),
+    protocol: cpFields.protocol.value,
+    base_url: baseUrl,
+    api_key: cpFields.apiKey.value.trim(),
+    streaming: cpFields.streaming.checked,
+    models,
+  }
+}
+
+async function submitCustomProvider() {
+  customProviderError.textContent = "Creating…"
+  let result
+  try {
+    result = await window.kvist.addCustomProvider(customProviderPayload())
+  } catch (error) {
+    customProviderError.textContent = error.message
+    return
+  }
+  configInfo = result.info
+  renderProviderOptions()
+  if (optionExists(result.provider_id)) providerSelect.value = result.provider_id
+  customProviderInput.value = ""
+  hideCustomProviderForm()
+  refreshSettingsDetail()
+}
+
+let providerChoiceBeforeNew = ""
+
+function handleProviderSelectChange() {
+  if (providerSelect.value !== "__new__") {
+    providerChoiceBeforeNew = providerSelect.value
+    refreshSettingsDetail()
+    return
+  }
+  providerSelect.value = providerChoiceBeforeNew
+  refreshSettingsDetail()
+  openCustomProviderForm()
 }
 
 // Pin the models the dialog is actually showing for the chosen provider, so a
@@ -1540,10 +1666,32 @@ settingsBackdrop.addEventListener("keydown", (event) => {
   hideSettings()
 })
 
-for (const control of [providerSelect, roleSelect, approvalModeSelect]) {
+for (const control of [roleSelect, approvalModeSelect]) {
   control.addEventListener("change", refreshSettingsDetail)
 }
+providerSelect.addEventListener("change", handleProviderSelectChange)
 customProviderInput.addEventListener("input", refreshSettingsDetail)
+
+addCustomProviderButton.addEventListener("click", openCustomProviderForm)
+customProviderClose.addEventListener("click", hideCustomProviderForm)
+customProviderCancel.addEventListener("click", hideCustomProviderForm)
+cpConfirmCancel.addEventListener("click", hideCustomProviderForm)
+cpConfirmContinue.addEventListener("click", revealCustomProviderFields)
+customProviderBackdrop.addEventListener("click", (event) => {
+  if (event.target === customProviderBackdrop) hideCustomProviderForm()
+})
+customProviderBackdrop.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return
+  event.preventDefault()
+  event.stopPropagation()
+  hideCustomProviderForm()
+})
+cpFields.protocol.addEventListener("change", syncCustomProviderForm)
+cpFields.oneModel.addEventListener("change", syncCustomProviderForm)
+customProviderForm.addEventListener("submit", (event) => {
+  event.preventDefault()
+  void submitCustomProvider()
+})
 
 settingsClose.addEventListener("click", hideSettings)
 settingsCancel.addEventListener("click", hideSettings)

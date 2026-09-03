@@ -1383,6 +1383,46 @@ kbd {
   white-space: nowrap;
 }
 
+.settings-panel .checkbox-field {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 8px;
+  color: #a9c3cf;
+  font-size: 11px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.settings-panel .checkbox-field input {
+  width: auto;
+  margin-top: 1px;
+}
+
+.link-button {
+  justify-self: start;
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.link-button:hover,
+.link-button:focus-visible {
+  outline: none;
+  text-decoration: underline;
+}
+
+.cp-confirm-text {
+  margin: 0;
+  color: #a9c3cf;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .provider-detail {
   display: flex;
   flex-direction: column;

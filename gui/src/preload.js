@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld("kvist", {
   bootstrap: () => ipcRenderer.invoke("kvist:bootstrap"),
   navigation: () => ipcRenderer.invoke("kvist:navigation"),
   configInfo: () => ipcRenderer.invoke("kvist:config-info"),
+  addCustomProvider: (payload) => ipcRenderer.invoke("kvist:add-custom-provider", payload),
+  deleteCustomProvider: (name) => ipcRenderer.invoke("kvist:delete-custom-provider", { name }),
   chooseWorkspace: () => ipcRenderer.invoke("kvist:choose-workspace"),
   activateProject: (workspace) => ipcRenderer.invoke("kvist:activate-project", workspace),
   newSession: (workspace) => ipcRenderer.invoke("kvist:new-session", workspace),

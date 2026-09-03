@@ -179,6 +179,7 @@
                 <input id="customProviderInput" autocomplete="off" placeholder="custom:my-provider" />
               </label>
             </div>
+            <button type="button" id="addCustomProviderButton" class="link-button">＋ Add custom provider…</button>
             <div id="providerDetail" class="provider-detail"></div>
           </section>
 
@@ -239,6 +240,107 @@
           <span class="settings-spacer"></span>
           <button id="settingsCancel" type="button">Cancel</button>
           <button class="settings-save" type="submit">Apply</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="customProviderBackdrop" class="overlay is-hidden" role="presentation">
+      <form id="customProviderForm" class="settings-panel" role="dialog" aria-modal="true" aria-label="Add custom provider">
+        <div class="settings-header">
+          <div>
+            <div class="settings-title">Add custom provider</div>
+            <div class="settings-subtitle">An OpenAI- or Anthropic-compatible endpoint</div>
+          </div>
+          <button id="customProviderClose" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+
+        <div id="cpConfirmView">
+          <div class="settings-body">
+            <p class="cp-confirm-text">
+              This adds a new OpenAI- or Anthropic-compatible provider. You'll enter
+              its base URL, an optional API key and the model IDs to use. Continue?
+            </p>
+          </div>
+          <div class="settings-actions">
+            <span class="settings-spacer"></span>
+            <button type="button" id="cpConfirmCancel">Cancel</button>
+            <button type="button" id="cpConfirmContinue" class="settings-save">Continue</button>
+          </div>
+        </div>
+
+        <div id="cpFormView" hidden>
+        <div class="settings-body">
+          <section class="settings-block">
+            <div class="field-grid two">
+              <label class="field">
+                <span>Provider ID</span>
+                <input id="cpName" autocomplete="off" placeholder="my-llama" />
+              </label>
+              <label class="field">
+                <span>Display name</span>
+                <input id="cpLabel" autocomplete="off" placeholder="My Llama" />
+              </label>
+            </div>
+            <div class="field-grid two">
+              <label class="field">
+                <span>Protocol</span>
+                <select id="cpProtocol">
+                  <option value="openai">OpenAI-compatible</option>
+                  <option value="anthropic">Anthropic-compatible</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>API key <small class="block-note">optional</small></span>
+                <input id="cpApiKey" type="password" autocomplete="off" />
+              </label>
+            </div>
+            <label class="field">
+              <span>Base URL</span>
+              <input id="cpBaseUrl" autocomplete="off" placeholder="https://api.example.com/v1" />
+            </label>
+            <label class="checkbox-field" id="cpAddV1Field">
+              <input id="cpAddV1" type="checkbox" checked />
+              <span>Append <code>/v1</code> if the URL has no path (most OpenAI gateways need it)</span>
+            </label>
+            <label class="checkbox-field">
+              <input id="cpStreaming" type="checkbox" />
+              <span>Endpoint has verified streaming support</span>
+            </label>
+          </section>
+
+          <section class="settings-block">
+            <div class="block-head">
+              <span class="block-title">Models</span>
+            </div>
+            <label class="checkbox-field">
+              <input id="cpOneModel" type="checkbox" checked />
+              <span>Use one model ID for all roles</span>
+            </label>
+            <div class="field-grid three">
+              <label class="field">
+                <span>Fast</span>
+                <input id="cpModelFast" autocomplete="off" />
+                <small id="cpModelFastHint" class="field-hint"></small>
+              </label>
+              <label class="field">
+                <span>Smart</span>
+                <input id="cpModelSmart" autocomplete="off" />
+              </label>
+              <label class="field">
+                <span>Planner</span>
+                <input id="cpModelPlanner" autocomplete="off" />
+              </label>
+            </div>
+          </section>
+
+          <div id="customProviderError" class="settings-error" aria-live="polite"></div>
+        </div>
+
+        <div class="settings-actions">
+          <span class="settings-spacer"></span>
+          <button id="customProviderCancel" type="button">Cancel</button>
+          <button class="settings-save" type="submit">Create provider</button>
+        </div>
         </div>
       </form>
     </div>
