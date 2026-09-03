@@ -502,6 +502,7 @@ def persist_logs(self, user_goal: str) -> None:
             "success_criteria": self._state.plan_info.success_criteria if self._state.plan_info else [],
             "risks": self._state.plan_info.risks if self._state.plan_info else [],
         },
+        "status": self._state.run_status,
         "progress": self._state.progress,
         "summary": self._state.summary,
         "files_read": self._state.files_read,
@@ -589,6 +590,10 @@ def save_checkpoint(
         "error_patterns": self._state.error_patterns,
         "seen_actions": self._state.seen_actions,
         "completed_plan_steps": list(self._state.completed_plan_steps),
+        "run_status": self._state.run_status,
+        "hard_denial_rules": self._state.hard_denial_rules,
+        "recovery_signatures": list(self._state.recovery_signatures),
+        "recovery_pending": self._state.recovery_pending,
         "user_messages": self._state.user_messages,
         "dependency_versions": self._state.dependency_versions,
         "web_facts": self._state.web_facts,
@@ -693,6 +698,10 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.error_patterns = data.get("error_patterns", {})
     self._state.seen_actions = data.get("seen_actions", {})
     self._state.completed_plan_steps = set(data.get("completed_plan_steps", []))
+    self._state.run_status = str(data.get("run_status") or "in_progress")
+    self._state.hard_denial_rules = data.get("hard_denial_rules", [])
+    self._state.recovery_signatures = set(data.get("recovery_signatures", []))
+    self._state.recovery_pending = bool(data.get("recovery_pending", False))
     self._state.user_messages = data.get("user_messages", [])
     self._state.dependency_versions = data.get("dependency_versions", {})
     self._state.web_facts = data.get("web_facts", [])

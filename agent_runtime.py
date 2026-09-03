@@ -65,6 +65,25 @@ _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "fin
 # terminal action, not to a phase label.
 _PLAN_STEP_BANDS = {"inspect": 15, "plan": 30, "edit": 55, "verify": 85}
 
+# Minimum distinct alternative approaches the model must attempt after a hard
+# environment denial before final_answer is allowed.
+_RECOVERY_ATTEMPTS_REQUIRED = 2
+
+
+def _is_hard_environment_denial(error_text: str) -> bool:
+    lowered = str(error_text).casefold()
+    return "hard security denial" in lowered or "hard deny" in lowered
+
+
+def _hard_denial_rule_text(error_text: str) -> str:
+    """The single rule sentence from a hard-denial error, without the prefix."""
+    text = str(error_text).strip()
+    marker = "hard security denial:"
+    idx = text.casefold().find(marker)
+    if idx != -1:
+        text = text[idx + len(marker):].strip()
+    return text.splitlines()[0].strip() if text else "environment security policy"
+
 
 def _note_run_context(self, **facts: Any) -> None:
     """Forward per-step run facts to a UI that exposes the live-panel channel.
@@ -382,6 +401,7 @@ def finalize_run(
 
     cleanup_steps: list[tuple[str, Any]] = [
         ("join pending prefetch", lambda: _join_pending_prefetch(self)),
+        ("seal run status", lambda: seal_run_status(self)),
         ("stop live UI", self._ui.stop_live),
         ("persist run log", lambda: self._persist_logs(user_goal)),
         ("flush performance log", self._perf_logger.flush),
@@ -1207,6 +1227,10 @@ def register_feedback(
     self._state.recent_events = self._state.recent_events[-self.config.summary_recent_events :]
     self._state.recent_result_details.append(detail_line)
     self._state.recent_result_details = self._state.recent_result_details[-self.config.detailed_feedback_limit :]
+    self._update_recovery_tracking(
+        command, ok, "" if ok else self._feedback_error_for_model(feedback)
+    )
+    self._refresh_completion_requirements()
     self._state.summary = self._build_summary()
 
     self._state.step_logs.append(
@@ -1379,6 +1403,7 @@ def register_final_answer(self, step: int, message: str) -> None:
         self._state.completed_plan_steps.add(item)
     self._refresh_completion_requirements()
     self._state.progress = 100
+    self._state.run_status = "completed"
     self._state.step_logs.append(
         {
             "step": step,
@@ -1404,9 +1429,8 @@ def register_safety_refusal(self, step: int, reason: str) -> None:
 def plan_progress(self) -> int:
     if not self._state.plan_info or not self._state.plan_info.plan:
         return self._state.progress
-    done = len(self._state.completed_plan_steps)
     total = len(self._state.plan_info.plan)
-    return round(done / total * 100)
+    return round(_effective_completed_plan_steps(self) / total * 100)
 
 
 def record_error(self, error_text: str) -> None:
@@ -2588,7 +2612,162 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
         )
         required_actions.update(_VERIFY_ONLY_ACTIONS)
 
+    for kind, text in _evidence_completion_blockers(self):
+        kinds.append(kind)
+        blockers.append(text)
+        if kind == "no_recovery":
+            required_actions.update(_READ_ONLY_ACTIONS)
+            required_actions.update(_WRITE_ACTIONS)
+            required_actions.update({"run_shell", "git_status", "git_diff"})
+        else:
+            required_actions.update(_WRITE_ACTIONS)
+
     return blockers, kinds, sorted(required_actions)
+
+
+def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
+    """Blockers that hold regardless of plan-step accounting.
+
+    Loose plan-step matching can mark every step complete on a run that read
+    and changed nothing, which silences every plan-based blocker. These checks
+    look only at hard evidence (files touched, recorded errors, denials).
+    """
+    st = self._state
+    ru = st.task_language == "ru"
+    out: list[tuple[str, str]] = []
+
+    change_task = (
+        st.create_goal
+        or st.modify_goal
+        or bool(st.required_artifacts)
+        or _plan_requires_file_changes(self)
+    )
+    verify_only_done = st.verify_only_goal and bool(st.verification_evidence)
+    if change_task and not st.read_only_goal and not verify_only_done and not st.files_changed:
+        out.append((
+            "no_changes",
+            "Completion blocked: this task changes files but files_changed is empty. "
+            "Make the actual edit before final_answer."
+            if not ru else
+            "Завершение заблокировано: задача меняет файлы, но files_changed пуст. "
+            "Внеси реальную правку до final_answer.",
+        ))
+
+    if (
+        st.progress >= 100
+        and st.error_history
+        and (st.recovery_pending or not st.files_changed)
+    ):
+        out.append((
+            "errors_present",
+            "Completion blocked: progress is 100% but there are unresolved errors "
+            f"({st.error_history[-1]}). Resolve them or report honestly."
+            if not ru else
+            "Завершение заблокировано: прогресс 100%, но есть неустранённые ошибки "
+            f"({st.error_history[-1]}). Устрани их или честно сообщи об этом.",
+        ))
+
+    if (
+        (change_task or st.error_history)
+        and not st.files_read
+        and not st.files_changed
+        and not st.verification_evidence
+    ):
+        out.append((
+            "no_activity",
+            "Completion blocked: no file was read and no file was changed. "
+            "Inspect the workspace and do the work before final_answer."
+            if not ru else
+            "Завершение заблокировано: ни один файл не прочитан и не изменён. "
+            "Изучи проект и выполни работу до final_answer.",
+        ))
+
+    if st.recovery_pending and st.hard_denial_rules:
+        tried = len(st.recovery_signatures)
+        rule = st.hard_denial_rules[-1]
+        out.append((
+            "no_recovery",
+            f"Completion blocked: the environment refused an approach ({rule}). "
+            f"Try at least {_RECOVERY_ATTEMPTS_REQUIRED} different strategies before "
+            f"final_answer; only {tried} tried so far."
+            if not ru else
+            f"Завершение заблокировано: среда отклонила подход ({rule}). "
+            f"Попробуй минимум {_RECOVERY_ATTEMPTS_REQUIRED} разные стратегии обхода "
+            f"до final_answer; пока попыток: {tried}.",
+        ))
+
+    return out
+
+
+def _effective_completed_plan_steps(self) -> int:
+    """Completed plan steps that survive scrutiny.
+
+    On a clean run this is the raw matched count. On a blocked run the loose
+    matcher is not trusted: without a file change or verification evidence
+    nothing is closed, and the count can never exceed (total - remaining).
+    """
+    plan_info = self._state.plan_info
+    if not plan_info or not plan_info.plan:
+        return 0
+    total = len(plan_info.plan)
+    done = len(self._state.completed_plan_steps & set(plan_info.plan))
+    if not self._state.completion_blockers:
+        return max(0, min(done, total))
+    if not self._state.files_changed and not self._state.verification_evidence:
+        return 0
+    remaining = len(_remaining_plan_steps(self))
+    return max(0, min(done, total - remaining))
+
+
+def _blocked_progress(self) -> int:
+    plan_info = self._state.plan_info
+    if not plan_info or not plan_info.plan:
+        return min(self._state.progress, 99)
+    return round(_effective_completed_plan_steps(self) / len(plan_info.plan) * 100)
+
+
+def seal_run_status(self) -> None:
+    """Fix the final run_status/progress/summary from one shared state.
+
+    Runs at finalize so a run that stopped on the step budget or an early stop
+    still reports "blocked" (not a stale in-progress percentage) when blockers
+    remain, and progress reflects steps actually closed.
+    """
+    self._refresh_completion_requirements()
+    if self._state.completion_blockers:
+        self._state.run_status = "blocked"
+        self._state.progress = _blocked_progress(self)
+    elif self._state.progress >= 100:
+        self._state.run_status = "completed"
+    else:
+        self._state.run_status = "in_progress"
+    self._state.summary = self._build_summary()
+
+
+def update_recovery_tracking(self, command: AgentCommand, ok: bool, error_text: str) -> None:
+    """Maintain the post-hard-denial recovery counter.
+
+    A hard denial resets the counter and arms the policy. Every later action
+    with a new signature (success or failure) counts as one distinct strategy;
+    two clear the policy.
+    """
+    if not ok and error_text and _is_hard_environment_denial(error_text):
+        self._push_unique(
+            self._state.hard_denial_rules,
+            _hard_denial_rule_text(error_text),
+            limit=6,
+        )
+        self._state.recovery_signatures = set()
+        self._state.recovery_pending = True
+        return
+
+    if not self._state.recovery_pending:
+        return
+    if command.action.type in ("final_answer", "report_to_user"):
+        return
+    self._state.recovery_signatures.add(self._action_signature(command))
+    if len(self._state.recovery_signatures) >= _RECOVERY_ATTEMPTS_REQUIRED:
+        self._state.recovery_pending = False
 
 
 def _plan_requires_file_changes(self) -> bool:

@@ -96,11 +96,14 @@ from agent_runtime import (
     reset_run_state,
     mark_file_write_applied,
     run_loop,
+    seal_run_status,
     set_required_next_actions,
     update_completed_plan_steps,
     update_progress,
+    update_recovery_tracking,
     update_state_from_success,
     update_verification_evidence,
+    _effective_completed_plan_steps,
     _is_report_artifact_blocked,
     _is_read_only_violation,
 )
@@ -696,6 +699,9 @@ class LocalAgent:
     _register_final_answer = register_final_answer
     _register_safety_refusal = register_safety_refusal
     _plan_progress = plan_progress
+    _effective_completed_plan_steps = _effective_completed_plan_steps
+    _seal_run_status = seal_run_status
+    _update_recovery_tracking = update_recovery_tracking
     _refresh_completion_requirements = refresh_completion_requirements
     _record_error = record_error
     _feedback_to_line = feedback_to_line

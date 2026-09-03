@@ -103,6 +103,18 @@ class RunState:
     completion_blocker_kinds: list[str] = field(default_factory=list)
     required_next_actions: list[str] = field(default_factory=list)
     completion_ready: bool = False
+    # Sealed outcome of the run: "in_progress" until finalize, then "completed"
+    # or "blocked". Derived from the same state as progress/summary, never from
+    # the model's own claim of being done.
+    run_status: str = "in_progress"
+    # Rule texts of hard environment denials seen this run (e.g. a sandbox
+    # security refusal). Recovery policy: after a denial the model must try at
+    # least two distinct alternative approaches before it may finish.
+    hard_denial_rules: list[str] = field(default_factory=list)
+    # Distinct action signatures attempted since the most recent hard denial.
+    # Reset on each new denial; the policy is satisfied at len() >= 2.
+    recovery_signatures: set[str] = field(default_factory=set)
+    recovery_pending: bool = False
     recent_feedback: list[str] = field(default_factory=list)
     recent_events: list[str] = field(default_factory=list)
     recent_result_details: list[str] = field(default_factory=list)

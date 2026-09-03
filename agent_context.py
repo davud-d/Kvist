@@ -393,8 +393,12 @@ def build_summary(self, language: str = "en") -> str:
 
     if self._state.plan_info:
         parts.append(
-            f"Completed plan steps: {len(self._state.completed_plan_steps)}/{len(self._state.plan_info.plan)}"
+            f"Completed plan steps: {self._effective_completed_plan_steps()}"
+            f"/{len(self._state.plan_info.plan)}"
         )
+
+    if self._state.run_status == "blocked" or self._state.completion_blockers:
+        parts.append(f"Status: blocked ({self._state.progress}% done)")
 
     if self._state.files_read:
         parts.append(f"Read: " + ", ".join(self._state.files_read[-6:]))
