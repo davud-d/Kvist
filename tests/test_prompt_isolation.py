@@ -33,9 +33,12 @@ def test_action_model_uses_current_agent_role_prompt(tmp_path):
 
     call_action_model(Agent(), "test task")
 
-    assert captured["system_prompt"] == _load_role_prompt("devops")
-    assert captured["system_prompt"] != _load_role_prompt("coder")
-    assert captured["system_prompt"] != _load_role_prompt("chat")
+    # build_role_system_prompt appends the selected style and this workspace's
+    # instructions after the role prompt, so the role prompt is a prefix, not
+    # the whole system prompt.
+    assert captured["system_prompt"].startswith(_load_role_prompt("devops"))
+    assert not captured["system_prompt"].startswith(_load_role_prompt("coder"))
+    assert not captured["system_prompt"].startswith(_load_role_prompt("chat"))
 
 
 def test_prompt_dir_resolves_to_correct_directory():
