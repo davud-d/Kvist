@@ -177,6 +177,9 @@ from user_config import (
     save_role_selection,
     get_saved_planning_enabled,
     save_planning_enabled,
+    get_saved_style,
+    get_style_options,
+    save_style_configuration,
     secret_label_for_key,
     set_provider_secret,
 )
@@ -1154,6 +1157,51 @@ def choose_role(current_role: str | None, verbose: bool) -> str | None:
     )
 
     return selected
+
+
+def choose_style(verbose: bool) -> tuple[str, str] | None:
+    """Pick a response style for chat or for the action-loop agents.
+
+    Returns (style_type, style_name) or None if the user cancelled at any step.
+    """
+    ui = TerminalBannerUI(console=console, verbose=verbose)
+
+    style_type = ui.choose_option(
+        title="Style for which mode?",
+        options=[
+            {
+                "value": "chat",
+                "label": "Chat",
+                "description": "Tone of the chat role's answers",
+            },
+            {
+                "value": "agents",
+                "label": "Agents",
+                "description": "Tone and habits of the coder/reader/devops action loop",
+            },
+        ],
+        current_value="chat",
+        help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
+    )
+    if style_type is None:
+        return None
+
+    current_style = get_saved_style(style_type)
+    options = [
+        {"value": name, "label": name, "description": description}
+        for name, description in get_style_options(style_type).items()
+    ]
+
+    selected = ui.choose_option(
+        title=f"Select {style_type} style",
+        current_value=current_style,
+        options=options,
+        help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
+    )
+    if selected is None:
+        return None
+
+    return style_type, selected
 
 
 def confirm_revert(file_count: int, verbose: bool) -> bool:
@@ -2560,6 +2608,24 @@ def main() -> None:
                 else:
                     for warning in model_warnings:
                         console.print(_display_text(warning, "yellow"))
+                continue
+
+            if user_goal.lower() == "/style":
+                with paused_interactive_screen(interactive_screen):
+                    result = choose_style(verbose)
+                if result is None:
+                    console.print("[yellow]Style selection cancelled.[/yellow]")
+                    continue
+                style_type, style_name = result
+                save_style_configuration(style_type, style_name)
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                console.print(
+                    _display_text(
+                        f"{style_type.capitalize()} style set to: {style_name}",
+                        "green",
+                    )
+                )
                 continue
 
             if user_goal.lower() == "/new":

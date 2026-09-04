@@ -422,13 +422,44 @@ def _load_role_prompt(role: str) -> str:
     return text
 
 
-def build_role_system_prompt(self, role: str) -> str:
-    """Role prompt plus this workspace's own instruction file, if it has one.
+def _read_style_prompt(style_type: str) -> str:
+    """Text of the style the user selected for this family, "" when none.
 
-    Read per call rather than cached, so editing KVIST.md takes effect on the
-    next step instead of the next session.
+    The prompt for each style lives in its own file under
+    `prompts/styles/<chat|agents>/<slug>.txt`; a missing or empty file means
+    "no style instruction". Read per call rather than cached, so a `/style`
+    change (or an edit to the file) lands on the next step.
+    """
+    from user_config import get_saved_style, style_slug
+
+    slug = style_slug(get_saved_style(style_type))
+    path = _STYLES_DIR / style_type / f"{slug}.txt"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, NotADirectoryError):
+        return ""
+
+
+def _style_context(role: str) -> str:
+    """The user's selected response-style instruction for this role, if any.
+
+    Sits high in the system prompt — right after the role prompt, before
+    workspace instructions.
+    """
+    prompt = _read_style_prompt("chat" if role == "chat" else "agents")
+    if not prompt:
+        return ""
+    return f"## RESPONSE STYLE\n\n{prompt}"
+
+
+def build_role_system_prompt(self, role: str) -> str:
+    """Role prompt, the user's response style, then this workspace's own
+    instruction file — each read per call so edits land on the next step.
     """
     base = _load_role_prompt(role)
+    style = _style_context(role)
+    if style:
+        base = f"{base}\n\n{style}"
     project = workspace_instructions_context(self.executor.workspace, role)
     return f"{base}\n\n{project}" if project else base
 

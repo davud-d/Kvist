@@ -6,6 +6,7 @@ import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, Literal
 
 from openai import AuthenticationError, OpenAI
 
@@ -70,6 +71,63 @@ _SECRET_LABELS = {
     DEEPSEEK_API_KEY_KEY: "DeepSeek API key",
 }
 
+StyleType = Literal["chat", "agents"]
+
+STYLES_KEY = "styles"
+DEFAULT_STYLE = "Default"
+
+# One-line summaries shown in the `/style` picker. The keys are the style names;
+# the same keys must exist in the matching *_PROMPTS dict below.
+_STYLE_CHAT_DESCRIPTIONS = {
+    "Default": "Cool, professional, concise, to the point.",
+    "Friendly": "Casual and friendly, but still professional and concise.",
+    "No-Friendly": "Only work, no small talk. Professional and concise, not friendly.",
+    "Honest": "Nonchalant and honest, reserved, won't just go along with the crowd.",
+    "Energetic": "Energetic, keeps you moving toward the goal.",
+}
+
+_STYLE_AGENTS_DESCRIPTIONS = {
+    "Default": "Does what was asked. Answers for everything it touched, and nothing else.",
+    "Senior-dev": "Does what the result needs, not only what was asked. Never makes a point of it.",
+    "Friendly Developer": "The same work, but you are never left alone with the result.",
+    "Perfectionist": "Quality is part of the task, not a task for later. Pays in time.",
+    "Paranoid": "An outage costs more than time spent checking. Looks before irreversible steps.",
+    "Minimalist": "Every line is an obligation for years. Extends a task only toward deletion.",
+    "Explainer": "A fix it cannot explain is no different from a wrong one. Finds the cause.",
+    "Fast-and-dirty": "A prototype may be bad if it is honestly called one. Says so first.",
+    "Architect": "A change that blurs the structure is negative even when the task is done.",
+}
+
+# The system-prompt text for each style lives in its own file under
+# prompts/styles/<chat|agents>/<slug>.txt (slug = style_slug(name)). A missing
+# or empty file means "no style instruction" (the behaviour of "Default").
+
+
+def _style_descriptions(style_type: StyleType) -> dict[str, str]:
+    if style_type == "chat":
+        return _STYLE_CHAT_DESCRIPTIONS
+    return _STYLE_AGENTS_DESCRIPTIONS
+
+
+def style_slug(name: str) -> str:
+    """Style name -> its prompt-file stem, e.g. 'Friendly Developer' -> 'friendly-developer'."""
+    return name.strip().lower().replace(" ", "-")
+
+
+def get_style_options(style_type: StyleType) -> dict[str, str]:
+    """Style name -> one-line description, for the `/style` picker."""
+    return dict(_style_descriptions(style_type))
+
+
+def get_saved_style(style_type: StyleType, config_path: Path | None = None) -> str:
+    """The saved style name for this mode, or 'Default' if none is set."""
+    payload = load_user_config(config_path)
+    styles = payload.get(STYLES_KEY)
+    if isinstance(styles, dict):
+        value = styles.get(style_type)
+        if isinstance(value, str) and value in _style_descriptions(style_type):
+            return value
+    return DEFAULT_STYLE
 
 def get_user_config_path() -> Path:
     return Path.home() / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME
@@ -544,6 +602,23 @@ def delete_custom_provider(name: str, config_path: Path | None = None) -> bool:
 
     _update_user_config(delete_provider, config_path)
     return deleted
+
+
+def save_style_configuration(
+    style_type: StyleType,
+    style: str,
+    config_path: Path | None = None,
+) -> bool:
+    """Save a style configuration. Returns True if saved, False if not found."""
+    if style not in _style_descriptions(style_type):
+        return False
+
+    def set_style(config: dict) -> dict:
+        config.setdefault(STYLES_KEY, {})[style_type] = style
+        return config
+
+    _update_user_config(set_style, config_path)
+    return True
 
 
 def _normalize_provider_models(models: object) -> dict[str, str]:
