@@ -12,16 +12,21 @@ SANDBOX_ROOT="$PLUGIN_DIR/.intellijPlatform/sandbox"
 PLUGIN_NAME="kvist-intellij"
 LINUX_BINARY_SRC="$DIST_DIR/kvist"
 LINUX_BINARY_DST="$PLUGIN_DIR/bin/linux/kvist.bin"
+MIN_JAVA_VERSION=17
+PREFERRED_JAVA_VERSION=21
 
 log() {
 	printf '===> %s\n' "$1"
 }
 
 find_python() {
-	if [[ -x "$PROJECT_DIR/venv/bin/python" ]]; then
-		printf '%s\n' "$PROJECT_DIR/venv/bin/python"
-		return 0
-	fi
+	local venv_dir
+	for venv_dir in "$PROJECT_DIR/.venv" "$PROJECT_DIR/venv"; do
+		if [[ -x "$venv_dir/bin/python" ]]; then
+			printf '%s\n' "$venv_dir/bin/python"
+			return 0
+		fi
+	done
 
 	if command -v python3 >/dev/null 2>&1; then
 		command -v python3
@@ -34,6 +39,45 @@ find_python() {
 	fi
 
 	printf 'Python interpreter not found.\n' >&2
+	return 1
+}
+
+java_major_version() {
+	local java_bin="$1/bin/java"
+	[[ -x "$java_bin" ]] || return 1
+	"$java_bin" -version 2>&1 | sed -n '1s/.*version "\([0-9][0-9]*\).*/\1/p'
+}
+
+# Gradle 9 refuses to run on JVM < 17 and the Kotlin toolchain targets 21, so the
+# system default JDK (Java 8/11 on many distros) cannot build this plugin.
+find_java_home() {
+	local candidate version
+	local best="" best_version=0
+
+	for candidate in "${JAVA_HOME:-}" /usr/lib/jvm/*; do
+		[[ -n "$candidate" && -d "$candidate" ]] || continue
+		version="$(java_major_version "$candidate" || true)"
+		[[ -n "$version" ]] || continue
+		(( version >= MIN_JAVA_VERSION )) || continue
+
+		if (( version == PREFERRED_JAVA_VERSION )); then
+			printf '%s\n' "$candidate"
+			return 0
+		fi
+
+		if (( best_version == 0 || version < best_version )); then
+			best="$candidate"
+			best_version="$version"
+		fi
+	done
+
+	if [[ -n "$best" ]]; then
+		printf '%s\n' "$best"
+		return 0
+	fi
+
+	printf 'No JDK %s+ found (needed by Gradle; JAVA_HOME=%s).\n' \
+		"$MIN_JAVA_VERSION" "${JAVA_HOME:-unset}" >&2
 	return 1
 }
 
@@ -76,10 +120,15 @@ refresh_sandbox_binary() {
 }
 
 PYTHON_BIN="$(find_python)"
+JAVA_HOME="$(find_java_home)"
+export JAVA_HOME
+PATH="$JAVA_HOME/bin:$PATH"
+export PATH
 
 log "Project directory: $PROJECT_DIR"
 log "Plugin directory: $PLUGIN_DIR"
 log "Python: $PYTHON_BIN"
+log "Java: $JAVA_HOME (version $(java_major_version "$JAVA_HOME"))"
 
 if [[ ! -f "$PROJECT_DIR/kvist.spec" ]]; then
 	printf 'kvist.spec not found in %s\n' "$PROJECT_DIR" >&2
