@@ -452,6 +452,30 @@ def _style_context(role: str) -> str:
     return f"## RESPONSE STYLE\n\n{prompt}"
 
 
+def planner_style_context() -> str:
+    """The working style, framed for the planner instead of the executor.
+
+    A style file speaks to the agent that will do the work ("you leave it",
+    "you fix it"), so handing it over unframed makes the planner answer in
+    character instead of planning. The preamble says whose beliefs these are and
+    what they are allowed to change; `planner_prompt.txt` carries the matching
+    bound after the block.
+    """
+    prompt = _read_style_prompt("agents")
+    if not prompt:
+        return ""
+    return (
+        "## EXECUTOR WORKING STYLE\n\n"
+        "The run you are planning will be carried out by an agent that holds "
+        "the beliefs below. They address that agent, not you: you never act "
+        "them out and never answer in their voice. Plan the run this agent will "
+        "actually perform — which steps it takes, what it treats as finished, "
+        "what it refuses to do — so the plan and the executor do not pull in "
+        "different directions.\n\n"
+        f"{prompt}"
+    )
+
+
 def build_role_system_prompt(self, role: str) -> str:
     """Role prompt, the user's response style, then this workspace's own
     instruction file — each read per call so edits land on the next step.

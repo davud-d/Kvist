@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from agent_model import planner_style_context
 from agent_state import PlanInfo
 from parser import CommandValidationError, load_single_json_object
 from redaction import defang_prompt_boundary_tags
@@ -112,10 +113,13 @@ def create_plan(self, user_goal: str) -> PlanInfo:
         "Build a short plan, success criteria, and estimate complexity"
     )
 
+    style = planner_style_context()
+    system_prompt = f"{PLANNER_PROMPT}\n\n{style}" if style else PLANNER_PROMPT
+
     try:
         raw = self._call_model(
             model=self.config.fast_model,
-            system_prompt=PLANNER_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=prompt,
             usage_kind="plan",
         )

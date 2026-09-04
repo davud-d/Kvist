@@ -95,7 +95,9 @@ def test_planner_uses_planner_prompt_not_role_prompt():
             return False
     create_plan(Agent(), "test task")
 
-    assert captured["system_prompt"] == PLANNER_PROMPT
-    assert captured["system_prompt"] != _load_role_prompt("coder")
-    assert captured["system_prompt"] != _load_role_prompt("devops")
-    assert captured["system_prompt"] != _load_role_prompt("chat")
+    # create_plan appends the executor's working style after the planner prompt,
+    # so the planner prompt is a prefix, not the whole system prompt.
+    assert captured["system_prompt"].startswith(PLANNER_PROMPT)
+    assert not captured["system_prompt"].startswith(_load_role_prompt("coder"))
+    assert not captured["system_prompt"].startswith(_load_role_prompt("devops"))
+    assert not captured["system_prompt"].startswith(_load_role_prompt("chat"))
