@@ -239,7 +239,27 @@ EN/RU) → LLM router call on `fast_model` → keyword fallback → default `cha
 Three roles per provider: **fast**, **smart**, **planner**. A run uses fast by default
 and escalates to smart on complexity="complex", parse errors, consecutive errors, or
 stagnation — unless the user explicitly pinned a model. Role system prompts are loaded
-and cached from `prompts/{coder,devops,chat,planner,router}_prompt.txt`.
+and cached from `prompts/system/{coder,devops,chat,planner,router}_prompt.txt`.
+
+User-selectable styles live apart, in `prompts/styles/{agents,chat}/<slug>.txt`
+(`agents` covers coder/reader/devops, `chat` the chat role). **One session, one
+style**: the choice is stamped into the session document when the session starts
+(`agent_logging.session_styles`, restored by `restore_session_document` *before*
+its empty-document exit) and every read inside that session resolves it through
+`agent_model._session_style_name`, never through the global preference. Without
+that, a plan built on step 0 and the steps that follow it could come from
+different beliefs — a paranoid plan executed by a minimalist that no longer
+believes in the pre-check step it was handed. `/style` writes the global
+preference and calls `agent.adopt_session_style`: an untouched session adopts the
+new choice (nothing came out of the old one yet), a session that already holds
+work keeps its stamp and the change starts with the next session. The selected
+*file* is still re-read per call, so editing that file lands on the next step.
+The planner gets the same `agents` style through `agent_model.planner_style_context`,
+wrapped in a preamble that says the beliefs address the executor, not the planner;
+the matching bound is the `EXECUTOR WORKING STYLE` section of `planner_prompt.txt`
+(it shapes steps, success criteria and risks, never the schema, the step limit,
+or how much work is taken on). The reporter (`report_prompt.txt`) does not see the
+style.
 
 ### Provider abstraction (`llm_clients.py`)
 Three providers, normalized names `openai` / `freeflow` / `omniroute`. OpenAI and OmniRoute
