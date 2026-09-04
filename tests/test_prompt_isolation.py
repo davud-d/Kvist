@@ -39,13 +39,13 @@ def test_action_model_uses_current_agent_role_prompt(tmp_path):
 
 
 def test_prompt_dir_resolves_to_correct_directory():
-    """_PROMPT_DIR must point to prompts/, NOT the stale prompts/prompts/ copy."""
+    """_PROMPT_DIR must point to prompts/system/, NOT a stale prompts/prompts/ copy."""
     from pathlib import Path
     from agent_model import _PROMPT_DIR
 
     resolved = _PROMPT_DIR.resolve()
-    # Must NOT be the stale duplicate directory
-    assert resolved.name == "prompts", f"_PROMPT_DIR resolves to {resolved}, expected .../prompts"
+    assert resolved.name == "system", f"_PROMPT_DIR resolves to {resolved}, expected .../prompts/system"
+    assert resolved.parent.name == "prompts", f"_PROMPT_DIR resolves to {resolved}"
     # Must NOT end with prompts/prompts
     assert not str(resolved).endswith("prompts/prompts"), (
         f"_PROMPT_DIR points to stale duplicate: {resolved}"
@@ -55,7 +55,7 @@ def test_prompt_dir_resolves_to_correct_directory():
 def test_prompt_duplicate_directory_not_loaded():
     """Verify that prompts/prompts/ (if it exists) is NOT the active prompt source."""
     from pathlib import Path
-    from agent_model import _PROMPT_DIR
+    from agent_model import _PROMPTS_ROOT as _PROMPT_DIR
 
     stale_dir = _PROMPT_DIR / "prompts"
     if stale_dir.exists():

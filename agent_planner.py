@@ -11,7 +11,11 @@ from redaction import defang_prompt_boundary_tags
 _PROMPT_DIR = Path(__file__).resolve().parent
 
 try:
-    PLANNER_PROMPT = (_PROMPT_DIR / "prompts" / "planner_prompt.txt").read_text(encoding="utf-8").strip()
+    PLANNER_PROMPT = (
+        (_PROMPT_DIR / "prompts" / "system" / "planner_prompt.txt")
+        .read_text(encoding="utf-8")
+        .strip()
+    )
 except FileNotFoundError:
     raise FileNotFoundError("Could not find the planner prompt.")
 

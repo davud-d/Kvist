@@ -49,10 +49,14 @@ except ImportError:
     tiktoken = None  # type: ignore[assignment]
 
 _TOKEN_ENCODING_UNINITIALIZED = object()
-_PROMPT_DIR = Path(__file__).resolve().parent / "prompts"
+_PROMPTS_ROOT = Path(__file__).resolve().parent / "prompts"
+# Role prompts and user-selectable styles are different kinds of text and live
+# apart: prompts/system/ is ours, prompts/styles/ is the user's choice.
+_PROMPT_DIR = _PROMPTS_ROOT / "system"
+_STYLES_DIR = _PROMPTS_ROOT / "styles"
 
 # ── Safety: detect stale prompts/prompts/ duplicate ──────────────────────
-_STALE_PROMPT_DIR = _PROMPT_DIR / "prompts"
+_STALE_PROMPT_DIR = _PROMPTS_ROOT / "prompts"
 if _STALE_PROMPT_DIR.is_dir():
     import sys as _sys
 

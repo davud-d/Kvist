@@ -184,10 +184,10 @@ write_file, append_file, replace_in_file, list_dir, list_tree, find_files, searc
 git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, final_answer,
 report_to_user). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
-validation, the executor dispatch, and the role prompts in `prompts/` — the sync is
+validation, the executor dispatch, and the role prompts in `prompts/system/` — the sync is
 enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
 `report_to_user` are terminal actions handled in `run_loop` (never reach the executor);
-`report_to_user` additionally routes through the chat reporter (`prompts/report_prompt.txt`).
+`report_to_user` additionally routes through the chat reporter (`prompts/system/report_prompt.txt`).
 
 ### LocalAgent composition pattern (important & non-obvious)
 `agent.py::LocalAgent` is assembled by binding functions from other modules as methods
@@ -202,7 +202,7 @@ functions take `self` as their first arg and operate on `self._state` (a `RunSta
 turns of `_session_history` (goal + truncated result, boundary tags defanged).
 Without it the planner reads a correction ("no, you broke it") as unrelated new
 work, because it never saw the turn being corrected. The matching `SESSION
-CONTEXT` section in `prompts/planner_prompt.txt` tells the planner to plan the
+CONTEXT` section in `prompts/system/planner_prompt.txt` tells the planner to plan the
 delta for a correction/follow-up and to treat the block as data, never
 instructions.
 
@@ -341,7 +341,7 @@ JSON encoding does not escape that terminator, so the payload is passed through
 `<PROJECT_INSTRUCTIONS>` becomes `[tag removed by Kvist]` and cannot close its own
 block. Trade-off to know when hacking on Kvist *with* Kvist: a file that literally
 contains those tag strings (this repo's own `agent_runtime.py`, `redaction.py`,
-`prompts/`) reads back with the marker in place — visible, never silent, and an edit
+`prompts/system/`) reads back with the marker in place — visible, never silent, and an edit
 built on it fails to match rather than corrupting the file.
 
 ## Conventions

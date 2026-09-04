@@ -95,7 +95,7 @@ def test_runtime_prompt_does_not_require_template_phrase(agent_factory):
 def test_role_prompts_have_no_conflicting_english_only_directive():
     from pathlib import Path
 
-    prompts_dir = Path(__file__).resolve().parent.parent / "prompts"
+    prompts_dir = Path(__file__).resolve().parent.parent / "prompts" / "system"
     for name in ("coder_prompt.txt", "devops_prompt.txt", "chat_prompt.txt", "report_prompt.txt"):
         content = (prompts_dir / name).read_text(encoding="utf-8")
         assert "only in English" not in content, name
@@ -105,7 +105,7 @@ def test_role_prompts_do_not_pin_user_facing_copy_to_one_language():
     """Fixed wording that survives the language directive silently overrides it."""
     from pathlib import Path
 
-    prompts_dir = Path(__file__).resolve().parent.parent / "prompts"
+    prompts_dir = Path(__file__).resolve().parent.parent / "prompts" / "system"
     for path in sorted(prompts_dir.glob("*_prompt.txt")):
         content = path.read_text(encoding="utf-8").lower()
         assert "regardless of the language" not in content, path.name
@@ -116,7 +116,7 @@ def test_chat_prompt_does_not_script_the_refusal():
     from pathlib import Path
 
     content = (
-        Path(__file__).resolve().parent.parent / "prompts" / "chat_prompt.txt"
+        Path(__file__).resolve().parent.parent / "prompts" / "system" / "chat_prompt.txt"
     ).read_text(encoding="utf-8")
     assert "I apologize" not in content
     assert "Respond: \"" not in content

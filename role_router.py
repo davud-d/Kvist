@@ -51,7 +51,9 @@ def has_no_write_marker(text: str) -> bool:
     lowered = text.casefold()
     return any(marker in lowered for marker in _NO_WRITE_MARKERS)
 
-_ROUTER_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "router_prompt.txt"
+_ROUTER_PROMPT_PATH = (
+    Path(__file__).resolve().parent / "prompts" / "system" / "router_prompt.txt"
+)
 _ROUTER_PROMPT_CACHE: str | None = None
 
 
