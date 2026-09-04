@@ -95,6 +95,30 @@ def _validated_session_document(
     return data
 
 
+_STYLE_FAMILIES = ("agents", "chat")
+
+
+def session_styles(data: dict[str, Any]) -> dict[str, str]:
+    """The styles a session was opened with, falling back to the current pick.
+
+    One session, one style: a plan and the steps that follow it must never come
+    from different beliefs, so the choice is stamped when the session starts and
+    every run inside it resolves the same files. A session written before styles
+    existed carries none; it adopts the current preference once, when it is
+    loaded, and keeps it from then on.
+    """
+    from user_config import get_saved_style
+
+    stored = data.get("styles")
+    resolved: dict[str, str] = {}
+    for family in _STYLE_FAMILIES:
+        value = stored.get(family) if isinstance(stored, dict) else None
+        resolved[family] = (
+            value if isinstance(value, str) and value.strip() else get_saved_style(family)
+        )
+    return resolved
+
+
 def _session_checkpoint(data: dict[str, Any]) -> dict[str, Any] | None:
     checkpoint = data.get("checkpoint")
     if isinstance(checkpoint, dict) and "goal" in checkpoint:
@@ -127,6 +151,7 @@ def _session_document(
         "session_history": getattr(self, "_session_history", []),
         "chat_history": _serializable_chat_history(self),
         "response_language": getattr(self, "_last_response_language", None),
+        "styles": getattr(self, "_session_styles", None) or session_styles({}),
         "checkpoint": checkpoint,
     }
     sanitized = redact_value(document)
@@ -142,6 +167,7 @@ def _empty_session_document(session: str) -> dict[str, Any]:
         "session_history": [],
         "chat_history": [],
         "response_language": None,
+        "styles": session_styles({}),
         "checkpoint": None,
     }
 
@@ -423,6 +449,34 @@ def save_session(self) -> None:
     save_active_session(self, session)
 
 
+def session_style(self, style_type: str) -> str:
+    """The style this session runs under, whatever the global preference says."""
+    styles = getattr(self, "_session_styles", None)
+    if isinstance(styles, dict) and isinstance(styles.get(style_type), str):
+        return styles[style_type]
+    return session_styles({})[style_type]
+
+
+def adopt_session_style(self, style_type: str, style_name: str) -> bool:
+    """Apply a style choice to the active session, when that is still honest.
+
+    One session, one style. A session that has produced nothing yet can adopt
+    the new choice: no plan, no step and no answer came out of the old one. A
+    session that already holds work keeps the style its history was made with,
+    and the choice starts with the next session. Returns True when the active
+    session adopted it.
+    """
+    styles = getattr(self, "_session_styles", None)
+    if not isinstance(styles, dict):
+        styles = session_styles({})
+        self._session_styles = styles
+    if _has_session_content(self):
+        return False
+    styles[style_type] = style_name
+    save_session(self)
+    return True
+
+
 def read_session_document(
     self,
     session: str | None = None,
@@ -452,6 +506,9 @@ def restore_session_document(self, data: dict[str, Any]) -> bool:
     self._last_response_language = None
     if hasattr(self, "_chat_history"):
         del self._chat_history
+    # Stamped before the empty-document exit: a session that starts here owns a
+    # style from its first step, not from its first save.
+    self._session_styles = session_styles(data)
     if not data:
         return False
 

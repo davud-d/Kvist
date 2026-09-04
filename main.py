@@ -2618,6 +2618,9 @@ def main() -> None:
                     continue
                 style_type, style_name = result
                 save_style_configuration(style_type, style_name)
+                # One session, one style: this session takes the new choice only
+                # while nothing has been produced under the old one.
+                adopted = agent.adopt_session_style(style_type, style_name)
                 if interactive_screen is not None:
                     interactive_screen.set_config(config)
                 console.print(
@@ -2626,6 +2629,14 @@ def main() -> None:
                         "green",
                     )
                 )
+                if not adopted:
+                    console.print(
+                        _display_text(
+                            f"This session keeps {agent.session_style(style_type)}. "
+                            "The new style starts with the next session (/new).",
+                            "yellow",
+                        )
+                    )
                 continue
 
             if user_goal.lower() == "/new":

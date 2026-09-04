@@ -32,7 +32,9 @@ from agent_logging import (
     persist_logs,
     begin_run,
     read_session_document,
+    adopt_session_style,
     restore_session_document,
+    session_style,
     sanitize_for_log,
     save_active_session,
     save_checkpoint,
@@ -751,6 +753,8 @@ class LocalAgent:
     _load_session = load_session
     _read_session_document = read_session_document
     _restore_session_document = restore_session_document
+    adopt_session_style = adopt_session_style
+    session_style = session_style
     _save_active_session = save_active_session
     _list_sessions = list_sessions
     _delete_session = delete_session

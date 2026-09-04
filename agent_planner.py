@@ -113,7 +113,7 @@ def create_plan(self, user_goal: str) -> PlanInfo:
         "Build a short plan, success criteria, and estimate complexity"
     )
 
-    style = planner_style_context()
+    style = planner_style_context(self)
     system_prompt = f"{PLANNER_PROMPT}\n\n{style}" if style else PLANNER_PROMPT
 
     try:

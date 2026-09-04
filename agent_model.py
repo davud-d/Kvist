@@ -422,17 +422,36 @@ def _load_role_prompt(role: str) -> str:
     return text
 
 
-def _read_style_prompt(style_type: str) -> str:
-    """Text of the style the user selected for this family, "" when none.
+def _session_style_name(self, style_type: str) -> str:
+    """The style this session was opened with, not the current global pick.
+
+    One session, one style: `agent_logging.restore_session_document` stamps the
+    choice when a session starts, so a plan built on step 0 and the steps that
+    follow it always come from the same beliefs.
+    """
+    styles = getattr(self, "_session_styles", None)
+    if isinstance(styles, dict):
+        name = styles.get(style_type)
+        if isinstance(name, str) and name.strip():
+            return name
+
+    from user_config import get_saved_style
+
+    return get_saved_style(style_type)
+
+
+def _read_style_prompt(self, style_type: str) -> str:
+    """Text of this session's style for that family, "" when none.
 
     The prompt for each style lives in its own file under
     `prompts/styles/<chat|agents>/<slug>.txt`; a missing or empty file means
-    "no style instruction". Read per call rather than cached, so a `/style`
-    change (or an edit to the file) lands on the next step.
+    "no style instruction". The file is read per call rather than cached, so an
+    edit to the selected file lands on the next step; which file is selected is
+    fixed for the session.
     """
-    from user_config import get_saved_style, style_slug
+    from user_config import style_slug
 
-    slug = style_slug(get_saved_style(style_type))
+    slug = style_slug(_session_style_name(self, style_type))
     path = _STYLES_DIR / style_type / f"{slug}.txt"
     try:
         return path.read_text(encoding="utf-8").strip()
@@ -440,19 +459,19 @@ def _read_style_prompt(style_type: str) -> str:
         return ""
 
 
-def _style_context(role: str) -> str:
-    """The user's selected response-style instruction for this role, if any.
+def _style_context(self, role: str) -> str:
+    """This session's response-style instruction for this role, if any.
 
     Sits high in the system prompt — right after the role prompt, before
     workspace instructions.
     """
-    prompt = _read_style_prompt("chat" if role == "chat" else "agents")
+    prompt = _read_style_prompt(self, "chat" if role == "chat" else "agents")
     if not prompt:
         return ""
     return f"## RESPONSE STYLE\n\n{prompt}"
 
 
-def planner_style_context() -> str:
+def planner_style_context(self) -> str:
     """The working style, framed for the planner instead of the executor.
 
     A style file speaks to the agent that will do the work ("you leave it",
@@ -461,7 +480,7 @@ def planner_style_context() -> str:
     what they are allowed to change; `planner_prompt.txt` carries the matching
     bound after the block.
     """
-    prompt = _read_style_prompt("agents")
+    prompt = _read_style_prompt(self, "agents")
     if not prompt:
         return ""
     return (
@@ -481,7 +500,7 @@ def build_role_system_prompt(self, role: str) -> str:
     instruction file — each read per call so edits land on the next step.
     """
     base = _load_role_prompt(role)
-    style = _style_context(role)
+    style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"
     project = workspace_instructions_context(self.executor.workspace, role)
