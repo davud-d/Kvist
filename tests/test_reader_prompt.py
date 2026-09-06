@@ -58,9 +58,20 @@ def test_reader_prompt_keeps_report_and_untrusted_and_examples():
 def test_reader_prompt_stays_within_token_budget():
     try:
         import tiktoken
+        import requests
     except ImportError:
         pytest.skip("tiktoken unavailable")
-    enc = tiktoken.get_encoding("cl100k_base")
+    try:
+        enc = tiktoken.get_encoding("cl100k_base")
+    except requests.exceptions.RequestException:
+        # cl100k_base's vocab is fetched from a remote blob on first use.
+        # No network and no local cache means this budget genuinely cannot
+        # be checked here, rather than a real regression, so skip instead
+        # of failing.
+        pytest.skip(
+            "tiktoken cl100k_base is not cached locally and no network is "
+            "available to download it"
+        )
     tokens = len(enc.encode(_load_role_prompt("reader")))
     # 1500 → 1600 for section 11 (KVIST.md); → 1900 for the HANDOFF path
     # (delegate_task to coder/devops). Nothing else may grow into it.
