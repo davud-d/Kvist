@@ -15,6 +15,7 @@ ran it from, since the binary itself requires --workspace and has no default.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import platform
 import shlex
@@ -81,6 +82,112 @@ def _has_shared_libpython(python_exe: str) -> bool:
         return False
     return result.stdout.strip() == "1"
 
+def _python_sysconfig_info(python_exe: str) -> dict[str, object]:
+    """Ask python_exe for the sysconfig facts PyInstaller depends on."""
+    probe = (
+        "import json, sys, sysconfig;"
+        "print(json.dumps({"
+        "'version': '%d.%d.%d' % sys.version_info[:3],"
+        "'executable': sys.executable,"
+        "'Py_ENABLE_SHARED': sysconfig.get_config_var('Py_ENABLE_SHARED'),"
+        "'LIBDIR': sysconfig.get_config_var('LIBDIR'),"
+        "'LDLIBRARY': sysconfig.get_config_var('LDLIBRARY'),"
+        "}))"
+    )
+    try:
+        output = subprocess.run(
+            [python_exe, "-c", probe], capture_output=True, text=True, check=True, timeout=60
+        ).stdout
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise SystemExit(f"error: cannot inspect {python_exe}: {exc}") from exc
+    try:
+        return json.loads(output)
+    except ValueError:
+        raise SystemExit(f"error: unexpected output from {python_exe}: {output!r}") from None
+
+
+def _distro_hints(commands: dict[str, str]) -> str:
+    """Per-distribution install commands, one per line, for error messages."""
+    return "\n".join(f"      {distro:<15}{command}" for distro, command in commands.items())
+
+
+def find_system_library(python_exe: str) -> str:
+    """Check PyInstaller's OS prerequisites; return the shared libpython path.
+
+    PyInstaller can only bundle an interpreter built with a shared libpython,
+    and on Linux it additionally needs GNU binutils' objdump to read the
+    dynamic-library table of every dependency it bundles. This is the fail-fast
+    gate for the build: a missing prerequisite stops the installer with install
+    instructions instead of a cryptic PyInstaller traceback. Returns "" on
+    platforms where no system check applies (Windows/macOS).
+    """
+    if not sys.platform.startswith("linux"):
+        return ""
+
+    info = _python_sysconfig_info(python_exe)
+    version_short = ".".join(str(info.get("version", "?")).split(".")[:2])
+    libdir = str(info.get("LIBDIR") or "")
+    ldlibrary = str(info.get("LDLIBRARY") or "")
+    libpython = os.path.join(libdir, ldlibrary) if libdir and ldlibrary else ""
+    problems: list[str] = []
+
+    # Shared libpython: sysconfig must know LIBDIR/LDLIBRARY and the file must
+    # actually exist (some pythons report --enable-shared without shipping it).
+    if str(info.get("Py_ENABLE_SHARED")) != "1" or not libpython:
+        problems.append(
+            f"Python {info.get('version')} ({info.get('executable')}) was built without a "
+            "shared libpython "
+            f"(Py_ENABLE_SHARED={info.get('Py_ENABLE_SHARED')!r}, LIBDIR={libdir!r}, "
+            f"LDLIBRARY={ldlibrary!r}); PyInstaller can only bundle an interpreter built "
+            "with --enable-shared.\n"
+            "    Install a python3 built with --enable-shared, e.g.:\n"
+            + _distro_hints(
+                {
+                    "Debian/Ubuntu:": "sudo apt install python3 python3-dev",
+                    "Fedora/RHEL:": "sudo dnf install python3 python3-devel",
+                    "Arch:": "sudo pacman -S python",
+                }
+            )
+        )
+    elif not os.path.isfile(libpython):
+        problems.append(
+            f"sysconfig reports a shared libpython that is not installed:\n"
+            f"    LIBDIR={libdir!r}\n"
+            f"    LDLIBRARY={ldlibrary!r}\n"
+            f"    (expected {libpython})\n"
+            "    Install the matching runtime, e.g.:\n"
+            + _distro_hints(
+                {
+                    "Debian/Ubuntu:": f"sudo apt install libpython{version_short}",
+                    "Fedora/RHEL:": "sudo dnf install python3-libs",
+                    "Arch:": "sudo pacman -S python",
+                }
+            )
+        )
+
+    # objdump: PyInstaller parses the dynamic-library table of every dependency.
+    if not shutil.which("objdump"):
+        problems.append(
+            "objdump was not found on PATH; PyInstaller needs GNU binutils' objdump to "
+            "inspect the shared libraries the binary links against.\n"
+            "    Install binutils, e.g.:\n"
+            + _distro_hints(
+                {
+                    "Debian/Ubuntu:": "sudo apt install binutils",
+                    "Fedora/RHEL:": "sudo dnf install binutils",
+                    "Arch:": "sudo pacman -S binutils",
+                }
+            )
+        )
+
+    if problems:
+        raise SystemExit(
+            "error: PyInstaller prerequisites are missing, kvist cannot be built:\n\n"
+            + "\n\n".join(f"  - {problem}" for problem in problems)
+            + "\n\nFix the issues above, then re-run install.py."
+        )
+
+    return libpython
 
 def find_base_python() -> str:
     """Pick an interpreter PyInstaller can actually link against.
@@ -120,6 +227,11 @@ def ensure_build_venv() -> Path:
         base_python = find_base_python()
         print(f"Creating build venv at {VENV_DIR} using {base_python} ...")
         subprocess.check_call([base_python, "-m", "venv", str(VENV_DIR)])
+
+    # Fail before any pip work if PyInstaller's OS prerequisites are missing
+    # (shared libpython + objdump on Linux): find_system_library raises SystemExit
+    # with per-distribution install instructions in that case.
+    find_system_library(str(python_path))
 
     print("Installing build dependencies ...")
     subprocess.check_call([str(python_path), "-m", "pip", "install", "--upgrade", "pip"])
