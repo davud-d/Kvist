@@ -116,3 +116,4 @@ postman/
 # Kvist agent instructions (local, per-developer)
 KVIST.md
 KVIST-CHAT.md
+.cache/
