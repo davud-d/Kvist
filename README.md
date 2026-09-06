@@ -127,7 +127,7 @@ For Unix-like systems (Linux, FreeBSD, OpenBSD) in a terminal:
 ```bash
 git clone https://github.com/davud-d/Kvist && echo "Clone OK" || echo "error clone"
 cd Kvist
-python -m venv .venv && echo "venv OK" || echo "error venv"
+python3 -m venv .venv && echo "venv OK" || echo "error venv" # or python -m venv .venv
 source .venv/bin/activate && echo "venv activated" || echo "error activate"
 uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
 python installer/install.py && echo "Install OK" || echo "error install"
