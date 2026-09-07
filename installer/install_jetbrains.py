@@ -10,28 +10,54 @@ per-user data directory, then unpacks the plugin ZIP into that IDE's
     python installer/install_jetbrains.py --build    # build the ZIP first
     python installer/install_jetbrains.py --plugin-zip path/to/kvist-intellij.zip
     python installer/install_jetbrains.py --uninstall
+
+Building the ZIP is quiet by default: Gradle writes into an install log in the
+temp dir while a single spinner names the current step, and a failed command
+prints the tail of that log plus its path. Pass --verbose to watch it directly.
 """
 
 from __future__ import annotations
 
 import argparse
-import os
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from _common import (
     IS_LINUX,
     IS_WINDOWS,
     JETBRAINS_PLUGIN_ID,
     REPO_ROOT,
+    InstallCommandError,
+    begin_quiet_mode,
+    close_log,
     discover_jetbrains_ides,
+    hold_last_step,
     log,
     remove_path,
-    run,
+    report_command_failure,
+    run_logged,
     safe_extract_zip,
+    show_step,
+    spinner,
     warn,
 )
+
+if TYPE_CHECKING:
+    from rich.status import Status
+
+STEPS = {
+    "starting": "Starting installation",
+    "build_plugin": "Building the plugin ZIP",
+    "read_zip": "Reading the plugin archive",
+    "install_into": "Installing into {label}",
+    "done": "Installation complete",
+}
+
+# Truncated per run: one install, one log.
+LOG_FILE = Path(tempfile.gettempdir()) / "kvist-jetbrains-install.log"
 
 
 def plugins_dir_for(config_dir: Path) -> Path:
@@ -67,14 +93,15 @@ def plugin_already_installed(ides: list[tuple[str, Path]]) -> bool:
     )
 
 
-def build_plugin_zip() -> Path:
+def build_plugin_zip(status: Status | None = None) -> Path:
     script = PLUGIN_DIR / ("build-plugin.bat" if IS_WINDOWS else "build-plugin.sh")
     if not script.is_file():
         raise SystemExit(f"error: plugin build script not found: {script}")
+    show_step(status, STEPS["build_plugin"])
     if IS_WINDOWS:
-        run(["cmd", "/c", str(script)], cwd=PLUGIN_DIR)
+        run_logged(["cmd", "/c", str(script)], cwd=PLUGIN_DIR)
     else:
-        run(["bash", str(script)], cwd=PLUGIN_DIR)
+        run_logged(["bash", str(script)], cwd=PLUGIN_DIR)
     built = find_plugin_zip()
     if built is None:
         raise SystemExit("error: build finished but no plugin ZIP was produced")
@@ -139,12 +166,78 @@ def uninstall_from(config_dir: Path) -> bool:
     return removed
 
 
+def resolve_plugin_zip(
+    args: argparse.Namespace, ides: list[tuple[str, Path]], status: Status | None = None
+) -> Path:
+    """Pick the ZIP to install, building a fresh one when that is the point."""
+    if args.plugin_zip is not None:
+        return args.plugin_zip
+    if args.build:
+        return build_plugin_zip(status)
+    # Re-running over an existing install means "update", so a stale
+    # distributions/ ZIP must be rebuilt rather than reused.
+    if plugin_already_installed(ides):
+        log("plugin is already installed; rebuilding the ZIP")
+        return build_plugin_zip(status)
+    found = find_plugin_zip()
+    if found is None:
+        raise SystemExit(
+            "error: no plugin ZIP found. Re-run with --build, or build it via "
+            "jetbrains-plugin/build-plugin.sh (.bat on Windows)."
+        )
+    return found
+
+
+def install_into_all(
+    ides: list[tuple[str, Path]],
+    zip_path: Path,
+    zip_root: str,
+    status: Status | None = None,
+) -> list[str]:
+    """Unpack the plugin into every IDE; return one line per IDE that failed.
+
+    A single unwritable IDE directory must not abort the others, and the
+    failures are returned rather than printed: a spinner may still be live.
+    """
+    failures: list[str] = []
+    for label, config_dir in ides:
+        show_step(status, STEPS["install_into"].format(label=label))
+        try:
+            install_into(config_dir, zip_path, zip_root)
+        except OSError as exc:
+            warn(f"could not install into {label}: {exc}")
+            failures.append(f"{label}: {exc}")
+    return failures
+
+
+def _install_plugin(
+    args: argparse.Namespace, ides: list[tuple[str, Path]], status: Status | None = None
+) -> list[str]:
+    zip_path = resolve_plugin_zip(args, ides, status)
+    show_step(status, STEPS["read_zip"])
+    log(f"plugin ZIP: {zip_path}")
+    zip_root = _zip_root(zip_path)
+    failures = install_into_all(ides, zip_path, zip_root, status)
+    show_step(status, STEPS["done"])
+    hold_last_step()
+    return failures
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--build", action="store_true", help="Build the plugin ZIP before installing.")
     parser.add_argument("--plugin-zip", type=Path, help="Use this plugin ZIP instead of searching for one.")
     parser.add_argument("--uninstall", action="store_true", help="Remove the plugin from every IDE instead.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show the full output of the plugin build instead of a spinner.",
+    )
     args = parser.parse_args()
+
+    if args.plugin_zip is not None and not args.plugin_zip.is_file():
+        raise SystemExit(f"error: plugin ZIP not found: {args.plugin_zip}")
 
     ides = discover_jetbrains_ides()
     if not ides:
@@ -152,49 +245,40 @@ def main() -> None:
             "error: no JetBrains IDE found. Install one (or run it once so it "
             "creates its user directory), then re-run."
         )
+
+    # Printed before the spinner takes the terminal: this is what the user checks.
     log(f"found {len(ides)} JetBrains IDE(s):")
     for label, config_dir in ides:
         print(f"    - {label}  ({config_dir})")
 
     if args.uninstall:
+        # Removal spawns nothing, so it needs neither a log nor a spinner.
         touched = sum(uninstall_from(config_dir) for _, config_dir in ides)
         print(f"\nDone. Plugin removed from {touched} IDE(s). Restart them to apply.")
         return
 
-    zip_path = args.plugin_zip
-    if zip_path is not None and not zip_path.is_file():
-        raise SystemExit(f"error: plugin ZIP not found: {zip_path}")
-    if zip_path is None:
-        if args.build:
-            zip_path = build_plugin_zip()
-        elif plugin_already_installed(ides):
-            # Re-running over an existing install means "update", so a stale
-            # distributions/ ZIP must be rebuilt rather than reused.
-            log("plugin is already installed; rebuilding the ZIP ...")
-            zip_path = build_plugin_zip()
-        else:
-            zip_path = find_plugin_zip()
-    if zip_path is None:
-        raise SystemExit(
-            "error: no plugin ZIP found. Re-run with --build, or build it via "
-            "jetbrains-plugin/build-plugin.sh (.bat on Windows)."
-        )
-    log(f"plugin ZIP: {zip_path}")
-    zip_root = _zip_root(zip_path)
-
-    failures = []
-    for label, config_dir in ides:
-        try:
-            install_into(config_dir, zip_path, zip_root)
-        except OSError as exc:
-            warn(f"could not install into {label}: {exc}")
-            failures.append(label)
+    if not args.verbose:
+        begin_quiet_mode(LOG_FILE)
+    try:
+        with spinner(STEPS["starting"]) as status:
+            failures = _install_plugin(args, ides, status)
+    except InstallCommandError as exc:
+        # Reported out here on purpose: leaving the `with` above already
+        # stopped the spinner and erased its line, so this cannot print over it.
+        report_command_failure(exc)
+        raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        print("Installation cancelled.", file=sys.stderr)
+        raise SystemExit(130) from None
+    finally:
+        close_log()
 
     if failures:
-        raise SystemExit(f"error: plugin installation failed for: {', '.join(failures)}")
-
+        raise SystemExit(
+            "error: plugin installation failed for:\n  " + "\n  ".join(failures)
+        )
     print(
-        f"\nDone. Restart your JetBrains IDE(s), then use Tools > Run Kvist "
+        "\nDone. Restart your JetBrains IDE(s), then use Tools > Run Kvist "
         "(or the toolbar button)."
     )
 

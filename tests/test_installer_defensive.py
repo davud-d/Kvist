@@ -15,7 +15,7 @@ INSTALLER_DIR = Path(__file__).resolve().parent.parent / "installer"
 if str(INSTALLER_DIR) not in sys.path:
     sys.path.insert(0, str(INSTALLER_DIR))
 
-install = importlib.import_module("install")
+install = importlib.import_module("install_cli")
 gui = importlib.import_module("install_gui")
 jetbrains = importlib.import_module("install_jetbrains")
 common = importlib.import_module("_common")
@@ -26,6 +26,12 @@ def _fresh_installer_modules():
     installer modules (test_install.py reloads `install` as Windows)."""
     importlib.reload(install)
     yield
+    # A test that drove an installer's main() left quiet mode switched on and
+    # its log handle closed; the next test's log() would write to that closed
+    # file. Nothing resets this in a real run, where each installer is a process.
+    common._log_file = None
+    common._log_path = None
+    common._last_step_shown_at = None
 
 
 def _zip(path: Path, *members: tuple[str, bytes]) -> Path:
@@ -170,7 +176,7 @@ def test_cli_rejects_lib_dir_that_is_a_file(tmp_path, monkeypatch):
     binary.write_bytes(b"binary")
     lib_file = tmp_path / "lib"
     lib_file.write_text("not a directory")
-    monkeypatch.setattr(sys, "argv", ["install.py", str(binary), "--lib-dir", str(lib_file)])
+    monkeypatch.setattr(sys, "argv", ["install_cli.py", str(binary), "--lib-dir", str(lib_file)])
 
     with pytest.raises(SystemExit):
         install.main()
@@ -315,7 +321,12 @@ def test_build_stops_when_dependency_installation_fails(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(install, "VENV_DIR", tmp_path / "venv")
     monkeypatch.setattr(install, "find_base_python", lambda: "/usr/bin/python3")
-    monkeypatch.setattr(install.subprocess, "check_call", lambda command, **_: (calls.append(command), (_ for _ in ()).throw(SystemExit("pip failed")))[1])
+
+    def fail(command, *_args, **_kwargs):
+        calls.append(command)
+        raise SystemExit("pip failed")
+
+    monkeypatch.setattr(install, "run_logged", fail)
 
     with pytest.raises(SystemExit, match="pip failed"):
         install.ensure_build_venv()

@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "installer"))
 
-install = importlib.import_module("install")
+install = importlib.import_module("install_cli")
 _common = importlib.import_module("_common")
 
 

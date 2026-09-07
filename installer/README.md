@@ -1,21 +1,39 @@
 # installer/
 
-Everything that puts Kvist onto a machine. All three scripts run on Linux and
+Everything that puts Kvist onto a machine. Every script runs on Linux and
 Windows (and, best-effort, macOS).
 
 | Script | What it does |
 | --- | --- |
-| `install.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). Formerly at the repo root. |
+| `install.py` | The front door: offers the three installers below as an arrow-key list, all selected by default, and runs the ones you keep. |
+| `install_cli.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). Formerly at the repo root, then `install.py`. |
 | `install_jetbrains.py` | Finds every installed JetBrains IDE and unpacks the **Kvist Launcher** plugin into each one's `plugins/` folder. |
 | `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux. |
+| `_common.py` | Shared helpers: the quiet log + spinner every installer reports through, safe ZIP extraction, JetBrains IDE discovery. |
 
 ```bash
-python installer/install.py
+python installer/install.py                      # pick with the arrow keys
+python installer/install.py --all                # everything, no questions
+python installer/install.py --cli --gui          # named components, no questions
+
+python installer/install_cli.py                  # or run one on its own
 python installer/install_jetbrains.py            # --build to build the plugin ZIP first
 python installer/install_jetbrains.py --uninstall
 python installer/install_gui.py                  # --build to run electron-builder first
 python installer/install_gui.py --uninstall
 ```
+
+## Output
+
+Each installer is quiet by default: the commands it spawns (pip, PyInstaller,
+npm, Gradle) write into its own log under the temp dir while a single spinner
+line names the current step, and a failure prints the tail of that log plus its
+path. Pass `--verbose` to any of them to watch those commands directly instead,
+with no spinner and no log.
+
+Run through `install.py`, the chosen installers run at once as background
+processes and a live panel shows the step each one is on; `install.py --verbose`
+drops the panel and runs them one after another.
 
 ## How JetBrains IDEs are discovered
 

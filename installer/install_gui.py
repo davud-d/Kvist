@@ -15,6 +15,11 @@ produce one first (needs Node.js + npm).
     python installer/install_gui.py
     python installer/install_gui.py --build
     python installer/install_gui.py --uninstall
+
+Building is quiet by default: npm and electron-builder write into an install
+log in the temp dir while a single spinner names the current step, and a failed
+command prints the tail of that log plus its path. Pass --verbose to watch
+those commands directly instead.
 """
 
 from __future__ import annotations
@@ -23,8 +28,10 @@ import argparse
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from _common import (
     ASSETS_DIR,
@@ -32,16 +39,40 @@ from _common import (
     GUI_LINUX_DESKTOP_ID,
     IS_WINDOWS,
     REPO_ROOT,
+    InstallCommandError,
+    begin_quiet_mode,
+    close_log,
+    hold_last_step,
     log,
     remove_path,
-    run,
+    report_command_failure,
+    run_logged,
+    show_step,
+    spinner,
     user_desktop_dir,
     warn,
 )
 
+if TYPE_CHECKING:
+    from rich.status import Status
+
+STEPS = {
+    "starting": "Starting installation",
+    "build_gui": "Building the GUI with electron-builder",
+    "find_payload": "Looking for the built GUI",
+    "install_app": "Installing the application",
+    "install_icons": "Installing icons",
+    "create_entry": "Creating the launcher entry",
+    "create_shortcuts": "Creating shortcuts",
+    "run_setup": "Running the Kvist installer — follow its prompts",
+    "done": "Installation complete",
+}
+
 GUI_DIR = REPO_ROOT / "gui"
 GUI_DIST = GUI_DIR / "dist"
 LINUX_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
+# Truncated per run: one install, one log.
+LOG_FILE = Path(tempfile.gettempdir()) / "kvist-gui-install.log"
 
 if IS_WINDOWS:
     INSTALL_ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Kvist" / "gui"
@@ -55,13 +86,14 @@ def is_already_installed() -> bool:
     return INSTALL_ROOT.is_dir()
 
 
-def build_gui() -> None:
+def build_gui(status: Status | None = None) -> None:
     npm = shutil.which("npm")
     if npm is None:
         raise SystemExit("error: npm not found; install Node.js to use --build")
+    show_step(status, STEPS["build_gui"])
     if not (GUI_DIR / "node_modules").is_dir():
-        run([npm, "install"], cwd=GUI_DIR)
-    run([npm, "run", "dist"], cwd=GUI_DIR)
+        run_logged([npm, "install"], cwd=GUI_DIR)
+    run_logged([npm, "run", "dist"], cwd=GUI_DIR)
 
 
 # ----------------------------------------------------------------------------- linux
@@ -88,7 +120,9 @@ def _linux_unpacked_exe(unpacked: Path) -> Path:
     raise SystemExit(f"error: could not find the GUI executable inside {unpacked}")
 
 
-def install_linux() -> None:
+def install_linux(status: Status | None = None) -> str:
+    """Install the built GUI; return the line main() prints once done."""
+    show_step(status, STEPS["find_payload"])
     kind, payload = _find_linux_payload()
     INSTALL_ROOT.parent.mkdir(parents=True, exist_ok=True)
     staged_root = Path(tempfile.mkdtemp(prefix=".kvist-gui.", dir=INSTALL_ROOT.parent))
@@ -96,6 +130,7 @@ def install_linux() -> None:
     backup_root = INSTALL_ROOT.with_name(f".{INSTALL_ROOT.name}.old")
 
     try:
+        show_step(status, STEPS["install_app"])
         if kind == "appimage":
             staged_exec = staged_root / "Kvist.AppImage"
             shutil.copy2(payload, staged_exec)
@@ -115,6 +150,7 @@ def install_linux() -> None:
         exec_path = INSTALL_ROOT / staged_exec.relative_to(staged_root)
         log(f"installed app -> {exec_path}")
 
+        show_step(status, STEPS["install_icons"])
         icon_root = Path.home() / ".local" / "share" / "icons" / "hicolor"
         for size in LINUX_ICON_SIZES:
             src = ASSETS_DIR / f"icon-{size}.png"
@@ -128,6 +164,7 @@ def install_linux() -> None:
         shutil.copy2(ASSETS_DIR / "icon.svg", scalable / f"{GUI_LINUX_DESKTOP_ID}.svg")
         log(f"installed icons -> {icon_root}")
 
+        show_step(status, STEPS["create_entry"])
         apps_dir = Path.home() / ".local" / "share" / "applications"
         apps_dir.mkdir(parents=True, exist_ok=True)
         desktop_file = apps_dir / f"{GUI_LINUX_DESKTOP_ID}.desktop"
@@ -149,7 +186,7 @@ def install_linux() -> None:
 
         _best_effort(["update-desktop-database", str(apps_dir)])
         _best_effort(["gtk-update-icon-cache", "-f", "-t", str(Path.home() / ".local" / "share" / "icons" / "hicolor")])
-        print(f"\nDone. Look for \"{GUI_APP_NAME}\" in your application launcher.")
+        return f"Installed {GUI_APP_NAME} to {exec_path}\nLook for it in your application launcher."
     except BaseException:
         if committed_root:
             remove_path(INSTALL_ROOT)
@@ -210,22 +247,27 @@ def _windows_shortcut(link_path: Path, target: Path, icon: Path) -> None:
         "$s.Description = 'Kvist coding agent';"
         "$s.Save()"
     ).format(link=link_path, target=target, workdir=target.parent, icon=icon)
-    run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps])
+    run_logged(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps])
 
 
-def install_windows() -> None:
+def install_windows(status: Status | None = None) -> str:
+    """Install the built GUI; return the line main() prints once done."""
+    show_step(status, STEPS["find_payload"])
     kind, payload = _find_windows_payload()
     if kind == "setup":
-        log("launching the NSIS installer; follow its prompts ...")
-        run([str(payload)])
-        print("\nDone. The installer created its own Start Menu / Desktop shortcuts.")
-        return
+        # The NSIS installer owns the rest: it lays down its own files and its
+        # own Start Menu / Desktop shortcuts, so none of the staging below
+        # applies and there is nothing for this installer to undo.
+        show_step(status, STEPS["run_setup"])
+        run_logged([str(payload)])
+        return "The installer created its own Start Menu / Desktop shortcuts."
 
     INSTALL_ROOT.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".kvist-gui.", dir=INSTALL_ROOT.parent))
     backup = INSTALL_ROOT.with_name(f".{INSTALL_ROOT.name}.old")
     committed = False
     try:
+        show_step(status, STEPS["install_app"])
         shutil.copytree(payload, staging / "app")
         dest = staging / "app"
         exe = dest / f"{GUI_APP_NAME}.exe"
@@ -247,11 +289,12 @@ def install_windows() -> None:
         icon = INSTALL_ROOT / icon.relative_to(staging / "app")
         log(f"installed app -> {exe}")
 
+        show_step(status, STEPS["create_shortcuts"])
         _windows_shortcut(user_desktop_dir() / f"{GUI_APP_NAME}.lnk", exe, icon)
         start_menu = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / \
             "Microsoft" / "Windows" / "Start Menu" / "Programs"
         _windows_shortcut(start_menu / f"{GUI_APP_NAME}.lnk", exe, icon)
-        print(f"\nDone. \"{GUI_APP_NAME}\" is on your Desktop and in the Start Menu.")
+        return f"Installed {GUI_APP_NAME} to {exe}\nIt is on your Desktop and in the Start Menu."
     except BaseException:
         if committed:
             remove_path(INSTALL_ROOT)
@@ -284,25 +327,55 @@ def _remove_all(targets: list[Path]) -> None:
     print("\nDone. Kvist GUI uninstalled.")
 
 
+def _install_gui(args: argparse.Namespace, status: Status | None = None) -> str:
+    # Re-running over an existing install means "update", so a stale dist/
+    # build must be rebuilt rather than silently reused.
+    if args.build:
+        build_gui(status)
+    elif is_already_installed():
+        log("Kvist GUI is already installed; rebuilding it")
+        build_gui(status)
+
+    done = (install_windows if IS_WINDOWS else install_linux)(status)
+    show_step(status, STEPS["done"])
+    hold_last_step()
+    return done
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--build", action="store_true", help="Build the GUI with electron-builder first.")
     parser.add_argument("--uninstall", action="store_true", help="Remove an installed GUI instead.")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show the full output of npm and electron-builder instead of a spinner.",
+    )
     args = parser.parse_args()
 
     if args.uninstall:
+        # Removal spawns nothing, so it needs neither a log nor a spinner.
         (uninstall_windows if IS_WINDOWS else uninstall_linux)()
         return
 
-    # Re-running the installer over an existing install means "update", so a
-    # stale gui/dist artifact must be rebuilt rather than reused.
-    if args.build:
-        build_gui()
-    elif is_already_installed():
-        log("Kvist GUI is already installed; rebuilding it ...")
-        build_gui()
+    if not args.verbose:
+        begin_quiet_mode(LOG_FILE)
+    try:
+        with spinner(STEPS["starting"]) as status:
+            done = _install_gui(args, status)
+    except InstallCommandError as exc:
+        # Reported out here on purpose: leaving the `with` above already
+        # stopped the spinner and erased its line, so this cannot print over it.
+        report_command_failure(exc)
+        raise SystemExit(1) from None
+    except KeyboardInterrupt:
+        print("Installation cancelled.", file=sys.stderr)
+        raise SystemExit(130) from None
+    finally:
+        close_log()
 
-    (install_windows if IS_WINDOWS else install_linux)()
+    print(f"\n{done}")
 
 
 if __name__ == "__main__":
