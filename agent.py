@@ -44,6 +44,7 @@ from agent_model import (
     call_action_model,
     call_model,
     call_model_streaming,
+    _create_completion_with_reasoning_fallback,
     _create_json_completion,
     _emit_usage,
     count_tokens,
@@ -126,6 +127,7 @@ from agent_web import (
 )
 from executor import SafeExecutor
 from performance_logger import PerfLogger
+from reasoning_effort import merge_reasoning_kwargs
 from redaction import redact_text, redact_value
 from role_router import route_role_with_llm, route_role
 from system_context import (
@@ -868,9 +870,17 @@ class LocalAgent:
                 else:
                     safe_history = redact_value(wire_history)
                     assert isinstance(safe_history, list)
-                    response = self.client.chat.completions.create(
-                        model=model,
-                        messages=safe_history,
+                    chat_kwargs: dict[str, Any] = {
+                        "model": model,
+                        "messages": safe_history,
+                    }
+                    merge_reasoning_kwargs(
+                        chat_kwargs,
+                        self.config.provider,
+                        self.config.reasoning_effort,
+                    )
+                    response = _create_completion_with_reasoning_fallback(
+                        self, chat_kwargs
                     )
                     content = safe_extract_completion_content(
                         response, self.config.provider, model
@@ -927,12 +937,16 @@ class LocalAgent:
         stream_model = model or self.config.fast_model
         safe_messages = redact_value(messages)
         assert isinstance(safe_messages, list)
+        stream_kwargs: dict[str, Any] = {
+            "model": stream_model,
+            "messages": safe_messages,
+            "stream": True,
+        }
+        merge_reasoning_kwargs(
+            stream_kwargs, self.config.provider, self.config.reasoning_effort
+        )
         try:
-            stream = self.client.chat.completions.create(
-                model=stream_model,
-                messages=safe_messages,
-                stream=True,
-            )
+            stream = _create_completion_with_reasoning_fallback(self, stream_kwargs)
         except KeyboardInterrupt as error:
             raise ChatRequestCancelled from error
         try:

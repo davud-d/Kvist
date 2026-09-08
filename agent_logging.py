@@ -129,12 +129,22 @@ def _session_checkpoint(data: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+_PERSISTED_MESSAGE_KEYS = ("role", "content", "reasoning_content")
+
+
 def _serializable_chat_history(self) -> list[dict[str, Any]]:
     history = getattr(self, "_chat_history", [])
     if not isinstance(history, list):
         return []
+    # ``reasoning_content`` is kept alongside role/content: DeepSeek thinking
+    # mode returns HTTP 400 for a resumed history that carries an assistant
+    # ``content`` without the ``reasoning_content`` it was produced with.
     return [
-        {key: value for key, value in message.items() if key in ("role", "content")}
+        {
+            key: value
+            for key, value in message.items()
+            if key in _PERSISTED_MESSAGE_KEYS
+        }
         for message in history
         if isinstance(message, dict)
     ]

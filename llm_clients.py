@@ -1177,6 +1177,11 @@ class _CompletionsNamespace:
             "top_p": float(kwargs.get("top_p", 1.0)),
             "model": model,
         }
+        # Reasoning effort reaches only Groq's request body (gpt-oss models);
+        # the Gemini backend has no equivalent knob and drops extra kwargs.
+        reasoning_effort = str(kwargs.get("reasoning_effort", "")).strip()
+        if reasoning_effort and infer_freeflow_backend(model) == "groq":
+            request_kwargs["reasoning_effort"] = reasoning_effort
         client = self._owner.build_client_for_model(model)
         try:
             if stream:
@@ -1192,6 +1197,19 @@ class _AnthropicChatNamespace:
 
     def __init__(self, owner: "AnthropicCompatibleClient") -> None:
         self.completions = _AnthropicCompletionsNamespace(owner)
+
+
+def _anthropic_thinking_from_effort(effort: Any) -> dict[str, Any] | None:
+    """Translate Kvist's ``reasoning_effort`` marker to an Anthropic thinking block.
+
+    ``None`` (no marker) and level ``false`` both mean "no extended thinking",
+    which is the wrapper's historical default.
+    """
+    if not effort:
+        return None
+    from reasoning_effort import anthropic_thinking_config
+
+    return anthropic_thinking_config(str(effort))
 
 
 class _AnthropicCompletionsNamespace:
@@ -1239,10 +1257,20 @@ class _AnthropicCompletionsNamespace:
         }
         if system:
             request_kwargs["system"] = system
-        if "temperature" in kwargs:
-            request_kwargs["temperature"] = float(kwargs["temperature"])
-        if "top_p" in kwargs:
-            request_kwargs["top_p"] = float(kwargs["top_p"])
+
+        thinking = _anthropic_thinking_from_effort(kwargs.get("reasoning_effort"))
+        if thinking is not None:
+            # Extended thinking rejects a non-default temperature / top_p and
+            # requires max_tokens to exceed the thinking budget.
+            request_kwargs["thinking"] = thinking
+            budget = int(thinking["budget_tokens"])
+            if request_kwargs["max_tokens"] <= budget:
+                request_kwargs["max_tokens"] = budget + 4096
+        else:
+            if "temperature" in kwargs:
+                request_kwargs["temperature"] = float(kwargs["temperature"])
+            if "top_p" in kwargs:
+                request_kwargs["top_p"] = float(kwargs["top_p"])
         if "stop" in kwargs and kwargs["stop"]:
             request_kwargs["stop_sequences"] = (
                 [kwargs["stop"]] if isinstance(kwargs["stop"], str) else list(kwargs["stop"])
@@ -1340,6 +1368,19 @@ class AnthropicCompatibleClient:
                     choices=[
                         SimpleNamespace(
                             delta=SimpleNamespace(content=delta.text)
+                        )
+                    ]
+                )
+            if delta and getattr(delta, "thinking", None):
+                # Surface extended-thinking tokens on the reasoning channel so
+                # the live panel shows them; they are not part of the answer.
+                return SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content=None,
+                                reasoning_content=delta.thinking,
+                            )
                         )
                     ]
                 )

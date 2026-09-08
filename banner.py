@@ -500,6 +500,7 @@ def _banner_fields(config) -> list[tuple[str, str]]:
         ("Smart:", sanitize_display_text(str(config.smart_model))),
         ("Planner:", sanitize_display_text(str(config.planner_model))),
         ("Role:", sanitize_display_text(get_saved_role() or "auto")),
+        ("Effort:", sanitize_display_text(str(getattr(config, "reasoning_effort", "medium")))),
         ("Commands:", "/commands"),
     ]
 

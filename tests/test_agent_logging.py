@@ -102,6 +102,42 @@ def test_checkpoint_restores_rolling_summaries_with_int_keys(agent_factory):
     assert max(agent._state.rolling_summaries) == 10
 
 
+def test_chat_history_round_trip_preserves_reasoning_content(agent_factory):
+    agent = agent_factory()
+    agent.current_session = "deepseek-thinking"
+    agent._chat_history = [
+        {"role": "system", "content": "prompt"},
+        {"role": "user", "content": "question"},
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "step-by-step rationale",
+        },
+    ]
+    agent.save_session()
+
+    restored = agent_factory()
+
+    assert restored.current_session == "deepseek-thinking"
+    assert restored._chat_history[-1]["reasoning_content"] == "step-by-step rationale"
+
+
+def test_serializable_chat_history_drops_unknown_keys_but_keeps_reasoning(agent_factory):
+    agent = agent_factory()
+    agent._chat_history = [
+        {
+            "role": "assistant",
+            "content": "a",
+            "reasoning_content": "r",
+            "internal_note": "should not persist",
+        }
+    ]
+
+    serialized = agent_logging._serializable_chat_history(agent)
+
+    assert serialized == [{"role": "assistant", "content": "a", "reasoning_content": "r"}]
+
+
 def test_save_session_restores_active_session_and_full_chat_history(agent_factory):
     agent = agent_factory()
     agent.current_session = "feature-work"

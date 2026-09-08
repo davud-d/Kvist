@@ -33,6 +33,7 @@ LLM_PROVIDER_KEY = "llm_provider"
 LLM_MODELS_KEY = "llm_models"
 ROLE_SELECTION_KEY = "role_selection"
 PLANNING_ENABLED_KEY = "planning_enabled"
+REASONING_EFFORT_KEY = "reasoning_effort"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
 FALLBACK_LLM_PROVIDER = FREEFLOW_PROVIDER
 GEMINI_API_KEY_KEY = "gemini_api_key"
@@ -302,6 +303,30 @@ def save_planning_enabled(enabled: bool, config_path: Path | None = None) -> Non
         return payload
 
     _update_user_config(save_planning, config_path)
+
+
+def get_saved_reasoning_effort(config_path: Path | None = None) -> str:
+    """The persisted global reasoning-effort level. Defaults to 'medium'.
+
+    Kept as a plain string here to avoid importing the level scale into the
+    config layer; callers normalize it (reasoning_effort.normalize_effort).
+    """
+    payload = load_user_config(config_path)
+    value = payload.get(REASONING_EFFORT_KEY)
+    if isinstance(value, str) and value.strip():
+        return value.strip().casefold()
+    return "medium"
+
+
+def save_reasoning_effort(level: str, config_path: Path | None = None) -> None:
+    """Persist the global reasoning-effort preference for future sessions."""
+    normalized = str(level).strip().casefold()
+
+    def save_effort(payload: dict[str, object]) -> dict[str, object]:
+        payload[REASONING_EFFORT_KEY] = normalized
+        return payload
+
+    _update_user_config(save_effort, config_path)
 
 
 def ensure_provider_credentials(

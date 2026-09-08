@@ -208,6 +208,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/change-api` | Replace the current provider key (`/change_api` and `/apikey` also work) |
 | `/models` | Select `fast`, `smart`, and `planner` models |
 | `/role` | Select `auto`, `coder`, `reader`, `devops`, or `chat` |
+| `/effort` | Set reasoning effort: `false`, `low`, `medium`, `high`, `xhigh`, `max` (saved globally) |
 | `/session` | Create, switch, or delete named sessions |
 | `/resume` | Continue the active session's latest checkpoint |
 | `/new` | Start a new session; the current one stays available in `/session` |
@@ -220,6 +221,11 @@ Type `/` to open command completion. The most useful commands are:
 
 Multiline input: `Alt+Enter` or `Esc+Enter`. The planning stage is enabled by
 default; `AGENT_SKIP_PLANNING=1` overrides the saved preference for a launch.
+
+Reasoning effort defaults to `medium` and is translated per provider (some
+levels collapse — e.g. DeepSeek treats `low`/`medium` as `high`; Gemini ignores
+it). If a provider rejects the setting, Kvist retries the request without it and
+warns each time. `AGENT_REASONING_EFFORT` overrides the saved level for a launch.
 
 Named sessions have 1–64 lowercase letters, digits, `-`, or `_`, and start with
 a letter or digit. Each session stores its own history and checkpoint. A
@@ -281,9 +287,10 @@ Run `npm test` for GUI tests. `npm run dist` builds native Linux (`AppImage`,
 Global settings live in `~/.kvist/config.json`. Runtime environment variables
 include `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`,
 `AGENT_PLANNER_MODEL`, `AGENT_VERBOSE`, `AGENT_MAX_STEPS`,
-`AGENT_PERSIST_LOGS`, `AGENT_SKIP_PLANNING`, `AGENT_SANDBOX_MODE`, and
-`AGENT_SANDBOX_NET`. Prefer `/provider`, `/models`, and `/role` for interactive
-configuration; do not commit keys or local `.kvist` data.
+`AGENT_PERSIST_LOGS`, `AGENT_SKIP_PLANNING`, `AGENT_REASONING_EFFORT`,
+`AGENT_SANDBOX_MODE`, and `AGENT_SANDBOX_NET`. Prefer `/provider`, `/models`,
+`/role`, and `/effort` for interactive configuration; do not commit keys or
+local `.kvist` data.
 
 Two instruction files sit in the workspace root: `KVIST.md` for the action-loop
 roles (coder, reader, devops) and `KVIST-CHAT.md` for chat. Kvist creates both

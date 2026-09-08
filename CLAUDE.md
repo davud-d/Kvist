@@ -66,8 +66,9 @@ configured in-repo.
 - API keys + selected provider/models live in `~/.kvist/config.json` (Windows:
   `C:\Users\<USER>\.kvist\config.json`). On first run the agent prompts for the
   key the active provider needs and writes it there. Managed by `user_config.py`.
-  Also persists the global `role_selection` and `planning_enabled` (the `/plan`
-  toggle; default true) preferences.
+  Also persists the global `role_selection`, `planning_enabled` (the `/plan`
+  toggle; default true) and `reasoning_effort` (the `/effort` level on the Kvist
+  scale `false|low|medium|high|xhigh|max`, default `medium`) preferences.
 - Per-project state lives under `<workspace>/.kvist/`: named-session documents
   (history, chat, `/resume` checkpoint) in `sessions/<name>.json`, the active-session
   marker in `active_session.json`, the workspace-global change journal (for
@@ -129,6 +130,8 @@ configured in-repo.
   `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`,
   `AGENT_SKIP_PLANNING` (1 skips the planner LLM round-trip at startup; overrides
   the persisted `planning_enabled` preference — runtime-toggled by `/plan`),
+  `AGENT_REASONING_EFFORT` (`false|low|medium|high|xhigh|max`; overrides the
+  persisted `reasoning_effort` preference — runtime-toggled by `/effort`),
   `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
   `AGENT_SANDBOX_NET` (allow|deny, default deny under bubblewrap),
   `AGENT_CHILD_ENV_ALLOW` (comma-separated safe child variables),
@@ -260,6 +263,39 @@ the matching bound is the `EXECUTOR WORKING STYLE` section of `planner_prompt.tx
 (it shapes steps, success criteria and risks, never the schema, the step limit,
 or how much work is taken on). The reporter (`report_prompt.txt`) does not see the
 style.
+
+### Reasoning effort (`reasoning_effort.py`)
+One global knob (`/effort`, env `AGENT_REASONING_EFFORT`, persisted
+`reasoning_effort`) on a fixed six-level scale: `false | low | medium | high |
+xhigh | max`. `reasoning_effort.py` owns the per-provider translation, because no
+two providers name or slice it the same way: OpenAI/OmniRoute get a top-level
+`reasoning_effort` (with `max`→`xhigh`, `false`→`minimal`), OpenRouter gets
+`extra_body.reasoning.effort`, DeepSeek gets `reasoning_effort` in `{high,max}`
+(or `extra_body.thinking.type=disabled` for `false`), and the Anthropic /
+FreeFlow wrapper clients receive a neutral `reasoning_effort` marker they
+translate themselves — Anthropic to a `thinking.budget_tokens` block (dropping
+`temperature`/`top_p`, bumping `max_tokens`), FreeFlow forwarding it only to Groq
+gpt-oss models. Injection happens in exactly two places: `_create_json_completion`
+(action loop + planner, via `merge_reasoning_kwargs`) and the chat path in
+`agent.py`; `role_router` is left alone. `_create_completion_with_reasoning_fallback`
+wraps the call: on a provider error that looks like a reasoning rejection
+(`is_reasoning_error`) it strips the reasoning kwargs, retries once, and prints a
+`ui.print_error` warning **every time** (no de-dup — deliberate). `/effort` also
+prints an upfront advisory (`effort_advisory`) about how the chosen level maps for
+the active provider. The effort level is part of the `call_model` response-cache
+key.
+
+**`reasoning_content` is never dropped by context compression.** DeepSeek's
+thinking mode returns a silent HTTP 400 when a resumed/trimmed history carries an
+assistant `content` without the `reasoning_content` it was produced with. Kvist
+does not round-trip `reasoning_content` today (chat history stores `role`/
+`content` only, the action loop rebuilds a single user prompt each step), but the
+compression paths are hardened so the day it does, they won't break it:
+`context_utils.trim_history` returns retained message dicts by identity (no key
+stripped), `agent_model.trim_chat_messages_to_token_limit`
+rebuilds every message with `{**message, ...}`, and `agent_logging._serializable_chat_history`
+keeps `reasoning_content` in `_PERSISTED_MESSAGE_KEYS`. A sliding window may drop a
+whole turn, but must never strip that field from a turn it keeps.
 
 ### Provider abstraction (`llm_clients.py`)
 Three providers, normalized names `openai` / `freeflow` / `omniroute`. OpenAI and OmniRoute

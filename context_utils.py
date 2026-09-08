@@ -17,6 +17,12 @@ from __future__ import annotations
 
 from typing import Any
 
+# A retained message is passed through untouched — its dict identity and every
+# key survive. This matters for ``reasoning_content``: DeepSeek's thinking mode
+# rejects (HTTP 400) a history where an assistant ``content`` is present without
+# the ``reasoning_content`` that came with it, so compression may drop a whole
+# turn but must never strip that field from a turn it keeps.
+
 
 def trim_history(
     messages: list[dict[str, Any]],
@@ -30,6 +36,8 @@ def trim_history(
     2. The last *max_recent* non-system messages are kept.
     3. Everything in the middle is discarded.
     4. If the history is already short enough, return as-is (no copy).
+    5. A kept message is never rewritten — every key it carries (including
+       ``reasoning_content``) survives (see the module note above).
 
     Parameters
     ----------

@@ -39,6 +39,12 @@ from llm_clients import (
     OPENROUTER_PROVIDER,
 )
 from agent_state import RunCancelled
+from reasoning_effort import (
+    is_reasoning_error,
+    merge_reasoning_kwargs,
+    normalize_effort,
+    strip_reasoning_kwargs,
+)
 from system_context import workspace_instructions_context
 from redaction import redact_text, redact_value
 from render_throttle import ThrottledRenderer
@@ -664,6 +670,7 @@ def call_model(
                 {
                     "model": current_model,
                     "messages": messages,
+                    "effort": normalize_effort(self.config.reasoning_effort),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -885,6 +892,37 @@ def call_model_streaming(
     return "".join(chunks)
 
 
+def _warn_reasoning_unsupported(self, error: Exception) -> None:
+    """Surface, every time it happens, that reasoning effort was dropped.
+
+    The user asked for a persistent warning rather than a one-time notice, so
+    there is deliberately no de-duplication here.
+    """
+    level = normalize_effort(self.config.reasoning_effort)
+    message = (
+        f"Provider rejected reasoning effort '{level}' — retrying this request "
+        "without it. Pick a level the provider supports with /effort."
+    )
+    printer = getattr(self._ui, "print_error", None)
+    if callable(printer):
+        printer(message)
+    self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")
+
+
+def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, Any]):
+    """Create a completion; on a reasoning-control rejection, warn and retry
+    once without any reasoning kwargs. Other errors propagate unchanged."""
+    try:
+        return self.client.chat.completions.create(**request_kwargs)
+    except Exception as error:
+        if not is_reasoning_error(error):
+            raise
+        _warn_reasoning_unsupported(self, error)
+        return self.client.chat.completions.create(
+            **strip_reasoning_kwargs(request_kwargs)
+        )
+
+
 def _create_json_completion(
     self,
     model: str,
@@ -904,10 +942,13 @@ def _create_json_completion(
     if stream:
         request_kwargs["stream"] = True
         request_kwargs["stream_options"] = {"include_usage": True}
+    merge_reasoning_kwargs(
+        request_kwargs, self.config.provider, self.config.reasoning_effort
+    )
 
     first_error: Exception | None = None
     try:
-        return self.client.chat.completions.create(**request_kwargs)
+        return _create_completion_with_reasoning_fallback(self, request_kwargs)
     except Exception as error:
         if not _supports_plain_json_fallback(error):
             raise
@@ -1097,7 +1138,12 @@ def trim_chat_messages_to_token_limit(
     self,
     messages: list[ChatCompletionMessageParam],
 ) -> list[ChatCompletionMessageParam]:
-    """Keep FreeFlow chat requests below the backend's hard input limit."""
+    """Keep FreeFlow chat requests below the backend's hard input limit.
+
+    Every retained/truncated message is rebuilt with ``{**message, ...}``, so
+    sibling keys such as ``reasoning_content`` survive — a reasoning provider
+    that ever reaches this path must still get that field back verbatim.
+    """
     if self.config.provider != FREEFLOW_PROVIDER:
         return messages
 

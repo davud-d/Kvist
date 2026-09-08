@@ -177,6 +177,8 @@ from user_config import (
     save_role_selection,
     get_saved_planning_enabled,
     save_planning_enabled,
+    get_saved_reasoning_effort,
+    save_reasoning_effort,
     get_saved_style,
     get_style_options,
     save_style_configuration,
@@ -186,6 +188,13 @@ from user_config import (
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
 
+from reasoning_effort import (
+    DEFAULT_EFFORT,
+    EFFORT_DESCRIPTIONS,
+    EFFORT_LEVELS,
+    effort_advisory,
+    normalize_effort,
+)
 from slash_commands import (
     SLASH_COMMAND_KEY_BINDINGS,
     SLASH_COMMAND_LEXER,
@@ -462,6 +471,22 @@ def apply_plan_mode(agent, planning_enabled: bool) -> None:
     slash_command_auto_suggest.set_plan(planning_enabled)
 
 
+def resolve_reasoning_effort() -> str:
+    """Startup reasoning-effort level: AGENT_REASONING_EFFORT overrides the
+    persisted preference, which defaults to 'medium'."""
+    override = os.getenv("AGENT_REASONING_EFFORT")
+    if override and override.strip():
+        return normalize_effort(override)
+    return normalize_effort(get_saved_reasoning_effort())
+
+
+def apply_reasoning_effort(agent, config: AgentConfig, level: str) -> None:
+    """Apply a reasoning-effort change to the live runtime objects."""
+    normalized = normalize_effort(level)
+    agent.config.reasoning_effort = normalized
+    config.reasoning_effort = normalized
+
+
 def sync_strime_suggestion(provider: str, enabled: bool) -> None:
     slash_command_auto_suggest.set_streaming(
         enabled,
@@ -729,6 +754,7 @@ def build_agent(
         stream=provider_supports_streaming(provider),
         verbose=verbose,
         skip_planning=skip_planning,
+        reasoning_effort=resolve_reasoning_effort(),
     )
     agent_console = Console()
     perf_logger = PerfLogger(executor.workspace)
@@ -746,6 +772,9 @@ def build_agent(
         perf_logger=perf_logger,
     )
     warnings.extend(getattr(agent, "_storage_warnings", []))
+    effort_note = effort_advisory(config.provider, config.reasoning_effort)
+    if effort_note and config.reasoning_effort != DEFAULT_EFFORT:
+        warnings.append(f"Reasoning effort '{config.reasoning_effort}': {effort_note}")
     try:
         ensure_workspace_instructions(executor.workspace)
     except OSError as error:
@@ -776,7 +805,10 @@ def print_runtime_banner(config: AgentConfig, max_steps: int, verbose: bool, war
         f"Planner model: {sanitize_display_text(config.planner_model)}",
         style="blue",
     )
-    line.append(f" | Max steps: {max_steps} | Verbose: {verbose}")
+    line.append(
+        f" | Max steps: {max_steps} | Effort: {config.reasoning_effort}"
+        f" | Verbose: {verbose}"
+    )
     console.print(line)
     for warning in warnings:
         console.print(_display_text(warning, "yellow"))
@@ -830,6 +862,7 @@ def render_startup_banner(
     console.print("[dim]Command '/change-api' — update the current provider's API key.[/dim]")
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
     console.print("[dim]Command '/role' — select agent role (auto/coder/reader/devops/chat).[/dim]")
+    console.print("[dim]Command '/effort' — set reasoning effort (false/low/medium/high/xhigh/max).[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
     console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
@@ -1157,6 +1190,23 @@ def choose_role(current_role: str | None, verbose: bool) -> str | None:
     )
 
     return selected
+
+
+def choose_effort(current_level: str, verbose: bool) -> str | None:
+    """Select the global reasoning-effort level. Returns the level or None."""
+    ui = TerminalBannerUI(console=console, verbose=verbose)
+
+    options = [
+        {"value": level, "label": level, "description": EFFORT_DESCRIPTIONS[level]}
+        for level in EFFORT_LEVELS
+    ]
+
+    return ui.choose_option(
+        title="Reasoning effort (applies to every provider)",
+        current_value=normalize_effort(current_level),
+        options=options,
+        help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
+    )
 
 
 def choose_style(verbose: bool) -> tuple[str, str] | None:
@@ -2757,6 +2807,40 @@ def main() -> None:
                 console.print(
                     _display_text(f"Role set to: {display_role}", "green")
                 )
+                continue
+
+            if user_goal.lower() == "/effort":
+                with paused_interactive_screen(interactive_screen):
+                    selected_effort = choose_effort(
+                        agent.config.reasoning_effort, verbose
+                    )
+                if selected_effort is None:
+                    console.print(
+                        "[yellow]Reasoning effort unchanged.[/yellow]"
+                    )
+                    continue
+                selected_effort = normalize_effort(selected_effort)
+                apply_reasoning_effort(agent, config, selected_effort)
+                try:
+                    save_reasoning_effort(selected_effort)
+                except RuntimeError as error:
+                    console.print(
+                        _display_text(
+                            "Reasoning-effort preference not saved: "
+                            f"{sanitize_display_text(str(error))}",
+                            "yellow",
+                        )
+                    )
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                console.print(
+                    _display_text(
+                        f"Reasoning effort set to: {selected_effort}", "green"
+                    )
+                )
+                advisory = effort_advisory(config.provider, selected_effort)
+                if advisory:
+                    console.print(_display_text(advisory, "yellow"))
                 continue
 
             validation_error = validate_user_goal(

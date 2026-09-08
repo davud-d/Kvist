@@ -36,6 +36,9 @@ class AgentConfig:
     logs_dirname: str = ".kvist/logs"
     state_filename: str = ".kvist/state.json"
     model_temperature: float = 0.1
+    # Global reasoning-effort level on the Kvist scale (reasoning_effort.py):
+    # false|low|medium|high|xhigh|max. Translated per provider at call time.
+    reasoning_effort: str = "medium"
     max_retries: int = 2
     retry_base_delay: float = 2.0
     max_context_tokens: int = 120000

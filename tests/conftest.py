@@ -62,6 +62,12 @@ class NullUI:
     def print_sandbox_notice(self, *args, **kwargs):
         pass
 
+    def print_result(self, *args, **kwargs):
+        pass
+
+    def print_error(self, *args, **kwargs):
+        pass
+
     def debug_print(self, *args, **kwargs):
         pass
 

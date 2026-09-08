@@ -42,6 +42,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     ),
     SlashCommand("models", "Select fast, smart and planner models"),
     SlashCommand("role", "Choose auto, coder, devops or chat role"),
+    SlashCommand("effort", "Set the model's reasoning effort level"),
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("style", "Select a style for chat/agent responses"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),
