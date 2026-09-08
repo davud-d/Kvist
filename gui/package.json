@@ -15,7 +15,8 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "build:core": "../.venv/bin/python -m PyInstaller ../kvist.spec --noconfirm --distpath resources/bin --workpath .build/core",
-    "dist": "npm run build:core && electron-builder"
+    "dist:app": "electron-builder",
+    "dist": "npm run build:core && npm run dist:app"
   },
   "dependencies": {
     "marked": "^18.0.9",

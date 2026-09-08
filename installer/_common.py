@@ -306,6 +306,37 @@ def show_step(status: Status | None, text: str) -> None:
     _last_step_shown_at = time.monotonic()
 
 
+# Every installer opens by saying which platform it is on, and each one branches
+# on that answer, so the texts live next to the helper that shows them.
+OS_STEPS = {
+    "detect": "Detecting operating system",
+    "windows": "Detected Windows",
+    "linux": "Detected Linux",
+    "macos": "[yellow]Detected macOS (untested)[/yellow]",
+}
+
+
+def show_detected_os(status: Status | None) -> str:
+    """Announce the platform on the step line; return its OS_STEPS key."""
+    show_step(status, OS_STEPS["detect"])
+    key = "windows" if IS_WINDOWS else "macos" if IS_MACOS else "linux"
+    show_step(status, OS_STEPS[key])
+    return key
+
+
+def human_size(path: Path) -> str:
+    """A file's size as the installer says it out loud, e.g. "12.4 MB"."""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return "unknown size"
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
 def safe_extract_zip(zip_path: Path, dest_dir: Path) -> None:
     """Extract every member of `zip_path` under `dest_dir`, refusing escapes.
 

@@ -44,9 +44,11 @@ from _common import (
     close_log,
     hold_last_step,
     log,
+    probe_command,
     remove_path,
     report_command_failure,
     run_logged,
+    show_detected_os,
     show_step,
     spinner,
     user_desktop_dir,
@@ -58,12 +60,28 @@ if TYPE_CHECKING:
 
 STEPS = {
     "starting": "Starting installation",
-    "build_gui": "Building the GUI with electron-builder",
+    "check_installed": "Checking for an existing installation",
+    "installed_found": "Kvist GUI is already installed — rebuilding it",
+    "installed_none": "No installed Kvist GUI found",
+    "check_npm": "Searching for Node.js and npm",
+    "npm_missing": "[red]npm not found — install Node.js[/red]",
+    "npm_found": "Found {tools}",
+    "check_modules": "Checking the GUI's npm packages",
+    "modules_found": "npm packages already installed",
+    "install_modules": "Installing npm packages",
+    "build_core": "Building the Kvist core binary with PyInstaller",
+    "build_app": "Packaging the desktop app with electron-builder",
+    "build_done": "GUI built successfully",
     "find_payload": "Looking for the built GUI",
-    "install_app": "Installing the application",
+    "payload_found": "Found {payload}",
+    "copy_app": "Copying the application into place",
+    "activate_app": "Activating the new installation",
     "install_icons": "Installing icons",
+    "icons_done": "Installed {count} icons into the hicolor theme",
     "create_entry": "Creating the launcher entry",
-    "create_shortcuts": "Creating shortcuts",
+    "refresh_caches": "Refreshing the desktop and icon caches",
+    "shortcut_desktop": "Creating the Desktop shortcut",
+    "shortcut_start_menu": "Creating the Start Menu shortcut",
     "run_setup": "Running the Kvist installer — follow its prompts",
     "done": "Installation complete",
 }
@@ -86,14 +104,41 @@ def is_already_installed() -> bool:
     return INSTALL_ROOT.is_dir()
 
 
-def build_gui(status: Status | None = None) -> None:
+def _toolchain_versions(npm: str) -> str:
+    """What the build will run with, e.g. "Node.js v22.3.0 + npm 10.8.1"."""
+    npm_version = probe_command([npm, "--version"], timeout=60).stdout.strip() or "?"
+    node = shutil.which("node")
+    if node is None:
+        return f"npm {npm_version}"
+    node_version = probe_command([node, "--version"], timeout=60).stdout.strip() or "?"
+    return f"Node.js {node_version} + npm {npm_version}"
+
+
+def _find_npm(status: Status | None) -> str:
+    show_step(status, STEPS["check_npm"])
     npm = shutil.which("npm")
     if npm is None:
-        raise SystemExit("error: npm not found; install Node.js to use --build")
-    show_step(status, STEPS["build_gui"])
-    if not (GUI_DIR / "node_modules").is_dir():
+        show_step(status, STEPS["npm_missing"])
+        raise SystemExit("error: npm not found; install Node.js to build the GUI")
+    show_step(status, STEPS["npm_found"].format(tools=_toolchain_versions(npm)))
+    return npm
+
+
+def build_gui(status: Status | None = None) -> None:
+    npm = _find_npm(status)
+    show_step(status, STEPS["check_modules"])
+    if (GUI_DIR / "node_modules").is_dir():
+        show_step(status, STEPS["modules_found"])
+    else:
+        show_step(status, STEPS["install_modules"])
         run_logged([npm, "install"], cwd=GUI_DIR)
-    run_logged([npm, "run", "dist"], cwd=GUI_DIR)
+    # `npm run dist` chains these two; running them separately is what lets the
+    # step line name which of the two long phases the build is in.
+    show_step(status, STEPS["build_core"])
+    run_logged([npm, "run", "build:core"], cwd=GUI_DIR)
+    show_step(status, STEPS["build_app"])
+    run_logged([npm, "run", "dist:app"], cwd=GUI_DIR)
+    show_step(status, STEPS["build_done"])
 
 
 # ----------------------------------------------------------------------------- linux
@@ -124,13 +169,14 @@ def install_linux(status: Status | None = None) -> str:
     """Install the built GUI; return the line main() prints once done."""
     show_step(status, STEPS["find_payload"])
     kind, payload = _find_linux_payload()
+    show_step(status, STEPS["payload_found"].format(payload=payload.name))
     INSTALL_ROOT.parent.mkdir(parents=True, exist_ok=True)
     staged_root = Path(tempfile.mkdtemp(prefix=".kvist-gui.", dir=INSTALL_ROOT.parent))
     committed_root = False
     backup_root = INSTALL_ROOT.with_name(f".{INSTALL_ROOT.name}.old")
 
     try:
-        show_step(status, STEPS["install_app"])
+        show_step(status, STEPS["copy_app"])
         if kind == "appimage":
             staged_exec = staged_root / "Kvist.AppImage"
             shutil.copy2(payload, staged_exec)
@@ -141,6 +187,7 @@ def install_linux(status: Status | None = None) -> str:
             staged_exec = _linux_unpacked_exe(staged_dest)
             staged_exec.chmod(0o755)
 
+        show_step(status, STEPS["activate_app"])
         if backup_root.exists() or backup_root.is_symlink():
             remove_path(backup_root)
         if INSTALL_ROOT.exists() or INSTALL_ROOT.is_symlink():
@@ -152,6 +199,7 @@ def install_linux(status: Status | None = None) -> str:
 
         show_step(status, STEPS["install_icons"])
         icon_root = Path.home() / ".local" / "share" / "icons" / "hicolor"
+        installed_icons = 0
         for size in LINUX_ICON_SIZES:
             src = ASSETS_DIR / f"icon-{size}.png"
             if not src.is_file():
@@ -159,10 +207,13 @@ def install_linux(status: Status | None = None) -> str:
             dst_dir = icon_root / f"{size}x{size}" / "apps"
             dst_dir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst_dir / f"{GUI_LINUX_DESKTOP_ID}.png")
+            installed_icons += 1
         scalable = icon_root / "scalable" / "apps"
         scalable.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ASSETS_DIR / "icon.svg", scalable / f"{GUI_LINUX_DESKTOP_ID}.svg")
+        installed_icons += 1
         log(f"installed icons -> {icon_root}")
+        show_step(status, STEPS["icons_done"].format(count=installed_icons))
 
         show_step(status, STEPS["create_entry"])
         apps_dir = Path.home() / ".local" / "share" / "applications"
@@ -184,6 +235,7 @@ def install_linux(status: Status | None = None) -> str:
         desktop_file.chmod(0o755)
         log(f"created launcher entry -> {desktop_file}")
 
+        show_step(status, STEPS["refresh_caches"])
         _best_effort(["update-desktop-database", str(apps_dir)])
         _best_effort(["gtk-update-icon-cache", "-f", "-t", str(Path.home() / ".local" / "share" / "icons" / "hicolor")])
         return f"Installed {GUI_APP_NAME} to {exec_path}\nLook for it in your application launcher."
@@ -254,6 +306,7 @@ def install_windows(status: Status | None = None) -> str:
     """Install the built GUI; return the line main() prints once done."""
     show_step(status, STEPS["find_payload"])
     kind, payload = _find_windows_payload()
+    show_step(status, STEPS["payload_found"].format(payload=payload.name))
     if kind == "setup":
         # The NSIS installer owns the rest: it lays down its own files and its
         # own Start Menu / Desktop shortcuts, so none of the staging below
@@ -267,7 +320,7 @@ def install_windows(status: Status | None = None) -> str:
     backup = INSTALL_ROOT.with_name(f".{INSTALL_ROOT.name}.old")
     committed = False
     try:
-        show_step(status, STEPS["install_app"])
+        show_step(status, STEPS["copy_app"])
         shutil.copytree(payload, staging / "app")
         dest = staging / "app"
         exe = dest / f"{GUI_APP_NAME}.exe"
@@ -279,6 +332,7 @@ def install_windows(status: Status | None = None) -> str:
         icon = dest / "kvist.ico"
         shutil.copy2(ASSETS_DIR / "kvist.ico", icon)
 
+        show_step(status, STEPS["activate_app"])
         if backup.exists() or backup.is_symlink():
             remove_path(backup)
         if INSTALL_ROOT.exists() or INSTALL_ROOT.is_symlink():
@@ -289,8 +343,9 @@ def install_windows(status: Status | None = None) -> str:
         icon = INSTALL_ROOT / icon.relative_to(staging / "app")
         log(f"installed app -> {exe}")
 
-        show_step(status, STEPS["create_shortcuts"])
+        show_step(status, STEPS["shortcut_desktop"])
         _windows_shortcut(user_desktop_dir() / f"{GUI_APP_NAME}.lnk", exe, icon)
+        show_step(status, STEPS["shortcut_start_menu"])
         start_menu = Path(os.environ.get("APPDATA", str(Path.home() / "AppData" / "Roaming"))) / \
             "Microsoft" / "Windows" / "Start Menu" / "Programs"
         _windows_shortcut(start_menu / f"{GUI_APP_NAME}.lnk", exe, icon)
@@ -328,12 +383,16 @@ def _remove_all(targets: list[Path]) -> None:
 
 
 def _install_gui(args: argparse.Namespace, status: Status | None = None) -> str:
+    show_detected_os(status)
+    show_step(status, STEPS["check_installed"])
+    installed = is_already_installed()
+    show_step(status, STEPS["installed_found" if installed else "installed_none"])
+    if installed:
+        log(f"Kvist GUI is already installed at {INSTALL_ROOT}")
+
     # Re-running over an existing install means "update", so a stale dist/
     # build must be rebuilt rather than silently reused.
-    if args.build:
-        build_gui(status)
-    elif is_already_installed():
-        log("Kvist GUI is already installed; rebuilding it")
+    if args.build or installed:
         build_gui(status)
 
     done = (install_windows if IS_WINDOWS else install_linux)(status)

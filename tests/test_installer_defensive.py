@@ -79,7 +79,7 @@ def test_malformed_plugin_zip_is_reported_as_controlled_error(tmp_path):
     broken.write_bytes(b"not a zip")
 
     with pytest.raises(SystemExit, match="ZIP"):
-        jetbrains._zip_root(broken)
+        jetbrains._zip_layout(broken)
 
 
 def test_untrusted_zip_root_cannot_delete_outside_plugin_tree(tmp_path):
@@ -275,11 +275,11 @@ def test_empty_and_multi_root_plugin_archives_are_rejected(tmp_path):
     with zipfile.ZipFile(empty, "w"):
         pass
     with pytest.raises(SystemExit, match="ZIP layout"):
-        jetbrains._zip_root(empty)
+        jetbrains._zip_layout(empty)
 
     multi = _zip(tmp_path / "multi.zip", ("one/file", b"1"), ("two/file", b"2"))
     with pytest.raises(SystemExit, match="ZIP layout"):
-        jetbrains._zip_root(multi)
+        jetbrains._zip_layout(multi)
 
 
 def test_safe_extract_rejects_nested_traversal_and_does_not_partially_extract(tmp_path):

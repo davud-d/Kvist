@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from _common import (
+    OS_STEPS,
     InstallCommandError,
     begin_quiet_mode,
     close_log,
@@ -42,6 +43,7 @@ from _common import (
     probe_command,
     report_command_failure,
     run_logged,
+    show_detected_os,
     show_step,
     spinner,
 )
@@ -51,10 +53,6 @@ if TYPE_CHECKING:
 
 STEPS = {
     "starting": "Starting installation",
-    "detect_os": "Detecting operating system",
-    "detect_os_windows": "Detected Windows",
-    "detect_os_linux": "Detected Linux",
-    "detect_os_macos": "[yellow]Detected macOS (untested)[/yellow]",
     "venv_check": "Checking Python environment",
     "venv_needed": "Setting up Python environment",
     "venv_found": "Found suitable Python environment",
@@ -73,7 +71,6 @@ STEPS = {
 }
 
 IS_WINDOWS = platform.system() == "Windows"
-IS_MACOS = platform.system() == "Darwin"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SPEC_FILE = PROJECT_ROOT / "kvist.spec"
@@ -511,16 +508,9 @@ def _install_cli(args: argparse.Namespace, status: Status | None = None) -> Path
     Every phase advances `status` (the run's single spinner line) when one is
     given; without one, progress is reported with plain prints instead.
     """
-    show_step(status, STEPS["detect_os"])
-    if IS_WINDOWS:
-        show_step(status, STEPS["detect_os_windows"])
-    elif IS_MACOS:
-        show_step(status, STEPS["detect_os_macos"])
-        if status is not None:
-            # Hold the yellow untested-platform warning on screen; see _hold_step.
-            _hold_step(status, STEPS["detect_os_macos"])
-    else:
-        show_step(status, STEPS["detect_os_linux"])
+    if show_detected_os(status) == "macos" and status is not None:
+        # Hold the yellow untested-platform warning on screen; see _hold_step.
+        _hold_step(status, OS_STEPS["macos"])
 
     binary = args.binary
     if binary is None:

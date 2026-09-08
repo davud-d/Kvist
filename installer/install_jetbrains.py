@@ -35,11 +35,13 @@ from _common import (
     close_log,
     discover_jetbrains_ides,
     hold_last_step,
+    human_size,
     log,
     remove_path,
     report_command_failure,
     run_logged,
     safe_extract_zip,
+    show_detected_os,
     show_step,
     spinner,
     warn,
@@ -50,9 +52,19 @@ if TYPE_CHECKING:
 
 STEPS = {
     "starting": "Starting installation",
-    "build_plugin": "Building the plugin ZIP",
+    "found_ides": "Preparing to install into {count} IDE(s)",
+    "check_installed": "Checking for an already installed plugin",
+    "installed_found": "Plugin is already installed — rebuilding the ZIP",
+    "installed_none": "No installed plugin found",
+    "build_plugin": "Building the plugin ZIP (PyInstaller, then Gradle)",
+    "build_done": "Plugin ZIP built successfully",
+    "find_zip": "Looking for a built plugin ZIP",
+    "zip_found": "Found {name} ({size})",
     "read_zip": "Reading the plugin archive",
+    "zip_ok": "Archive holds {count} files under {root}/",
     "install_into": "Installing into {label}",
+    "installed_into": "Installed into {label}",
+    "install_failed": "[red]Could not install into {label}[/red]",
     "done": "Installation complete",
 }
 
@@ -105,22 +117,25 @@ def build_plugin_zip(status: Status | None = None) -> Path:
     built = find_plugin_zip()
     if built is None:
         raise SystemExit("error: build finished but no plugin ZIP was produced")
+    show_step(status, STEPS["build_done"])
     return built
 
 
-def _zip_root(zip_path: Path) -> str:
+def _zip_layout(zip_path: Path) -> tuple[str, int]:
+    """The archive's single top-level folder, and how many files it holds."""
     try:
         archive = zipfile.ZipFile(zip_path)
     except (OSError, zipfile.BadZipFile) as exc:
         raise SystemExit(f"error: invalid plugin ZIP: {zip_path}") from exc
     with archive:
-        roots = {name.split("/", 1)[0] for name in archive.namelist() if name.strip("/")}
+        entries = [info for info in archive.infolist() if info.filename.strip("/")]
+    roots = {info.filename.split("/", 1)[0] for info in entries}
     if len(roots) != 1:
         raise SystemExit(f"error: unexpected plugin ZIP layout (roots: {sorted(roots)})")
     root = roots.pop()
     if root in {".", ".."} or not root or "/" in root or "\\" in root:
         raise SystemExit(f"error: unsafe plugin ZIP root: {root!r}")
-    return root
+    return root, sum(not info.is_dir() for info in entries)
 
 
 def install_into(config_dir: Path, zip_path: Path, zip_root: str) -> None:
@@ -174,11 +189,17 @@ def resolve_plugin_zip(
         return args.plugin_zip
     if args.build:
         return build_plugin_zip(status)
+
+    show_step(status, STEPS["check_installed"])
+    installed = plugin_already_installed(ides)
+    show_step(status, STEPS["installed_found" if installed else "installed_none"])
     # Re-running over an existing install means "update", so a stale
     # distributions/ ZIP must be rebuilt rather than reused.
-    if plugin_already_installed(ides):
+    if installed:
         log("plugin is already installed; rebuilding the ZIP")
         return build_plugin_zip(status)
+
+    show_step(status, STEPS["find_zip"])
     found = find_plugin_zip()
     if found is None:
         raise SystemExit(
@@ -205,18 +226,25 @@ def install_into_all(
         try:
             install_into(config_dir, zip_path, zip_root)
         except OSError as exc:
+            show_step(status, STEPS["install_failed"].format(label=label))
             warn(f"could not install into {label}: {exc}")
             failures.append(f"{label}: {exc}")
+            continue
+        show_step(status, STEPS["installed_into"].format(label=label))
     return failures
 
 
 def _install_plugin(
     args: argparse.Namespace, ides: list[tuple[str, Path]], status: Status | None = None
 ) -> list[str]:
+    show_detected_os(status)
+    show_step(status, STEPS["found_ides"].format(count=len(ides)))
     zip_path = resolve_plugin_zip(args, ides, status)
+    show_step(status, STEPS["zip_found"].format(name=zip_path.name, size=human_size(zip_path)))
     show_step(status, STEPS["read_zip"])
     log(f"plugin ZIP: {zip_path}")
-    zip_root = _zip_root(zip_path)
+    zip_root, entry_count = _zip_layout(zip_path)
+    show_step(status, STEPS["zip_ok"].format(count=entry_count, root=zip_root))
     failures = install_into_all(ides, zip_path, zip_root, status)
     show_step(status, STEPS["done"])
     hold_last_step()
