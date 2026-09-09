@@ -84,15 +84,21 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "report": "report_prompt.txt",
 }
 
-# Per-provider API request interval (seconds). A zero interval removes the
-# artificial request spacing entirely (no throttle sleeps, no per-step dwell).
-# Direct official-API providers (OpenAI, Anthropic, DeepSeek) run unpaced; the
-# relay/aggregator providers keep the paced default for rate-limit politeness.
-# Override with AGENT_API_INTERVAL env var for all providers.
+# Direct official-API providers (OpenAI, Anthropic, DeepSeek) are reached
+# straight at the vendor endpoint and answer fast, so every artificial
+# mechanism is pure overhead for them: no request pacing and no
+# perceived-latency prefetch pipeline — clean sequential speed. Relay and
+# aggregator providers (OpenRouter, FreeFlow, OmniRoute, custom endpoints)
+# keep the paced defaults for rate-limit politeness.
+_FAST_DIRECT_PROVIDERS: frozenset[str] = frozenset(
+    {OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER}
+)
+
+# Per-provider API request interval overrides (seconds) on top of the config
+# default (AgentConfig.api_request_interval, 5.0 s). _FAST_DIRECT_PROVIDERS
+# are always zeroed (no spacing). Override everything with the
+# AGENT_API_INTERVAL env var.
 _API_PROVIDER_INTERVALS: dict[str, float] = {
-    OPENAI_PROVIDER: 0.0,
-    ANTHROPIC_PROVIDER: 0.0,
-    DEEPSEEK_PROVIDER: 0.0,
     OPENROUTER_PROVIDER: 2.5,
 }
 
@@ -107,11 +113,13 @@ def _get_api_interval(self) -> float:
             return float(env_override)
         except ValueError:
             pass
-    # A zero interval (config, env var, or the per-provider table) disables all
-    # artificial spacing; the table never overrides an explicit "off" above.
+    # An explicit interval of 0 (config or env var) disables all artificial
+    # spacing; the fast-direct zeroing below never overrides that "off".
     if self.config.api_request_interval <= 0:
         return 0.0
     provider = getattr(self.config, "provider", "")
+    if provider in _FAST_DIRECT_PROVIDERS:
+        return 0.0
     return _API_PROVIDER_INTERVALS.get(provider, self.config.api_request_interval)
 
 
@@ -146,6 +154,23 @@ def _throttle_request_rate(self) -> None:
 # the foreground would send anyway; any mismatch is discarded and re-called.
 _PIPELINE_DWELL_MIN = 0.5
 _PIPELINE_DWELL_CAP = 2.5
+
+
+def _pipeline_allowed(self) -> bool:
+    """Whether the perceived-latency prefetch pipeline may run for this run.
+
+    Fast direct providers (OpenAI, Anthropic, DeepSeek) never pipeline: they
+    run strictly sequential, with no next step computed in the background —
+    clean speed. The pipeline is also off in verbose mode, whose debug stream
+    must stay strictly sequential, and whenever request pacing is disabled
+    (tests, ``api_request_interval=0``).
+    """
+    if self.config.verbose:
+        return False
+    provider = getattr(self.config, "provider", "")
+    if provider in _FAST_DIRECT_PROVIDERS:
+        return False
+    return _get_api_interval(self) > 0
 
 
 def _speculative_action_call(
