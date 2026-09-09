@@ -68,7 +68,7 @@ _LIVE_FPS = 30
 # Marks for the four states a component passes through. The running one is
 # animated from the clock, like the installers' own spinner.
 _FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
-_FRAME_PERIOD = 0.08
+_FRAME_PERIOD = 0.05
 _MARKS = {"queued": " ", "done": "✓", "failed": "✗"}
 _STYLES = {"queued": "dim", "running": "", "done": "green", "failed": "red"}
 
