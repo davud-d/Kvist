@@ -36,6 +36,7 @@ from llm_clients import (
     provider_supports_json_mode,
     OPENAI_PROVIDER,
     ANTHROPIC_PROVIDER,
+    DEEPSEEK_PROVIDER,
     OPENROUTER_PROVIDER,
 )
 from agent_state import RunCancelled
@@ -83,12 +84,15 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "report": "report_prompt.txt",
 }
 
-# Per-provider API request interval (seconds).
-# Top-tier providers get 2.5 s; all others get the default from config (5.0 s).
+# Per-provider API request interval (seconds). A zero interval removes the
+# artificial request spacing entirely (no throttle sleeps, no per-step dwell).
+# Direct official-API providers (OpenAI, Anthropic, DeepSeek) run unpaced; the
+# relay/aggregator providers keep the paced default for rate-limit politeness.
 # Override with AGENT_API_INTERVAL env var for all providers.
 _API_PROVIDER_INTERVALS: dict[str, float] = {
-    OPENAI_PROVIDER: 2.5,
-    ANTHROPIC_PROVIDER: 2.5,
+    OPENAI_PROVIDER: 0.0,
+    ANTHROPIC_PROVIDER: 0.0,
+    DEEPSEEK_PROVIDER: 0.0,
     OPENROUTER_PROVIDER: 2.5,
 }
 
@@ -103,8 +107,8 @@ def _get_api_interval(self) -> float:
             return float(env_override)
         except ValueError:
             pass
-    # An explicit interval of 0 disables all artificial spacing; the per-provider
-    # table only lowers the positive default, it never overrides "off".
+    # A zero interval (config, env var, or the per-provider table) disables all
+    # artificial spacing; the table never overrides an explicit "off" above.
     if self.config.api_request_interval <= 0:
         return 0.0
     provider = getattr(self.config, "provider", "")

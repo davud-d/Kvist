@@ -179,9 +179,10 @@ def _run_pipeline_dwell(self, user_goal: str, step: int) -> None:
 
     Off-loads only the pure LLM call for ``step + 1`` and then sleeps a short,
     latency-matched dwell so the user reads the current step while the next is
-    prepared — the perceived-latency pipeline. Disabled when there is no request
-    interval (tests, ``api_request_interval=0``) and in verbose mode, whose
-    debug stream must stay strictly sequential.
+    prepared — the perceived-latency pipeline. Disabled when there is no
+    request interval (tests, ``api_request_interval=0``, unpaced providers such
+    as OpenAI/Anthropic/DeepSeek) and in verbose mode, whose debug stream must
+    stay strictly sequential.
     """
     from agent_model import (
         _get_api_interval,
