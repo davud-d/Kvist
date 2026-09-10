@@ -182,10 +182,10 @@ not already have, so `agent_runtime.update_progress` derives `RunState.progress`
 completed plan steps (`_plan_progress`) with `_PLAN_STEP_BANDS` as the floor when
 planning is off. The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 18 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
-git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, final_answer,
-report_to_user). The parser tolerates fenced code blocks, smart quotes, and surrounding
+git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, refuse,
+final_answer, report_to_user). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `prompts/system/` — the sync is
 enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
@@ -211,9 +211,9 @@ instructions.
 
 ### Request flow
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
-the request into **coder / devops / chat** → `LocalAgent.run()`:
+the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
 - **chat** role takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol.
-- **coder / devops** build a plan (`agent_planner.py`) then enter `run_loop` (`agent_runtime.py`),
+- **coder / reader / devops** build a plan (`agent_planner.py`) then enter `run_loop` (`agent_runtime.py`),
   which calls the action model, parses, executes via `SafeExecutor`, registers feedback,
   tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
   consecutive errors, repeated-action blocking, write-required-on-create-tasks).
@@ -234,15 +234,21 @@ before; a cancelled question (Esc, or the screen shutting down mid-question) is
 treated the same way.
 
 ### Role routing (`role_router.py`)
-First-match-wins priority: deterministic regex rules (devops → coder → chat, bilingual
-EN/RU) → LLM router call on `fast_model` → keyword fallback → default `chat`. Returns a
-`RoleRouteResult` (alias `RouteDecision`) carrying the chosen role and its `source`.
+Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins
+priority: an explicit no-write marker → `reader` (beats topic) → deterministic regex
+rules (devops → coder → chat, bilingual EN/RU) → LLM router call on `fast_model` →
+keyword fallback → default `chat`. Returns a `RoleRouteResult` (alias `RouteDecision`)
+carrying the chosen role and its `source`. `reader` is a full role with its own prompt
+(`prompts/system/reader_prompt.txt`): it inspects and reports, and its writes are
+disabled. `main.py --role` additionally accepts `auto`, which is "let the router decide"
+rather than a fifth role.
 
 ### Model tiers (`agent_model.py`)
 Three roles per provider: **fast**, **smart**, **planner**. A run uses fast by default
 and escalates to smart on complexity="complex", parse errors, consecutive errors, or
 stagnation — unless the user explicitly pinned a model. Role system prompts are loaded
-and cached from `prompts/system/{coder,devops,chat,planner,router}_prompt.txt`.
+and cached from `prompts/system/` — seven files:
+`{chat,coder,devops,planner,reader,report,router}_prompt.txt`.
 
 User-selectable styles live apart, in `prompts/styles/{agents,chat}/<slug>.txt`
 (`agents` covers coder/reader/devops, `chat` the chat role). **One session, one
@@ -298,12 +304,20 @@ keeps `reasoning_content` in `_PERSISTED_MESSAGE_KEYS`. A sliding window may dro
 whole turn, but must never strip that field from a turn it keeps.
 
 ### Provider abstraction (`llm_clients.py`)
-Three providers, normalized names `openai` / `freeflow` / `omniroute`. OpenAI and OmniRoute
-use the OpenAI SDK directly (OmniRoute is a local OpenAI-compatible gateway, models entered
-manually); `freeflow` wraps Gemini+Groq via a `FreeFlowCompatibleClient` with cross-backend
-fallback. Only OpenAI gets strict JSON mode and streaming; FreeFlow falls back to plain
-completions. `resolve_models_for_provider` / `validate_model_selection` /
+Six built-in providers (`SUPPORTED_LLM_PROVIDERS`), normalized names `openai` /
+`anthropic` / `deepseek` / `freeflow` / `omniroute` / `openrouter`, plus arbitrary
+user-defined endpoints under a `custom:` name prefix. `openai`, `omniroute`,
+`openrouter` and `deepseek` go through the OpenAI SDK directly (OmniRoute is a local
+OpenAI-compatible gateway defaulting to `http://localhost:20128/v1`, models entered
+manually); `anthropic` uses `AnthropicCompatibleClient`; `freeflow` wraps Gemini+Groq
+via `FreeFlowCompatibleClient` with cross-backend fallback. Capability is per provider,
+not one assumption for all: `provider_supports_streaming` is true for openai,
+openrouter, anthropic and deepseek (custom endpoints are opt-in via their saved
+`streaming` flag, default off), and `provider_supports_json_mode` is true for openai,
+openrouter and deepseek only. `resolve_models_for_provider` / `validate_model_selection` /
 `fallback_candidates_for_model` handle defaults, validation, and model fallback chains.
+`fetch_available_models` queries the provider's `/v1/models` on **every** launch and
+degrades to configured models with a warning when that fails.
 
 ### Execution boundary (`executor.py` + `terminal.py` + `command_policy.py` + `sandbox.py` + `process_tree.py` + `secret_paths.py`)
 `SafeExecutor` is the single gate for every action and returns an `ExecutionResult`
