@@ -1,0 +1,510 @@
+/* components.css — header, hero, replay, cards, footer.
+   Every value comes from tokens.css; no component names a colour or a number. */
+
+/* -- header ---------------------------------------------------------------- */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+/* Safari applies backdrop-filter only on a compositing layer; without a
+   transform it silently paints nothing on some builds. */
+@supports (backdrop-filter: blur(1px)) {
+  .top { transform: translateZ(0); }
+}
+
+.top-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-4);
+  min-height: 52px;
+}
+
+.mark {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  font-weight: 700;
+  letter-spacing: var(--track-2);
+  text-transform: uppercase;
+  text-decoration: none;
+  font-size: var(--t-15);
+}
+.mark .dot {
+  width: 7px;
+  height: 7px;
+  background: var(--tx);
+  border-radius: var(--r-0);
+}
+
+.rail {
+  display: flex;
+  gap: var(--s-4);
+  margin-inline-start: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.rail::-webkit-scrollbar { display: none; }
+
+.rail a {
+  font-size: var(--t-14);
+  letter-spacing: var(--track-1);
+  text-transform: uppercase;
+  color: var(--dim);
+  text-decoration: none;
+  padding-block: var(--s-2);
+  border-bottom: 1px solid transparent;
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .rail a:hover { color: var(--tx); border-bottom-color: var(--line-2); }
+}
+/* ACCENT SLOT 4 — the section you are in. */
+.rail a[aria-current="true"] {
+  color: var(--acc);
+  border-bottom-color: var(--acc);
+}
+
+.tools { display: flex; gap: var(--s-2); align-items: center; }
+
+.chip {
+  font: inherit;
+  font-size: var(--t-14);
+  letter-spacing: var(--track-1);
+  text-transform: uppercase;
+  color: var(--dim);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  padding: var(--s-1) var(--s-2);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) {
+  .chip:hover { color: var(--tx); border-color: var(--line-2); }
+}
+.chip[aria-pressed="true"] { background: var(--paper); color: var(--ink); border-color: var(--paper); }
+
+/* -- language bar ---------------------------------------------------------- */
+
+/* Fixed to the bottom rather than inserted above the header: appearing after
+   the page has painted must not move anything the reader is already looking
+   at, and a strip down there is easier to ignore than one at the top. */
+.langbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 45;
+  border-top: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: blur(10px);
+  font-size: var(--t-14);
+}
+.langbar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+  padding-block: var(--s-2);
+}
+.langbar p { color: var(--dim); margin: 0; }
+
+/* -- hero ------------------------------------------------------------------ */
+
+.hero {
+  position: relative;
+  z-index: 1;
+  min-height: min(78vh, 660px);
+  display: flex;
+  align-items: flex-end;
+  padding-block: var(--s-7) var(--s-8);
+  overflow: hidden;
+}
+
+.hero-canvas,
+.hero-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+/* A canvas is a replaced element: inset alone leaves it at its intrinsic
+   300x150, so the box has to be stated. */
+.hero-canvas { z-index: 0; width: 100%; height: 100%; }
+
+/* The scrim that makes the hero text legible over the brightest frame of the
+   animation. Both stops are tokens, and tools/hero-contrast.mjs fails the
+   build if the pair stops clearing 4.5:1.
+   Narrow: the word sits above the text, so the scrim runs down the page.
+   Wide: the word sits to the right of the text, so it runs across it. The
+   strong stop always covers the text, which is what the tool measures. */
+.hero-veil {
+  z-index: 1;
+  background: linear-gradient(
+    to bottom,
+    rgb(var(--hero-scrim) / var(--hero-veil-clear)) 0%,
+    rgb(var(--hero-scrim) / var(--hero-veil-clear)) 26%,
+    rgb(var(--hero-scrim) / var(--hero-veil-text)) 40%,
+    rgb(var(--hero-scrim) / var(--hero-veil-text)) 100%
+  );
+}
+@media (min-width: 980px) {
+  .hero-veil {
+    background: linear-gradient(
+      to right,
+      rgb(var(--hero-scrim) / var(--hero-veil-text)) 0%,
+      rgb(var(--hero-scrim) / var(--hero-veil-text)) 56%,
+      rgb(var(--hero-scrim) / var(--hero-veil-clear)) 68%,
+      rgb(var(--hero-scrim) / var(--hero-veil-clear)) 100%
+    );
+  }
+  /* The prose is capped so it stays inside the scrim's strong stop, where
+     hero.js never draws. The command block is not prose: it takes the full
+     width so a 101-character command fits on one line. */
+  .hero h1 { max-width: 10.2em; }
+  .hero .lede { max-width: 27.6em; }
+}
+
+.hero-body {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+}
+
+.hero h1 {
+  font-size: var(--t-40);
+  line-height: 1.08;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  margin-block: var(--s-3) var(--s-4);
+  max-width: 12em;
+}
+
+.hero .lede { max-width: 36em; margin-bottom: var(--s-5); }
+
+.hero-note {
+  font-size: var(--t-14);
+  color: var(--faint);
+  letter-spacing: var(--track-1);
+  margin-top: var(--s-3);
+}
+
+/* -- the install command --------------------------------------------------- */
+
+.cmd {
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--panel);
+}
+.cmd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px dashed var(--line);
+  font-size: var(--t-14);
+  letter-spacing: var(--track-2);
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.cmd-body { padding: var(--s-3); }
+.cmd code {
+  display: block;
+  font: inherit;
+  font-size: var(--t-15);
+  color: var(--tx);
+  word-break: break-all;
+  user-select: all;
+}
+/* ACCENT SLOT 1 — the sigil in front of the command you came here to copy. */
+.cmd code::before {
+  content: "$ ";
+  color: var(--acc);
+  user-select: none;
+}
+
+.copy {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: var(--t-14);
+  letter-spacing: var(--track-1);
+  text-transform: uppercase;
+  padding: var(--s-1) var(--s-3);
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid var(--paper);
+  border-radius: var(--r-1);
+  cursor: pointer;
+}
+.copy[data-copied="true"] { background: transparent; color: var(--tx); border-style: dashed; border-color: var(--line-2); }
+.no-js .copy { display: none; }
+
+.cmd-hint { font-size: var(--t-14); color: var(--faint); padding: 0 var(--s-3) var(--s-3); }
+
+.hero-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2) var(--s-4);
+  align-items: baseline;
+  margin-top: var(--s-4);
+}
+.hero-links .hero-note { margin-top: 0; }
+.linkout {
+  font-size: var(--t-15);
+  letter-spacing: var(--track-1);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--line-2);
+  text-decoration: none;
+  padding-bottom: 2px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .linkout:hover { border-bottom-color: var(--tx); }
+}
+
+/* -- card grids ------------------------------------------------------------ */
+
+.grid {
+  display: grid;
+  gap: var(--s-4);
+  margin-top: var(--s-6);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 290px), 1fr));
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: var(--s-4);
+  background: var(--panel);
+}
+.card .term { display: block; margin-bottom: var(--s-2); }
+.card p { color: var(--dim); font-size: var(--t-15); margin: 0; }
+
+/* State by form, not by colour: the honest-limits note is hatched. */
+.note {
+  margin-top: var(--s-5);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-2);
+  padding: var(--s-4);
+  color: var(--dim);
+  font-size: var(--t-15);
+  max-width: var(--measure);
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgb(var(--texture-rgb) / 0) 0 6px,
+    rgb(var(--texture-rgb) / .05) 6px 12px
+  );
+}
+
+/* -- steps ----------------------------------------------------------------- */
+
+.steps { display: grid; gap: var(--s-4); margin-top: var(--s-6); }
+.step {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-4);
+  align-items: start;
+  border-top: 1px solid var(--line);
+  padding-top: var(--s-4);
+}
+.step .n {
+  font-weight: 700;
+  font-size: var(--t-14);
+  letter-spacing: var(--track-2);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 2px var(--s-2);
+  border-radius: var(--r-1);
+}
+.step p { color: var(--dim); font-size: var(--t-15); margin-top: var(--s-1); }
+
+.req { margin-top: var(--s-6); display: grid; gap: var(--s-2); }
+.req li {
+  font-size: var(--t-15);
+  color: var(--dim);
+  padding-inline-start: var(--s-4);
+  position: relative;
+}
+.req li::before {
+  content: "·";
+  position: absolute;
+  inset-inline-start: 0;
+  color: var(--faint);
+}
+
+/* -- the terminal replay --------------------------------------------------- */
+
+.replay {
+  margin-top: var(--s-6);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.replay-wrap { container-type: inline-size; }
+
+/* 100 columns of a monospace need roughly 60x the font size. Wherever that
+   fits the replay is set at the page's 14px floor; below that it shrinks and
+   the right-hand columns — the telemetry panel, not the conversation — are
+   clipped, because a horizontal scrollbar inside the page is worse. */
+.replay-screen {
+  margin: 0;
+  padding: var(--s-3);
+  overflow: hidden;
+  font-size: max(8px, min(var(--t-14), calc((100cqw - 2 * var(--s-3)) / 60)));
+  line-height: var(--replay-line);
+  /* Stated in em, so the box is the same height before and after the webfont
+     arrives. Six of these on the guides page shifting by a fallback font's
+     metrics is most of a page's layout-shift budget. */
+  height: calc(var(--rows, 32) * var(--replay-line) * 1em + 2 * var(--s-3));
+  white-space: pre;
+  tab-size: 8;
+  color: var(--ansi-fg);
+}
+.replay-screen b { font-weight: 700; }
+
+/* Rows are absolute-height so the block never reflows mid-playback: the
+   height is set once from the recording's row count. */
+.replay-screen > span { display: block; height: calc(var(--replay-line) * 1em); }
+
+.replay-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  border-top: 1px dashed var(--line);
+  flex-wrap: wrap;
+}
+.no-js .replay-bar { display: none; }
+
+.replay-bar .chip { min-width: 4.8em; text-align: center; }
+
+.scrub {
+  flex: 1 1 160px;
+  min-width: 120px;
+  appearance: none;
+  background: transparent;
+  height: 20px;
+  cursor: pointer;
+}
+.scrub::-webkit-slider-runnable-track { height: 2px; background: var(--line-2); }
+.scrub::-moz-range-track { height: 2px; background: var(--line-2); }
+/* ACCENT SLOT 5 — the run indicator. */
+.scrub::-webkit-slider-thumb {
+  appearance: none;
+  width: 4px;
+  height: 16px;
+  margin-top: -7px;
+  background: var(--acc);
+  border: 0;
+  border-radius: var(--r-0);
+}
+.scrub::-moz-range-thumb {
+  width: 4px;
+  height: 16px;
+  background: var(--acc);
+  border: 0;
+  border-radius: var(--r-0);
+}
+
+.replay-time {
+  font-size: var(--t-14);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.task {
+  margin-top: var(--s-4);
+  border-inline-start: 2px solid var(--line-2);
+  padding-inline-start: var(--s-3);
+  color: var(--dim);
+  font-size: var(--t-15);
+  max-width: var(--measure);
+}
+.task .term { display: block; color: var(--faint); margin-bottom: var(--s-1); }
+
+/* -- footer ---------------------------------------------------------------- */
+
+.foot {
+  position: relative;
+  z-index: 1;
+  border-top: 1px solid var(--line);
+  padding-block: var(--s-6) var(--s-7);
+  font-size: var(--t-14);
+  color: var(--faint);
+}
+.foot-row { display: flex; flex-wrap: wrap; gap: var(--s-3) var(--s-5); align-items: baseline; }
+.foot p { max-width: var(--measure); }
+
+/* -- widths ---------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  .section { padding-block: var(--s-8); }
+  .hero { min-height: auto; padding-block: var(--s-6); }
+}
+
+@media (max-width: 620px) {
+  .wrap { padding-inline: var(--s-4); }
+  .top-row { flex-wrap: wrap; gap: var(--s-2); min-height: 0; padding-block: var(--s-2); }
+  .rail { order: 3; width: 100%; margin-inline-start: 0; gap: var(--s-3); }
+  .cmd-head { gap: var(--s-2); }
+  .hero h1 { max-width: none; }
+}
+
+/* Short viewports: the install command must stay above the fold at 1366x768,
+   so the hero gives up vertical air before it gives up the command. */
+@media (min-width: 901px) and (max-height: 820px) {
+  .hero { min-height: auto; padding-block: var(--s-5) var(--s-6); }
+  .hero h1 { font-size: clamp(26px, 3.4vw, 34px); margin-block: var(--s-2) var(--s-3); }
+  .hero .lede { margin-bottom: var(--s-4); font-size: var(--t-15); }
+}
+
+/* -- the guides page ------------------------------------------------------- */
+
+/* A reference page is read top to bottom, so its sections sit closer together
+   than the front page's, where each one is a separate argument. */
+.guides .section { padding-block: var(--s-7); }
+.guides .section-lead { padding-block: var(--s-6) var(--s-7); }
+
+.h1-page {
+  font-size: var(--t-28);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  margin-block: var(--s-3) var(--s-4);
+  max-width: 14.4em;
+}
+
+/* The number is a marker, not decoration: it is the same inverted block the
+   install steps use, so the two pages read as one system. */
+.guide-head {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s-4);
+  align-items: start;
+}
+.guide-head .n {
+  font-weight: 700;
+  font-size: var(--t-14);
+  letter-spacing: var(--track-2);
+  background: var(--paper);
+  color: var(--ink);
+  padding: 2px var(--s-2);
+  border-radius: var(--r-1);
+}
+.guide-head .h2 { margin-top: 0; }
+
+@media (max-width: 620px) {
+  .guide-head { grid-template-columns: 1fr; gap: var(--s-2); }
+  .guide-head .n { justify-self: start; }
+}
+
+/* A group of guides under one heading; the group is the section, each guide
+   inside it keeps its own anchor and its own rhythm. */
+.guides .guide { padding-block: var(--s-6) 0; }
+.guides .guide:first-of-type { padding-top: var(--s-4); }

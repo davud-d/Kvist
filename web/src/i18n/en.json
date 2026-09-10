@@ -1,0 +1,332 @@
+{
+  "lang": "en",
+  "dir": "/",
+  "other": {
+    "lang": "ru",
+    "dir": "/ru/",
+    "label": "RU",
+    "name": "Русский"
+  },
+  "meta": {
+    "title": "Kvist — a supervised coding agent for one workspace",
+    "description": "Kvist is a terminal coding agent that works in one project directory. It plans, then emits one JSON action per step through a sandbox that masks secrets, blocks .env, and asks before anything dangerous. Python, MIT, beta.",
+    "ogAlt": "The Kvist wordmark drawn in terminal half-blocks"
+  },
+  "nav": {
+    "skip": "Skip to the install command",
+    "demo": "Run",
+    "loop": "Loop",
+    "boundary": "Boundary",
+    "recovery": "Recovery",
+    "control": "Control",
+    "install": "Install",
+    "repo": "Repository",
+    "theme": "Switch theme",
+    "themeDark": "Dark",
+    "themeLight": "Light"
+  },
+  "langbar": {
+    "text": "This page is also in Russian.",
+    "go": "Go to /ru/",
+    "dismiss": "Dismiss"
+  },
+  "hero": {
+    "status": "Beta",
+    "h1": "One workspace. One action per step.",
+    "lede": "Kvist is a terminal coding agent that works in a single project directory. It plans the task, then emits one JSON action at a time — read, edit, run, verify — and feeds the result back before deciding the next one. Every action goes through one executor that can refuse it.",
+    "commandLabel": "Install",
+    "command": "git clone https://github.com/davud-d/Kvist && cd Kvist && python3 installer/install.py --cli",
+    "copy": "Copy",
+    "copied": "Copied",
+    "copyHint": "Select the command and copy it, or use the button.",
+    "repo": "Open the repository",
+    "note": "Python 3.11 and 3.12 · Linux and Windows · MIT"
+  },
+  "demo": {
+    "kicker": "Recorded run",
+    "h2": "A real run, not a rehearsal",
+    "lede": "This is the terminal recording of Kvist fixing a slug function: it reads both files, plans, and stops at the approval gate with the one-line diff on screen before it is allowed to write. Then it runs the check and reports 4/4. Nothing was cut or re-taken. The replay below is the recording parsed into text, so you can select it and your screen reader can read it.",
+    "play": "Play",
+    "pause": "Pause",
+    "restart": "Restart",
+    "speed": "Speed",
+    "progress": "Position in the run",
+    "srHint": "Use the slider to move through the run. The final frame is shown when playback is stopped.",
+    "task": "Task given to the agent",
+    "taskText": "check.py fails. Read slugify.py and check.py, fix slugify so runs of non-alphanumeric characters collapse into a single dash and leading and trailing dashes are stripped, then run python3 check.py.",
+    "reRecord": "Re-record it yourself: web/assets/demo/record.fish"
+  },
+  "loop": {
+    "kicker": "The loop",
+    "h2": "Plan, then one action at a time",
+    "lede": "A request is routed to a role, planned once, and then executed step by step. Each step is a single JSON object: a thought, the plan step it belongs to, and one action. The action set is closed — the model cannot invent a new capability mid-run.",
+    "items": [
+      {
+        "term": "18 action types",
+        "text": "read_file, write_file, replace_in_file, search_code, run_shell, git_diff, fetch_url, delegate_task, refuse, final_answer and eight more. The list is a Literal in protocol.py, and a test fails the build if the prompts, the parser and the executor drift apart."
+      },
+      {
+        "term": "4 roles plus auto",
+        "text": "coder edits, reader investigates without writing, devops handles services and deployment, chat answers without touching files. Routing tries explicit rules first, then a small model, then keywords — in that order, in English and Russian."
+      },
+      {
+        "term": "Untrusted output stays untrusted",
+        "text": "Every result the model can be influenced by — file contents, search hits, shell output, fetched pages — is wrapped in a delimited block, and a forged closing tag inside the payload is defanged before it reaches the prompt."
+      },
+      {
+        "term": "Progress is derived, not declared",
+        "text": "The model does not report a percentage. Progress comes from the plan steps that are actually finished. When the step budget runs out, Kvist asks whether to continue instead of stopping silently."
+      }
+    ]
+  },
+  "boundary": {
+    "kicker": "The boundary",
+    "h2": "What it will not do",
+    "lede": "The parts that hold are the ones that never read the prompt. A hostile file, a poisoned web page or a confused model all meet the same gates.",
+    "items": [
+      {
+        "term": ".env is refused outright",
+        "text": "Reading or writing a .env file is blocked on the path check, before the file is opened, and blocked again for shell commands. The refusal names the violation instead of failing quietly."
+      },
+      {
+        "term": "Secrets are masked, not trusted",
+        "text": "Under Bubblewrap the sandbox shadows .ssh, .aws, .gnupg, .kube and .azure, id_rsa / id_ed25519 / id_ecdsa, .netrc, .npmrc, .git-credentials and every .pem, .key, .p12, .pfx and .crt. Files become /dev/null, directories become empty tmpfs — so a path built at runtime finds nothing either."
+      },
+      {
+        "term": "No network from the shell by default",
+        "text": "The sandbox unshares the network namespace unless AGENT_SANDBOX_NET is set to allow. PID, IPC and UTS namespaces are unshared too, host /home and /root are hidden, and the host root is never bound."
+      },
+      {
+        "term": "Dangerous commands are approved once each",
+        "text": "git push, git reset, git clean, docker rm, docker prune, systemctl start/stop/enable and package-manager install/remove are per-execution approvals. Project policy can deny more, never less: deny and the built-in hard blocks always win over allow."
+      },
+      {
+        "term": "Approval binds the exact command",
+        "text": "What you approve is argv plus the resolved cwd, the role, the policy digest, the sandbox profile, the child environment, the target executable's identity and content, and the attested shebang interpreter. If any of it changes before the spawn, the approval is void."
+      },
+      {
+        "term": "Nothing detaches and survives",
+        "text": "A child that calls setsid() escapes a process group, so the whole subtree runs in a cgroup v2 scope and is torn down with cgroup.kill on both timeout and completion. Output is drained into fixed-size buffers, so a noisy child cannot grow the parent."
+      }
+    ],
+    "honest": "Kvist is a supervised tool, not a security product. Transitive imports are not individually attested, history-aware tools can surface content that never appears in argv, and a narrow window remains between the final check and the spawn. Read the diff."
+  },
+  "recovery": {
+    "kicker": "Recovery",
+    "h2": "Interrupt it without losing the work",
+    "lede": "A run writes down what it is about to do before it does it. That is what makes an interrupted run resumable and a change reversible.",
+    "items": [
+      {
+        "term": "/resume continues the right conversation",
+        "text": "A checkpoint is written before every externally visible action. Resuming follows the checkpoint into the session it belongs to instead of replaying it into whatever session happens to be open."
+      },
+      {
+        "term": "/revert only touches what it can prove",
+        "text": "The journal separates a write it can prove it made from content that merely looks right. Reverting overwrites the first and leaves the second alone. A corrupt journal stops the mutation instead of being read as an empty one."
+      },
+      {
+        "term": "Sessions are documents, not a scratch buffer",
+        "text": "/new starts a session; it does not erase the previous one. Each session keeps its own history, checkpoint and style, and the style is stamped at the start so a plan and the steps that follow it come from the same beliefs."
+      }
+    ]
+  },
+  "control": {
+    "kicker": "Control",
+    "h2": "Your models, your rules",
+    "lede": "Providers, effort and tone are settings, not assumptions baked into the agent.",
+    "items": [
+      {
+        "term": "Six providers, plus your own endpoint",
+        "text": "OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute and FreeFlow, or any OpenAI-compatible or Anthropic-compatible endpoint you add from /provider. Streaming and JSON mode are per-provider facts, not one assumption applied to all of them."
+      },
+      {
+        "term": "Three model tiers per run",
+        "text": "fast, smart and planner. A run starts on fast and escalates to smart on a complex task, a parse error, repeated errors or stagnation — unless you pinned a model yourself."
+      },
+      {
+        "term": "Six levels of reasoning effort",
+        "text": "false, low, medium, high, xhigh, max — one /effort command, translated per provider. If a provider rejects the setting, Kvist retries without it and warns you every single time."
+      },
+      {
+        "term": "Fourteen working styles",
+        "text": "Nine for the action loop — minimalist, paranoid, architect, perfectionist, senior-dev and more — and five for chat. One session keeps one style, so the executor cannot quietly disagree with the plan it was handed."
+      },
+      {
+        "term": "The project states its own rules",
+        "text": "KVIST.md and KVIST-CHAT.md in the workspace root carry your build commands, layout and conventions into every call. They are workspace content, so they are quoted as data inside bounds that rule out changing the role, the safety rules or the action protocol."
+      },
+      {
+        "term": "Headless when you need it",
+        "text": "A newline-delimited JSON frontend runs Kvist from another process, with session and journal operations available as one-shot commands. The Electron GUI uses that same protocol and nothing else."
+      }
+    ]
+  },
+  "install": {
+    "kicker": "Install",
+    "h2": "Clone, run the installer",
+    "lede": "The installer builds its own environment. It does not need the development venv, and it does not touch your shell configuration beyond the launcher.",
+    "steps": [
+      {
+        "n": "01",
+        "term": "Clone and run it",
+        "text": "python3 installer/install.py --cli builds the binary in a dedicated .venv-build, installs it under ~/.local/share/kvist and puts a kvist launcher in ~/.local/bin. On Windows it goes to %LOCALAPPDATA%\\Kvist and adds the bin directory to your user PATH."
+      },
+      {
+        "n": "02",
+        "term": "Start it in a project",
+        "text": "cd into the project and run kvist. The launcher uses the current directory as the workspace. The first launch asks for a provider, the models and the key, and saves them in ~/.kvist/config.json."
+      },
+      {
+        "n": "03",
+        "term": "Give it a task",
+        "text": "Type the task, or / for the command list. Approvals appear inline; answer them and the run continues. /changes shows what was written, /revert puts it back."
+      }
+    ],
+    "reqTitle": "What it needs",
+    "req": [
+      "Python — tested in CI on 3.11 and 3.12",
+      "A key for one of the supported providers",
+      "A terminal, for the configuration and approval prompts",
+      "Linux or Windows; macOS is experimental"
+    ],
+    "alt": "Prefer to run it from source? requirements.txt has nine entries and main.py --workspace takes it from there."
+  },
+  "footer": {
+    "beta": "Kvist is beta. There is no release version yet; the interface and the protocol can still change.",
+    "license": "MIT, © 2026 Davud",
+    "repo": "Source on GitHub",
+    "builtWith": "This page ships no third-party requests, no analytics and no fonts from a CDN."
+  },
+  "guides": {
+    "nav": "Guides",
+    "meta": {
+      "title": "Kvist guides — configuring and driving the agent",
+      "description": "Short terminal recordings of the real Kvist interface: picking a provider, the command list, roles, reasoning effort, named sessions, and reverting what the agent wrote."
+    },
+    "kicker": "Guides",
+    "h1": "Six recordings of the real interface",
+    "lede": "Each one is the terminal, not a diagram. They were recorded the same way as the run on the front page, with the same script that is checked into the repository, so you can re-record them after the CLI changes.",
+    "back": "Back to the front page",
+    "caveat": {
+      "term": "About these recordings",
+      "text": "They show the interface, so they do not need a model: each one runs under a throwaway HOME against a small OpenAI-compatible gateway on localhost — which is what OmniRoute, the built-in local gateway option, is for. No real provider is called and no real key is typed, which is why the models are called local-fast and local-smart. Everything else on screen is the agent you install."
+    },
+    "items": [
+      {
+        "id": "provider",
+        "n": "01",
+        "term": "First run: pick a provider",
+        "text": "On the first launch in a project Kvist asks which provider to use. The list carries every built-in one plus an entry for adding your own OpenAI- or Anthropic-compatible endpoint. Arrow keys move, Enter confirms, and then it asks for that provider's key at a masked prompt and writes it to ~/.kvist/config.json — never into the project. The recording picks OmniRoute because that is the local-gateway option; picking OpenAI or Anthropic is the same three keystrokes.",
+        "short": "Provider",
+        "group": "setup"
+      },
+      {
+        "id": "custom",
+        "term": "Add your own endpoint",
+        "text": "The last entry in the provider list adds an OpenAI- or Anthropic-compatible endpoint of your own: an id, the protocol, the base URL, whether it survives streaming, a key, a display name, and the model ids it serves. The key is whatever that endpoint expects — a gateway on your own machine usually ignores it. Streaming starts off, because many third-party gateways answer plain requests correctly and break on stream=true.",
+        "short": "Custom",
+        "n": "02",
+        "group": "setup"
+      },
+      {
+        "id": "models",
+        "term": "Three models, three jobs",
+        "text": "fast carries routing, planning, chat and the simple steps; smart takes complex work and error recovery; planner builds the plan. /models sets all three, together or one at a time. Providers with a fixed catalogue offer a list; ones with dynamic ids — a local gateway, for instance — take the id you type.",
+        "short": "Models",
+        "n": "03",
+        "group": "setup"
+      },
+      {
+        "id": "changeapi",
+        "term": "Replace a key",
+        "text": "/change-api replaces the key for the provider you are on, at the same masked prompt as the first launch. It never prints the old one; the panel says only that one is configured. Leaving the field empty keeps what is already there.",
+        "short": "Keys",
+        "n": "04",
+        "group": "setup"
+      },
+      {
+        "id": "commands",
+        "n": "05",
+        "term": "Every command in one place",
+        "text": "Typing / opens completion; /commands prints the whole list with what each one does. Seventeen commands cover providers, models, roles, effort, sessions, the change journal and the two toggles for planning and verbose output.",
+        "short": "Commands",
+        "group": "driving"
+      },
+      {
+        "id": "role",
+        "n": "06",
+        "term": "Roles decide what it may touch",
+        "text": "/role pins the run to coder, reader, devops or chat, or leaves it on auto. Auto routes each request itself: explicit rules first, then a small model, then keywords. Pinning devops here is the difference between an agent that edits your source and one that works on services and deployment.",
+        "short": "Roles",
+        "group": "driving"
+      },
+      {
+        "id": "effort",
+        "n": "07",
+        "term": "Reasoning effort, one knob",
+        "text": "/effort sets how hard the model thinks, on one scale from false to max — six levels, one command, whatever the provider underneath calls them. Providers slice it differently, so when your choice collapses into something coarser Kvist says so at the moment you make it rather than leaving you to wonder: DeepSeek, for instance, answers that only false, high and max are actually distinct there.",
+        "short": "Effort",
+        "group": "driving"
+      },
+      {
+        "id": "style",
+        "term": "Working styles",
+        "text": "/style picks how the agent works and how it writes: nine styles for the action loop — minimalist, paranoid, architect, perfectionist, senior-dev among them — and five for chat. One session keeps one style, stamped when it starts, so the plan and the steps that follow it come from the same beliefs.",
+        "short": "Styles",
+        "n": "08",
+        "group": "driving"
+      },
+      {
+        "id": "toggles",
+        "term": "Two switches",
+        "text": "/plan turns the separate planning call off, so the agent starts acting immediately instead of drawing up steps first — cheaper and blunter. /verbose turns on the diagnostic output. Both are saved globally and say what they did, so you are never guessing which state you are in.",
+        "short": "Switches",
+        "n": "09",
+        "group": "driving"
+      },
+      {
+        "id": "session",
+        "n": "10",
+        "term": "Named sessions",
+        "text": "/session lists what the workspace has and creates a new one. Each session keeps its own history, checkpoint and style. Creating one does not erase the old conversation — it stays on disk and is one /session away. An auto-named session left empty is dropped, so opening and quitting cannot litter the list.",
+        "short": "Sessions",
+        "group": "state"
+      },
+      {
+        "id": "changes",
+        "n": "11",
+        "term": "See what changed, put it back",
+        "text": "/changes prints a diff of everything the agent wrote in this workspace, across sessions. /revert restores it — after a confirmation that opens on “No”, because it is a decision. It only overwrites content the journal can prove the agent wrote; anything you changed yourself is kept.",
+        "short": "Revert",
+        "group": "state"
+      },
+      {
+        "id": "headless",
+        "term": "No interface at all",
+        "text": "Kvist answers one-shot commands for scripts and other frontends: --config-info reports the saved provider and models without an LLM call, --session-op manages sessions, --journal-op prints or reverts the change journal. All of it is JSON on stdout. The Electron GUI is built on the same protocol and nothing else.",
+        "short": "Headless",
+        "n": "12",
+        "group": "script"
+      }
+    ],
+    "skip": "Skip to the first guide",
+    "groups": [
+      {
+        "id": "setup",
+        "title": "Setting it up"
+      },
+      {
+        "id": "driving",
+        "title": "Driving a run"
+      },
+      {
+        "id": "state",
+        "title": "Sessions and undo"
+      },
+      {
+        "id": "script",
+        "title": "Without an interface"
+      }
+    ]
+  }
+}

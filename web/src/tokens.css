@@ -1,0 +1,228 @@
+/* ==========================================================================
+   tokens.css — the only file in this site that is allowed to name a colour.
+   --------------------------------------------------------------------------
+   Repainting the whole site, both themes, the hero canvas and the terminal
+   replay is an edit to this file and nothing else. Components, SVG, canvas and
+   JS read these variables; none of them carry a literal colour.
+
+   Canvas and the cast player resolve colours at runtime with
+   getComputedStyle(document.documentElement).getPropertyValue('--acc') and
+   re-read them on every theme change, so a token edit reaches the pixels too.
+
+   Dark values are the starting point, synced with the Kvist terminal theme
+   (themes/kvist.json in the repository root). Light is an inversion of the
+   same roles, not a second palette.
+
+   Border floor: the owner's display runs at brightness 35, where anything
+   darker than #1a1a1a collapses into the background. No border or divider in
+   the dark theme may be dimmer than --line (#232c38).
+   ========================================================================== */
+
+:root {
+  /* -- surfaces ---------------------------------------------------------- */
+  --ink:    #000000;   /* page background                                   */
+  --panel:  #0d131b;   /* panel fill                                        */
+  --line:   #232c38;   /* borders and dividers — brightness floor           */
+  --line-2: #2f3a49;   /* hover / active border, one step up from --line    */
+
+  /* -- text -------------------------------------------------------------- */
+  --tx:     #e8edf2;   /* primary text                                      */
+  --dim:    #a7b0bb;   /* secondary text                                    */
+  --faint:  #8b95a1;   /* tertiary text — minimum permitted brightness      */
+
+  /* -- inversion --------------------------------------------------------- */
+  --paper:  #ffffff;   /* inverse block fill; --ink is its text colour      */
+
+  /* -- accents ----------------------------------------------------------- */
+  --acc:    #4fc3f7;   /* accent 1                                          */
+  --ok:     #3fc47a;   /* accent 2                                          */
+
+  /* ------------------------------------------------------------------
+     ACCENT BUDGET — five slots for the whole page, no sixth.
+       1. install command      the $ sigil + the copied state       --acc
+       2. demo success         the passing check in the replay      --ok
+       3. focus ring           :focus-visible outline               --acc
+       4. active nav item      current section in the rail          --acc
+       5. run indicator        the replay scrubber / playhead       --acc
+     Everything else is --tx / --dim / --faint / --paper on --ink / --panel.
+     ------------------------------------------------------------------ */
+
+  /* -- terminal replay: ANSI mapped onto tokens, never onto raw ANSI RGB -- */
+  --ansi-0:  var(--panel);          /* black          */
+  --ansi-1:  #e06c75;               /* red            */
+  --ansi-2:  var(--ok);             /* green          */
+  --ansi-3:  #d9a441;               /* yellow         */
+  --ansi-4:  #5b8dd6;               /* blue           */
+  --ansi-5:  #b18ad4;               /* magenta        */
+  --ansi-6:  var(--acc);            /* cyan           */
+  --ansi-7:  var(--dim);            /* white          */
+  --ansi-8:  var(--faint);          /* bright black   */
+  --ansi-9:  #ff8a8f;               /* bright red     */
+  --ansi-10: var(--ok);             /* bright green   */
+  --ansi-11: #f0c060;               /* bright yellow  */
+  --ansi-12: #7aa7e8;               /* bright blue    */
+  --ansi-13: #c9a3e0;               /* bright magenta */
+  --ansi-14: var(--acc);            /* bright cyan    */
+  --ansi-15: var(--tx);             /* bright white   */
+  --ansi-fg: var(--tx);
+  --ansi-bg: transparent;
+
+  /* -- hero canvas ------------------------------------------------------- */
+  --hero-glyph:  var(--acc);        /* settled bitmap letter                */
+  --hero-flash:  var(--paper);      /* freshly typed glyph before it cools  */
+  --hero-plate:  var(--panel);      /* the terminal plate behind the word   */
+  --hero-scrim:  0, 0, 0;           /* scrim RGB; the alphas below apply it */
+  /* The scrim is what guarantees the hero text stays above 4.5:1 over the
+     brightest frame of the animation. tools/hero-contrast.mjs reads these
+     three numbers and the colours above, replays a full cycle, and fails if
+     any frame drops below the threshold — so they are tuned by measurement,
+     not by eye. Raise --hero-veil-text if you brighten --hero-flash. */
+  --hero-veil-clear: .15;           /* above the text: the word stays bright */
+  --hero-veil-text:  .62;           /* behind the text block                 */
+  --hero-settle:     .55;           /* canvas alpha once the intro is over   */
+
+  /* -- texture ----------------------------------------------------------- */
+  --grain-alpha: .035;
+  --scan-alpha:  .05;
+  --glass:       rgba(13, 19, 27, .62);
+
+  /* -- geometry ---------------------------------------------------------- */
+  --r-0: 0px;
+  --r-1: 2px;
+  --r-2: 4px;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+  --s-9: 96px;
+
+  /* 62 characters, stated in em: ch resolves against the active font,
+     so it changes when the webfont replaces the fallback and reflows the
+     text under the reader. */
+  --measure: 37.2em;
+  --page: 1180px;
+
+  /* -- type -------------------------------------------------------------- */
+  --f-mono: "Kvist Mono", ui-monospace, "JetBrains Mono", "IBM Plex Mono",
+            "DejaVu Sans Mono", Consolas, monospace;
+  --t-14: 14px;
+  --t-15: 15px;
+  --t-16: 16px;
+  --t-18: 18px;
+  --t-21: 21px;
+  --t-28: 28px;
+  --t-40: clamp(28px, 5.2vw, 44px);
+  --replay-line: 1.32;
+  --track-1: .08em;
+  --track-2: .14em;
+  --track-3: .2em;
+
+  /* -- motion ------------------------------------------------------------ */
+  --dur-1: 120ms;
+  --dur-2: 260ms;
+  --dur-3: 520ms;
+  --ease: cubic-bezier(.2, .7, .3, 1);
+  --steps-6: steps(6, end);
+}
+
+/* Light is the same roles inverted. Only values change; no selector below
+   this line may appear in a component file. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ink:    #ffffff;
+    --panel:  #f1f3f6;
+    --line:   #c3ccd7;
+    --line-2: #a8b3c1;
+
+    --tx:     #10161d;
+    --dim:    #454f5b;
+    --faint:  #5b6672;
+
+    --paper:  #000000;
+
+    --acc:    #0a6c9e;
+    --ok:     #12734a;
+
+    --ansi-1:  #b03a3f;
+    --ansi-3:  #7a5510;
+    --ansi-4:  #2b5ea8;
+    --ansi-5:  #6f4a95;
+    --ansi-9:  #9b2f34;
+    --ansi-11: #6a4a0c;
+    --ansi-12: #1f4f92;
+    --ansi-13: #5d3d80;
+
+    --hero-scrim:  255, 255, 255;
+    --texture-rgb: 0, 0, 0;
+    --grain-alpha: .028;
+    --scan-alpha:  .035;
+    --glass:       rgba(241, 243, 246, .68);
+  }
+}
+
+:root[data-theme="light"] {
+  --ink:    #ffffff;
+  --panel:  #f1f3f6;
+  --line:   #c3ccd7;
+  --line-2: #a8b3c1;
+
+  --tx:     #10161d;
+  --dim:    #454f5b;
+  --faint:  #5b6672;
+
+  --paper:  #000000;
+
+  --acc:    #0a6c9e;
+  --ok:     #12734a;
+
+  --ansi-1:  #b03a3f;
+  --ansi-3:  #7a5510;
+  --ansi-4:  #2b5ea8;
+  --ansi-5:  #6f4a95;
+  --ansi-9:  #9b2f34;
+  --ansi-11: #6a4a0c;
+  --ansi-12: #1f4f92;
+  --ansi-13: #5d3d80;
+
+  --hero-scrim:  255, 255, 255;
+  --texture-rgb: 0, 0, 0;
+  --grain-alpha: .028;
+  --scan-alpha:  .035;
+  --glass:       rgba(241, 243, 246, .68);
+}
+
+:root[data-theme="dark"] {
+  --ink:    #000000;
+  --panel:  #0d131b;
+  --line:   #232c38;
+  --line-2: #2f3a49;
+
+  --tx:     #e8edf2;
+  --dim:    #a7b0bb;
+  --faint:  #8b95a1;
+
+  --paper:  #ffffff;
+
+  --acc:    #4fc3f7;
+  --ok:     #3fc47a;
+
+  --ansi-1:  #e06c75;
+  --ansi-3:  #d9a441;
+  --ansi-4:  #5b8dd6;
+  --ansi-5:  #b18ad4;
+  --ansi-9:  #ff8a8f;
+  --ansi-11: #f0c060;
+  --ansi-12: #7aa7e8;
+  --ansi-13: #c9a3e0;
+
+  --hero-scrim:  0, 0, 0;
+  --texture-rgb: 232, 237, 242;
+  --grain-alpha: .035;
+  --scan-alpha:  .05;
+  --glass:       rgba(13, 19, 27, .62);
+}

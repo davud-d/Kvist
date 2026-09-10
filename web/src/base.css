@@ -1,0 +1,231 @@
+/* base.css — reset, type, page frame, texture. No literal colour lives here. */
+
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-latin-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2022, U+00B7,
+    U+2026, U+2190-2199, U+2713, U+2717, U+25CF, U+25CB;
+}
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-latin-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD, U+2500-257F, U+2580-259F, U+25A0-25FF, U+2022, U+00B7,
+    U+2026, U+2190-2199, U+2713, U+2717, U+25CF, U+25CB;
+}
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-cyrillic-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Kvist Mono";
+  src: url("/assets/fonts/kvist-mono-cyrillic-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--ink);
+  color: var(--tx);
+  font: 400 var(--t-16)/1.6 var(--f-mono);
+  font-variant-ligatures: none;
+  overflow-x: hidden;
+}
+
+img, canvas, svg { display: block; max-width: 100%; }
+
+a {
+  color: inherit;
+  text-decoration-thickness: 1px;
+  text-underline-offset: .25em;
+}
+
+:focus-visible {
+  /* ACCENT SLOT 3 — focus ring. */
+  outline: 2px solid var(--acc);
+  outline-offset: 3px;
+  border-radius: var(--r-1);
+}
+
+::selection { background: var(--tx); color: var(--ink); }
+
+h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+
+/* -- page frame ------------------------------------------------------------ */
+
+.wrap {
+  width: 100%;
+  max-width: var(--page);
+  margin-inline: auto;
+  padding-inline: var(--s-5);
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 60;
+  background: var(--paper);
+  color: var(--ink);
+  padding: var(--s-2) var(--s-4);
+  font-size: var(--t-14);
+  letter-spacing: var(--track-1);
+  text-transform: uppercase;
+}
+.skip:focus { left: var(--s-4); top: var(--s-4); }
+
+.sr {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* -- texture: grain + CRT scan, both inline data URIs, never a request ----- */
+
+.texture {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.texture::before,
+.texture::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.texture::before {
+  opacity: var(--grain-alpha);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 120px 120px;
+}
+.texture::after {
+  opacity: var(--scan-alpha);
+  background-image: repeating-linear-gradient(
+    to bottom,
+    rgb(var(--texture-rgb) / 0) 0 2px,
+    rgb(var(--texture-rgb) / .55) 2px 3px
+  );
+}
+
+/* -- typographic roles ----------------------------------------------------- */
+
+.kicker {
+  font-size: var(--t-14);
+  letter-spacing: var(--track-3);
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.h2 {
+  font-size: var(--t-28);
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  margin-block: var(--s-3) var(--s-4);
+}
+
+.lede {
+  color: var(--dim);
+  max-width: var(--measure);
+  font-size: var(--t-16);
+}
+
+.term {
+  font-size: var(--t-15);
+  font-weight: 700;
+  letter-spacing: var(--track-1);
+  text-transform: uppercase;
+}
+
+/* Inverted block: the only "fill" the page uses instead of a colour. */
+.invert {
+  display: inline-block;
+  background: var(--paper);
+  color: var(--ink);
+  padding: 2px var(--s-2);
+  font-size: var(--t-14);
+  letter-spacing: var(--track-2);
+  text-transform: uppercase;
+  border-radius: var(--r-1);
+}
+
+/* -- section rhythm and its dashed rule ------------------------------------ */
+
+.section {
+  position: relative;
+  z-index: 1;
+  padding-block: var(--s-9);
+}
+
+.section + .section::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  background: repeating-linear-gradient(
+    to right,
+    var(--line) 0 8px,
+    transparent 8px 16px
+  );
+}
+
+/* -- appearance: one observer, per-child delay from --i --------------------- */
+
+.js .reveal > * {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.js .reveal.seen > * {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-3) var(--ease),
+    transform var(--dur-3) var(--ease);
+  transition-delay: calc(var(--i, 0) * 60ms);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .js .reveal > *,
+  .js .reveal.seen > * {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

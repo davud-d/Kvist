@@ -1,0 +1,18 @@
+{
+  "name": "kvist-site",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve",
+    "check": "node tools/contrast.mjs && node tools/hero-contrast.mjs && node tools/i18n-check.mjs"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "devDependencies": {
+    "html-validate": "^11.15.0",
+    "playwright": "^1.63.0"
+  }
+}
