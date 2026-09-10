@@ -957,6 +957,7 @@ def _create_json_completion(
     model: str,
     messages: list[ChatCompletionMessageParam],
     stream: bool = False,
+    json_mode: bool = True,
 ):
     safe_messages = redact_value(messages)
     assert isinstance(safe_messages, list)
@@ -966,7 +967,7 @@ def _create_json_completion(
         "temperature": self.config.model_temperature,
         "timeout": self.config.api_timeout,
     }
-    if provider_supports_json_mode(self.config.provider):
+    if json_mode and provider_supports_json_mode(self.config.provider):
         request_kwargs["response_format"] = {"type": "json_object"}
     if stream:
         request_kwargs["stream"] = True

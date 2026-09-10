@@ -80,6 +80,27 @@ def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch
     assert warnings == ["warn"]
 
 
+def test_build_agent_rejects_omniroute_with_no_models(tmp_path, monkeypatch):
+    # "Keep current models" with nothing configured returns an empty dict; the
+    # old code then hit KeyError: 'fast' deep in credential resolution.
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "omniroute")
+    monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "TerminalBannerUI", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        main, "configure_omniroute_models_interactively", lambda ui, models: {}
+    )
+
+    with pytest.raises(RuntimeError, match="no model configured"):
+        main.build_agent(
+            executor=SafeExecutor(tmp_path),
+            max_steps=7,
+            persist_logs=False,
+            verbose=False,
+            language_hint="en",
+        )
+
+
 def test_startup_banner_renders_dynamic_values_as_literal_safe_text(
     monkeypatch,
 ):

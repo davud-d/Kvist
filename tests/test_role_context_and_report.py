@@ -110,6 +110,31 @@ def test_add_to_session_history_stores_read_content_for_next_role(agent_factory)
     assert "gaps_in = 5" in "\n".join(entry.get("outputs", []))
 
 
+def test_render_report_disables_json_mode(agent_factory, monkeypatch):
+    """report_to_user renders free-form markdown, so the completion must not run
+    in JSON mode — otherwise a JSON-mode provider streams raw JSON to console."""
+    import agent_model
+    from agent_runtime import _render_report
+
+    seen = {}
+
+    def fake_completion(self, model, messages, stream=False, json_mode=True):
+        seen["json_mode"] = json_mode
+        seen["stream"] = stream
+        return "## Done\nAll good."
+
+    monkeypatch.setattr(agent_model, "_create_json_completion", fake_completion)
+    monkeypatch.setattr(
+        agent_model, "safe_extract_completion_content", lambda resp, *a: resp
+    )
+
+    agent = agent_factory(stream=False)
+    out = _render_report(agent, "{}")
+
+    assert seen["json_mode"] is False
+    assert out == "## Done\nAll good."
+
+
 # ── BUG-2: report tasks are answered, not stubbed ───────────────────────────
 
 def test_is_report_goal_detects_substantive_requests():

@@ -395,6 +395,27 @@ def test_custom_provider_resolve_models():
     assert models["smart"] == "llama-4-pro"
 
 
+def test_custom_provider_create_client_without_api_key(monkeypatch):
+    # The provider-creation dialog lets the API key be skipped for a local
+    # endpoint; building the client must not crash on the empty key.
+    created = []
+
+    def mock_openai(api_key, base_url=None, **kwargs):
+        created.append({"api_key": api_key, "base_url": base_url})
+        return f"client-{api_key}"
+
+    monkeypatch.setattr(llm_clients, "OpenAI", mock_openai)
+    monkeypatch.setattr(
+        "user_config.get_custom_provider_by_name",
+        lambda name: {"api_key": "", "base_url": "http://localhost:8000/v1"},
+    )
+
+    client = llm_clients.create_llm_client("custom:local-vllm", {})
+    assert client == "client-not-needed"
+    assert created[-1]["api_key"]
+    assert created[-1]["base_url"] == "http://localhost:8000/v1"
+
+
 def test_custom_provider_normalize_model_name():
     assert llm_clients.normalize_model_name("custom:my-llama", "  llama-4  ") == "llama-4"
     assert llm_clients.normalize_model_name("custom:my-llama", "llama-4") == "llama-4"

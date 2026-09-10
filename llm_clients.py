@@ -1111,6 +1111,11 @@ def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool 
             raise RuntimeError(
                 f"Custom provider '{name}' has no base URL configured."
             )
+        # A custom endpoint may need no authentication (the creation dialog lets
+        # the key be skipped). Both SDK clients still demand a non-empty api_key,
+        # so pass a placeholder the local endpoint ignores.
+        if not api_key:
+            api_key = "not-needed"
         protocol = info.get("protocol", "openai").strip()
         if protocol == "anthropic":
             return AnthropicCompatibleClient(api_key=api_key, base_url=base_url, verbose=verbose)

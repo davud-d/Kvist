@@ -688,6 +688,13 @@ def build_agent(
                 selected_models = configure_omniroute_models_interactively(ui, models)
             if selected_models is None:
                 raise RuntimeError(f"{provider_display} model configuration was cancelled.")
+            still_missing = [role for role in MODEL_ROLES if not selected_models.get(role)]
+            if still_missing:
+                raise RuntimeError(
+                    f"{provider_display} has no model configured for: "
+                    f"{', '.join(still_missing)}. Set exact model ids with /models, "
+                    f"for example {example_model}."
+                )
             if is_custom_provider(provider):
                 # Save models back to custom provider config
                 name = extract_custom_provider_name(provider)

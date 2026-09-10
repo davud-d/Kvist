@@ -308,7 +308,7 @@ def _render_report(self, context: str) -> str:
     from agent_model import (
         _emit_usage,
         _load_role_prompt,
-        call_model,
+        safe_extract_completion_content,
         safe_extract_reasoning_delta,
         safe_extract_stream_delta,
         _create_json_completion,
@@ -316,23 +316,34 @@ def _render_report(self, context: str) -> str:
 
     report_prompt = _load_role_prompt("report")
     stream_model = self.config.fast_model
-
-    if not getattr(self.config, "stream", True):
-        raw = call_model(
-            self,
-            model=stream_model,
-            system_prompt=report_prompt,
-            user_prompt=context,
-            usage_kind="report",
-        )
-        self._ui.print_user_markdown(raw)
-        return raw
-
     messages = [
         {"role": "system", "content": report_prompt},
         {"role": "user", "content": context},
     ]
-    stream = _create_json_completion(self, stream_model, messages, stream=True)
+
+    # The report is free-form markdown prose, so JSON mode must stay off — with
+    # it on, a JSON-mode provider returns the report wrapped in a JSON object and
+    # the raw JSON reaches the console instead of a rendered panel.
+    if not getattr(self.config, "stream", True):
+        response = _create_json_completion(
+            self, stream_model, messages, stream=False, json_mode=False
+        )
+        raw = safe_extract_completion_content(
+            response, self.config.provider, stream_model
+        )
+        self._ui.print_user_markdown(raw)
+        _emit_usage(
+            self,
+            model=stream_model,
+            input_tokens=self._count_tokens(report_prompt) + self._count_tokens(context),
+            output_tokens=self._count_tokens(raw),
+            kind="report",
+        )
+        return raw
+
+    stream = _create_json_completion(
+        self, stream_model, messages, stream=True, json_mode=False
+    )
     chunks: list[str] = []
     reasoning_chunks: list[str] = []
     last_update = __import__("time").monotonic()
