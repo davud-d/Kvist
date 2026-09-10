@@ -1,4 +1,4 @@
-# kvist.dev — the landing page
+# kvist.site — the landing page
 
 Four static pages — `/` and `/guides/` in English, `/ru/` and `/ru/guides/` in
 Russian — built by one Node script. No framework, no CSS library, no
@@ -169,7 +169,7 @@ than downloading a second copy.
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name kvist.dev;
+    server_name kvist.site;
 
     root /srv/kvist-site;
     index index.html;

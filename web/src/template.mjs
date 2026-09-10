@@ -6,7 +6,7 @@
  * needs JavaScript to be readable.
  */
 
-const SITE = "https://kvist.dev";
+const SITE = "https://kvist.site";
 const REPO = "https://github.com/davud-d/Kvist";
 
 const esc = (value) =>
