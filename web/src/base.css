@@ -137,6 +137,43 @@ ul, ol { padding: 0; list-style: none; }
   );
 }
 
+/* -- cursor glow: a soft accent halo that trails the pointer -------------- */
+/* Decorative only. It sits above the sections but below the header and every
+   fixed bar, never takes pointer events, and blends with screen so it lifts
+   colour without hiding text. JavaScript sets --gx/--gy and toggles is-on. */
+
+.cursor-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 440px;
+  height: 440px;
+  margin: -220px 0 0 -220px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 2;
+  background: radial-gradient(
+    circle,
+    rgb(79 195 247 / .22),
+    rgb(79 195 247 / .09) 42%,
+    transparent 68%
+  );
+  filter: blur(16px);
+  mix-blend-mode: screen;
+  opacity: 0;
+  transition: opacity 450ms var(--ease, ease);
+  transform: translate3d(var(--gx, 50vw), var(--gy, 50vh), 0);
+  will-change: transform;
+}
+
+.cursor-glow.is-on {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cursor-glow { display: none; }
+}
+
 /* -- typographic roles ----------------------------------------------------- */
 
 .kicker {

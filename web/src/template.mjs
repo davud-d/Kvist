@@ -168,6 +168,7 @@ ${head({ t, css, meta: t.meta, path: t.dir, otherPath: t.other.dir })}
 <body>
 <a class="skip" href="#install-command">${esc(t.nav.skip)}</a>
 <div class="texture" aria-hidden="true"></div>
+<div class="cursor-glow" data-cursor-glow aria-hidden="true"></div>
 
 ${header({ t, home: t.dir, rail })}
 
@@ -311,6 +312,7 @@ ${head({ t, css, meta: t.guides.meta, path, otherPath })}
 <body>
 <a class="skip" href="#${t.guides.items[0].id}">${esc(t.guides.skip)}</a>
 <div class="texture" aria-hidden="true"></div>
+<div class="cursor-glow" data-cursor-glow aria-hidden="true"></div>
 
 ${header({ t, home: t.dir, rail })}
 

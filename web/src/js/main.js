@@ -5,6 +5,7 @@
  */
 import { mountHero } from "./hero.js";
 import { mountPlayer } from "./player.js";
+import { mountCursorGlow } from "./cursor-glow.js";
 
 const THEME_KEY = "kvist.theme";
 const LANG_KEY = "kvist.lang-bar";
@@ -169,6 +170,8 @@ setupRail();
 
 const canvas = document.querySelector("[data-hero-canvas]");
 if (canvas) mountHero(canvas, { reducedMotion });
+
+mountCursorGlow(document.querySelector("[data-cursor-glow]"), { reducedMotion });
 
 for (const replay of document.querySelectorAll("[data-replay]")) {
   mountPlayer(replay, {
