@@ -117,3 +117,7 @@ postman/
 KVIST.md
 KVIST-CHAT.md
 .cache/
+
+# Pentest scratch (local automation browser profile and screenshots)
+.playwright-mcp/
+clickjacking-test.png
