@@ -335,8 +335,8 @@ function serve(port = 4173) {
     } catch {
       response.writeHead(404, { "content-type": "text/plain" }).end("404");
     }
-  }).listen(port, () => {
-    console.log(`\nserving dist/ on http://localhost:${port}/ and /ru/`);
+  }).listen(port, "0.0.0.0", () => {
+    console.log(`\nserving dist/ on http://0.0.0.0:${port}/ and /ru/`);
   });
 }
 
