@@ -7,7 +7,6 @@
  */
 
 const SITE = "https://kvist.site";
-const REPO = "https://github.com/davud-d/Kvist";
 
 const esc = (value) =>
   String(value)
@@ -96,7 +95,6 @@ function head({ t, css, meta, path, otherPath }) {
     url,
     softwareVersion: "beta",
     programmingLanguage: "Python",
-    codeRepository: REPO,
     license: "https://opensource.org/licenses/MIT",
     inLanguage: t.lang,
     offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
@@ -178,7 +176,7 @@ export function render({ t, css, cast, buildId }) {
 ${head({ t, css, meta: t.meta, path: t.dir, otherPath: t.other.dir })}
 </head>
 <body>
-<a class="skip" href="#install-command">${esc(t.nav.skip)}</a>
+<a class="skip" href="#demo">${esc(t.nav.skip)}</a>
 <div class="texture" aria-hidden="true"></div>
 <div class="cursor-glow" data-cursor-glow aria-hidden="true"></div>
 
@@ -193,23 +191,16 @@ ${header({ t, home: t.dir, rail })}
       <h1>${esc(t.hero.h1)}</h1>
       <p class="lede">${esc(t.hero.lede)}</p>
 
-      <div class="cmd">
-        <div class="cmd-head">
-          <span>${esc(t.hero.commandLabel)}</span>
-          <button class="copy" type="button" hidden data-copy="install-command"
-                  data-idle="${esc(t.hero.copy)}" data-done="${esc(t.hero.copied)}"
-                  data-copied="false">${esc(t.hero.copy)}</button>
-        </div>
-        <div class="cmd-body">
-          <code id="install-command" tabindex="0">${esc(t.hero.command)}</code>
-        </div>
-        <p class="cmd-hint">${esc(t.hero.copyHint)}</p>
-      </div>
-
       <div class="hero-links">
-        <a class="linkout" href="${REPO}" rel="noopener">${esc(t.hero.repo)}</a>
-        <span class="hero-note">${esc(t.hero.note)}</span>
+        <a class="linkout" href="#demo">${esc(t.hero.cta)}</a>
+        <a class="linkout" href="${t.dir}guides/">${esc(t.hero.guidesLink)}</a>
+        <span class="repo-boarded" role="img" aria-label="${esc(t.hero.repo)} — ${esc(t.hero.repoHint)}">
+          <span aria-hidden="true">${esc(t.hero.repo)}</span>
+          <span class="plank plank-a" aria-hidden="true"></span>
+          <span class="plank plank-b" aria-hidden="true"></span>
+        </span>
       </div>
+      <p class="hero-note">${esc(t.hero.note)}</p>
     </div>
   </section>
 
@@ -286,7 +277,7 @@ ${header({ t, home: t.dir, rail })}
     <p>${esc(t.footer.beta)}</p>
     <div class="foot-row" style="margin-top:var(--s-4)">
       <span>${esc(t.footer.license)}</span>
-      <a href="${REPO}" rel="noopener">${esc(t.footer.repo)}</a>
+      <span>${esc(t.footer.repo)}</span>
       <span>${esc(t.footer.builtWith)}</span>
     </div>
   </div>
@@ -300,7 +291,7 @@ ${langbar(t, t.other.dir)}
 `;
 }
 
-export { SITE, REPO, BOOT };
+export { SITE, BOOT };
 
 /**
  * The guides page: one section per recording, each a short piece of prose and
@@ -379,7 +370,7 @@ ${header({ t, home: t.dir, rail })}
   <div class="wrap">
     <div class="foot-row">
       <a class="linkout" href="${t.dir}">${esc(t.guides.back)}</a>
-      <a href="${REPO}" rel="noopener">${esc(t.footer.repo)}</a>
+      <span>${esc(t.footer.repo)}</span>
       <span>${esc(t.footer.license)}</span>
     </div>
   </div>

@@ -13,7 +13,7 @@
     "ogAlt": "The Kvist wordmark drawn in terminal half-blocks"
   },
   "nav": {
-    "skip": "Skip to the install command",
+    "skip": "Skip to the recorded run",
     "demo": "Run",
     "loop": "Loop",
     "boundary": "Boundary",
@@ -34,13 +34,11 @@
     "status": "Beta",
     "h1": "One workspace. One action per step.",
     "lede": "Kvist is a terminal coding agent that works in a single project directory. It plans the task, then emits one JSON action at a time — read, edit, run, verify — and feeds the result back before deciding the next one. Every action goes through one executor that can refuse it.",
-    "commandLabel": "Install",
-    "command": "git clone https://github.com/davud-d/Kvist && cd Kvist && python3 installer/install.py --cli",
-    "copy": "Copy",
-    "copied": "Copied",
-    "copyHint": "Select the command and copy it, or use the button.",
+    "cta": "Watch it run",
+    "guidesLink": "Browse the guides",
     "repo": "Open the repository",
-    "note": "Python 3.11 and 3.12 · Linux and Windows · MIT"
+    "repoHint": "Boarded up until launch.",
+    "note": "The source isn't public yet. Everything below — the run, the twelve guides — is the real interface, recorded end to end, not a mockup. Python 3.11 and 3.12 · Linux and Windows · MIT"
   },
   "demo": {
     "kicker": "Recorded run",
@@ -54,7 +52,7 @@
     "srHint": "Use the slider to move through the run. The final frame is shown when playback is stopped.",
     "task": "Task given to the agent",
     "taskText": "check.py fails. Read slugify.py and check.py, fix slugify so runs of non-alphanumeric characters collapse into a single dash and leading and trailing dashes are stripped, then run python3 check.py.",
-    "reRecord": "Re-record it yourself: web/assets/demo/record.fish"
+    "reRecord": "Recorded with web/assets/demo/record.fish — the same script, every time."
   },
   "loop": {
     "kicker": "The loop",
@@ -162,9 +160,9 @@
     ]
   },
   "install": {
-    "kicker": "Install",
-    "h2": "Clone, run the installer",
-    "lede": "The installer builds its own environment. It does not need the development venv, and it does not touch your shell configuration beyond the launcher.",
+    "kicker": "Not released yet",
+    "h2": "What installing will look like",
+    "lede": "The repository is private while this is finished. When it opens, this is the path start to finish — the installer builds its own environment, needs no development venv, and touches nothing in your shell configuration beyond the launcher.",
     "steps": [
       {
         "n": "01",
@@ -182,19 +180,19 @@
         "text": "Type the task, or / for the command list. Approvals appear inline; answer them and the run continues. /changes shows what was written, /revert puts it back."
       }
     ],
-    "reqTitle": "What it needs",
+    "reqTitle": "What it will need",
     "req": [
       "Python — tested in CI on 3.11 and 3.12",
       "A key for one of the supported providers",
       "A terminal, for the configuration and approval prompts",
       "Linux or Windows; macOS is experimental"
     ],
-    "alt": "Prefer to run it from source? requirements.txt has nine entries and main.py --workspace takes it from there."
+    "alt": "Running from source will look the same: requirements.txt has nine entries, and main.py --workspace takes it from there."
   },
   "footer": {
     "beta": "Kvist is beta. There is no release version yet; the interface and the protocol can still change.",
     "license": "MIT, © 2026 Davud",
-    "repo": "Source on GitHub",
+    "repo": "Not public yet",
     "builtWith": "This page ships no third-party requests, no analytics and no fonts from a CDN."
   },
   "guides": {
@@ -204,8 +202,8 @@
       "description": "Short terminal recordings of the real Kvist interface: picking a provider, the command list, roles, reasoning effort, named sessions, and reverting what the agent wrote."
     },
     "kicker": "Guides",
-    "h1": "Six recordings of the real interface",
-    "lede": "Each one is the terminal, not a diagram. They were recorded the same way as the run on the front page, with the same script that is checked into the repository, so you can re-record them after the CLI changes.",
+    "h1": "Twelve recordings of the real interface",
+    "lede": "Each one is the terminal, not a diagram — a spoiler of the interface, not a mockup of it. They're recorded the same way as the run on the front page, with the same script every time, so nothing here is staged for the screenshot.",
     "back": "Back to the front page",
     "caveat": {
       "term": "About these recordings",

@@ -1,5 +1,5 @@
 /**
- * main.js — theme, language bar, reveal, copy, nav state, and the two
+ * main.js — theme, language bar, reveal, nav state, and the two
  * enhancements (hero canvas, cast replay). Everything here is optional: the
  * page is complete before this file runs.
  */
@@ -83,30 +83,6 @@ function setupLangBar() {
   });
 }
 
-/* -- copy ------------------------------------------------------------------ */
-/* The <code> is selectable and complete without this; the button is a shortcut. */
-
-function setupCopy() {
-  for (const button of document.querySelectorAll("[data-copy]")) {
-    const target = document.getElementById(button.dataset.copy);
-    if (!target || !navigator.clipboard) continue;
-    button.hidden = false;
-    button.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(target.textContent.trim());
-      } catch {
-        return; // clipboard refused; the command is still selectable
-      }
-      button.dataset.copied = "true";
-      button.textContent = button.dataset.done;
-      setTimeout(() => {
-        button.dataset.copied = "false";
-        button.textContent = button.dataset.idle;
-      }, 1600);
-    });
-  }
-}
-
 /* -- reveal ---------------------------------------------------------------- */
 /* One observer for the page. Children carry their own delay in --i. */
 
@@ -164,7 +140,6 @@ function setupRail() {
 
 setupTheme();
 setupLangBar();
-setupCopy();
 setupReveal();
 setupRail();
 

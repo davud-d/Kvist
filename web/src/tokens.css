@@ -38,12 +38,13 @@
   --ok:     #3fc47a;   /* accent 2                                          */
 
   /* ------------------------------------------------------------------
-     ACCENT BUDGET — five slots for the whole page, no sixth.
-       1. install command      the $ sigil + the copied state       --acc
+     ACCENT BUDGET — five slots for the whole page, one spent so far.
+       1. (unused — the install command it lit up is gone with the repo link)
        2. demo success         the passing check in the replay      --ok
        3. focus ring           :focus-visible outline               --acc
        4. active nav item      current section in the rail          --acc
        5. run indicator        the replay scrubber / playhead       --acc
+     The boarded-repo planks are --line-2/--faint on purpose — no new accent.
      Everything else is --tx / --dim / --faint / --paper on --ink / --panel.
      ------------------------------------------------------------------ */
 
