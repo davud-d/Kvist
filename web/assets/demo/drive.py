@@ -6,6 +6,10 @@ typed into the live prompt_toolkit application exactly as a person would type
 it. Approval prompts are answered with `y` after they appear on screen: the
 gate is shown, not bypassed.
 
+The run is real, so it uses the operator's real provider — but the child gets a
+short environment rather than this one, so the only credential within its reach
+is the one its provider needs, out of ~/.kvist/config.json. See PASS_THROUGH.
+
 usage: drive.py <repo> <workspace> <locale>
 """
 from __future__ import annotations
@@ -42,6 +46,29 @@ QUIET_SECONDS = 90.0
 HARD_LIMIT_SECONDS = 300.0
 
 
+# This run is real and needs a real provider, which it reads from the real
+# ~/.kvist/config.json — so unlike the guides it keeps HOME. What it does not
+# keep is the rest of the environment: every frame this process draws is
+# published, and a key for some other service has no reason to be within reach
+# of it. Kvist looks in the environment before the config file, so anything
+# named here would also silently pick the wrong provider for the recording.
+PASS_THROUGH = ("HOME", "PATH", "USER", "LOGNAME", "SHELL", "LANG", "TZ")
+
+
+def child_env() -> dict[str, str]:
+    env = {
+        name: os.environ[name] for name in PASS_THROUGH if name in os.environ
+    }
+    env.update(
+        {name: value for name, value in os.environ.items() if name.startswith("LC_")}
+    )
+    env["TERM"] = "xterm-256color"
+    env["COLUMNS"] = str(COLS)
+    env["LINES"] = str(ROWS)
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print("usage: drive.py <repo> <workspace> <locale>", file=sys.stderr)
@@ -49,11 +76,7 @@ def main() -> int:
     repo, workspace, locale = sys.argv[1], sys.argv[2], sys.argv[3]
     goal = GOALS[locale]
 
-    env = dict(os.environ)
-    env["TERM"] = "xterm-256color"
-    env["COLUMNS"] = str(COLS)
-    env["LINES"] = str(ROWS)
-    env["PYTHONUNBUFFERED"] = "1"
+    env = child_env()
 
     child = pexpect.spawn(
         os.path.join(repo, ".venv/bin/python"),

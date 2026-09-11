@@ -14,10 +14,22 @@ const esc = (value) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+/** JSON going inside a <script> element, where esc() would corrupt it.
+    JSON.stringify escapes neither "<" nor "/", so a string holding
+    "</script>" would close the element it is sitting in. < is the same
+    string to a JSON parser and inert to the HTML one. */
+const escJson = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
 
 /** The theme decision, inline and before first paint, so nothing flashes. */
 const BOOT = `var d=document.documentElement;d.classList.remove('no-js');d.classList.add('js');try{var t=localStorage.getItem('kvist.theme');if(t){d.dataset.theme=t}}catch(e){}`;
+
+/** True for an --ansi-0..15 index. The compiler only ever writes integers here,
+    but this is the one place a cast reaches markup instead of a DOM property,
+    so the colour is checked rather than trusted. */
+const isSlot = (value) => Number.isInteger(value) && value >= 0 && value <= 15;
 
 /** The recording's final frame, as static markup for the no-JavaScript case. */
 function finalFrame(cast) {
@@ -26,8 +38,8 @@ function finalFrame(cast) {
       const spans = cast.rows[id]
         .map(([text, fg, bg, bold]) => {
           const style = [
-            fg !== -1 ? `color:var(--ansi-${fg})` : "",
-            bg !== -2 ? `background:var(--ansi-${bg})` : "",
+            isSlot(fg) ? `color:var(--ansi-${fg})` : "",
+            isSlot(bg) ? `background:var(--ansi-${bg})` : "",
           ]
             .filter(Boolean)
             .join(";");
@@ -121,7 +133,7 @@ function head({ t, css, meta, path, otherPath }) {
 }
 <script>${BOOT}</script>
 <style>${css}</style>
-<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>`;
+<script type="application/ld+json">${escJson(jsonLd)}</script>`;
 }
 
 /** The header is shared; only the rail contents differ between the pages. */
@@ -288,7 +300,7 @@ ${langbar(t, t.other.dir)}
 `;
 }
 
-export { SITE, REPO };
+export { SITE, REPO, BOOT };
 
 /**
  * The guides page: one section per recording, each a short piece of prose and

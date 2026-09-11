@@ -42,6 +42,11 @@ KEYS = {
 # after the recording, and the prompt masks it anyway.
 PLACEHOLDER_KEY = "local-gateway-no-key-needed"
 
+# The throwaway HOME hides the config file, but Kvist looks in the environment
+# first, so an exported key would walk straight past it and into the recording.
+# The child gets what a terminal session needs and nothing else.
+PASS_THROUGH = ("PATH", "USER", "LOGNAME", "SHELL", "LANG", "TZ")
+
 # prompt_toolkit probes the terminal for the cursor position and warns on the
 # screen when nothing answers. A pty is not a terminal, so the driver answers.
 CPR_QUERY = b"\x1b[6n"
@@ -279,15 +284,17 @@ def main() -> int:
     steps = steps_for(scenario)
     log = open(log_path, "a", encoding="utf-8")
 
-    env = dict(os.environ)
+    env = {
+        name: os.environ[name] for name in PASS_THROUGH if name in os.environ
+    }
+    env.update(
+        {name: value for name, value in os.environ.items() if name.startswith("LC_")}
+    )
     env["HOME"] = home
     env["TERM"] = "xterm-256color"
     env["COLUMNS"] = str(COLS)
     env["LINES"] = str(ROWS)
     env["PYTHONUNBUFFERED"] = "1"
-    # Nothing here should reach a provider; a guide is about the interface.
-    env.pop("OPENAI_API_KEY", None)
-    env.pop("ANTHROPIC_API_KEY", None)
 
     child = pexpect.spawn(
         os.path.join(repo, ".venv/bin/python"),

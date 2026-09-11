@@ -166,6 +166,14 @@ than downloading a second copy.
 
 `dist/` is the document root. Nothing is generated at request time.
 
+`dist/security-headers.conf` is written by the build. It carries the CSP, HSTS
+and the rest, and it is generated rather than kept here because the policy names
+the digest of the inline theme script — a hand-copied digest goes stale the
+first time that script is edited, and a stale digest is a page that stops
+theming itself. Include it in every `location` that sets a header of its own:
+nginx's `add_header` does not inherit into a block that adds headers, so a
+`location` with a `Cache-Control` line and no `include` silently ships no CSP.
+
 ```nginx
 server {
     listen 443 ssl http2;
@@ -179,17 +187,25 @@ server {
                image/svg+xml application/xml;
     gzip_min_length 512;
 
+    include /srv/kvist-site/security-headers.conf;
+
     # Nothing is content-hashed, so HTML stays fresh and assets revalidate.
     location ~ ^/(ru/)?(guides/)?$ {
+        include /srv/kvist-site/security-headers.conf;
         add_header Cache-Control "public, max-age=0, must-revalidate";
     }
 
     location /assets/fonts/ {
+        include /srv/kvist-site/security-headers.conf;
         add_header Cache-Control "public, max-age=31536000, immutable";
     }
     location /assets/ {
+        include /srv/kvist-site/security-headers.conf;
         add_header Cache-Control "public, max-age=3600";
     }
+
+    # The snippet is configuration, not content.
+    location = /security-headers.conf { return 404; }
 
     location / { try_files $uri $uri/ =404; }
 }

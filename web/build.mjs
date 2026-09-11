@@ -24,7 +24,9 @@ import { createServer } from "node:http";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
-import { render, renderGuides, SITE } from "./src/template.mjs";
+import { createHash } from "node:crypto";
+import { render, renderGuides, SITE, BOOT } from "./src/template.mjs";
+import { resolveRequest } from "./tools/static-path.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(here, "dist");
@@ -201,8 +203,54 @@ ${PATHS
     join(dist, "robots.txt"),
     `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`,
   );
+  writeFileSync(join(dist, "security-headers.conf"), securityHeaders());
 
   report({ css, js, pages });
+}
+
+/**
+ * The nginx snippet the deploy includes, written by the build because only the
+ * build knows the hash. The theme decision is an inline script — it has to run
+ * before the first paint — so a policy that allows it has to name its digest,
+ * and a hand-copied digest goes stale the first time that script is edited.
+ *
+ * The page makes no request off its own origin: no CDN, no analytics, no
+ * webfont host. That is what makes a policy this narrow possible, and the
+ * policy is what keeps it true — an added third-party script fails visibly
+ * here rather than quietly shipping.
+ *
+ * style-src keeps 'unsafe-inline' and cannot drop it: the stylesheet is inlined
+ * into <head>, the replay carries style attributes, and the player writes
+ * element.style as it paints. Hashes do not cover attributes, so the honest
+ * thing is to allow it and say why.
+ */
+function securityHeaders() {
+  const bootHash = createHash("sha256").update(BOOT, "utf8").digest("base64");
+  const policy = [
+    "default-src 'none'",
+    `script-src 'self' 'sha256-${bootHash}'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+
+  return `# Written by build.mjs — do not edit; the script hash is computed from
+# the inline theme script and changes whenever that script does.
+#
+#   include /srv/kvist-site/security-headers.conf;
+#
+# add_header does not inherit into a location block that adds headers of its
+# own, so this is included in each one that does.
+add_header Content-Security-Policy "${policy}" always;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), interest-cohort=()" always;
+`;
 }
 
 /** The first frame whose screen contains `marker`, as dictionary ids. */
@@ -310,18 +358,10 @@ const TYPES = {
 
 function serve(port = 4173) {
   createServer((request, response) => {
-    /* A protocol-relative request such as "//" makes new URL() throw, which
-       would take the whole server down. Nothing served here is worth that. */
-    let path;
-    try {
-      path = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-    } catch {
-      response.writeHead(400).end("bad request");
-      return;
-    }
-    if (path.endsWith("/")) path += "index.html";
-    const file = join(dist, path);
-    if (!file.startsWith(dist)) {
+    /* This one listens on every interface, so the containment rule is the only
+       thing between dist/ and the network. It lives in tools/static-path.mjs. */
+    const file = resolveRequest(dist, request.url);
+    if (!file) {
       response.writeHead(403).end();
       return;
     }

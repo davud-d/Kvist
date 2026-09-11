@@ -11,8 +11,9 @@
 import { createServer } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolveRequest } from "./static-path.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(here, "../dist");
@@ -39,17 +40,11 @@ const COMPRESSIBLE = new Set([".html", ".js", ".json", ".xml", ".txt"]);
 
 function serve() {
   const server = createServer((request, response) => {
-    /* A protocol-relative request such as "//" makes new URL() throw, which
-       would take the whole server down. Nothing served here is worth that. */
-    let path;
-    try {
-      path = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
-    } catch {
-      response.writeHead(400).end("bad request");
+    const file = resolveRequest(dist, request.url);
+    if (!file) {
+      response.writeHead(403).end();
       return;
     }
-    if (path.endsWith("/")) path += "index.html";
-    const file = join(dist, path);
     try {
       let body = readFileSync(file);
       const type = extname(file);
@@ -68,7 +63,8 @@ function serve() {
       response.writeHead(404).end("404");
     }
   });
-  return new Promise((done) => server.listen(PORT, () => done(server)));
+  /* Only this machine's browser reads it, so only this machine can reach it. */
+  return new Promise((done) => server.listen(PORT, "127.0.0.1", () => done(server)));
 }
 
 let chromium;

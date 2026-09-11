@@ -5,9 +5,10 @@
 #   ./record-guides.fish              # all twelve
 #   ./record-guides.fish role effort  # named ones
 #
-# Unlike record.fish, these need no provider account and no API key. Every
-# guide runs under a throwaway HOME in /tmp, so the real ~/.kvist/config.json is
-# neither read nor written.
+# Unlike record.fish, these need no provider account and no API key. Every guide
+# runs under a throwaway HOME below $XDG_RUNTIME_DIR, so the real
+# ~/.kvist/config.json is neither read nor written, and guide.py hands the child
+# a short environment so an exported key cannot be picked up in its place.
 #
 # Kvist asks its provider for a model list on every launch, so the recordings
 # need something that answers. stub_gateway.py is that something: a real, tiny
@@ -30,8 +31,16 @@ if not command -q asciinema
     echo "asciinema not found — install it (pip install asciinema)"; exit 1
 end
 
-set -l home /tmp/kvist-guide-home
-set -l log /tmp/kvist-guide.log
+# Same private root as record.fish, and for the same reason: these paths are
+# predictable and get deleted on every run, which in a shared /tmp is an
+# invitation. /run/user/<uid> is 0700.
+if test -z "$XDG_RUNTIME_DIR"
+    echo "XDG_RUNTIME_DIR is not set — no private directory to record in"; exit 1
+end
+set -l root $XDG_RUNTIME_DIR/kvist-record
+mkdir -p $root; or exit 1
+
+set -l log $root/guide.log
 set -l port 20129
 rm -f $log
 
@@ -48,8 +57,8 @@ end
 for guide in $guides
     # Its own HOME and its own workspace, so the order guides are recorded in
     # cannot change what any of them shows.
-    set -l gh /tmp/kvist-gh-$guide
-    set -l work /tmp/kvist-gw-$guide
+    set -l gh $root/gh-$guide
+    set -l work $root/gw-$guide
     rm -rf $gh $work
 
     # Only the provider guide shows the first-run picker; the rest open on a
@@ -61,12 +70,12 @@ for guide in $guides
     end
 
     # changes and headless need a workspace that already carries a journal from
-    # a real run. record.fish leaves one in /tmp/kvist-demo-en.
+    # a real run. record.fish leaves one in the same root.
     if contains $guide changes headless
-        if not test -d /tmp/kvist-demo-en/.kvist
+        if not test -d $root/demo-en/.kvist
             echo "no journal to show — run ./record.fish en first"; exit 1
         end
-        cp -r /tmp/kvist-demo-en $work
+        cp -r $root/demo-en $work
     else
         mkdir -p $work
     end
@@ -76,7 +85,7 @@ for guide in $guides
         env COLUMNS=100 LINES=32 TERM=xterm-256color \
             asciinema rec --overwrite --cols 100 --rows 32 \
             --title "Kvist guide: $guide" \
-            -c "bash $here/headless.sh $repo $gh $work" \
+            -c "bash $here/headless.sh $repo $gh $work /tmp/kvist-hl-ws" \
             $here/guide-$guide.cast; or exit 1
     else
         env COLUMNS=100 LINES=32 TERM=xterm-256color \
