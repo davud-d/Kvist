@@ -54,19 +54,19 @@ function finalFrame(cast) {
 
 /** One replay: server-rendered final frame plus the controls that drive it. */
 function replay({ t, cast, source, label, autoplay }) {
-  return `<div class="replay" data-replay data-cast="${source}"
+  return `<div class="replay" data-replay data-cast="${esc(source)}"
            data-play="${esc(t.demo.play)}" data-pause="${esc(t.demo.pause)}"
            ${autoplay ? "" : 'data-autoplay="false"'}>
         <div class="replay-wrap">
           <pre class="replay-screen" data-screen tabindex="0"
-               style="--rows:${cast.h}"
+               style="--rows:${esc(cast.h)}"
                aria-label="${esc(label)}">${finalFrame(cast)}</pre>
         </div>
         <div class="replay-bar">
           <button class="chip" type="button" data-play aria-pressed="false">${esc(t.demo.play)}</button>
           <button class="chip" type="button" data-restart>${esc(t.demo.restart)}</button>
           <button class="chip" type="button" data-speed aria-label="${esc(t.demo.speed)}">1&#215;</button>
-          <input class="scrub" type="range" min="0" max="${cast.duration}" value="0" step="100"
+          <input class="scrub" type="range" min="0" max="${esc(cast.duration)}" value="0" step="100"
                  data-scrub disabled aria-label="${esc(t.demo.progress)}">
           <span class="replay-time" data-time>0:00 / 0:00</span>
         </div>
@@ -105,12 +105,12 @@ function head({ t, css, meta, path, otherPath }) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(meta.title)}</title>
 <meta name="description" content="${esc(meta.description)}">
-<link rel="canonical" href="${url}">
-<link rel="alternate" hreflang="en" href="${SITE}${enPath}">
-<link rel="alternate" hreflang="ru" href="${SITE}${ruPath}">
-<link rel="alternate" hreflang="x-default" href="${SITE}${enPath}">
+<link rel="canonical" href="${esc(url)}">
+<link rel="alternate" hreflang="en" href="${SITE}${esc(enPath)}">
+<link rel="alternate" hreflang="ru" href="${SITE}${esc(ruPath)}">
+<link rel="alternate" hreflang="x-default" href="${SITE}${esc(enPath)}">
 <meta property="og:type" content="website">
-<meta property="og:url" content="${url}">
+<meta property="og:url" content="${esc(url)}">
 <meta property="og:title" content="${esc(meta.title)}">
 <meta property="og:description" content="${esc(meta.description)}">
 <meta property="og:image" content="${SITE}/assets/og.png">
@@ -138,7 +138,7 @@ function head({ t, css, meta, path, otherPath }) {
 function header({ t, home, rail }) {
   return `<header class="top">
   <div class="wrap top-row">
-    <a class="mark" href="${home}"><span class="dot" aria-hidden="true"></span>Kvist</a>
+    <a class="mark" href="${esc(home)}"><span class="dot" aria-hidden="true"></span>Kvist</a>
     <nav class="rail" aria-label="${esc(t.meta.title)}">
       ${rail}
     </nav>
@@ -146,19 +146,19 @@ function header({ t, home, rail }) {
       <button class="chip" type="button" data-theme-toggle
               data-dark="${esc(t.nav.themeDark)}" data-light="${esc(t.nav.themeLight)}"
               aria-label="${esc(t.nav.theme)}">${esc(t.nav.themeLight)}</button>
-      <a class="chip" href="${t.other.dir}" lang="${t.other.lang}"
-         hreflang="${t.other.lang}" aria-label="${esc(t.other.name)}">${esc(t.other.label)}</a>
+      <a class="chip" href="${esc(t.other.dir)}" lang="${esc(t.other.lang)}"
+         hreflang="${esc(t.other.lang)}" aria-label="${esc(t.other.name)}">${esc(t.other.label)}</a>
     </div>
   </div>
 </header>`;
 }
 
 function langbar(t, otherPath) {
-  return `<aside class="langbar" data-langbar="${t.other.lang}" hidden
+  return `<aside class="langbar" data-langbar="${esc(t.other.lang)}" hidden
        aria-label="${esc(t.other.name)}">
   <div class="wrap langbar-row">
     <p>${esc(t.langbar.text)}</p>
-    <a class="chip" href="${otherPath}">${esc(t.langbar.go)}</a>
+    <a class="chip" href="${esc(otherPath)}">${esc(t.langbar.go)}</a>
     <button class="chip" type="button" data-langbar-close>${esc(t.langbar.dismiss)}</button>
   </div>
 </aside>`;
@@ -168,10 +168,10 @@ export function render({ t, css, cast, buildId }) {
   const rail = ["demo", "loop", "boundary", "recovery", "control", "install"]
     .map((key) => `<a href="#${key}">${esc(t.nav[key])}</a>`)
     .join("\n      ") +
-    `\n      <a href="${t.dir}guides/">${esc(t.guides.nav)}</a>`;
+    `\n      <a href="${esc(t.dir)}guides/">${esc(t.guides.nav)}</a>`;
 
   return `<!DOCTYPE html>
-<html lang="${t.lang}" class="no-js">
+<html lang="${esc(t.lang)}" class="no-js">
 <head>
 ${head({ t, css, meta: t.meta, path: t.dir, otherPath: t.other.dir })}
 </head>
@@ -193,7 +193,7 @@ ${header({ t, home: t.dir, rail })}
 
       <div class="hero-links">
         <a class="linkout" href="#demo">${esc(t.hero.cta)}</a>
-        <a class="linkout" href="${t.dir}guides/">${esc(t.hero.guidesLink)}</a>
+        <a class="linkout" href="${esc(t.dir)}guides/">${esc(t.hero.guidesLink)}</a>
         <span class="repo-boarded" role="img" aria-label="${esc(t.hero.repo)} — ${esc(t.hero.repoHint)}">
           <span aria-hidden="true">${esc(t.hero.repo)}</span>
           <span class="plank plank-a" aria-hidden="true"></span>
@@ -304,16 +304,16 @@ export function renderGuides({ t, css, casts, buildId }) {
   const otherPath = `${t.other.dir}guides/`;
   /* Twelve entries do not fit a rail, so it lists the four groups. */
   const rail = t.guides.groups
-    .map((group) => `<a href="#${group.id}">${esc(group.title)}</a>`)
+    .map((group) => `<a href="#${esc(group.id)}">${esc(group.title)}</a>`)
     .join("\n      ");
 
   return `<!DOCTYPE html>
-<html lang="${t.lang}" class="no-js guides">
+<html lang="${esc(t.lang)}" class="no-js guides">
 <head>
 ${head({ t, css, meta: t.guides.meta, path, otherPath })}
 </head>
 <body>
-<a class="skip" href="#${t.guides.items[0].id}">${esc(t.guides.skip)}</a>
+<a class="skip" href="#${esc(t.guides.items[0].id)}">${esc(t.guides.skip)}</a>
 <div class="texture" aria-hidden="true"></div>
 <div class="cursor-glow" data-cursor-glow aria-hidden="true"></div>
 
@@ -335,13 +335,13 @@ ${header({ t, home: t.dir, rail })}
   ${t.guides.groups
     .map((group) => {
       const items = t.guides.items.filter((item) => item.group === group.id);
-      return `<section class="section" id="${group.id}">
+      return `<section class="section" id="${esc(group.id)}">
     <div class="wrap">
       <p class="kicker">${esc(group.title)}</p>
     </div>
     ${items
       .map(
-        (item) => `<div class="guide" id="${item.id}">
+        (item) => `<div class="guide" id="${esc(item.id)}">
       <div class="wrap">
         <div class="guide-head">
           <span class="n">${esc(item.n)}</span>
@@ -369,7 +369,7 @@ ${header({ t, home: t.dir, rail })}
 <footer class="foot">
   <div class="wrap">
     <div class="foot-row">
-      <a class="linkout" href="${t.dir}">${esc(t.guides.back)}</a>
+      <a class="linkout" href="${esc(t.dir)}">${esc(t.guides.back)}</a>
       <span>${esc(t.footer.repo)}</span>
       <span>${esc(t.footer.license)}</span>
     </div>

@@ -30,6 +30,7 @@ import { resolveRequest } from "./tools/static-path.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dist = resolve(here, "dist");
+const deploy = resolve(here, "deploy");
 
 /* Budgets from the brief, in bytes after gzip. A build that breaks one fails. */
 const BUDGET = {
@@ -122,6 +123,7 @@ async function main() {
   // Assets.
   cpSync(resolve(here, "assets/fonts"), join(dist, "assets/fonts"), {
     recursive: true,
+    dereference: true,
     filter: (src) => !src.endsWith("font-face.css"),
   });
   mkdirSync(join(dist, "assets/demo"), { recursive: true });
@@ -129,12 +131,14 @@ async function main() {
     cpSync(
       resolve(here, `assets/demo/run-${locale}.json`),
       join(dist, `assets/demo/run-${locale}.json`),
+      { dereference: true },
     );
   }
   for (const guide of GUIDES) {
     cpSync(
       resolve(here, `assets/demo/guide-${guide}.json`),
       join(dist, `assets/demo/guide-${guide}.json`),
+      { dereference: true },
     );
   }
   execFileSync(process.execPath, [
@@ -203,7 +207,8 @@ ${PATHS
     join(dist, "robots.txt"),
     `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`,
   );
-  writeFileSync(join(dist, "security-headers.conf"), securityHeaders());
+  mkdirSync(deploy, { recursive: true });
+  writeFileSync(join(deploy, "security-headers.conf"), securityHeaders());
 
   report({ css, js, pages });
 }
@@ -224,20 +229,31 @@ ${PATHS
  * element.style as it paints. Hashes do not cover attributes, so the honest
  * thing is to allow it and say why.
  */
-function securityHeaders() {
+/** The security headers as name → value, shared by the nginx snippet below and
+    the dev server, so the two cannot drift apart. */
+function securityHeaderValues() {
   const bootHash = createHash("sha256").update(BOOT, "utf8").digest("base64");
-  const policy = [
-    "default-src 'none'",
-    `script-src 'self' 'sha256-${bootHash}'`,
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-ancestors 'none'",
-  ].join("; ");
+  return {
+    "Content-Security-Policy": [
+      "default-src 'none'",
+      `script-src 'self' 'sha256-${bootHash}'`,
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data:",
+      "font-src 'self'",
+      "connect-src 'self'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'none'",
+    ].join("; "),
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "geolocation=(), camera=(), microphone=(), interest-cohort=()",
+  };
+}
 
+function securityHeaders() {
+  const headers = securityHeaderValues();
   return `# Written by build.mjs — do not edit; the script hash is computed from
 # the inline theme script and changes whenever that script does.
 #
@@ -245,11 +261,9 @@ function securityHeaders() {
 #
 # add_header does not inherit into a location block that adds headers of its
 # own, so this is included in each one that does.
-add_header Content-Security-Policy "${policy}" always;
-add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-add_header X-Content-Type-Options "nosniff" always;
-add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-add_header Permissions-Policy "geolocation=(), camera=(), microphone=(), interest-cohort=()" always;
+${Object.entries(headers)
+  .map(([name, value]) => `add_header ${name} "${value}" always;`)
+  .join("\n")}
 `;
 }
 
@@ -357,7 +371,20 @@ const TYPES = {
 };
 
 function serve(port = 4173) {
+  /* The headers production relies on, minus Strict-Transport-Security — this
+     server is plain HTTP, where HSTS is ignored. The pinned script hash still
+     holds, because the inline theme script is served here too. */
+  const headers = securityHeaderValues();
+  delete headers["Strict-Transport-Security"];
+
   createServer((request, response) => {
+    /* Only GET and HEAD are reads; refuse everything else before any file is
+       touched so the server cannot be nudged into an unintended method. */
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      response.writeHead(405, { allow: "GET, HEAD" }).end();
+      return;
+    }
+
     /* This one listens on every interface, so the containment rule is the only
        thing between dist/ and the network. It lives in tools/static-path.mjs. */
     const file = resolveRequest(dist, request.url);
@@ -368,10 +395,15 @@ function serve(port = 4173) {
     try {
       const body = readFileSync(file);
       response.writeHead(200, {
+        ...headers,
         "content-type": TYPES[extname(file)] ?? "application/octet-stream",
         "cache-control": "no-store",
       });
-      response.end(body);
+      if (request.method === "HEAD") {
+        response.end();
+      } else {
+        response.end(body);
+      }
     } catch {
       response.writeHead(404, { "content-type": "text/plain" }).end("404");
     }

@@ -61,6 +61,7 @@ web/
     audit.mjs            widths, themes, no-JS, reduced motion, keyboard
     perf.mjs             LCP, CLS and bytes under Fast 3G
   dist/                  the built site — this is what gets deployed
+  deploy/                the nginx snippet the deploy includes, generated too
 ```
 
 ## Changing the palette
@@ -166,7 +167,7 @@ than downloading a second copy.
 
 `dist/` is the document root. Nothing is generated at request time.
 
-`dist/security-headers.conf` is written by the build. It carries the CSP, HSTS
+`deploy/security-headers.conf` is written by the build. It carries the CSP, HSTS
 and the rest, and it is generated rather than kept here because the policy names
 the digest of the inline theme script — a hand-copied digest goes stale the
 first time that script is edited, and a stale digest is a page that stops
@@ -216,7 +217,9 @@ Publishing:
 ```fish
 cd web
 node build.mjs
+# --delete clears whatever dist/ no longer ships, so re-sync the conf after it.
 rsync -av --delete dist/ user@host:/srv/kvist-site/
+rsync -av deploy/security-headers.conf user@host:/srv/kvist-site/security-headers.conf
 ```
 
 Cloudflare in front needs nothing special. Do not enable its HTML minifier or

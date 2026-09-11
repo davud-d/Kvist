@@ -17,6 +17,7 @@
  *   - startsWith(root) is not containment: with root "/srv/dist" it also
  *     accepts "/srv/dist2/secret". The separator has to be part of the compare.
  */
+import { realpathSync } from "node:fs";
 import { resolve, sep } from "node:path";
 
 /**
@@ -38,5 +39,18 @@ export function resolveRequest(root, requestUrl) {
      decodeURIComponent just revealed collapse before the compare, not after. */
   const file = resolve(root, `.${path}`);
   if (file !== root && !file.startsWith(root + sep)) return null;
+
+  /* Lexical containment is not enough: readFileSync follows symlinks, so a
+     link planted inside root can point anywhere. Resolve both the file and the
+     root to their real paths and re-check, so the byte actually read stays
+     inside root. A file that is not on disk yet has no real path; readFileSync
+     will 404 it the same either way. */
+  try {
+    const real = realpathSync(file);
+    const realRoot = realpathSync(root);
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) return null;
+  } catch {
+    // file or root not on disk; the read below 404s a missing file
+  }
   return file;
 }
