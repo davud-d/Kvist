@@ -163,7 +163,7 @@ class SafeExecutor:
         self._txn_run_id: str | None = None
         self._txn_action_id: str | None = None
 
-        self.max_read_chars = 20000
+        self.max_read_chars = 200000
         self.max_output_chars = 12000
         self.max_search_results = 50
         self.max_file_size_bytes = 256 * 1024
@@ -2394,14 +2394,25 @@ class SafeExecutor:
 
     def _safe_read_text(self, target: Path) -> tuple[str, bool]:
         target = self._canonical_read_target(target)
+        size = target.stat().st_size
         try:
-            raw = target.read_text(encoding="utf-8", errors="replace")
+            with target.open("r", encoding="utf-8", errors="replace") as handle:
+                # Bounded read: the previous code pulled the whole file into
+                # memory and only then compared its size against the limit, so
+                # the limit did nothing to protect the process from a huge file.
+                raw = handle.read(self.max_read_chars + 1)
         except OSError as error:
             raise ExecutorError(f"Failed to read file: {target.name}") from error
 
-        size_exceeded = target.stat().st_size > self.max_file_size_bytes
-        truncated = len(raw) > self.max_read_chars
-        return self._truncate_text(raw, self.max_read_chars), size_exceeded or truncated
+        if len(raw) <= self.max_read_chars:
+            return raw, size > self.max_file_size_bytes
+
+        return (
+            raw[: self.max_read_chars]
+            + f"\n\n[TRUNCATED: showing the first {self.max_read_chars} "
+            f"characters; the file is {size} bytes]",
+            True,
+        )
 
     def _truncate_text(self, text: str, limit: int) -> str:
         if len(text) <= limit:

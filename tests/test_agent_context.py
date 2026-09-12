@@ -38,3 +38,49 @@ def test_context_formatting_compaction_and_summary(agent_factory):
     summary = agent._build_summary()
     assert "Completed plan steps: 1/4" in summary
     assert "Changed: app.py" in summary
+
+
+def test_every_rendered_section_header_is_known_to_the_trimmer(agent_factory, monkeypatch):
+    """A header the trimmer does not recognise is not a section.
+
+    Its text silently folds into the section above and is trimmed at *that*
+    section's priority. Two headers ("Recent useful observations:", "Recent
+    action results:") drifted from their SECTION_PRIORITIES keys exactly this
+    way, so the guard is the spelling itself.
+    """
+    from agent_context import SECTION_PRIORITIES, split_prompt_into_sections
+
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.completion_ready = True  # also renders "Final answer style:"
+    monkeypatch.setattr(
+        "agent_context.current_time_context",
+        lambda: {"current_time": "2026-01-01 00:00:00 UTC"},
+    )
+
+    prompt = agent._build_runtime_prompt("test goal", 2)
+    rendered = {header for header, _text, _priority in split_prompt_into_sections(prompt)}
+    rendered.discard("")
+
+    assert rendered <= set(SECTION_PRIORITIES)
+    assert {"Recent useful observations:", "Recent action results:"} <= rendered
+
+
+def test_file_contents_survive_budget_pressure(agent_factory):
+    """File contents and command output are the source of truth in the prompt;
+    every other section about them is a summary of that one.
+
+    Asserted through the trimmer rather than by comparing priority numbers: at
+    priority 3 this section was dropped whole before anything else, which is
+    what made the model re-read files it had already been given.
+    """
+    agent = agent_factory(max_context_tokens=1_500)
+    agent._state.plan_info = make_plan()
+    agent._state.recent_result_details = [
+        "Detailed recent action data:\nMARKER_FROM_THE_FILE\n" + "body line\n" * 4_000
+    ]
+    agent._state.rolling_summaries = {1: "summary " * 300}
+
+    trimmed = agent._trim_prompt_to_token_limit("system", agent._build_runtime_prompt("g", 5))
+
+    assert "MARKER_FROM_THE_FILE" in trimmed

@@ -8,7 +8,7 @@ import agent_model
 from agent import LocalAgent
 from agent_state import PlanInfo
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient, NullUI
+from tests.conftest import FakeLLMClient, NullUI, make_plan
 
 
 @pytest.mark.parametrize(
@@ -303,7 +303,253 @@ def test_usage_carries_the_limit_the_prompt_is_trimmed_to(agent_factory):
     agent._ui = _UsageCapturingUI()
     assert _emit(agent, kind="step")["context_limit"] == 120000
 
-    freeflow = agent_factory(provider="freeflow", max_context_tokens=120000)
+    freeflow = agent_factory(provider="freeflow")
     freeflow._ui = _UsageCapturingUI()
     assert _emit(freeflow, kind="step")["context_limit"] == 11000
     assert agent_model.context_token_limit(freeflow) == 11000
+
+
+def test_context_limit_follows_the_active_model_not_the_configured_one(agent_factory):
+    """Escalating fast -> smart mid-run changes the model, so it must change
+    the budget: a 1M-model budget carried onto a 200k model is a hard 400."""
+    agent = agent_factory(fast_model="claude-sonnet-5", provider="anthropic")
+    big = agent_model.context_token_limit(agent)
+
+    agent._state.selected_action_model = "claude-haiku-4-5"
+    small = agent_model.context_token_limit(agent)
+
+    assert small < big
+    assert small < 200_000
+
+
+def test_env_overrides_the_derived_context_limit(agent_factory, monkeypatch):
+    agent = agent_factory(fast_model="gpt-5.4-mini")
+    monkeypatch.setenv("AGENT_MAX_CONTEXT_TOKENS", "40000")
+    assert agent_model.context_token_limit(agent) == 40000
+
+
+# ── a model sized wrong is corrected by the provider, not fatal ─────────────
+
+def test_context_overflow_is_classified():
+    for message in (
+        "Input tokens exceed the configured limit of 272,000 tokens",
+        "prompt is too long: 1050000 tokens > 1000000 maximum",
+        "This model's maximum context length is 128000 tokens",
+        "context_length_exceeded",
+    ):
+        assert agent_model.is_context_overflow_error(RuntimeError(message))
+
+    assert not agent_model.is_context_overflow_error(RuntimeError("rate limit reached"))
+    assert not agent_model.is_context_overflow_error(RuntimeError("invalid api key"))
+
+
+def test_overflow_shrinks_the_budget_and_retries_instead_of_failing(
+    agent_factory, monkeypatch
+):
+    """Model ids come from /v1/models, so a size guess can be wrong.
+
+    The provider's rejection is the only authority on the real limit: it must
+    lower the budget for that model and re-send, not break the step.
+    """
+    from context_budget import learned_budget_for, reset_learned_budgets
+
+    reset_learned_budgets()
+    monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
+    monkeypatch.setattr(agent_model.time, "sleep", lambda _: None)
+    try:
+        agent = agent_factory(
+            fast_model="gpt-6-terra", stream=False, cache_enabled=False, max_retries=3
+        )
+        agent._count_tokens = lambda text: len(text)
+
+        attempts: list[int] = []
+
+        def flaky(model, messages, **kwargs):
+            sent = sum(len(message["content"]) for message in messages)
+            attempts.append(sent)
+            if len(attempts) == 1:
+                raise RuntimeError(
+                    "Input tokens exceed the configured limit of 272,000 tokens"
+                )
+            return FakeLLMClient(content='{"thought":"ok"}').chat.completions.create(
+                model=model, messages=messages
+            )
+
+        monkeypatch.setattr(agent, "_create_json_completion", flaky)
+
+        content = agent._call_model("gpt-6-terra", "system", "u" * 900_000)
+
+        assert content == '{"thought":"ok"}'
+        assert len(attempts) == 2
+        assert attempts[1] < attempts[0]
+        assert learned_budget_for("gpt-6-terra") is not None
+        assert agent_model.context_token_limit(agent) == learned_budget_for("gpt-6-terra")
+    finally:
+        reset_learned_budgets()
+
+
+def test_a_learned_rejection_outranks_an_explicit_override(agent_factory, monkeypatch):
+    """Otherwise the retry resends exactly the prompt that was just refused."""
+    from context_budget import note_input_overflow, reset_learned_budgets
+
+    reset_learned_budgets()
+    monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
+    try:
+        agent = agent_factory(fast_model="gpt-6-terra", max_context_tokens=900_000)
+        assert agent_model.context_token_limit(agent) == 900_000
+
+        note_input_overflow("gpt-6-terra", 500_000)
+        assert agent_model.context_token_limit(agent) == 300_000
+
+        monkeypatch.setenv("AGENT_MAX_CONTEXT_TOKENS", "1500000")
+        assert agent_model.context_token_limit(agent) == 300_000
+    finally:
+        reset_learned_budgets()
+
+
+# ── the trimmer must actually deliver what it promises ──────────────────────
+
+_CONTENT_SHAPES = {
+    "prose": "the quick brown fox jumps over the lazy dog ",
+    # Cyrillic and code are far denser per character than prose. A trimmer that
+    # assumes a fixed chars-per-token ratio silently overshoots on both, and
+    # source code is most of what Kvist puts in a prompt.
+    "cyrillic": "быстрая коричневая лиса прыгает через ленивую собаку ",
+    "code": "def f(x):\n    return x + 1\n",
+    "json": '{"path": "a/b.py", "content": "x"},\n',
+    "minified": "a" * 400,
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_CONTENT_SHAPES))
+@pytest.mark.parametrize("budget", [1_200, 4_000, 30_000])
+def test_trimmed_prompt_actually_fits_the_budget(agent_factory, shape, budget):
+    """The property the whole trimmer exists for, checked against the real
+    tokenizer rather than the estimate the trimmer used to trust.
+
+    With a fixed 4-chars-per-token assumption a code-heavy prompt came back
+    almost three times over budget — measured as fitting, refused by the API.
+    """
+    agent = agent_factory(max_context_tokens=budget)
+    agent._state.plan_info = make_plan()
+    agent._state.recent_result_details = [
+        "Detailed recent action data:\n" + _CONTENT_SHAPES[shape] * 3_000
+    ]
+    system_prompt = "You are a coding agent.\n" * 20
+    prompt = agent._build_runtime_prompt("проверь файл", 4)
+
+    trimmed = agent._trim_prompt_to_token_limit(system_prompt, prompt)
+
+    total = agent._count_tokens(system_prompt) + agent._count_tokens(trimmed)
+    assert total <= budget, f"{shape}: {total} tokens against a {budget} budget"
+
+
+def test_trimming_keeps_the_sections_the_model_cannot_work_without(agent_factory):
+    """Fitting the budget by discarding the task would be a useless kind of
+    correct."""
+    agent = agent_factory(max_context_tokens=2_000)
+    agent._state.plan_info = make_plan()
+    agent._state.recent_result_details = ["Detailed recent action data:\n" + "x=1\n" * 20_000]
+
+    trimmed = agent._trim_prompt_to_token_limit("system", agent._build_runtime_prompt("СДЕЛАЙ ЭТО", 2))
+
+    assert "СДЕЛАЙ ЭТО" in trimmed
+    assert "Completion status:" in trimmed
+
+
+def test_an_untrimmed_prompt_is_returned_untouched(agent_factory):
+    """A prompt inside the budget must not be marked as trimmed — the marker is
+    how a reader tells a whole prompt from a cut one."""
+    agent = agent_factory(max_context_tokens=500_000)
+    agent._state.plan_info = make_plan()
+
+    prompt = agent._build_runtime_prompt("small task", 1)
+    trimmed = agent._trim_prompt_to_token_limit("system", prompt)
+
+    assert trimmed == prompt
+    assert "CONTEXT TRIMMED" not in trimmed
+
+
+def test_section_truncation_respects_the_real_token_cost(agent_factory):
+    """Directly on the helper: the same character count costs very different
+    numbers of tokens, and the target is expressed in tokens."""
+    agent = agent_factory()
+    for text in ("word " * 4_000, "слово " * 4_000, "x=1;\n" * 4_000):
+        section = "Header:\n" + text
+        out = agent_model._truncate_section_text(section, 300, agent._count_tokens)
+        assert agent._count_tokens(out) <= 300
+        assert out.startswith("Header:")
+
+
+# ── an overflow must be told apart from a rate limit ────────────────────────
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Rate limit reached for gpt-5.6-luna: Limit 200000 tokens per min",
+        "429 Too Many Requests: retry after 20s",
+        "Request too large for model on tokens per min (TPM): Limit 30000",
+        "rate_limit_exceeded: you exceeded your current quota",
+        # The dangerous one: a relayed throughput error that also carries the
+        # exact wording of a context overflow. Marker matching alone reads this
+        # as "your prompt is too big" and shrinks the budget permanently.
+        "Rate limit reached for model on tokens per minute (TPM): Limit 30000, "
+        "Requested 35000. Please reduce the length of the messages and try again in 12s.",
+    ],
+)
+def test_a_rate_limit_is_not_mistaken_for_an_overflow(message):
+    """Both are 'about tokens' and phrased alike, but the cures are opposite.
+
+    Reading a rate limit as an overflow permanently shrinks the model's budget
+    for the session *and* skips the backoff sleep, so Kvist hammers the
+    provider with a crippled context.
+    """
+    assert not agent_model.is_context_overflow_error(RuntimeError(message))
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Input tokens exceed the configured limit of 272,000 tokens",
+        "prompt is too long: 1050000 tokens > 1000000 maximum",
+        "This model's maximum context length is 128000 tokens",
+        "context_length_exceeded",
+        "Please reduce the length of the messages",
+        # Numbers that merely look like status codes or throughput limits must
+        # not disarm the classifier: over-broad rate-limit markers would leave
+        # a genuine overflow unrecognised and the step dead.
+        "This model's maximum context length is 429000 tokens (request id req_429ab)",
+    ],
+)
+def test_a_real_overflow_is_recognised(message):
+    assert agent_model.is_context_overflow_error(RuntimeError(message))
+
+
+def test_overflow_does_not_resend_an_identical_prompt(agent_factory, monkeypatch):
+    """A retry that cannot shrink is a retry that buys the same rejection.
+
+    The prompt may be unshrinkable: the system prompt is never trimmed, and a
+    learned cap is keyed to the model that was refused, which is not
+    necessarily the one whose budget the trimmer consults.
+    """
+    from context_budget import reset_learned_budgets
+
+    reset_learned_budgets()
+    monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
+    monkeypatch.setattr(agent_model.time, "sleep", lambda _: None)
+    try:
+        agent = agent_factory(stream=False, cache_enabled=False, max_retries=4)
+        sent: list[str] = []
+
+        def always_overflows(model, messages, **kwargs):
+            sent.append("".join(message["content"] for message in messages))
+            raise RuntimeError("prompt is too long: too many input tokens")
+
+        monkeypatch.setattr(agent, "_create_json_completion", always_overflows)
+
+        with pytest.raises(Exception):
+            agent._call_model("gpt-5.6-luna", "S" * 400_000, "u" * 40_000)
+
+        assert len(sent) == len(set(sent)), "the same prompt was sent twice"
+    finally:
+        reset_learned_budgets()

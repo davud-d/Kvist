@@ -288,9 +288,27 @@ Global settings live in `~/.kvist/config.json`. Runtime environment variables
 include `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`,
 `AGENT_PLANNER_MODEL`, `AGENT_VERBOSE`, `AGENT_MAX_STEPS`,
 `AGENT_PERSIST_LOGS`, `AGENT_SKIP_PLANNING`, `AGENT_REASONING_EFFORT`,
-`AGENT_SANDBOX_MODE`, and `AGENT_SANDBOX_NET`. Prefer `/provider`, `/models`,
-`/role`, and `/effort` for interactive configuration; do not commit keys or
-local `.kvist` data.
+`AGENT_MAX_CONTEXT_TOKENS`, `AGENT_SANDBOX_MODE`, and `AGENT_SANDBOX_NET`.
+Prefer `/provider`, `/models`, `/role`, and `/effort` for interactive
+configuration; do not commit keys or local `.kvist` data.
+
+How much context a step may occupy is derived from the *active model's*
+documented **input** limit (`context_budget.py`), not from one flat number. Input
+limit, not context window: OpenAI reserves its 128k max output inside the window,
+so a 400k-window GPT-5 model refuses any prompt over 272k, while Anthropic bounds
+the input alone and a 1M model really does take a 1M-token prompt. The budget is
+85% of that limit, because Kvist counts tokens with tiktoken, which under-counts
+for the Anthropic and DeepSeek tokenizers — so a 1M model gets 850k and a
+272k-input one gets 231k.
+
+Because Kvist discovers the model catalog from `/v1/models` on every launch and
+no provider reports a context size there, a model newer than that table is
+expected: an unlisted member of a known family inherits its generation (a new
+`gpt-6-*`, a new `claude-opus-*`) instead of dropping to a generic 256k, and
+`-mini`/`-nano` variants stay on the small tier. If a guess still comes out too
+high, the provider's own "prompt is too long" rejection lowers the budget for
+that model and the call is re-sent rather than failing. Set
+`AGENT_MAX_CONTEXT_TOKENS` to pin a budget yourself.
 
 Two instruction files sit in the workspace root: `KVIST.md` for the action-loop
 roles (coder, reader, devops) and `KVIST-CHAT.md` for chat. Kvist creates both

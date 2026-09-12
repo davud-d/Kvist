@@ -41,9 +41,15 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Compressed state:": 2,
     "Read files:": 2,
     "Changed files:": 2,
-    "Recent observations:": 2,
-    "Recent results:": 1,
-    "Detailed recent action data:": 3,
+    # These two must match what build_runtime_prompt renders verbatim, or the
+    # trimmer never sees them as sections and silently folds them into the
+    # section above at that section's priority.
+    "Recent useful observations:": 2,
+    "Recent action results:": 1,
+    # File contents and command output live here. Dropping them first is what
+    # forced the model to re-read files it had already been given; everything
+    # else in the prompt is a summary of this, so this is what survives.
+    "Detailed recent action data:": 1,
     "Repeated errors:": 1,
     "Additional instruction:": 0,
     "Step summaries:": 1,

@@ -1365,3 +1365,132 @@ def test_cancelled_question_does_not_extend_the_budget(agent_factory):
     agent._run_loop("Посмотри файлы", start_step=1)
 
     assert agent._state.step_budget == 2
+
+
+def test_read_file_content_reaches_the_model_whole(agent_factory, tmp_path):
+    """A file the executor read must arrive in the prompt intact.
+
+    The old caps (prompt_value_char_limit=1600 on top of a 20k executor read)
+    handed the model ~9% of a normal source file, so it re-read the same file a
+    few steps later. The executor's read cap is the only cap that may apply.
+    """
+    agent = agent_factory()
+    source = (tmp_path / "big.py")
+    body = "\n".join(f"line {index} — содержимое" for index in range(2000))
+    source.write_text(body, encoding="utf-8")
+    assert len(body) > 20_000  # far past the caps that used to cut it
+
+    command = make_command("read_file", {"path": "big.py"})
+    feedback = agent._execute_command(command)
+    detail = agent._feedback_to_detail(command, feedback)
+
+    assert feedback["ok"] is True
+    assert feedback["data"]["truncated"] is False
+    assert "line 1999" in detail
+    assert "TRUNCATED_FOR_PROMPT" not in detail
+
+
+@pytest.mark.parametrize("size", [1, 5_000, 50_000, 199_999])
+def test_whatever_the_executor_read_reaches_the_model(agent_factory, tmp_path, size):
+    """Two independent caps on the same content is how a read got halved.
+
+    Checked at several sizes rather than by comparing the two constants: the
+    bug was not that one number was smaller, it was that a second cap applied
+    to content the first had already approved.
+    """
+    agent = agent_factory()
+    body = "\n".join(f"line {index}" for index in range(size // 8))[:size]
+    (tmp_path / "f.py").write_text(body, encoding="utf-8")
+
+    command = make_command("read_file", {"path": "f.py"})
+    feedback = agent._execute_command(command)
+
+    assert feedback["ok"] is True
+    assert feedback["data"]["content"] == body
+    assert feedback["data"]["truncated"] is False
+    assert "TRUNCATED_FOR_PROMPT" not in agent._feedback_to_detail(command, feedback)
+
+
+def test_a_file_read_stays_in_context_across_later_steps(agent_factory, tmp_path):
+    """The reported symptom: the agent re-read the same files every few steps.
+
+    Only the last few action payloads were kept, so file content aged out of
+    the prompt while the task was still using it and the model had no way to
+    get it back except by reading the file again.
+    """
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    (tmp_path / "target.py").write_text("MARKER_ONLY_IN_THIS_FILE = 1\n", encoding="utf-8")
+
+    read = make_command("read_file", {"path": "target.py"})
+    agent._register_feedback(1, read, agent._execute_command(read))
+
+    # Several unrelated steps happen afterwards, as they do in any real run.
+    for step in range(2, 7):
+        listing = make_command("list_dir", {"path": "."})
+        agent._register_feedback(step, listing, agent._execute_command(listing))
+
+    prompt = agent._build_runtime_prompt("используй target.py", 7)
+
+    assert "MARKER_ONLY_IN_THIS_FILE" in prompt, (
+        "the file content aged out of the prompt, so the model must re-read it"
+    )
+
+
+def test_an_analysis_plan_can_actually_finish(agent_factory, tmp_path):
+    """Reproduces the deadlock from run_012: a read-only analysis task that
+    read every file it needed and still could not finish.
+
+    Plan steps are matched to actions by vocabulary. A planner asked to
+    evaluate something writes judgement steps that name no inspect, edit,
+    verify or report verb, so no action can ever mark them complete. While they
+    gate completion the run is unfinishable: the model is told the plan is
+    incomplete, keeps inspecting, and re-reads the same files until the step
+    budget runs out.
+    """
+    agent = agent_factory()
+    agent._state.read_only_goal = True
+    agent._state.plan_info = PlanInfo(
+        goal="Оценить инсталляторы",
+        complexity="complex",
+        plan=[
+            "Найти папку installer и составить список файлов внутри неё",
+            "Прочитать документацию внутри папки installer",
+            "Оценить инсталляторы по критериям: корректность, обработка ошибок, идемпотентность",
+            "Сопоставить заявленное в документации с тем, что реально делают инсталляторы",
+            "Сформировать итоговый отчёт с рекомендациями",
+        ],
+        success_criteria=["Отчёт содержит конкретные замечания"],
+        risks=[],
+        task_kind="report",
+    )
+    (tmp_path / "installer").mkdir()
+    (tmp_path / "installer" / "README.md").write_text("docs\n", encoding="utf-8")
+
+    listing = make_command("list_dir", {"path": "installer"})
+    agent._register_feedback(1, listing, agent._execute_command(listing))
+    read = make_command("read_file", {"path": "installer/README.md"})
+    agent._register_feedback(2, read, agent._execute_command(read))
+
+    agent._refresh_completion_requirements()
+
+    assert "plan_incomplete" not in agent._state.completion_blocker_kinds, (
+        "judgement steps no action can satisfy are still gating completion: "
+        f"{agent._state.completion_blockers}"
+    )
+
+
+def test_a_step_a_real_action_could_satisfy_still_gates_completion(agent_factory):
+    """The deadlock fix must not become a way to skip actual work."""
+    agent = agent_factory()
+    agent._state.plan_info = PlanInfo(
+        goal="Починить баг",
+        complexity="simple",
+        plan=["Прочитать модуль", "Исправить обработку ошибок в модуле"],
+        success_criteria=["Правка применена"],
+        risks=[],
+    )
+
+    agent._refresh_completion_requirements()
+
+    assert "plan_incomplete" in agent._state.completion_blocker_kinds

@@ -27,10 +27,17 @@ class AgentConfig:
     repeat_action_limit: int = 4
     summary_recent_events: int = 8
     recent_feedback_limit: int = 4
-    detailed_feedback_limit: int = 3
+    # How many *full* action payloads stay in the prompt. At 3 a file read fell
+    # out of context three steps later and the model re-read it; the prompt
+    # budget (context_budget.py) is what actually caps this now.
+    detailed_feedback_limit: int = 8
     rolling_summary_interval: int = 5
-    prompt_result_char_limit: int = 5000
-    prompt_value_char_limit: int = 1600
+    # Char caps on one action payload and on one string inside it. They exist to
+    # stop a single runaway value from filling the window, not to summarize: a
+    # file the executor already capped at max_read_chars must reach the model
+    # whole, so prompt_value_char_limit is never below that cap.
+    prompt_result_char_limit: int = 400_000
+    prompt_value_char_limit: int = 200_000
     cache_enabled: bool = True
     persist_logs: bool = True
     logs_dirname: str = ".kvist/logs"
@@ -41,7 +48,10 @@ class AgentConfig:
     reasoning_effort: str = "medium"
     max_retries: int = 2
     retry_base_delay: float = 2.0
-    max_context_tokens: int = 120000
+    # 0 means "derive from the active model's real context window"
+    # (context_budget.py). A non-zero value is an explicit override, as is the
+    # AGENT_MAX_CONTEXT_TOKENS env var, which wins over both.
+    max_context_tokens: int = 0
     runtime_model_fallbacks_enabled: bool = False
     stream: bool = True
     verbose: bool = False

@@ -2567,6 +2567,7 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
         item for item in remaining_plan_steps
         if not _PLAN_REPORT_RE.search(item.casefold())
         and not _plan_step_is_non_blocking_after_progress(self, item)
+        and not _plan_step_is_unreachable_by_any_action(item)
     ]
     verify_only_complete = (
         self._state.verify_only_goal
@@ -2915,6 +2916,30 @@ def _plan_step_resolved_by_alternative_branch(self, item: str) -> bool:
     if _PLAN_NOT_EXISTS_RE.match(normalized):
         return any(_PLAN_EXISTS_RE.match(step) for step in completed)
     return False
+
+
+def _plan_step_is_unreachable_by_any_action(item: str) -> bool:
+    """Whether no action in the protocol could ever mark *item* complete.
+
+    Plan steps are matched to actions by vocabulary. A planner writing an
+    analysis task produces judgement steps — "Оценить инсталляторы по
+    критериям", "Сопоставить документацию с кодом" — that name no inspect,
+    edit, verify or report verb, so nothing the agent can do will ever complete
+    them. Left blocking, they deadlock the run: completion stays forbidden
+    forever while the model is told the plan is unfinished, so it keeps
+    inspecting and re-reads the same files until the step budget dies.
+
+    Such a step is not skipped work; its deliverable *is* the final answer. It
+    simply cannot be a gate. Every gate that a real action could satisfy is
+    untouched.
+    """
+    normalized = item.casefold().strip()
+    if not normalized:
+        return False
+    return not any(
+        pattern.search(normalized)
+        for pattern in (_PLAN_INSPECT_RE, _PLAN_EDIT_RE, _PLAN_VERIFY_RE, _PLAN_REPORT_RE)
+    )
 
 
 def _plan_step_is_non_blocking_after_progress(self, item: str) -> bool:

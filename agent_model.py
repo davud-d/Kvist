@@ -24,8 +24,13 @@ from openai import (
 
 from agent_context import (
     SECTION_PRIORITIES,
-    estimate_section_tokens,
     split_prompt_into_sections,
+)
+from context_budget import (
+    derived_prompt_budget,
+    env_prompt_budget,
+    learned_budget_for,
+    note_input_overflow,
 )
 from context_utils import trim_history
 from llm_clients import (
@@ -607,10 +612,25 @@ _CONTEXT_USAGE_KINDS = frozenset({"step", "chat"})
 
 
 def context_token_limit(self) -> int:
-    """Tokens one call may occupy — the budget ``_trim_prompt_to_token_limit`` enforces."""
-    if self.config.provider == "freeflow":
-        return 11000
-    return self.config.max_context_tokens
+    """Tokens one call may occupy — the budget ``_trim_prompt_to_token_limit`` enforces.
+
+    Derived from the *active* model's documented window, so escalating
+    fast → smart mid-run re-resolves it. ``AGENT_MAX_CONTEXT_TOKENS`` and an
+    explicit ``config.max_context_tokens`` are the two ways to override it.
+    """
+    active_model = self._state.selected_action_model or self.config.fast_model
+    budget = (
+        env_prompt_budget()
+        or self.config.max_context_tokens
+        or derived_prompt_budget(self.config.provider, active_model)
+    )
+    # A rejection the provider actually returned outranks every guess, an
+    # explicit override included — otherwise the override would make the retry
+    # resend exactly the prompt that was just refused.
+    learned = learned_budget_for(active_model)
+    if learned is None:
+        return budget
+    return min(budget, learned)
 
 
 def _emit_usage(
@@ -780,6 +800,30 @@ def call_model(
                     error=str(error),
                 )
                 last_error = error
+                if is_context_overflow_error(error):
+                    shrunk = _shrink_prompt_after_overflow(
+                        self,
+                        model=current_model,
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        attempted_tokens=_input_tokens,
+                    )
+                    # An overflow is deterministic, so a retry is worth paying
+                    # for only on a prompt that actually got smaller. It may not
+                    # have: the system prompt is never trimmed, and a learned
+                    # cap is keyed to the model that was refused, which is not
+                    # always the one whose budget the trimmer consults.
+                    if len(shrunk) >= len(trimmed_prompt):
+                        break
+                    trimmed_prompt = shrunk
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": trimmed_prompt},
+                    ]
+                    _prompt_tokens = self._count_tokens(trimmed_prompt)
+                    _input_tokens = _system_tokens + _prompt_tokens
+                    _prompt_chars = len(system_prompt) + len(trimmed_prompt)
+                    continue
                 if not _should_retry_model_error(error):
                     break
                 if attempt < self.config.max_retries:
@@ -1098,7 +1142,7 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
                 continue
             # Keep ~30% of the original token budget for this section
             target_tok = max(60, int(section_tokens[i] * 0.30))
-            truncated = _truncate_section_text(text, target_tok)
+            truncated = _truncate_section_text(text, target_tok, self._count_tokens)
             sections[i] = (header, truncated, priority)
             new_tok = self._count_tokens(truncated)
             total_user_tokens = total_user_tokens - section_tokens[i] + new_tok
@@ -1114,7 +1158,7 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
             if text is None:
                 continue
             target_tok = max(100, int(section_tokens[i] * 0.50))
-            truncated = _truncate_section_text(text, target_tok)
+            truncated = _truncate_section_text(text, target_tok, self._count_tokens)
             sections[i] = (header, truncated, priority)
             new_tok = self._count_tokens(truncated)
             total_user_tokens = total_user_tokens - section_tokens[i] + new_tok
@@ -1130,7 +1174,7 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
             if text is None:
                 continue
             target_tok = max(40, int(section_tokens[i] * 0.15))
-            truncated = _truncate_section_text(text, target_tok)
+            truncated = _truncate_section_text(text, target_tok, self._count_tokens)
             sections[i] = (header, truncated, priority)
             new_tok = self._count_tokens(truncated)
             total_user_tokens = total_user_tokens - section_tokens[i] + new_tok
@@ -1145,7 +1189,7 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
             if text is None or section_tokens[i] <= 0:
                 continue
             target_tok = max(50, int(section_tokens[i] * ratio * 0.90))
-            truncated = _truncate_section_text(text, target_tok)
+            truncated = _truncate_section_text(text, target_tok, self._count_tokens)
             sections[i] = (header, truncated, priority)
             section_tokens[i] = self._count_tokens(truncated)
 
@@ -1154,6 +1198,12 @@ def trim_prompt_to_token_limit(self, system_prompt: str, user_prompt: str) -> st
         trimmed = user_prompt[:max(400, available * 4)]
 
     trimmed += "\n\n[CONTEXT TRIMMED BY PRIORITY]"
+
+    # Priority-0 sections are never trimmed and section targets are per-section,
+    # so the tiers alone cannot promise the total fits. A request over the real
+    # limit is refused outright, so a degraded prompt beats a hard 400.
+    if self._count_tokens(trimmed) > available:
+        trimmed = _truncate_section_text(trimmed, available, self._count_tokens)
 
     kept_count = sum(1 for t in section_tokens if t > 0)
     self._ui.debug_print(
@@ -1168,16 +1218,18 @@ def trim_chat_messages_to_token_limit(
     self,
     messages: list[ChatCompletionMessageParam],
 ) -> list[ChatCompletionMessageParam]:
-    """Keep FreeFlow chat requests below the backend's hard input limit.
+    """Keep a chat request inside the active model's prompt budget.
+
+    This used to run for FreeFlow only, so on every other provider the chat
+    history was bounded by message *count* alone — five turns, however large.
+    The budget is now the same per-model one the action loop uses, so a long
+    conversation is cut when it actually gets long.
 
     Every retained/truncated message is rebuilt with ``{**message, ...}``, so
     sibling keys such as ``reasoning_content`` survive — a reasoning provider
     that ever reaches this path must still get that field back verbatim.
     """
-    if self.config.provider != FREEFLOW_PROVIDER:
-        return messages
-
-    max_tokens = 11000
+    max_tokens = context_token_limit(self)
     normalized = [
         message for message in messages
         if isinstance(message, dict) and isinstance(message.get("content"), str)
@@ -1231,54 +1283,49 @@ def trim_chat_messages_to_token_limit(
 
     trimmed = system + list(reversed(kept_reversed))
     self._ui.debug_print(
-        f"Chat history trimmed for FreeFlow: {total_tokens} -> "
+        f"Chat history trimmed: {total_tokens} -> "
         f"{sum(self._count_tokens(message['content']) for message in trimmed)} tokens "
         f"(limit {max_tokens})"
     )
     return trimmed
 
 
-def _truncate_section_text(text: str, target_tokens: int, chars_per_token: int = 4) -> str:
-    """Truncate *text* from the end so it fits within ~*target_tokens*.
+_TRUNCATION_MARKER = "\n[... truncated]"
 
-    The header line (everything up to the first newline) is always preserved.
-    Subsequent lines are kept until the estimated token budget is exhausted,
-    then a truncation marker is appended.
+
+def _truncate_section_text(text: str, target_tokens: int, count_tokens) -> str:
+    """Truncate *text* from the end so it really fits within *target_tokens*.
+
+    Measured with the caller's tokenizer rather than a chars-per-token guess.
+    The old fixed ratio of 4 assumed prose; source code runs closer to two
+    characters per token, so a code-heavy section was left several times over
+    its target — and source code is most of what Kvist puts in a prompt.
+
+    Keeping a prefix keeps the section header, which is always the first line.
     """
-    if not text:
+    if not text or target_tokens <= 0:
+        return ""
+    if count_tokens(text) <= target_tokens:
         return text
 
-    target_chars = target_tokens * chars_per_token
+    budget = target_tokens - count_tokens(_TRUNCATION_MARKER)
+    if budget <= 0:
+        return ""
 
-    # If the token target would allow more chars than we actually have,
-    # force a meaningful reduction (at least 10 %, at most keep 2/3).
-    if target_chars >= len(text):
-        target_chars = max(len(text) // 10, len(text) * 2 // 3)
+    low, high = 0, len(text)
+    while low < high:
+        kept = (low + high + 1) // 2
+        if count_tokens(text[:kept]) <= budget:
+            low = kept
+        else:
+            high = kept - 1
 
-    if len(text) <= target_chars:
-        return text
+    # Prefer a line boundary, but never at the cost of the header line.
+    boundary = text.rfind("\n", 0, low)
+    if boundary > text.find("\n"):
+        low = boundary
 
-    lines = text.split("\n")
-    # Always keep the header (first line).
-    if len(lines) <= 1:
-        return text[:target_chars] + "\n[... truncated]"
-
-    header = lines[0]
-    body_lines = lines[1:]
-
-    result_lines = [header]
-    used = len(header)
-
-    for line in body_lines:
-        if used + len(line) + 1 > target_chars:
-            remaining = len(body_lines) - body_lines.index(line)
-            if remaining > 0:
-                result_lines.append(f"[... {remaining} more lines truncated]")
-            break
-        result_lines.append(line)
-        used += len(line) + 1
-
-    return "\n".join(result_lines)
+    return text[:low] + _TRUNCATION_MARKER
 
 
 def prefer_smart_model(self) -> bool:
@@ -1306,6 +1353,59 @@ def _supports_plain_json_fallback(error: Exception) -> bool:
         "extra inputs are not permitted",
     )
     return any(marker in message for marker in markers)
+
+
+# A prompt the provider refused as too large. Kvist sizes models from a static
+# table plus name rules (context_budget.py) while the catalog itself is
+# discovered live, so this is the signal that sizes a model Kvist guessed wrong.
+_CONTEXT_OVERFLOW_MARKERS = (
+    "context_length_exceeded",
+    "maximum context length",
+    "input tokens exceed",
+    "prompt is too long",
+    "reduce the length of the messages",
+    "exceeds the context window",
+    "context window exceeded",
+)
+
+# A rate limit is also "about tokens" and is phrased alarmingly close to an
+# overflow, but it is transient and the cure is the opposite one: wait, do not
+# shrink. Mistaking it for an overflow both cripples the model's budget for the
+# rest of the session and skips the backoff sleep, hammering the provider.
+_RATE_LIMIT_MARKERS = (
+    "rate limit",
+    "rate_limit",
+    "too many requests",
+    "tokens per min",
+    "quota",
+    "retry after",
+    "try again in",
+)
+
+
+def is_context_overflow_error(error: Exception) -> bool:
+    """Whether the provider rejected the request for prompt size alone."""
+    message = str(error).casefold()
+    if any(marker in message for marker in _RATE_LIMIT_MARKERS):
+        return False
+    return any(marker in message for marker in _CONTEXT_OVERFLOW_MARKERS)
+
+
+def _shrink_prompt_after_overflow(
+    self,
+    *,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    attempted_tokens: int,
+) -> str:
+    """Learn the model's real ceiling from its rejection and re-trim to it."""
+    budget = note_input_overflow(model, attempted_tokens)
+    self._ui.print_error(
+        f"{model}: the provider refused a prompt of ~{attempted_tokens} tokens. "
+        f"Retrying within {budget}; set AGENT_MAX_CONTEXT_TOKENS to pin a budget."
+    )
+    return self._trim_prompt_to_token_limit(system_prompt, user_prompt)
 
 
 def _should_retry_model_error(error: Exception) -> bool:

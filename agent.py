@@ -152,12 +152,16 @@ class ChatRequestCancelled(Exception):
 
 
 # How much read/searched content a run contributes to session history, so a
-# later turn in a different role can cite it instead of re-reading. Kept small:
-# session history is persisted and re-injected into every subsequent prompt.
-_SESSION_READ_CONTENT_CHARS = 1200
-_SESSION_MULTI_READ_CONTENT_CHARS = 600
-_SESSION_MULTI_READ_MAX_FILES = 5
-_SESSION_MAX_HARVESTED_OUTPUTS = 8
+# later turn in a different role can cite it instead of re-reading. At 1200/600
+# chars a chat follow-up was handed a fraction of the file the previous run had
+# read and truthfully reported it only had part of it. Session history is
+# persisted and re-injected, so the ceiling stays finite — but it is now large
+# enough to carry a real source file, not an excerpt.
+_SESSION_READ_CONTENT_CHARS = 40000
+_SESSION_MULTI_READ_CONTENT_CHARS = 20000
+_SESSION_MULTI_READ_MAX_FILES = 10
+_SESSION_MAX_HARVESTED_OUTPUTS = 12
+_SESSION_SHELL_OUTPUT_CHARS = 4000
 
 # Preamble that hands harvested session output to a later chat turn. It states
 # the content is available (so the role uses it) but must NOT forbid admitting
@@ -239,7 +243,7 @@ class LocalAgent:
             if action_type == "run_shell":
                 stdout = data.get("stdout", "")
                 if stdout:
-                    outputs.append(stdout[:300])
+                    outputs.append(stdout[:_SESSION_SHELL_OUTPUT_CHARS])
             elif action_type == "read_file":
                 content = data.get("content", "")
                 if content:
@@ -830,8 +834,10 @@ class LocalAgent:
         # get baked permanently into every future turn's context.
         self._chat_history.append({"role": "user", "content": user_goal})
 
-        # Trim history to keep only last 10 messages + system prompt
-        self._chat_history = trim_history(self._chat_history, max_recent=10)
+        # Coarse turn cap so a session document cannot grow without bound; the
+        # real limit is the token budget applied right after, which is what
+        # decides how much of a long conversation actually survives.
+        self._chat_history = trim_history(self._chat_history, max_recent=40)
         self._chat_history = self._trim_chat_messages_to_token_limit(self._chat_history)
 
         # Wire history sent to the model decorates only the current turn with

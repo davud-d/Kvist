@@ -36,14 +36,18 @@ def test_provider_and_model_normalization():
     assert llm_clients.normalize_model_name("freeflow", "gemini 3.1 pro") == "gemini-3.1-pro-preview"
     assert llm_clients.infer_freeflow_backend("qwen-3-32b") == "groq"
     assert llm_clients.is_model_supported_by_provider("freeflow", "not-a-model") is False
+    # A retired id is not "deprecated": it is aliased to a live replacement, so
+    # a saved config keeps working instead of warning about a model the user
+    # never chose.
     assert llm_clients.is_model_deprecated("freeflow", "mixtral-8x7b-32768") is False
+    assert llm_clients.normalize_model_name("freeflow", "mixtral-8x7b-32768") == "openai/gpt-oss-120b"
 
 
 def test_resolve_models_for_provider_uses_env_and_warns(monkeypatch):
     monkeypatch.setenv("AGENT_FAST_MODEL", "bad-model")
     models, warnings = llm_clients.resolve_models_for_provider("freeflow", {})
 
-    assert models["fast"] == "gemini-3.5-flash"
+    assert models["fast"] == "gemini-3.8-flash"
     assert warnings
 
 
@@ -211,8 +215,8 @@ def test_openrouter_model_options():
     # OpenRouter returns predefined model options (unlike OmniRoute)
     options = llm_clients.get_model_options("openrouter")
     assert len(options) > 0
-    assert any(item["value"] == "anthropic/claude-sonnet-4-6" for item in options)
-    assert any(item["value"] == "openai/gpt-5.4-mini" for item in options)
+    assert any(item["value"] == "anthropic/claude-sonnet-5" for item in options)
+    assert any(item["value"] == "openai/gpt-5.6-luna" for item in options)
     # Verify all options have required keys
     for item in options:
         assert "value" in item
@@ -443,8 +447,8 @@ def test_anthropic_model_options():
 def test_anthropic_model_defaults():
     models, warnings = llm_clients.resolve_models_for_provider("anthropic", {})
     assert models["fast"] == "claude-haiku-4-5"
-    assert models["smart"] == "claude-sonnet-4-6"
-    assert models["planner"] == "claude-sonnet-4-6"
+    assert models["smart"] == "claude-sonnet-5"
+    assert models["planner"] == "claude-sonnet-5"
     assert warnings == []
 
 
@@ -485,12 +489,12 @@ def test_deepseek_model_options():
     assert len(options) > 0
     values = [o["value"] for o in options]
     assert "deepseek-v4-pro" in values
-    assert "deepseek-v4-flash" in values
+    assert "deepseek-flash" in values
 
 
 def test_deepseek_model_defaults():
     models, warnings = llm_clients.resolve_models_for_provider("deepseek", {})
-    assert models["fast"] == "deepseek-v4-flash"
+    assert models["fast"] == "deepseek-flash"
     assert models["smart"] == "deepseek-v4-pro"
     assert models["planner"] == "deepseek-v4-pro"
     assert warnings == []
@@ -719,3 +723,50 @@ def test_get_model_options_from_live_catalog_overrides_static():
     # Empty live catalog falls back to the static curated hints.
     fallback = llm_clients.get_model_options("openai", [])
     assert fallback == llm_clients.get_model_options("openai")
+
+
+# ── catalog coherence ───────────────────────────────────────────────────────
+
+def test_no_alias_resolves_to_a_deprecated_or_unlisted_model():
+    """An alias exists so a saved config keeps working. Pointing one at a model
+    that is itself retired turns a silent migration into a dead end — which is
+    exactly what happened when Groq retired the Llama models the mixtral and
+    allam aliases pointed at.
+    """
+    offered = {item["value"] for item in llm_clients.get_model_options("freeflow")}
+    for alias, target in llm_clients._FREEFLOW_MODEL_ALIASES.items():
+        assert not llm_clients.is_model_deprecated("freeflow", target), alias
+        assert target in offered, f"{alias} -> {target} is not selectable"
+
+
+def test_no_provider_offers_a_deprecated_model():
+    for provider in ("freeflow", "openai", "anthropic", "deepseek", "openrouter"):
+        for item in llm_clients.get_model_options(provider):
+            assert not llm_clients.is_model_deprecated(provider, item["value"])
+
+
+def test_every_default_model_is_offered_by_its_provider():
+    """A default the picker does not list is a default nobody can get back to."""
+    for provider in ("openai", "anthropic", "deepseek", "freeflow"):
+        offered = {item["value"] for item in llm_clients.get_model_options(provider)}
+        models, _warnings = llm_clients.resolve_models_for_provider(provider, {})
+        for role, model in models.items():
+            assert model in offered, f"{provider}/{role}={model}"
+
+
+def test_fallback_chains_start_at_an_offered_model():
+    """The head of a chain is the default path and must be selectable.
+
+    The tail deliberately may not be: a chain exists for the case where the
+    current generation is unavailable to a key, and reaching an older model the
+    picker no longer advertises is the whole point.
+    """
+    offered = {item["value"] for item in llm_clients.get_model_options("openai")}
+    for role, chain in llm_clients._OPENAI_ROLE_FALLBACKS.items():
+        assert chain[0] in offered, role
+    assert llm_clients._OPENAI_GENERIC_FALLBACKS[0] in offered
+
+    freeflow = {item["value"] for item in llm_clients.get_model_options("freeflow")}
+    for model in llm_clients._FREEFLOW_GENERIC_FALLBACKS:
+        assert model in freeflow, model
+        assert not llm_clients.is_model_deprecated("freeflow", model), model

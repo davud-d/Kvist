@@ -51,27 +51,28 @@ MODEL_ROLES = ("fast", "smart", "planner")
 # Default models per provider.
 _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
     OPENAI_PROVIDER: {
-        # Use the latest stable GPT-5.4 mini across roles for better quality and lower cost.
-        # See OpenAI chat completions model list for available GPT-5.4 variants.
-        "fast": "gpt-5.4-mini",
-        "smart": "gpt-5.4-mini",
-        "planner": "gpt-5.4-mini",
+        # GPT-5.6 Luna across roles: the cost-optimized tier of the current
+        # generation. Cheaper than the GPT-5.4 mini it replaces ($0.20/$1.20
+        # against $0.75/$4.50) and on the 1.05M window instead of 400k.
+        "fast": "gpt-5.6-luna",
+        "smart": "gpt-5.6-luna",
+        "planner": "gpt-5.6-luna",
     },
     FREEFLOW_PROVIDER: {
-        # Default all roles to Gemini 3.5 Flash - Google's newest Flash model with long context.
-        "fast": "gemini-3.5-flash",
-        "smart": "gemini-3.5-flash",
-        "planner": "gemini-3.5-flash",
+        # Default all roles to Gemini 3.8 Flash - Google's newest stable Flash.
+        "fast": "gemini-3.8-flash",
+        "smart": "gemini-3.8-flash",
+        "planner": "gemini-3.8-flash",
     },
     ANTHROPIC_PROVIDER: {
         # Claude models — fast tier uses Haiku, smart/planner use Sonnet.
         "fast": "claude-haiku-4-5",
-        "smart": "claude-sonnet-4-6",
-        "planner": "claude-sonnet-4-6",
+        "smart": "claude-sonnet-5",
+        "planner": "claude-sonnet-5",
     },
     DEEPSEEK_PROVIDER: {
         # DeepSeek models — fast tier uses Flash, smart/planner use Pro.
-        "fast": "deepseek-v4-flash",
+        "fast": "deepseek-flash",
         "smart": "deepseek-v4-pro",
         "planner": "deepseek-v4-pro",
     },
@@ -87,102 +88,141 @@ _MODEL_ENV_KEYS = {
 # Model options presented to the user when selecting models.
 _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
     OPENAI_PROVIDER: [
-        # Updated OpenAI models: prefer GPT-5.4 variants according to the official API model list.
+        # Current OpenAI catalog (developers.openai.com/api/docs/models).
+        # The GPT-5.6 generation replaced the full/mini/nano split with named
+        # tiers; all four below share a 1.05M window and 128k max output.
         {
-            "value": "gpt-5.4-nano",
-            "label": "GPT-5.4 Nano",
-            "description": "The fastest and lightest GPT-5.4 variant",
+            "value": "gpt-5.6-luna",
+            "label": "GPT-5.6 Luna",
+            "description": "Cost-optimized tier, 1M context — the default",
         },
         {
-            "value": "gpt-5.4-mini",
-            "label": "GPT-5.4 Mini",
-            "description": "Fast GPT-5.4 for everyday tasks",
+            "value": "gpt-5.6-terra",
+            "label": "GPT-5.6 Terra",
+            "description": "Mid tier: stronger reasoning at moderate cost",
+        },
+        {
+            "value": "gpt-5.6-sol",
+            "label": "GPT-5.6 Sol",
+            "description": "Flagship GPT-5.6 for complex work",
+        },
+        {
+            "value": "gpt-6-astra",
+            "label": "GPT-6 Astra",
+            "description": "Most capable OpenAI model; priced accordingly",
         },
         {
             "value": "gpt-5.4",
-            "label": "GPT-5.4",
-            "description": "Current powerful OpenAI model for complex tasks",
+            "label": "GPT-5.4 (legacy)",
+            "description": "Previous flagship; kept as a fallback",
         },
         {
-            "value": "gpt-5-mini",
-            "label": "GPT-5 Mini (legacy)",
-            "description": "Previous GPT-5 model; used as fallback",
-        },
-        {
-            "value": "gpt-5-nano",
-            "label": "GPT-5 Nano (legacy)",
-            "description": "Legacy fast GPT-5 variant; used as fallback",
+            "value": "gpt-5.4-mini",
+            "label": "GPT-5.4 Mini (legacy)",
+            "description": "Previous fast tier, 400k context; used as fallback",
         },
     ],
     FREEFLOW_PROVIDER: [
-        # FreeFlow/Groq/Gemini model options updated from official provider docs.
+        # Gemini (ai.google.dev/gemini-api/docs/models) + Groq
+        # (console.groq.com/docs/models).
+        {
+            "value": "gemini-3.8-flash",
+            "label": "Gemini 3.8 Flash",
+            "description": "Newest stable Flash, 1M context — the default",
+        },
+        {
+            "value": "gemini-3.7-flash",
+            "label": "Gemini 3.7 Flash",
+            "description": "Agentic workhorse of the Gemini 3 family",
+        },
         {
             "value": "gemini-3.5-flash",
-            "label": "Gemini 3.5 Flash",
-            "description": "New Google Flash model with 1M context",
+            "label": "Gemini 3.5 Flash (legacy)",
+            "description": "Baseline speed, still stable",
         },
         {
             "value": "gemini-3.1-pro-preview",
             "label": "Gemini 3.1 Pro Preview",
-            "description": "Complex tasks: advanced reasoning",
+            "description": "Preview Pro tier: advanced reasoning",
         },
         {
-            "value": "gemini-3.1-flash-lite",
-            "label": "Gemini 3.1 Flash Lite",
-            "description": "Lightweight and cost-effective Flash version",
+            "value": "gemini-2.5-pro",
+            "label": "Gemini 2.5 Pro",
+            "description": "Deep reasoning for complex tasks",
         },
         {
-            "value": "gemini-3-flash-preview",
-            "label": "Gemini 3 Flash Preview",
-            "description": "Previous Flash preview version",
-        },
-        {
-            "value": "llama-3.3-70b-versatile",
-            "label": "Llama 3.3 70B Versatile",
-            "description": "Deep versatile Groq-hosted Meta model",
-        },
-        {
-            "value": "llama-3.1-8b-instant",
-            "label": "Llama 3.1 8B Instant",
-            "description": "Fast Groq-hosted variant with low latency",
+            "value": "gemini-2.5-flash",
+            "label": "Gemini 2.5 Flash",
+            "description": "Low-latency, high-volume price-performance",
         },
         {
             "value": "openai/gpt-oss-120b",
             "label": "GPT-OSS 120B",
-            "description": "Open source OpenAI model with large context",
+            "description": "Open source OpenAI model on Groq, 131k context",
         },
         {
-            "value": "qwen/qwen3-32b",
-            "label": "Qwen 3 32B",
-            "description": "Groq-supported Qwen 3 model",
+            "value": "openai/gpt-oss-20b",
+            "label": "GPT-OSS 20B",
+            "description": "Smallest GPT-OSS on Groq; fastest to first token",
         },
         {
-            "value": "deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash",
-            "description": "New fast DeepSeek variant; successor to DeepSeek Chat",
+            "value": "qwen/qwen3.6-27b",
+            "label": "Qwen 3.6 27B",
+            "description": "Current Groq-hosted Qwen, 131k context",
+        },
+        {
+            "value": "moonshotai/kimi-k2-instruct-0905",
+            "label": "Kimi K2",
+            "description": "256k context on Groq",
+        },
+        {
+            "value": "gemini-3-flash-preview",
+            "label": "Gemini 3 Flash Preview",
+            "description": "Earlier Flash preview; kept as an alias target",
         },
         {
             "value": "deepseek-v4-pro",
             "label": "DeepSeek V4 Pro",
-            "description": "Advanced DeepSeek version; replaces DeepSeek Reasoner",
+            "description": "Advanced DeepSeek version via the Groq backend",
+        },
+        {
+            "value": "deepseek-flash",
+            "label": "DeepSeek Flash",
+            "description": "Fast DeepSeek variant via the Groq backend",
         },
     ],
     ANTHROPIC_PROVIDER: [
-        # Anthropic Claude models — official model IDs.
+        # Anthropic Claude models — official model IDs
+        # (platform.claude.com/docs/en/models/overview).
         {
-            "value": "claude-opus-4-8",
-            "label": "Claude Opus 4.8",
-            "description": "Most capable for complex reasoning and coding",
+            "value": "claude-fable-5-1",
+            "label": "Claude Fable 5.1",
+            "description": "Demanding reasoning and long-horizon agentic work",
         },
         {
-            "value": "claude-sonnet-4-6",
-            "label": "Claude Sonnet 4.6",
-            "description": "Balanced performance for everyday tasks",
+            "value": "claude-opus-5",
+            "label": "Claude Opus 5",
+            "description": "Complex agentic coding and enterprise work",
+        },
+        {
+            "value": "claude-sonnet-5",
+            "label": "Claude Sonnet 5",
+            "description": "Best balance of speed and intelligence, 1M context",
         },
         {
             "value": "claude-haiku-4-5",
             "label": "Claude Haiku 4.5",
-            "description": "Fastest Claude for lightweight tasks",
+            "description": "Fastest Claude, 200k context",
+        },
+        {
+            "value": "claude-opus-4-8",
+            "label": "Claude Opus 4.8 (legacy)",
+            "description": "Previous Opus generation; still available",
+        },
+        {
+            "value": "claude-sonnet-4-6",
+            "label": "Claude Sonnet 4.6 (legacy)",
+            "description": "Previous Sonnet generation; still available",
         },
     ],
     DEEPSEEK_PROVIDER: [
@@ -190,50 +230,50 @@ _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
         {
             "value": "deepseek-v4-pro",
             "label": "DeepSeek V4 Pro",
-            "description": "Advanced reasoning and coding tasks",
+            "description": "Advanced reasoning and coding, 1M context",
         },
         {
-            "value": "deepseek-v4-flash",
-            "label": "DeepSeek V4 Flash",
-            "description": "Fast and cost-effective for everyday tasks",
+            "value": "deepseek-flash",
+            "label": "DeepSeek Flash",
+            "description": "Fast and cost-effective, 1M context",
         },
     ],
     OPENROUTER_PROVIDER: [
         # Popular models available through OpenRouter.
         {
-            "value": "anthropic/claude-opus-4-8",
-            "label": "Claude Opus 4.8",
-            "description": "Most capable Claude model for complex reasoning",
+            "value": "anthropic/claude-opus-5",
+            "label": "Claude Opus 5",
+            "description": "Most capable Claude for complex agentic work",
         },
         {
-            "value": "anthropic/claude-sonnet-4-6",
-            "label": "Claude Sonnet 4.6",
-            "description": "Balanced Claude model for everyday tasks",
+            "value": "anthropic/claude-sonnet-5",
+            "label": "Claude Sonnet 5",
+            "description": "Balanced Claude, 1M context",
         },
         {
             "value": "anthropic/claude-haiku-4-5",
             "label": "Claude Haiku 4.5",
-            "description": "Fast and cost-effective Claude model",
+            "description": "Fast and cost-effective Claude",
         },
         {
-            "value": "openai/gpt-5.4-mini",
-            "label": "GPT-5.4 Mini",
-            "description": "Fast GPT-5.4 for everyday tasks via OpenRouter",
+            "value": "openai/gpt-5.6-luna",
+            "label": "GPT-5.6 Luna",
+            "description": "Cost-optimized GPT-5.6 via OpenRouter",
         },
         {
-            "value": "openai/gpt-5.4",
-            "label": "GPT-5.4",
-            "description": "Current powerful OpenAI model via OpenRouter",
+            "value": "openai/gpt-5.6-terra",
+            "label": "GPT-5.6 Terra",
+            "description": "Mid-tier GPT-5.6 via OpenRouter",
         },
         {
-            "value": "google/gemini-3.5-flash",
-            "label": "Gemini 3.5 Flash",
-            "description": "Google Flash model with 1M context via OpenRouter",
+            "value": "openai/gpt-6-astra",
+            "label": "GPT-6 Astra",
+            "description": "Most capable OpenAI model via OpenRouter",
         },
         {
-            "value": "google/gemini-3.5-pro",
-            "label": "Gemini 3.5 Pro",
-            "description": "Google Pro model for complex tasks via OpenRouter",
+            "value": "google/gemini-3.8-flash",
+            "label": "Gemini 3.8 Flash",
+            "description": "Newest Google Flash, 1M context via OpenRouter",
         },
         {
             "value": "deepseek/deepseek-v4-pro",
@@ -241,34 +281,34 @@ _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
             "description": "Advanced DeepSeek model via OpenRouter",
         },
         {
-            "value": "meta-llama/llama-4-maverick",
-            "label": "Llama 4 Maverick",
-            "description": "Meta's latest open model via OpenRouter",
+            "value": "moonshotai/kimi-k2-instruct-0905",
+            "label": "Kimi K2",
+            "description": "256k-context open model via OpenRouter",
         },
     ],
 }
 
 # Fallback chains for each role within OpenAI. Try latest models first; fall back to legacy ones.
 _OPENAI_ROLE_FALLBACKS: dict[str, tuple[str, ...]] = {
-    "fast": ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"),
-    "smart": ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"),
-    "planner": ("gpt-5.4-mini", "gpt-5.4-nano", "gpt-5-mini", "gpt-5-nano"),
+    "fast": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5-mini"),
+    "smart": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5-mini"),
+    "planner": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5-mini"),
 }
 
 # Generic OpenAI fallback chain (used when role-specific fallbacks are unavailable).
 _OPENAI_GENERIC_FALLBACKS: tuple[str, ...] = (
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
     "gpt-5.4-mini",
-    "gpt-5.4-nano",
     "gpt-5-mini",
-    "gpt-5-nano",
 )
 
-# Generic FreeFlow fallback chain. Order matters: try Gemini first, then Llama, then DeepSeek.
+# Generic FreeFlow fallback chain. Order matters: try Gemini first, then Groq.
 _FREEFLOW_GENERIC_FALLBACKS: tuple[str, ...] = (
-    "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
-    "llama-3.3-70b-versatile",
-    "deepseek-v4-flash",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.6-27b",
 )
 
 # Set of models that are no longer supported by FreeFlow providers.
@@ -282,6 +322,10 @@ _DEPRECATED_FREEFLOW_MODELS: set[str] = {
     "deepseek-r1-distill-qwen-32b",
     "qwen-2.5-coder-32b",
     "llama-3.2-3b-preview",
+    # Groq retired the Llama production models in June 2026 in favour of
+    # GPT-OSS and Qwen.
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
 }
 
 # Aliases map common misspellings and legacy names to current model IDs.
@@ -294,18 +338,27 @@ _FREEFLOW_MODEL_ALIASES: dict[str, str] = {
     "gemini 3.1 pro preview": "gemini-3.1-pro-preview",
     "gemini-3.1 pro": "gemini-3.1-pro-preview",
     "gemini-3.1 pro preview": "gemini-3.1-pro-preview",
-    "mixtral-8x7b-32768": "llama-3.3-70b-versatile",
-    "allam-2-7b": "llama-3.3-70b-versatile",
+    "mixtral-8x7b-32768": "openai/gpt-oss-120b",
+    "allam-2-7b": "openai/gpt-oss-120b",
     "deepseek-r1-distill-llama-70b": "openai/gpt-oss-120b",
-    # Map legacy DeepSeek and Qwen aliases to current model IDs.
-    "deepseek chat": "deepseek-v4-flash",
-    "deepseek-chat": "deepseek-v4-flash",
+    # Groq retired both Llama production models in June 2026.
+    "llama-3.3-70b-versatile": "openai/gpt-oss-120b",
+    "llama-3.1-8b-instant": "openai/gpt-oss-20b",
+    # Map legacy DeepSeek and Qwen aliases to current model IDs. DeepSeek still
+    # accepts deepseek-v4-flash but serves it from DeepSeek-V4.1-Flash, which is
+    # what deepseek-flash names directly.
+    "deepseek chat": "deepseek-flash",
+    "deepseek-chat": "deepseek-flash",
+    "deepseek-v4-flash": "deepseek-flash",
+    "deepseek-v4-flash-vision-exp": "deepseek-flash",
     "deepseek reasoner": "deepseek-v4-pro",
     "deepseek-reasoner": "deepseek-v4-pro",
-    "qwen-3-32b": "qwen/qwen3-32b",
-    "qwen 3 32b": "qwen/qwen3-32b",
-    "qwen-2.5 coder 32b": "qwen/qwen3-32b",
+    "qwen-3-32b": "qwen/qwen3.6-27b",
+    "qwen 3 32b": "qwen/qwen3.6-27b",
+    "qwen/qwen3-32b": "qwen/qwen3.6-27b",
+    "qwen-2.5 coder 32b": "qwen/qwen3.6-27b",
     "gpt-oss-120b": "openai/gpt-oss-120b",
+    "gpt-oss-20b": "openai/gpt-oss-20b",
 }
 
 # Prefixes used to determine whether a model is a Groq backend. Namespaced prefixes allow

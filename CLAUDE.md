@@ -132,6 +132,8 @@ configured in-repo.
   the persisted `planning_enabled` preference — runtime-toggled by `/plan`),
   `AGENT_REASONING_EFFORT` (`false|low|medium|high|xhigh|max`; overrides the
   persisted `reasoning_effort` preference — runtime-toggled by `/effort`),
+  `AGENT_MAX_CONTEXT_TOKENS` (overrides the per-model prompt budget derived in
+  `context_budget.py`),
   `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
   `AGENT_SANDBOX_NET` (allow|deny, default deny under bubblewrap),
   `AGENT_CHILD_ENV_ALLOW` (comma-separated safe child variables),
@@ -218,6 +220,19 @@ the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
   tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
   consecutive errors, repeated-action blocking, write-required-on-create-tasks).
 
+**A plan step no action can satisfy must never gate completion.** Plan steps are
+matched to actions by vocabulary (`_PLAN_INSPECT_RE` / `_PLAN_EDIT_RE` /
+`_PLAN_VERIFY_RE` / `_PLAN_REPORT_RE`). A planner given an analysis task writes
+judgement steps — "Оценить … по критериям", "Сопоставить документацию с кодом" —
+that match none of the four, so nothing in the protocol can ever mark them
+complete. While they count as remaining work the run deadlocks: completion stays
+forbidden while the model is told the plan is unfinished, so it keeps inspecting
+and re-reads the same files until the step budget dies. `_plan_step_is_unreachable_by_any_action`
+drops exactly that class from `actionable_remaining_plan_steps`; its deliverable
+is the final answer, not a tool call. The `_plan_step_is_non_blocking_after_progress`
+escape hatch does not cover it — that one needs `files_changed` or
+`verification_evidence`, which a read-only analysis run never has.
+
 ### Step budget (`AGENT_MAX_STEPS`, default 50)
 `run_loop` counts against `RunState.step_budget`, seeded from `config.max_steps`.
 Exhausting it is **not** a silent stop: `_extend_step_budget` asks through the UI's
@@ -242,6 +257,87 @@ carrying the chosen role and its `source`. `reader` is a full role with its own 
 (`prompts/system/reader_prompt.txt`): it inspects and reports, and its writes are
 disabled. `main.py --role` additionally accepts `auto`, which is "let the router decide"
 rather than a fifth role.
+
+### Context budget (`context_budget.py`)
+How much prompt one call may occupy is derived from the **active model's**
+documented limit, not from one flat number — `context_token_limit` resolves it
+per call, so escalating fast → smart mid-run re-resolves it.
+
+**`MODEL_INPUT_LIMITS` holds max *input* tokens, never the advertised context
+window**, because the two differ per vendor and only the input side bounds a
+prompt: OpenAI reserves its 128k max output inside the window, so a 400k-window
+GPT-5 model rejects any prompt over 272k ("Input tokens exceed the configured
+limit"), while Anthropic bounds the input alone — on Claude 4.5+ a request whose
+input plus `max_tokens` overflows is accepted and the *reply* is cut short
+instead. Budgeting a GPT-5 model off its 400k window sends a prompt the API
+refuses outright. Lookup strips any vendor prefix (`anthropic/claude-…`) and
+takes the longest matching prefix; anything unlisted gets `DEFAULT_INPUT_LIMIT`
+(256k).
+
+The budget is `input_limit * 0.85` — Kvist measures with tiktoken, which
+under-counts for the Anthropic and DeepSeek tokenizers, and on vendors that bill
+output from the same window the same margin covers the reply. So a 1M-input
+model gets 850k and a 272k-input one gets 231k. FreeFlow is the exception: its
+11k is a hard per-request input limit on the free Gemini/Groq backends.
+
+**A static table cannot be the whole answer**, because `fetch_available_models`
+discovers model ids live from `/v1/models` on every launch and neither OpenAI
+nor Anthropic report a context size there — an id newer than the table is the
+normal case. Three rules cover it, in this order:
+1. `_is_small_openai_tier` runs **before** the table: a `-mini`/`-nano` id in a
+   modern OpenAI family is the 272k tier. Without this pre-check `gpt-5.5-mini`
+   prefix-matches `gpt-5.5` and inherits four times its real limit.
+2. longest-prefix lookup in `MODEL_INPUT_LIMITS` (vendor prefix stripped).
+3. `_family_fallback` — an unlisted member of a known family inherits that
+   family's current generation (a new `gpt-6-*` gets 872k, a new
+   `claude-opus-*` 1M, a new `claude-*haiku*` 200k) rather than collapsing to
+   `DEFAULT_INPUT_LIMIT`, which would quietly cut the budget of every model
+   released after this file was written.
+
+**A table entry must never shadow a newer generation.** Matching is by prefix,
+so a bare `"gpt-5"` entry also matched `gpt-5.6-luna` and every future
+`gpt-5.x`, sizing a 1M model at 272k and keeping rule 3 from ever running for
+that line — hence the trailing hyphen in `"gpt-5-"`. The asymmetry to keep in
+mind when adding entries: a budget that is too small is silent and permanent,
+while one that is too large is corrected by the first rejection.
+
+A guess that is too *high* is then corrected by the provider rather than being
+fatal: `agent_model.is_context_overflow_error` recognises the rejection,
+`context_budget.note_input_overflow` records a reduced budget for that model id
+(session-local; 60% of what was refused, only ever tightening), and `call_model`
+re-trims and re-sends within the same attempt budget. **A learned rejection
+outranks every override**, `AGENT_MAX_CONTEXT_TOKENS` included — otherwise the
+retry would resend exactly the prompt that was just refused.
+
+Override order is `AGENT_MAX_CONTEXT_TOKENS` → an explicit non-zero
+`config.max_context_tokens` → derived, then clamped by anything learned; the
+config field defaults to 0, meaning "derive".
+
+This budget is what the section-priority trimmer
+(`agent_model.trim_prompt_to_token_limit`) enforces, so it also decides how much
+of a file read survives into the prompt. The three caps upstream of it —
+`executor.max_read_chars`, `prompt_value_char_limit`, `prompt_result_char_limit`
+— exist only to stop one runaway value from filling the window, and
+`prompt_value_char_limit` is never below `max_read_chars`: two independent caps
+on the same content is how a 17k-char file used to reach the model as 1.6k, with
+the model re-reading it a few steps later. For the same reason
+`"Detailed recent action data:"` is a **priority-1** section — every other
+section about a read is a summary of that one, so it is not what gets dropped
+first.
+
+`trim_prompt_to_token_limit` is measured, never estimated: `_truncate_section_text`
+takes the caller's tokenizer and binary-searches the cut, and the function ends
+with a hard cut to the budget. A fixed chars-per-token ratio assumes prose and
+left a code-heavy prompt nearly three times over budget — and source code is
+most of what Kvist puts in a prompt. Priority-0 sections are never trimmed, so
+the tiers alone cannot bound the total; the final cut is what makes the promise
+true.
+
+**Section headers in `agent_context.SECTION_PRIORITIES` must match what
+`build_runtime_prompt` renders, character for character.** A header that does
+not match is not a section at all: its text folds into the section above and is
+trimmed at *that* section's priority. `tests/test_agent_context.py` asserts
+every rendered header is a known key.
 
 ### Model tiers (`agent_model.py`)
 Three roles per provider: **fast**, **smart**, **planner**. A run uses fast by default
@@ -304,6 +400,16 @@ keeps `reasoning_content` in `_PERSISTED_MESSAGE_KEYS`. A sliding window may dro
 whole turn, but must never strip that field from a turn it keeps.
 
 ### Provider abstraction (`llm_clients.py`)
+Model catalogs (`_MODEL_DEFAULTS`, `_MODEL_OPTIONS`, the fallback chains,
+`_DEPRECATED_FREEFLOW_MODELS`, `_FREEFLOW_MODEL_ALIASES`) are offline fallbacks
+for when live discovery fails, and `tests/test_llm_clients.py` enforces their
+coherence: **no alias may resolve to a deprecated or unlisted model** (retiring
+Groq's Llama models broke the `mixtral`/`allam` aliases that pointed at them),
+every default must be offered by its provider, and every fallback chain must
+start at an offered model. `tests/test_context_budget.py` additionally requires
+every shipped model to have an explicit `MODEL_INPUT_LIMITS` entry — the family
+fallback is for ids discovered at launch, not for the catalog Kvist controls.
+
 Six built-in providers (`SUPPORTED_LLM_PROVIDERS`), normalized names `openai` /
 `anthropic` / `deepseek` / `freeflow` / `omniroute` / `openrouter`, plus arbitrary
 user-defined endpoints under a `custom:` name prefix. `openai`, `omniroute`,

@@ -600,3 +600,62 @@ def test_extra_fetch_domain_content_still_marked_untrusted(tmp_path, monkeypatch
 
     assert result.data["untrusted"] is True
     assert result.data["notice"] == UNTRUSTED_CONTENT_NOTICE
+
+
+# ── a read must be bounded before it reaches memory ─────────────────────────
+
+def test_reading_a_huge_file_never_materializes_all_of_it(tmp_path, monkeypatch):
+    """The size limit has to bound the *read*, not judge it afterwards.
+
+    The previous code called read_text() on the whole file and only then
+    compared st_size against the limit, so the limit protected nothing: a
+    multi-gigabyte file in the workspace was read into memory in full first.
+    Banning the unbounded call is the only way to assert that from a test.
+    """
+    workspace = SafeExecutor(tmp_path)
+    workspace.max_read_chars = 1_000
+
+    target = tmp_path / "huge.txt"
+    target.write_text("x" * 500_000, encoding="utf-8")
+
+    def unbounded_read_is_banned(self, *args, **kwargs):
+        raise AssertionError(f"read the whole of {self} into memory")
+
+    monkeypatch.setattr(Path, "read_text", unbounded_read_is_banned)
+
+    content, truncated = workspace._safe_read_text(target)
+
+    assert truncated is True
+    assert len(content) < 2 * workspace.max_read_chars
+
+
+def test_a_truncated_read_reports_the_real_file_size(tmp_path):
+    """A bounded read no longer knows the total length, so the notice must
+    quote something it actually measured rather than the size of its own
+    buffer — otherwise it tells the model a file is 1k when it is 500k."""
+    workspace = SafeExecutor(tmp_path)
+    workspace.max_read_chars = 1_000
+
+    target = tmp_path / "huge.txt"
+    target.write_text("x" * 500_000, encoding="utf-8")
+
+    content, _truncated = workspace._safe_read_text(target)
+
+    assert "500000 bytes" in content
+    assert "1000" in content
+
+
+def test_a_file_just_under_the_cap_is_returned_whole_and_unmarked(tmp_path):
+    """Off-by-one at the boundary is how a complete file acquires a
+    'truncated' marker the model then works around."""
+    workspace = SafeExecutor(tmp_path)
+    workspace.max_read_chars = 1_000
+
+    exact = tmp_path / "exact.txt"
+    exact.write_text("y" * 1_000, encoding="utf-8")
+
+    content, truncated = workspace._safe_read_text(exact)
+
+    assert content == "y" * 1_000
+    assert truncated is False
+    assert "TRUNCATED" not in content

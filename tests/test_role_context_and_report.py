@@ -62,8 +62,11 @@ def test_harvest_run_outputs_captures_search_and_multi_read(agent_factory):
 def test_harvest_marks_truncated_multi_read(agent_factory):
     """More files than the per-step cap must leave an explicit marker naming the
     hidden files — a silent drop would reintroduce BUG-1 in a new form."""
+    from agent import _SESSION_MULTI_READ_MAX_FILES
+
     agent = agent_factory()
-    files = [{"path": f"f{i}.conf", "content": f"content-{i}"} for i in range(7)]
+    total = _SESSION_MULTI_READ_MAX_FILES + 2
+    files = [{"path": f"f{i}.conf", "content": f"content-{i}"} for i in range(total)]
     agent._state.step_logs.append(
         {
             "step": 1,
@@ -76,7 +79,7 @@ def test_harvest_marks_truncated_multi_read(agent_factory):
     joined = "\n".join(agent._harvest_run_outputs())
 
     assert "more file(s)" in joined
-    assert "f6.conf" in joined
+    assert f"f{total - 1}.conf" in joined
 
 
 def test_chat_history_preamble_allows_admitting_absence():
