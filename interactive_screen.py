@@ -1178,22 +1178,41 @@ class InteractiveScreen:
             current_top = self._current_scroll_top_locked()
             self._follow_tail = False
             self._transcript_cursor_line = max(0, current_top - amount)
+            self._pin_transcript_viewport_locked(self._transcript_cursor_line)
         self.invalidate()
 
     def _scroll_down(self, amount: int) -> None:
         with self._state_lock:
             last = self._last_transcript_line_locked()
             current_top = self._current_scroll_top_locked()
-            # Put the virtual cursor past the current bottom so prompt_toolkit
-            # advances the viewport instead of merely keeping the old tail
-            # visible.
             target = current_top + amount
             if target >= last:
                 self._follow_tail = True
                 self._transcript_cursor_line = last
             else:
                 self._transcript_cursor_line = target
+                self._pin_transcript_viewport_locked(target)
         self.invalidate()
+
+    def _pin_transcript_viewport_locked(self, top: int) -> None:
+        """Force the window's scroll position instead of hinting via cursor.
+
+        prompt_toolkit only advances ``Window.vertical_scroll`` when its
+        cursor-follow algorithm decides the cursor would otherwise leave the
+        viewport - it moves the top edge down to the cursor line unconditionally
+        (top scroll offset is 0), but only moves it up once the cursor passes
+        the *bottom* edge. A small downward nudge (one mouse-wheel notch) never
+        reaches that edge, so ``vertical_scroll`` never advances and every
+        following call recomputes the same target from the same stale
+        ``render_info.vertical_scroll`` - the transcript gets stuck a few
+        lines below the point where scrolling down was first tried. Writing
+        the attribute directly makes the next render's clamp agree with our
+        own bookkeeping instead of depending on that visibility side effect,
+        which is exactly what already makes scrolling up work by accident.
+        """
+        window = self._transcript_window
+        if window is not None:
+            window.vertical_scroll = top
 
     def _follow_transcript_tail(self) -> None:
         with self._state_lock:

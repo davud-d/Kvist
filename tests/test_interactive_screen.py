@@ -422,6 +422,37 @@ def test_page_up_steps_by_visible_lines_not_screen_rows(screen_runtime):
     assert before - after <= 10
 
 
+def test_small_scroll_down_steps_do_not_stall(screen_runtime):
+    """Mouse-wheel-sized downward steps must keep advancing, not stick.
+
+    A step smaller than the viewport height never pushes the cursor past the
+    window's bottom edge, so prompt_toolkit's own cursor-follow scroll leaves
+    ``vertical_scroll`` untouched; recomputing the next target from that
+    unmoved value repeats the same target forever. Regression for that stall.
+    """
+    screen = screen_runtime.screen
+    screen._append_output(
+        "".join(f"line {index:04d}\n" for index in range(200)), "stdout"
+    )
+    _wait_until(lambda: "line 0199" in _rendered_text(screen_runtime))
+
+    for _ in range(5):
+        screen._page_up()
+        time.sleep(0.05)
+    top_after_up = _transcript_scroll(screen_runtime)
+
+    seen = {top_after_up}
+    small_step = 3
+    for _ in range(8):
+        screen._scroll_down(small_step)
+        time.sleep(0.05)
+        seen.add(_transcript_scroll(screen_runtime))
+
+    # Every one of the 8 small steps must have moved the viewport; a stalled
+    # implementation collapses most of these into one repeated value.
+    assert len(seen) >= 7
+
+
 def test_transcript_lines_merge_across_entry_boundaries(screen_runtime):
     screen = screen_runtime.screen
     screen.suspend()
