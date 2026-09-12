@@ -255,40 +255,45 @@ class TestDirectChatRuleDoesNotCallLLM:
         assert client.calls == 0, "LLM must NOT be called when direct rule matches"
 
     def test_difference_is_chat(self, monkeypatch):
+        # A single chat-pattern hit ("comparison question") is not enough to
+        # short-circuit on its own (see _DIRECT_CHAT_MIN_MATCHES) — it defers
+        # to the LLM router, which is the one asked here.
         monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
-        client = _make_client(role="coder")
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Чем Python 2 отличается от Python 3?",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
-        assert client.calls == 0
+        assert decision.source == "llm"
+        assert client.calls == 1
 
     def test_what_is_is_chat(self, monkeypatch):
+        # Single "definition question" hit — deferred to the LLM router.
         monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
-        client = _make_client(role="coder")
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "What is Python?",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
-        assert client.calls == 0
+        assert decision.source == "llm"
+        assert client.calls == 1
 
     def test_explain_is_chat(self, monkeypatch):
+        # Single "explanation request" hit — deferred to the LLM router.
         monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
-        client = _make_client(role="coder")
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Explain Docker",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
-        assert client.calls == 0
+        assert decision.source == "llm"
+        assert client.calls == 1
 
 
 class TestDirectDevopsRuleDoesNotCallLLM:
@@ -362,8 +367,9 @@ class TestLLMErrorUsesKeywordFallback:
         assert client.calls == 0
 
     def test_docker_explain_without_direct_match(self, monkeypatch):
-        """A request that has keyword 'docker' but no direct rule match,
-        LLM fails → keyword fallback picks 'devops' from docker keyword."""
+        """A single "tell request" hit ('Расскажи') no longer short-circuits
+        on its own, so this has no direct match; LLM fails → keyword
+        fallback picks 'devops' from the 'docker' keyword."""
         monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
         client = _make_client(should_raise=True, error_msg="router failed")
         decision = route_role_decision_with_llm(
@@ -371,10 +377,8 @@ class TestLLMErrorUsesKeywordFallback:
             client=client,
             model="test-model",
         )
-        # "Расскажи" matches direct chat rule → source is "direct"
-        assert decision.role == "chat"
-        assert decision.source == "direct"
-        assert client.calls == 0
+        assert decision.role == "devops"
+        assert decision.source == "keyword_fallback"
 
     def test_napishi_file_no_direct_match_with_llm_error(self, monkeypatch):
         """A request matching coder keywords but not the precise direct pattern,
@@ -452,41 +456,47 @@ class TestCreateScriptIsCoderNotChat:
 
 
 class TestShowExampleScriptIsChatNotCoder:
-    """Test 8: "Покажи пример скрипта" must be chat."""
+    """Test 8: "Покажи пример скрипта" must be chat (via the LLM router —
+    a single chat-pattern hit no longer short-circuits, see
+    _DIRECT_CHAT_MIN_MATCHES)."""
 
     def test_show_example_script(self):
-        client = _make_client(role="coder")
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Покажи пример Python скрипта очистки Downloads",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
+        assert decision.source == "llm"
+        assert client.calls == 1
 
     def test_dai_code_bez_sozdania(self):
-        client = _make_client(role="coder")
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Дай код скрипта очистки Downloads без создания файла",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
+        assert decision.source == "llm"
+        assert client.calls == 1
 
 
 class TestPythonDifferenceIsChat:
-    """Test 9: "Чем Python 2 отличается..." must be chat."""
+    """Test 9: "Чем Python 2 отличается..." must be chat (via the LLM
+    router — a single "comparison question" hit is not enough on its own)."""
 
     def test_python_difference(self):
-        client = _make_client(role="coder")
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Чем Python 2 отличается от Python 3?",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
+        assert decision.source == "llm"
+        assert client.calls == 1
 
 
 class TestFixFileIsCoder:
@@ -640,9 +650,11 @@ class TestEdgeCases:
         assert d1.role == "coder"
         assert d1.source == "direct"
 
+        # Single "example request" hit — deferred to the LLM router, which
+        # (per the FakeClient's configured "chat" response) agrees.
         d2 = route_role_decision_with_llm("Покажи пример скрипта очистки", client=client, model="m")
         assert d2.role == "chat"
-        assert d2.source == "direct"
+        assert d2.source == "llm"
 
     def test_add_logging_is_coder(self):
         client = _make_client(role="chat")
@@ -732,24 +744,28 @@ class TestAdditionalDirectRules:
         assert decision.source == "direct"
 
     def test_kubernetes_question_is_chat(self):
-        client = _make_client(role="coder")
+        # Single "definition question" hit — deferred to the LLM router.
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Что такое Kubernetes?",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
+        assert decision.source == "llm"
+        assert client.calls == 1
 
     def test_architecture_advice_is_chat(self):
-        client = _make_client(role="coder")
+        # Single "advice request" hit — deferred to the LLM router.
+        client = _make_client(role="chat")
         decision = route_role_decision_with_llm(
             "Как лучше построить архитектуру агента?",
             client=client,
             model="test-model",
         )
         assert decision.role == "chat"
-        assert decision.source == "direct"
+        assert decision.source == "llm"
+        assert client.calls == 1
 
 
 class TestRouteDecisionMetadata:
@@ -844,12 +860,25 @@ class TestMatchDirectRule:
         assert label == "create artifact"
 
     def test_match_direct_rule_chat(self):
+        # Needs two corroborating chat-pattern hits to short-circuit
+        # (see _DIRECT_CHAT_MIN_MATCHES) — a lone "definition question"
+        # hit like "Что такое Docker?" is covered by
+        # test_match_direct_rule_single_chat_hit_defers below.
         from role_router import _match_direct_rule
-        result = _match_direct_rule("Что такое Docker?")
+        result = _match_direct_rule("Объясни, как работает Docker")
         assert result is not None
         role, label, pattern = result
         assert role == "chat"
-        assert label == "definition question"
+        assert "explanation request" in label
+        assert "how-it-works question" in label
+
+    def test_match_direct_rule_single_chat_hit_defers(self):
+        # A single chat-pattern hit is weak evidence on its own (it could
+        # just as well appear inside a diagnostic/investigation request),
+        # so it must defer to the LLM router rather than deciding alone.
+        from role_router import _match_direct_rule
+        assert _match_direct_rule("Что такое Docker?") is None
+        assert _match_direct_rule("Explain Docker") is None
 
     def test_match_direct_rule_none(self):
         from role_router import _match_direct_rule
@@ -870,13 +899,15 @@ class TestEnglishAndRussianParity:
         assert d2.source == "direct"
 
     def test_explain_vs_obyasni(self):
-        client = _make_client(role="coder")
+        # Each is a single chat-pattern hit — both defer to the LLM router
+        # (see _DIRECT_CHAT_MIN_MATCHES), which agrees on "chat" here.
+        client = _make_client(role="chat")
         d1 = route_role_decision_with_llm("Explain Docker", client=client, model="m")
         d2 = route_role_decision_with_llm("Объясни Docker", client=client, model="m")
         assert d1.role == "chat"
         assert d2.role == "chat"
-        assert d1.source == "direct"
-        assert d2.source == "direct"
+        assert d1.source == "llm"
+        assert d2.source == "llm"
 
     def test_deploy_vs_razverni(self):
         client = _make_client(role="chat")

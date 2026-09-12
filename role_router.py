@@ -93,7 +93,19 @@ RouteDecision = RoleRouteResult
 
 
 # ── Direct deterministic rules (before LLM) ──────────────────────
-# Priority: devops → coder → chat (most specific → most general)
+# Priority: reader (no-write marker) → devops → coder → chat (most specific → most general)
+
+# A single chat pattern is a bare filler word ("почему", "привет", "explain",
+# "what is") that says nothing about domain — it fires just as readily inside
+# a genuine "why won't X start, investigate and report" diagnostic request as
+# inside small talk. Enumerating every diagnostic rephrasing as its own regex
+# doesn't scale (any new wording that avoids the exact enumerated verbs slips
+# back into chat). Instead: a lone chat-pattern hit is not enough evidence by
+# itself — require at least two independent chat signals to agree before
+# short-circuiting past the LLM router. One weak signal defers to the LLM
+# router (see prompts/system/router_prompt.txt), which reads the whole
+# sentence and already knows to route inspect-and-report requests to reader.
+_DIRECT_CHAT_MIN_MATCHES = 2
 
 _DIRECT_DEVOPS_PATTERNS: tuple[tuple[str, str], ...] = (
     # Russian: service status / inspection
@@ -141,12 +153,18 @@ _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
 )
 
 _DIRECT_CHAT_PATTERNS: tuple[tuple[str, str], ...] = (
+    # No bare "почему"/"why is" or "привет" here on purpose: a greeting is
+    # zero-content filler that opens messages of every kind, and a bare "why"
+    # is exactly as common in "why won't X start" diagnostics as in trivia
+    # questions — keeping them out of even the multi-match corroboration
+    # pool (see _DIRECT_CHAT_MIN_MATCHES) stops them from combining with
+    # each other to fake a confident match. The LLM router and the keyword
+    # fallback below still classify bare greetings/"why" as chat by default.
     # Russian: questions / explanations / advice
     ("(?:что такое|кто такой|каков[аы]|какой смысл)", "definition question"),
     ("(?:чем|в ч[её]м)\\s.*(?:отличается|разниц[аы])", "comparison question"),
     ("объясни", "explanation request"),
     ("расскажи", "tell request"),
-    ("почему", "why question"),
     ("как работает", "how-it-works question"),
     ("как устроен", "how-it-works question"),
     ("для чего", "purpose question"),
@@ -157,7 +175,6 @@ _DIRECT_CHAT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("покажи пример", "example request"),
     ("дай код.*без создания", "code example only"),
     ("что думаешь", "opinion request"),
-    ("привет", "greeting"),
     ("помоги разобраться", "help understanding"),
     # English: questions / explanations / advice
     ("what is", "definition question"),
@@ -169,7 +186,6 @@ _DIRECT_CHAT_PATTERNS: tuple[tuple[str, str], ...] = (
     ("show.*example", "example request"),
     ("give.*example", "example request"),
     ("how does", "how-it-works question"),
-    ("why is", "why question"),
     ("what are", "definition question"),
     ("compare", "comparison question"),
     ("pros and cons", "comparison question"),
@@ -207,9 +223,17 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
         if re.search(pattern, lowered):
             return ("coder", label, pattern)
 
-    for pattern, label in _DIRECT_CHAT_PATTERNS:
-        if re.search(pattern, lowered):
-            return ("chat", label, pattern)
+    # Chat patterns are individually weak (bare filler words), so a single
+    # hit does not short-circuit — see _DIRECT_CHAT_MIN_MATCHES above.
+    chat_hits = [
+        (label, pattern)
+        for pattern, label in _DIRECT_CHAT_PATTERNS
+        if re.search(pattern, lowered)
+    ]
+    if len(chat_hits) >= _DIRECT_CHAT_MIN_MATCHES:
+        combined_label = "+".join(label for label, _pattern in chat_hits)
+        combined_pattern = "|".join(pattern for _label, pattern in chat_hits)
+        return ("chat", combined_label, combined_pattern)
 
     return None
 

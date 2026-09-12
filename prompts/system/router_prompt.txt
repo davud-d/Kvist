@@ -59,6 +59,10 @@ Choose reader when the request:
 - inspects code/config to answer a question, with no modification requested
 - explicitly forbids changes ("don't modify", "read-only", "ничего не меняй",
   "без изменений", "не трогай", "только прочитай")
+- diagnoses why a concrete thing on THIS machine/project is broken — an app
+  that won't start, a build that fails, a process that crashes — and reports
+  the cause, without applying a fix yet (even if the user's own wording uses
+  "why"/"почему": that word alone does not make it chat — see TIEBREAKERS)
 
 If the user asks to actually apply a change, fix, create, run tests, or build,
 use coder instead — not reader.
@@ -68,6 +72,12 @@ User: "Read my hyprland config and tell me what you'd improve, don't change anyt
 User: "Найди конфиг nginx, прочитай и скажи что улучшить, но ничего не меняй" -> reader
 User: "Look at settings.py and explain what each option does (read-only)" -> reader
 User: "Review main.py and list problems, but do not edit it" -> reader
+User: "Why won't ghostty start on my system? Explain the cause in a report, then wait for my confirmation before fixing it" -> reader
+User: "Почему не запускается ghostty в системе, объясни причину в отчёте, дальше жди подтверждения" -> reader
+User: "My build keeps failing, find out why and tell me" -> reader
+User: "Оцени мои инсталляторы в папке Installer, прочитай документацию и сами инсталляторы" -> reader
+User: "Evaluate my installers in the Installer folder, read the docs and the scripts themselves" -> reader
+User: "Review the auth module and tell me if it's solid" -> reader
 
 devops:
 Use devops only when the request requires deployment, server, infrastructure, or system operations:
@@ -93,7 +103,10 @@ Use chat when the user wants an answer, explanation, advice, comparison, brainst
 Choose chat for:
 - "what is..."
 - "who is..."
-- "why..."
+- "why..." — ONLY a general/conceptual "why" (why a technology is popular, why
+  a design works a certain way); a "why isn't MY app/service/build working"
+  question about a concrete thing on the user's machine is reader/devops, not
+  chat, even though it also uses the word "why" — see TIEBREAKERS
 - "how does ... work?"
 - "how is ... different from ...?"
 - "explain..."
@@ -140,6 +153,18 @@ User: "Explain how Docker works" -> chat
 
 TIEBREAKERS
 
+A "why" question splits on WHAT is being asked about, not on the word itself:
+- a concrete thing on the user's own machine/project (an app, service, build,
+  script, config) that is broken/crashing/won't start/won't connect -> reader
+  (or devops for server/infrastructure/production state) — this needs actual
+  inspection (logs, process state, files), a general-knowledge answer cannot
+  supply the cause
+- a general/abstract "why" with no specific broken thing to inspect (why a
+  language is popular, why a pattern is used, why X is designed that way) -> chat
+A request combining a filler word ("почему"/"why", "привет"/hi, "объясни") with
+naming a concrete failing thing is still an investigation, not small talk —
+route it by the concrete thing, not by the filler word.
+
 If the user asks to read/inspect/analyze files or config and report back WITHOUT changing anything (or explicitly says not to modify) -> reader.
 
 If the user asks to change, create, fix, run, test, build, or work inside the repository -> coder.
@@ -147,6 +172,11 @@ If the user asks to change, create, fix, run, test, build, or work inside the re
 If the user asks to deploy, configure server/infrastructure, Docker runtime, nginx, systemd, CI/CD, SSL, VPS, or production -> devops.
 
 If the user only asks a question and does not ask to touch files, run commands, or change the environment -> chat.
+This means no concrete target is named — a request that names a specific
+file, folder, or project and asks to read/evaluate/review/assess it
+("оцени", "evaluate", "review", "прочитай и скажи") is reader, not chat,
+even when it is phrased as a question or opens with a greeting. A greeting
+at the start of a message never changes the role.
 
 Extremely vague requests without explicit file/code/command/deployment/server action must be classified as chat:
 - "Make it better" -> chat
