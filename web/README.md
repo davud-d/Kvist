@@ -176,22 +176,36 @@ nginx's `add_header` does not inherit into a block that adds headers, so a
 `location` with a `Cache-Control` line and no `include` silently ships no CSP.
 
 ```nginx
+# Port 8443, not 443: on backup-host port 443 belongs to another service and must stay
+# untouched. Cloudflare reaches 8443 through an Origin Rule (below).
 server {
-    listen 443 ssl http2;
+    listen 8443 ssl http2;
     server_name kvist.site;
 
     root /srv/kvist-site;
     index index.html;
 
+    ssl_certificate     /etc/ssl/kvist/origin-cf.pem;
+    ssl_certificate_key /etc/ssl/kvist/origin-cf.key;
+
+    # Only Cloudflare may reach this origin. Keyed on $realip_remote_addr,
+    # never $remote_addr: real_ip rewrites $remote_addr to the visitor's own
+    # address before the access phase runs, so an allow/deny list there tests
+    # the reader instead of the proxy and 403s the entire internet.
+    if ($kvist_from_cloudflare = 0) { return 444; }
+
     gzip on;
-    gzip_types text/html text/css application/javascript application/json
+    gzip_types text/css application/javascript application/json
                image/svg+xml application/xml;
     gzip_min_length 512;
 
     include /srv/kvist-site/security-headers.conf;
 
     # Nothing is content-hashed, so HTML stays fresh and assets revalidate.
-    location ~ ^/(ru/)?(guides/)?$ {
+    # index.html is part of the pattern because `index` redirects the directory
+    # URI to the file internally and the location is matched again on the file —
+    # match only the directory and this Cache-Control never ships.
+    location ~ ^/(ru/)?(guides/)?(index\.html)?$ {
         include /srv/kvist-site/security-headers.conf;
         add_header Cache-Control "public, max-age=0, must-revalidate";
     }
@@ -212,17 +226,34 @@ server {
 }
 ```
 
+`$kvist_from_cloudflare` is a `geo` block in the http context, generated from
+<https://www.cloudflare.com/ips-v4> and `ips-v6`, alongside the `set_real_ip_from`
+list and `real_ip_header CF-Connecting-IP`. A default server on the same ports
+answers `444` to any other Host, so the origin stays quiet under scanning.
+
 Publishing:
 
 ```fish
 cd web
 node build.mjs
 # --delete clears whatever dist/ no longer ships, so re-sync the conf after it.
-rsync -av --delete dist/ user@host:/srv/kvist-site/
-rsync -av deploy/security-headers.conf user@host:/srv/kvist-site/security-headers.conf
+rsync -av --delete dist/ backup-host:/srv/kvist-site/
+rsync -av deploy/security-headers.conf backup-host:/srv/kvist-site/security-headers.conf
+ssh backup-host 'chown -R www-data:www-data /srv/kvist-site && nginx -t && systemctl reload nginx'
 ```
 
-Cloudflare in front needs nothing special. Do not enable its HTML minifier or
+Three things on the Cloudflare side, because the origin is not on 443:
+
+- an **Origin Rule** rewriting the destination port to **8443** (Free plan
+  includes these) — without it Cloudflare dials 443 and lands on another service;
+- **SSL/TLS mode Full (strict)** with a Cloudflare **Origin CA** certificate on
+  the origin. Generate the CSR *on the server* and paste only the CSR into the
+  dashboard, so the private key never leaves the host;
+- **Always Use HTTPS** on. Cloudflare preserves the visitor's scheme to the
+  origin, so an `http://` request would otherwise arrive as plain HTTP on the
+  TLS port and come back `400`.
+
+Beyond that: do not enable Cloudflare's HTML minifier or
 Rocket Loader: the theme decision is an inline script in `<head>` that has to
 run before the first paint, and deferring it brings back the white flash.
 
