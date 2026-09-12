@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Kvist is a local, terminal-based coding agent that operates on one workspace
 directory at a time. It plans a task, then runs an action/feedback loop where an LLM
-emits one JSON action per step (read/write files, run shell, search web, etc.), the
-agent executes it through a sandboxed executor, feeds the result back, and repeats
-until completion. There is also a JetBrains plugin (`jetbrains-plugin/`, separate
+emits one JSON response per step carrying a short batch of actions (read/write files,
+run shell, search web, etc.), the agent executes them through a sandboxed executor,
+feeds the result back, and repeats until completion. There is also a JetBrains plugin (`jetbrains-plugin/`, separate
 Gradle build) that wraps the same Python core.
 
 ## Pushing commits (MANDATORY)
@@ -192,9 +192,10 @@ configured in-repo.
 ## Architecture
 
 ### The action protocol (the contract everything revolves around)
-Each loop step the LLM returns a single JSON object parsed by `parser.py` into an
-`AgentCommand` (`protocol.py`): `thought`, `plan_step` (inspect/plan/edit/verify/done),
-`user_message`, and an `action` with a `type` + `args`. There is deliberately no
+Each model call returns a single JSON object that `parser.parse_agent_commands` expands
+into a list of `AgentCommand`s (`protocol.py`) sharing one `thought`, `plan_step`
+(inspect/plan/edit/verify/done) and `user_message`, each with its own `action`
+(`type` + `args` + an optional short `description`). There is deliberately no
 `progress` field: a self-declared percentage carried no information the runtime did
 not already have, so `agent_runtime.update_progress` derives `RunState.progress` from
 completed plan steps (`_plan_progress`) with `_PLAN_STEP_BANDS` as the floor when
@@ -209,6 +210,23 @@ validation, the executor dispatch, and the role prompts in `prompts/system/` —
 enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
 `report_to_user` are terminal actions handled in `run_loop` (never reach the executor);
 `report_to_user` additionally routes through the chat reporter (`prompts/system/report_prompt.txt`).
+
+**Action batches.** The model sends `"actions": [...]` (1 to `parser.MAX_BATCH_ACTIONS`
+= 8); a bare `"action"` object is still accepted for a model prompted from an older
+schema. **Every action is its own step** — step logs, checkpoints, `pending_action` and
+the step budget stay per action; only the number of model calls drops.
+`agent_runtime._run_action_batch` runs the actions in order through `_run_one_action`
+(the same guards as a single action) and **stops at the first action that is blocked
+or fails**: a later action must never run on the assumption that an earlier one
+worked. `_note_skipped_actions` puts the unexecuted tail into `pending_instruction`, so
+the next prompt says what did not run. The parser allows `final_answer` /
+`report_to_user` only as the last action and `refuse` only alone. `user_message`
+describes the whole batch; each action's `description` feeds the banner's Action row
+(`StepEvent.action_description` for the GUI) — prompts cap it at 16 characters because
+that row holds 17 (`banner.LIVE_METRICS_WIDTH` minus the label). A status message stays on screen at
+least 2.5 s before a newer one replaces it (`terminal_banner._MESSAGE_HOLD_SECONDS`,
+`STATUS_HOLD_MS` in `gui/renderer/app.js`) — a timer on the UI side, never a sleep in
+the agent thread, so the hold costs the run no time.
 
 ### LocalAgent composition pattern (important & non-obvious)
 `agent.py::LocalAgent` is assembled by binding functions from other modules as methods

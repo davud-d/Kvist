@@ -385,3 +385,70 @@ def test_prompt_text_tty_eof_cancels(monkeypatch):
 
     result = ui.prompt_text("Enter model:", "existing")
     assert result is None
+
+
+def test_message_hold_counts_only_a_different_message_shown_recently():
+    assert ui_module._message_hold_remaining("", 0.0, "new", 1.0) == 0.0
+    assert ui_module._message_hold_remaining("old", 10.0, "old", 10.5) == 0.0
+    assert ui_module._message_hold_remaining("old", 10.0, "new", 11.0) == pytest.approx(1.5)
+    assert ui_module._message_hold_remaining("old", 10.0, "new", 13.0) == 0.0
+
+
+class _ManualTimer:
+    created: list["_ManualTimer"] = []
+
+    def __init__(self, interval, callback) -> None:
+        self.interval = interval
+        self.callback = callback
+        self.daemon = False
+        _ManualTimer.created.append(self)
+
+    def start(self) -> None:
+        pass
+
+    def cancel(self) -> None:
+        pass
+
+
+def _rendered_text(panel) -> str:
+    console = Console(record=True, width=100)
+    console.print(panel)
+    return console.export_text()
+
+
+@pytest.fixture
+def held_status_ui(monkeypatch):
+    clock = [100.0]
+    _ManualTimer.created = []
+    monkeypatch.setattr(ui_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(ui_module.threading, "Timer", _ManualTimer)
+    screen = _ScreenRecorder()
+    ui = AgentUI(verbose=False)
+    ui.attach_screen(screen)
+    ui.start_live()
+    ui.update_live(user_message="Creating folders", status="executing action", step=1)
+    clock[0] += 0.5
+    ui.update_live(user_message="Checking the result", status="executing action", step=2)
+    return ui, screen, clock
+
+
+def test_live_status_holds_a_fresh_message_without_blocking(held_status_ui):
+    ui, screen, clock = held_status_ui
+
+    assert "Creating folders" in _rendered_text(screen.statuses[-1])
+    assert len(_ManualTimer.created) == 1
+    assert _ManualTimer.created[0].interval == pytest.approx(2.0)
+
+    clock[0] += 2.0
+    _ManualTimer.created[0].callback()
+
+    assert "Checking the result" in _rendered_text(screen.statuses[-1])
+
+
+def test_stopping_the_run_drops_a_held_message(held_status_ui):
+    ui, screen, _clock = held_status_ui
+
+    ui.stop_live()
+    _ManualTimer.created[0].callback()
+
+    assert screen.statuses[-1] is None

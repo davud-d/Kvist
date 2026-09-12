@@ -1013,7 +1013,7 @@ def test_pending_verification_blocks_final_answer(agent_factory):
 @pytest.mark.offline_smoke
 def test_devops_run_shell_parsed_and_executed(agent_factory):
     """DevOps run_shell: parser accepts command=[\"systemctl\",\"status\",\"nginx\"] and executor runs it."""
-    from parser import parse_agent_command
+    from parser import parse_agent_commands
 
     devops_response = json.dumps({
         "thought": "Проверяю статус systemd сервиса",
@@ -1029,7 +1029,7 @@ def test_devops_run_shell_parsed_and_executed(agent_factory):
         },
     }, ensure_ascii=False)
 
-    command = parse_agent_command(devops_response)
+    (command,) = parse_agent_commands(devops_response)
     assert command.action.type == "run_shell"
     assert isinstance(command.action.args["command"], list)
     assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
@@ -1063,7 +1063,7 @@ def test_devops_run_shell_parsed_and_executed(agent_factory):
 
 def test_devops_run_shell_string_command_rejected(agent_factory):
     """DevOps run_shell: command as string → clear parse error, not generic 'Invalid model response'."""
-    from parser import parse_agent_command, CommandValidationError
+    from parser import parse_agent_commands, CommandValidationError
 
     devops_response_bad = json.dumps({
         "thought": "Проверяю статус systemd сервиса",
@@ -1080,7 +1080,7 @@ def test_devops_run_shell_string_command_rejected(agent_factory):
     }, ensure_ascii=False)
 
     with pytest.raises(CommandValidationError) as exc_info:
-        parse_agent_command(devops_response_bad)
+        parse_agent_commands(devops_response_bad)
 
     error_msg = str(exc_info.value)
     assert "must be a list of strings" in error_msg, (
@@ -1095,7 +1095,7 @@ def test_devops_run_shell_string_command_rejected(agent_factory):
 
 def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
     """Devops run_shell with systemctl status passes terminal allowlist."""
-    from parser import parse_agent_command
+    from parser import parse_agent_commands
     from terminal import TerminalExecutor
 
     devops_response = json.dumps({
@@ -1112,7 +1112,7 @@ def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
         },
     }, ensure_ascii=False)
 
-    command = parse_agent_command(devops_response)
+    (command,) = parse_agent_commands(devops_response)
     assert command.action.type == "run_shell"
     assert isinstance(command.action.args["command"], list)
 
@@ -1163,7 +1163,7 @@ def test_devops_blocked_command_produces_honest_feedback(agent_factory):
 
 def test_devops_status_nginx_no_parse_error(agent_factory):
     """Full cycle: devops 'nginx status' → run_shell parsed → no parse_error."""
-    from parser import parse_agent_command
+    from parser import parse_agent_commands
 
     devops_response = json.dumps({
         "thought": "Проверяю статус systemd сервиса nginx",
@@ -1179,7 +1179,7 @@ def test_devops_status_nginx_no_parse_error(agent_factory):
         },
     }, ensure_ascii=False)
 
-    command = parse_agent_command(devops_response)
+    (command,) = parse_agent_commands(devops_response)
     assert command.action.type == "run_shell"
     assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
     assert all(isinstance(x, str) for x in command.action.args["command"])
@@ -1494,3 +1494,119 @@ def test_a_step_a_real_action_could_satisfy_still_gates_completion(agent_factory
     agent._refresh_completion_requirements()
 
     assert "plan_incomplete" in agent._state.completion_blocker_kinds
+
+
+def _batch_response(actions: list[dict]) -> str:
+    return json.dumps(
+        {
+            "thought": "all inputs are known",
+            "plan_step": "inspect",
+            "user_message": "surveying the workspace",
+            "actions": actions,
+        }
+    )
+
+
+def _list_dir(path: str, description: str = "") -> dict:
+    action = {"type": "list_dir", "args": {"path": path}}
+    if description:
+        action["description"] = description
+    return action
+
+
+def test_run_loop_executes_a_whole_batch_from_one_model_call(agent_factory):
+    agent = agent_factory(max_steps=3)
+    agent._state.plan_info = make_plan()
+    model_calls = []
+    executed = []
+
+    def fake_call_action_model(prompt: str) -> str:
+        model_calls.append(prompt)
+        return _batch_response([_list_dir("a"), _list_dir("b"), _list_dir("c")])
+
+    def fake_execute(command):
+        executed.append(command.action.args["path"])
+        return ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._call_action_model = fake_call_action_model
+    agent.executor.execute = fake_execute
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert len(model_calls) == 1
+    assert executed == ["a", "b", "c"]
+    assert [log["step"] for log in agent._state.step_logs if log.get("status") == "ok"] == [1, 2, 3]
+
+
+def test_run_loop_stops_a_batch_at_the_first_failed_action(agent_factory):
+    agent = agent_factory(max_steps=2)
+    agent._state.plan_info = make_plan()
+    executed = []
+
+    def fake_execute(command):
+        path = command.action.args["path"]
+        executed.append(path)
+        return ExecutionResult(path != "b", "list_dir", {"error": "no such directory"})
+
+    agent._call_action_model = lambda prompt: _batch_response(
+        [_list_dir("a"), _list_dir("b"), _list_dir("c")]
+    )
+    agent.executor.execute = fake_execute
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert executed == ["a", "b"]
+    skipped = [log for log in agent._state.step_logs if log.get("status") == "batch_actions_skipped"]
+    assert skipped == [{"status": "batch_actions_skipped", "skipped": [{"type": "list_dir", "args": {"path": "c"}}]}]
+
+
+def test_run_loop_tells_the_model_which_batched_actions_never_ran(agent_factory):
+    agent = agent_factory(max_steps=2)
+    agent._state.plan_info = make_plan()
+    prompts = []
+    responses = iter(
+        [
+            _batch_response([_list_dir("a"), _list_dir("b"), _list_dir("c")]),
+            _batch_response([_list_dir("d")]),
+        ]
+    )
+
+    def fake_call_action_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    agent._call_action_model = fake_call_action_model
+    agent.executor.execute = lambda command: ExecutionResult(
+        command.action.args["path"] != "a", "list_dir", {"error": "no such directory"}
+    )
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert len(prompts) == 2
+    assert "2 later action(s) were NOT executed" in prompts[1]
+
+
+def test_run_loop_shows_each_action_description_in_the_live_panel(agent_factory):
+    agent = agent_factory(max_steps=2)
+    agent._state.plan_info = make_plan()
+    shown_actions = []
+    agent._ui.set_run_context = lambda **facts: shown_actions.append(facts.get("action"))
+    agent._call_action_model = lambda prompt: _batch_response(
+        [_list_dir("a", "Список a"), _list_dir("b")]
+    )
+    agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert shown_actions == ["generating JSON", "Список a", "list_dir"]
+
+
+def test_run_loop_records_a_batch_user_message_once(agent_factory):
+    agent = agent_factory(max_steps=2)
+    agent._state.plan_info = make_plan()
+    agent._call_action_model = lambda prompt: _batch_response([_list_dir("a"), _list_dir("b")])
+    agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert agent._state.user_messages == ["surveying the workspace"]

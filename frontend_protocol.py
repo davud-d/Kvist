@@ -98,6 +98,7 @@ class StepEvent:
     action_type: str
     action_args: dict
     reasoning_seconds: float = 0.0
+    action_description: str = ""
     type: ClassVar[str] = "step"
 
     def to_dict(self) -> dict:
@@ -110,6 +111,7 @@ class StepEvent:
             "action_type": self.action_type,
             "action_args": self.action_args,
             "reasoning_seconds": self.reasoning_seconds,
+            "action_description": self.action_description,
         }
 
 

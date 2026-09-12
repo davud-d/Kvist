@@ -31,6 +31,9 @@ ActionType = Literal[
 class Action:
     type: ActionType
     args: dict[str, Any]
+    # Short user-facing label for the banner's Action row; the model's
+    # user_message is shared by a whole batch, so it cannot name one action.
+    description: str = ""
 
 
 @dataclass(slots=True)

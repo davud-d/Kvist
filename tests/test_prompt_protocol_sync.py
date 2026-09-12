@@ -5,7 +5,7 @@ import re
 import pytest
 
 from agent_model import _load_role_prompt
-from parser import ALLOWED_ACTIONS, parse_agent_command
+from parser import ALLOWED_ACTIONS, parse_agent_commands
 
 _EXAMPLE_LINE_RE = re.compile(r"^\{\"thought\".*\}$", re.MULTILINE)
 
@@ -45,14 +45,16 @@ def test_devops_prompt_mentions_report_to_user():
 
 @pytest.mark.parametrize("role", ["coder", "devops"])
 def test_prompt_json_examples_pass_parser(role):
-    """Every inline JSON example in role prompts must parse via parse_agent_command."""
+    """Every inline JSON example in role prompts must parse via parse_agent_commands."""
     prompt_text = _load_role_prompt(role)
     examples = _EXAMPLE_LINE_RE.findall(prompt_text)
     assert examples, f"No JSON examples found in {role} prompt"
 
     for example in examples:
-        command = parse_agent_command(example)
-        assert command.action.type in ALLOWED_ACTIONS
+        # Examples teach the batch form; the single-action form is only tolerated.
+        assert '"actions"' in example
+        for command in parse_agent_commands(example):
+            assert command.action.type in ALLOWED_ACTIONS
 
 
 @pytest.mark.parametrize("role", ["coder", "devops"])
@@ -60,3 +62,13 @@ def test_prompt_marks_web_content_untrusted(role):
     """Role prompts must teach that web content is data, not instructions."""
     prompt_text = _load_role_prompt(role)
     assert "UNTRUSTED" in prompt_text
+
+
+@pytest.mark.parametrize("role", ["coder", "devops", "reader"])
+def test_prompt_example_descriptions_fit_the_banner_action_row(role):
+    """The Action row shows 17 characters; a longer description is cut mid-word."""
+    import json
+
+    for example in _EXAMPLE_LINE_RE.findall(_load_role_prompt(role)):
+        for action in json.loads(example)["actions"]:
+            assert len(action.get("description", "")) <= 16, action

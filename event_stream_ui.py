@@ -92,6 +92,7 @@ class EventStreamUI:
                 str(command.action.type),
                 redact_value(command.action.args),
                 reasoning_seconds,
+                redact_text(command.action.description),
             )
         )
 

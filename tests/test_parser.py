@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from parser import CommandValidationError, load_single_json_object, parse_agent_command, validate_action_args
+from parser import CommandValidationError, MAX_BATCH_ACTIONS, load_single_json_object, parse_agent_commands, validate_action_args
 
 
 def valid_payload(action_type: str = "final_answer", args: dict | None = None) -> dict:
@@ -33,7 +33,7 @@ def test_load_single_json_object_rejects_missing_json():
 
 
 def test_parse_agent_command_returns_typed_command():
-    command = parse_agent_command(
+    (command,) = parse_agent_commands(
         '{"thought":"Think","plan_step":"inspect","progress":10,'
         '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}}}'
     )
@@ -44,7 +44,7 @@ def test_parse_agent_command_returns_typed_command():
 
 def test_parse_agent_command_ignores_a_declared_progress():
     """The runtime derives progress; a model still emitting one must not cost a step."""
-    command = parse_agent_command(json.dumps({**valid_payload(), "progress": 101}))
+    (command,) = parse_agent_commands(json.dumps({**valid_payload(), "progress": 101}))
     assert command.action.type == "final_answer"
     assert not hasattr(command, "progress")
 
@@ -62,7 +62,7 @@ def test_parse_agent_command_rejects_invalid_root_schema(payload, error):
     import json
 
     with pytest.raises(CommandValidationError, match=error):
-        parse_agent_command(json.dumps(payload))
+        parse_agent_commands(json.dumps(payload))
 
 
 @pytest.mark.parametrize(
@@ -113,7 +113,7 @@ def test_validate_action_args_rejects_edge_cases(action_type, args, error):
 
 
 def test_parse_agent_command_accepts_optional_step_summary():
-    command = parse_agent_command(
+    (command,) = parse_agent_commands(
         '{"thought":"Think","plan_step":"inspect","progress":10,'
         '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}},'
         '"step_summary":"Read ui.py, found auth bug on line 42"}'
@@ -122,7 +122,7 @@ def test_parse_agent_command_accepts_optional_step_summary():
 
 
 def test_parse_agent_command_accepts_missing_step_summary():
-    command = parse_agent_command(
+    (command,) = parse_agent_commands(
         '{"thought":"Think","plan_step":"inspect","progress":10,'
         '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}}}'
     )
@@ -134,7 +134,7 @@ def test_parse_agent_command_rejects_non_string_step_summary():
 
     payload = {**valid_payload("read_file", {"path": "ui.py"}), "step_summary": 123}
     with pytest.raises(CommandValidationError, match="step_summary"):
-        parse_agent_command(json.dumps(payload))
+        parse_agent_commands(json.dumps(payload))
 
 
 def test_devops_run_shell_accepts_list_command():
@@ -153,7 +153,7 @@ def test_devops_run_shell_accepts_list_command():
         },
     }
     import json
-    command = parse_agent_command(json.dumps(payload))
+    (command,) = parse_agent_commands(json.dumps(payload))
     assert command.action.type == "run_shell"
     assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
     assert isinstance(command.action.args["command"], list)
@@ -177,4 +177,67 @@ def test_devops_run_shell_rejects_string_command_with_clear_error():
     }
     import json
     with pytest.raises(CommandValidationError, match="must be a list of strings"):
-        parse_agent_command(json.dumps(payload))
+        parse_agent_commands(json.dumps(payload))
+
+
+def batch_payload(actions: list[dict]) -> dict:
+    return {
+        "thought": "Both inputs are known",
+        "plan_step": "edit",
+        "user_message": "Creating the files",
+        "actions": actions,
+    }
+
+
+def test_parse_agent_commands_expands_a_batch_in_order_with_shared_fields():
+    commands = parse_agent_commands(
+        json.dumps(
+            batch_payload(
+                [
+                    {"type": "write_file", "args": {"path": "a.txt", "content": "a"}, "description": "Create a.txt"},
+                    {"type": "write_file", "args": {"path": "b.txt", "content": "b"}},
+                ]
+            )
+        )
+    )
+
+    assert [command.action.args["path"] for command in commands] == ["a.txt", "b.txt"]
+    assert [command.action.description for command in commands] == ["Create a.txt", ""]
+    assert {command.user_message for command in commands} == {"Creating the files"}
+
+
+@pytest.mark.parametrize(
+    "payload,error",
+    [
+        (batch_payload([]), "non-empty list"),
+        (batch_payload([{"type": "list_dir", "args": {"path": "."}}] * (MAX_BATCH_ACTIONS + 1)), "at most"),
+        ({**batch_payload([{"type": "list_dir", "args": {"path": "."}}]), "action": {"type": "list_dir", "args": {"path": "."}}}, "not both"),
+        (batch_payload([{"type": "list_dir", "args": {"path": "."}, "description": 3}]), "description"),
+        (batch_payload(["list_dir"]), "must be an object"),
+        (
+            batch_payload([{"type": "final_answer", "args": {"message": "done"}}, {"type": "list_dir", "args": {"path": "."}}]),
+            "only be the last",
+        ),
+        (
+            batch_payload([{"type": "list_dir", "args": {"path": "."}}, {"type": "refuse", "args": {"reason": "no"}}]),
+            "only action",
+        ),
+    ],
+)
+def test_parse_agent_commands_rejects_malformed_batches(payload, error):
+    with pytest.raises(CommandValidationError, match=error):
+        parse_agent_commands(json.dumps(payload))
+
+
+def test_parse_agent_commands_accepts_a_terminal_action_closing_the_batch():
+    commands = parse_agent_commands(
+        json.dumps(
+            batch_payload(
+                [
+                    {"type": "list_dir", "args": {"path": "."}},
+                    {"type": "final_answer", "args": {"message": "done"}},
+                ]
+            )
+        )
+    )
+    assert [command.action.type for command in commands] == ["list_dir", "final_answer"]

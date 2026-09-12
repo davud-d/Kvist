@@ -949,6 +949,24 @@ function saveSettings() {
   return true
 }
 
+// A status message stays up at least this long before a newer one replaces
+// it, so a batch of fast actions does not flash its message past unread.
+const STATUS_HOLD_MS = 2500
+let statusShownAt = 0
+let statusHoldTimer = null
+
+function showStatus(event) {
+  clearTimeout(statusHoldTimer)
+  const text = event.user_message || event.status || "Working…"
+  const show = () => {
+    if (activityText.textContent !== text) statusShownAt = Date.now()
+    setActivity(text, { busy: !event.is_error, progress: event.progress, error: event.is_error })
+  }
+  const wait = activityText.textContent === text ? 0 : statusShownAt + STATUS_HOLD_MS - Date.now()
+  if (wait > 0) statusHoldTimer = setTimeout(show, wait)
+  else show()
+}
+
 function setActivity(text, { busy = false, progress = null, error = false } = {}) {
   activityText.textContent = text
   activityText.style.color = error ? "var(--error)" : ""
@@ -1126,7 +1144,7 @@ function addStep(event) {
   const summary = createElement("summary")
   summary.append(
     createElement("span", "step-action", event.action_type || event.plan_step || "step"),
-    createElement("span", "", event.user_message || `Step ${event.step}`),
+    createElement("span", "", event.action_description || event.user_message || `Step ${event.step}`),
   )
   if (event.reasoning_seconds > 0) {
     summary.append(
@@ -1286,17 +1304,15 @@ function handleEvent(event) {
       setActivity(`Connected · protocol v${event.protocol_version}`, { busy: true, progress: 2 })
       break
     case "live_start":
+      clearTimeout(statusHoldTimer)
       setActivity("Kvist is working…", { busy: true })
       break
     case "live_stop":
+      clearTimeout(statusHoldTimer)
       setActivity("Finishing…", { busy: true })
       break
     case "status":
-      setActivity(event.user_message || event.status || "Working…", {
-        busy: !event.is_error,
-        progress: event.progress,
-        error: event.is_error,
-      })
+      showStatus(event)
       break
     case "plan":
       addPlan(event)

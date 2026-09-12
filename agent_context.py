@@ -231,7 +231,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         language_block = (
             "USER-FACING LANGUAGE:\n"
             "- JSON action keys, action types, and tool schemas are always English.\n"
-            "- final_answer.args.message, report_to_user args, user_message, and plain chat replies must use response_language.\n"
+            "- final_answer.args.message, report_to_user args, user_message, actions[].description, and plain chat replies must use response_language.\n"
             "- final_answer.args.message, report_to_user args, and plain chat replies may use simple Markdown: backticks for file paths/commands, short bullet lists for multi-item reports, fenced code blocks for file contents. Do not over-format trivial answers.\n"
             f"- Current response_language: {response_language}\n"
         )

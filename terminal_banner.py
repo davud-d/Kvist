@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import sys
+import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -52,6 +53,19 @@ def _ignore_reasoning(message: str) -> None:
     _ = message
 
 
+# A status message stays on screen at least this long before a newer one may
+# replace it: a batch of fast actions would otherwise flash its message past
+# before anyone can read it.
+_MESSAGE_HOLD_SECONDS = 2.5
+
+
+def _message_hold_remaining(shown: str, shown_at: float, incoming: str, now: float) -> float:
+    """Seconds ``incoming`` must still wait before it may replace ``shown``."""
+    if not shown or incoming == shown:
+        return 0.0
+    return max(0.0, shown_at + _MESSAGE_HOLD_SECONDS - now)
+
+
 class TerminalBannerUI:
     """Terminal frontend for the agent UI API (``ui.AgentUI`` protocol).
 
@@ -79,6 +93,14 @@ class TerminalBannerUI:
         # transient view concern that must not enter the /resume checkpoint.
         self._live_panel = banner.LivePanelState()
         self._live_run_start = 0.0
+        # The hold never pauses the agent: a newer message waits on a timer
+        # while the run keeps going. Re-entrant because a timer-driven redraw
+        # goes through the same hold as a direct one.
+        self._message_lock = threading.RLock()
+        self._shown_message = ""
+        self._shown_at = 0.0
+        self._held_status: dict[str, Any] | None = None
+        self._release_timer: threading.Timer | None = None
 
     def attach_screen(self, screen: Any | None) -> None:
         """Route transient agent output through a persistent TUI screen.
@@ -171,6 +193,7 @@ class TerminalBannerUI:
         self._publish_live()
 
     def start_live(self) -> None:
+        self._reset_message_hold()
         self._live_panel = banner.LivePanelState(
             running=True, state_label="working"
         )
@@ -204,6 +227,7 @@ class TerminalBannerUI:
         self._live.start()
 
     def stop_live(self) -> None:
+        self._reset_message_hold()
         if self._live_run_start:
             # Keep the finished run's totals on screen instead of snapping the
             # panel back to zero; only a fresh UI shows the not-started state.
@@ -278,15 +302,60 @@ class TerminalBannerUI:
         ):
             return
 
-        panel = self._render_live_panel(
-            user_message=user_message,
-            status=status,
-            step=step,
-            progress=progress,
-            plan_step=plan_step,
-            is_error=is_error,
+        self._show_status(
+            {
+                "user_message": user_message,
+                "status": status,
+                "step": step,
+                "progress": progress,
+                "plan_step": plan_step,
+                "is_error": is_error,
+            }
         )
 
+    def _show_status(self, fields: dict[str, Any]) -> None:
+        with self._message_lock:
+            message = self._hold_message(fields)
+            panel = self._render_live_panel(**{**fields, "user_message": message})
+            self._set_status_panel(panel)
+
+    def _hold_message(self, fields: dict[str, Any]) -> str:
+        """The message to show now; a newer one waits out the hold on a timer."""
+        incoming = fields["user_message"]
+        now = time.monotonic()
+        self._held_status = fields
+        wait = _message_hold_remaining(self._shown_message, self._shown_at, incoming, now)
+        if wait <= 0:
+            if incoming != self._shown_message:
+                self._shown_message = incoming
+                self._shown_at = now
+            return incoming
+        if self._release_timer is None:
+            self._release_timer = threading.Timer(wait, self._release_held_message)
+            self._release_timer.daemon = True
+            self._release_timer.start()
+        return self._shown_message
+
+    def _release_held_message(self) -> None:
+        with self._message_lock:
+            self._release_timer = None
+            fields = self._held_status
+            if fields is None or not self._live_panel.running or is_hitl_active():
+                return
+            if self._screen is None and self._live is None:
+                return
+            self._show_status(fields)
+
+    def _reset_message_hold(self) -> None:
+        with self._message_lock:
+            if self._release_timer is not None:
+                self._release_timer.cancel()
+            self._release_timer = None
+            self._held_status = None
+            self._shown_message = ""
+            self._shown_at = 0.0
+
+    def _set_status_panel(self, panel: Panel) -> None:
         if self._screen is not None:
             if self._perf_logger is not None:
                 render_start = time.monotonic()

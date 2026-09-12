@@ -31,6 +31,10 @@ ALLOWED_ACTIONS = {
 
 ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
 
+MAX_BATCH_ACTIONS = 8
+
+_FINISHING_ACTIONS = {"final_answer", "report_to_user"}
+
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
 
@@ -67,7 +71,7 @@ def load_single_json_object(text: str) -> Any:
     raise CommandValidationError(f"Invalid JSON: {last_error}")
 
 
-def parse_agent_command(text: str) -> AgentCommand:
+def parse_agent_commands(text: str) -> list[AgentCommand]:
     raw = load_single_json_object(text)
 
     if not isinstance(raw, dict):
@@ -75,13 +79,16 @@ def parse_agent_command(text: str) -> AgentCommand:
 
     # "progress" is accepted and discarded: the runtime derives progress from the
     # plan and plan_step, but a model prompted from a cached older schema still
-    # emits the key, and rejecting it would cost a step for nothing.
-    require_only_allowed_keys(raw, {"thought", "plan_step", "progress", "user_message", "action", "step_summary"})
+    # emits the key, and rejecting it would cost a step for nothing. A single
+    # "action" object is the pre-batch form and is accepted for the same reason.
+    require_only_allowed_keys(
+        raw,
+        {"thought", "plan_step", "progress", "user_message", "action", "actions", "step_summary"},
+    )
 
     thought = raw.get("thought")
     plan_step = raw.get("plan_step")
     user_message = raw.get("user_message")
-    action = raw.get("action")
     step_summary = raw.get("step_summary")
 
     if not isinstance(thought, str) or not thought.strip():
@@ -101,11 +108,46 @@ def parse_agent_command(text: str) -> AgentCommand:
     if step_summary is not None and not isinstance(step_summary, str):
         raise CommandValidationError("Field 'step_summary' must be a string")
 
-    if not isinstance(action, dict):
-        raise CommandValidationError("Field 'action' must be an object")
+    actions = [_parse_action(item) for item in _raw_actions(raw)]
+    _validate_batch_order(actions)
 
-    action_type = action.get("type")
-    args = action.get("args")
+    return [
+        AgentCommand(
+            thought=thought.strip(),
+            plan_step=plan_step.strip(),
+            user_message=user_message.strip(),
+            action=action,
+            step_summary=step_summary.strip() if isinstance(step_summary, str) else "",
+        )
+        for action in actions
+    ]
+
+
+def _raw_actions(raw: dict[str, Any]) -> list[Any]:
+    if "action" in raw and "actions" in raw:
+        raise CommandValidationError("Use either 'actions' or 'action', not both")
+    if "action" in raw:
+        return [raw["action"]]
+
+    actions = raw.get("actions")
+    if not isinstance(actions, list) or not actions:
+        raise CommandValidationError("Field 'actions' must be a non-empty list of action objects")
+    # A response cut off by the output-token limit is invalid JSON and loses
+    # every action in it, so a batch is kept short.
+    if len(actions) > MAX_BATCH_ACTIONS:
+        raise CommandValidationError(
+            f"Field 'actions' may hold at most {MAX_BATCH_ACTIONS} actions"
+        )
+    return actions
+
+
+def _parse_action(item: Any) -> Action:
+    if not isinstance(item, dict):
+        raise CommandValidationError("Each action must be an object")
+
+    action_type = item.get("type")
+    args = item.get("args")
+    description = item.get("description", "")
 
     if action_type not in ALLOWED_ACTIONS:
         raise CommandValidationError(f"Invalid action.type: {action_type!r}")
@@ -113,15 +155,25 @@ def parse_agent_command(text: str) -> AgentCommand:
     if not isinstance(args, dict):
         raise CommandValidationError("Field 'action.args' must be an object")
 
-    validate_action_args(str(action_type), args)
+    if not isinstance(description, str):
+        raise CommandValidationError("Field 'action.description' must be a string")
 
-    return AgentCommand(
-        thought=thought.strip(),
-        plan_step=plan_step.strip(),
-        user_message=user_message.strip(),
-        action=Action(type=action_type, args=args),
-        step_summary=step_summary.strip() if isinstance(step_summary, str) else "",
-    )
+    validate_action_args(str(action_type), args)
+    return Action(type=action_type, args=args, description=description.strip())
+
+
+def _validate_batch_order(actions: list[Action]) -> None:
+    # A terminal action reports on work it has not seen finish when anything
+    # follows it, and a refusal must stop the run before any other action runs.
+    if len(actions) == 1:
+        return
+    types = [action.type for action in actions]
+    if "refuse" in types:
+        raise CommandValidationError("'refuse' must be the only action in a response")
+    if any(action_type in _FINISHING_ACTIONS for action_type in types[:-1]):
+        raise CommandValidationError(
+            "final_answer and report_to_user may only be the last action in 'actions'"
+        )
 
 
 def validate_action_args(action_type: str, args: dict[str, Any]) -> None:

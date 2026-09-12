@@ -6,7 +6,7 @@ import re
 import pytest
 
 from agent_model import _load_role_prompt
-from parser import ALLOWED_ACTIONS, parse_agent_command
+from parser import ALLOWED_ACTIONS, parse_agent_commands
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 _EXAMPLE_LINE_RE = re.compile(r'^\{"thought".*\}$', re.MULTILINE)
@@ -51,8 +51,10 @@ def test_reader_prompt_keeps_report_and_untrusted_and_examples():
     examples = _EXAMPLE_LINE_RE.findall(reader)
     assert examples
     for example in examples:
-        command = parse_agent_command(example)
-        assert command.action.type in ALLOWED_ACTIONS
+        # Examples teach the batch form; the single-action form is only tolerated.
+        assert '"actions"' in example
+        for command in parse_agent_commands(example):
+            assert command.action.type in ALLOWED_ACTIONS
 
 
 def test_reader_prompt_stays_within_token_budget():
@@ -74,5 +76,6 @@ def test_reader_prompt_stays_within_token_budget():
         )
     tokens = len(enc.encode(_load_role_prompt("reader")))
     # 1500 → 1600 for section 11 (KVIST.md); → 1900 for the HANDOFF path
-    # (delegate_task to coder/devops). Nothing else may grow into it.
-    assert tokens <= 1900, f"reader prompt is {tokens} tokens (budget 1900)"
+    # (delegate_task to coder/devops); → 2100 for action batches, which changed
+    # the response schema itself. Nothing else may grow into it.
+    assert tokens <= 2100, f"reader prompt is {tokens} tokens (budget 2100)"

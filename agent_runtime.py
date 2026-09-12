@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import itertools
 import json
 import re
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +46,7 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
 
 from agent_state import RunCancelled, RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
-from parser import CommandValidationError, parse_agent_command
+from parser import CommandValidationError, parse_agent_commands
 from protocol import AgentCommand
 from redaction import defang_prompt_boundary_tags, redact_text, redact_value
 from agent_planner import infer_task_kind
@@ -442,6 +442,24 @@ def finalize_run(
     raise RuntimeError(message) from None
 
 
+@dataclass(slots=True, frozen=True)
+class _ActionOutcome:
+    """What running one action means for the rest of its batch and the run.
+
+    ``proceed`` is set only by an action that executed and succeeded: a batch
+    stops at the first action that did not, so a later action never runs on
+    the assumption that an earlier one worked.
+    """
+
+    proceed: bool = False
+    finished: bool = False
+    final_message: str = ""
+    report_rendered: bool = False
+
+
+_BLOCKED = _ActionOutcome()
+
+
 def run_loop(self, user_goal: str, start_step: int) -> str:
     self._ui.start_live()
 
@@ -470,8 +488,9 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.step_budget = max(self._state.step_budget, self.config.max_steps)
     report_rendered = False
     task_completed = False
+    step = start_step
     try:
-        for step in itertools.count(start_step):
+        while True:
             if step > self._state.step_budget and not _extend_step_budget(self):
                 final_message = self._build_limit_reached_message()
                 break
@@ -483,7 +502,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
             prompt = self._build_runtime_prompt(user_goal, step)
             self._current_step = step
-            _note_run_context(self, action="generating command")
+            _note_run_context(self, action="generating JSON")
             loop_pre = time.monotonic()
             try:
                 raw_text = self._call_action_model(prompt)
@@ -527,10 +546,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     step=step,
                     context="model_call_error",
                 )
+                step += 1
                 # Cooldown to avoid burning through all steps on transient API failures.
                 # Skip if the model layer already exhausted its own retries (avoid double-sleep).
-                retries_exhausted = getattr(self, "_retries_exhausted", False)
-                if retries_exhausted:
+                if getattr(self, "_retries_exhausted", False):
                     continue
                 cooldown = self.config.retry_base_delay * (2 ** min(self._state.consecutive_errors, 4))
                 if any(m in error_text.casefold() for m in ("rate limit", "too many requests", "high demand", "503", "timeout")):
@@ -539,7 +558,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 continue
 
             try:
-                command = parse_agent_command(raw_text)
+                commands = parse_agent_commands(raw_text)
             except CommandValidationError as error:
                 self._register_parse_error(
                     step,
@@ -554,400 +573,21 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                     plan_step="format correction",
                     is_error=True,
                 )
+                step += 1
                 continue
 
-            _note_thought(self, command.thought)
-
-            # Safety refusal takes priority over every other guard (language,
-            # repeat-block, report-artifact, read-only, completion-readiness):
-            # an illegal/malicious request must stop immediately, unconditionally,
-            # not queue behind corrective retries that assume the task is legitimate.
-            if command.action.type == "refuse":
-                reason = str(command.action.args["reason"])
-                self._register_safety_refusal(step, reason)
-                final_message = self._build_safety_refusal_message()
-                self._ui.update_live(
-                    user_message=final_message,
-                    status="stopped by safety filters",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step=command.plan_step,
-                    is_error=True,
-                )
+            outcome, step = _run_action_batch(self, user_goal, step, commands)
+            if outcome.finished:
+                final_message = outcome.final_message
+                report_rendered = outcome.report_rendered
                 task_completed = True
                 break
-
-            language_error = self._command_language_error(command)
-            if language_error:
-                self._register_language_error(step, command, language_error)
-                self._ui.update_live(
-                    user_message="Fixing the model response language and retrying the step",
-                    status="fixing response language",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step="language correction",
-                    is_error=True,
-                )
-                continue
-
-            self._record_user_message(command.user_message)
-
-            followup_error = self._required_followup_error(command)
-            if followup_error:
-                blocked_count = self._register_blocked_action(command)
-                # blocked_actions is in-memory only; this breadcrumb rides in
-                # recent_events (persisted + prompted) so a resumed run still
-                # knows its last action was refused.
-                self._push_unique(
-                    self._state.recent_events,
-                    f"Action '{command.action.type}' was blocked; corrective action required.",
-                    self.config.summary_recent_events,
-                )
-                self._state.stagnation_count += 1
-                self._state.pending_instruction = followup_error
-                if blocked_count >= 2:
-                    self._state.pending_instruction = _build_strict_next_action_instruction(
-                        self._state.task_language,
-                        self._state.required_next_actions,
-                        self._state.missing_artifacts,
-                    )
-                self._state.step_logs.append(
-                    {
-                        "step": step,
-                        "status": "blocked_for_corrective_action",
-                        "blocked_count": blocked_count,
-                        "reason": followup_error,
-                        "required_next_actions": self._state.required_next_actions,
-                        "command": {
-                            "thought": command.thought,
-                            "plan_step": command.plan_step,
-                            "user_message": command.user_message,
-                            "action": {
-                                "type": command.action.type,
-                                "args": command.action.args,
-                            },
-                        },
-                    }
-                )
-                self._ui.update_live(
-                    user_message=command.user_message,
-                    status="corrective action required",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step=command.plan_step,
-                    is_error=True,
-                )
-                continue
-
-            if self._is_repeat_blocked(command):
-                if create_goal and not self._state.files_changed:
-                    self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
-                self._ui.update_live(
-                    user_message=command.user_message,
-                    status="looking for another working step",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step=command.plan_step,
-                    is_error=True,
-                )
-                continue
-
-            # Block report-like artifact creation at the UI/report layer only.
-            # Never auto-complete here: the model may try to write task_report.txt
-            # before doing any real work, and that must stay a corrective error.
-            if self._is_report_artifact_blocked(command):
-                self._refresh_completion_requirements(force_enforcement=True)
-                if self._state.completion_ready:
-                    feedback = {
-                        "ok": False,
-                        "action_type": command.action.type,
-                        "result": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
-                    }
-                    live_status = "completion enforced"
-                    live_message = "Task is complete, requiring final_answer"
-                else:
-                    feedback = {
-                        "ok": False,
-                        "action_type": command.action.type,
-                        "result": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
-                    }
-                    live_status = "report artifact blocked"
-                    live_message = "Report artifact blocked; continue the actual task"
-                self._register_feedback(step, command, feedback)
-                self._ui.update_live(
-                    user_message=live_message,
-                    status=live_status,
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step=command.plan_step,
-                    is_error=True,
-                )
-                continue
-
-            # Block write actions for read-only tasks
-            if self._is_read_only_violation(command):
-                feedback = {
-                    "ok": False,
-                    "action_type": command.action.type,
-                    "result": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
-                }
-                self._register_feedback(step, command, feedback)
-                self._ui.update_live(
-                    user_message="Read-only task violation blocked",
-                    status="corrective action required",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step=command.plan_step,
-                    is_error=True,
-                )
-                continue
-
-            self._ui.print_step_header(
-                step, command, getattr(self, "_last_reasoning_seconds", 0.0)
-            )
-
-            if command.action.type == "web_search":
-                web_error = self._prepare_web_search_command(user_goal, command)
-                if web_error:
-                    feedback = self._build_error_feedback("web_search", web_error)
-                    self._register_feedback(step, command, feedback)
-                    self._ui.update_live(
-                        user_message=command.user_message,
-                        status="web search limit reached",
-                        step=step,
-                        progress=self._state.progress,
-                        plan_step=command.plan_step,
-                        is_error=True,
-                    )
-                    continue
-
-            if command.action.type == "fetch_url":
-                fetch_error = self._prepare_fetch_url_command(command)
-                if fetch_error:
-                    feedback = self._build_error_feedback("fetch_url", fetch_error)
-                    self._register_feedback(step, command, feedback)
-                    self._ui.update_live(
-                        user_message=command.user_message,
-                        status="URL read limit reached",
-                        step=step,
-                        progress=self._state.progress,
-                        plan_step=command.plan_step,
-                        is_error=True,
-                    )
-                    continue
-
-            _note_run_context(
-                self,
-                action=command.action.type,
-                files_changed=len(self._state.files_changed),
-                model_tier=self._state.selected_action_role or "fast",
-                **_plan_position(self),
-            )
-            self._ui.update_live(
-                user_message=command.user_message,
-                status="executing action",
-                step=step,
-                progress=self._state.progress,
-                plan_step=command.plan_step,
-            )
-
-            # Completion guard: if task is ready, only allow final_answer
-            if self._state.completion_ready and command.action.type not in ("final_answer", "report_to_user"):
-                # Provide corrective feedback and give model one more chance
-                corrective_feedback = {
-                    "ok": False,
-                    "action_type": command.action.type,
-                    "result": "Task is already verified and complete. You must use final_answer or report_to_user now. No further actions are permitted.",
-                }
-                self._register_feedback(step, command, corrective_feedback)
-                self._ui.update_live(
-                    user_message="Task is complete, requiring final_answer",
-                    status="completion enforced",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step=command.plan_step,
-                    is_error=False,
-                )
-                # If model ignores this twice, force final_answer
-                if self._state.seen_actions.get("completion_ready_violations", 0) >= 1:
-                    final_message = self._build_auto_completion_message()
-                    self._register_final_answer(step, final_message)
-                    task_completed = True
-                    break
-                self._state.seen_actions["completion_ready_violations"] = self._state.seen_actions.get("completion_ready_violations", 0) + 1
-                continue
-
-            if command.action.type == "final_answer":
-                self._refresh_completion_requirements(force_enforcement=True)
-                if self._state.completion_blockers:
-                    error_text = " ".join(self._state.completion_blockers)
-                    self._state.consecutive_errors += 1
-                    self._record_error(error_text)
-                    self._state.step_logs.append(
-                        {
-                            "step": step,
-                            "status": "blocked_final_answer",
-                            "reason": error_text,
-                            "command": {
-                                "thought": command.thought,
-                                "plan_step": command.plan_step,
-                                "user_message": command.user_message,
-                                "action": {
-                                    "type": command.action.type,
-                                    "args": command.action.args,
-                                },
-                            },
-                        }
-                    )
-                    self._ui.update_live(
-                        user_message="Switching to a corrective action instead of stopping too early",
-                        status="final answer blocked",
-                        step=step,
-                        progress=self._state.progress,
-                        plan_step=command.plan_step,
-                        is_error=True,
-                    )
-                    continue
-                final_message = str(command.action.args["message"])
-                if self._state.report_goal and not _is_substantive_answer(final_message):
-                    substance_retries = self._state.seen_actions.get("report_substance_retries", 0)
-                    if substance_retries < 1:
-                        self._state.seen_actions["report_substance_retries"] = substance_retries + 1
-                        self._register_feedback(
-                            step,
-                            command,
-                            {
-                                "ok": False,
-                                "action_type": "final_answer",
-                                "result": _build_report_substance_instruction(self._state.task_language),
-                            },
-                        )
-                        self._set_required_next_actions(
-                            ["final_answer", "report_to_user"],
-                            _build_report_substance_instruction(self._state.task_language),
-                        )
-                        continue
-                    # The model would not answer substantively — report the miss
-                    # honestly instead of surfacing a content-free final answer.
-                    final_message = self._build_report_failure_message()
-                self._register_final_answer(step, final_message)
-                task_completed = True
-                break
-
-            if command.action.type == "report_to_user":
-                self._refresh_completion_requirements(force_enforcement=True)
-                if self._state.completion_blockers:
-                    error_text = " ".join(self._state.completion_blockers)
-                    self._state.consecutive_errors += 1
-                    self._record_error(error_text)
-                    self._state.pending_instruction = (
-                        f"Task is not complete. Blockers: {error_text}. "
-                        "Fix the remaining issues before reporting."
-                    )
-                    self._ui.update_live(
-                        user_message="Report blocked — task not complete",
-                        status="report blocked",
-                        step=step,
-                        progress=self._state.progress,
-                        plan_step=command.plan_step,
-                        is_error=True,
-                    )
-                    continue
-                # Collect context and hand off to chat reporter
-                summary = str(command.action.args.get("summary", ""))
-                tech_result = str(command.action.args.get("result", ""))
-                issues = str(command.action.args.get("issues", ""))
-                context = _build_report_context(self, user_goal, summary, tech_result, issues)
-                report_text = _render_report(self, context)
-                final_message = report_text or tech_result or summary
-                self._register_final_answer(step, final_message)
-                report_rendered = True
-                task_completed = True
-                break
-
-            # Crash-consistent side effects: durably record the pending action
-            # BEFORE it executes so a process death in the action window is
-            # reconciled on resume rather than blindly replayed. File mutations
-            # are reconcilable from content digests; run_shell/delegate_task are
-            # not (their effect cannot be proven after a crash) and resume treats
-            # them as ambiguous. The post-step checkpoint clears the record.
-            pending_action = _build_pending_action(self, command, step)
-            if pending_action is not None:
-                # Bind the executor's journal transaction to the SAME identity
-                # recorded in the checkpoint, so a pending journal write can only
-                # be promoted by this exact action.
-                self.executor.begin_action_transaction(
-                    pending_action.get("run_id"), pending_action["action_id"]
-                )
-                self._save_checkpoint(user_goal, step, pending_action=pending_action)
-            try:
-                feedback = self._execute_command(command)
-            finally:
-                if pending_action is not None:
-                    self.executor.end_action_transaction()
-            self._register_feedback(step, command, feedback)
-
-            # Store rolling summary on interval steps (every Nth step)
-            if (
-                step % self.config.rolling_summary_interval == 0
-                and command.step_summary
-            ):
-                self._state.rolling_summaries[step] = command.step_summary
-
-            # Immediate completion check: if task just became ready, finish now.
-            # A report task is excluded: it must be closed by the model's own
-            # final_answer with real findings, not a synthetic stub. Leaving it
-            # unbroken lets the completion guard push the model to answer.
-            if (
-                self._state.completion_ready
-                and feedback.get("ok")
-                and not self._state.report_goal
-                and (self._state.create_goal or self._state.verify_only_goal)
-            ):
-                final_message = self._build_auto_completion_message()
-                self._register_final_answer(step, final_message)
-                task_completed = True
-                break
-
-            if (
-                self._state.completion_ready
-                and feedback.get("ok")
-                and self._state.report_goal
-                and not self._state.required_next_actions
-            ):
-                self._set_required_next_actions(
-                    ["final_answer", "report_to_user"],
-                    _build_report_substance_instruction(self._state.task_language),
-                )
-
-            if (
-                create_goal
-                and not self._state.files_changed
-                and feedback.get("ok")
-                and command.action.type in _READ_ONLY_ACTIONS
-                and self._state.read_only_streak >= 2
-            ):
-                self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
-
-            self._ui.update_live(
-                user_message=command.user_message,
-                status="continuing" if feedback.get("ok") else "error received",
-                step=step,
-                progress=self._state.progress,
-                plan_step=command.plan_step,
-                is_error=not bool(feedback.get("ok")),
-            )
-
-            # Checkpoint every step: mutating actions land on disk immediately,
-            # so a coarser interval leaves resume state trailing the real
-            # workspace. The atomic write is negligible next to the LLM call.
-            self._save_checkpoint(user_goal, step)
 
             # Only pipeline off a clean, successful step: after an error the
             # model tier and pending instruction are volatile, so predicting the
             # next prompt is unreliable (a mismatch just wastes the prefetch).
-            if feedback.get("ok"):
-                _run_pipeline_dwell(self, user_goal, step)
+            if outcome.proceed:
+                _run_pipeline_dwell(self, user_goal, step - 1)
 
         if not final_message:
             final_message = self._build_limit_reached_message()
@@ -962,6 +602,489 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         self._ui.print_final(final_message, self._state.user_messages)
 
     return final_message
+
+
+def _run_action_batch(
+    self, user_goal: str, step: int, commands: list[AgentCommand]
+) -> tuple[_ActionOutcome, int]:
+    """Run one response's actions in order; return the last outcome and the next step.
+
+    Every action is its own step, so step logs, checkpoints, the pending-action
+    record and the step budget keep meaning exactly what they did before
+    batching — only the number of model calls goes down.
+    """
+    _note_thought(self, commands[0].thought)
+    outcome = _BLOCKED
+    for index, command in enumerate(commands):
+        if index and step > self._state.step_budget:
+            _note_skipped_actions(self, commands[index:])
+            return outcome, step
+        outcome = _run_one_action(self, user_goal, step, command)
+        step += 1
+        if outcome.finished:
+            return outcome, step
+        if not outcome.proceed:
+            _note_skipped_actions(self, commands[index + 1 :])
+            return outcome, step
+    return outcome, step
+
+
+def _note_skipped_actions(self, skipped: list[AgentCommand]) -> None:
+    """Tell the model which actions of its batch never ran."""
+    if not skipped:
+        return
+    names = ", ".join(command.action.type for command in skipped)
+    note = (
+        f"The batch stopped early: {len(skipped)} later action(s) were NOT executed ({names}). "
+        "Decide the next actions from the results above; do not assume the skipped ones ran."
+    )
+    self._state.pending_instruction = f"{self._state.pending_instruction} {note}".strip()
+    self._push_unique(self._state.recent_events, note, self.config.summary_recent_events)
+    self._state.step_logs.append(
+        {
+            "status": "batch_actions_skipped",
+            "skipped": [
+                {"type": command.action.type, "args": command.action.args}
+                for command in skipped
+            ],
+        }
+    )
+
+
+def _run_one_action(
+    self, user_goal: str, step: int, command: AgentCommand
+) -> _ActionOutcome:
+    self._current_step = step
+    # Safety refusal takes priority over every other guard (language,
+    # repeat-block, report-artifact, read-only, completion-readiness):
+    # an illegal/malicious request must stop immediately, unconditionally,
+    # not queue behind corrective retries that assume the task is legitimate.
+    if command.action.type == "refuse":
+        return _stop_for_safety_refusal(self, step, command)
+
+    if _reject_wrong_language(self, step, command):
+        return _BLOCKED
+
+    self._record_user_message(command.user_message)
+
+    if _reject_before_execution(self, step, command):
+        return _BLOCKED
+
+    self._ui.print_step_header(
+        step, command, getattr(self, "_last_reasoning_seconds", 0.0)
+    )
+
+    if _reject_exhausted_web_budget(self, user_goal, step, command):
+        return _BLOCKED
+
+    _note_run_context(
+        self,
+        action=command.action.description or command.action.type,
+        files_changed=len(self._state.files_changed),
+        model_tier=self._state.selected_action_role or "fast",
+        **_plan_position(self),
+    )
+    self._ui.update_live(
+        user_message=command.user_message,
+        status="executing action",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+    )
+
+    if self._state.completion_ready and command.action.type not in ("final_answer", "report_to_user"):
+        return _enforce_completion(self, step, command)
+    if command.action.type == "final_answer":
+        return _finish_with_final_answer(self, step, command)
+    if command.action.type == "report_to_user":
+        return _finish_with_report(self, user_goal, step, command)
+    return _execute_action(self, user_goal, step, command)
+
+
+def _stop_for_safety_refusal(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    reason = str(command.action.args["reason"])
+    self._register_safety_refusal(step, reason)
+    final_message = self._build_safety_refusal_message()
+    self._ui.update_live(
+        user_message=final_message,
+        status="stopped by safety filters",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return _ActionOutcome(finished=True, final_message=final_message)
+
+
+def _reject_wrong_language(self, step: int, command: AgentCommand) -> bool:
+    language_error = self._command_language_error(command)
+    if not language_error:
+        return False
+    self._register_language_error(step, command, language_error)
+    self._ui.update_live(
+        user_message="Fixing the model response language and retrying the step",
+        status="fixing response language",
+        step=step,
+        progress=self._state.progress,
+        plan_step="language correction",
+        is_error=True,
+    )
+    return True
+
+
+def _reject_before_execution(self, step: int, command: AgentCommand) -> bool:
+    # Order matters: _is_repeat_blocked records the action as seen, so it must
+    # not run for an action the follow-up guard already turned away.
+    return (
+        _reject_missing_followup(self, step, command)
+        or _reject_repeated_action(self, step, command)
+        or _reject_report_artifact(self, step, command)
+        or _reject_read_only_violation(self, step, command)
+    )
+
+
+def _reject_missing_followup(self, step: int, command: AgentCommand) -> bool:
+    followup_error = self._required_followup_error(command)
+    if not followup_error:
+        return False
+    blocked_count = self._register_blocked_action(command)
+    # blocked_actions is in-memory only; this breadcrumb rides in
+    # recent_events (persisted + prompted) so a resumed run still
+    # knows its last action was refused.
+    self._push_unique(
+        self._state.recent_events,
+        f"Action '{command.action.type}' was blocked; corrective action required.",
+        self.config.summary_recent_events,
+    )
+    self._state.stagnation_count += 1
+    self._state.pending_instruction = followup_error
+    if blocked_count >= 2:
+        self._state.pending_instruction = _build_strict_next_action_instruction(
+            self._state.task_language,
+            self._state.required_next_actions,
+            self._state.missing_artifacts,
+        )
+    self._state.step_logs.append(
+        {
+            "step": step,
+            "status": "blocked_for_corrective_action",
+            "blocked_count": blocked_count,
+            "reason": followup_error,
+            "required_next_actions": self._state.required_next_actions,
+            "command": {
+                "thought": command.thought,
+                "plan_step": command.plan_step,
+                "user_message": command.user_message,
+                "action": {
+                    "type": command.action.type,
+                    "args": command.action.args,
+                },
+            },
+        }
+    )
+    self._ui.update_live(
+        user_message=command.user_message,
+        status="corrective action required",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return True
+
+
+def _reject_repeated_action(self, step: int, command: AgentCommand) -> bool:
+    if not self._is_repeat_blocked(command):
+        return False
+    if self._state.create_goal and not self._state.files_changed:
+        self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
+    self._ui.update_live(
+        user_message=command.user_message,
+        status="looking for another working step",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return True
+
+
+def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
+    # Block report-like artifact creation at the UI/report layer only.
+    # Never auto-complete here: the model may try to write task_report.txt
+    # before doing any real work, and that must stay a corrective error.
+    if not self._is_report_artifact_blocked(command):
+        return False
+    self._refresh_completion_requirements(force_enforcement=True)
+    if self._state.completion_ready:
+        feedback = {
+            "ok": False,
+            "action_type": command.action.type,
+            "result": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
+        }
+        live_status = "completion enforced"
+        live_message = "Task is complete, requiring final_answer"
+    else:
+        feedback = {
+            "ok": False,
+            "action_type": command.action.type,
+            "result": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
+        }
+        live_status = "report artifact blocked"
+        live_message = "Report artifact blocked; continue the actual task"
+    self._register_feedback(step, command, feedback)
+    self._ui.update_live(
+        user_message=live_message,
+        status=live_status,
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return True
+
+
+def _reject_read_only_violation(self, step: int, command: AgentCommand) -> bool:
+    if not self._is_read_only_violation(command):
+        return False
+    feedback = {
+        "ok": False,
+        "action_type": command.action.type,
+        "result": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
+    }
+    self._register_feedback(step, command, feedback)
+    self._ui.update_live(
+        user_message="Read-only task violation blocked",
+        status="corrective action required",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return True
+
+
+def _reject_exhausted_web_budget(
+    self, user_goal: str, step: int, command: AgentCommand
+) -> bool:
+    if command.action.type == "web_search":
+        web_error = self._prepare_web_search_command(user_goal, command)
+        live_status = "web search limit reached"
+    elif command.action.type == "fetch_url":
+        web_error = self._prepare_fetch_url_command(command)
+        live_status = "URL read limit reached"
+    else:
+        return False
+    if not web_error:
+        return False
+    feedback = self._build_error_feedback(command.action.type, web_error)
+    self._register_feedback(step, command, feedback)
+    self._ui.update_live(
+        user_message=command.user_message,
+        status=live_status,
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return True
+
+
+def _enforce_completion(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    """The task is already ready: only a terminal action may run now."""
+    corrective_feedback = {
+        "ok": False,
+        "action_type": command.action.type,
+        "result": "Task is already verified and complete. You must use final_answer or report_to_user now. No further actions are permitted.",
+    }
+    self._register_feedback(step, command, corrective_feedback)
+    self._ui.update_live(
+        user_message="Task is complete, requiring final_answer",
+        status="completion enforced",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=False,
+    )
+    violations = self._state.seen_actions.get("completion_ready_violations", 0)
+    if violations >= 1:
+        final_message = self._build_auto_completion_message()
+        self._register_final_answer(step, final_message)
+        return _ActionOutcome(finished=True, final_message=final_message)
+    self._state.seen_actions["completion_ready_violations"] = violations + 1
+    return _BLOCKED
+
+
+def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    self._refresh_completion_requirements(force_enforcement=True)
+    if self._state.completion_blockers:
+        error_text = " ".join(self._state.completion_blockers)
+        self._state.consecutive_errors += 1
+        self._record_error(error_text)
+        self._state.step_logs.append(
+            {
+                "step": step,
+                "status": "blocked_final_answer",
+                "reason": error_text,
+                "command": {
+                    "thought": command.thought,
+                    "plan_step": command.plan_step,
+                    "user_message": command.user_message,
+                    "action": {
+                        "type": command.action.type,
+                        "args": command.action.args,
+                    },
+                },
+            }
+        )
+        self._ui.update_live(
+            user_message="Switching to a corrective action instead of stopping too early",
+            status="final answer blocked",
+            step=step,
+            progress=self._state.progress,
+            plan_step=command.plan_step,
+            is_error=True,
+        )
+        return _BLOCKED
+    final_message = str(command.action.args["message"])
+    if self._state.report_goal and not _is_substantive_answer(final_message):
+        substance_retries = self._state.seen_actions.get("report_substance_retries", 0)
+        if substance_retries < 1:
+            self._state.seen_actions["report_substance_retries"] = substance_retries + 1
+            self._register_feedback(
+                step,
+                command,
+                {
+                    "ok": False,
+                    "action_type": "final_answer",
+                    "result": _build_report_substance_instruction(self._state.task_language),
+                },
+            )
+            self._set_required_next_actions(
+                ["final_answer", "report_to_user"],
+                _build_report_substance_instruction(self._state.task_language),
+            )
+            return _BLOCKED
+        # The model would not answer substantively — report the miss
+        # honestly instead of surfacing a content-free final answer.
+        final_message = self._build_report_failure_message()
+    self._register_final_answer(step, final_message)
+    return _ActionOutcome(finished=True, final_message=final_message)
+
+
+def _finish_with_report(
+    self, user_goal: str, step: int, command: AgentCommand
+) -> _ActionOutcome:
+    self._refresh_completion_requirements(force_enforcement=True)
+    if self._state.completion_blockers:
+        error_text = " ".join(self._state.completion_blockers)
+        self._state.consecutive_errors += 1
+        self._record_error(error_text)
+        self._state.pending_instruction = (
+            f"Task is not complete. Blockers: {error_text}. "
+            "Fix the remaining issues before reporting."
+        )
+        self._ui.update_live(
+            user_message="Report blocked — task not complete",
+            status="report blocked",
+            step=step,
+            progress=self._state.progress,
+            plan_step=command.plan_step,
+            is_error=True,
+        )
+        return _BLOCKED
+    # Collect context and hand off to chat reporter
+    summary = str(command.action.args.get("summary", ""))
+    tech_result = str(command.action.args.get("result", ""))
+    issues = str(command.action.args.get("issues", ""))
+    context = _build_report_context(self, user_goal, summary, tech_result, issues)
+    report_text = _render_report(self, context)
+    final_message = report_text or tech_result or summary
+    self._register_final_answer(step, final_message)
+    return _ActionOutcome(finished=True, final_message=final_message, report_rendered=True)
+
+
+def _execute_action(
+    self, user_goal: str, step: int, command: AgentCommand
+) -> _ActionOutcome:
+    # Crash-consistent side effects: durably record the pending action
+    # BEFORE it executes so a process death in the action window is
+    # reconciled on resume rather than blindly replayed. File mutations
+    # are reconcilable from content digests; run_shell/delegate_task are
+    # not (their effect cannot be proven after a crash) and resume treats
+    # them as ambiguous. The post-step checkpoint clears the record.
+    pending_action = _build_pending_action(self, command, step)
+    if pending_action is not None:
+        # Bind the executor's journal transaction to the SAME identity
+        # recorded in the checkpoint, so a pending journal write can only
+        # be promoted by this exact action.
+        self.executor.begin_action_transaction(
+            pending_action.get("run_id"), pending_action["action_id"]
+        )
+        self._save_checkpoint(user_goal, step, pending_action=pending_action)
+    try:
+        feedback = self._execute_command(command)
+    finally:
+        if pending_action is not None:
+            self.executor.end_action_transaction()
+    self._register_feedback(step, command, feedback)
+    ok = bool(feedback.get("ok"))
+
+    # Store rolling summary on interval steps (every Nth step)
+    if (
+        step % self.config.rolling_summary_interval == 0
+        and command.step_summary
+    ):
+        self._state.rolling_summaries[step] = command.step_summary
+
+    # Immediate completion check: if task just became ready, finish now.
+    # A report task is excluded: it must be closed by the model's own
+    # final_answer with real findings, not a synthetic stub. Leaving it
+    # unbroken lets the completion guard push the model to answer.
+    if (
+        self._state.completion_ready
+        and ok
+        and not self._state.report_goal
+        and (self._state.create_goal or self._state.verify_only_goal)
+    ):
+        final_message = self._build_auto_completion_message()
+        self._register_final_answer(step, final_message)
+        return _ActionOutcome(finished=True, final_message=final_message)
+
+    if (
+        self._state.completion_ready
+        and ok
+        and self._state.report_goal
+        and not self._state.required_next_actions
+    ):
+        self._set_required_next_actions(
+            ["final_answer", "report_to_user"],
+            _build_report_substance_instruction(self._state.task_language),
+        )
+
+    if (
+        self._state.create_goal
+        and not self._state.files_changed
+        and ok
+        and command.action.type in _READ_ONLY_ACTIONS
+        and self._state.read_only_streak >= 2
+    ):
+        self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
+
+    self._ui.update_live(
+        user_message=command.user_message,
+        status="continuing" if ok else "error received",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=not ok,
+    )
+
+    # Checkpoint every step: mutating actions land on disk immediately,
+    # so a coarser interval leaves resume state trailing the real
+    # workspace. The atomic write is negligible next to the LLM call.
+    self._save_checkpoint(user_goal, step)
+    return _ActionOutcome(proceed=ok)
 
 
 def reset_run_state(self) -> None:
@@ -1814,7 +1937,8 @@ def action_signature(self, command: AgentCommand) -> str:
 
 def record_user_message(self, message: str) -> None:
     clean = message.strip()
-    if not clean:
+    # A batch shares one user_message across its actions; it is still one message.
+    if not clean or self._state.user_messages[-1:] == [clean]:
         return
     self._state.user_messages.append(clean)
     del self._state.user_messages[:-80]
