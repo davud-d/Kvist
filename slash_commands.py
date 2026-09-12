@@ -41,6 +41,11 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         aliases=("change_api", "apikey"),
     ),
     SlashCommand("models", "Select fast, smart and planner models"),
+    SlashCommand(
+        "settings-api",
+        "Tune API pacing, timeouts, retries and the context window",
+        aliases=("settings_api", "api"),
+    ),
     SlashCommand("role", "Choose auto, coder, devops or chat role"),
     SlashCommand("effort", "Set the model's reasoning effort level"),
     SlashCommand("session", "Create, switch or delete saved sessions"),

@@ -207,6 +207,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/provider` | Select or configure a provider |
 | `/change-api` | Replace the current provider key (`/change_api` and `/apikey` also work) |
 | `/models` | Select `fast`, `smart`, and `planner` models |
+| `/settings-api` | Tune request pacing, timeout, retries, the context window, dynamic model loading, response cache and model fallbacks (`/api` also works, saved globally) |
 | `/role` | Select `auto`, `coder`, `reader`, `devops`, or `chat` |
 | `/effort` | Set reasoning effort: `false`, `low`, `medium`, `high`, `xhigh`, `max` (saved globally) |
 | `/session` | Create, switch, or delete named sessions |
@@ -309,6 +310,16 @@ expected: an unlisted member of a known family inherits its generation (a new
 high, the provider's own "prompt is too long" rejection lowers the budget for
 that model and the call is re-sent rather than failing. Set
 `AGENT_MAX_CONTEXT_TOKENS` to pin a budget yourself.
+
+`/settings-api` is the interactive form of the same transport knobs, saved
+globally in `~/.kvist/config.json` under `api_settings`: the minimum gap between
+two requests (a number applies to every provider, `0` removes the pacing
+entirely), the per-call timeout, retry count and backoff, the prompt budget
+(`auto` derives it as above, or set it yourself — `1m`, `250k`), whether the
+model catalog is discovered from `/v1/models` at launch at all, the in-run
+response cache, and runtime model fallbacks. Only knobs you actually change are
+written; `AGENT_API_INTERVAL` and `AGENT_MAX_CONTEXT_TOKENS` still win over the
+saved values, and the dialog says so on the affected row.
 
 Two instruction files sit in the workspace root: `KVIST.md` for the action-loop
 roles (coder, reader, devops) and `KVIST-CHAT.md` for chat. Kvist creates both

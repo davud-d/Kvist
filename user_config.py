@@ -34,6 +34,7 @@ LLM_MODELS_KEY = "llm_models"
 ROLE_SELECTION_KEY = "role_selection"
 PLANNING_ENABLED_KEY = "planning_enabled"
 REASONING_EFFORT_KEY = "reasoning_effort"
+API_SETTINGS_KEY = "api_settings"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
 FALLBACK_LLM_PROVIDER = FREEFLOW_PROVIDER
 GEMINI_API_KEY_KEY = "gemini_api_key"
@@ -327,6 +328,41 @@ def save_reasoning_effort(level: str, config_path: Path | None = None) -> None:
         return payload
 
     _update_user_config(save_effort, config_path)
+
+
+def get_saved_api_settings(config_path: Path | None = None) -> dict[str, object]:
+    """The persisted API transport overrides, as stored.
+
+    Only the knobs the user actually changed are present; ``api_settings.py``
+    owns the defaults and the validation, so this layer stays a plain reader.
+    """
+    payload = load_user_config(config_path)
+    value = payload.get(API_SETTINGS_KEY)
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if isinstance(item, (bool, int, float))
+    }
+
+
+def save_api_settings(
+    settings: dict[str, object],
+    config_path: Path | None = None,
+) -> None:
+    """Replace the persisted API transport overrides with *settings*."""
+    stored = {
+        str(key): item
+        for key, item in settings.items()
+        if isinstance(item, (bool, int, float))
+    }
+
+    def save_settings(payload: dict[str, object]) -> dict[str, object]:
+        payload[API_SETTINGS_KEY] = stored
+        return payload
+
+    _update_user_config(save_settings, config_path)
 
 
 def ensure_provider_credentials(

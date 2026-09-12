@@ -60,6 +60,10 @@ class AgentConfig:
     # planner's guidance for a faster time-to-first-action.
     skip_planning: bool = False
     api_request_interval: float = 5.0
+    # True when the interval above is the user's own choice (/settings-api), so
+    # it outranks the per-provider pacing table in agent_model — a number the
+    # user typed for OpenAI must not be silently zeroed by that table.
+    api_interval_user_set: bool = False
     api_timeout: float = 60.0
 
 

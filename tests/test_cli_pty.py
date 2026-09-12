@@ -691,3 +691,45 @@ def test_live_ui_cancelled_turn_leaves_no_history(tmp_path):
         document = json.loads(state_path.read_text(encoding="utf-8"))
         assert document["session_history"] == []
         assert [m["role"] for m in document["chat_history"]] in ([], ["system"])
+
+
+def test_cli_pty_settings_api_edits_the_context_window(tmp_path):
+    """The /settings-api dialog edits, persists, and reports one knob."""
+    home = tmp_path / "home"
+    child = _spawn(tmp_path / "workspace", home)
+    try:
+        child.wait_for("❯", timeout=20)
+
+        start = child.mark()
+        child.send("/settings-api\r")
+        child.wait_for("API settings", start=start, timeout=15)
+        child.settle()
+
+        # Request interval · Request timeout · Retry attempts · Retry backoff ·
+        # Context window — the menu opens on the first row, "j" moves down.
+        for _ in range(4):
+            child.send("j")
+            child.settle(quiet=0.1)
+        opened = child.mark()
+        child.send("\r")
+        child.wait_for("Enter value", start=opened, timeout=10)
+        assert "Current: auto" in child.visible(opened)
+        child.settle()
+
+        edited = child.mark()
+        child.send("\x15" "1m\r")
+        child.wait_for("Context window — 1 000 000 tokens", start=edited, timeout=10)
+        child.settle()
+
+        closed = child.mark()
+        child.send("\x1b")
+        child.wait_for("Context window: 1 000 000 tokens", start=closed, timeout=10)
+
+        child.send("/bye\r")
+        assert child.wait() == 0
+        assert "Traceback (most recent call last)" not in child.visible()
+    finally:
+        child.close()
+
+    saved = json.loads((home / ".kvist" / "config.json").read_text(encoding="utf-8"))
+    assert saved["api_settings"] == {"context_tokens": 1_000_000}

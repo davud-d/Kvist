@@ -551,3 +551,153 @@ def test_configure_custom_provider_interactively_url_normalization(monkeypatch):
     ui.prompt_selections["base URL"] = "api.example.dev/v1"
     main.configure_custom_provider_interactively(ui, False)
     assert saved_providers["test-provider-9"]["base_url"] == "https://api.example.dev/v1"
+
+
+class _ApiSettingsUI:
+    """Scripted arrow-key menu + typed field for the /settings-api dialog."""
+
+    def __init__(self, choices, typed=()):
+        self._choices = iter(choices)
+        self._typed = iter(typed)
+        self.prompts = []
+
+    def __call__(self, **kwargs):
+        return self
+
+    def choose_option(self, **kwargs):
+        return next(self._choices)
+
+    def prompt_text(self, **kwargs):
+        self.prompts.append(kwargs)
+        return next(self._typed)
+
+
+def _isolated_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+
+def test_settings_api_dialog_persists_and_applies_one_edit(tmp_path, monkeypatch):
+    _isolated_home(monkeypatch, tmp_path)
+    monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
+    ui = _ApiSettingsUI(choices=["context_tokens", "__done__"], typed=["1m"])
+    monkeypatch.setattr(main, "TerminalBannerUI", ui)
+    config = main.AgentConfig(provider="openai")
+
+    changed = main.configure_api_settings(config, False)
+
+    assert changed == {"context_tokens"}
+    assert config.max_context_tokens == 1_000_000
+    assert main.load_api_settings()["context_tokens"] == 1_000_000
+
+
+def test_settings_api_dialog_reprompts_after_an_impossible_value(
+    tmp_path, monkeypatch
+):
+    _isolated_home(monkeypatch, tmp_path)
+    ui = _ApiSettingsUI(
+        choices=["max_retries", "__done__"],
+        typed=["99", "4"],
+    )
+    monkeypatch.setattr(main, "TerminalBannerUI", ui)
+    config = main.AgentConfig()
+
+    changed = main.configure_api_settings(config, False)
+
+    assert changed == {"max_retries"}
+    assert config.max_retries == 4
+    assert "between 1 and 10" in ui.prompts[1]["help_text"]
+
+
+def test_settings_api_dialog_writes_nothing_when_closed(tmp_path, monkeypatch):
+    _isolated_home(monkeypatch, tmp_path)
+    ui = _ApiSettingsUI(choices=[None])
+    monkeypatch.setattr(main, "TerminalBannerUI", ui)
+    config = main.AgentConfig()
+
+    assert main.configure_api_settings(config, False) == set()
+    assert not (tmp_path / ".kvist" / "config.json").exists()
+
+
+def test_settings_api_dialog_cancelled_field_keeps_the_old_value(
+    tmp_path, monkeypatch
+):
+    _isolated_home(monkeypatch, tmp_path)
+    ui = _ApiSettingsUI(choices=["request_timeout", "__done__"], typed=[None])
+    monkeypatch.setattr(main, "TerminalBannerUI", ui)
+    config = main.AgentConfig()
+
+    assert main.configure_api_settings(config, False) == set()
+    assert config.api_timeout == 60.0
+
+
+def test_settings_api_dialog_reset_restores_every_default(tmp_path, monkeypatch):
+    _isolated_home(monkeypatch, tmp_path)
+    monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
+    values = main.default_api_settings()
+    values["request_interval"] = 0.0
+    values["dynamic_models"] = False
+    main.store_api_settings(values)
+
+    ui = _ApiSettingsUI(choices=["__reset__", "yes", "__done__"])
+    monkeypatch.setattr(main, "TerminalBannerUI", ui)
+    config = main.AgentConfig()
+    main.apply_api_settings(config)
+
+    changed = main.configure_api_settings(config, False)
+
+    assert changed == {"request_interval", "dynamic_models"}
+    assert main.load_api_settings() == main.default_api_settings()
+    assert config.api_request_interval == 5.0
+    assert config.api_interval_user_set is False
+    assert main.dynamic_model_loading_enabled() is True
+
+
+def test_settings_api_dialog_toggles_dynamic_model_loading(tmp_path, monkeypatch):
+    _isolated_home(monkeypatch, tmp_path)
+    ui = _ApiSettingsUI(choices=["dynamic_models", "off", "__done__"])
+    monkeypatch.setattr(main, "TerminalBannerUI", ui)
+    config = main.AgentConfig()
+
+    changed = main.configure_api_settings(config, False)
+
+    assert changed == {"dynamic_models"}
+    assert main.dynamic_model_loading_enabled() is False
+
+
+def test_build_agent_skips_discovery_when_dynamic_loading_is_off(
+    tmp_path, monkeypatch
+):
+    _isolated_home(monkeypatch, tmp_path)
+    values = main.default_api_settings()
+    values["dynamic_models"] = False
+    values["request_timeout"] = 240.0
+    main.store_api_settings(values)
+
+    def _unreachable(*args, **kwargs):
+        raise AssertionError("dynamic model loading is off")
+
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "openai")
+    monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
+    monkeypatch.setattr(
+        main,
+        "ensure_provider_credentials",
+        lambda **kwargs: {"openai_api_key": "key"},
+    )
+    monkeypatch.setattr(main, "fetch_available_models", _unreachable)
+    monkeypatch.setattr(
+        main,
+        "create_llm_client",
+        lambda provider, credentials, verbose=False: SimpleNamespace(chat=None),
+    )
+
+    _agent, config, warnings = main.build_agent(
+        executor=SafeExecutor(tmp_path / "workspace"),
+        max_steps=7,
+        persist_logs=False,
+        verbose=False,
+        language_hint="en",
+    )
+
+    assert config.api_timeout == 240.0
+    assert any("Dynamic model loading is off" in warning for warning in warnings)

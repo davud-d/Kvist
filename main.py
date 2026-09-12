@@ -188,6 +188,21 @@ from user_config import (
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
 
+from api_settings import (
+    API_SETTINGS,
+    ApiSetting,
+    active_env_override,
+    apply_api_settings,
+    default_api_settings,
+    dynamic_model_loading_enabled,
+    format_value,
+    load_api_settings,
+    parse_number,
+    range_hint,
+    setting_for,
+    store_api_settings,
+)
+from context_budget import derived_prompt_budget
 from reasoning_effort import (
     DEFAULT_EFFORT,
     EFFORT_DESCRIPTIONS,
@@ -726,17 +741,25 @@ def build_agent(
     # Discover the live model catalog from the provider's /v1/models endpoint
     # on every launch, then reconcile configured models against it. Discovery
     # is best-effort: on failure we keep configured/static models and warn.
-    live_models, discovery_error = fetch_available_models(provider, credentials)
-    if discovery_error:
-        warnings.append(discovery_error)
-    else:
-        models, access_warnings = resolve_accessible_models(
-            provider,
-            models,
-            live_models,
-            language_hint=language_hint,
+    # /settings-api can turn it off entirely, for a gateway that has no
+    # catalog endpoint or a user who does not want the extra launch call.
+    if not dynamic_model_loading_enabled():
+        warnings.append(
+            "Dynamic model loading is off: using the configured models without "
+            "asking the provider. Re-enable it with /settings-api."
         )
-        warnings.extend(access_warnings)
+    else:
+        live_models, discovery_error = fetch_available_models(provider, credentials)
+        if discovery_error:
+            warnings.append(discovery_error)
+        else:
+            models, access_warnings = resolve_accessible_models(
+                provider,
+                models,
+                live_models,
+                language_hint=language_hint,
+            )
+            warnings.extend(access_warnings)
     if provider == FREEFLOW_PROVIDER:
         warnings.append(
             "For FreeFlow LLM, streaming is disabled: the library handles stream responses unstably."
@@ -763,6 +786,7 @@ def build_agent(
         skip_planning=skip_planning,
         reasoning_effort=resolve_reasoning_effort(),
     )
+    apply_api_settings(config)
     agent_console = Console()
     perf_logger = PerfLogger(executor.workspace)
     agent_ui = (
@@ -1261,6 +1285,181 @@ def choose_style(verbose: bool) -> tuple[str, str] | None:
     return style_type, selected
 
 
+# ── /settings-api ════════════════════════════════════════════════════════════
+# Menu rows carry the current value only; the long explanation belongs to the
+# edit panel, where there is room for it and where the user is about to need it.
+
+_API_SETTINGS_RESET = "__reset__"
+_API_SETTINGS_DONE = "__done__"
+
+# Knobs the running agent reads per call, so an edit lands on the next step.
+# Everything else here is consumed once, at launch.
+_LIVE_API_SETTING_KEYS = frozenset(
+    {
+        "request_interval",
+        "request_timeout",
+        "max_retries",
+        "retry_base_delay",
+        "context_tokens",
+        "response_cache",
+        "model_fallbacks",
+    }
+)
+
+
+def _api_setting_status(
+    setting: ApiSetting,
+    value: bool | int | float,
+    config: AgentConfig,
+) -> str:
+    """The value column of one settings row, saying what actually applies."""
+    rendered = format_value(setting, value)
+    if setting.key == "context_tokens" and not value:
+        derived = derived_prompt_budget(config.provider, config.fast_model)
+        grouped = f"{derived:,}".replace(",", " ")
+        rendered = f"{rendered} — {grouped} for {config.fast_model}"
+    env_var = active_env_override(setting)
+    if env_var:
+        rendered = f"{rendered} (ignored: {env_var} is set)"
+    return rendered
+
+
+def _api_settings_menu_options(
+    values: dict[str, bool | int | float],
+    config: AgentConfig,
+) -> list[dict[str, str]]:
+    rows = [
+        {
+            "value": setting.key,
+            "label": setting.label,
+            "description": _api_setting_status(setting, values[setting.key], config),
+        }
+        for setting in API_SETTINGS
+    ]
+    rows.append(
+        {
+            "value": _API_SETTINGS_RESET,
+            "label": "Reset all",
+            "description": "Back to Kvist's shipped defaults",
+        }
+    )
+    rows.append({"value": _API_SETTINGS_DONE, "label": "Done", "description": ""})
+    return rows
+
+
+def _edit_api_toggle(ui: AgentUI, setting: ApiSetting, value: bool) -> bool | None:
+    selected = ui.choose_option(
+        title=setting.label,
+        options=[
+            {"value": "on", "label": "On"},
+            {"value": "off", "label": "Off"},
+        ],
+        current_value="on" if value else "off",
+        help_text=setting.description,
+    )
+    if selected is None:
+        return None
+    return selected == "on"
+
+
+def _edit_api_number(
+    ui: AgentUI,
+    setting: ApiSetting,
+    value: int | float,
+) -> int | float | None:
+    """Ask for a number until it is one this setting accepts, or cancelled."""
+    notice = ""
+    while True:
+        typed = ui.prompt_text(
+            title=setting.label,
+            current_value=format_value(setting, value),
+            help_text=f"{setting.description}\n{range_hint(setting)}{notice}",
+        )
+        if typed is None:
+            return None
+        try:
+            return parse_number(setting, typed)
+        except ValueError as error:
+            notice = f"\n\n{error}"
+
+
+def _edit_api_setting(
+    ui: AgentUI,
+    setting: ApiSetting,
+    value: bool | int | float,
+) -> bool | int | float | None:
+    if setting.kind == "bool":
+        return _edit_api_toggle(ui, setting, bool(value))
+    return _edit_api_number(ui, setting, value)
+
+
+def _commit_api_settings(
+    config: AgentConfig,
+    values: dict[str, bool | int | float],
+) -> None:
+    store_api_settings(values)
+    apply_api_settings(config)
+
+
+def configure_api_settings(config: AgentConfig, verbose: bool) -> set[str]:
+    """Run the API settings dialog. Returns the keys the user changed.
+
+    Every edit is persisted and applied to *config* as it is made, so closing
+    the dialog is not a commit step and cancelling one field never discards
+    another.
+    """
+    ui = TerminalBannerUI(console=console, verbose=verbose)
+    values = load_api_settings()
+    changed: set[str] = set()
+    # The menu reopens after every edit, so it reopens on the row just edited
+    # instead of sending the user back to the top of the list each time.
+    cursor = API_SETTINGS[0].key
+
+    while True:
+        chosen = ui.choose_option(
+            title=f"API settings — {provider_label(config.provider)}",
+            options=_api_settings_menu_options(values, config),
+            current_value=cursor,
+            help_text="↑/↓ — select, Enter — edit, Esc — close",
+        )
+        if chosen is None or chosen == _API_SETTINGS_DONE:
+            return changed
+        cursor = chosen
+
+        if chosen == _API_SETTINGS_RESET:
+            if confirm_api_settings_reset(ui):
+                defaults = default_api_settings()
+                changed.update(
+                    key for key, value in values.items() if value != defaults[key]
+                )
+                values = defaults
+                _commit_api_settings(config, values)
+            continue
+
+        setting = setting_for(chosen)
+        updated = _edit_api_setting(ui, setting, values[setting.key])
+        if updated is None or updated == values[setting.key]:
+            continue
+        values[setting.key] = updated
+        _commit_api_settings(config, values)
+        changed.add(setting.key)
+
+
+def confirm_api_settings_reset(ui: AgentUI) -> bool:
+    return (
+        ui.choose_option(
+            title="Reset every API setting to its default?",
+            options=[
+                {"value": "no", "label": "No, keep them"},
+                {"value": "yes", "label": "Yes, reset"},
+            ],
+            current_value="no",
+            help_text="Enter — confirm, Esc — cancel",
+        )
+        == "yes"
+    )
+
+
 def confirm_revert(file_count: int, verbose: bool) -> bool:
     """Ask the user to confirm a workspace revert. Returns True if confirmed."""
     ui = TerminalBannerUI(console=console, verbose=verbose)
@@ -1280,9 +1479,12 @@ def _model_picker_options(provider: str) -> tuple[list[dict[str, str]], bool]:
     """Return model picker options for a provider, preferring the live catalog.
 
     Queries the provider's /v1/models endpoint using stored credentials and
-    falls back to the static curated hints when discovery fails or returns
-    nothing. The second element marks whether the options are live.
+    falls back to the static curated hints when discovery fails, returns
+    nothing, or when /settings-api has turned dynamic model loading off. The
+    second element marks whether the options are live.
     """
+    if not dynamic_model_loading_enabled():
+        return get_model_options(provider), False
     try:
         required_keys = required_secret_keys_for_provider(provider, [])
         credentials = load_available_credentials(required_keys)
@@ -2814,6 +3016,44 @@ def main() -> None:
                 console.print(
                     _display_text(f"Role set to: {display_role}", "green")
                 )
+                continue
+
+            if user_goal.lower() == "/settings-api":
+                try:
+                    with paused_interactive_screen(interactive_screen):
+                        changed_settings = configure_api_settings(config, verbose)
+                except RuntimeError as error:
+                    console.print(
+                        _display_text(
+                            "API settings not saved: "
+                            f"{sanitize_display_text(str(error))}",
+                            "yellow",
+                        )
+                    )
+                    continue
+                if not changed_settings:
+                    console.print("[yellow]API settings unchanged.[/yellow]")
+                    continue
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                saved_settings = load_api_settings()
+                for setting in API_SETTINGS:
+                    if setting.key not in changed_settings:
+                        continue
+                    console.print(
+                        _display_text(
+                            f"{setting.label}: "
+                            f"{format_value(setting, saved_settings[setting.key])}",
+                            "green",
+                        )
+                    )
+                if not changed_settings <= _LIVE_API_SETTING_KEYS:
+                    console.print(
+                        _display_text(
+                            "Dynamic model loading applies at the next launch.",
+                            "yellow",
+                        )
+                    )
                 continue
 
             if user_goal.lower() == "/effort":

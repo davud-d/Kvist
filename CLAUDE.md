@@ -69,6 +69,22 @@ configured in-repo.
   Also persists the global `role_selection`, `planning_enabled` (the `/plan`
   toggle; default true) and `reasoning_effort` (the `/effort` level on the Kvist
   scale `false|low|medium|high|xhigh|max`, default `medium`) preferences.
+- The `/settings-api` dialog's knobs live in the same file under `api_settings`,
+  owned by `api_settings.py` (the table and its validation) with `user_config`
+  only storing them: request interval, request timeout, retry count, retry
+  backoff, context-window override, dynamic model loading, response cache and
+  runtime model fallbacks. **Only keys whose value differs from the shipped
+  default are written**, and that absence is load-bearing: `apply_api_settings`
+  reads "the key is present" as "the user chose this" and sets
+  `AgentConfig.api_interval_user_set`, which is what makes a typed interval
+  outrank the `_API_PROVIDER_INTERVALS` table and the `_FAST_DIRECT_PROVIDERS`
+  zeroing in `agent_model._get_api_interval` — without it a number entered for
+  OpenAI would be silently discarded. `AGENT_API_INTERVAL` and
+  `AGENT_MAX_CONTEXT_TOKENS` still outrank the saved values, and the dialog
+  labels that row as ignored instead of pretending. `dynamic_models=False`
+  skips launch-time `fetch_available_models` in `build_agent` *and* the
+  `/models` picker (`_model_picker_options`), so it is the one knob that does
+  not take effect in the running session.
 - Per-project state lives under `<workspace>/.kvist/`: named-session documents
   (history, chat, `/resume` checkpoint) in `sessions/<name>.json`, the active-session
   marker in `active_session.json`, the workspace-global change journal (for

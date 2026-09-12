@@ -101,8 +101,8 @@ _FAST_DIRECT_PROVIDERS: frozenset[str] = frozenset(
 
 # Per-provider API request interval overrides (seconds) on top of the config
 # default (AgentConfig.api_request_interval, 5.0 s). _FAST_DIRECT_PROVIDERS
-# are always zeroed (no spacing). Override everything with the
-# AGENT_API_INTERVAL env var.
+# are always zeroed (no spacing) unless the user picked an interval in
+# /settings-api. Override everything with the AGENT_API_INTERVAL env var.
 _API_PROVIDER_INTERVALS: dict[str, float] = {
     OPENROUTER_PROVIDER: 2.5,
 }
@@ -122,6 +122,11 @@ def _get_api_interval(self) -> float:
     # spacing; the fast-direct zeroing below never overrides that "off".
     if self.config.api_request_interval <= 0:
         return 0.0
+    # An interval the user chose in /settings-api is an instruction, not a
+    # default: it applies to every provider, including the direct ones this
+    # table would otherwise zero.
+    if getattr(self.config, "api_interval_user_set", False):
+        return self.config.api_request_interval
     provider = getattr(self.config, "provider", "")
     if provider in _FAST_DIRECT_PROVIDERS:
         return 0.0
