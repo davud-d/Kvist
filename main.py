@@ -2913,6 +2913,10 @@ def main() -> None:
                         )
                     )
                     continue
+                if interactive_screen is not None:
+                    interactive_screen.clear_transcript()
+                else:
+                    console.clear()
                 render_new_session_notice(started)
                 continue
 

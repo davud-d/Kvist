@@ -1025,6 +1025,24 @@ class InteractiveScreen:
                 self._transcript_cursor_line = self._last_transcript_line_locked()
         self.invalidate()
 
+    def clear_transcript(self) -> None:
+        """Wipe the visible transcript (``/new`` starting a fresh session).
+
+        A new session must not still show the outgoing conversation above the
+        input field, so this empties the same state ``_trim_transcript_locked``
+        maintains rather than just letting old entries scroll off.
+        """
+        with self._state_lock:
+            self._transcript_entries = []
+            self._set_transcript_plain_locked("")
+            self._transcript_storage_chars = 0
+            self._ansi_pending_stream = None
+            self._ansi_pending_kind = None
+            self._ansi_pending_osc_escape = False
+            self._reset_transcript_lines_locked()
+            self._transcript_cursor_line = 0
+        self.invalidate()
+
     def _trim_transcript_locked(self) -> None:
         """Bound transcript memory while retaining a useful recent tail."""
         if (
