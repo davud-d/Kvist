@@ -307,6 +307,116 @@ def test_choose_option_tty_eof_cancels(monkeypatch):
     assert result is None
 
 
+def _many_options(n: int) -> list[dict[str, str]]:
+    return [{"value": f"v{i}", "label": f"Provider {i}"} for i in range(n)]
+
+
+def test_choose_option_short_list_ignores_typed_letters(monkeypatch):
+    """Below the filter threshold, a typed letter is simply ignored (no filter UI)."""
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    keys = iter(["char:a", "down", "enter"])
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: next(keys))
+
+    result = ui.choose_option("Title", ["a", "b", "c"])
+    assert result == "b"
+
+
+def test_choose_option_long_list_filters_by_typed_text(monkeypatch):
+    """Above the filter threshold, typing narrows the list; Enter picks the match."""
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    options = _many_options(9)
+    options[7]["label"] = "Qwen (DashScope)"
+    # Typing "qwen" should isolate the one match regardless of arrow position.
+    keys = iter(["char:q", "char:w", "char:e", "char:n", "enter"])
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: next(keys))
+
+    result = ui.choose_option("Title", options)
+    assert result == "v7"
+
+
+def test_choose_option_filter_backspace_widens_matches(monkeypatch):
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    options = _many_options(9)
+    options[0]["label"] = "Alpha"
+    options[1]["label"] = "Alt"
+    # "alt" matches only "Alt"; backspace back to "al" matches both, then Enter
+    # confirms whichever the (reset-to-top) cursor lands on.
+    keys = iter(["char:a", "char:l", "char:t", "backspace", "enter"])
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: next(keys))
+
+    result = ui.choose_option("Title", options)
+    assert result == "v0"
+
+
+def test_choose_option_filter_no_matches_does_not_crash(monkeypatch):
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    options = _many_options(9)
+    keys = iter(["char:z", "char:z", "char:z", "enter", "escape"])
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: next(keys))
+
+    # Enter with no matches is a no-op; the loop continues to the next key.
+    result = ui.choose_option("Title", options)
+    assert result is None
+
+
+def test_choose_option_long_list_windows_rows_instead_of_dumping_everything(monkeypatch):
+    """A long picker must never print every option every frame — that's what
+    buried OpenAI/Anthropic/DeepSeek off-screen in the real bug report."""
+    import io
+
+    from rich.console import Console as RichConsole
+
+    buffer = io.StringIO()
+    console = RichConsole(file=buffer, width=100, height=15, force_terminal=True, color_system=None)
+    ui = AgentUI(console=console, verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    options = _many_options(30)
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: "enter")
+
+    result = ui.choose_option("Title", options)
+    assert result == "v0"
+
+    output = buffer.getvalue()
+    assert "Provider 0" in output
+    assert "more below" in output
+    # height=15 clamps the row budget to max(5, min(15, 15-8)) = 7 rows, so
+    # an option far past the window must never have been rendered at all.
+    assert "Provider 29" not in output
+
+
+def test_choose_option_window_follows_cursor_down_and_up(monkeypatch):
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(ui, "_visible_row_budget", lambda: 5)
+    options = _many_options(20)
+    # Move down past the first window, then back up, then confirm.
+    keys = iter(["down"] * 8 + ["up"] * 3 + ["enter"])
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: next(keys))
+
+    result = ui.choose_option("Title", options)
+    assert result == "v5"  # 8 downs - 3 ups = index 5
+
+
+def test_read_menu_key_windows_reports_char_and_backspace(monkeypatch):
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    keys = iter(["q", "\x08", "\r"])
+
+    class FakeMsvcrt:
+        @staticmethod
+        def getwch():
+            return next(keys)
+
+    monkeypatch.setitem(sys.modules, "msvcrt", FakeMsvcrt())
+    assert ui._read_menu_key() == "char:q"
+    assert ui._read_menu_key() == "backspace"
+    assert ui._read_menu_key() == "enter"
+
+
 def test_prompt_text_returns_current_value_in_non_tty():
     """Non-TTY: prompt_text returns current_value when one is set."""
     ui = AgentUI(verbose=False)

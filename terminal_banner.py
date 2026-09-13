@@ -597,6 +597,31 @@ class TerminalBannerUI:
         )
         self.console.print(panel)
 
+    # Below this many options, arrow keys alone are fine; typing a filter
+    # would only add noise to a short menu (e.g. a yes/no confirm).
+    _FILTER_THRESHOLD = 8
+
+    def _visible_row_budget(self) -> int:
+        """How many option rows to draw at once.
+
+        A picker that renders every option every keypress (as this one used
+        to) is fine for a handful of items, but a 40+-entry provider list
+        turns each redraw into a screen-filling wall of text — worse still on
+        a terminal frontend that does not honor cursor-repositioning escapes,
+        where every redraw just appends below the last, burying the top of
+        the list (OpenAI, Anthropic, ...) far above the visible viewport with
+        no way back short of scrolling blind. Sizing off the reported
+        terminal height keeps one frame within one screen; the floor/ceiling
+        guard against a bogus or tiny reported height.
+        """
+        try:
+            height = self.console.size.height
+        except Exception:
+            height = 24
+        # Reserve ~8 lines for the title/help panel, the list panel's own
+        # border/padding, and the scroll indicators.
+        return max(5, min(15, height - 8))
+
     def choose_option(
         self,
         title: str,
@@ -623,13 +648,32 @@ class TerminalBannerUI:
             return default
 
         index = values.index(current_value) if current_value in values else 0
+        query = ""
+        filterable = len(normalized_options) > self._FILTER_THRESHOLD
+        window_start = 0
+
+        def matches(option: dict[str, str]) -> bool:
+            needle = query.casefold()
+            haystack = f"{option['label']} {option.get('description', '')}".casefold()
+            return needle in haystack
 
         with self._bounded_screen():
             while True:
+                filtered = (
+                    [opt for opt in normalized_options if matches(opt)]
+                    if filterable and query
+                    else normalized_options
+                )
+                index = max(0, min(index, len(filtered) - 1)) if filtered else 0
+
                 self.console.clear()
+                panel_help = sanitize_display_text(help_text)
+                if filterable:
+                    filter_line = f"Filter: {sanitize_display_text(query)}" if query else "Type to filter"
+                    panel_help = f"{panel_help}\n{filter_line}"
                 self.console.print(
                     Panel(
-                        Text(sanitize_display_text(help_text), style="grey70"),
+                        Text(panel_help, style="grey70"),
                         title=Text(sanitize_display_text(title)),
                         title_align="left",
                         border_style="bright_cyan",
@@ -639,21 +683,38 @@ class TerminalBannerUI:
                 )
 
                 rows: list[Text] = []
-                for option_index, option in enumerate(normalized_options):
-                    is_selected = option_index == index
-                    prefix = "❯ " if is_selected else "  "
-                    row = Text()
-                    row.append(prefix, style="bright_green" if is_selected else "grey50")
-                    row.append(
-                        sanitize_display_text(option["label"]),
-                        style="bold bright_green" if is_selected else "white",
-                    )
-                    description = sanitize_display_text(
-                        option.get("description", "").strip()
-                    )
-                    if description:
-                        row.append(f" — {description}", style="grey70")
-                    rows.append(row)
+                if not filtered:
+                    rows.append(Text(f"No matches for '{query}'", style="red"))
+                else:
+                    max_rows = self._visible_row_budget()
+                    # Keep the cursor inside the window, scrolling the
+                    # minimum amount needed rather than re-centering it.
+                    window_start = min(window_start, index)
+                    if index >= window_start + max_rows:
+                        window_start = index - max_rows + 1
+                    window_start = max(0, min(window_start, max(0, len(filtered) - max_rows)))
+                    window_end = min(len(filtered), window_start + max_rows)
+
+                    if window_start > 0:
+                        rows.append(Text(f"↑ {window_start} more above", style="grey50"))
+                    for option_index in range(window_start, window_end):
+                        option = filtered[option_index]
+                        is_selected = option_index == index
+                        prefix = "❯ " if is_selected else "  "
+                        row = Text()
+                        row.append(prefix, style="bright_green" if is_selected else "grey50")
+                        row.append(
+                            sanitize_display_text(option["label"]),
+                            style="bold bright_green" if is_selected else "white",
+                        )
+                        description = sanitize_display_text(
+                            option.get("description", "").strip()
+                        )
+                        if description:
+                            row.append(f" — {description}", style="grey70")
+                        rows.append(row)
+                    if window_end < len(filtered):
+                        rows.append(Text(f"↓ {len(filtered) - window_end} more below", style="grey50"))
 
                 self.console.print(
                     Panel(
@@ -666,15 +727,30 @@ class TerminalBannerUI:
 
                 pressed = self._read_menu_key()
                 if pressed == "up":
-                    index = (index - 1) % len(normalized_options)
+                    if filtered:
+                        index = (index - 1) % len(filtered)
                     continue
                 if pressed == "down":
-                    index = (index + 1) % len(normalized_options)
+                    if filtered:
+                        index = (index + 1) % len(filtered)
                     continue
                 if pressed == "enter":
-                    return normalized_options[index]["value"]
+                    if filtered:
+                        return filtered[index]["value"]
+                    continue
                 if pressed in {"escape", "interrupt"}:
                     return None
+                if not filterable:
+                    continue
+                if pressed == "backspace":
+                    if query:
+                        query = query[:-1]
+                        index = 0
+                    continue
+                if pressed.startswith("char:"):
+                    query += pressed[len("char:"):]
+                    index = 0
+                    continue
 
     def prompt_text(
         self,
@@ -798,6 +874,12 @@ class TerminalBannerUI:
 
     @staticmethod
     def _read_menu_key() -> str:
+        """Read one logical key press for a menu: "up"/"down"/"enter"/
+        "escape"/"interrupt"/"backspace", or "char:<c>" for any other
+        printable character (used by ``choose_option`` to filter long lists
+        by typing). There is deliberately no vim-style j/k shortcut here —
+        once arbitrary typing can filter the list, "j"/"k" must always be
+        literal filter characters, never a hidden navigation binding."""
         if sys.platform == "win32":
             import msvcrt
 
@@ -816,10 +898,10 @@ class TerminalBannerUI:
                     return "escape"
                 if key == "\x03":
                     return "interrupt"
-                if key.lower() == "k":
-                    return "up"
-                if key.lower() == "j":
-                    return "down"
+                if key in {"\x08", "\x7f"}:
+                    return "backspace"
+                if key and key.isprintable():
+                    return f"char:{key}"
 
         import os
         import select
@@ -836,6 +918,8 @@ class TerminalBannerUI:
                     return "enter"
                 if key == "\x03":
                     return "interrupt"
+                if key in {"\x7f", "\x08"}:
+                    return "backspace"
                 if key == "\x1b":
                     ready, _, _ = select.select([fd], [], [], 0.05)
                     if not ready:
@@ -855,10 +939,8 @@ class TerminalBannerUI:
                             return "down"
                         continue
                     return "escape"
-                if key.lower() == "k":
-                    return "up"
-                if key.lower() == "j":
-                    return "down"
+                if key and key.isprintable():
+                    return f"char:{key}"
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 

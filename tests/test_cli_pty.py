@@ -706,9 +706,11 @@ def test_cli_pty_settings_api_edits_the_context_window(tmp_path):
         child.settle()
 
         # Request interval · Request timeout · Retry attempts · Retry backoff ·
-        # Context window — the menu opens on the first row, "j" moves down.
+        # Context window — the menu opens on the first row, ↓ moves down.
+        # (Not "j": choose_option now filters long lists by typing, so a
+        # plain letter key is never a hidden navigation shortcut.)
         for _ in range(4):
-            child.send("j")
+            child.send("\x1b[B")
             child.settle(quiet=0.1)
         opened = child.mark()
         child.send("\r")

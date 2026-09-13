@@ -873,3 +873,116 @@ def test_manual_provider_discovery_endpoint_uses_credentials():
             "label": "Z.ai (GLM)",
         }
     ]
+
+
+# ── Regional base-URL racing ────────────────────────────────────────────────
+
+
+def test_regional_base_url_candidates_only_covers_multi_region_providers():
+    for slug, candidates in llm_clients.REGIONAL_BASE_URL_CANDIDATES.items():
+        assert slug in llm_clients.MANUAL_OPENAI_PROVIDERS
+        assert len(candidates) >= 2
+        assert len(set(candidates)) == len(candidates)  # no duplicate entries
+        for url in candidates:
+            assert url.startswith("https://")
+
+
+def test_race_base_urls_picks_the_fastest_responder(monkeypatch):
+    import time as time_module
+
+    import httpx
+
+    def fake_get(url, headers=None, timeout=None):
+        if url == "https://slow.example/v1/models":
+            time_module.sleep(0.05)
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    winner, results = llm_clients.race_base_urls(
+        ("https://slow.example/v1", "https://fast.example/v1"), api_key="k", timeout=2.0
+    )
+
+    assert winner == "https://fast.example/v1"
+    assert results["https://fast.example/v1"]["status"] == "ok"
+    assert results["https://slow.example/v1"]["status"] == "ok"
+    assert results["https://fast.example/v1"]["elapsed"] < results["https://slow.example/v1"]["elapsed"]
+
+
+def test_race_base_urls_excludes_a_region_that_rejects_the_key_even_if_fast(monkeypatch):
+    """The whole point: a fast-but-wrong-region endpoint is often still
+    reachable and answers something — it must never win just for being
+    fast if it explicitly rejects the key."""
+    import time as time_module
+
+    import httpx
+
+    def fake_get(url, headers=None, timeout=None):
+        if url == "https://wrong-region-fast.example/v1/models":
+            return SimpleNamespace(status_code=401)
+        time_module.sleep(0.05)
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    winner, results = llm_clients.race_base_urls(
+        ("https://wrong-region-fast.example/v1", "https://right-region-slower.example/v1"),
+        api_key="k",
+        timeout=2.0,
+    )
+
+    assert winner == "https://right-region-slower.example/v1"
+    assert results["https://wrong-region-fast.example/v1"]["status"] == "unauthorized"
+
+
+def test_race_base_urls_treats_connection_errors_as_unreachable(monkeypatch):
+    import httpx
+
+    def fake_get(url, headers=None, timeout=None):
+        if url == "https://down.example/v1/models":
+            raise httpx.ConnectError("boom")
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    winner, results = llm_clients.race_base_urls(
+        ("https://down.example/v1", "https://up.example/v1"), api_key="k", timeout=2.0
+    )
+
+    assert winner == "https://up.example/v1"
+    assert results["https://down.example/v1"] == {"status": "unreachable", "elapsed": None}
+
+
+def test_race_base_urls_returns_none_when_every_candidate_fails(monkeypatch):
+    import httpx
+
+    def fake_get(url, headers=None, timeout=None):
+        raise httpx.ConnectError("no network")
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    winner, results = llm_clients.race_base_urls(
+        ("https://a.example/v1", "https://b.example/v1"), api_key="k", timeout=1.0
+    )
+
+    assert winner is None
+    assert results == {
+        "https://a.example/v1": {"status": "unreachable", "elapsed": None},
+        "https://b.example/v1": {"status": "unreachable", "elapsed": None},
+    }
+
+
+def test_race_base_urls_returns_none_when_key_rejected_everywhere(monkeypatch):
+    import httpx
+
+    def fake_get(url, headers=None, timeout=None):
+        return SimpleNamespace(status_code=401)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    winner, results = llm_clients.race_base_urls(
+        ("https://a.example/v1", "https://b.example/v1"), api_key="bad-key", timeout=1.0
+    )
+
+    assert winner is None
+    assert all(item["status"] == "unauthorized" for item in results.values())

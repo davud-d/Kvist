@@ -174,6 +174,35 @@ def test_ensure_provider_credentials_uses_prompt_and_mocked_validation(tmp_path,
     assert user_config.load_user_config(path)["openai_api_key"] == "secret-key"
 
 
+def test_ensure_provider_credentials_uses_injected_prompt_secret_fn(tmp_path, monkeypatch):
+    """A frontend with a real masked-input widget must be able to override the
+    bare getpass() fallback, which has no visible feedback at all."""
+    path = tmp_path / "config.json"
+    calls = []
+
+    def fake_ui_prompt(label: str) -> str:
+        calls.append(label)
+        return "ui-provided-key"
+
+    # If the injected function were ignored, this would blow up: the bare
+    # module-level prompt_secret is not mocked here.
+    monkeypatch.setattr(
+        user_config, "prompt_secret", lambda label: (_ for _ in ()).throw(AssertionError("fallback used"))
+    )
+
+    credentials = user_config.ensure_provider_credentials(
+        provider="qwen",
+        validation_model="qwen-max",
+        required_keys=("qwen_api_key",),
+        config_path=path,
+        prompt_secret_fn=fake_ui_prompt,
+    )
+
+    assert credentials == {"qwen_api_key": "ui-provided-key"}
+    assert calls == ["Qwen (DashScope) API key"]
+    assert user_config.load_user_config(path)["qwen_api_key"] == "ui-provided-key"
+
+
 def test_validate_api_key_wraps_openai_errors(monkeypatch):
     class Models:
         def list(self):

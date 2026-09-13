@@ -132,6 +132,8 @@ from llm_clients import (
     is_custom_provider,
     extract_custom_provider_name,
     MANUAL_OPENAI_PROVIDERS,
+    REGIONAL_BASE_URL_CANDIDATES,
+    race_base_urls,
     MODEL_ROLES,
     OPENAI_API_KEY_KEY,
     OPENAI_PROVIDER,
@@ -173,6 +175,7 @@ from user_config import (
     get_saved_provider_or_none,
     load_available_credentials,
     prompt_provider_choice,
+    prompt_secret,
     save_models_for_provider,
     get_saved_role,
     save_role_selection,
@@ -734,16 +737,112 @@ def build_agent(
                 _display_text(f"{provider_display} models saved.", "green")
             )
 
+    if provider in MANUAL_OPENAI_PROVIDERS and sys.stdin.isatty():
+        manual_config = MANUAL_OPENAI_PROVIDERS[provider]
+        api_key_key = manual_config["api_key_key"]
+        base_url_key = manual_config["base_url_key"]
+        existing = load_available_credentials((api_key_key, base_url_key))
+        regional_candidates = REGIONAL_BASE_URL_CANDIDATES.get(provider)
+
+        if not existing.get(api_key_key) and regional_candidates and not existing.get(base_url_key):
+            # Several of these vendors are region-sharded (Xiaomi Token
+            # Plan: cn/sgp/ams; Qwen: intl/mainland; Moonshot/MiniMax/
+            # SiliconFlow: .com/.cn) and a key issued for one region gets a
+            # plain 401 on another region's endpoint — indistinguishable
+            # from a wrong key (a real case reported in Sep 2026). Racing on
+            # raw reachability alone doesn't fix that: a fast-but-wrong
+            # region is usually still up and answers something. So the key
+            # is collected up front and the race is authenticated — a
+            # 401/403 excludes that region outright regardless of speed;
+            # see race_base_urls in llm_clients.py.
+            secret_ui = TerminalBannerUI(console=console, verbose=verbose)
+            api_key_label = secret_label_for_key(api_key_key)
+            entered_key = secret_ui.prompt_secret(
+                title=api_key_label,
+                help_text="Paste or type the value, then press Enter.",
+            )
+            if not entered_key:
+                raise RuntimeError(f"{api_key_label} is required for {provider_label(provider)}.")
+
+            console.print(
+                _display_text(
+                    f"Testing {len(regional_candidates)} {provider_label(provider)} "
+                    "regions with this key...",
+                    "dim",
+                )
+            )
+            winner, race_results = race_base_urls(regional_candidates, entered_key)
+            if winner is None:
+                if all(item["status"] == "unauthorized" for item in race_results.values()):
+                    raise RuntimeError(
+                        f"{provider_label(provider)} rejected this API key in every known "
+                        "region. Double-check it was copied correctly."
+                    )
+                console.print(
+                    _display_text(
+                        f"No {provider_label(provider)} endpoint responded within a few "
+                        "seconds — check your internet connection, or run /provider "
+                        "again to pick a different provider.",
+                        "red",
+                    )
+                )
+                raise RuntimeError(
+                    f"Could not reach any {provider_label(provider)} regional endpoint "
+                    f"(tried: {', '.join(regional_candidates)})."
+                )
+            console.print(
+                _display_text(
+                    f"Fastest region that accepted this key: {winner} "
+                    f"({race_results[winner]['elapsed'] * 1000:.0f} ms).",
+                    "green",
+                )
+            )
+            set_provider_secret(api_key_key, entered_key)
+            set_provider_secret(base_url_key, winner)
+        elif not existing.get(api_key_key):
+            # Single-endpoint provider (or a base URL override is already
+            # saved): plain confirm/edit, no race needed. The key itself is
+            # still collected afterward by ensure_provider_credentials.
+            base_url_ui = TerminalBannerUI(console=console, verbose=verbose)
+            chosen_base_url = base_url_ui.prompt_text(
+                title=f"Base URL for {provider_label(provider)}",
+                current_value=existing.get(base_url_key) or manual_config["default_base_url"],
+                help_text=(
+                    "Confirm, or edit if your account/key uses a different "
+                    "region or endpoint. Press Enter to accept."
+                ),
+            )
+            if chosen_base_url and chosen_base_url.strip():
+                set_provider_secret(base_url_key, chosen_base_url.strip())
+
     required_keys = required_secret_keys_for_provider(
         provider,
         [models["fast"], models["smart"], models["planner"]],
     )
+
+    def _prompt_secret_via_ui(label: str) -> str:
+        # ensure_provider_credentials otherwise falls back to a bare
+        # getpass() call with no visible feedback at all (not even
+        # asterisks) — this gives first-time key entry the same masked
+        # Rich/prompt_toolkit field that /change-api already uses. Without a
+        # real TTY, keep the original stdin-pipe fallback (run_task.py /
+        # scripted use can still pipe a secret in) rather than the UI, which
+        # would just return nothing.
+        if not sys.stdin.isatty():
+            return prompt_secret(label)
+        secret_ui = TerminalBannerUI(console=console, verbose=verbose)
+        return secret_ui.prompt_secret(
+            title=label,
+            help_text="Paste or type the value, then press Enter.",
+        ) or ""
+
     credentials = ensure_provider_credentials(
         provider=provider,
         validation_model=models["fast"],
         required_keys=required_keys,
         language_hint=language_hint,
         skip_validation=(provider == OPENAI_PROVIDER),
+        prompt_secret_fn=_prompt_secret_via_ui,
     )
     if provider == FREEFLOW_PROVIDER:
         credentials.update(

@@ -379,7 +379,22 @@ def ensure_provider_credentials(
     config_path: Path | None = None,
     language_hint: str | None = None,
     skip_validation: bool = False,
+    prompt_secret_fn: Callable[[str], str] | None = None,
 ) -> dict[str, str]:
+    """Resolve (and persist) the secrets a provider needs, prompting for any
+    that are missing.
+
+    ``prompt_secret_fn`` overrides how a missing secret is collected. It
+    defaults to the bare ``getpass``-based :func:`prompt_secret` in this
+    module, which has no masking feedback at all (not even asterisks — that
+    is ``getpass``'s actual behavior) and can fall back to fully visible
+    input if the terminal can't disable echo. Frontends with a real input
+    widget (the Rich/prompt_toolkit masked field in ``TerminalBannerUI``)
+    should pass their own so first-time key entry gets the same visible
+    feedback as `/change-api` already has, instead of silently dropping to
+    this primitive fallback.
+    """
+    secret_prompt = prompt_secret_fn or prompt_secret
     normalized_provider = normalize_provider(provider)
     payload = load_user_config(config_path)
     payload[LLM_PROVIDER_KEY] = normalized_provider
@@ -395,7 +410,7 @@ def ensure_provider_credentials(
     for key_name in keys_to_resolve:
         secret = _resolve_secret(payload, key_name)
         if not secret:
-            secret = prompt_secret(_SECRET_LABELS.get(key_name, key_name))
+            secret = secret_prompt(_SECRET_LABELS.get(key_name, key_name))
 
         if not secret:
             if normalized_provider == FREEFLOW_PROVIDER:

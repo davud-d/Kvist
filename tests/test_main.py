@@ -103,6 +103,273 @@ def test_build_agent_wires_manual_tier_provider(tmp_path, monkeypatch):
     assert config.fast_model == "qwen-flash"
 
 
+def test_build_agent_wires_ui_backed_secret_prompt(tmp_path, monkeypatch):
+    """ensure_provider_credentials must get a prompt_secret_fn backed by the
+    real masked UI, not silently fall through to bare getpass() (no visible
+    feedback at all) the way it used to for any first-time key entry."""
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "openai")
+    monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: (["gpt-test"], None))
+    monkeypatch.setattr(
+        main, "resolve_accessible_models",
+        lambda provider, models, available, language_hint=None: (models, []),
+    )
+    monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+
+    captured_kwargs = {}
+
+    def fake_ensure(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {"openai_api_key": "key"}
+
+    monkeypatch.setattr(main, "ensure_provider_credentials", fake_ensure)
+
+    main.build_agent(
+        executor=SafeExecutor(tmp_path),
+        max_steps=7,
+        persist_logs=False,
+        verbose=False,
+        language_hint="en",
+    )
+
+    assert callable(captured_kwargs["prompt_secret_fn"])
+    # Headless (no TTY): keeps the original stdin-pipe fallback (run_task.py /
+    # scripted use can still pipe a secret in) rather than using the UI.
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(main, "prompt_secret", lambda label: f"piped:{label}")
+    assert captured_kwargs["prompt_secret_fn"]("Some label") == "piped:Some label"
+
+    # With a TTY, it must delegate to TerminalBannerUI.prompt_secret rather
+    # than the bare getpass() fallback.
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    seen_titles = []
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def prompt_secret(self, title, **kwargs):
+            seen_titles.append(title)
+            return "typed-secret"
+
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+    assert captured_kwargs["prompt_secret_fn"]("OpenAI API key") == "typed-secret"
+    assert seen_titles == ["OpenAI API key"]
+
+
+def test_build_agent_confirms_base_url_on_first_time_manual_provider_setup(tmp_path, monkeypatch):
+    """A manual-tier provider with a single known endpoint (no regional
+    race) must still let the user confirm/override the base URL on first
+    setup, pre-filled with the default."""
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "mistral")
+    monkeypatch.setattr(
+        main, "get_saved_models",
+        lambda provider: {"fast": "mistral-small", "smart": "mistral-large", "planner": "mistral-large"},
+    )
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: ([], None))
+    monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+
+    saved_secrets = {}
+    monkeypatch.setattr(main, "set_provider_secret", lambda key, value, **kw: saved_secrets.__setitem__(key, value))
+    monkeypatch.setattr(
+        main, "ensure_provider_credentials",
+        lambda **kwargs: {"mistral_api_key": "key"},
+    )
+
+    def race_should_not_run(*args, **kwargs):
+        raise AssertionError("race_base_urls must not run for a single-endpoint provider")
+
+    monkeypatch.setattr(main, "race_base_urls", race_should_not_run)
+
+    seen_prompts = []
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def prompt_text(self, title, current_value="", **kwargs):
+            seen_prompts.append((title, current_value))
+            return "https://api.mistral.ai/v1"
+
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+
+    main.build_agent(
+        executor=SafeExecutor(tmp_path),
+        max_steps=7,
+        persist_logs=False,
+        verbose=False,
+        language_hint="en",
+    )
+
+    assert len(seen_prompts) == 1
+    title, current_value = seen_prompts[0]
+    assert "Mistral AI" in title
+    assert current_value == "https://api.mistral.ai/v1"
+    assert saved_secrets == {"mistral_base_url": "https://api.mistral.ai/v1"}
+
+
+def test_build_agent_races_regional_endpoints_authenticated_and_suggests_the_fastest(tmp_path, monkeypatch):
+    """xiaomi-tokenplan has 3 known regional endpoints — first-time setup
+    must collect the key up front, race the regions *with* it, and persist
+    whichever accepted the key fastest (not just whichever answered fastest:
+    a fast-but-wrong region would still "respond", just with a 401)."""
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "xiaomi-tokenplan")
+    monkeypatch.setattr(
+        main, "get_saved_models",
+        lambda provider: {"fast": "mimo-v2.5", "smart": "mimo-v2.5", "planner": "mimo-v2.5"},
+    )
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: ([], None))
+    monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+    monkeypatch.setattr(main, "ensure_provider_credentials", lambda **kwargs: {"xiaomi_tokenplan_api_key": "typed-key"})
+
+    saved_secrets = {}
+    monkeypatch.setattr(main, "set_provider_secret", lambda key, value, **kw: saved_secrets.__setitem__(key, value))
+
+    race_calls = []
+
+    def fake_race(candidates, api_key, timeout=8.0):
+        race_calls.append((candidates, api_key))
+        # cn "responds" (still up) but rejects this key; sgp accepts it.
+        return "https://token-plan-sgp.xiaomimimo.com/v1", {
+            "https://token-plan-cn.xiaomimimo.com/v1": {"status": "unauthorized", "elapsed": 0.1},
+            "https://token-plan-sgp.xiaomimimo.com/v1": {"status": "ok", "elapsed": 0.42},
+            "https://token-plan-ams.xiaomimimo.com/v1": {"status": "unreachable", "elapsed": None},
+        }
+
+    monkeypatch.setattr(main, "race_base_urls", fake_race)
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def prompt_secret(self, title, **kwargs):
+            return "typed-key"
+
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+
+    main.build_agent(
+        executor=SafeExecutor(tmp_path),
+        max_steps=7,
+        persist_logs=False,
+        verbose=False,
+        language_hint="en",
+    )
+
+    assert len(race_calls) == 1
+    candidates, api_key = race_calls[0]
+    assert set(candidates) == {
+        "https://token-plan-cn.xiaomimimo.com/v1",
+        "https://token-plan-sgp.xiaomimimo.com/v1",
+        "https://token-plan-ams.xiaomimimo.com/v1",
+    }
+    assert api_key == "typed-key"
+    assert saved_secrets == {
+        "xiaomi_tokenplan_api_key": "typed-key",
+        "xiaomi_tokenplan_base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
+    }
+
+
+def test_build_agent_raises_clearly_when_key_rejected_in_every_region(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "qwen")
+    monkeypatch.setattr(
+        main, "get_saved_models",
+        lambda provider: {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"},
+    )
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
+    monkeypatch.setattr(
+        main, "race_base_urls",
+        lambda candidates, api_key, timeout=8.0: (
+            None, {url: {"status": "unauthorized", "elapsed": 0.1} for url in candidates}
+        ),
+    )
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def prompt_secret(self, title, **kwargs):
+            return "bad-key"
+
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+
+    with pytest.raises(RuntimeError, match="rejected this API key in every known region"):
+        main.build_agent(
+            executor=SafeExecutor(tmp_path),
+            max_steps=7,
+            persist_logs=False,
+            verbose=False,
+            language_hint="en",
+        )
+
+
+def test_build_agent_raises_clearly_when_no_region_responds(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "qwen")
+    monkeypatch.setattr(
+        main, "get_saved_models",
+        lambda provider: {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"},
+    )
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
+    monkeypatch.setattr(
+        main, "race_base_urls",
+        lambda candidates, api_key, timeout=8.0: (
+            None, {url: {"status": "unreachable", "elapsed": None} for url in candidates}
+        ),
+    )
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def prompt_secret(self, title, **kwargs):
+            return "some-key"
+
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+
+    with pytest.raises(RuntimeError, match="Could not reach any Qwen"):
+        main.build_agent(
+            executor=SafeExecutor(tmp_path),
+            max_steps=7,
+            persist_logs=False,
+            verbose=False,
+            language_hint="en",
+        )
+
+
+def test_build_agent_skips_base_url_prompt_when_provider_already_configured(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "xiaomi-tokenplan")
+    monkeypatch.setattr(
+        main, "get_saved_models",
+        lambda provider: {"fast": "mimo-v2.5", "smart": "mimo-v2.5", "planner": "mimo-v2.5"},
+    )
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {"xiaomi_tokenplan_api_key": "already-set"})
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: ([], None))
+    monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+    monkeypatch.setattr(
+        main, "ensure_provider_credentials",
+        lambda **kwargs: {"xiaomi_tokenplan_api_key": "already-set"},
+    )
+
+    prompt_calls = []
+    monkeypatch.setattr(main, "TerminalBannerUI", lambda **kw: SimpleNamespace(prompt_text=lambda **k: prompt_calls.append(k)))
+
+    main.build_agent(
+        executor=SafeExecutor(tmp_path),
+        max_steps=7,
+        persist_logs=False,
+        verbose=False,
+        language_hint="en",
+    )
+
+    assert prompt_calls == []
+
+
 def test_build_agent_rejects_manual_tier_provider_with_no_models(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "moonshot")
     monkeypatch.setattr(main, "get_saved_models", lambda provider: {})

@@ -297,6 +297,105 @@ SUPPORTED_LLM_PROVIDERS = (
     OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
 ) + tuple(MANUAL_OPENAI_PROVIDERS)
 
+# Manual-tier providers with more than one known regional/mirror endpoint. A
+# key issued for one region gets a plain 401 on another region's endpoint —
+# indistinguishable from a wrong key (a real case: Xiaomi Token Plan cn vs.
+# sgp vs. ams, Sep 2026). Everything else in MANUAL_OPENAI_PROVIDERS has a
+# single documented endpoint and is deliberately left out of this dict —
+# racing candidates only makes sense where more than one legitimately exists.
+REGIONAL_BASE_URL_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "qwen": (
+        "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    ),
+    "moonshot": (
+        "https://api.moonshot.ai/v1",
+        "https://api.moonshot.cn/v1",
+    ),
+    "minimax": (
+        "https://api.minimax.io/v1",
+        "https://api.minimaxi.com/v1",
+    ),
+    "siliconflow": (
+        "https://api.siliconflow.com/v1",
+        "https://api.siliconflow.cn/v1",
+    ),
+    "xiaomi-tokenplan": (
+        "https://token-plan-cn.xiaomimimo.com/v1",
+        "https://token-plan-sgp.xiaomimimo.com/v1",
+        "https://token-plan-ams.xiaomimimo.com/v1",
+    ),
+}
+
+
+def race_base_urls(
+    candidates: tuple[str, ...],
+    api_key: str,
+    timeout: float = 8.0,
+) -> tuple[str | None, dict[str, dict[str, Any]]]:
+    """Probe every candidate base URL concurrently, authenticated with
+    ``api_key``, and return whichever accepted it fastest.
+
+    Plain reachability is not enough here: a fast-but-wrong-region endpoint
+    is usually still up and will happily answer *something*, so racing on
+    raw latency alone can silently pick a region that has no idea about this
+    key — the exact failure mode this function exists to avoid. Each
+    candidate is queried at ``<base_url>/models`` with the key attached
+    (the same request ``fetch_available_models`` makes). A 401/403 marks
+    that region as having explicitly rejected this key and takes it out of
+    the running no matter how fast it answered; every other outcome (2xx, or
+    a non-auth error such as 404 for a vendor with no ``/models`` endpoint)
+    is treated as viable and ranked by latency.
+
+    Each result dict has ``status`` (``"ok"`` | ``"unauthorized"`` |
+    ``"other"`` | ``"unreachable"``) and ``elapsed`` (seconds, or ``None``
+    when unreachable). Returns ``(None, results)`` when nothing is viable —
+    callers should check whether every entry is ``"unauthorized"`` (the key
+    itself is wrong, not the region) versus ``"unreachable"`` (no internet,
+    or every regional cluster is down) to give the right explanation.
+    """
+    import httpx
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    results: dict[str, dict[str, Any]] = {
+        url: {"status": "unreachable", "elapsed": None} for url in candidates
+    }
+
+    def probe(url: str) -> tuple[str, dict[str, Any]]:
+        start = time.monotonic()
+        endpoint = url.rstrip("/") + "/models"
+        try:
+            response = httpx.get(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=timeout,
+            )
+            elapsed = time.monotonic() - start
+            if response.status_code in (401, 403):
+                return url, {"status": "unauthorized", "elapsed": elapsed}
+            if response.status_code < 500:
+                return url, {"status": "ok", "elapsed": elapsed}
+            return url, {"status": "other", "elapsed": elapsed}
+        except Exception:
+            return url, {"status": "unreachable", "elapsed": None}
+
+    with ThreadPoolExecutor(max_workers=max(1, len(candidates))) as pool:
+        futures = {pool.submit(probe, url) for url in candidates}
+        done, _not_done = wait(futures, timeout=timeout + 1)
+        for future in done:
+            url, outcome = future.result()
+            results[url] = outcome
+
+    viable = [
+        (url, outcome["elapsed"])
+        for url, outcome in results.items()
+        if outcome["status"] in ("ok", "other") and outcome["elapsed"] is not None
+    ]
+    if not viable:
+        return None, results
+    winner = min(viable, key=lambda item: item[1])[0]
+    return winner, results
+
 CUSTOM_PROVIDER_PREFIX = "custom:"
 CUSTOM_PROVIDER_PLACEHOLDER = "custom"
 MODEL_ROLES = ("fast", "smart", "planner")
