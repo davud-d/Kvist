@@ -131,6 +131,7 @@ from llm_clients import (
     get_model_options,
     is_custom_provider,
     extract_custom_provider_name,
+    MANUAL_OPENAI_PROVIDERS,
     MODEL_ROLES,
     OPENAI_API_KEY_KEY,
     OPENAI_PROVIDER,
@@ -673,13 +674,19 @@ def build_agent(
         language_hint=language_hint,
     )
 
-    # For OmniRoute, OpenRouter and custom providers, check if models are missing
-    if provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER) or is_custom_provider(provider):
+    # For OmniRoute, OpenRouter, manual-tier and custom providers, check if models are missing
+    if (
+        provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+        or provider in MANUAL_OPENAI_PROVIDERS
+        or is_custom_provider(provider)
+    ):
         missing_roles = [role for role in MODEL_ROLES if role not in models or not models[role]]
         if missing_roles:
             provider_display = provider_label(provider)
             if provider == OPENROUTER_PROVIDER:
                 example_model = "openai/gpt-5.4-mini"
+            elif provider in MANUAL_OPENAI_PROVIDERS:
+                example_model = "the exact model id from the provider's documentation"
             else:
                 example_model = "kr/claude-sonnet-4.5"
             if not sys.stdin.isatty():
@@ -699,6 +706,10 @@ def build_agent(
                 selected_models = configure_openrouter_models_interactively(ui, models)
             elif is_custom_provider(provider):
                 selected_models = configure_custom_provider_models_interactively(ui, models)
+            elif provider in MANUAL_OPENAI_PROVIDERS:
+                selected_models = configure_manual_provider_models_interactively(
+                    ui, models, provider
+                )
             else:
                 selected_models = configure_omniroute_models_interactively(ui, models)
             if selected_models is None:
@@ -975,6 +986,15 @@ def choose_provider(current_provider: str, verbose: bool) -> str | None:
         "label": "FreeFlow LLM",
         "description": "Gemini/Groq via FreeFlow, JSON — best effort",
     })
+
+    # Third-party OpenAI-compatible providers — one API key, manual model entry
+    # (same tier as OmniRoute above; see MANUAL_OPENAI_PROVIDERS in llm_clients.py).
+    for slug, config in MANUAL_OPENAI_PROVIDERS.items():
+        options.append({
+            "value": slug,
+            "label": config["label"],
+            "description": f"OpenAI-compatible — {config['default_base_url']}",
+        })
 
     # Add saved custom providers with protocol tags
     custom_providers = get_custom_providers()
@@ -1539,6 +1559,10 @@ def select_models_interactively(config: AgentConfig, verbose: bool) -> dict[str,
         return configure_omniroute_models_interactively(ui, current_models=current_models)
     if config.provider == OPENROUTER_PROVIDER:
         return configure_openrouter_models_interactively(ui, current_models=current_models)
+    if config.provider in MANUAL_OPENAI_PROVIDERS:
+        return configure_manual_provider_models_interactively(
+            ui, current_models=current_models, provider=config.provider
+        )
     if is_custom_provider(config.provider):
         return configure_custom_provider_models_interactively(ui, current_models=current_models)
     return choose_models(
@@ -2233,6 +2257,110 @@ def configure_omniroute_models_interactively(
     return None
 
 
+def configure_manual_provider_models_interactively(
+    ui: AgentUI,
+    current_models: dict[str, str],
+    provider: str,
+) -> dict[str, str] | None:
+    """Interactively configure models for a manual-tier provider (see
+    ``MANUAL_OPENAI_PROVIDERS`` in llm_clients.py). Kvist ships no static
+    model list for these vendors, but they are plain OpenAI-compatible
+    endpoints, so ``_model_picker_options`` can usually populate a live
+    ``/v1/models`` catalog once an API key is configured — offered as a
+    picker the same way ``configure_openrouter_models_interactively`` does.
+    Text entry (single id, or one per role) remains the fallback for a first
+    run with no key yet, or when the endpoint has no ``/v1/models``."""
+    provider_display = provider_label(provider)
+    console.print()
+    console.print(f"[bold cyan]{provider_display} Model Configuration[/bold cyan]")
+    console.print(
+        f"[dim]Enter the exact model id from {provider_display}'s documentation.[/dim]"
+    )
+
+    role_labels = {"fast": "Fast", "smart": "Smart", "planner": "Planner"}
+    console.print()
+    console.print("[bold]Current models:[/bold]")
+    for role in MODEL_ROLES:
+        _print_model_row(role_labels.get(role, role), current_models.get(role, ""))
+
+    picker_options, picker_is_live = _model_picker_options(provider)
+
+    console.print()
+    menu_options = []
+    if picker_is_live:
+        menu_options.append({
+            "value": "pick",
+            "label": f"Choose from the live {provider_display} model catalog",
+        })
+    menu_options.append({"value": "one", "label": "Enter one model id for all roles"})
+    menu_options.append({"value": "each", "label": "Enter a separate model id per role"})
+    menu_options.append({"value": "keep", "label": "Keep current models (unchanged)"})
+
+    action = ui.choose_option(
+        title="Select action:",
+        options=menu_options,
+        current_value="",
+        help_text="Enter — cancel and keep current models",
+    )
+    if action is None:
+        return None
+    if action == "keep":
+        console.print("[green]Current models kept.[/green]")
+        return dict(current_models)
+
+    if action == "pick":
+        selected = dict(current_models)
+        for role in MODEL_ROLES:
+            chosen = ui.choose_option(
+                title=f"Select model for {role_labels[role]}",
+                current_value=selected.get(role, picker_options[0]["value"]),
+                options=picker_options,
+                help_text="↑/↓ — select model, Enter — confirm, Esc — cancel all",
+            )
+            if chosen is None:
+                return None
+            selected[role] = chosen
+        console.print(
+            _display_text(f"Models selected from the {provider_display} catalog.", "green")
+        )
+        return selected
+
+    if action == "one":
+        model_id = ui.prompt_text(
+            title=f"Enter {provider_display} model id for all roles:",
+            current_value=current_models.get("fast", ""),
+            help_text="The exact model id, e.g. as shown in the provider's docs.",
+        )
+        if model_id is None:
+            return None
+        model_id = model_id.strip()
+        if not model_id:
+            console.print("[yellow]Model id cannot be empty.[/yellow]")
+            return None
+        console.print(_display_text(f"Model set to {model_id} for all roles.", "green"))
+        return {role: model_id for role in MODEL_ROLES}
+
+    if action == "each":
+        selected: dict[str, str] = {}
+        for role in MODEL_ROLES:
+            model_id = ui.prompt_text(
+                title=f"Enter {provider_display} model id for {role_labels[role]} role:",
+                current_value=current_models.get(role, ""),
+                help_text=_ROLE_HINTS[role],
+            )
+            if model_id is None:
+                return None
+            model_id = model_id.strip()
+            if not model_id:
+                console.print(_display_text(f"Model id for {role} cannot be empty.", "yellow"))
+                return None
+            selected[role] = model_id
+        console.print(_display_text("Models set per role.", "green"))
+        return selected
+
+    return None
+
+
 def main() -> None:
     args = (
         _DIRECT_CLI_ARGS
@@ -2782,6 +2910,7 @@ def main() -> None:
             if user_goal.lower() == "/models":
                 uses_manual_model_ids = (
                     config.provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+                    or config.provider in MANUAL_OPENAI_PROVIDERS
                     or is_custom_provider(config.provider)
                 )
                 if not uses_manual_model_ids and not get_model_options(config.provider):

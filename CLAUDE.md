@@ -444,18 +444,50 @@ start at an offered model. `tests/test_context_budget.py` additionally requires
 every shipped model to have an explicit `MODEL_INPUT_LIMITS` entry — the family
 fallback is for ids discovered at launch, not for the catalog Kvist controls.
 
-Six built-in providers (`SUPPORTED_LLM_PROVIDERS`), normalized names `openai` /
-`anthropic` / `deepseek` / `freeflow` / `omniroute` / `openrouter`, plus arbitrary
-user-defined endpoints under a `custom:` name prefix. `openai`, `omniroute`,
-`openrouter` and `deepseek` go through the OpenAI SDK directly (OmniRoute is a local
-OpenAI-compatible gateway defaulting to `http://localhost:20128/v1`, models entered
-manually); `anthropic` uses `AnthropicCompatibleClient`; `freeflow` wraps Gemini+Groq
-via `FreeFlowCompatibleClient` with cross-backend fallback. Capability is per provider,
-not one assumption for all: `provider_supports_streaming` is true for openai,
-openrouter, anthropic and deepseek (custom endpoints are opt-in via their saved
-`streaming` flag, default off), and `provider_supports_json_mode` is true for openai,
-openrouter and deepseek only. `resolve_models_for_provider` / `validate_model_selection` /
-`fallback_candidates_for_model` handle defaults, validation, and model fallback chains.
+Six core providers (`openai` / `anthropic` / `deepseek` / `freeflow` / `omniroute` /
+`openrouter`) plus a **manual tier** of 36 third-party OpenAI-compatible vendors
+(`MANUAL_OPENAI_PROVIDERS` in `llm_clients.py`: Qwen, Moonshot/Kimi, Zhipu, Z.ai,
+Xiaomi MiMo + Token Plan, MiniMax, 01.AI, StepFun, SiliconFlow, Baichuan, Qianfan,
+Hunyuan, ModelScope, Mistral, Groq, Together, Fireworks, xAI, Perplexity, Cerebras,
+DeepInfra, Novita, Vercel AI Gateway, Baseten, SambaNova, Nebius AI Studio, Friendli
+AI, Databricks Model Serving, Google AI Studio (direct), Cohere, AI21 Labs, ByteDance
+Doubao (Volcengine Ark), GitHub Models, iFlytek Spark, Scaleway Generative APIs), plus
+arbitrary user-defined endpoints under a `custom:` name
+prefix. `SUPPORTED_LLM_PROVIDERS` is the six core providers followed by
+`tuple(MANUAL_OPENAI_PROVIDERS)` — adding a vendor is one dict entry (`label`,
+`api_key_key`, `base_url_key`, `default_base_url`); every lookup (`provider_label`,
+`required_secret_keys_for_provider`, `resolve_models_for_provider`,
+`fallback_models_for_provider`/`fallback_candidates_for_model`, `get_model_options`,
+`_discovery_endpoints`, `create_llm_client`) keys off that dict or the derived
+`MANUAL_MODEL_PROVIDERS` frozenset instead of a per-provider branch. Manual-tier
+providers are wired like OmniRoute for defaults: one API key (`<slug>_api_key`, env
+`<SLUG>_API_KEY`), a region-overridable default base URL (`<slug>_base_url`), and
+**no static `_MODEL_DEFAULTS`/`_MODEL_OPTIONS` entries** — these vendors' model ids
+change too often for a hardcoded default to stay correct. `databricks` is the one
+entry with `default_base_url = ""`: every workspace has its own
+`<workspace>/serving-endpoints` URL, so `create_llm_client` raises a clear error and
+`_discovery_endpoints` contributes no endpoint until `databricks_base_url` is set —
+never silently falls through to another vendor's default. `gemini` and `groq` are
+deliberately separate credentials from FreeFlow's own `gemini_api_key`/`groq_api_key`
+(`gemini_direct_api_key`/`groq_direct_api_key`): FreeFlow talks to both through its
+own SDK wrapper, these manual-tier entries talk to them as plain OpenAI-compatible
+endpoints, and the two paths must stay independently configurable. Unlike OmniRoute's wizard,
+though, `configure_manual_provider_models_interactively` in `main.py` is wired like
+OpenRouter's: it calls `_model_picker_options`, which is `_discovery_endpoints`'s
+`/v1/models` catalog fetch for that provider, and offers a "choose from the live
+catalog" picker whenever discovery succeeds; text entry (one id, or one per role) is
+only the fallback for a first run with no key yet or an endpoint without `/v1/models`.
+`openai`, `omniroute`, `openrouter`, `deepseek` and every manual-tier provider go
+through the OpenAI SDK directly (OmniRoute is a local OpenAI-compatible gateway
+defaulting to `http://localhost:20128/v1`, models entered manually); `anthropic` uses
+`AnthropicCompatibleClient`; `freeflow` wraps Gemini+Groq via `FreeFlowCompatibleClient`
+with cross-backend fallback. Capability is per provider, not one assumption for all:
+`provider_supports_streaming` is true for openai, openrouter, anthropic and deepseek
+only (manual-tier providers default to false, same as an unverified custom endpoint,
+until one is individually verified), and `provider_supports_json_mode` is true for
+openai, openrouter and deepseek only. `resolve_models_for_provider` /
+`validate_model_selection` / `fallback_candidates_for_model` handle defaults,
+validation, and model fallback chains.
 `fetch_available_models` queries the provider's `/v1/models` on **every** launch and
 degrades to configured models with a warning when that fails.
 

@@ -4,6 +4,7 @@ import pytest
 
 import config_info
 import user_config
+from llm_clients import MANUAL_OPENAI_PROVIDERS
 
 _CREDENTIAL_ENVS = (
     "OPENAI_API_KEY",
@@ -44,8 +45,14 @@ def test_build_config_info_reports_saved_defaults_and_credentials(isolated_confi
     assert info["saved_role"] == "coder"
 
     by_id = {provider["id"]: provider for provider in info["providers"]}
-    assert set(by_id) == {"openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow"}
+    assert set(by_id) == {
+        "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow",
+    } | set(MANUAL_OPENAI_PROVIDERS)
     assert [p["id"] for p in info["providers"]][:3] == ["openai", "anthropic", "deepseek"]
+
+    qwen = by_id["qwen"]
+    assert qwen["requires_manual_models"] is True
+    assert qwen["options"] == []
 
     openai = by_id["openai"]
     assert openai["has_credentials"] is True

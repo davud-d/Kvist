@@ -184,6 +184,63 @@ def test_validate_api_key_wraps_openai_errors(monkeypatch):
         user_config.validate_api_key("bad", "model")
 
 
+def test_manual_provider_env_key_aliases(monkeypatch, tmp_path):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("QWEN_API_KEY", "env-qwen-key")
+    monkeypatch.setenv("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+
+    credentials = user_config.load_available_credentials(
+        ("qwen_api_key", "qwen_base_url"),
+        path,
+    )
+
+    assert credentials["qwen_api_key"] == "env-qwen-key"
+    assert credentials["qwen_base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+def test_manual_provider_secret_label():
+    assert user_config.secret_label_for_key("qwen_api_key") == "Qwen (DashScope) API key"
+
+
+def test_manual_provider_ensure_credentials_persists_base_url(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    monkeypatch.setattr(user_config, "prompt_secret", lambda label: "moonshot-secret")
+    user_config.save_user_config({"moonshot_base_url": "https://api.moonshot.cn/v1"}, path)
+
+    credentials = user_config.ensure_provider_credentials(
+        provider="moonshot",
+        validation_model="kimi-k2",
+        required_keys=("moonshot_api_key",),
+        config_path=path,
+    )
+
+    assert credentials["moonshot_api_key"] == "moonshot-secret"
+    assert credentials["moonshot_base_url"] == "https://api.moonshot.cn/v1"
+
+
+def test_manual_provider_ensure_credentials_missing_key_raises(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    monkeypatch.setattr(user_config, "prompt_secret", lambda label: "")
+
+    with pytest.raises(RuntimeError, match="Moonshot AI"):
+        user_config.ensure_provider_credentials(
+            provider="moonshot",
+            validation_model="kimi-k2",
+            required_keys=("moonshot_api_key",),
+            config_path=path,
+        )
+
+
+def test_prompt_provider_choice_accepts_manual_provider_name(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt="": "qwen")
+    assert user_config.prompt_provider_choice() == "qwen"
+
+
+def test_prompt_provider_choice_accepts_legacy_numbered_options(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda prompt="": "2")
+    assert user_config.prompt_provider_choice() == "anthropic"
+
+
 def test_omniroute_env_key_aliases(monkeypatch, tmp_path):
     path = tmp_path / "config.json"
     monkeypatch.setenv("OMNIROUTE_API_KEY", "env-omniroute-key")

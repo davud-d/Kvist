@@ -19,7 +19,7 @@ from durable_json import (
 )
 from llm_clients import (
     FREEFLOW_PROVIDER, OPENAI_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
-    ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
+    ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, MANUAL_OPENAI_PROVIDERS,
     CUSTOM_PROVIDER_PREFIX, is_custom_provider, extract_custom_provider_name,
     normalize_provider,
 )
@@ -62,6 +62,10 @@ _ENV_KEY_ALIASES = {
     DEEPSEEK_API_KEY_KEY: ("DEEPSEEK_API_KEY",),
     DEEPSEEK_BASE_URL_KEY: ("DEEPSEEK_BASE_URL",),
 }
+for _manual_provider, _manual_config in MANUAL_OPENAI_PROVIDERS.items():
+    _ENV_KEY_ALIASES[_manual_config["api_key_key"]] = (_manual_config["api_key_key"].upper(),)
+    _ENV_KEY_ALIASES[_manual_config["base_url_key"]] = (_manual_config["base_url_key"].upper(),)
+del _manual_provider, _manual_config
 
 _SECRET_LABELS = {
     USER_CONFIG_KEY: "OpenAI API key",
@@ -72,6 +76,9 @@ _SECRET_LABELS = {
     ANTHROPIC_API_KEY_KEY: "Anthropic API key",
     DEEPSEEK_API_KEY_KEY: "DeepSeek API key",
 }
+for _manual_provider, _manual_config in MANUAL_OPENAI_PROVIDERS.items():
+    _SECRET_LABELS[_manual_config["api_key_key"]] = f"{_manual_config['label']} API key"
+del _manual_provider, _manual_config
 
 StyleType = Literal["chat", "agents"]
 
@@ -411,6 +418,11 @@ def ensure_provider_credentials(
                 raise RuntimeError(
                     f"{_SECRET_LABELS.get(key_name, key_name)} is required for DeepSeek."
                 )
+            if normalized_provider in MANUAL_OPENAI_PROVIDERS:
+                label = MANUAL_OPENAI_PROVIDERS[normalized_provider]["label"]
+                raise RuntimeError(
+                    f"{_SECRET_LABELS.get(key_name, key_name)} is required for {label}."
+                )
             raise RuntimeError("OpenAI API key is required.")
 
         secret = secret.strip()
@@ -446,6 +458,13 @@ def ensure_provider_credentials(
             collected[DEEPSEEK_BASE_URL_KEY] = base_url.strip()
             payload[DEEPSEEK_BASE_URL_KEY] = base_url.strip()
             changed_values[DEEPSEEK_BASE_URL_KEY] = base_url.strip()
+    elif normalized_provider in MANUAL_OPENAI_PROVIDERS:
+        base_url_key = MANUAL_OPENAI_PROVIDERS[normalized_provider]["base_url_key"]
+        base_url = _resolve_secret(payload, base_url_key)
+        if base_url:
+            collected[base_url_key] = base_url.strip()
+            payload[base_url_key] = base_url.strip()
+            changed_values[base_url_key] = base_url.strip()
 
     # Custom providers: credentials are stored in provider config, not as separate keys
     if is_custom_provider(normalized_provider):
@@ -473,36 +492,39 @@ def get_saved_provider_or_none(config_path: Path | None = None) -> str | None:
 
 
 def prompt_provider_choice() -> str:
+    fixed_options: list[tuple[str, str, set[str]]] = [
+        (OPENAI_PROVIDER, "OpenAI", {"openai", "o"}),
+        (ANTHROPIC_PROVIDER, "Anthropic (Claude)", {"anthropic", "claude", "ant", "a"}),
+        (DEEPSEEK_PROVIDER, "DeepSeek", {"deepseek", "ds"}),
+        (FREEFLOW_PROVIDER, "FreeFlow LLM (Gemini/Groq)", {"freeflow", "free", "f"}),
+        (OMNIROUTE_PROVIDER, "OmniRoute", {"omniroute", "omni", "or"}),
+        (OPENROUTER_PROVIDER, "OpenRouter", {"openrouter", "openroute", "openrt", "router"}),
+    ]
+    manual_options = [
+        (slug, config["label"], {slug})
+        for slug, config in MANUAL_OPENAI_PROVIDERS.items()
+    ]
+    options = fixed_options + manual_options
+
     print("Select LLM provider:")
-    print("1. OpenAI")
-    print("2. Anthropic (Claude)")
-    print("3. DeepSeek")
-    print("4. FreeFlow LLM (Gemini/Groq)")
-    print("5. OmniRoute")
-    print("6. OpenRouter")
+    for index, (_slug, label, _aliases) in enumerate(options, start=1):
+        print(f"{index}. {label}")
+
+    aliases_by_number = {str(index): slug for index, (slug, _label, _aliases) in enumerate(options, start=1)}
+    aliases_by_name: dict[str, str] = {}
+    for slug, _label, aliases in options:
+        for alias in aliases:
+            aliases_by_name[alias] = slug
 
     while True:
         choice = input("> ").strip().lower()
 
-        if choice in {"1", "openai", "o"}:
-            return OPENAI_PROVIDER
+        if choice in aliases_by_number:
+            return aliases_by_number[choice]
+        if choice in aliases_by_name:
+            return aliases_by_name[choice]
 
-        if choice in {"2", "anthropic", "claude", "ant", "a"}:
-            return ANTHROPIC_PROVIDER
-
-        if choice in {"3", "deepseek", "ds"}:
-            return DEEPSEEK_PROVIDER
-
-        if choice in {"4", "freeflow", "free", "f"}:
-            return FREEFLOW_PROVIDER
-
-        if choice in {"5", "omniroute", "omni", "or"}:
-            return OMNIROUTE_PROVIDER
-
-        if choice in {"6", "openrouter", "openroute", "openrt", "router"}:
-            return OPENROUTER_PROVIDER
-
-        print("Enter 1-6: OpenAI, Anthropic, DeepSeek, FreeFlow, OmniRoute, OpenRouter.")
+        print(f"Enter 1-{len(options)}, or the provider name.")
 
 
 

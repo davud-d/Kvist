@@ -80,6 +80,91 @@ def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch
     assert warnings == ["warn"]
 
 
+def test_build_agent_wires_manual_tier_provider(tmp_path, monkeypatch):
+    # Manual-tier providers (Qwen, Moonshot, ...) resolve like OmniRoute: no
+    # defaults, so an already-saved model set must flow straight through.
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "qwen")
+    monkeypatch.setattr(
+        main, "get_saved_models", lambda provider: {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"}
+    )
+    monkeypatch.setattr(main, "ensure_provider_credentials", lambda **kwargs: {"qwen_api_key": "key"})
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: ([], None))
+    monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+
+    agent, config, warnings = main.build_agent(
+        executor=SafeExecutor(tmp_path),
+        max_steps=7,
+        persist_logs=False,
+        verbose=True,
+        language_hint="en",
+    )
+
+    assert config.provider == "qwen"
+    assert config.fast_model == "qwen-flash"
+
+
+def test_build_agent_rejects_manual_tier_provider_with_no_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "moonshot")
+    monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "TerminalBannerUI", lambda **kwargs: SimpleNamespace())
+    monkeypatch.setattr(
+        main, "configure_manual_provider_models_interactively", lambda ui, models, provider: {}
+    )
+
+    with pytest.raises(RuntimeError, match="no model configured"):
+        main.build_agent(
+            executor=SafeExecutor(tmp_path),
+            max_steps=7,
+            persist_logs=False,
+            verbose=False,
+            language_hint="en",
+        )
+
+
+def test_configure_manual_provider_models_interactively_offers_live_pick(monkeypatch):
+    monkeypatch.setattr(
+        main, "_model_picker_options",
+        lambda provider: ([{"value": "qwen-max", "label": "qwen-max", "description": ""}], True),
+    )
+
+    seen_menus = []
+
+    class FakeUI:
+        def choose_option(self, **kwargs):
+            options = kwargs["options"]
+            seen_menus.append([item["value"] for item in options])
+            if "pick" in [item["value"] for item in options] and kwargs["title"] == "Select action:":
+                return "pick"
+            return "qwen-max"
+
+    result = main.configure_manual_provider_models_interactively(
+        FakeUI(), current_models={"fast": "", "smart": "", "planner": ""}, provider="qwen"
+    )
+
+    assert result == {"fast": "qwen-max", "smart": "qwen-max", "planner": "qwen-max"}
+    assert "pick" in seen_menus[0]
+
+
+def test_configure_manual_provider_models_interactively_falls_back_to_text_entry(monkeypatch):
+    monkeypatch.setattr(main, "_model_picker_options", lambda provider: ([], False))
+
+    class FakeUI:
+        def choose_option(self, **kwargs):
+            options = [item["value"] for item in kwargs["options"]]
+            assert "pick" not in options
+            return "one"
+
+        def prompt_text(self, **kwargs):
+            return "custom-model-id"
+
+    result = main.configure_manual_provider_models_interactively(
+        FakeUI(), current_models={"fast": "", "smart": "", "planner": ""}, provider="qwen"
+    )
+
+    assert result == {"fast": "custom-model-id", "smart": "custom-model-id", "planner": "custom-model-id"}
+
+
 def test_build_agent_rejects_omniroute_with_no_models(tmp_path, monkeypatch):
     # "Keep current models" with nothing configured returns an empty dict; the
     # old code then hit KeyError: 'fast' deep in credential resolution.

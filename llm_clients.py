@@ -26,7 +26,6 @@ OMNIROUTE_PROVIDER = "omniroute"
 OPENROUTER_PROVIDER = "openrouter"
 ANTHROPIC_PROVIDER = "anthropic"
 DEEPSEEK_PROVIDER = "deepseek"
-SUPPORTED_LLM_PROVIDERS = (OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
 
 # API key environment keys.
 OPENAI_API_KEY_KEY = "openai_api_key"
@@ -44,6 +43,260 @@ ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
 DEEPSEEK_API_KEY_KEY = "deepseek_api_key"
 DEEPSEEK_BASE_URL_KEY = "deepseek_base_url"
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+
+# ── Third-party OpenAI-compatible providers ("manual" tier) ═════════════════
+#
+# Wired exactly like OmniRoute/OpenRouter already are: one API key, a fixed
+# default base URL (region-overridable via the matching *_base_url key), and
+# no built-in model catalog or defaults — these vendors' model ids change far
+# too often for a static default to stay correct, so the user always types
+# them, same as OmniRoute. Adding a new one is exactly this dict entry: every
+# lookup below keys off MANUAL_OPENAI_PROVIDERS / MANUAL_MODEL_PROVIDERS
+# instead of a dedicated per-provider branch.
+MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
+    "qwen": {
+        "label": "Qwen (DashScope)",
+        "api_key_key": "qwen_api_key",
+        "base_url_key": "qwen_base_url",
+        "default_base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    },
+    "moonshot": {
+        "label": "Moonshot AI (Kimi)",
+        "api_key_key": "moonshot_api_key",
+        "base_url_key": "moonshot_base_url",
+        "default_base_url": "https://api.moonshot.ai/v1",
+    },
+    "zhipu": {
+        "label": "Zhipu AI (BigModel)",
+        "api_key_key": "zhipu_api_key",
+        "base_url_key": "zhipu_base_url",
+        "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
+    },
+    "zai": {
+        "label": "Z.ai (GLM)",
+        "api_key_key": "zai_api_key",
+        "base_url_key": "zai_base_url",
+        "default_base_url": "https://api.z.ai/api/paas/v4",
+    },
+    "xiaomi": {
+        "label": "Xiaomi MiMo API",
+        "api_key_key": "xiaomi_api_key",
+        "base_url_key": "xiaomi_base_url",
+        "default_base_url": "https://api.xiaomimimo.com/v1",
+    },
+    "xiaomi-tokenplan": {
+        "label": "Xiaomi MiMo Token Plan",
+        "api_key_key": "xiaomi_tokenplan_api_key",
+        "base_url_key": "xiaomi_tokenplan_base_url",
+        "default_base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+    },
+    "minimax": {
+        "label": "MiniMax",
+        "api_key_key": "minimax_api_key",
+        "base_url_key": "minimax_base_url",
+        "default_base_url": "https://api.minimax.io/v1",
+    },
+    "lingyiwanwu": {
+        "label": "01.AI (Yi)",
+        "api_key_key": "lingyiwanwu_api_key",
+        "base_url_key": "lingyiwanwu_base_url",
+        "default_base_url": "https://api.lingyiwanwu.com/v1",
+    },
+    "stepfun": {
+        "label": "StepFun",
+        "api_key_key": "stepfun_api_key",
+        "base_url_key": "stepfun_base_url",
+        "default_base_url": "https://api.stepfun.com/v1",
+    },
+    "siliconflow": {
+        "label": "SiliconFlow",
+        "api_key_key": "siliconflow_api_key",
+        "base_url_key": "siliconflow_base_url",
+        "default_base_url": "https://api.siliconflow.com/v1",
+    },
+    "baichuan": {
+        "label": "Baichuan AI",
+        "api_key_key": "baichuan_api_key",
+        "base_url_key": "baichuan_base_url",
+        "default_base_url": "https://api.baichuan-ai.com/v1",
+    },
+    "qianfan": {
+        "label": "Baidu Qianfan (ERNIE)",
+        "api_key_key": "qianfan_api_key",
+        "base_url_key": "qianfan_base_url",
+        "default_base_url": "https://qianfan.baidubce.com/v2",
+    },
+    "hunyuan": {
+        "label": "Tencent Hunyuan",
+        "api_key_key": "hunyuan_api_key",
+        "base_url_key": "hunyuan_base_url",
+        "default_base_url": "https://api.hunyuan.cloud.tencent.com/v1",
+    },
+    "modelscope": {
+        "label": "ModelScope",
+        "api_key_key": "modelscope_api_key",
+        "base_url_key": "modelscope_base_url",
+        "default_base_url": "https://api-inference.modelscope.cn/v1",
+    },
+    "mistral": {
+        "label": "Mistral AI",
+        "api_key_key": "mistral_api_key",
+        "base_url_key": "mistral_base_url",
+        "default_base_url": "https://api.mistral.ai/v1",
+    },
+    "groq": {
+        "label": "Groq",
+        # Deliberately a separate credential from FreeFlow's own Groq key
+        # (GROQ_API_KEY_KEY): FreeFlow talks to Groq through its own SDK
+        # wrapper, this provider talks to it as a plain OpenAI-compatible
+        # endpoint, and the two paths must stay independently configurable.
+        "api_key_key": "groq_direct_api_key",
+        "base_url_key": "groq_direct_base_url",
+        "default_base_url": "https://api.groq.com/openai/v1",
+    },
+    "together": {
+        "label": "Together AI",
+        "api_key_key": "together_api_key",
+        "base_url_key": "together_base_url",
+        "default_base_url": "https://api.together.xyz/v1",
+    },
+    "fireworks": {
+        "label": "Fireworks AI",
+        "api_key_key": "fireworks_api_key",
+        "base_url_key": "fireworks_base_url",
+        "default_base_url": "https://api.fireworks.ai/inference/v1",
+    },
+    "xai": {
+        "label": "xAI (Grok)",
+        "api_key_key": "xai_api_key",
+        "base_url_key": "xai_base_url",
+        "default_base_url": "https://api.x.ai/v1",
+    },
+    "perplexity": {
+        "label": "Perplexity",
+        "api_key_key": "perplexity_api_key",
+        "base_url_key": "perplexity_base_url",
+        "default_base_url": "https://api.perplexity.ai",
+    },
+    "cerebras": {
+        "label": "Cerebras",
+        "api_key_key": "cerebras_api_key",
+        "base_url_key": "cerebras_base_url",
+        "default_base_url": "https://api.cerebras.ai/v1",
+    },
+    "deepinfra": {
+        "label": "DeepInfra",
+        "api_key_key": "deepinfra_api_key",
+        "base_url_key": "deepinfra_base_url",
+        "default_base_url": "https://api.deepinfra.com/v1/openai",
+    },
+    "novita": {
+        "label": "Novita AI",
+        "api_key_key": "novita_api_key",
+        "base_url_key": "novita_base_url",
+        "default_base_url": "https://api.novita.ai/v3/openai",
+    },
+    "vercel": {
+        "label": "Vercel AI Gateway",
+        "api_key_key": "vercel_api_key",
+        "base_url_key": "vercel_base_url",
+        "default_base_url": "https://ai-gateway.vercel.sh/v1",
+    },
+    "baseten": {
+        "label": "Baseten",
+        "api_key_key": "baseten_api_key",
+        "base_url_key": "baseten_base_url",
+        "default_base_url": "https://inference.baseten.co/v1",
+    },
+    "sambanova": {
+        "label": "SambaNova",
+        "api_key_key": "sambanova_api_key",
+        "base_url_key": "sambanova_base_url",
+        "default_base_url": "https://api.sambanova.ai/v1",
+    },
+    "nebius": {
+        "label": "Nebius AI Studio",
+        "api_key_key": "nebius_api_key",
+        "base_url_key": "nebius_base_url",
+        "default_base_url": "https://api.studio.nebius.com/v1",
+    },
+    "friendli": {
+        "label": "Friendli AI",
+        "api_key_key": "friendli_api_key",
+        "base_url_key": "friendli_base_url",
+        "default_base_url": "https://api.friendli.ai/serverless/v1",
+    },
+    "databricks": {
+        "label": "Databricks Model Serving",
+        "api_key_key": "databricks_api_key",
+        "base_url_key": "databricks_base_url",
+        # No usable default exists: every workspace has its own URL
+        # (<workspace>/serving-endpoints). An empty default forces
+        # required-base-url validation in create_llm_client and
+        # _discovery_endpoints instead of silently falling through to
+        # some other vendor's endpoint with this key.
+        "default_base_url": "",
+    },
+    "gemini": {
+        # "Google AI Studio" is the console (aistudio.google.com) where this
+        # key comes from; it's the same Gemini Developer API either name.
+        "label": "Google AI Studio (Gemini)",
+        # Deliberately a separate credential from FreeFlow's own Gemini key
+        # (GEMINI_API_KEY_KEY): FreeFlow talks to Gemini through its own SDK
+        # wrapper, this provider talks to it as a plain OpenAI-compatible
+        # endpoint, and the two paths must stay independently configurable.
+        "api_key_key": "gemini_direct_api_key",
+        "base_url_key": "gemini_direct_base_url",
+        "default_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+    },
+    "cohere": {
+        "label": "Cohere",
+        "api_key_key": "cohere_api_key",
+        "base_url_key": "cohere_base_url",
+        "default_base_url": "https://api.cohere.com/compatibility/v1",
+    },
+    "ai21": {
+        "label": "AI21 Labs (Jamba)",
+        "api_key_key": "ai21_api_key",
+        "base_url_key": "ai21_base_url",
+        "default_base_url": "https://api.ai21.com/studio/v1",
+    },
+    "doubao": {
+        "label": "ByteDance Doubao (Volcengine Ark)",
+        "api_key_key": "doubao_api_key",
+        "base_url_key": "doubao_base_url",
+        "default_base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    },
+    "github-models": {
+        "label": "GitHub Models",
+        # Auth is a GitHub PAT with the models:read scope, passed as a
+        # plain bearer token — fits the same api_key shape as every other
+        # entry here.
+        "api_key_key": "github_models_api_key",
+        "base_url_key": "github_models_base_url",
+        "default_base_url": "https://models.github.ai/inference",
+    },
+    "iflytek-spark": {
+        "label": "iFlytek Spark",
+        "api_key_key": "iflytek_spark_api_key",
+        "base_url_key": "iflytek_spark_base_url",
+        "default_base_url": "https://spark-api-open.xf-yun.com/v1",
+    },
+    "scaleway": {
+        "label": "Scaleway Generative APIs",
+        "api_key_key": "scaleway_api_key",
+        "base_url_key": "scaleway_base_url",
+        "default_base_url": "https://api.scaleway.ai/v1",
+    },
+}
+
+MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
+
+SUPPORTED_LLM_PROVIDERS = (
+    OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, FREEFLOW_PROVIDER,
+    OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
+) + tuple(MANUAL_OPENAI_PROVIDERS)
+
 CUSTOM_PROVIDER_PREFIX = "custom:"
 CUSTOM_PROVIDER_PLACEHOLDER = "custom"
 MODEL_ROLES = ("fast", "smart", "planner")
@@ -422,6 +675,8 @@ def provider_label(provider: str) -> str:
         return "Anthropic"
     if normalized == DEEPSEEK_PROVIDER:
         return "DeepSeek"
+    if normalized in MANUAL_OPENAI_PROVIDERS:
+        return MANUAL_OPENAI_PROVIDERS[normalized]["label"]
     if is_custom_provider(normalized):
         name = extract_custom_provider_name(normalized)
         return f"Custom: {name}"
@@ -460,6 +715,9 @@ def normalize_model_name(provider: str, model: str) -> str:
         return candidate
     if is_custom_provider(normalized_provider):
         # Custom providers: only strip whitespace, preserve exact model id
+        return candidate
+    if normalized_provider in MANUAL_MODEL_PROVIDERS:
+        # Manual-tier providers: only strip whitespace, preserve exact model id
         return candidate
     if normalized_provider != FREEFLOW_PROVIDER:
         return candidate
@@ -526,7 +784,7 @@ def is_model_supported_by_provider(provider: str, model: str) -> bool:
         return True
     if normalized_provider == DEEPSEEK_PROVIDER:
         return True
-    if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER):
+    if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER) or normalized_provider in MANUAL_MODEL_PROVIDERS:
         return is_valid_omniroute_model_id(model)
     if is_custom_provider(normalized_provider):
         # Custom providers: accept any non-empty model id
@@ -551,8 +809,12 @@ def resolve_models_for_provider(
     """Resolve configured models for each role, applying defaults and deprecation checks."""
     normalized_provider = normalize_provider(provider)
 
-    # OmniRoute, OpenRouter and custom providers have no defaults - only saved models and env overrides
-    if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER) or is_custom_provider(normalized_provider):
+    # OmniRoute, OpenRouter, manual-tier and custom providers have no defaults - only saved models and env overrides
+    if (
+        normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+        or normalized_provider in MANUAL_MODEL_PROVIDERS
+        or is_custom_provider(normalized_provider)
+    ):
         resolved: dict[str, str] = {}
         warnings: list[str] = []
         persisted = saved_models or {}
@@ -718,6 +980,14 @@ def _discovery_endpoints(normalized_provider: str, credentials: dict[str, str]) 
             credentials.get(DEEPSEEK_API_KEY_KEY),
             "DeepSeek",
         )
+    elif normalized_provider in MANUAL_OPENAI_PROVIDERS:
+        config = MANUAL_OPENAI_PROVIDERS[normalized_provider]
+        base_url = str(credentials.get(config["base_url_key"]) or config["default_base_url"]).strip()
+        # A provider with no working default (Databricks: every workspace has
+        # its own URL) must never silently fall through to some other
+        # vendor's endpoint just because base_url ended up empty.
+        if base_url:
+            add("openai", base_url, credentials.get(config["api_key_key"]), config["label"])
     elif is_custom_provider(normalized_provider):
         from user_config import get_custom_provider_by_name
         info = get_custom_provider_by_name(extract_custom_provider_name(normalized_provider)) or {}
@@ -866,8 +1136,12 @@ def fallback_models_for_provider(provider: str) -> tuple[str, ...]:
         return ()
     if normalized_provider == DEEPSEEK_PROVIDER:
         return ()
-    if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER) or is_custom_provider(normalized_provider):
-        # OmniRoute, OpenRouter and custom providers have no fallback chain - models are user-specified
+    if (
+        normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+        or normalized_provider in MANUAL_MODEL_PROVIDERS
+        or is_custom_provider(normalized_provider)
+    ):
+        # OmniRoute, OpenRouter, manual-tier and custom providers have no fallback chain - models are user-specified
         return ()
     return _FREEFLOW_GENERIC_FALLBACKS
 
@@ -892,8 +1166,12 @@ def fallback_candidates_for_model(
     if not allow_runtime_fallbacks:
         return tuple(candidates)
 
-    # OmniRoute, OpenRouter and custom providers: no runtime fallbacks - only the selected model
-    if normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER) or is_custom_provider(normalized_provider):
+    # OmniRoute, OpenRouter, manual-tier and custom providers: no runtime fallbacks - only the selected model
+    if (
+        normalized_provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+        or normalized_provider in MANUAL_MODEL_PROVIDERS
+        or is_custom_provider(normalized_provider)
+    ):
         return tuple(candidates)
 
     provider_fallbacks = fallback_models_for_provider(normalized_provider)
@@ -1034,8 +1312,12 @@ def get_model_options(
                 for item in live_ids
             ]
     normalized_provider = normalize_provider(provider)
-    if normalized_provider == OMNIROUTE_PROVIDER or is_custom_provider(normalized_provider):
-        # OmniRoute and custom providers use manual input, no predefined options
+    if (
+        normalized_provider == OMNIROUTE_PROVIDER
+        or normalized_provider in MANUAL_MODEL_PROVIDERS
+        or is_custom_provider(normalized_provider)
+    ):
+        # OmniRoute, manual-tier and custom providers use manual input, no predefined options
         return []
     return [dict(item) for item in _MODEL_OPTIONS.get(normalized_provider, [])]
 
@@ -1057,6 +1339,9 @@ def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[s
 
     if normalized_provider == DEEPSEEK_PROVIDER:
         return (DEEPSEEK_API_KEY_KEY,)
+
+    if normalized_provider in MANUAL_OPENAI_PROVIDERS:
+        return (MANUAL_OPENAI_PROVIDERS[normalized_provider]["api_key_key"],)
 
     if is_custom_provider(normalized_provider):
         # Custom providers store their API key in the provider config
@@ -1147,6 +1432,19 @@ def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool 
         base_url = credentials.get(DEEPSEEK_BASE_URL_KEY, "").strip()
         if not base_url:
             base_url = DEEPSEEK_DEFAULT_BASE_URL
+        return _build_openai_client(api_key, base_url=base_url)
+
+    if normalized_provider in MANUAL_OPENAI_PROVIDERS:
+        config = MANUAL_OPENAI_PROVIDERS[normalized_provider]
+        api_key = credentials.get(config["api_key_key"], "").strip()
+        if not api_key:
+            raise RuntimeError(f"{config['label']} API key is missing.")
+        base_url = credentials.get(config["base_url_key"], "").strip() or config["default_base_url"]
+        if not base_url:
+            raise RuntimeError(
+                f"{config['label']} has no base URL configured. Set "
+                f"{config['base_url_key']} (e.g. your workspace's serving-endpoints URL)."
+            )
         return _build_openai_client(api_key, base_url=base_url)
 
     if is_custom_provider(normalized_provider):

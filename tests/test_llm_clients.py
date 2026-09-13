@@ -770,3 +770,106 @@ def test_fallback_chains_start_at_an_offered_model():
     for model in llm_clients._FREEFLOW_GENERIC_FALLBACKS:
         assert model in freeflow, model
         assert not llm_clients.is_model_deprecated("freeflow", model), model
+
+
+# ── Manual-tier third-party providers (Qwen, Moonshot, Z.ai, ...) ──────────────
+
+
+def test_manual_providers_are_registered_and_at_least_twenty():
+    assert len(llm_clients.MANUAL_OPENAI_PROVIDERS) >= 20
+    for slug in llm_clients.MANUAL_OPENAI_PROVIDERS:
+        assert slug in llm_clients.SUPPORTED_LLM_PROVIDERS
+        assert slug in llm_clients.MANUAL_MODEL_PROVIDERS
+
+
+# Providers with no single working default base URL (every workspace/tenant
+# has its own). These require the matching *_base_url override to be usable
+# at all; create_llm_client and _discovery_endpoints raise/skip accordingly.
+_NO_DEFAULT_BASE_URL_PROVIDERS = frozenset({"databricks"})
+
+
+def test_manual_provider_config_is_well_formed():
+    for slug, config in llm_clients.MANUAL_OPENAI_PROVIDERS.items():
+        assert config["label"].strip()
+        if slug in _NO_DEFAULT_BASE_URL_PROVIDERS:
+            assert config["default_base_url"] == ""
+        else:
+            assert config["default_base_url"].startswith(("http://", "https://"))
+        assert config["api_key_key"].endswith("_api_key")
+        assert config["base_url_key"].endswith("_base_url")
+        assert llm_clients.required_secret_keys_for_provider(slug, []) == (config["api_key_key"],)
+        assert llm_clients.provider_label(slug) == config["label"]
+
+
+def test_provider_with_no_default_base_url_requires_override():
+    for slug in _NO_DEFAULT_BASE_URL_PROVIDERS:
+        api_key_key = llm_clients.MANUAL_OPENAI_PROVIDERS[slug]["api_key_key"]
+        with pytest.raises(RuntimeError, match="base URL"):
+            llm_clients.create_llm_client(slug, {api_key_key: "key"})
+        assert llm_clients._discovery_endpoints(slug, {api_key_key: "key"}) == []
+
+
+@pytest.mark.parametrize("slug", ["qwen", "moonshot", "zai", "mistral", "groq"])
+def test_manual_provider_model_options_and_fallbacks_are_empty(slug):
+    assert llm_clients.get_model_options(slug) == []
+    assert llm_clients.fallback_models_for_provider(slug) == ()
+    assert llm_clients.fallback_candidates_for_model(slug, "some-model", True) == ("some-model",)
+
+
+def test_manual_provider_resolve_models_no_defaults(monkeypatch):
+    for key in ("AGENT_FAST_MODEL", "AGENT_SMART_MODEL", "AGENT_PLANNER_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    models, warnings = llm_clients.resolve_models_for_provider("qwen", {})
+    assert models == {}
+    assert warnings == []
+
+    models, warnings = llm_clients.resolve_models_for_provider(
+        "qwen", {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"}
+    )
+    assert models == {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"}
+    assert warnings == []
+
+
+def test_manual_provider_is_model_supported():
+    assert llm_clients.is_model_supported_by_provider("qwen", "qwen-max") is True
+    assert llm_clients.is_model_supported_by_provider("qwen", "bad model") is False
+
+
+def test_manual_provider_create_client_uses_default_base_url(monkeypatch):
+    created_clients = []
+
+    def mock_openai(api_key, base_url=None, **kwargs):
+        created_clients.append({"api_key": api_key, "base_url": base_url})
+        return f"client-{api_key}"
+
+    monkeypatch.setattr(llm_clients, "OpenAI", mock_openai)
+
+    client = llm_clients.create_llm_client("moonshot", {"moonshot_api_key": "test-key"})
+    assert client == "client-test-key"
+    assert created_clients[-1]["base_url"] == "https://api.moonshot.ai/v1"
+
+    client = llm_clients.create_llm_client(
+        "moonshot",
+        {"moonshot_api_key": "test-key2", "moonshot_base_url": "https://api.moonshot.cn/v1"},
+    )
+    assert client == "client-test-key2"
+    assert created_clients[-1]["base_url"] == "https://api.moonshot.cn/v1"
+
+
+def test_manual_provider_create_client_requires_api_key():
+    with pytest.raises(RuntimeError, match="Qwen"):
+        llm_clients.create_llm_client("qwen", {})
+
+
+def test_manual_provider_discovery_endpoint_uses_credentials():
+    endpoints = llm_clients._discovery_endpoints(
+        "zai", {"zai_api_key": "k", "zai_base_url": "https://api.z.ai/api/coding/paas/v4"}
+    )
+    assert endpoints == [
+        {
+            "kind": "openai",
+            "base_url": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "k",
+            "label": "Z.ai (GLM)",
+        }
+    ]
