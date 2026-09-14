@@ -185,6 +185,7 @@ from custom_provider import (
 from system_context import ensure_workspace_instructions
 from ui import AgentUI
 from terminal_banner import TerminalBannerUI
+from anymodel_onboarding import offer_anymodel_registration
 from performance_logger import PerfLogger
 from agent_logging import (
     delete_session as delete_agent_session,
@@ -678,9 +679,18 @@ def resolve_startup_provider(provider_override: str | None = None) -> str:
     if _anymodel_key_available():
         return DEFAULT_BLANK_START_PROVIDER
 
-    # First run: use RichUI if available, fall back to plain-text
+    # First run, no AnyModel key either: use RichUI if available, fall back
+    # to plain-text. The AnyModel registration screen is offered first (it
+    # is the shipped default); Esc there falls through to the generic
+    # picker, with AnyModel excluded since it was just offered separately.
     if sys.stdin.isatty():
-        selected = choose_provider("openai", False)
+        registration_ui = TerminalBannerUI(console=console, verbose=False)
+        selected = offer_anymodel_registration(registration_ui)
+        if selected:
+            return selected
+        selected = choose_provider(
+            "openai", False, exclude=frozenset({DEFAULT_BLANK_START_PROVIDER})
+        )
         if selected:
             return selected
     return prompt_provider_choice()

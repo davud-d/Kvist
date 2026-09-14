@@ -89,6 +89,42 @@ def test_choose_provider_lists_anymodel_among_manual_tier_providers(monkeypatch)
     assert "anymodel" in values
 
 
+def test_blank_start_on_a_tty_offers_anymodel_registration_first(monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: None)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "TerminalBannerUI", lambda **kwargs: object())
+
+    monkeypatch.setattr(main, "offer_anymodel_registration", lambda ui: "anymodel")
+
+    def _fail_choose_provider(*args, **kwargs):
+        raise AssertionError("choose_provider must not run once the registration screen succeeds")
+
+    monkeypatch.setattr(main, "choose_provider", _fail_choose_provider)
+
+    assert main.resolve_startup_provider() == "anymodel"
+
+
+def test_esc_on_anymodel_registration_falls_back_to_choose_provider_without_anymodel(monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: None)
+    monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main, "TerminalBannerUI", lambda **kwargs: object())
+
+    monkeypatch.setattr(main, "offer_anymodel_registration", lambda ui: None)
+
+    captured = {}
+
+    def fake_choose_provider(current, verbose, exclude=None):
+        captured["exclude"] = exclude
+        return "openai"
+
+    monkeypatch.setattr(main, "choose_provider", fake_choose_provider)
+
+    assert main.resolve_startup_provider() == "openai"
+    assert captured["exclude"] == frozenset({"anymodel"})
+
+
 def test_choose_provider_exclude_filters_anymodel_out(monkeypatch):
     captured = {}
 
