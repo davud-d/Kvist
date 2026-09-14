@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 import frontends
@@ -65,6 +70,30 @@ def test_cli_parser_accepts_session_lifecycle_flags():
 
     resumed = parser.parse_args(["--workspace", ".", "--frontend", "stdio", "--resume"])
     assert resumed.resume is True
+
+
+def test_session_op_skips_provider_and_terminal_imports(tmp_path):
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "importtime",
+            str(Path(main.__file__)),
+            "--workspace",
+            str(tmp_path),
+            "--session-op",
+            "status",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout.strip().splitlines()[-1])["ok"] is True
+    imported = {line.rsplit("|", 1)[-1].strip() for line in completed.stderr.splitlines()}
+    assert not {"openai", "prompt_toolkit", "agent", "banner"} & imported
 
 
 def test_stdio_launcher_import_is_valid():

@@ -108,6 +108,32 @@ _DIRECT_CLI_ARGS = (
 )
 
 
+def _run_session_op(args: argparse.Namespace) -> None:
+    import json
+
+    from durable_json import JsonStorageError
+    from redaction import sanitize_display_text
+    from session_store import run_session_op
+
+    try:
+        payload = run_session_op(args.workspace, args.session_op, args.session_name)
+    except (ValueError, JsonStorageError, OSError) as error:
+        failure = {
+            "ok": False,
+            "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+        }
+        print(json.dumps(failure, ensure_ascii=False))
+        raise SystemExit(1) from error
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+# The GUI spawns a session op per switch and per sidebar project. Importing the
+# provider SDKs and terminal UI below first made each one ~1 s instead of ~50 ms.
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.session_op:
+    _run_session_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+
 from prompt_toolkit import PromptSession
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.history import InMemoryHistory
@@ -2558,25 +2584,7 @@ def main() -> None:
         return
 
     if args.session_op:
-        import json as _json
-
-        from durable_json import JsonStorageError
-        from session_store import run_session_op
-
-        try:
-            payload = run_session_op(
-                args.workspace,
-                args.session_op,
-                args.session_name,
-            )
-        except (ValueError, JsonStorageError, OSError) as error:
-            failure = {
-                "ok": False,
-                "error": sanitize_display_text(str(error).strip() or type(error).__name__),
-            }
-            print(_json.dumps(failure, ensure_ascii=False))
-            raise SystemExit(1) from error
-        print(_json.dumps(payload, ensure_ascii=False))
+        _run_session_op(args)
         return
 
     if args.frontend == "stdio-multi":

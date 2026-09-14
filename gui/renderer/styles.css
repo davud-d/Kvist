@@ -104,6 +104,7 @@ button {
 }
 
 .content-shell {
+  position: relative;
   min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
@@ -458,6 +459,26 @@ button {
   height: auto;
   display: block;
   filter: drop-shadow(0 0 18px rgba(45, 187, 255, 0.13));
+}
+
+.session-splash {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: var(--background);
+}
+
+/* The logo is painted on black: screen blending lets the stage colour show
+   through it, and the mask hides the edges of the cropped rectangle. */
+.session-splash img {
+  width: clamp(420px, 56vw, 760px);
+  height: auto;
+  opacity: 0;
+  mix-blend-mode: screen;
+  mask-image: radial-gradient(ellipse 50% 50% at center, #000 72%, transparent 100%);
+  user-select: none;
 }
 
 .metrics-bar {

@@ -3,6 +3,8 @@
 const { ProtocolState } = window.KvistProtocol
 
 const welcome = document.querySelector("#welcome")
+const sessionSplash = document.querySelector("#sessionSplash")
+const sessionSplashLogo = sessionSplash.querySelector("img")
 const conversation = document.querySelector("#conversation")
 const messages = document.querySelector("#messages")
 const sidebar = document.querySelector("#sidebar")
@@ -416,8 +418,38 @@ async function refreshNavigation() {
   }
 }
 
+const SPLASH_FADE_MS = 650
+const SPLASH_DARK = { opacity: 0, filter: "brightness(0.15) blur(6px)" }
+const SPLASH_BRIGHT = { opacity: 1, filter: "brightness(1.15) blur(0px)" }
+
+function sessionSplashActive() {
+  return !sessionSplash.classList.contains("is-hidden")
+}
+
+// The logo always finishes rising and fading even when the load itself is
+// instant, so a fast switch never reads as a flicker.
+async function withSessionSplash(load) {
+  // The overlay starts visible so the launch never flashes the empty stage
+  // before the first splash begins.
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    sessionSplash.classList.add("is-hidden")
+    return load()
+  }
+  const timing = { duration: SPLASH_FADE_MS, easing: "ease-in-out", fill: "forwards" }
+  sessionSplash.classList.remove("is-hidden")
+  try {
+    const appear = sessionSplashLogo.animate([SPLASH_DARK, SPLASH_BRIGHT], timing)
+    const [result] = await Promise.all([load(), appear.finished])
+    await sessionSplashLogo.animate([SPLASH_BRIGHT, SPLASH_DARK], timing).finished
+    return result
+  } finally {
+    for (const animation of sessionSplashLogo.getAnimations()) animation.cancel()
+    sessionSplash.classList.add("is-hidden")
+  }
+}
+
 async function toggleProject(project) {
-  if (running || !project.available) return
+  if (running || sessionSplashActive() || !project.available) return
   if (project.path === workspace) {
     if (expandedProjects.has(project.path)) expandedProjects.delete(project.path)
     else expandedProjects.add(project.path)
@@ -426,7 +458,7 @@ async function toggleProject(project) {
   }
   try {
     expandedProjects.add(project.path)
-    const state = await window.kvist.activateProject(project.path)
+    const state = await withSessionSplash(() => window.kvist.activateProject(project.path))
     updateNavigation(state)
     const selected = currentProject()
     displaySession(sessionItem(selected, selected?.status?.active_session))
@@ -437,10 +469,10 @@ async function toggleProject(project) {
 }
 
 async function selectSession(projectPath, name) {
-  if (running) return
+  if (running || sessionSplashActive()) return
   try {
     expandedProjects.add(projectPath)
-    const result = await window.kvist.switchSession(projectPath, name)
+    const result = await withSessionSplash(() => window.kvist.switchSession(projectPath, name))
     updateNavigation(result.navigation)
     const project = currentProject()
     displaySession(sessionItem(project, name))
@@ -451,9 +483,9 @@ async function selectSession(projectPath, name) {
 }
 
 async function createNewSession() {
-  if (running || !workspace) return
+  if (running || sessionSplashActive() || !workspace) return
   try {
-    const result = await window.kvist.newSession(workspace)
+    const result = await withSessionSplash(() => window.kvist.newSession(workspace))
     expandedProjects.add(workspace)
     updateNavigation(result.navigation)
     resetView()
@@ -1834,7 +1866,7 @@ function installCursorGlow() {
   window.addEventListener("blur", () => glow.classList.remove("is-active"))
 }
 
-window.kvist.bootstrap().then((state) => {
+withSessionSplash(() => window.kvist.bootstrap()).then((state) => {
   updateNavigation(state)
   protocolLabel.textContent = `v${state.protocolVersion}`
   const project = currentProject()

@@ -426,7 +426,7 @@ function createWindow() {
         const image = await windowRef.webContents.capturePage()
         await fs.promises.writeFile(path.resolve(capturePath), image.toPNG())
         app.quit()
-      }, Number(process.env.KVIST_CAPTURE_DELAY || 1200))
+      }, Number(process.env.KVIST_CAPTURE_DELAY || 3000))
     })
   }
 }
