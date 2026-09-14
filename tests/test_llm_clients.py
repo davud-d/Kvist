@@ -782,6 +782,12 @@ def test_manual_providers_are_registered_and_at_least_twenty():
         assert slug in llm_clients.MANUAL_MODEL_PROVIDERS
 
 
+def test_anymodel_is_the_blank_start_default_and_a_manual_provider():
+    assert llm_clients.DEFAULT_BLANK_START_PROVIDER == "anymodel"
+    assert "anymodel" in llm_clients.MANUAL_OPENAI_PROVIDERS
+    assert llm_clients.MANUAL_OPENAI_PROVIDERS["anymodel"]["api_key_key"] == "anymodel_api_key"
+
+
 # Providers with no single working default base URL (every workspace/tenant
 # has its own). These require the matching *_base_url override to be usable
 # at all; create_llm_client and _discovery_endpoints raise/skip accordingly.

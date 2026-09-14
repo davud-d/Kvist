@@ -288,7 +288,20 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
         "base_url_key": "scaleway_base_url",
         "default_base_url": "https://api.scaleway.ai/v1",
     },
+    "anymodel": {
+        "label": "AnyModel",
+        "api_key_key": "anymodel_api_key",
+        "base_url_key": "anymodel_base_url",
+        "default_base_url": "https://anymodel.org/v1",
+    },
 }
+
+# The blank-start default: a fresh install with no saved provider and no
+# AGENT_LLM_PROVIDER override falls to this one (see
+# main.resolve_startup_provider) instead of forcing every first run through
+# the generic provider picker. It stays a plain manual-tier entry above —
+# this constant only decides what "nothing configured yet" resolves to.
+DEFAULT_BLANK_START_PROVIDER = "anymodel"
 
 MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
 

@@ -153,6 +153,7 @@ from llm_clients import (
     ANTHROPIC_PROVIDER,
     CUSTOM_PROVIDER_PREFIX,
     CUSTOM_PROVIDER_PLACEHOLDER,
+    DEFAULT_BLANK_START_PROVIDER,
     FREEFLOW_PROVIDER,
     get_model_options,
     is_custom_provider,
@@ -651,6 +652,13 @@ def paused_interactive_screen(screen: InteractiveScreen | None):
             screen.resume()
 
 
+def _anymodel_key_available() -> bool:
+    """Is the AnyModel key already reachable (env var or saved config)?"""
+    api_key_key = MANUAL_OPENAI_PROVIDERS[DEFAULT_BLANK_START_PROVIDER]["api_key_key"]
+    credentials = load_available_credentials((api_key_key,))
+    return bool(credentials.get(api_key_key))
+
+
 def resolve_startup_provider(provider_override: str | None = None) -> str:
     if provider_override:
         return normalize_provider(provider_override)
@@ -662,6 +670,13 @@ def resolve_startup_provider(provider_override: str | None = None) -> str:
     saved_provider = get_saved_provider_or_none()
     if saved_provider:
         return saved_provider
+
+    # Blank start: nothing saved yet. AnyModel ships as the default — if its
+    # key is already reachable (env var, or a config partially written by a
+    # prior run), use it directly instead of asking about the other five
+    # built-in providers.
+    if _anymodel_key_available():
+        return DEFAULT_BLANK_START_PROVIDER
 
     # First run: use RichUI if available, fall back to plain-text
     if sys.stdin.isatty():
@@ -1073,7 +1088,11 @@ def render_startup_banner(
         console.print("[dim]Current role: auto (automatic detection enabled)[/dim]")
 
 
-def choose_provider(current_provider: str, verbose: bool) -> str | None:
+def choose_provider(
+    current_provider: str,
+    verbose: bool,
+    exclude: frozenset[str] | None = None,
+) -> str | None:
     ui = TerminalBannerUI(console=console, verbose=verbose)
 
     # Built-in providers in order: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute
@@ -1143,6 +1162,9 @@ def choose_provider(current_provider: str, verbose: bool) -> str | None:
         "label": "+ Create custom provider...",
         "description": "Add a new OpenAI- or Anthropic-compatible endpoint",
     })
+
+    if exclude:
+        options = [option for option in options if option["value"] not in exclude]
 
     selected = ui.choose_option(
         title="Select LLM Provider",
