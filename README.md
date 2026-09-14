@@ -1,3 +1,7 @@
+<p align="center">
+  <img alt="Kvist logo" src="preview/logo.png" width="480">
+</p>
+
 # Kvist
 
 [Русская версия](README.ru.md)
