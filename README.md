@@ -164,6 +164,38 @@ The first interactive launch asks for the provider, models, and credentials and
 saves them in `~/.kvist/config.json` (secrets are not printed). Start a new
 terminal in the project and run Kvist again to reuse that configuration.
 
+### AnyModel (default provider)
+
+A blank config defaults to [AnyModel](https://anymodel.org). If
+`ANYMODEL_API_KEY` is already set in the environment, Kvist starts straight
+away with no prompts. Otherwise the first launch offers a dedicated screen:
+
+```
+Нет ключа AnyModel. Регистрация займёт минуту.
+
+  Enter — открыть регистрацию в браузере (email + пароль)
+  Esc   — выбрать другого провайдера
+
+https://anymodel.org/register
+```
+
+`Enter` opens the registration page in your browser and asks you to paste the
+key once you have one; the key is checked immediately against AnyModel's
+catalog endpoint (a bad key is rejected right away, with a retry, instead of
+letting the agent start and fail later). `Esc` falls through to the regular
+provider picker for any of the other built-in or third-party providers.
+
+The same endpoint AnyModel is checked against also carries the per-model
+billing coefficient used for cost tracking:
+
+```bash
+curl -H "Authorization: Bearer $ANYMODEL_API_KEY" https://anymodel.org/v1/models
+```
+
+Set `AGENT_LLM_PROVIDER` (or run `/provider`) to switch away from AnyModel at
+any time — the default only applies to a config that has no provider saved
+yet.
+
 To install a reusable `kvist` launcher and build a standalone binary when needed:
 
 ```bash
