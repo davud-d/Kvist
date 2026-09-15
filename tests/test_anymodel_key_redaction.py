@@ -71,6 +71,7 @@ def test_anymodel_unavailable_error_scrubs_a_key_that_leaks_into_the_local_reaso
 
 def test_registration_screen_never_prints_the_raw_key_even_on_retry(monkeypatch, capsys):
     monkeypatch.setattr(anymodel_onboarding.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setattr(anymodel_onboarding.webbrowser, "open", lambda url: None)
 
     bad_key = SYNTHETIC_KEY + "-bad"

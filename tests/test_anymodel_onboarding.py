@@ -46,6 +46,16 @@ def test_oauth_flag_requires_exact_value(monkeypatch):
     assert anymodel_onboarding._oauth_flag_enabled() is True
 
 
+@pytest.fixture(autouse=True)
+def _assume_gui_browser_available(monkeypatch):
+    # Whether a real GUI session exists depends on the machine running the
+    # tests (DISPLAY/WAYLAND_DISPLAY, CI container, ...); pin a DISPLAY value
+    # so _gui_browser_available()'s *real* logic is deterministic without
+    # replacing the function itself (tests for the actual detection logic,
+    # and for the headless fallback, override this env var themselves).
+    monkeypatch.setenv("DISPLAY", ":0")
+
+
 class _FakeUI:
     def __init__(self, choose_result="register", secrets=None):
         self.choose_result = choose_result
@@ -171,6 +181,69 @@ def test_timeout_during_key_validation_raises_a_clear_error(monkeypatch):
     ui = _FakeUI(choose_result="register", secrets=["some-key"])
     with pytest.raises(RuntimeError, match="unreachable"):
         anymodel_onboarding.offer_anymodel_registration(ui)
+
+
+def test_gui_browser_available_reflects_display_env_on_linux(monkeypatch):
+    monkeypatch.setattr(anymodel_onboarding.sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert anymodel_onboarding._gui_browser_available() is False
+
+    monkeypatch.setenv("DISPLAY", ":0")
+    assert anymodel_onboarding._gui_browser_available() is True
+
+
+def test_gui_browser_always_available_on_macos_and_windows(monkeypatch):
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    monkeypatch.setattr(anymodel_onboarding.sys, "platform", "darwin")
+    assert anymodel_onboarding._gui_browser_available() is True
+    monkeypatch.setattr(anymodel_onboarding.sys, "platform", "win32")
+    assert anymodel_onboarding._gui_browser_available() is True
+
+
+def test_headless_container_does_not_call_webbrowser_open_and_does_not_hang(monkeypatch):
+    """No DISPLAY, no GUI session: webbrowser would otherwise happily launch
+    a console browser (lynx/w3m/links) as a blocking subprocess in this same
+    terminal — the flow must skip straight to the key prompt instead."""
+    monkeypatch.setattr(anymodel_onboarding.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(anymodel_onboarding.sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    def _fail_open(*args, **kwargs):
+        raise AssertionError("webbrowser.open must not run without a GUI session")
+
+    monkeypatch.setattr(anymodel_onboarding.webbrowser, "open", _fail_open)
+    monkeypatch.setattr(
+        anymodel_onboarding, "fetch_model_coefficients",
+        lambda api_key, force_refresh=False: {"m": 1.0},
+    )
+    monkeypatch.setattr(anymodel_onboarding, "set_provider_secret", lambda key, value, **kw: None)
+
+    ui = _FakeUI(choose_result="register", secrets=["sk-good"])
+    result = anymodel_onboarding.offer_anymodel_registration(ui)
+
+    assert result == "anymodel"
+
+
+def test_webbrowser_error_falls_back_to_the_key_prompt_instead_of_crashing(monkeypatch):
+    monkeypatch.setattr(anymodel_onboarding.sys.stdin, "isatty", lambda: True)
+
+    def _raise_webbrowser_error(*args, **kwargs):
+        raise anymodel_onboarding.webbrowser.Error("no runnable browser")
+
+    monkeypatch.setattr(anymodel_onboarding.webbrowser, "open", _raise_webbrowser_error)
+    monkeypatch.setattr(
+        anymodel_onboarding, "fetch_model_coefficients",
+        lambda api_key, force_refresh=False: {"m": 1.0},
+    )
+    monkeypatch.setattr(anymodel_onboarding, "set_provider_secret", lambda key, value, **kw: None)
+
+    ui = _FakeUI(choose_result="register", secrets=["sk-good"])
+    result = anymodel_onboarding.offer_anymodel_registration(ui)
+
+    assert result == "anymodel"
 
 
 def test_oauth_result_short_circuits_the_manual_screen(monkeypatch):

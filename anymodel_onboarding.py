@@ -39,6 +39,22 @@ def _oauth_flag_enabled() -> bool:
     return os.getenv(_OAUTH_FLAG_ENV, "").strip() == "1"
 
 
+def _gui_browser_available() -> bool:
+    """Is there a graphical session ``webbrowser`` could actually pop a window in?
+
+    Without one, ``webbrowser`` on Linux still finds a *console* browser
+    (``www-browser``/``links``/``elinks``/``lynx``/``w3m``) if one happens to
+    be on PATH, and opens it via a blocking subprocess call — the process
+    takes over this same terminal until the user quits it by hand, which in
+    a headless container (no browser installed, no DISPLAY) reads as the
+    whole flow hanging on Enter. Skipping the open entirely when there is no
+    GUI session to open a window in avoids that trap.
+    """
+    if sys.platform in ("darwin", "win32"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def try_oauth_register() -> str | None:
     """Attempt an OAuth-like AnyModel registration; a no-op today either way.
 
@@ -84,6 +100,16 @@ def _print_registration_screen() -> None:
     sys.stdout.flush()
 
 
+def _open_registration_browser() -> None:
+    if not _gui_browser_available():
+        print("Графический браузер не найден — открой ссылку выше вручную.")
+        return
+    try:
+        webbrowser.open(ANYMODEL_REGISTER_URL)
+    except webbrowser.Error:
+        print("Не удалось открыть браузер автоматически — открой ссылку выше вручную.")
+
+
 def offer_anymodel_registration(ui: AgentUI) -> str | None:
     """First-run "no AnyModel key yet" screen.
 
@@ -114,7 +140,7 @@ def offer_anymodel_registration(ui: AgentUI) -> str | None:
     if selected != "register":
         return None
 
-    webbrowser.open(ANYMODEL_REGISTER_URL)
+    _open_registration_browser()
 
     while True:
         api_key = ui.prompt_secret(
