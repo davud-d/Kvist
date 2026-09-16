@@ -86,6 +86,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Run one headless change-journal operation, print JSON, exit.",
     )
     parser.add_argument(
+        "--commit-message",
+        action="store_true",
+        help="Generate a commit message from a JSON change payload on stdin, "
+        "print JSON, exit.",
+    )
+    parser.add_argument(
         "--config-op",
         choices=("add-custom-provider", "delete-custom-provider"),
         help="Run one headless config operation, print JSON, exit (no LLM call).",
@@ -125,6 +131,37 @@ def _run_session_op(args: argparse.Namespace) -> None:
         print(json.dumps(failure, ensure_ascii=False))
         raise SystemExit(1) from error
     print(json.dumps(payload, ensure_ascii=False))
+
+
+def _run_commit_message_op() -> None:
+    import json
+    from contextlib import redirect_stdout
+
+    from commit_message import CommitMessageError, generate_commit_message
+    from redaction import sanitize_display_text
+
+    # The IDE writes UTF-8 whatever the console code page is (a Windows build
+    # would otherwise decode stdin as cp1252), and the ASCII-escaped reply is
+    # immune to the same mismatch on the way back.
+    payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    try:
+        # stdout is the JSON reply the IDE parses; anything a provider SDK
+        # prints on the way must not corrupt it.
+        with redirect_stdout(sys.stderr):
+            message = generate_commit_message(payload_text)
+    except (CommitMessageError, RuntimeError, OSError) as error:
+        failure = {
+            "ok": False,
+            "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+        }
+        print(json.dumps(failure))
+        raise SystemExit(1) from error
+    print(json.dumps({"ok": True, "message": message}))
+
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
+    _run_commit_message_op()
+    raise SystemExit(0)
 
 
 # The GUI spawns a session op per switch and per sidebar project. Importing the
@@ -2631,6 +2668,10 @@ def main() -> None:
             print(_json.dumps(failure, ensure_ascii=False))
             raise SystemExit(1) from error
         print(_json.dumps(payload, ensure_ascii=False))
+        return
+
+    if args.commit_message:
+        _run_commit_message_op()
         return
 
     if args.config_op:

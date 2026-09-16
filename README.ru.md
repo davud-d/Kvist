@@ -101,7 +101,8 @@ Electron frontend использует тот же runtime и NDJSON-прото�
 - TTY для интерактивной настройки и подтверждений.
 
 CLI проверяется на Linux и Windows. macOS остаётся экспериментальной. Плагин
-для JetBrains поддерживает Linux и Windows и нацелен на IntelliJ Platform 2025.3.
+для JetBrains поддерживает Linux и Windows и нацелен на IntelliJ Platform 2025.3;
+кроме запуска Kvist, он пишет сообщения коммитов прямо из окна коммита.
 
 Встроенные провайдеры: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute и
 FreeFlow LLM (beta). Дополнительно через `/provider` можно добавить совместимый
@@ -287,6 +288,10 @@ kvist
 .venv/bin/python main.py --workspace /path/to/project --session-op create --session-name review
 .venv/bin/python main.py --workspace /path/to/project --journal-op changes
 .venv/bin/python main.py --workspace /path/to/project --journal-op revert
+
+# Сообщение коммита по набору изменений (так его вызывает плагин JetBrains; UI_API.ru.md §8b)
+echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
+  | .venv/bin/python main.py --commit-message
 ```
 
 Для stdio доступны overrides `--provider`, все три model-флага, `--role` и

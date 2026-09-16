@@ -87,6 +87,7 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "reader": "reader_prompt.txt",
     "chat": "chat_prompt.txt",
     "report": "report_prompt.txt",
+    "commit": "commit_prompt.txt",
 }
 
 # Direct official-API providers (OpenAI, Anthropic, DeepSeek) are reached

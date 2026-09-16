@@ -5,13 +5,15 @@
     <vendor>Kvist</vendor>
 
     <description><![CDATA[
-    Launches Kvist directly inside the IDE Terminal for the current project.
+    Launches Kvist directly inside the IDE Terminal for the current project,
+    and writes commit messages for the changes selected in the commit dialog.
     ]]></description>
 
     <idea-version since-build="253" />
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
+    <depends optional="true" config-file="kvist-git.xml">Git4Idea</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Kvist Notifications" displayType="BALLOON" isLogByDefault="false" />

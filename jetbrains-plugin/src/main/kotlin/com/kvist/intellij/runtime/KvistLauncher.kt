@@ -79,6 +79,15 @@ object KvistLauncher {
         }
     }
 
+    /** Resolves an executable Kvist binary for headless calls, notifying the user on failure. */
+    fun prepareBinary(project: Project): Path? {
+        val launchSpec = prepareLaunch(project, notifyUser = true, logFailures = true) ?: return null
+        if (!ensureBinaryReadyForLaunch(project, launchSpec)) {
+            return null
+        }
+        return launchSpec.binaryPath
+    }
+
     fun isLaunchContextAvailable(project: Project?): Boolean {
         return project != null && prepareLaunch(project, notifyUser = false, logFailures = false) != null
     }

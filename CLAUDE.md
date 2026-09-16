@@ -182,8 +182,21 @@ configured in-repo.
   prompts carry the matching rule (`PROJECT INSTRUCTIONS` in coder/devops,
   folded into the untrusted-data section in reader, `PROJECT INSTRUCTIONS` in
   chat) and the top-of-prompt JAILBREAK RESISTANCE directive names
-  `<PROJECT_INSTRUCTIONS>` as a source that can never lift it. Planner, router
-  and report prompts are deliberately untouched.
+  `<PROJECT_INSTRUCTIONS>` as a source that can never lift it. Planner, router,
+  report and commit prompts are deliberately untouched.
+- IDE commit messages: `main.py --commit-message` (`commit_message.py`) reads
+  `{"files": [{"path", "patch"}], "recent_subjects": [...]}` on stdin as UTF-8
+  bytes and prints ASCII JSON `{"ok", "message"|"error"}`. It uses the saved
+  provider and its **fast** model but **never builds a `LocalAgent` or calls
+  `build_agent`**: those write `.kvist/` session state and seed `KVIST.md` /
+  `.gitignore`, which would land in the very commit being described. A missing
+  key fails instead of prompting (no TTY). Protected paths are dropped with
+  `change_journal.journal_path_violation` before the model is called, the diff
+  is capped at `MAX_DIFF_TOKENS`, and both the diff and the history travel in
+  `<UNTRUSTED_TOOL_OUTPUT source="git_diff"|"recent_commits">` blocks. The
+  JetBrains plugin calls it from `GenerateCommitMessageAction` (registered in
+  `kvist-git.xml` under `Vcs.MessageActionGroup`, an optional `Git4Idea`
+  dependency, so the launcher still loads with Git disabled).
 - Per-project command permissions live in `<workspace>/.kvist/permissions.json`
   (`allow`/`deny`/`ask` patterns, `permission_policy.py`); deny and built-in hard
   blocks always win over allow, and intrinsic DANGEROUS commands remain
@@ -427,8 +440,8 @@ every rendered header is a known key.
 Three roles per provider: **fast**, **smart**, **planner**. A run uses fast by default
 and escalates to smart on complexity="complex", parse errors, consecutive errors, or
 stagnation — unless the user explicitly pinned a model. Role system prompts are loaded
-and cached from `prompts/system/` — seven files:
-`{chat,coder,devops,planner,reader,report,router}_prompt.txt`.
+and cached from `prompts/system/` — eight files:
+`{chat,coder,commit,devops,planner,reader,report,router}_prompt.txt`.
 
 User-selectable styles live apart, in `prompts/styles/{agents,chat}/<slug>.txt`
 (`agents` covers coder/reader/devops, `chat` the chat role). **One session, one

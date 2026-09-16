@@ -101,7 +101,8 @@ and not a complete security boundary: review the diff and command output.
 - a TTY for the interactive terminal configuration and approval prompts.
 
 The CLI is tested on Linux and Windows. macOS is experimental. The optional
-JetBrains plugin supports Linux and Windows and targets IntelliJ Platform 2025.3.
+JetBrains plugin supports Linux and Windows and targets IntelliJ Platform 2025.3;
+besides launching Kvist, it writes commit messages from the commit dialog.
 
 Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
 FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
@@ -293,6 +294,10 @@ Useful headless commands:
 .venv/bin/python main.py --workspace /path/to/project --session-op status
 .venv/bin/python main.py --workspace /path/to/project --session-op create --session-name review
 .venv/bin/python main.py --workspace /path/to/project --session-op switch --session-name review
+
+# Write a commit message for a change payload (used by the JetBrains plugin; UI_API.md §8b)
+echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
+  | .venv/bin/python main.py --commit-message
 
 # Read or revert the durable change journal
 .venv/bin/python main.py --workspace /path/to/project --journal-op changes

@@ -17,6 +17,7 @@ dependencies {
     intellijPlatform {
         intellijIdea("2025.3")
         bundledPlugin("org.jetbrains.plugins.terminal")
+        bundledPlugin("Git4Idea")
     }
 }
 

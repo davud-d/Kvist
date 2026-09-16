@@ -91,6 +91,8 @@ one of `auto`, `coder`, `devops`, or `chat`. `--approval-mode` is `ask` or
 - `--frontend stdio --resume` → resume the active session's checkpoint instead
   of submitting a goal (no stdin goal line is read; §8a).
 - `--session-op …` → one headless session lifecycle operation, JSON out (§8a).
+- `--commit-message` → a commit message for a change payload on stdin, JSON
+  out (§8b).
 
 (During development, without the built binary, use
 `.venv/bin/python main.py --workspace … --frontend stdio`.)
@@ -333,6 +335,48 @@ The stream is the ordinary §8 stream; if there is no checkpoint **in any
 session**, the core emits an `error` event ("No saved checkpoint to resume.")
 and ends the run. Otherwise the core activates the session that holds it, so
 the `hello` event's `session` may differ from the one you launched in.
+
+---
+
+## 8b. Commit messages for IDE frontends
+
+One call, no event stream: write the changes to stdin as **UTF-8** JSON, close
+stdin, read one JSON line from stdout.
+
+```bash
+kvist --commit-message < payload.json
+```
+
+```json
+{
+  "files": [{"path": "src/app.py", "patch": "--- a/src/app.py\n+++ b/src/app.py\n..."}],
+  "recent_subjects": ["Fix retry backoff", "Add AnyModel stub"]
+}
+```
+
+- `files` — one entry per changed file; `path` is relative to its VCS root,
+  `patch` is its unified diff. Send what the user selected for this commit.
+- `recent_subjects` — optional, the latest commit subjects (at most 15 are
+  used). The message follows their convention: Conventional Commits if the
+  project uses them, plain imperative sentences otherwise.
+
+Reply (ASCII-escaped, so the console code page does not matter):
+
+```json
+{"ok": true, "message": "Retry provider calls on 429\n\nThe gateway ..."}
+{"ok": false, "error": "Nothing to describe: no changed files with a diff."}
+```
+
+Exit code is 0 on success and 1 on failure. Guarantees a frontend can rely on:
+
+- The message is always English, and its subject is at most 72 characters.
+- The saved provider and its **fast** model are used. A missing key is an
+  error, never a prompt, so the call cannot hang waiting for input.
+- Nothing is written to the workspace — no `.kvist/` session, no `KVIST.md`.
+- Secret files (`.env`, keys, certificates, `.ssh/`, ...) and `.kvist/` are
+  dropped before the model sees anything; no need to filter them yourself.
+- A large diff is cut to fit the model; the call never fails for size.
+- Anything else the core prints goes to stderr; log it, do not parse it.
 
 ---
 
