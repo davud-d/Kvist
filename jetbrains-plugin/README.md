@@ -6,6 +6,8 @@ Minimal IntelliJ Platform plugin that starts the Kvist binary directly inside th
 
 The commit dialog (and the non-modal Commit tool window) gets a Kvist button next to the message field. It sends the changes ticked in the dialog, partially staged lines included, plus the project's last 15 commit subjects to `kvist --commit-message`, and puts the answer into the message field.
 
+While it runs, the button shows a spinner; hovering turns it into a red stop square, and clicking it then cancels the generation instead of starting another one.
+
 - The message is always English. Its style follows the project's history: Conventional Commits if the project uses them, plain imperative sentences otherwise. A body is added only when the diff does not explain itself.
 - It uses the provider and **fast** model saved in `~/.kvist/config.json`. Run Kvist once in a terminal to configure them; the button never asks for a key.
 - Secret files (`.env`, keys, certificates, ...) and `.kvist/` are dropped before anything reaches the model.
