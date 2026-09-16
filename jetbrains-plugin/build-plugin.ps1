@@ -4,8 +4,11 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $ProjectDir = (Get-Item "$ScriptDir\..").FullName
 $PluginDir = Join-Path $ProjectDir "jetbrains-plugin"
-$DistDir = Join-Path $ProjectDir "dist"
-$BuildDir = Join-Path $ProjectDir "build"
+# The core gets its own dist/work dirs so a parallel install_cli.py build of
+# the project's dist\kvist.exe cannot corrupt this one (or be wiped by it).
+$CoreBuildDir = Join-Path $PluginDir ".build\core"
+$DistDir = Join-Path $CoreBuildDir "dist"
+$WorkDir = Join-Path $CoreBuildDir "work"
 $PluginBuildDir = Join-Path $PluginDir "build"
 $SandboxRoot = Join-Path $PluginDir ".intellijPlatform\sandbox"
 $PluginName = "kvist-intellij"
@@ -90,13 +93,13 @@ if (-not (Test-Path (Join-Path $PluginDir "gradlew.bat"))) {
 Stop-SandboxAgents
 
 Write-Log "Cleaning previous build artifacts"
-foreach ($Dir in @($DistDir, $BuildDir, $PluginBuildDir)) {
+foreach ($Dir in @($CoreBuildDir, $PluginBuildDir)) {
     if (Test-Path $Dir) { Remove-Item -Path $Dir -Recurse -Force }
 }
 
 Write-Log "Building Kvist binary with PyInstaller"
 Set-Location $ProjectDir
-& $PythonBin -m PyInstaller kvist.spec
+& $PythonBin -m PyInstaller kvist.spec --noconfirm --distpath $DistDir --workpath $WorkDir
 
 if (-not (Test-Path $WinBinarySrc)) {
     throw "PyInstaller output not found: $WinBinarySrc"

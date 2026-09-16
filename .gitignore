@@ -67,6 +67,9 @@ node_modules/
 gui/resources/bin/
 gui/.build/
 
+# JetBrains plugin's private core build (kept apart from the CLI's dist/)
+jetbrains-plugin/.build/
+
 # Demo UI (local scratch, not part of the shipped app)
 Demo UI/
 

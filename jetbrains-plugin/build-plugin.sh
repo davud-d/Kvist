@@ -5,8 +5,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLUGIN_DIR="$PROJECT_DIR/jetbrains-plugin"
-DIST_DIR="$PROJECT_DIR/dist"
-BUILD_DIR="$PROJECT_DIR/build"
+# The core is built into the plugin's own directories, never the project's
+# dist/ and build/: installer/install.py runs this next to install_cli.py, and two
+# PyInstaller runs writing one dist/kvist interleave into a corrupt archive.
+# Kept out of build/ because `gradlew clean` wipes that.
+CORE_BUILD_DIR="$PLUGIN_DIR/.build/core"
+DIST_DIR="$CORE_BUILD_DIR/dist"
+WORK_DIR="$CORE_BUILD_DIR/work"
 PLUGIN_BUILD_DIR="$PLUGIN_DIR/build"
 SANDBOX_ROOT="$PLUGIN_DIR/.intellijPlatform/sandbox"
 PLUGIN_NAME="kvist-intellij"
@@ -143,14 +148,14 @@ fi
 stop_running_sandbox_agents
 
 log "Cleaning previous Python build artifacts"
-rm -rf "$DIST_DIR" "$BUILD_DIR"
+rm -rf "$CORE_BUILD_DIR"
 
 log "Cleaning previous plugin build artifacts"
 rm -rf "$PLUGIN_BUILD_DIR"
 
 log "Building Kvist binary with PyInstaller"
 cd "$PROJECT_DIR"
-"$PYTHON_BIN" -m PyInstaller kvist.spec
+"$PYTHON_BIN" -m PyInstaller kvist.spec --noconfirm --distpath "$DIST_DIR" --workpath "$WORK_DIR"
 
 if [[ ! -f "$LINUX_BINARY_SRC" ]]; then
 	printf 'PyInstaller output not found: %s\n' "$LINUX_BINARY_SRC" >&2

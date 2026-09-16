@@ -9,8 +9,11 @@ set "SCRIPT_DIR=%~dp0"
 cd /d "%SCRIPT_DIR%.."
 set "PROJECT_DIR=%CD%"
 set "PLUGIN_DIR=%PROJECT_DIR%\jetbrains-plugin"
-set "DIST_DIR=%PROJECT_DIR%\dist"
-set "BUILD_DIR=%PROJECT_DIR%\build"
+:: The core gets its own dist/work dirs so a parallel install_cli.py build of
+:: the project's dist\kvist.exe cannot corrupt this one (or be wiped by it).
+set "CORE_BUILD_DIR=%PLUGIN_DIR%\.build\core"
+set "DIST_DIR=%CORE_BUILD_DIR%\dist"
+set "WORK_DIR=%CORE_BUILD_DIR%\work"
 set "PLUGIN_BUILD_DIR=%PLUGIN_DIR%\build"
 set "SANDBOX_ROOT=%PLUGIN_DIR%\.intellijPlatform\sandbox"
 set "PLUGIN_NAME=kvist-intellij"
@@ -46,13 +49,12 @@ if not exist "%PLUGIN_DIR%\gradlew.bat" (
 call :stop_running_sandbox_agents
 
 call :log "Cleaning previous build artifacts"
-if exist "%DIST_DIR%" rd /s /q "%DIST_DIR%"
-if exist "%BUILD_DIR%" rd /s /q "%BUILD_DIR%"
+if exist "%CORE_BUILD_DIR%" rd /s /q "%CORE_BUILD_DIR%"
 if exist "%PLUGIN_BUILD_DIR%" rd /s /q "%PLUGIN_BUILD_DIR%"
 
 call :log "Building Kvist binary with PyInstaller"
 cd /d "%PROJECT_DIR%"
-"%PYTHON_BIN%" -m PyInstaller kvist.spec
+"%PYTHON_BIN%" -m PyInstaller kvist.spec --noconfirm --distpath "%DIST_DIR%" --workpath "%WORK_DIR%"
 if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
 
 if not exist "%WIN_BINARY_SRC%" (

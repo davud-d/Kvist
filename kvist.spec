@@ -20,7 +20,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('prompts', 'prompts'), ('themes', 'themes')],
+    datas=[('prompts', 'prompts'), ('themes', 'themes'), ('assets', 'assets')],
     hiddenimports=local_hiddenimports,
     hookspath=[],
     hooksconfig={},

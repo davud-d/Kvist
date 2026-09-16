@@ -222,6 +222,7 @@ from custom_provider import (
 from system_context import ensure_workspace_instructions
 from ui import AgentUI
 from terminal_banner import TerminalBannerUI
+from terminal_image import print_exit_logo
 from anymodel_onboarding import offer_anymodel_registration
 from performance_logger import PerfLogger
 from agent_logging import (
@@ -1062,6 +1063,8 @@ def render_exit_message(agent: LocalAgent) -> None:
     below that restored content instead of leaving the full chat transcript.
     """
     session_name = getattr(agent, "current_session", "default")
+    console.file.flush()
+    print_exit_logo()
     console.print("[dim]Kvist agent[/dim] [red]stopped.[/red]")
     message = Text(
         "To continue, start the agent and resume session ",
