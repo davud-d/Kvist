@@ -198,6 +198,8 @@ from user_config import (
     get_custom_provider_by_name,
     save_custom_provider,
     delete_custom_provider,
+    clear_saved_provider,
+    reset_user_config,
     get_saved_models,
     get_saved_provider,
     get_saved_provider_or_none,
@@ -582,6 +584,14 @@ def wizard_screen():
 
 def request_cancelled_text(language: str) -> str:
     return "Запрос отменён." if language == "ru" else "Request cancelled."
+
+
+def run_stopped_text(language: str) -> str:
+    return (
+        "Работа агента остановлена вами."
+        if language == "ru"
+        else "Agent run stopped by you."
+    )
 
 
 def release_terminal(
@@ -1650,6 +1660,87 @@ def confirm_revert(file_count: int, verbose: bool) -> bool:
         help_text="Enter — confirm, Esc — cancel",
     )
     return confirmed == "yes"
+
+
+def _terminal_supports_mouse_clicks() -> bool:
+    """Best-effort check for xterm-style mouse click reporting.
+
+    The Linux virtual console (``TERM=linux``) and non-terminal streams never
+    forward mouse events to the process; anything else that identifies a real
+    terminal type is assumed capable — prompt_toolkit's own mouse protocol
+    degrades to an inert click rather than corrupting input if this guess is
+    wrong, so the cost of a false positive is just "the button did nothing."
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return False
+    if os.name == "nt":
+        return True
+    return os.environ.get("TERM", "").strip().lower() not in ("", "dumb", "linux")
+
+
+def confirm_with_mouse_checkbox(title: str, checkbox_text: str) -> bool | None:
+    """Mouse-click checkbox + OK/Cancel confirmation for a destructive action.
+
+    Returns ``True`` if the box was checked and OK was activated, ``False`` if
+    cancelled, or ``None`` if this terminal cannot be trusted to report mouse
+    clicks — the caller falls back to a keyboard-only confirmation in that case.
+    """
+    if not _terminal_supports_mouse_clicks():
+        return None
+
+    from prompt_toolkit.application import Application, get_app
+    from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+    from prompt_toolkit.key_binding.bindings.focus import focus_next, focus_previous
+    from prompt_toolkit.layout import HSplit, Layout, VSplit, Window
+    from prompt_toolkit.widgets import Button, Checkbox, Frame, Label
+
+    checkbox = Checkbox(text=checkbox_text)
+    result = {"value": False}
+
+    def submit() -> None:
+        result["value"] = checkbox.checked
+        get_app().exit()
+
+    def cancel() -> None:
+        result["value"] = False
+        get_app().exit()
+
+    ok_button = Button(text="OK", handler=submit)
+    cancel_button = Button(text="Cancel", handler=cancel)
+
+    root = Frame(
+        HSplit(
+            [
+                Label(text=title),
+                Window(height=1),
+                checkbox,
+                Window(height=1),
+                VSplit([ok_button, Window(width=2), cancel_button]),
+            ]
+        ),
+        title="Confirm",
+    )
+
+    nav_bindings = KeyBindings()
+    nav_bindings.add("tab")(focus_next)
+    nav_bindings.add("s-tab")(focus_previous)
+
+    escape_bindings = KeyBindings()
+
+    @escape_bindings.add("escape")
+    @escape_bindings.add("c-c")
+    def _cancel(event) -> None:
+        result["value"] = False
+        event.app.exit()
+
+    app = Application(
+        layout=Layout(root, focused_element=checkbox),
+        key_bindings=merge_key_bindings([nav_bindings, escape_bindings]),
+        mouse_support=True,
+        full_screen=True,
+    )
+    app.run()
+    return result["value"]
 
 
 def _model_picker_options(provider: str) -> tuple[list[dict[str, str]], bool]:
@@ -2929,6 +3020,102 @@ def main() -> None:
                 )
                 continue
 
+            if user_goal.lower() == "/del-provider":
+                if not is_custom_provider(config.provider):
+                    console.print(
+                        _display_text(
+                            "/del-provider works only for a custom provider. / "
+                            "/del-provider работает только для кастомного провайдера.",
+                            "yellow",
+                        )
+                    )
+                    continue
+
+                provider_name = extract_custom_provider_name(config.provider)
+                with paused_interactive_screen(interactive_screen):
+                    confirmed = (
+                        TerminalBannerUI(console=console, verbose=verbose).choose_option(
+                            title=(
+                                f"Delete custom provider '{provider_label(config.provider)}'? "
+                                "This cannot be undone."
+                            ),
+                            options=[
+                                {"value": "no", "label": "No, cancel"},
+                                {"value": "yes", "label": "Yes, delete"},
+                            ],
+                            current_value="no",
+                            help_text="Enter — confirm, Esc — cancel",
+                        )
+                        == "yes"
+                    )
+                if not confirmed:
+                    console.print("[yellow]Provider deletion cancelled.[/yellow]")
+                    continue
+
+                if not delete_custom_provider(provider_name):
+                    console.print(
+                        _display_text(
+                            f"Custom provider '{provider_name}' was already gone.",
+                            "yellow",
+                        )
+                    )
+                    continue
+                clear_saved_provider()
+
+                build_error: str | None = None
+                with paused_interactive_screen(interactive_screen), wizard_screen():
+                    try:
+                        agent, config, model_warnings = build_agent(
+                            executor=executor,
+                            max_steps=max_steps,
+                            persist_logs=persist_logs,
+                            verbose=verbose,
+                            skip_planning=skip_planning,
+                            language_hint=session_language,
+                        )
+                    except Exception as error:
+                        build_error = sanitize_display_text(
+                            str(error).strip() or type(error).__name__
+                        )
+
+                if build_error is not None:
+                    console.print(
+                        _display_text(
+                            "Provider deleted, but selecting a replacement failed: "
+                            f"{build_error}. Run /provider to choose one.",
+                            "red",
+                        )
+                    )
+                    continue
+
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                    agent._ui.attach_screen(interactive_screen)
+                    executor.set_hitl_callbacks(
+                        suspend_fn=interactive_screen.suspend,
+                        resume_fn=interactive_screen.resume,
+                    )
+                else:
+                    executor.set_hitl_callbacks(
+                        suspend_fn=agent._ui.stop_live,
+                        resume_fn=agent._ui.start_live,
+                    )
+                sync_strime_suggestion(config.provider, config.stream)
+
+                console.print(
+                    _display_text(
+                        f"Custom provider '{provider_name}' deleted. Now using "
+                        f"{provider_label(config.provider)}.",
+                        "green",
+                    )
+                )
+                if interactive_screen is None:
+                    print_runtime_banner(config, max_steps, verbose, model_warnings)
+                else:
+                    for warning in model_warnings:
+                        console.print(_display_text(warning, "yellow"))
+                continue
+
             if user_goal.lower() == "/provider":
                 previous_provider = config.provider
                 build_error: str | None = None
@@ -3257,6 +3444,126 @@ def main() -> None:
                     )
                 continue
 
+            if user_goal.lower() == "/full-reset":
+                console.print(
+                    Panel(
+                        "[bold red]This wipes ~/.kvist/config.json entirely: every saved "
+                        "API key, custom provider, model selection, and role/style/effort/"
+                        "planning preference. It cannot be undone.[/bold red]\n"
+                        "[bold red]Это полностью очистит ~/.kvist/config.json: все "
+                        "сохранённые API-ключи, кастомные провайдеры, выбор моделей и "
+                        "настройки роли/стиля/effort/планирования. Отменить нельзя.[/bold red]",
+                        title="/full-reset",
+                        border_style="red",
+                    )
+                )
+
+                with paused_interactive_screen(interactive_screen):
+                    first_confirm = (
+                        TerminalBannerUI(console=console, verbose=verbose).choose_option(
+                            title="Continue toward a full provider/config reset?",
+                            options=[
+                                {"value": "no", "label": "No, cancel / Нет, отмена"},
+                                {"value": "yes", "label": "Yes, continue / Да, продолжить"},
+                            ],
+                            current_value="no",
+                            help_text="Enter — confirm, Esc — cancel",
+                        )
+                        == "yes"
+                    )
+                if not first_confirm:
+                    console.print("[yellow]Full reset cancelled.[/yellow]")
+                    continue
+
+                with paused_interactive_screen(interactive_screen):
+                    mouse_result = confirm_with_mouse_checkbox(
+                        title=(
+                            "Check the box to confirm the full reset, then click OK.\n"
+                            "Поставьте галочку, чтобы подтвердить полный сброс, затем "
+                            "нажмите OK."
+                        ),
+                        checkbox_text=(
+                            "I understand this is irreversible / "
+                            "Я понимаю, что это необратимо"
+                        ),
+                    )
+                    if mouse_result is None:
+                        # Terminal cannot report mouse clicks: skip the mouse-only
+                        # gate and fall back to one more keyboard confirmation.
+                        final_confirm = (
+                            TerminalBannerUI(console=console, verbose=verbose).choose_option(
+                                title="Final confirmation: wipe all provider settings now?",
+                                options=[
+                                    {"value": "no", "label": "No, cancel / Нет, отмена"},
+                                    {"value": "yes", "label": "Yes, wipe / Да, стереть"},
+                                ],
+                                current_value="no",
+                                help_text="Enter — confirm, Esc — cancel",
+                            )
+                            == "yes"
+                        )
+                    else:
+                        final_confirm = mouse_result
+                if not final_confirm:
+                    console.print("[yellow]Full reset cancelled.[/yellow]")
+                    continue
+
+                reset_user_config()
+
+                build_error: str | None = None
+                with paused_interactive_screen(interactive_screen), wizard_screen():
+                    try:
+                        agent, config, model_warnings = build_agent(
+                            executor=executor,
+                            max_steps=max_steps,
+                            persist_logs=persist_logs,
+                            verbose=verbose,
+                            skip_planning=skip_planning,
+                            language_hint=session_language,
+                        )
+                    except Exception as error:
+                        build_error = sanitize_display_text(
+                            str(error).strip() or type(error).__name__
+                        )
+
+                if build_error is not None:
+                    console.print(
+                        _display_text(
+                            "Config wiped, but no provider was configured: "
+                            f"{build_error}. Run /provider when ready.",
+                            "red",
+                        )
+                    )
+                    continue
+
+                if interactive_screen is not None:
+                    interactive_screen.set_config(config)
+                    agent._ui.attach_screen(interactive_screen)
+                    executor.set_hitl_callbacks(
+                        suspend_fn=interactive_screen.suspend,
+                        resume_fn=interactive_screen.resume,
+                    )
+                else:
+                    executor.set_hitl_callbacks(
+                        suspend_fn=agent._ui.stop_live,
+                        resume_fn=agent._ui.start_live,
+                    )
+                sync_strime_suggestion(config.provider, config.stream)
+
+                console.print(
+                    _display_text(
+                        "Full reset complete. Now using "
+                        f"{provider_label(config.provider)}. / Полный сброс выполнен.",
+                        "green",
+                    )
+                )
+                if interactive_screen is None:
+                    print_runtime_banner(config, max_steps, verbose, model_warnings)
+                else:
+                    for warning in model_warnings:
+                        console.print(_display_text(warning, "yellow"))
+                continue
+
             if user_goal.lower() == "/session":
                 if not hasattr(agent, "_list_sessions"):
                     console.print("[yellow]/session not available — restart the agent to load the latest code.[/yellow]")
@@ -3450,8 +3757,17 @@ Support:
                 )
             )
 
+            turn_language = detect_request_language(user_goal, fallback=session_language)
+            if interactive_screen is not None:
+                interactive_screen.set_language(turn_language)
             try:
                 result = agent.run(user_goal, routed_role=detected_role)
+            except KeyboardInterrupt:
+                # A stop that lands before run() owns the turn: it ends, the
+                # session stays open. Stops during planning, the loop or a chat
+                # reply never reach here — run() reports and records them.
+                console.print(_display_text(run_stopped_text(turn_language), "yellow"))
+                continue
             except Exception as error:
                 safe_error = sanitize_display_text(
                     str(error).strip() or type(error).__name__

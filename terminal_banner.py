@@ -29,12 +29,32 @@ from terminal import is_hitl_active
 
 try:
     from prompt_toolkit import prompt as pt_prompt
+    from prompt_toolkit.key_binding import KeyBindings as PtKeyBindings
     from prompt_toolkit.styles import Style as PtStyle
     _PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     pt_prompt = None  # type: ignore[assignment]
+    PtKeyBindings = None  # type: ignore[assignment]
     PtStyle = None  # type: ignore[assignment]
     _PROMPT_TOOLKIT_AVAILABLE = False
+
+
+def _cancel_on_escape_bindings() -> Any:
+    """Make a lone Escape abort a ``pt_prompt``.
+
+    Plain ``pt_prompt`` treats Escape as the meta prefix of an Alt-combination
+    and never cancels on it, so the panels promising "Esc to cancel" left the
+    key dead and Ctrl+C as the only way out. ``eager`` fires before the
+    meta-sequence timeout, which costs the Alt-word bindings inside a
+    single-value field and buys the immediate cancel the label advertises.
+    """
+    bindings = PtKeyBindings()
+
+    @bindings.add("escape", eager=True)
+    def _cancel(event: Any) -> None:
+        event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
+    return bindings
 
 
 # Keep the live thinking preview short so a long chain of thought does not push
@@ -51,6 +71,23 @@ def _reasoning_renderable(message: str) -> Text:
 
 def _ignore_reasoning(message: str) -> None:
     _ = message
+
+
+def _split_settled_markdown(text: str) -> tuple[str, str]:
+    """Split streamed markdown into a part safe to commit now and the live tail.
+
+    The cut is the last blank line that is not inside a fenced code block:
+    every block before it is closed, so rendering it now cannot change once
+    more tokens arrive. Returns an empty settled part while the whole text is
+    still one unfinished block.
+    """
+    cut = text.rfind("\n\n")
+    while cut != -1:
+        settled = text[: cut + 2]
+        if settled.count("```") % 2 == 0:
+            return settled, text[cut + 2 :]
+        cut = text.rfind("\n\n", 0, cut)
+    return "", text
 
 
 # A status message stays on screen at least this long before a newer one may
@@ -387,11 +424,14 @@ class TerminalBannerUI:
     def live_markdown(self) -> Iterator[Callable[[str], None]]:
         """Expose one mutable Markdown entry for a streaming response.
 
-        A persistent screen keeps the entry in its stream slot while tokens
-        arrive, then commits that slot to the transcript exactly once.  The
-        legacy path deliberately retains Rich's existing ``Live`` behavior.
-        In plain mode nothing is drawn per token; the final text is printed
-        once when the stream closes.
+        A persistent screen streams into its stream slot, handing every
+        finished block to the transcript as it settles so a long reply reads
+        top-down through the scrollable history instead of scrolling its own
+        head out of the height-capped slot.  Only the block still being
+        written stays in the slot, and the final commit closes it.  The legacy
+        path deliberately retains Rich's existing ``Live`` behavior.  In plain
+        mode nothing is drawn per token; the final text is printed once when
+        the stream closes.
         """
         if self._plain and self._screen is None:
             latest = ""
@@ -409,12 +449,20 @@ class TerminalBannerUI:
             return
 
         if self._screen is not None:
-            latest = ""
+            committed_chars = 0
+            tail = ""
 
             def update(message: str) -> None:
-                nonlocal latest
-                latest = message
-                self._screen.set_stream(self.render_user_markdown(message))
+                nonlocal committed_chars, tail
+                settled, tail = _split_settled_markdown(message[committed_chars:])
+                if not settled:
+                    self._screen.set_stream(self.render_user_markdown(tail))
+                    return
+                committed_chars += len(settled)
+                self._screen.flush_stream(
+                    self.render_user_markdown(settled),
+                    self.render_user_markdown(tail),
+                )
 
             def reasoning(message: str) -> None:
                 self._screen.set_stream(_reasoning_renderable(message))
@@ -424,11 +472,13 @@ class TerminalBannerUI:
                 self._publish_live()
 
             update.reasoning = reasoning
-            self._screen.set_stream(self.render_user_markdown(latest))
+            self._screen.set_stream(self.render_user_markdown(tail))
             try:
                 yield update
             finally:
-                self._screen.commit_stream(self.render_user_markdown(latest))
+                # Only the unsettled tail is left to commit: everything before
+                # it already went to the transcript while it streamed.
+                self._screen.commit_stream(self.render_user_markdown(tail))
             return
 
         with Live(
@@ -807,6 +857,7 @@ class TerminalBannerUI:
                         "> ",
                         default=current_value if current_value else "",
                         style=PtStyle.from_dict({"": "#ffffff"}),
+                        key_bindings=_cancel_on_escape_bindings(),
                     ).strip()
                     return user_input if user_input else (current_value or None)
                 else:
@@ -867,6 +918,7 @@ class TerminalBannerUI:
                     "> ",
                     is_password=True,
                     style=PtStyle.from_dict({"": "#ffffff"}),
+                    key_bindings=_cancel_on_escape_bindings(),
                 ).strip()
                 return user_input
             except (KeyboardInterrupt, EOFError):

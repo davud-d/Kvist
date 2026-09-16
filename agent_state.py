@@ -124,6 +124,9 @@ class RunState:
     # or "blocked". Derived from the same state as progress/summary, never from
     # the model's own claim of being done.
     run_status: str = "in_progress"
+    # The user stopped this run (Ctrl+C, Escape, the GUI's cancel). Recorded in
+    # session history so later turns know the work was cut short on purpose.
+    stopped_by_user: bool = False
     # Rule texts of hard environment denials seen this run (e.g. a sandbox
     # security refusal). Recovery policy: after a denial the model must try at
     # least two distinct alternative approaches before it may finish.

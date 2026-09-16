@@ -380,10 +380,17 @@ def run_supervised(
     stderr_reader.start()
 
     timed_out = False
+    interrupted: BaseException | None = None
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
+    except BaseException as error:
+        # A stop requested from the UI (Ctrl+C/Escape) unwinds through here.
+        # The child owns its own session, so it survives our exit unless the
+        # teardown below still runs — hence recording the interrupt and
+        # re-raising it only after the subtree is gone.
+        interrupted = error
 
     # Always tear down the whole subtree before joining readers: this kills
     # detached descendants (survival on normal completion) and closes any pipe
@@ -419,6 +426,8 @@ def run_supervised(
             reader.join(_KILL_POLL_INTERVAL * 5)
 
     scope_close_error = scope.close() if scope is not None else None
+    if interrupted is not None:
+        raise interrupted
     supervision_error = termination_error or scope_close_error
     if supervision_error:
         raise ProcessSupervisionError(supervision_error)

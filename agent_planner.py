@@ -93,6 +93,8 @@ def session_context(self) -> str:
         result = str(entry.get("result", "")).strip()
         if result:
             lines.append(f"  agent answered: {result[:_PLANNER_HISTORY_CHARS]}")
+        if entry.get("stopped_by_user"):
+            lines.append("  status: the user stopped this turn before it finished")
     if not lines:
         return ""
 

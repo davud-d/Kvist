@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from types import SimpleNamespace
 
 import pytest
 from rich.console import Console
@@ -14,6 +15,7 @@ class _ScreenRecorder:
         self.statuses = []
         self.streams = []
         self.commits = []
+        self.flushes = []
 
     def set_status(self, content) -> None:
         self.statuses.append(content)
@@ -23,6 +25,9 @@ class _ScreenRecorder:
 
     def commit_stream(self, content) -> None:
         self.commits.append(content)
+
+    def flush_stream(self, settled, remaining) -> None:
+        self.flushes.append((settled, remaining))
 
 
 @pytest.mark.offline_smoke
@@ -66,6 +71,74 @@ def test_live_markdown_commits_attached_screen_once():
 
     assert len(screen.streams) == 3  # Empty slot, partial, final.
     assert len(screen.commits) == 1
+
+
+def test_split_settled_markdown_cuts_at_the_last_blank_line():
+    settled, tail = ui_module._split_settled_markdown(
+        "First block.\n\nSecond block.\n\nstill writ"
+    )
+    assert settled == "First block.\n\nSecond block.\n\n"
+    assert tail == "still writ"
+
+
+def test_split_settled_markdown_keeps_an_unfinished_block_whole():
+    assert ui_module._split_settled_markdown("one long paragraph stil") == (
+        "",
+        "one long paragraph stil",
+    )
+
+
+def test_split_settled_markdown_never_cuts_inside_a_code_fence():
+    """A blank line inside an open fence is not a block boundary."""
+    text = "Intro.\n\n```python\ndef f():\n\n    return 1\n"
+    settled, tail = ui_module._split_settled_markdown(text)
+    assert settled == "Intro.\n\n"
+    assert tail == "```python\ndef f():\n\n    return 1\n"
+
+
+def test_live_markdown_hands_finished_blocks_to_the_transcript():
+    """A long reply must not grow inside the height-capped slot."""
+    screen = _ScreenRecorder()
+    ui = AgentUI(verbose=False)
+    ui.attach_screen(screen)
+
+    with ui.live_markdown() as update:
+        update("First block.")
+        update("First block.\n\nSecond")
+        update("First block.\n\nSecond block.\n\nThird")
+
+    # Each finished block was committed as it settled, the tail streamed on,
+    # and the final commit carried only what was left.
+    assert len(screen.flushes) == 2
+    assert [str(flush[0].markup) for flush in screen.flushes] == [
+        "First block.\n\n",
+        "Second block.\n\n",
+    ]
+    assert str(screen.commits[0].markup) == "Third"
+
+
+def test_cancel_on_escape_bindings_aborts_the_prompt():
+    """The panels promise "Esc to cancel"; plain pt_prompt does not deliver it."""
+    from prompt_toolkit.keys import Keys
+
+    bindings = ui_module._cancel_on_escape_bindings()
+    escape = bindings.get_bindings_for_keys((Keys.Escape,))
+    assert len(escape) == 1
+    # Without eager the key waits for a meta-sequence timeout instead.
+    assert escape[0].eager() is True
+
+    exits = {}
+
+    class _App:
+        def exit(self, **kwargs) -> None:
+            exits.update(kwargs)
+
+        def invalidate(self) -> None:
+            pass
+
+    escape[0].call(SimpleNamespace(app=_App()))
+
+    assert exits["exception"] is KeyboardInterrupt
 
 
 def test_print_user_markdown_accepts_markdown_text_without_crashing():

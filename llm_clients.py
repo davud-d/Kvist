@@ -26,6 +26,10 @@ OMNIROUTE_PROVIDER = "omniroute"
 OPENROUTER_PROVIDER = "openrouter"
 ANTHROPIC_PROVIDER = "anthropic"
 DEEPSEEK_PROVIDER = "deepseek"
+# Manual-tier entry (see MANUAL_OPENAI_PROVIDERS) that also needs naming here:
+# it is the blank-start default and the one manual-tier provider whose
+# streaming is verified, so two capability lookups have to reference it.
+ANYMODEL_PROVIDER = "anymodel"
 
 # API key environment keys.
 OPENAI_API_KEY_KEY = "openai_api_key"
@@ -288,7 +292,7 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
         "base_url_key": "scaleway_base_url",
         "default_base_url": "https://api.scaleway.ai/v1",
     },
-    "anymodel": {
+    ANYMODEL_PROVIDER: {
         "label": "AnyModel",
         "api_key_key": "anymodel_api_key",
         "base_url_key": "anymodel_base_url",
@@ -301,7 +305,7 @@ MANUAL_OPENAI_PROVIDERS: dict[str, dict[str, str]] = {
 # main.resolve_startup_provider) instead of forcing every first run through
 # the generic provider picker. It stays a plain manual-tier entry above —
 # this constant only decides what "nothing configured yet" resolves to.
-DEFAULT_BLANK_START_PROVIDER = "anymodel"
+DEFAULT_BLANK_START_PROVIDER = ANYMODEL_PROVIDER
 
 MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
 
@@ -1307,13 +1311,23 @@ def provider_supports_streaming(provider: str) -> bool:
     Custom providers are unverified third-party endpoints — many implement plain
     chat completions correctly but break on ``stream=true``. Streaming is opt-in
     per provider via its saved ``streaming`` flag, defaulting to off.
+
+    AnyModel is the one manual-tier provider listed here: it is the blank-start
+    default, so leaving it off meant a first run never streamed at all, and its
+    ``stream=true`` support was verified against the live endpoint.
     """
     normalized = normalize_provider(provider)
     if is_custom_provider(normalized):
         from user_config import get_custom_provider_by_name
         info = get_custom_provider_by_name(extract_custom_provider_name(normalized))
         return bool(info.get("streaming", False)) if info else False
-    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER)
+    return normalized in (
+        OPENAI_PROVIDER,
+        OPENROUTER_PROVIDER,
+        ANTHROPIC_PROVIDER,
+        DEEPSEEK_PROVIDER,
+        ANYMODEL_PROVIDER,
+    )
 
 
 def provider_supports_json_mode(provider: str) -> bool:

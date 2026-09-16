@@ -788,6 +788,14 @@ def test_anymodel_is_the_blank_start_default_and_a_manual_provider():
     assert llm_clients.MANUAL_OPENAI_PROVIDERS["anymodel"]["api_key_key"] == "anymodel_api_key"
 
 
+def test_anymodel_streams_unlike_the_rest_of_the_manual_tier():
+    """Verified against the live endpoint; a first run must not be stream-less."""
+    assert llm_clients.provider_supports_streaming("anymodel") is True
+    # The rest of the tier stays opt-out until each is individually verified.
+    assert llm_clients.provider_supports_streaming("qwen") is False
+    assert llm_clients.provider_supports_streaming("moonshot") is False
+
+
 # Providers with no single working default base URL (every workspace/tenant
 # has its own). These require the matching *_base_url override to be usable
 # at all; create_llm_client and _discovery_endpoints raise/skip accordingly.

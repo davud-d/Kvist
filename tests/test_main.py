@@ -504,6 +504,34 @@ def test_choose_provider_delegates_to_ui(monkeypatch):
     assert main.choose_provider("openai", False) == "openai"
 
 
+def test_terminal_supports_mouse_clicks_requires_a_real_tty(monkeypatch):
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+    assert main._terminal_supports_mouse_clicks() is False
+
+
+def test_terminal_supports_mouse_clicks_rejects_linux_console_and_dumb(monkeypatch):
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(main.os, "name", "posix")
+    for term in ("linux", "dumb", ""):
+        monkeypatch.setenv("TERM", term) if term else monkeypatch.delenv("TERM", raising=False)
+        assert main._terminal_supports_mouse_clicks() is False
+
+
+def test_terminal_supports_mouse_clicks_accepts_xterm(monkeypatch):
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(main.os, "name", "posix")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert main._terminal_supports_mouse_clicks() is True
+
+
+def test_confirm_with_mouse_checkbox_returns_none_without_mouse_support(monkeypatch):
+    monkeypatch.setattr(main, "_terminal_supports_mouse_clicks", lambda: False)
+    assert main.confirm_with_mouse_checkbox("title", "checkbox") is None
+
+
 def test_choose_session_creates_normalized_named_session(monkeypatch):
     created = []
 

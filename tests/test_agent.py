@@ -154,12 +154,20 @@ def test_chat_keyboard_interrupt_before_stream_returns_to_prompt(
 
     result = agent.run("hello", routed_role="chat")
 
-    assert "cancel" in result.casefold()
-    assert [message["role"] for message in agent._chat_history] == ["system"]
-    assert agent._session_history == []
+    assert "stopped by you" in result.casefold()
+    # The stopped turn stays in context, answered only by the stop note.
+    assert [message["role"] for message in agent._chat_history] == [
+        "system",
+        "user",
+        "assistant",
+    ]
+    assert agent._chat_history[-1]["content"] == (
+        "[The user stopped this reply before it finished.]"
+    )
+    assert agent._session_history[-1]["stopped_by_user"] is True
 
 
-def test_chat_keyboard_interrupt_mid_stream_discards_partial_answer(
+def test_chat_keyboard_interrupt_mid_stream_keeps_partial_answer_with_note(
     agent_factory,
     monkeypatch,
 ):
@@ -169,11 +177,14 @@ def test_chat_keyboard_interrupt_mid_stream_discards_partial_answer(
 
     result = agent.run("hello", routed_role="chat")
 
-    assert "cancel" in result.casefold()
+    assert "stopped by you" in result.casefold()
     assert stream.closed
-    assert [message["role"] for message in agent._chat_history] == ["system"]
-    assert all("partial" not in m["content"] for m in agent._chat_history)
-    assert agent._session_history == []
+    assert agent._chat_history[-1] == {
+        "role": "assistant",
+        "content": "partial\n\n[The user stopped this reply before it finished.]",
+    }
+    assert agent._session_history[-1]["goal"] == "hello"
+    assert agent._session_history[-1]["stopped_by_user"] is True
 
 
 def test_chat_stream_is_closed_after_a_successful_answer(
@@ -226,6 +237,8 @@ def test_chat_recovers_for_the_next_request_after_cancellation(
     assert agent.run("second", routed_role="chat") == "second answer"
     assert [message["role"] for message in agent._chat_history] == [
         "system",
+        "user",
+        "assistant",
         "user",
         "assistant",
     ]

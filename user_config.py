@@ -702,6 +702,27 @@ def delete_custom_provider(name: str, config_path: Path | None = None) -> bool:
     return deleted
 
 
+def clear_saved_provider(config_path: Path | None = None) -> None:
+    """Unset the saved provider selection.
+
+    Used after deleting the active custom provider: leaving the stale
+    ``llm_provider`` value in place would point the next launch at a
+    provider whose config no longer exists.
+    """
+
+    def clear_provider(payload: dict[str, object]) -> dict[str, object]:
+        payload.pop(LLM_PROVIDER_KEY, None)
+        return payload
+
+    _update_user_config(clear_provider, config_path)
+
+
+def reset_user_config(config_path: Path | None = None) -> None:
+    """Wipe the entire user config file (API keys, custom providers, all
+    saved preferences). Used by ``/full-reset``; irreversible."""
+    save_user_config({}, config_path)
+
+
 def save_style_configuration(
     style_type: StyleType,
     style: str,

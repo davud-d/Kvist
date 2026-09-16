@@ -332,9 +332,10 @@ def test_run_loop_checkpoints_before_the_fifth_step(agent_factory):
         "data": {"path": command.action.args["path"]},
     }
 
-    with pytest.raises(KeyboardInterrupt):
-        agent._run_loop("Investigate files", start_step=1)
+    result = agent._run_loop("Investigate files", start_step=1)
 
+    # A stop is reported, not raised: the turn ends inside the loop.
+    assert result == agent._build_cancellation_message()
     # Per-step checkpointing must capture step 2 even though the old
     # every-5-steps cadence would have saved nothing before step 5.
     restarted = agent_factory(max_steps=6)
@@ -368,9 +369,9 @@ def test_run_loop_preserves_last_checkpoint_on_keyboard_interrupt(agent_factory)
         "data": {"path": command.action.args["path"]},
     }
 
-    with pytest.raises(KeyboardInterrupt):
-        agent._run_loop("Investigate files", start_step=1)
+    result = agent._run_loop("Investigate files", start_step=1)
 
+    assert result == agent._build_cancellation_message()
     restarted = agent_factory(max_steps=6)
     checkpoint = restarted._load_checkpoint()
     assert checkpoint == ("Investigate files", 5)
@@ -536,14 +537,17 @@ def test_run_loop_cleanup_does_not_mask_keyboard_interrupt(agent_factory):
     agent._persist_logs = lambda goal: cleanup_calls.append("persist")
     agent._perf_logger.flush = lambda: cleanup_calls.append("flush")
 
-    with pytest.raises(KeyboardInterrupt) as caught:
+    # A stop is a normal outcome now, so there is no primary failure for the
+    # cleanup report to attach to: a failing cleanup surfaces on its own,
+    # still redacted, and only after every other cleanup was attempted.
+    with pytest.raises(RuntimeError) as caught:
         agent._run_loop("Investigate files", start_step=1)
 
     assert cleanup_calls == ["stop", "persist", "flush"]
-    notes = "\n".join(caught.value.__notes__)
-    assert "synthetic UI stop failure" in notes
-    assert synthetic_secret not in notes
-    assert "[REDACTED]" in notes
+    reported = str(caught.value)
+    assert "synthetic UI stop failure" in reported
+    assert synthetic_secret not in reported
+    assert "[REDACTED]" in reported
 
 
 def test_rolling_summary_stored_on_summary_step(agent_factory, tmp_path):

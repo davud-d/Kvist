@@ -249,6 +249,15 @@ instructions.
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
 the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
 - **chat** role takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol.
+  **A streamed reply settles into the transcript as it arrives.** The screen's stream
+  slot is height-capped (`_transient_height` leaves `_MIN_TRANSCRIPT_ROWS_WHILE_STREAMING`
+  for the history), so a long answer used to scroll its own head out of that slot with
+  nowhere to scroll back to — the transcript stayed empty until the final
+  `commit_stream`. `terminal_banner.live_markdown` now splits each update with
+  `_split_settled_markdown` (cut at the last blank line outside an open ``` fence, so a
+  committed block can never re-render differently) and hands the settled part to
+  `InteractiveScreen.flush_stream`, which appends it to the transcript while re-arming
+  the slot with the tail. Only the block still being written lives in the slot.
 - **coder / reader / devops** build a plan (`agent_planner.py`) then enter `run_loop` (`agent_runtime.py`),
   which calls the action model, parses, executes via `SafeExecutor`, registers feedback,
   tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
@@ -281,6 +290,47 @@ A UI without `ask_choice` (headless frontends, `run_task.py`, no TTY) has nobody
 ask, so the budget stays a hard stop with `_build_limit_reached_message` exactly as
 before; a cancelled question (Esc, or the screen shutting down mid-question) is
 treated the same way.
+
+### Stopping a turn (Ctrl+C / Escape)
+**A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt`
+around its whole loop, so the turn's answer becomes `build_cancellation_message`
+("Работа агента остановлена вами…") and the `finally` still seals the session,
+checkpoint and logs; `main.py`'s `except KeyboardInterrupt` around `agent.run` is only the
+last-resort net for a stop that lands before `run()` owns the turn (`run_stopped_text`). Only a
+stop at the *idle* prompt still exits with 130. A stop during planning is handled in
+`run()` itself (`_report_stop_before_loop`). A stopped chat reply shows "Ответ
+остановлен вами." and — unlike before — **stays in the chat history**: the user
+message is answered by whatever arrived plus a "[Ответ остановлен пользователем…]"
+note (`_stopped_chat_reply`), so the transcript alternates correctly.
+
+**A stop is context, not just UI.** Every stop path sets `RunState.stopped_by_user`
+(chat passes it directly) and `_add_to_session_history` writes
+`stopped_by_user: true` into the entry. All three readers of session history render it —
+the planner's `session_context`, the action loop's `SESSION HISTORY` block in
+`agent_context`, and the chat preamble — so "продолжай" after a stop is understood as
+unfinished work rather than a completed task.
+
+**Escape needs two presses; Ctrl+C needs one.** The first Escape only arms the stop
+(`_stop_armed_at`) and shows `_STOP_HINTS` in a one-line window directly under the
+status panel; a second press within `_STOP_CONFIRM_SECONDS` (3 s) performs it, and the
+arming expires on its own because every render re-checks the window. The hint language
+follows the request text (`main.py` calls `InteractiveScreen.set_language` per turn),
+not `LANG`, which is English on a machine whose user writes Russian.
+
+Both keys must raise a **real signal**, which is why
+`InteractiveScreen._interrupt_main_thread` calls `os.kill(os.getpid(), SIGINT)` on
+POSIX instead of `_thread.interrupt_main`: the flag `interrupt_main` sets is only read
+between bytecodes, so it cannot free a main thread parked in a provider socket read —
+the moment a stop is most likely to be pressed (the same reason
+`_preserve_interrupt_signal` keeps `ISIG` on so Ctrl+C stays a tty signal). Escape gets
+Ctrl+C's path under `_turn_in_flight` — the REPL is inside `read_input` and the input
+box is empty — because Escape is the meta prefix (Alt+Enter) while a line is being
+typed. `process_tree.run_supervised` records an interrupt from `proc.wait` and re-raises
+it only *after* tearing the subtree down; the child owns its own session, so skipping
+that would orphan a build in a session that now survives the stop.
+`agent.request_cancel()` (the flag `_cancel_event`) stays the **GUI's**
+transport-agnostic mechanism — observed between steps, while consuming an action-loop
+stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
 
 ### Role routing (`role_router.py`)
 Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins
@@ -482,9 +532,11 @@ through the OpenAI SDK directly (OmniRoute is a local OpenAI-compatible gateway
 defaulting to `http://localhost:20128/v1`, models entered manually); `anthropic` uses
 `AnthropicCompatibleClient`; `freeflow` wraps Gemini+Groq via `FreeFlowCompatibleClient`
 with cross-backend fallback. Capability is per provider, not one assumption for all:
-`provider_supports_streaming` is true for openai, openrouter, anthropic and deepseek
-only (manual-tier providers default to false, same as an unverified custom endpoint,
-until one is individually verified), and `provider_supports_json_mode` is true for
+`provider_supports_streaming` is true for openai, openrouter, anthropic, deepseek and
+`anymodel` (the rest of the manual tier defaults to false, same as an unverified custom
+endpoint, until one is individually verified against the live endpoint — AnyModel is
+listed because it is the blank-start default, so leaving it off meant a first run never
+streamed at all), and `provider_supports_json_mode` is true for
 openai, openrouter and deepseek only. `resolve_models_for_provider` /
 `validate_model_selection` / `fallback_candidates_for_model` handle defaults,
 validation, and model fallback chains.

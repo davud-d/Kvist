@@ -495,6 +495,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 final_message = self._build_limit_reached_message()
                 break
 
+            if self._cancel_event.is_set():
+                final_message = _stop_by_user(self)
+                break
+
             early_stop_message = self._build_early_stop_message(step)
             if early_stop_message:
                 final_message = early_stop_message
@@ -511,7 +515,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 # ran, so exit through the same safe-stop finalization as a
                 # between-steps cancel — report rendered, session/checkpoint
                 # written, no half-applied work.
-                final_message = self._build_cancellation_message()
+                final_message = _stop_by_user(self)
                 break
             except Exception as error:
                 error_text = redact_text(
@@ -591,6 +595,14 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
         if not final_message:
             final_message = self._build_limit_reached_message()
+    except KeyboardInterrupt:
+        # Ctrl+C or Escape in the terminal, which lands wherever the run
+        # happens to be. It ends the turn, not the process: the finally below
+        # still seals the session, checkpoint and logs, and the user gets the
+        # same report a cancel between steps produces. Anything the
+        # interrupted action left half-written is a partial commit the journal
+        # already records as unconfirmed for /resume to reconcile.
+        final_message = _stop_by_user(self)
     finally:
         self._finalize_run(
             user_goal,
@@ -602,6 +614,11 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         self._ui.print_final(final_message, self._state.user_messages)
 
     return final_message
+
+
+def _stop_by_user(self) -> str:
+    self._state.stopped_by_user = True
+    return self._build_cancellation_message()
 
 
 def _run_action_batch(
@@ -1704,9 +1721,12 @@ def render_feedback(self, summary_line: str, feedback: dict[str, Any]) -> str:
 
 
 def build_cancellation_message(self) -> str:
+    # Every route into this message is a user gesture (Ctrl+C or Escape in the
+    # terminal, the GUI's cancel), so it says who stopped the run instead of
+    # leaving "on request" to be read as an internal limit being hit.
     if self._state.response_language == "ru":
-        return "Ход остановлен по запросу. Показано то, что агент успел сделать."
-    return "Run stopped on request. Showing what the agent completed so far."
+        return "Работа агента остановлена вами. Показано то, что агент успел сделать."
+    return "Agent run stopped by you. Showing what the agent completed so far."
 
 
 def build_early_stop_message(self, step: int) -> str | None:

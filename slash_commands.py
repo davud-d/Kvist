@@ -57,6 +57,16 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("revert", "Restore agent-changed files to their baselines"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
     SlashCommand(
+        "del-provider",
+        "Delete the active custom provider",
+        aliases=("del_provider", "delprovider"),
+    ),
+    SlashCommand(
+        "full-reset",
+        "Wipe all saved provider settings and API keys",
+        aliases=("full_reset",),
+    ),
+    SlashCommand(
         "bye",
         "Save the active session and exit Kvist",
         aliases=("exit", "quit"),

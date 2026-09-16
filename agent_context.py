@@ -214,6 +214,11 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
                 history_lines.append(
                     f"{i}. [{entry['role']}] {entry['goal'][:120]}"
                 )
+                if entry.get("stopped_by_user"):
+                    history_lines.append(
+                        "   ! The user stopped this task before it finished; "
+                        "do not assume its remaining work was done."
+                    )
                 for output in entry.get("outputs", [])[:2]:
                     history_lines.append(f"   → {output[:150]}")
             history_lines.append("")

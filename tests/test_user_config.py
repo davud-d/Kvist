@@ -452,6 +452,39 @@ def test_delete_custom_provider(tmp_path):
     assert result is False
 
 
+def test_clear_saved_provider(tmp_path):
+    path = tmp_path / "config.json"
+
+    user_config.save_user_config({"llm_provider": "custom:gone", "gemini_api_key": "keep-me"}, path)
+    user_config.clear_saved_provider(path)
+
+    payload = user_config.load_user_config(path)
+    assert "llm_provider" not in payload
+    assert payload["gemini_api_key"] == "keep-me"
+
+    # Clearing again with nothing saved is a no-op, not an error.
+    user_config.clear_saved_provider(path)
+    assert "llm_provider" not in user_config.load_user_config(path)
+
+
+def test_reset_user_config(tmp_path):
+    path = tmp_path / "config.json"
+
+    user_config.save_user_config(
+        {
+            "llm_provider": "openai",
+            "openai_api_key": "sk-test",
+            "custom_providers": {"my-llama": {"label": "My Llama", "base_url": "http://x/v1"}},
+        },
+        path,
+    )
+    user_config.reset_user_config(path)
+
+    assert user_config.load_user_config(path) == {}
+    assert user_config.get_custom_providers(path) == {}
+    assert user_config.get_saved_provider_or_none(path) is None
+
+
 def test_custom_provider_invalid_entries_filtered(tmp_path):
     path = tmp_path / "config.json"
 

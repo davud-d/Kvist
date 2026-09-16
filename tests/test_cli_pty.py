@@ -359,7 +359,8 @@ def test_cli_pty_ctrl_c_saves_and_exits_130(tmp_path):
         child.close()
 
 
-def test_cli_pty_ctrl_c_cancels_active_task(tmp_path):
+def test_cli_pty_ctrl_c_stops_the_task_and_keeps_the_repl_alive(tmp_path):
+    """Ctrl+C during a run ends that turn, not the session."""
     child = _spawn(tmp_path / "workspace", tmp_path / "home")
     try:
         child.wait_for("❯", timeout=20)
@@ -367,9 +368,14 @@ def test_cli_pty_ctrl_c_cancels_active_task(tmp_path):
         child.send("wait for cancellation now\r")
         child.wait_for("⚡ Role:", start=start)
         child.send("\x03")
-        assert child.wait(timeout=5) == 130
-        assert "unexpectedly completed" not in child.visible(start)
-        assert "Traceback (most recent call last)" not in child.visible(start)
+        stopped = child.wait_for("Agent run stopped by you.", start=start, timeout=15)
+        assert "unexpectedly completed" not in stopped
+        assert "Traceback (most recent call last)" not in stopped
+        assert child.exit_code is None
+
+        # The session survived the stop, so the normal shutdown path still runs.
+        child.send("/bye\r")
+        assert child.wait(timeout=15) == 0
     finally:
         child.close()
 
@@ -486,7 +492,7 @@ def test_cli_pty_ctrl_c_cancels_chat_request_and_keeps_repl_alive(tmp_path):
 
         # 2. Ctrl+C cancels only that request.
         child.send("\x03")
-        cancelled = child.wait_for("Request cancelled.", start=start, timeout=15)
+        cancelled = child.wait_for("Reply stopped by you.", start=start, timeout=15)
         assert "Traceback (most recent call last)" not in cancelled
         assert child.exit_code is None
 
@@ -643,7 +649,7 @@ def test_live_ui_ctrl_c_byte_cancels_blocked_request(tmp_path):
 
         # Exactly what a user does: the byte, not os.kill(SIGINT).
         child.send("\x03")
-        cancelled = child.wait_for("Request cancelled.", start=start, timeout=15)
+        cancelled = child.wait_for("Reply stopped by you.", start=start, timeout=15)
         assert "Traceback (most recent call last)" not in cancelled
         assert child.exit_code is None
 
@@ -654,6 +660,49 @@ def test_live_ui_ctrl_c_byte_cancels_blocked_request(tmp_path):
         child.send("/bye\r")
         assert child.wait(timeout=20) == 0
         assert "Traceback (most recent call last)" not in child.visible()
+    finally:
+        child.close()
+
+
+def test_live_ui_escape_stops_a_turn_in_flight_on_the_second_press(tmp_path):
+    """One Escape only asks for confirmation; the second one stops the turn."""
+    child = _live_ui_child(tmp_path)
+    try:
+        start = child.mark()
+        child.send("first chat message\r")
+        child.wait_for("REQUEST-BLOCKED", start=start, timeout=20)
+
+        armed = child.mark()
+        child.send("\x1b")
+        child.wait_for("Press Esc again to stop the agent", start=armed, timeout=10)
+        assert "Reply stopped by you." not in child.visible(start)
+
+        # Escape reaches the application as a key, so freeing a thread parked
+        # in the provider read depends on it raising a real signal.
+        child.send("\x1b")
+        cancelled = child.wait_for("Reply stopped by you.", start=start, timeout=15)
+        assert "Traceback (most recent call last)" not in cancelled
+        assert child.exit_code is None
+
+        second = child.mark()
+        child.send("second chat message\r")
+        child.wait_for("SECOND-ANSWER-OK", start=second, timeout=20)
+
+        child.send("/bye\r")
+        assert child.wait(timeout=20) == 0
+    finally:
+        child.close()
+
+
+def test_live_ui_escape_at_the_prompt_does_not_stop_kvist(tmp_path):
+    child = _live_ui_child(tmp_path)
+    try:
+        child.send("\x1b")
+        start = child.mark()
+        # Still alive and still taking work: Escape was not a stop here.
+        child.send("first chat message\r")
+        child.wait_for("REQUEST-BLOCKED", start=start, timeout=20)
+        assert child.exit_code is None
     finally:
         child.close()
 
@@ -670,7 +719,8 @@ def test_live_ui_ctrl_c_byte_at_prompt_exits_130(tmp_path):
         child.close()
 
 
-def test_live_ui_cancelled_turn_leaves_no_history(tmp_path):
+def test_live_ui_stopped_turn_is_recorded_as_stopped_by_the_user(tmp_path):
+    """The next turn must be able to see that this one was cut short."""
     workspace = tmp_path / "workspace"
     child = _live_ui_child(tmp_path)
     try:
@@ -678,19 +728,25 @@ def test_live_ui_cancelled_turn_leaves_no_history(tmp_path):
         child.send("first chat message\r")
         child.wait_for("REQUEST-BLOCKED", start=start, timeout=20)
         child.send("\x03")
-        child.wait_for("Request cancelled.", start=start, timeout=15)
+        child.wait_for("Reply stopped by you.", start=start, timeout=15)
         child.send("/bye\r")
         assert child.wait(timeout=20) == 0
     finally:
         child.close()
 
-    # A session with nothing in it is never materialised, so an absent file is
-    # the strongest possible form of "the cancelled turn left no history".
-    state_path = workspace / ".kvist" / "sessions" / "default.json"
-    if state_path.exists():
-        document = json.loads(state_path.read_text(encoding="utf-8"))
-        assert document["session_history"] == []
-        assert [m["role"] for m in document["chat_history"]] in ([], ["system"])
+    documents = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (workspace / ".kvist" / "sessions").glob("*.json")
+    ]
+    recorded = [doc for doc in documents if doc.get("session_history")]
+    assert len(recorded) == 1
+    entry = recorded[0]["session_history"][-1]
+    assert entry["goal"] == "first chat message"
+    assert entry["stopped_by_user"] is True
+    assert recorded[0]["chat_history"][-1] == {
+        "role": "assistant",
+        "content": "[The user stopped this reply before it finished.]",
+    }
 
 
 def test_cli_pty_settings_api_edits_the_context_window(tmp_path):

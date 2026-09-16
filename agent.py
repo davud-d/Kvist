@@ -281,8 +281,14 @@ class LocalAgent:
                     )
         return outputs[-_SESSION_MAX_HARVESTED_OUTPUTS:]
 
-    def _add_to_session_history(self, user_goal: str, role: str, result: str) -> None:
-        """Record a completed run in session history for context."""
+    def _add_to_session_history(
+        self,
+        user_goal: str,
+        role: str,
+        result: str,
+        stopped_by_user: bool = False,
+    ) -> None:
+        """Record a finished or user-stopped turn in session history for context."""
         outputs = self._harvest_run_outputs()
 
         entry = {
@@ -292,6 +298,8 @@ class LocalAgent:
         }
         if outputs:
             entry["outputs"] = outputs
+        if stopped_by_user:
+            entry["stopped_by_user"] = True
         safe_entry = redact_value(entry)
         assert isinstance(safe_entry, dict)
         self._session_history.append(safe_entry)
@@ -440,7 +448,12 @@ class LocalAgent:
             try:
                 result = self._run_chat(user_goal)
             except ChatRequestCancelled:
-                # A cancelled turn produced no answer, so it is not history.
+                self._add_to_session_history(
+                    user_goal,
+                    "chat",
+                    self._stopped_chat_reply(),
+                    stopped_by_user=True,
+                )
                 return self._report_cancelled_turn()
             self._add_to_session_history(user_goal, "chat", result)
             return result
@@ -454,19 +467,42 @@ class LocalAgent:
         self._run_id = uuid.uuid4().hex
         self._pending_action = None
         self._begin_run(user_goal, self._run_id)
-        self._state.plan_info = (
-            self._no_plan_info(user_goal)
-            if self.config.skip_planning
-            else self._create_plan(user_goal)
-        )
-        if not self._state.selected_action_model:
-            self._select_action_model_for_run()
-        self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
-        self._ui.print_sandbox_notice(self.executor.sandbox_note)
-        self._ui.print_plan(self._state.plan_info)
+        try:
+            self._state.plan_info = (
+                self._no_plan_info(user_goal)
+                if self.config.skip_planning
+                else self._create_plan(user_goal)
+            )
+            if not self._state.selected_action_model:
+                self._select_action_model_for_run()
+            self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
+            self._ui.print_sandbox_notice(self.executor.sandbox_note)
+            self._ui.print_plan(self._state.plan_info)
+        except KeyboardInterrupt:
+            return self._report_stop_before_loop(user_goal)
         result = self._run_loop(user_goal, start_step=1)
-        self._add_to_session_history(user_goal, self._state.current_agent_role, result)
+        self._record_run_turn(user_goal, result)
         return result
+
+    def _record_run_turn(self, user_goal: str, result: str) -> None:
+        self._add_to_session_history(
+            user_goal,
+            self._state.current_agent_role,
+            result,
+            stopped_by_user=self._state.stopped_by_user,
+        )
+
+    def _report_stop_before_loop(self, user_goal: str) -> str:
+        """End a turn the user stopped while it was still being planned.
+
+        Nothing ran yet, but the turn is still recorded: the next request may
+        well be "carry on", and it has to know this one was cut short.
+        """
+        self._state.stopped_by_user = True
+        message = self._build_cancellation_message()
+        self._ui.print_final(message, self._state.user_messages)
+        self._record_run_turn(user_goal, message)
+        return message
 
     def resume(self) -> str | None:
         self._reset_cancel()
@@ -515,15 +551,18 @@ class LocalAgent:
         # external side effect: re-plan NEW and start fresh from step 1 rather
         # than reviving the superseded run or forgetting NEW.
         if resumed_phase == "planning" or self._state.plan_info is None:
-            self._state.plan_info = (
-                self._no_plan_info(user_goal)
-                if self.config.skip_planning
-                else self._create_plan(user_goal)
-            )
-            self._ui.print_plan(self._state.plan_info)
+            try:
+                self._state.plan_info = (
+                    self._no_plan_info(user_goal)
+                    if self.config.skip_planning
+                    else self._create_plan(user_goal)
+                )
+                self._ui.print_plan(self._state.plan_info)
+            except KeyboardInterrupt:
+                return self._report_stop_before_loop(user_goal)
             start_step = 1
         result = self._run_loop(user_goal, start_step=start_step)
-        self._add_to_session_history(user_goal, self._state.current_agent_role, result)
+        self._record_run_turn(user_goal, result)
         return result
 
     def _follow_checkpoint_to_its_session(self) -> None:
@@ -806,6 +845,10 @@ class LocalAgent:
                 history_lines.append(
                     f"- [{entry['role']}] Asked: \"{entry['goal']}\""
                 )
+                if entry.get("stopped_by_user"):
+                    history_lines.append(
+                        "    Status: the user stopped this turn before it finished."
+                    )
                 for output in entry.get("outputs", []):
                     history_lines.append(f"    Output: {output}")
             session_context = "\n".join(history_lines) + "\n\n---\n\n"
@@ -869,6 +912,7 @@ class LocalAgent:
         except Exception:
             pass
 
+        self._chat_answer_chunks: list[str] = []
         for attempt, model in enumerate(models_to_try):
             try:
                 if self.config.stream:
@@ -903,9 +947,14 @@ class LocalAgent:
                 continue
 
             except (ChatRequestCancelled, KeyboardInterrupt) as error:
-                # Ordered before ``Exception`` so a cancelled turn is never
-                # retried against a fallback model.
-                self._chat_history = history_before
+                # Ordered before ``Exception`` so a stopped turn is never
+                # retried against a fallback model. The turn stays in history,
+                # answered by what arrived plus a note that the user cut it
+                # short, so the next message is read with that in mind.
+                self._chat_history = history_before + [
+                    {"role": "user", "content": user_goal},
+                    {"role": "assistant", "content": self._stopped_chat_reply()},
+                ]
                 raise ChatRequestCancelled from error
 
             except Exception as error:
@@ -929,11 +978,20 @@ class LocalAgent:
         self.console.print(Text(fallback_msg, style="yellow"))
         return fallback_msg
 
+    def _stopped_chat_reply(self) -> str:
+        note = (
+            "[Ответ остановлен пользователем до завершения.]"
+            if self._state.response_language == "ru"
+            else "[The user stopped this reply before it finished.]"
+        )
+        partial = "".join(getattr(self, "_chat_answer_chunks", [])).rstrip()
+        return f"{partial}\n\n{note}" if partial else note
+
     def _report_cancelled_turn(self) -> str:
         message = (
-            "Запрос отменён."
+            "Ответ остановлен вами."
             if self._state.response_language == "ru"
-            else "Request cancelled."
+            else "Reply stopped by you."
         )
         self.console.print(Text(message, style="yellow"))
         return message
@@ -995,6 +1053,9 @@ class LocalAgent:
 
     def _consume_chat_stream(self, stream: Any) -> str:
         chunks: list[str] = []
+        # Shared, not copied: if the user stops the reply mid-stream, the turn
+        # is recorded with whatever had arrived by then.
+        self._chat_answer_chunks = chunks
         reasoning_chunks: list[str] = []
 
         import time
@@ -1004,6 +1065,12 @@ class LocalAgent:
         with self._ui.live_markdown() as update_markdown:
             reasoning_update = getattr(update_markdown, "reasoning", None)
             for chunk in stream:
+                # The same flag the action loop watches (see agent_model's
+                # stream loop). Without it a cancel requested from another
+                # thread — the GUI's only way to stop a turn — was ignored
+                # here and a chat answer kept streaming to its end.
+                if self._cancel_event.is_set():
+                    raise ChatRequestCancelled
                 text = ""
 
                 # 1. OpenAI variant (strict objects with attributes)

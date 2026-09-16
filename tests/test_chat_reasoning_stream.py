@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 from agent import LocalAgent
@@ -22,7 +23,10 @@ def _delta(**fields):
 
 def _consume(stream):
     channel = FrontendChannel()
-    fake_self = SimpleNamespace(_ui=EventStreamUI(channel))
+    fake_self = SimpleNamespace(
+        _ui=EventStreamUI(channel),
+        _cancel_event=threading.Event(),
+    )
     answer = LocalAgent._consume_chat_stream(fake_self, stream)
     return answer, channel.drain()
 

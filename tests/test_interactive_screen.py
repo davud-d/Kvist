@@ -293,6 +293,36 @@ def test_stream_slot_commits_once_beside_pinned_status(screen_runtime):
     assert "STATUS-ONLY" in text
 
 
+def test_flush_stream_moves_settled_text_into_the_transcript(screen_runtime):
+    """A settled block leaves the height-capped slot for the scrollable log."""
+    screen = screen_runtime.screen
+    screen.suspend()
+
+    screen.set_stream("FIRST-BLOCK\n\nTAIL")
+    screen.flush_stream("FIRST-BLOCK\n\n", "TAIL")
+
+    # The settled part is transcript now, and the slot only holds the tail.
+    assert "FIRST-BLOCK" in screen._transcript_plain
+    assert "TAIL" not in screen._transcript_plain
+    assert screen._stream == "TAIL"
+
+    screen.commit_stream()
+    assert screen._transcript_plain.count("FIRST-BLOCK") == 1
+    assert screen._transcript_plain.count("TAIL") == 1
+    assert screen._stream is None
+
+
+def test_flush_stream_without_a_live_slot_is_ignored(screen_runtime):
+    """Nothing to flush after the commit closed the slot."""
+    screen = screen_runtime.screen
+    screen.suspend()
+
+    screen.flush_stream("ORPHAN", "TAIL")
+
+    assert "ORPHAN" not in screen._transcript_plain
+    assert screen._stream is None
+
+
 def test_dynamic_control_cursor_uses_same_snapshot_as_rendered_content(
     screen_runtime,
 ):
@@ -750,3 +780,24 @@ def test_shutdown_releases_a_pending_choice(screen_runtime):
     screen.stop()
     thread.join(timeout=3)
     assert answer[0] is None
+
+
+def test_escape_stop_arming_expires(screen_runtime, monkeypatch):
+    """A lone Escape must not stay armed until some later accidental press."""
+    screen = screen_runtime.screen
+    now = [100.0]
+    monkeypatch.setattr(interactive_screen_module.time, "monotonic", lambda: now[0])
+
+    assert not screen._stop_armed()
+    screen._stop_armed_at = now[0]
+    assert screen._stop_armed()
+    now[0] += interactive_screen_module._STOP_CONFIRM_SECONDS + 0.1
+    assert not screen._stop_armed()
+
+
+def test_stop_hint_follows_the_turn_language(screen_runtime):
+    screen = screen_runtime.screen
+    screen.set_language("ru")
+    assert "Esc ещё раз" in screen._get_stop_hint()[0][1]
+    screen.set_language("en")
+    assert "Press Esc again" in screen._get_stop_hint()[0][1]

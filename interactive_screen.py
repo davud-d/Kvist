@@ -13,6 +13,7 @@ import io
 import os
 import queue
 import re
+import signal
 import sys
 import threading
 import time
@@ -82,6 +83,13 @@ _MAX_TRANSCRIPT_ENTRIES = 2_000
 _TRANSCRIPT_TRUNCATION_MARKER = "[Earlier terminal output truncated]\n"
 _STOP = object()
 _ANSI_CHUNK_BATCH = 64
+# Escape sits next to keys people hit while reading, so one press only arms the
+# stop; a second press inside this window performs it.
+_STOP_CONFIRM_SECONDS = 3.0
+_STOP_HINTS = {
+    "ru": "  Esc ещё раз — остановить агента",
+    "en": "  Press Esc again to stop the agent",
+}
 
 
 def _restore_interrupt_signal(input_object: Any) -> None:
@@ -453,6 +461,13 @@ class InteractiveScreen:
 
         self._status: Any | None = None
         self._stream: Any | None = None
+        # Cleared only while the REPL is off processing a turn, which is the
+        # one state where Escape means "stop" rather than a meta prefix. It
+        # starts set so Escape stays inert during startup.
+        self._awaiting_input = threading.Event()
+        self._awaiting_input.set()
+        self._stop_armed_at: float | None = None
+        self._language = "en"
         # Arrow-key question asked from the agent thread and answered by the
         # UI thread. It renders inside the running application, directly under
         # the banner, so the live panel keeps updating while the user chooses.
@@ -672,10 +687,31 @@ class InteractiveScreen:
 
         if not self.is_running and not self._suspended:
             self.start()
-        item = self._input_queue.get()
+        self._awaiting_input.set()
+        self._stop_armed_at = None
+        try:
+            item = self._input_queue.get()
+        finally:
+            self._awaiting_input.clear()
         if item is _STOP:
             raise EOFError
         return str(item).strip()
+
+    @staticmethod
+    def _interrupt_main_thread() -> None:
+        """Stop whatever the main thread is doing, from the UI thread.
+
+        ``interrupt_main`` only sets a flag that the main thread checks between
+        bytecodes, so it cannot free a thread parked in a provider socket read
+        — the very moment a stop is most likely to be pressed (see
+        ``_preserve_interrupt_signal``).  A real signal interrupts that syscall,
+        so POSIX goes through the kernel and Windows, which has no equivalent,
+        keeps the flag.
+        """
+        if os.name == "nt":
+            _thread.interrupt_main()
+            return
+        os.kill(os.getpid(), signal.SIGINT)
 
     def _preserve_interrupt_signal(self) -> None:
         """Keep ``ISIG`` set whenever prompt_toolkit takes the input raw.
@@ -762,6 +798,10 @@ class InteractiveScreen:
         with self._state_lock:
             self._config = config
         self.invalidate()
+
+    def set_language(self, language: str) -> None:
+        """Language of the turn in flight, for the screen's own hints."""
+        self._language = language
 
     def set_status(self, content: Any | None) -> None:
         with self._state_lock:
@@ -875,28 +915,41 @@ class InteractiveScreen:
             # duplicate the response in the transcript.
             if self._stream is None:
                 return
-            committed = self._stream if content is None else content
-            fragments = self._format_content(committed, self._terminal_width())
-            if fragments:
-                if not self._fragments_end_in_newline(fragments):
-                    fragments.append(("", "\n"))
-                self._transcript_entries.append(("formatted", fragments))
-                plain = "".join(
-                    fragment[1] for fragment in fragments
-                )
-                self._append_transcript_plain_locked(plain)
-                self._transcript_storage_chars += len(plain)
-                self._trim_transcript_locked()
-                self._invalidate_transcript_lines_locked()
-                if self._follow_tail:
-                    self._transcript_cursor_line = (
-                        self._last_transcript_line_locked()
-                    )
+            self._commit_stream_content_locked(
+                self._stream if content is None else content
+            )
             self._stream = None
             self._slot_generation += 1
             self._slot_cache = None
 
         self.invalidate()
+
+    def flush_stream(self, settled: Any, remaining: Any) -> None:
+        """Move a settled part of a live stream into the transcript.
+
+        The slot keeps streaming ``remaining``, so a long reply flows up
+        through the scrollable transcript as it arrives instead of growing
+        inside the height-capped slot, where everything past the cap scrolled
+        out of sight until the final commit.
+        """
+
+        with self._state_lock:
+            if self._stream is None:
+                return
+            self._commit_stream_content_locked(settled)
+            self._stream = remaining
+            self._slot_generation += 1
+            self._slot_cache = None
+
+        self.invalidate()
+
+    def _commit_stream_content_locked(self, content: Any) -> None:
+        fragments = self._format_content(content, self._terminal_width())
+        if not fragments:
+            return
+        if not self._fragments_end_in_newline(fragments):
+            fragments.append(("", "\n"))
+        self._append_formatted_locked(fragments)
 
     def invalidate(self) -> None:
         app = self._app
@@ -1014,16 +1067,19 @@ class InteractiveScreen:
     def _append_formatted(self, fragments: list[tuple[str, str]]) -> None:
         if not fragments:
             return
-        plain = "".join(fragment[1] for fragment in fragments)
         with self._state_lock:
-            self._transcript_entries.append(("formatted", fragments))
-            self._append_transcript_plain_locked(plain)
-            self._transcript_storage_chars += len(plain)
-            self._trim_transcript_locked()
-            self._invalidate_transcript_lines_locked()
-            if self._follow_tail:
-                self._transcript_cursor_line = self._last_transcript_line_locked()
+            self._append_formatted_locked(fragments)
         self.invalidate()
+
+    def _append_formatted_locked(self, fragments: list[tuple[str, str]]) -> None:
+        plain = "".join(fragment[1] for fragment in fragments)
+        self._transcript_entries.append(("formatted", fragments))
+        self._append_transcript_plain_locked(plain)
+        self._transcript_storage_chars += len(plain)
+        self._trim_transcript_locked()
+        self._invalidate_transcript_lines_locked()
+        if self._follow_tail:
+            self._transcript_cursor_line = self._last_transcript_line_locked()
 
     def clear_transcript(self) -> None:
         """Wipe the visible transcript (``/new`` starting a fresh session).
@@ -1272,6 +1328,18 @@ class InteractiveScreen:
             ),
             filter=Condition(self._has_status),
         )
+        # Directly under the run's status panel, so the confirmation reads as
+        # part of it; it expires on its own because every render re-checks
+        # the arming window.
+        stop_hint = ConditionalContainer(
+            Window(
+                FormattedTextControl(self._get_stop_hint, show_cursor=False),
+                height=1,
+                dont_extend_height=True,
+                always_hide_cursor=True,
+            ),
+            filter=Condition(self._stop_armed),
+        )
 
         transcript_control = _TranscriptControl(
             self._transcript_content,
@@ -1368,6 +1436,7 @@ class InteractiveScreen:
                 banner_window,
                 choice,
                 status,
+                stop_hint,
                 transcript,
                 transient,
                 input_area,
@@ -1447,7 +1516,29 @@ class InteractiveScreen:
         @bindings.add(Keys.ControlC, eager=True)
         @bindings.add("<sigint>", eager=True)
         def interrupt_main(event: Any) -> None:
-            _thread.interrupt_main()
+            self._interrupt_main_thread()
+
+        @bindings.add(
+            Keys.Escape,
+            filter=Condition(self._turn_in_flight) & ~choosing,
+            eager=True,
+        )
+        def stop_run(event: Any) -> None:
+            """Escape stops the turn in flight on its second press.
+
+            Escape is the meta prefix while a line is being typed, so this
+            takes it over only while the REPL is away running a turn — chat,
+            planning and the action loop alike. The first press only arms the
+            stop and shows the hint; the confirmed stop shares Ctrl+C's path,
+            so "stop" keeps one meaning: the turn ends and reports, the
+            session stays.
+            """
+            if not self._stop_armed():
+                self._stop_armed_at = time.monotonic()
+                self.invalidate()
+                return
+            self._stop_armed_at = None
+            self._interrupt_main_thread()
 
         @bindings.add(Keys.ControlD, filter=buffer_focused, eager=True)
         def eof_or_delete(event: Any) -> None:
@@ -1559,6 +1650,27 @@ class InteractiveScreen:
         with self._state_lock:
             return self._status is None
 
+    def _stop_armed(self) -> bool:
+        armed_at = self._stop_armed_at
+        if armed_at is None:
+            return False
+        return time.monotonic() - armed_at < _STOP_CONFIRM_SECONDS
+
+    def _get_stop_hint(self) -> AnyFormattedText:
+        hint = _STOP_HINTS.get(self._language, _STOP_HINTS["en"])
+        return [("fg:ansiyellow bold", hint)]
+
+    def _turn_in_flight(self) -> bool:
+        """True while the REPL is away running a turn, so Escape means stop.
+
+        Text sitting in the input box means the keyboard still belongs to
+        editing, where Escape is the meta prefix that opens a multiline edit,
+        so a stop never takes it over there.
+        """
+        if self._awaiting_input.is_set():
+            return False
+        return not self.session.default_buffer.text
+
     def _has_transient(self) -> bool:
         with self._state_lock:
             return self._stream is not None
@@ -1577,6 +1689,8 @@ class InteractiveScreen:
         if self._show_banner():
             reserved += _BANNER_HEIGHT
         if self._has_status():
+            reserved += 1
+        if self._stop_armed():
             reserved += 1
         if self._input_visible():
             reserved += self._input_height()
