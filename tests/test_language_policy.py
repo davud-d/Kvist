@@ -162,23 +162,11 @@ def test_protocol_actions_are_not_language_checked(agent_factory):
     assert json.dumps({"type": command.action.type}) == '{"type": "read_file"}'
 
 
-def test_auto_completion_message_localized(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    agent._state.files_changed = ["hello.txt"]
-    message = agent._build_auto_completion_message()
-    assert "Task completed successfully" not in message
-    assert "hello.txt" in message
-    assert "Готово" in message
-
-    agent._state.response_language = "en"
-    assert "Done" in agent._build_auto_completion_message()
-
-
 def test_report_context_carries_response_language(agent_factory):
     from agent_runtime import _build_report_context
 
     agent = agent_factory()
     agent._state.response_language = "ru"
-    context = json.loads(_build_report_context(agent, "создай hello.txt", "s", "r", ""))
+    context = json.loads(_build_report_context(agent, "создай hello.txt", "s", "r", "", "incomplete"))
     assert context["response_language"] == "ru"
+    assert context["outcome"] == "incomplete"

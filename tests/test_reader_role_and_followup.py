@@ -114,7 +114,7 @@ def test_run_loop_reader_role_blocks_file_writes(agent_factory):
     assert agent._state.read_only_goal is True
     assert agent._state.create_goal is False
     assert any(
-        "read-only" in str(log.get("feedback", {}).get("result", "")).lower()
+        "read-only" in str(log.get("feedback", {}).get("error", "")).lower()
         for log in agent._state.step_logs
     )
 

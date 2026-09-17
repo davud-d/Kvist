@@ -284,7 +284,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     pending_instruction = self._state.pending_instruction or text["none"]
     allowed_next_actions = ", ".join(self._state.required_next_actions) or text["none"]
 
-    completion_status = "READY - You MUST use final_answer or report_to_user now" if self._state.completion_ready else "NOT READY - Continue with required actions"
+    completion_status = "READY - finish with final_answer or report_to_user unless something still needs verifying" if self._state.completion_ready else "NOT READY - Continue with required actions"
     forbidden_next_actions = text["none"]
     if self._state.required_next_actions:
         forbidden = sorted({

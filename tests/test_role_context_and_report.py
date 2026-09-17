@@ -181,17 +181,6 @@ def test_is_substantive_answer_rejects_stub():
     )
 
 
-def test_build_auto_completion_message_is_honest_for_report_goal(agent_factory):
-    agent = agent_factory()
-    agent._state.report_goal = True
-    agent._state.response_language = "ru"
-
-    message = agent._build_auto_completion_message()
-
-    assert "проверки пройдены" not in message.lower()
-    assert "не удалось" in message.lower()
-
-
 def test_run_loop_report_task_lets_model_answer_instead_of_stub(agent_factory):
     """Regression for BUG-2: a verify-style task that also asks for a spoken
     answer must end with the model's substantive final_answer, never with the

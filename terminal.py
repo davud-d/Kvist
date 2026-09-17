@@ -51,6 +51,7 @@ from process_tree import (
     cgroup_supervision_available,
     run_supervised,
 )
+from protocol import MAX_SHELL_TIMEOUT_SECONDS
 from redaction import redact_text, sanitize_display_text
 from sandbox import (
     SandboxMode,
@@ -514,7 +515,10 @@ class ExecutionContext:
 
 # Per-profile timeout ceiling: restricted keeps the old tight cap, dev
 # allows real builds and test runs.
-_TIMEOUT_CEILINGS: dict[str, float] = {"restricted": 30.0, "dev": 300.0}
+_TIMEOUT_CEILINGS: dict[str, float] = {
+    "restricted": 30.0,
+    "dev": MAX_SHELL_TIMEOUT_SECONDS,
+}
 _MAX_COMMAND_ITEMS = 512
 _MAX_COMMAND_CHARS = 2000
 

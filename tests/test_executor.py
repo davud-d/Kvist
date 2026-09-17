@@ -47,6 +47,15 @@ def test_executor_file_lifecycle_and_search(tmp_path):
     assert executor._search_code("changed").data["results"][0]["path"] == "src/app.py"
 
 
+def test_find_files_double_star_matches_root_level_files(tmp_path):
+    executor = executor_module.SafeExecutor(str(tmp_path))
+    executor._write_file("setup.py", "pass\n")
+    executor._write_file("src/app.py", "pass\n")
+
+    matches = set(executor._find_files("**/*.py").data["matches"])
+    assert matches == {"setup.py", "src/app.py"}
+
+
 def test_executor_blocks_workspace_escape_env_and_internal_paths(tmp_path):
     executor = SafeExecutor(tmp_path)
 
@@ -233,6 +242,73 @@ def test_symlink_escape_still_blocked(tmp_path):
     dir_link.symlink_to(outside, target_is_directory=True)
     with pytest.raises(ExecutorError, match="outside workspace|Symbolic link"):
         executor._read_file("outside_dir/secret.txt")
+
+
+def _workspace_with_outside_key_dir_link(tmp_path):
+    workspace = tmp_path / "ws"
+    outside = tmp_path / "home" / ".ssh"
+    workspace.mkdir()
+    outside.mkdir(parents=True)
+    (outside / "id_ed25519").write_text("PRIVATE KEY needle\n", encoding="utf-8")
+    (workspace / "src").mkdir()
+    (workspace / "src" / "app.py").write_text("print('ok')\n", encoding="utf-8")
+    (workspace / "keys").symlink_to(outside, target_is_directory=True)
+    return workspace, outside
+
+
+def test_list_tree_does_not_descend_into_symlinked_directory(tmp_path):
+    workspace, outside = _workspace_with_outside_key_dir_link(tmp_path)
+    executor = SafeExecutor(workspace)
+
+    tree = executor._list_tree(".", max_depth=4).data["tree"]
+
+    assert "id_ed25519" not in tree
+    assert str(outside) not in tree
+    assert "keys -> (symlink)" in tree
+    assert "app.py" in tree
+
+
+def test_list_dir_reports_symlink_without_following_it(tmp_path):
+    workspace, _ = _workspace_with_outside_key_dir_link(tmp_path)
+    executor = SafeExecutor(workspace)
+
+    items = executor._list_dir(".").data["items"]
+
+    assert {"name": "keys", "type": "symlink"} in items
+    assert {"name": "src", "type": "dir"} in items
+    assert "id_ed25519" not in str(items)
+
+
+def test_find_files_and_search_code_skip_symlinked_directory(tmp_path):
+    workspace, _ = _workspace_with_outside_key_dir_link(tmp_path)
+    executor = SafeExecutor(workspace)
+
+    assert "id_ed25519" not in str(executor._find_files("*").data["matches"])
+    assert executor._find_files("*id_ed25519*").data["matches"] == []
+    assert executor._search_code("needle").data["results"] == []
+
+
+def test_read_through_symlinked_directory_is_rejected(tmp_path):
+    workspace, _ = _workspace_with_outside_key_dir_link(tmp_path)
+    executor = SafeExecutor(workspace)
+
+    with pytest.raises(ExecutorError, match="Symbolic link|outside workspace"):
+        executor._read_file("keys/id_ed25519")
+    with pytest.raises(ExecutorError, match="Symbolic link|outside workspace"):
+        executor._read_multiple_files(["keys/id_ed25519"])
+    with pytest.raises(ExecutorError, match="Symbolic link|outside workspace"):
+        executor._list_tree("keys")
+
+
+def test_find_files_does_not_reveal_outside_target_of_file_symlink(tmp_path):
+    workspace, outside = _workspace_with_outside_key_dir_link(tmp_path)
+    (workspace / "deploy_key").symlink_to(outside / "id_ed25519")
+    executor = SafeExecutor(workspace)
+
+    matches = executor._find_files("*").data["matches"]
+
+    assert "deploy_key" in matches
+    assert "id_ed25519" not in str(matches)
 
 
 def test_hardlink_to_external_inode_is_rejected_for_file_actions(tmp_path):

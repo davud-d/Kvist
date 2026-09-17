@@ -100,7 +100,7 @@ def test_validate_action_args_accepts_valid_shapes(action_type, args):
         ("list_tree", {"path": ".", "max_depth": 11}, "range 1..10"),
         ("search_code", {"query": "x", "max_results": 201}, "range 1..200"),
         ("run_shell", {"command": [], "timeout": 1}, "must not be empty"),
-        ("run_shell", {"command": ["python"], "timeout": 31}, "range 1..30"),
+        ("run_shell", {"command": ["python"], "timeout": "30s"}, "must be a number"),
         ("run_shell", {"command": "systemctl status nginx", "timeout": 15}, "must be a list of strings"),
         ("web_search", {"query": "x", "freshness": "year"}, "freshness"),
         ("fetch_url", {"url": "file:///tmp/x"}, "http or https"),
@@ -110,6 +110,26 @@ def test_validate_action_args_accepts_valid_shapes(action_type, args):
 def test_validate_action_args_rejects_edge_cases(action_type, args, error):
     with pytest.raises(CommandValidationError, match=error):
         validate_action_args(action_type, args)
+
+
+@pytest.mark.parametrize(
+    "given,expected",
+    [(600, 300.0), (0, 1.0), (60, 60)],
+)
+def test_run_shell_timeout_is_clamped_not_rejected(given, expected):
+    # The model cannot know the active profile's ceiling; a 60s timeout must
+    # not cost the whole response a format error.
+    args = {"command": ["pytest"], "timeout": given}
+    validate_action_args("run_shell", args)
+    assert args["timeout"] == expected
+
+
+def test_parse_agent_commands_clamps_out_of_range_timeout():
+    (command,) = parse_agent_commands(
+        '{"thought":"Run the tests","plan_step":"verify","user_message":"Testing",'
+        '"action":{"type":"run_shell","args":{"command":["pytest"],"timeout":600}}}'
+    )
+    assert command.action.args["timeout"] == 300.0
 
 
 def test_parse_agent_command_accepts_optional_step_summary():

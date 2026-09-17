@@ -337,6 +337,37 @@ Bad risks:
 - "it will not work"
 - "project is complex"
 
+RULES FOR DESTRUCTIVE OR BROADLY-SCOPED REQUESTS
+
+A request that is irreversible or broad (wipe, delete everything, drop, force-push,
+rewrite history, remove uncommitted work) must never be planned as a simple
+execute-and-report task, even when the user's wording is short. The plan's first
+step must pin down exactly what gets removed and what must survive, before any step
+that performs the removal; "confirm the actual scope before executing" belongs in
+risks whenever the literal request is broader than what is likely intended.
+
+A request that names one narrow artifact (a file, a commit, a config key) but whose
+surrounding wording also points at a live symptom or defect (a bug, a wrong price, a
+crash) must plan a step that checks the live behavior too, not only the named
+artifact — the artifact is often not the actual bug.
+
+RULES FOR COMPUTED ANSWERS FROM FILE DATA
+
+A plan step that just says "calculate X" or "determine the total" is a step no
+action in the protocol can perform — it silently happens inside the executor's own
+head when it writes the final answer, with nothing to catch a bad assumption (a
+blank field treated as zero, a row skipped, a truncated record counted as whole).
+When the task derives a number (a total, sum, count, average) from more than one
+record, plan a distinct step phrased so it requires an executed check, not mental
+arithmetic — "run a script/command that computes X and verify it accounts for every
+row, including any with missing or malformed fields" — not "calculate X". Running
+real code against the real data is what turns a silently-assumed edge case into a
+visible error or an explicit branch, instead of a wrong answer that looks clean.
+If EXECUTOR ROLE (given above, when present) says the executor is read-only, it
+cannot run a script or arbitrary shell command — phrase the verify step as
+re-reading and explicitly cross-checking every row/field for missing or malformed
+values before reporting the number, not "run a script".
+
 LIMITS
 
 Do not plan:

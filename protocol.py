@@ -26,6 +26,12 @@ ActionType = Literal[
     "report_to_user",
 ]
 
+# run_shell timeout bounds shared by the parser and the terminal. The widest
+# per-profile ceiling is the dev profile's; the terminal clamps again to the
+# profile actually active, which the model cannot know.
+MIN_SHELL_TIMEOUT_SECONDS = 1.0
+MAX_SHELL_TIMEOUT_SECONDS = 300.0
+
 
 @dataclass(slots=True)
 class Action:

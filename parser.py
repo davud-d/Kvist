@@ -6,7 +6,12 @@ import re
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
-from protocol import AgentCommand, Action
+from protocol import (
+    MAX_SHELL_TIMEOUT_SECONDS,
+    MIN_SHELL_TIMEOUT_SECONDS,
+    AgentCommand,
+    Action,
+)
 
 ALLOWED_ACTIONS = {
     "final_answer",
@@ -34,6 +39,9 @@ ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
 MAX_BATCH_ACTIONS = 8
 
 _FINISHING_ACTIONS = {"final_answer", "report_to_user"}
+# "incomplete" lets the model end a run it cannot or should not finish
+# without having to claim success.
+FINISH_OUTCOMES = ("done", "incomplete")
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 
@@ -179,8 +187,9 @@ def _validate_batch_order(actions: list[Action]) -> None:
 def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
     if action_type == "final_answer":
         require_keys(args, {"message"})
-        require_only_allowed_keys(args, {"message"})
+        require_only_allowed_keys(args, {"message", "outcome"})
         require_str(args, "message")
+        _require_outcome(args)
 
     elif action_type == "refuse":
         require_keys(args, {"reason"})
@@ -289,8 +298,12 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         if timeout is not None:
             if not isinstance(timeout, (int, float)):
                 raise CommandValidationError("'timeout' must be a number")
-            if timeout < 1 or timeout > 30:
-                raise CommandValidationError("'timeout' must be in range 1..30")
+            # The model cannot know the active profile's ceiling, so an
+            # out-of-range number is clamped here instead of costing the whole
+            # response a format error. The terminal clamps again per profile.
+            args["timeout"] = min(
+                max(timeout, MIN_SHELL_TIMEOUT_SECONDS), MAX_SHELL_TIMEOUT_SECONDS
+            )
 
     elif action_type == "web_search":
         require_keys(args, {"query"})
@@ -375,11 +388,19 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
 
     elif action_type == "report_to_user":
         require_keys(args, {"summary", "result"})
-        require_only_allowed_keys(args, {"summary", "result", "issues"})
+        require_only_allowed_keys(args, {"summary", "result", "issues", "outcome"})
         require_str(args, "summary")
         require_str(args, "result")
         if "issues" in args:
             require_text(args, "issues")
+        _require_outcome(args)
+
+
+def _require_outcome(args: dict[str, Any]) -> None:
+    if "outcome" in args and args["outcome"] not in FINISH_OUTCOMES:
+        raise CommandValidationError(
+            f"'outcome' must be one of: {', '.join(FINISH_OUTCOMES)}"
+        )
 
 
 def require_keys(data: dict[str, Any], required: set[str]) -> None:

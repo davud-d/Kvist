@@ -46,10 +46,74 @@ _NO_WRITE_MARKERS: tuple[str, ...] = (
 )
 
 
-def has_no_write_marker(text: str) -> bool:
-    """True when the user explicitly forbids modifying anything."""
+# Verbs that make a request a change request. Shared with agent_runtime
+# (_is_modify_goal) so the router and the run loop can never disagree about
+# whether the user asked for a change. The boundary assertions keep a short
+# stem from firing inside an identifier like `remove_user` or `movement`.
+_CHANGE_VERB_RE = re.compile(
+    r"(?<![a-z_])(?:"
+    r"add(?:s|ed|ing)?"
+    r"|fix(?:es|ed|ing)?"
+    r"|modif(?:y|ies|ied|ying)"
+    r"|chang(?:e|es|ed|ing)"
+    r"|updat(?:e|es|ed|ing)"
+    r"|edit(?:s|ed|ing)?"
+    r"|refactor(?:s|ed|ing)?"
+    r"|improv(?:e|es|ed|ing)"
+    r"|enhanc(?:e|es|ed|ing)"
+    r"|replac(?:e|es|ed|ing)"
+    r"|renam(?:e|es|ed|ing)"
+    r"|remov(?:e|es|ed|ing)"
+    r"|delet(?:e|es|ed|ing)"
+    r"|implement(?:s|ed|ing)?"
+    r"|rewrit(?:e|es|ing)|rewrote"
+    r"|migrat(?:e|es|ed|ing)"
+    r"|upgrad(?:e|es|ed|ing)"
+    r"|bump(?:s|ed|ing)?"
+    r"|convert(?:s|ed|ing)?"
+    r"|mov(?:e|es|ed|ing)"
+    r"|исправ|измени|изменить|обнов|добав|отредактир|переделай|доработай"
+    r"|переимен|замен|удали|удалить|почин|поправ|реализ|перепиш|переписать"
+    r"|мигрир|верни"
+    r")(?![a-z_])",
+    re.IGNORECASE,
+)
+
+# Change requests whose verb alone says nothing ("make" is also "make me a
+# list"); the object of the change is what identifies them.
+_CHANGE_PHRASE_RE = re.compile(
+    r"make\s+(?:\S+\s+){0,6}?(?:pass|work|working|compile|build|run|runs|return|succeed)(?![a-z_])"
+    r"|сделай\s+так"
+    r"|сделай\s+(?:\S+\s+){0,6}?чтобы",
+    re.IGNORECASE,
+)
+
+
+def has_change_verb(text: str) -> bool:
+    """True when the request asks for something to be changed."""
     lowered = text.casefold()
-    return any(marker in lowered for marker in _NO_WRITE_MARKERS)
+    return bool(_CHANGE_VERB_RE.search(lowered) or _CHANGE_PHRASE_RE.search(lowered))
+
+
+def has_no_write_marker(text: str) -> bool:
+    """True when the user forbids modifying anything at all.
+
+    A no-write marker inside a change request is a *scope*, not a read-only
+    run ("make all tests pass without modifying the tests"), so the marker
+    only counts when nothing else in the request asks for a change. The
+    markers themselves contain change verbs ("don't change"), so they are
+    removed before the request is checked for one.
+    """
+    lowered = text.casefold()
+    if not any(marker in lowered for marker in _NO_WRITE_MARKERS):
+        return False
+    return not has_change_verb(_strip_no_write_markers(lowered))
+
+
+def _strip_no_write_markers(lowered: str) -> str:
+    for marker in _NO_WRITE_MARKERS:
+        lowered = lowered.replace(marker, " ")
+    return lowered
 
 _ROUTER_PROMPT_PATH = (
     Path(__file__).resolve().parent / "prompts" / "system" / "router_prompt.txt"
@@ -107,6 +171,24 @@ RouteDecision = RoleRouteResult
 # sentence and already knows to route inspect-and-report requests to reader.
 _DIRECT_CHAT_MIN_MATCHES = 2
 
+# The router only needs one word back, but reasoning models (deepseek-flash)
+# spend their thinking out of the same budget: at 50 tokens the thinking
+# regularly hit the cap and the reply arrived empty, which silently routed
+# every such request to chat — the one role that cannot look at the workspace.
+_ROUTER_MAX_TOKENS = 1024
+
+_DIRECT_READER_PATTERNS: tuple[tuple[str, str], ...] = (
+    # "explain"/"tell me about"/"summarize" alone is a chat question, but
+    # paired with a concrete workspace artifact it means "look at this and
+    # report", which chat cannot do at all (no file access) — without its
+    # own rule this fell through to the chat patterns below, since those
+    # verbs are exactly what _DIRECT_CHAT_PATTERNS matches on.
+    # Russian
+    ("(?:объясни|расскажи|перескажи|что\\s+в|покажи|прочитай|резюмируй|подытожь)\\s.*\\b(?:лог\\w*|файл\\w*|дифф\\w*|diff|статус|status|вывод\\w*|дамп\\w*|трейс\\w*|инцидент\\w*)\\b", "explain-artifact"),
+    # English
+    ("(?:explain|tell me about|summarize|summarise|show me|read)\\s.*\\b(?:log\\w*|file\\w*|diff|status|output\\w*|dump\\w*|trace\\w*|incident\\w*)\\b", "explain-artifact"),
+)
+
 _DIRECT_DEVOPS_PATTERNS: tuple[tuple[str, str], ...] = (
     # Russian: service status / inspection
     ("проверь\\s+.*(?:статус|состояние).*\\b(?:systemd|systemctl|nginx|apache|docker|сервис\\w*|служб\\w*|демон\\w*)\\b", "service status"),
@@ -135,6 +217,9 @@ _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
     # Russian: creation verbs + artifact
     ("(?:создай|напиши|сделай|сгенерируй|закоди|разработай)\\s.*(?:скрипт|файл|бот|README|readme|программ|приложени|код|модуль)", "create artifact"),
     ("исправь\\s.*(?:ошибк|баг|проблем|issue)", "fix action"),
+    # "почини баг" carries no artifact noun, so the create-artifact rule above
+    # never sees it; without its own rule it fell through to chat.
+    ("(?:почини|починить|поправь|поправить|чини)\\b", "fix action"),
     ("добавь\\s.*логирование", "add logging"),
     ("рефактор", "refactor"),
     ("прочитай\\s.*\\.py\\b", "read project file"),
@@ -204,7 +289,8 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
     """Check if a direct deterministic rule matches the user goal.
 
     Returns (role, matched_rule_label, pattern) or None.
-    Checks in priority order: reader → devops → coder → chat.
+    Checks in priority order: reader (no-write marker) → devops → coder →
+    reader (explain-artifact) → chat.
     """
     lowered = user_goal.casefold()
 
@@ -222,6 +308,13 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
     for pattern, label in _DIRECT_CODER_PATTERNS:
         if re.search(pattern, lowered):
             return ("coder", label, pattern)
+
+    # Checked after devops/coder: "restart the service and show me the
+    # logs" is a devops action that happens to mention "logs", not a
+    # read-only request, so an action-topic match must win first.
+    for pattern, label in _DIRECT_READER_PATTERNS:
+        if re.search(pattern, lowered):
+            return ("reader", label, pattern)
 
     # Chat patterns are individually weak (bare filler words), so a single
     # hit does not short-circuit — see _DIRECT_CHAT_MIN_MATCHES above.
@@ -278,7 +371,7 @@ _CHAT_KEYWORDS: tuple[str, ...] = (
 
 
 def _keyword_route(user_goal: str) -> str:
-    """Keyword-based fallback routing. Priority: reader → devops → coder → chat → default."""
+    """Keyword-based fallback routing. Priority: reader (no-write) → devops → coder → reader (explain-artifact) → chat → default."""
     lowered = user_goal.casefold()
 
     # Reader: an explicit "do not modify" wins over any topic keyword.
@@ -295,6 +388,13 @@ def _keyword_route(user_goal: str) -> str:
         if keyword in lowered:
             return "coder"
 
+    # Reader: "explain/summarize <artifact>" reads a workspace file, which
+    # chat cannot do — checked after devops/coder (an action request that
+    # happens to mention "logs" is still an action) but before chat.
+    for pattern, _label in _DIRECT_READER_PATTERNS:
+        if re.search(pattern, lowered):
+            return "reader"
+
     # Chat: explanation/discussion keywords
     for keyword in _CHAT_KEYWORDS:
         if keyword in lowered:
@@ -304,6 +404,11 @@ def _keyword_route(user_goal: str) -> str:
 
 
 # ── LLM-based routing ────────────────────────────────────────────
+
+def _response_names_role(response: str) -> bool:
+    cleaned = response.strip().lower()
+    return any(re.search(rf"\b{role}\b", cleaned) for role in _VALID_ROLES)
+
 
 def _parse_llm_role(response: str) -> str:
     """Extracts role from LLM response. Robust to noise."""
@@ -363,12 +468,19 @@ def route_role_decision_with_llm(
             model=model,
             messages=safe_messages,
             temperature=temperature,
-            max_tokens=50,
+            max_tokens=_ROUTER_MAX_TOKENS,
         )
         raw = response.choices[0].message.content or ""
         decision.raw_response = raw
-        decision.role = _parse_llm_role(raw)
-        decision.source = "llm"
+        if _response_names_role(raw):
+            decision.role = _parse_llm_role(raw)
+            decision.source = "llm"
+            return decision
+        # An empty or role-less reply is no decision; defaulting it to chat
+        # would answer a workspace question without looking at the workspace.
+        decision.error = "router reply named no role"
+        decision.role = _keyword_route(user_goal)
+        decision.source = "keyword_fallback"
     except Exception as exc:
         # ── Step 5: LLM failed → keyword fallback ─────────────
         decision.error = redact_text(

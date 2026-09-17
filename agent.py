@@ -71,7 +71,6 @@ from agent_runtime import (
     build_early_stop_message,
     build_error_feedback,
     build_limit_reached_message,
-    build_auto_completion_message,
     build_safety_refusal_message,
     build_report_failure_message,
     command_language_error,
@@ -757,7 +756,6 @@ class LocalAgent:
     _build_early_stop_message = build_early_stop_message
     _build_cancellation_message = build_cancellation_message
     _build_limit_reached_message = build_limit_reached_message
-    _build_auto_completion_message = build_auto_completion_message
     _build_safety_refusal_message = build_safety_refusal_message
     _build_report_failure_message = build_report_failure_message
     _is_repeat_blocked = is_repeat_blocked

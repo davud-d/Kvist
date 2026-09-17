@@ -1491,11 +1491,12 @@ class SafeExecutor:
                 raise ExecutorError(
                     "Not a directory: " + self._path_error_details(path, target)
                 )
-            entries = sorted(
-                target.iterdir(),
-                key=lambda entry: (not entry.is_dir(), entry.name.lower()),
-            )
+            entries = sorted(target.iterdir(), key=self._listing_sort_key)
             entries = [entry for entry in entries if not self._is_internal_agent_path(entry)]
+            items = [
+                {"name": item.name, "type": self._entry_kind(item)}
+                for item in entries
+            ]
         except PermissionError as error:
             raise ExecutorError(
                 "Permission denied while listing directory: "
@@ -1506,15 +1507,6 @@ class SafeExecutor:
                 "Failed to list directory: "
                 + self._path_error_details(path, target, error)
             ) from error
-
-        items = []
-        for item in entries:
-            items.append(
-                {
-                    "name": item.name,
-                    "type": "dir" if item.is_dir() else "file",
-                }
-            )
 
         return ExecutionResult(
             ok=True,
@@ -1564,10 +1556,7 @@ class SafeExecutor:
             return
 
         try:
-            entries = sorted(
-                directory.iterdir(),
-                key=lambda e: (not e.is_dir(), e.name.lower()),
-            )
+            entries = sorted(directory.iterdir(), key=self._listing_sort_key)
         except PermissionError:
             return
 
@@ -1578,7 +1567,14 @@ class SafeExecutor:
                 return
             is_last = i == len(entries) - 1
             connector = "└── " if is_last else "├── "
-            if entry.is_dir():
+            kind = self._entry_kind(entry)
+            # A link is a leaf: descending into it would walk whatever it
+            # points at, which the start-path boundary check never saw.
+            # The target is withheld because it may lie outside every boundary.
+            if kind == "symlink":
+                lines.append(f"{prefix}{connector}{entry.name} -> (symlink)")
+                counter[0] += 1
+            elif kind == "dir":
                 lines.append(f"{prefix}{connector}{entry.name}/")
                 counter[0] += 1
                 extension = "    " if is_last else "│   "
@@ -1590,17 +1586,44 @@ class SafeExecutor:
                 lines.append(f"{prefix}{connector}{entry.name}")
                 counter[0] += 1
 
+    @staticmethod
+    def _entry_kind(entry: Path) -> str:
+        if entry.is_symlink():
+            return "symlink"
+        return "dir" if entry.is_dir() else "file"
+
+    @classmethod
+    def _listing_sort_key(cls, entry: Path) -> tuple[bool, str]:
+        return (cls._entry_kind(entry) != "dir", entry.name.lower())
+
     def _find_files(self, pattern: str, path: str = "") -> ExecutionResult:
         base_dir = self._resolve_read_dir(path)
         matches: list[str] = []
+        # "**/" is meant to mean "any depth, including zero" (a common glob
+        # convention), but fnmatch.translate turns it into ".*.*\/" — a
+        # literal slash the pattern then requires. A root-level file has no
+        # slash before its name, so "**/name" silently matched nothing for
+        # it. Matching against both the original and the "**/"-stripped
+        # pattern covers the zero-depth case without changing any deeper one.
+        patterns = [pattern]
+        if "**/" in pattern:
+            stripped = pattern.replace("**/", "")
+            if stripped and stripped != pattern:
+                patterns.append(stripped)
 
         try:
             files = self._iter_files(base_dir)
             for file_path in files:
                 if self._skip_during_walk(file_path):
                     continue
-                relative = self._display_path(file_path.resolve())
-                if fnmatch.fnmatch(file_path.name, pattern) or fnmatch.fnmatch(relative, pattern):
+                # base_dir is already canonical, so resolving here would only
+                # swap a file symlink's name for its target — possibly an
+                # outside path the model must not learn.
+                relative = self._display_path(file_path)
+                if any(
+                    fnmatch.fnmatch(file_path.name, pat) or fnmatch.fnmatch(relative, pat)
+                    for pat in patterns
+                ):
                     matches.append(relative)
                 if len(matches) >= 200:
                     break

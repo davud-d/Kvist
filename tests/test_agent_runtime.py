@@ -112,8 +112,9 @@ def test_runtime_helpers_format_feedback_and_bounded_lists(agent_factory):
     assert agent._render_feedback("summary", {"ok": False, "error": "bad"}).startswith("Result: ERROR")
 
 
-def test_run_loop_auto_completes_simple_create_after_verification(agent_factory):
+def test_run_loop_create_task_finishes_only_on_the_models_final_answer(agent_factory):
     agent = agent_factory(max_steps=4)
+    agent._state.response_language = "ru"
     agent._state.plan_info = PlanInfo(
         goal="Создать hello.py",
         complexity="simple",
@@ -145,29 +146,44 @@ def test_run_loop_auto_completes_simple_create_after_verification(agent_factory)
                 "args": {"path": "hello.py"},
             },
         },
+        {
+            "thought": "Готово",
+            "plan_step": "done",
+            "user_message": "Готово",
+            "action": {
+                "type": "final_answer",
+                "args": {"message": "Создал hello.py и прочитал его обратно."},
+            },
+        },
     ]
     call_count = {"value": 0}
+    prompts: list[str] = []
 
     def fake_call_action_model(prompt: str) -> str:
         index = call_count["value"]
         if index >= len(responses):
-            raise AssertionError("run_loop requested an extra action after verification")
+            raise AssertionError("run_loop requested an extra action after the final answer")
         call_count["value"] += 1
+        prompts.append(prompt)
         return json.dumps(responses[index], ensure_ascii=False)
 
     agent._call_action_model = fake_call_action_model
 
     result = agent._run_loop("Создай hello.py", start_step=1)
 
-    assert call_count["value"] == 2
-    assert "hello.py" in result
+    # Readiness is only a hint: the run waits for the model to finish it.
+    assert call_count["value"] == 3
+    assert "The task looks complete" in prompts[-1]
+    assert result == "Создал hello.py и прочитал его обратно."
     assert agent._state.step_logs[-1]["status"] == "final_answer"
+    assert agent._state.run_status == "completed"
     assert (agent.executor.workspace / "hello.py").exists()
     assert not (agent.executor.workspace / "task_report.txt").exists()
 
 
 def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_factory):
     agent = agent_factory(max_steps=5)
+    agent._state.response_language = "ru"
     agent._state.plan_info = PlanInfo(
         goal="Создать hello.py",
         complexity="simple",
@@ -209,13 +225,22 @@ def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_fac
                 "args": {"path": "hello.py"},
             },
         },
+        {
+            "thought": "Готово",
+            "plan_step": "done",
+            "user_message": "Готово",
+            "action": {
+                "type": "final_answer",
+                "args": {"message": "Создал hello.py и проверил его."},
+            },
+        },
     ]
     call_count = {"value": 0}
 
     def fake_call_action_model(prompt: str) -> str:
         index = call_count["value"]
         if index >= len(responses):
-            raise AssertionError("run_loop requested an extra action after verification")
+            raise AssertionError("run_loop requested an extra action after the final answer")
         call_count["value"] += 1
         return json.dumps(responses[index], ensure_ascii=False)
 
@@ -223,7 +248,7 @@ def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_fac
 
     result = agent._run_loop("Создай hello.py", start_step=1)
 
-    assert call_count["value"] == 3
+    assert call_count["value"] == 4
     assert "hello.py" in result
     assert agent._state.step_logs[-1]["status"] == "final_answer"
     assert any(log["status"] == "error" for log in agent._state.step_logs[:-1])
@@ -732,7 +757,7 @@ def test_task_017_live_scenario_russian_modify_blocked(agent_factory):
     Model action: final_answer
     Expected: final_answer blocked, completion not allowed.
     """
-    from agent_runtime import _is_modify_goal, _is_read_only_goal, _is_verify_only_goal
+    from agent_runtime import _is_modify_goal, _is_verify_only_goal
 
     TASK_017_GOAL = (
         "В файле empty_list.py исправь функцию average, "
@@ -743,12 +768,6 @@ def test_task_017_live_scenario_russian_modify_blocked(agent_factory):
     # --- Checkpoint 2: _is_modify_goal must return True for this Russian string ---
     assert _is_modify_goal(TASK_017_GOAL), (
         "_is_modify_goal must be True for 'исправь' marker"
-    )
-    # Regression: _is_read_only_goal must NOT be True for a modify task,
-    # otherwise _is_read_only_violation blocks writes and creates a deadlock.
-    assert not _is_read_only_goal(TASK_017_GOAL), (
-        "_is_read_only_goal must be False for a FIX/MODIFY task "
-        "(otherwise write actions are blocked as read-only violations)"
     )
     assert not _is_verify_only_goal(TASK_017_GOAL), (
         "_is_verify_only_goal must be False for a FIX/MODIFY task"
@@ -1093,6 +1112,92 @@ def test_devops_run_shell_string_command_rejected(agent_factory):
     # Must NOT be a generic message
     assert "Invalid model response" not in error_msg
     assert "Invalid JSON" not in error_msg
+
+
+# ── P4: reader read-only sqlite3 shell allowlist ────────────────────────
+
+
+def test_read_only_shell_allows_sqlite3_select(agent_factory):
+    """A read-only reader task may query a database with a plain SELECT.
+
+    Regression for h10-sqlite: the model had no read-only way to query
+    data/users.db and fell back to read_file on the raw binary, guessing
+    the answer instead of reporting it.
+    """
+    from agent_runtime import _is_read_only_violation
+
+    agent = agent_factory()
+    agent._state.read_only_goal = True
+    agent._state.current_agent_role = "reader"
+    command = make_command(
+        "run_shell",
+        {"command": ["sqlite3", "data/users.db", "SELECT COUNT(*) FROM users;"]},
+    )
+
+    assert not _is_read_only_violation(agent, command)
+
+
+@pytest.mark.parametrize(
+    "sql_command",
+    [
+        ["sqlite3", "data/users.db", "INSERT INTO users VALUES (1);"],
+        ["sqlite3", "data/users.db", "DROP TABLE users;"],
+        ["sqlite3", "data/users.db", "ATTACH DATABASE 'x.db' AS x;"],
+        ["sqlite3", "data/users.db", ".import users.csv users"],
+        ["sqlite3", "data/users.db", ".shell rm -rf /"],
+    ],
+    ids=["insert", "drop", "attach", "dot-import", "dot-shell"],
+)
+def test_read_only_shell_rejects_sqlite3_write_forms(agent_factory, sql_command):
+    from agent_runtime import _is_read_only_violation
+
+    agent = agent_factory()
+    agent._state.read_only_goal = True
+    agent._state.current_agent_role = "reader"
+    command = make_command("run_shell", {"command": sql_command})
+
+    assert _is_read_only_violation(agent, command)
+
+
+def test_read_only_shell_rejects_sqlite3_multi_statement_with_a_trailing_write(agent_factory):
+    """A leading SELECT must not launder a later write in the same argument."""
+    from agent_runtime import _is_read_only_violation
+
+    agent = agent_factory()
+    agent._state.read_only_goal = True
+    agent._state.current_agent_role = "reader"
+    command = make_command(
+        "run_shell",
+        {
+            "command": [
+                "sqlite3",
+                "data/users.db",
+                "SELECT COUNT(*) FROM users; DELETE FROM users;",
+            ]
+        },
+    )
+
+    assert _is_read_only_violation(agent, command)
+
+
+def test_read_only_shell_still_rejects_python_dash_c(agent_factory):
+    """python -c stays out of the read-only allowlist regardless of this change.
+
+    terminal.py separately hard-denies '-c' for every task (see
+    tests/test_terminal.py); this only confirms the read-only-goal gate
+    never grew a bypass for it.
+    """
+    from agent_runtime import _is_read_only_violation
+
+    agent = agent_factory()
+    agent._state.read_only_goal = True
+    agent._state.current_agent_role = "reader"
+    command = make_command(
+        "run_shell",
+        {"command": ["python", "-c", "import os; os.remove('data/users.db')"]},
+    )
+
+    assert _is_read_only_violation(agent, command)
 
 
 # ── P5: devops systemctl allowlist + blocked command handling ──────────
@@ -1614,3 +1719,87 @@ def test_run_loop_records_a_batch_user_message_once(agent_factory):
     agent._run_loop("Investigate files", start_step=1)
 
     assert agent._state.user_messages == ["surveying the workspace"]
+
+
+def test_modify_goal_detects_the_verbs_stress_round_r2_missed():
+    from agent_runtime import _is_modify_goal
+
+    assert _is_modify_goal("Переименуй get_usr в get_user везде и проверь, что всё работает.")
+    assert _is_modify_goal(
+        "Replace the json parsing with fastjsonx.turbo_parse and show me the benchmark numbers."
+    )
+    assert _is_modify_goal("Rename get_usr to get_user everywhere")
+    assert _is_modify_goal("Remove the dead branch in loader.py")
+    assert _is_modify_goal("delete the unused import")
+    assert _is_modify_goal("implement retry for the http client")
+    assert _is_modify_goal("rewrite the parser without regex")
+    assert _is_modify_goal("migrate the config to toml")
+    assert _is_modify_goal("upgrade requests to 2.32")
+    assert _is_modify_goal("bump the version in pyproject.toml")
+    assert _is_modify_goal("convert the script to a module")
+    assert _is_modify_goal("move helpers.py into utils/")
+    assert _is_modify_goal("Make all tests pass without modifying the tests.")
+    assert _is_modify_goal("почини баг")
+    assert _is_modify_goal("поправь функцию average")
+    assert _is_modify_goal("удали лишний файл")
+    assert _is_modify_goal("замени json на orjson")
+    assert _is_modify_goal("реализуй ретраи")
+    assert _is_modify_goal("перепиши парсер без регулярок")
+    assert _is_modify_goal("сделай так, чтобы тесты проходили")
+    assert _is_modify_goal("верни datetime вместо строки")
+
+
+def test_modify_goal_ignores_identifiers_and_read_only_requests():
+    from agent_runtime import _is_modify_goal
+
+    assert not _is_modify_goal("Check if main.py exists")
+    assert not _is_modify_goal("Create a new file")
+    assert not _is_modify_goal("покажи, где вызывается remove_user")
+    assert not _is_modify_goal("read-only review of auth.py")
+
+
+def test_keyword_heuristics_cannot_block_writes_on_a_coder_run(agent_factory):
+    """r2/v06: "переименуй ... и проверь, что всё работает" is a rename task.
+
+    "проверь" used to make the whole run read-only, so every write was
+    refused and the run had nothing left it was allowed to do.
+    """
+    goal = "Переименуй get_usr в get_user везде и проверь, что всё работает."
+    agent = agent_factory(max_steps=2)
+    agent._state.current_agent_role = "coder"
+    agent.executor.set_active_role("coder")
+    agent._state.plan_info = PlanInfo(
+        goal=goal,
+        complexity="simple",
+        plan=["rename the function", "run the tests"],
+        success_criteria=["get_usr is gone"],
+        risks=[],
+    )
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "mock-model"
+    agent._state.response_language = "ru"
+    agent._state.task_language = "ru"
+
+    response = json.dumps(
+        {
+            "thought": "Переименовываю",
+            "plan_step": "edit",
+            "user_message": "Переименовываю",
+            "action": {
+                "type": "write_file",
+                "args": {"path": "repo.py", "content": "def get_user():\n    return 1\n"},
+            },
+        },
+        ensure_ascii=False,
+    )
+    agent._call_action_model = lambda prompt: response
+
+    agent._run_loop(goal, start_step=1)
+
+    assert agent._state.read_only_goal is False
+    assert agent._state.modify_goal is True
+    assert (agent.executor.workspace / "repo.py").exists()
+    assert not any(
+        "read-only" in str(log.get("feedback", {}).get("error", "")).lower()
+        for log in agent._state.step_logs
+    )

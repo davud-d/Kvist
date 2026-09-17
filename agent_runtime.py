@@ -50,7 +50,7 @@ from parser import CommandValidationError, parse_agent_commands
 from protocol import AgentCommand
 from redaction import defang_prompt_boundary_tags, redact_text, redact_value
 from agent_planner import infer_task_kind
-from role_router import has_no_write_marker
+from role_router import has_change_verb, has_no_write_marker
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -65,9 +65,25 @@ _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "fin
 # terminal action, not to a phase label.
 _PLAN_STEP_BANDS = {"inspect": 15, "plan": 30, "edit": 55, "verify": 85}
 
-# Minimum distinct alternative approaches the model must attempt after a hard
-# environment denial before final_answer is allowed.
+_FINISH_ACTIONS = {"final_answer", "report_to_user"}
+
+# Distinct actions after a hard environment denial before that denial stops
+# counting as an unresolved error. It never blocks finishing: a denial must not
+# push the model into working around it.
 _RECOVERY_ATTEMPTS_REQUIRED = 2
+
+# Every completion blocker names this exit, so a task that cannot or should
+# not be done ends truthfully instead of in forced busywork.
+_HONEST_EXIT_HINT = (
+    "If the work cannot or should not be done (target missing, premise false, "
+    "user denied the change, environment blocks it), finish with final_answer or "
+    'report_to_user using "outcome": "incomplete" and say why.'
+)
+_HONEST_EXIT_HINT_RU = (
+    "Если работу нельзя или не нужно выполнять (цели нет, предпосылка ложна, "
+    "пользователь отклонил правку, среда не даёт), заверши final_answer или "
+    'report_to_user с "outcome": "incomplete" и объясни причину.'
+)
 
 
 def _is_hard_environment_denial(error_text: str) -> bool:
@@ -249,6 +265,16 @@ _READ_ONLY_SHELL_DENYLIST = {
     "git add",
     "git apply",
 }
+# sqlite3's own dot-commands that only inspect the database or the CLI's
+# display settings; every other dot-command (.import, .read, .output,
+# .shell/.system, ...) can write files or run host commands.
+_SAFE_READ_ONLY_SQLITE_DOT_COMMANDS = {".schema", ".tables", ".mode", ".headers", ".quit"}
+# PRAGMAs that only report schema metadata. Any other PRAGMA — including
+# these same names used as `PRAGMA x = value` — can change database state.
+_SAFE_READ_ONLY_SQLITE_PRAGMAS = {"table_info", "index_list", "foreign_key_list", "table_list"}
+_UNSAFE_SQLITE_STATEMENT_RE = re.compile(
+    r"^(insert|update|delete|drop|alter|create|replace|vacuum|reindex|attach)\b"
+)
 
 _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
 _PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search|провер|прочит|просмотр|найти|структур|поиск")
@@ -281,11 +307,14 @@ _SERVICE_INSPECTION_GOAL_RE = re.compile(
 )
 
 
-def _build_report_context(self, user_goal: str, summary: str, result: str, issues: str) -> str:
+def _build_report_context(
+    self, user_goal: str, summary: str, result: str, issues: str, outcome: str
+) -> str:
     """Build a structured JSON context block for the chat reporter."""
     state = self._state
     context = {
         "user_goal": user_goal,
+        "outcome": outcome,
         "response_language": state.response_language or "en",
         "role": state.current_agent_role or "coder",
         "summary": summary,
@@ -466,23 +495,24 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     final_message = ""
     create_goal = _is_create_goal(user_goal)
     modify_goal = _is_modify_goal(user_goal)
-    read_only_goal = _is_read_only_goal(user_goal)
     verify_only_goal = _is_verify_only_goal(user_goal)
-    # Reader role and any explicit "do not modify" phrasing are authoritative:
-    # force read-only so _is_read_only_violation hard-blocks every write, even
-    # if the goal text also tripped a create/modify heuristic. Clearing
+    # Only an authoritative source may forbid writes: the reader role and an
+    # explicit "do not modify" request. A keyword guess must never hard-block a
+    # write — "переименуй ... и проверь, что всё работает" is a rename task, and
+    # blocking its writes left it with nothing it was allowed to do. Clearing
     # create/modify avoids the runtime demanding a write it will then refuse.
-    if self._state.current_agent_role == "reader" or has_no_write_marker(user_goal):
+    read_only_goal = self._state.current_agent_role == "reader" or has_no_write_marker(user_goal)
+    if read_only_goal:
         create_goal = False
         modify_goal = False
-        read_only_goal = True
     self._state.user_goal = user_goal
     self._state.create_goal = create_goal
     self._state.modify_goal = modify_goal
     self._state.read_only_goal = read_only_goal
     self._state.verify_only_goal = verify_only_goal
     self._state.report_goal = _resolve_report_goal(self, user_goal)
-    if not self._state.required_artifacts and not read_only_goal:
+    # "check if main.py exists" names a file it must not be required to create.
+    if not self._state.required_artifacts and not (read_only_goal or verify_only_goal):
         self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
     self._refresh_completion_requirements()
     self._state.step_budget = max(self._state.step_budget, self.config.max_steps)
@@ -709,8 +739,6 @@ def _run_one_action(
         plan_step=command.plan_step,
     )
 
-    if self._state.completion_ready and command.action.type not in ("final_answer", "report_to_user"):
-        return _enforce_completion(self, step, command)
     if command.action.type == "final_answer":
         return _finish_with_final_answer(self, step, command)
     if command.action.type == "report_to_user":
@@ -837,7 +865,7 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
         feedback = {
             "ok": False,
             "action_type": command.action.type,
-            "result": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
+            "error": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
         }
         live_status = "completion enforced"
         live_message = "Task is complete, requiring final_answer"
@@ -845,7 +873,7 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
         feedback = {
             "ok": False,
             "action_type": command.action.type,
-            "result": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
+            "error": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
         }
         live_status = "report artifact blocked"
         live_message = "Report artifact blocked; continue the actual task"
@@ -867,7 +895,7 @@ def _reject_read_only_violation(self, step: int, command: AgentCommand) -> bool:
     feedback = {
         "ok": False,
         "action_type": command.action.type,
-        "result": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
+        "error": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
     }
     self._register_feedback(step, command, feedback)
     self._ui.update_live(
@@ -907,35 +935,20 @@ def _reject_exhausted_web_budget(
     return True
 
 
-def _enforce_completion(self, step: int, command: AgentCommand) -> _ActionOutcome:
-    """The task is already ready: only a terminal action may run now."""
-    corrective_feedback = {
-        "ok": False,
-        "action_type": command.action.type,
-        "result": "Task is already verified and complete. You must use final_answer or report_to_user now. No further actions are permitted.",
-    }
-    self._register_feedback(step, command, corrective_feedback)
-    self._ui.update_live(
-        user_message="Task is complete, requiring final_answer",
-        status="completion enforced",
-        step=step,
-        progress=self._state.progress,
-        plan_step=command.plan_step,
-        is_error=False,
-    )
-    violations = self._state.seen_actions.get("completion_ready_violations", 0)
-    if violations >= 1:
-        final_message = self._build_auto_completion_message()
-        self._register_final_answer(step, final_message)
-        return _ActionOutcome(finished=True, final_message=final_message)
-    self._state.seen_actions["completion_ready_violations"] = violations + 1
-    return _BLOCKED
+def _is_incomplete_finish(command: AgentCommand) -> bool:
+    return command.action.args.get("outcome") == "incomplete"
 
 
 def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    if _is_incomplete_finish(command):
+        # An honest "not done" claims nothing, so there is nothing for the
+        # completion or substance gates to verify.
+        final_message = str(command.action.args["message"])
+        _register_incomplete_finish(self, step, final_message)
+        return _ActionOutcome(finished=True, final_message=final_message)
     self._refresh_completion_requirements(force_enforcement=True)
     if self._state.completion_blockers:
-        error_text = " ".join(self._state.completion_blockers)
+        error_text = _join_blockers(self._state.completion_blockers)
         self._state.consecutive_errors += 1
         self._record_error(error_text)
         self._state.step_logs.append(
@@ -974,7 +987,7 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
                 {
                     "ok": False,
                     "action_type": "final_answer",
-                    "result": _build_report_substance_instruction(self._state.task_language),
+                    "error": _build_report_substance_instruction(self._state.task_language),
                 },
             )
             self._set_required_next_actions(
@@ -992,14 +1005,17 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
 def _finish_with_report(
     self, user_goal: str, step: int, command: AgentCommand
 ) -> _ActionOutcome:
-    self._refresh_completion_requirements(force_enforcement=True)
-    if self._state.completion_blockers:
-        error_text = " ".join(self._state.completion_blockers)
+    incomplete = _is_incomplete_finish(command)
+    if not incomplete:
+        self._refresh_completion_requirements(force_enforcement=True)
+    if not incomplete and self._state.completion_blockers:
+        error_text = _join_blockers(self._state.completion_blockers, with_hint=False)
         self._state.consecutive_errors += 1
         self._record_error(error_text)
         self._state.pending_instruction = (
-            f"Task is not complete. Blockers: {error_text}. "
-            "Fix the remaining issues before reporting."
+            f"Task is not complete. Blockers: {error_text} "
+            "Fix the remaining issues before reporting. "
+            f"{_HONEST_EXIT_HINT}"
         )
         self._ui.update_live(
             user_message="Report blocked — task not complete",
@@ -1014,11 +1030,20 @@ def _finish_with_report(
     summary = str(command.action.args.get("summary", ""))
     tech_result = str(command.action.args.get("result", ""))
     issues = str(command.action.args.get("issues", ""))
-    context = _build_report_context(self, user_goal, summary, tech_result, issues)
+    outcome = "incomplete" if incomplete else "done"
+    context = _build_report_context(self, user_goal, summary, tech_result, issues, outcome)
     report_text = _render_report(self, context)
     final_message = report_text or tech_result or summary
-    self._register_final_answer(step, final_message)
+    if incomplete:
+        _register_incomplete_finish(self, step, final_message)
+    else:
+        self._register_final_answer(step, final_message)
     return _ActionOutcome(finished=True, final_message=final_message, report_rendered=True)
+
+
+def _register_incomplete_finish(self, step: int, message: str) -> None:
+    self._state.finished_incomplete = True
+    self._register_final_answer(step, message)
 
 
 def _execute_action(
@@ -1054,29 +1079,11 @@ def _execute_action(
     ):
         self._state.rolling_summaries[step] = command.step_summary
 
-    # Immediate completion check: if task just became ready, finish now.
-    # A report task is excluded: it must be closed by the model's own
-    # final_answer with real findings, not a synthetic stub. Leaving it
-    # unbroken lets the completion guard push the model to answer.
-    if (
-        self._state.completion_ready
-        and ok
-        and not self._state.report_goal
-        and (self._state.create_goal or self._state.verify_only_goal)
-    ):
-        final_message = self._build_auto_completion_message()
-        self._register_final_answer(step, final_message)
-        return _ActionOutcome(finished=True, final_message=final_message)
-
-    if (
-        self._state.completion_ready
-        and ok
-        and self._state.report_goal
-        and not self._state.required_next_actions
-    ):
-        self._set_required_next_actions(
-            ["final_answer", "report_to_user"],
-            _build_report_substance_instruction(self._state.task_language),
+    # Only the model may declare the task done, and it may still want to
+    # verify, so readiness is a hint rather than a gate.
+    if self._state.completion_ready and ok:
+        self._state.pending_instruction = (
+            f"{self._state.pending_instruction} {_build_completion_hint(self)}".strip()
         )
 
     if (
@@ -1551,16 +1558,19 @@ def update_progress(self, command: AgentCommand, ok: bool) -> None:
 
 
 def register_final_answer(self, step: int, message: str) -> None:
-    for item in _report_plan_steps(self):
-        self._state.completed_plan_steps.add(item)
+    incomplete = self._state.finished_incomplete
+    if not incomplete:
+        for item in _report_plan_steps(self):
+            self._state.completed_plan_steps.add(item)
     self._refresh_completion_requirements()
-    self._state.progress = 100
-    self._state.run_status = "completed"
+    self._state.progress = _blocked_progress(self) if incomplete else 100
+    self._state.run_status = "blocked" if incomplete else "completed"
     self._state.step_logs.append(
         {
             "step": step,
             "status": "final_answer",
-            "progress": 100,
+            "outcome": "incomplete" if incomplete else "done",
+            "progress": self._state.progress,
             "message": message,
         }
     )
@@ -1786,29 +1796,6 @@ def build_limit_reached_message(self) -> str:
     if blockers:
         message += f" Blockers: {blockers}."
     return message
-
-
-def build_auto_completion_message(self) -> str:
-    """Build automatic completion message when task is verified but model doesn't call final_answer."""
-    # A report task must never be closed with a synthetic "checks passed" —
-    # that is exactly the false-positive success we are fixing.
-    if self._state.report_goal:
-        return self._build_report_failure_message()
-
-    files_summary = ", ".join(self._state.files_changed[:5])
-    if len(self._state.files_changed) > 5:
-        extra = len(self._state.files_changed) - 5
-        files_summary += (
-            f" и ещё {extra}" if self._state.response_language == "ru" else f" and {extra} more"
-        )
-
-    if self._state.response_language == "ru":
-        if self._state.files_changed:
-            return f"Готово. Изменённые файлы: {files_summary}. Проверка пройдена."
-        return "Готово, все проверки пройдены."
-    if self._state.files_changed:
-        return f"Done. Modified files: {files_summary}. Verification confirmed."
-    return "Done. All checks passed."
 
 
 def build_safety_refusal_message(self) -> str:
@@ -2265,6 +2252,8 @@ def required_followup_error(self, command: AgentCommand) -> str | None:
     required_actions = set(self._state.required_next_actions)
     if not required_actions or command.action.type in required_actions:
         return None
+    if command.action.type in _FINISH_ACTIONS and _is_incomplete_finish(command):
+        return None
 
     # A read-only inspection is never a stall. Blocking it here is what forces
     # the model to mutate a file it has never read: the runtime demands a write
@@ -2300,7 +2289,7 @@ def _is_report_artifact_blocked(self, command: AgentCommand) -> bool:
 
 
 def _is_read_only_violation(self, command: AgentCommand) -> bool:
-    """Block write actions for read-only/verify tasks."""
+    """Block write actions on a run the user or the role made read-only."""
     if not self._state.read_only_goal:
         return False
 
@@ -2374,48 +2363,25 @@ def _is_create_goal(user_goal: str) -> bool:
     return any(marker in lowered for marker in markers)
 
 
-def _is_modify_goal(user_goal: str) -> bool:
-    """Detect fix/modify/change/update/edit intent from user goal."""
-    lowered = user_goal.casefold()
-    markers = (
-        "add ",
-        "fix ",
-        "fix:",
-        "modify ",
-        "change ",
-        "update ",
-        "edit ",
-        "refactor ",
-        "improve ",
-        "enhance ",
-        "исправь",
-        "исправить",
-        "измени",
-        "изменить",
-        "обнови",
-        "обновить",
-        "добавь",
-        "добавить",
-        "отредактируй",
-        "отредактировать",
-        "переделай",
-        "доработай",
-    )
-    return any(marker in lowered for marker in markers)
+# The router owns the change-verb vocabulary; the run loop reads the same list
+# so a request the router treats as a change cannot be a read-only run here.
+_is_modify_goal = has_change_verb
 
 
-def _is_read_only_goal(user_goal: str) -> bool:
-    """Detect read-only/verify intent from user goal."""
+def _is_verify_only_goal(user_goal: str) -> bool:
+    """Detect short verify/check tasks that should end after one factual confirmation.
+
+    A guess, so it only relaxes completion accounting (a read counts as
+    evidence, a found-nothing answer is a valid ending). It never blocks a
+    write and never ends a run by itself.
+    """
     if _is_create_goal(user_goal):
         return False
-    # A FIX/MODIFY task is never read-only, even if it mentions filenames
-    # like empty_list.py whose substrings match short markers ("list").
+    # A FIX/MODIFY task is never verify-only.
     if _is_modify_goal(user_goal):
         return False
 
     lowered = user_goal.casefold()
-
-    # Russian patterns
     ru_patterns = (
         "проверь",
         "есть ли",
@@ -2431,48 +2397,15 @@ def _is_read_only_goal(user_goal: str) -> bool:
         "git status",
         "git diff",
     )
-
-    # English patterns — short single-word markers use word-boundary
-    # matching via _token_match to avoid false positives on filenames
-    # (e.g. "list" must not trigger inside "empty_list.py").
-    en_token_markers = {"find", "show", "inspect", "list"}
-    en_phrase_patterns = (
-        "check if",
-        "check whether",
-        "git status",
-        "git diff",
-    )
-
-    if any(pattern in lowered for pattern in ru_patterns + en_phrase_patterns):
-        return True
-    return any(_token_match(marker, lowered) for marker in en_token_markers)
-
-
-def _is_verify_only_goal(user_goal: str) -> bool:
-    """Detect short verify/check tasks that should end after one factual confirmation."""
-    if _is_create_goal(user_goal):
-        return False
-    # A FIX/MODIFY task is never verify-only.
-    if _is_modify_goal(user_goal):
-        return False
-
-    lowered = user_goal.casefold()
-    ru_patterns = (
-        "проверь",
-        "есть ли",
-        "найди",
-        "покажи",
-        "выведи",
-        "git status",
-        "git diff",
-    )
     en_phrases = (
         "check if",
         "check whether",
         "git status",
         "git diff",
     )
-    en_token_markers = {"find", "show", "list"}
+    # Short single-word markers use word-boundary matching via _token_match to
+    # avoid false positives on filenames ("list" inside "empty_list.py").
+    en_token_markers = {"find", "show", "list", "inspect"}
 
     if any(pattern in lowered for pattern in ru_patterns + en_phrases):
         return True
@@ -2565,15 +2498,27 @@ def _build_premature_final_answer_error(language: str) -> str:
     return (
         "Completion blocked: this looks like a CREATE task, "
         "but no files were created or changed. "
-        "Create the required files inside the workspace, then verify."
+        "If the files should be created, create them inside the workspace, then verify. "
+        f"{_HONEST_EXIT_HINT}"
     )
 
 
 def _build_missing_implementation_error(language: str) -> str:
     return (
         "Completion blocked: this looks like a FIX/MODIFY task, "
-        "but no files were changed. Read the target file, make a minimal fix, then verify."
+        "but no files were changed. If a change is needed, read the target file, "
+        f"edit it, then verify. {_HONEST_EXIT_HINT}"
     )
+
+
+def _build_completion_hint(self) -> str:
+    hint = (
+        "The task looks complete. If nothing is left to verify, finish with "
+        "final_answer or report_to_user."
+    )
+    if self._state.report_goal:
+        hint += " " + _build_report_substance_instruction(self._state.task_language)
+    return hint
 
 
 def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
@@ -2772,12 +2717,7 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
     for kind, text in _evidence_completion_blockers(self):
         kinds.append(kind)
         blockers.append(text)
-        if kind == "no_recovery":
-            required_actions.update(_READ_ONLY_ACTIONS)
-            required_actions.update(_WRITE_ACTIONS)
-            required_actions.update({"run_shell", "git_status", "git_diff"})
-        else:
-            required_actions.update(_WRITE_ACTIONS)
+        required_actions.update(_WRITE_ACTIONS)
 
     return blockers, kinds, sorted(required_actions)
 
@@ -2804,10 +2744,10 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
         out.append((
             "no_changes",
             "Completion blocked: this task changes files but files_changed is empty. "
-            "Make the actual edit before final_answer."
+            f"Make the actual edit before claiming it done. {_HONEST_EXIT_HINT}"
             if not ru else
             "Завершение заблокировано: задача меняет файлы, но files_changed пуст. "
-            "Внеси реальную правку до final_answer.",
+            f"Внеси реальную правку, прежде чем заявлять о готовности. {_HONEST_EXIT_HINT_RU}",
         ))
 
     if (
@@ -2818,10 +2758,10 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
         out.append((
             "errors_present",
             "Completion blocked: progress is 100% but there are unresolved errors "
-            f"({st.error_history[-1]}). Resolve them or report honestly."
+            f"({st.error_history[-1]}). Resolve them. {_HONEST_EXIT_HINT}"
             if not ru else
             "Завершение заблокировано: прогресс 100%, но есть неустранённые ошибки "
-            f"({st.error_history[-1]}). Устрани их или честно сообщи об этом.",
+            f"({st.error_history[-1]}). Устрани их. {_HONEST_EXIT_HINT_RU}",
         ))
 
     if (
@@ -2833,24 +2773,10 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
         out.append((
             "no_activity",
             "Completion blocked: no file was read and no file was changed. "
-            "Inspect the workspace and do the work before final_answer."
+            f"Inspect the workspace before claiming the work done. {_HONEST_EXIT_HINT}"
             if not ru else
             "Завершение заблокировано: ни один файл не прочитан и не изменён. "
-            "Изучи проект и выполни работу до final_answer.",
-        ))
-
-    if st.recovery_pending and st.hard_denial_rules:
-        tried = len(st.recovery_signatures)
-        rule = st.hard_denial_rules[-1]
-        out.append((
-            "no_recovery",
-            f"Completion blocked: the environment refused an approach ({rule}). "
-            f"Try at least {_RECOVERY_ATTEMPTS_REQUIRED} different strategies before "
-            f"final_answer; only {tried} tried so far."
-            if not ru else
-            f"Завершение заблокировано: среда отклонила подход ({rule}). "
-            f"Попробуй минимум {_RECOVERY_ATTEMPTS_REQUIRED} разные стратегии обхода "
-            f"до final_answer; пока попыток: {tried}.",
+            f"Изучи проект, прежде чем заявлять о готовности. {_HONEST_EXIT_HINT_RU}",
         ))
 
     return out
@@ -2891,7 +2817,7 @@ def seal_run_status(self) -> None:
     remain, and progress reflects steps actually closed.
     """
     self._refresh_completion_requirements()
-    if self._state.completion_blockers:
+    if self._state.finished_incomplete or self._state.completion_blockers:
         self._state.run_status = "blocked"
         self._state.progress = _blocked_progress(self)
     elif self._state.progress >= 100:
@@ -2993,25 +2919,40 @@ def _build_incomplete_plan_error(language: str, remaining_steps: list[str]) -> s
     preview = "; ".join(remaining_steps[:3])
     if len(remaining_steps) > 3:
         preview += f"; {len(remaining_steps) - 3} more"
-    return f"Task cannot finish: the execution plan is not complete yet. Remaining: {preview}."
+    return (
+        f"Task cannot finish as done: the execution plan is not complete yet. Remaining: {preview}. "
+        f"{_HONEST_EXIT_HINT}"
+    )
 
 
 def _build_missing_verification_error(language: str) -> str:
     return "Task cannot finish without verification of the changes: structure, syntax, import, or run evidence is required."
 
 
+def _join_blockers(blockers: list[str], with_hint: bool = True) -> str:
+    # Each blocker names the honest exit on its own; joined, it is said once.
+    texts = [
+        text.replace(_HONEST_EXIT_HINT, "").replace(_HONEST_EXIT_HINT_RU, "").strip()
+        for text in blockers
+    ]
+    if with_hint:
+        texts.append(_HONEST_EXIT_HINT)
+    return " ".join(texts)
+
+
 def _build_completion_blocker_instruction(language: str, blockers: list[str], actions: list[str]) -> str:
     action_text = ", ".join(actions) or "none"
-    blocker_text = " ".join(blockers)
+    blocker_text = _join_blockers(blockers, with_hint=False)
     return (
-        f"final_answer and report_to_user are forbidden. Blockers: {blocker_text} "
-        f"The next step must be a corrective action using one of: {action_text}."
+        f'final_answer and report_to_user with "outcome": "done" are forbidden. Blockers: {blocker_text} '
+        f"Next, either take a corrective action using one of: {action_text}; "
+        'or, if the work cannot or should not be done, finish with "outcome": "incomplete" and say why.'
     )
 
 
 def _build_required_action_error(language: str, actions: list[str], blockers: list[str]) -> str:
     action_text = ", ".join(actions)
-    blocker_text = " ".join(blockers)
+    blocker_text = _join_blockers(blockers)
     return f"A corrective action is required. Allowed next actions: {action_text}. Blockers: {blocker_text}"
 
 
@@ -3025,7 +2966,8 @@ def _build_strict_next_action_instruction(
     message = (
         f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
         "Do not use inspect/read/list_tree/find/search/final_answer/report_to_user on the next step. "
-        "For a CREATE task, switch directly to changing files inside the workspace."
+        "For a CREATE task, switch directly to changing files inside the workspace. "
+        'The one exception: if the work cannot or should not be done, finish with "outcome": "incomplete" and say why.'
     )
     if first_artifact:
         message += f" Start with artifact: {first_artifact}."
@@ -3161,6 +3103,52 @@ def _user_explicitly_requested_report_artifact(self, path: str) -> bool:
     return any(word in goal for word in report_words) and any(word in goal for word in request_words)
 
 
+def _is_sqlite3_statement_read_only(statement: str) -> bool:
+    """Classify one already-casefolded SQL statement or dot-command.
+
+    `statement` is one `;`-separated piece of a single sqlite3 CLI argument.
+    """
+    if not statement:
+        return True
+    if statement.startswith("."):
+        return statement in _SAFE_READ_ONLY_SQLITE_DOT_COMMANDS
+    if statement.startswith("select"):
+        return True
+    if statement.startswith("pragma"):
+        # "PRAGMA x = value" mutates state even for an otherwise-safe name.
+        if "=" in statement:
+            return False
+        pragma_name = statement[len("pragma"):].strip().split("(", 1)[0].strip()
+        return pragma_name in _SAFE_READ_ONLY_SQLITE_PRAGMAS
+    if _UNSAFE_SQLITE_STATEMENT_RE.match(statement):
+        return False
+    # An unrecognized statement shape (e.g. a bare ATTACH without a keyword
+    # match above) fails closed rather than being assumed read-only.
+    return False
+
+
+def _is_safe_read_only_sqlite3_command(parts: list[str]) -> bool:
+    """True only if every statement passed to the sqlite3 CLI is read-only.
+
+    `parts` are casefolded argv tokens including the leading "sqlite3".
+    Workspace/path validation for the database file argument is the
+    executor's/terminal's job (see terminal.py `_validate_common_tokens`),
+    not this classifier's — it only judges SQL/dot-command intent.
+    """
+    positional = [token for token in parts[1:] if not token.startswith("-")]
+    if len(positional) < 2:
+        # No SQL/dot-command supplied (just a filename, or nothing at all):
+        # there is no query to justify running the CLI for a read-only task.
+        return False
+
+    statement_tokens = positional[1:]  # positional[0] is the database file
+    for token in statement_tokens:
+        for raw_statement in token.split(";"):
+            if not _is_sqlite3_statement_read_only(raw_statement.strip()):
+                return False
+    return True
+
+
 def _is_safe_read_only_shell_command(command_parts: Any) -> bool:
     if not isinstance(command_parts, list) or not command_parts:
         return False
@@ -3178,4 +3166,6 @@ def _is_safe_read_only_shell_command(command_parts: Any) -> bool:
         return len(parts) >= 2 and parts[1] in _SAFE_READ_ONLY_GIT_SUBCOMMANDS
     if program in {"python", "python3"}:
         return len(parts) == 2 and parts[1] in {"--version", "-v"}
+    if program == "sqlite3":
+        return _is_safe_read_only_sqlite3_command(parts)
     return program in _SAFE_READ_ONLY_SHELLS

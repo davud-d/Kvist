@@ -77,5 +77,11 @@ def test_reader_prompt_stays_within_token_budget():
     tokens = len(enc.encode(_load_role_prompt("reader")))
     # 1500 → 1600 for section 11 (KVIST.md); → 1900 for the HANDOFF path
     # (delegate_task to coder/devops); → 2100 for action batches, which changed
-    # the response schema itself. Nothing else may grow into it.
-    assert tokens <= 2100, f"reader prompt is {tokens} tokens (budget 2100)"
+    # the response schema itself; → 2150 for the finish "outcome" arg, another
+    # schema change; → 2200 for the anti-sycophancy line in section 8 (a
+    # user's claim about existing behavior is not evidence); → 2280 for
+    # naming the grounding principle explicitly in section 8 plus two more
+    # examples of it (git_status/git_diff cover tracked changes only; a
+    # truncated log/dump can make a naive count wrong). Nothing else may
+    # grow into it.
+    assert tokens <= 2280, f"reader prompt is {tokens} tokens (budget 2280)"

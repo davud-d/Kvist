@@ -107,9 +107,31 @@ def session_context(self) -> str:
     )
 
 
+_READ_ONLY_ROLE_NOTE = (
+    "EXECUTOR ROLE: reader (read-only). It can read/list/find/search files and run "
+    "only safe read-only shell commands (ls, cat, grep, find, git status/diff) — it "
+    "cannot write files, cannot run scripts, and cannot run arbitrary shell commands "
+    "(no python/awk/node/etc). Any verify step in the plan must be something reader "
+    "can actually do: re-reading and cross-checking the data by hand, never \"run a "
+    "script\".\n\n"
+)
+
+
+def _executor_role_context(self) -> str:
+    # The planner plans blind to execution capability otherwise, even though the
+    # role is already fixed by the time it runs (routing happens before planning) —
+    # a plan step reader cannot perform (running a script) is worse than no plan
+    # step at all: it deadlocks the run on a capability reader will never have.
+    state = getattr(self, "_state", None)
+    if getattr(state, "current_agent_role", None) == "reader":
+        return _READ_ONLY_ROLE_NOTE
+    return ""
+
+
 def create_plan(self, user_goal: str) -> PlanInfo:
     prompt = (
         f"{session_context(self)}"
+        f"{_executor_role_context(self)}"
         "User task:\n"
         f"{user_goal}\n\n"
         "Build a short plan, success criteria, and estimate complexity"

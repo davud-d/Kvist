@@ -578,7 +578,7 @@ class TestLLMMessagesIncludeRouterPromptAndUserGoal:
         kwargs = client.last_kwargs
         assert kwargs["model"] == "my-model"
         assert kwargs["temperature"] == 0.0
-        assert kwargs["max_tokens"] == 50
+        assert kwargs["max_tokens"] == role_router._ROUTER_MAX_TOKENS
 
 
 class TestKeywordFallbackOrder:
@@ -885,6 +885,32 @@ class TestMatchDirectRule:
         result = _match_direct_rule("абракадабра xyz")
         assert result is None
 
+    def test_match_direct_rule_reader_explain_artifact(self):
+        # "explain/summarize <workspace artifact>" needs a file read, which
+        # chat cannot do at all — must not fall into the chat patterns just
+        # because it starts with "объясни"/"explain".
+        from role_router import _match_direct_rule
+        for goal in (
+            "Объясни, что в этом логе",
+            "Перескажи содержимое усечённого лога инцидента",
+            "Summarize this log file for me",
+            "Explain what's in the incident log",
+        ):
+            result = _match_direct_rule(goal)
+            assert result is not None, goal
+            role, label, _pattern = result
+            assert role == "reader", goal
+            assert label == "explain-artifact"
+
+    def test_match_direct_rule_reader_artifact_beats_chat_min_matches(self):
+        # Without the reader rule, two chat-pattern hits ("explain" +
+        # "how does") would short-circuit this straight to chat.
+        from role_router import _match_direct_rule
+        role, _label, _pattern = _match_direct_rule(
+            "Explain how does this log file end up truncated"
+        )
+        assert role == "reader"
+
 
 class TestEnglishAndRussianParity:
     """Test that English and Russian patterns work equally."""
@@ -917,3 +943,64 @@ class TestEnglishAndRussianParity:
         assert d2.role == "devops"
         assert d1.source == "direct"
         assert d2.source == "direct"
+
+
+def test_empty_router_reply_falls_back_to_keywords_not_chat(monkeypatch):
+    # A reasoning model that spends its budget thinking replies with nothing;
+    # that must not silently become the chat role.
+    monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
+    decision = route_role_decision_with_llm(
+        "please fix the flaky file loader",
+        client=_make_client(role=""),
+        model="m",
+    )
+    assert decision.role == "coder"
+    assert decision.source == "keyword_fallback"
+
+
+def test_pochini_bug_routes_to_coder_directly():
+    decision = route_role_decision_with_llm("почини баг", client=_make_client(role="chat"), model="m")
+    assert decision.role == "coder"
+    assert decision.source == "direct"
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "поправь функцию average в empty_list.py",
+        "Прогони тесты и почини всё, что падает.",
+    ],
+)
+def test_russian_fix_verbs_route_to_coder(goal):
+    decision = route_role_decision_with_llm(goal, client=_make_client(role="chat"), model="m")
+    assert decision.role == "coder"
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "Make all tests pass without modifying the tests.",
+        "Make parse_date return a datetime object, but keep it returning a string too, "
+        "and don't change any callers.",
+        "обнови версию в pyproject.toml, но не трогай CHANGELOG",
+    ],
+)
+def test_scoped_no_write_constraint_is_not_read_only(goal):
+    # The constraint names what must stay untouched; the request still asks
+    # for a change, so it must not become a reader run.
+    assert role_router.has_no_write_marker(goal) is False
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "посмотри код, ничего не меняй",
+        "read-only review of auth.py",
+        "прочитай конфиг, но ничего не меняй",
+    ],
+)
+def test_plain_no_write_request_is_read_only(goal):
+    assert role_router.has_no_write_marker(goal) is True
+    decision = route_role_decision_with_llm(goal, client=_make_client(role="chat"), model="m")
+    assert decision.role == "reader"
+    assert decision.source == "direct"

@@ -18,7 +18,7 @@ def _deny(agent, step: int) -> None:
     )
 
 
-def test_hard_denial_arms_recovery_and_blocks_final_answer(agent_factory):
+def test_hard_denial_is_recorded_but_never_demands_a_workaround(agent_factory):
     agent = agent_factory()
     agent._state.plan_info = make_plan()
     agent._state.task_language = "en"
@@ -29,7 +29,8 @@ def test_hard_denial_arms_recovery_and_blocks_final_answer(agent_factory):
     assert any("ripgrep" in rule for rule in agent._state.hard_denial_rules)
 
     agent._refresh_completion_requirements(force_enforcement=True)
-    assert any("recursive ripgrep" in b for b in agent._state.completion_blockers)
+    assert "no_recovery" not in agent._state.completion_blocker_kinds
+    assert not any("strateg" in b for b in agent._state.completion_blockers)
 
 
 def test_two_distinct_strategies_clear_the_recovery_requirement(agent_factory):

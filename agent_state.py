@@ -95,7 +95,11 @@ class RunState:
     user_goal: str = ""
     create_goal: bool = False
     modify_goal: bool = False
+    # Writes are hard-blocked, so only an authoritative source sets it: the
+    # reader role or an explicit "do not modify" request.
     read_only_goal: bool = False
+    # A keyword guess about a short check task; it only relaxes completion
+    # accounting and must never block a write or end a run by itself.
     verify_only_goal: bool = False
     # The user asked for a substantive spoken answer (explain/describe/list/
     # "what would you change"), not just a file mutation or a yes/no check.
@@ -127,12 +131,15 @@ class RunState:
     # The user stopped this run (Ctrl+C, Escape, the GUI's cancel). Recorded in
     # session history so later turns know the work was cut short on purpose.
     stopped_by_user: bool = False
+    # The model ended the run with outcome "incomplete": seals as "blocked"
+    # however clean the evidence looks, because nothing was claimed as done.
+    finished_incomplete: bool = False
     # Rule texts of hard environment denials seen this run (e.g. a sandbox
-    # security refusal). Recovery policy: after a denial the model must try at
-    # least two distinct alternative approaches before it may finish.
+    # security refusal). Logged only; a denial never obliges the model to
+    # try other approaches before finishing.
     hard_denial_rules: list[str] = field(default_factory=list)
     # Distinct action signatures attempted since the most recent hard denial.
-    # Reset on each new denial; the policy is satisfied at len() >= 2.
+    # Until two exist the denial still counts as an unresolved error.
     recovery_signatures: set[str] = field(default_factory=set)
     recovery_pending: bool = False
     recent_feedback: list[str] = field(default_factory=list)

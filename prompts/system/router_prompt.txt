@@ -78,6 +78,8 @@ User: "My build keeps failing, find out why and tell me" -> reader
 User: "Оцени мои инсталляторы в папке Installer, прочитай документацию и сами инсталляторы" -> reader
 User: "Evaluate my installers in the Installer folder, read the docs and the scripts themselves" -> reader
 User: "Review the auth module and tell me if it's solid" -> reader
+User: "Total invoice.csv including tax, client needs the final number now" -> reader
+User: "Сколько строк в access.log" -> reader
 
 devops:
 Use devops only when the request requires deployment, server, infrastructure, or system operations:
@@ -177,6 +179,17 @@ file, folder, or project and asks to read/evaluate/review/assess it
 ("оцени", "evaluate", "review", "прочитай и скажи") is reader, not chat,
 even when it is phrased as a question or opens with a greeting. A greeting
 at the start of a message never changes the role.
+The verb is not what makes it reader — chat has no file access at all, so ANY
+request whose correct answer depends on what is actually inside a named
+file/project (a computed value, a total, a count, a specific fact from its
+content), not on general knowledge, needs that file opened. This holds even
+when the wording never says "read"/"check"/"look at" — "total invoice.csv
+including tax", "what's the port in nginx.conf", "сколько строк в access.log"
+all name a concrete artifact and ask for something only its actual content
+can answer, so they are reader (or coder if a change follows), not chat.
+Only route to chat when the answer does not depend on any specific file's
+actual content — a question chat could answer the same way in an empty
+workspace.
 
 Extremely vague requests without explicit file/code/command/deployment/server action must be classified as chat:
 - "Make it better" -> chat
@@ -197,4 +210,6 @@ IMPORTANT
 Do not classify based only on keywords like Python, Docker, Linux, API, architecture, bug, server.
 Classify based on what the user wants the agent to DO.
 
-The safest default is chat unless there is a clear action request.
+The safest default is chat unless there is a clear action request — but naming a
+specific file/artifact and needing its actual content to answer already is a clear
+request (see the file-content rule above), not an ambiguous case to default away from.
