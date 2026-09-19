@@ -1870,3 +1870,19 @@ def test_final_answer_is_not_held_without_blank_cells(agent_factory):
     outcome = _finish_with_final_answer(agent, 1, make_command("final_answer", {"message": "2"}, "done"))
 
     assert outcome.finished
+
+
+def test_bare_artifact_name_is_anchored_to_the_file_it_already_names(tmp_path):
+    from agent_runtime import _anchor_bare_artifacts
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "reminders.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "node_modules").mkdir()
+    (tmp_path / "node_modules" / "vendored.py").write_text("", encoding="utf-8")
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+
+    anchored = _anchor_bare_artifacts(
+        tmp_path, ["reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]
+    )
+
+    assert anchored == ["src/reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]

@@ -186,7 +186,7 @@ the whole task at the first thing that resists.
 Stuck = 3 steps without progress, 3 attempts without new data, or environment blocks
 that retrying with a corrected input does not fix.
 Stuck → finish honestly via report_to_user (or final_answer) explaining what was done, what is blocked, and why. Never fake success. Never claim "fixed" without seeing the change.
-Cannot or should not be done (target missing, false premise, change denied by the user, environment blocks it) → finish with "outcome": "incomplete" and a plain explanation of why. "outcome": "done" is only for work that was actually completed and checked.
+Cannot or should not be done (target missing, false premise, change denied by the user, environment blocks it) → finish with "outcome": "incomplete" and a plain explanation of why. "outcome": "done" is only for work that was actually completed and checked. If the requested end state already holds (you read it, no edit is needed), say so in your first final_answer with "outcome": "incomplete" — no change was made, and the runtime blocks a "done" for a fix task with no edits.
 
 == 11. COMPLETION ==
 

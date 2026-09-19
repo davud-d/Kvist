@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
 import sys
 import time
@@ -518,7 +519,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.report_goal = _resolve_report_goal(self, user_goal)
     # "check if main.py exists" names a file it must not be required to create.
     if not self._state.required_artifacts and not (read_only_goal or verify_only_goal):
-        self._state.required_artifacts = _extract_required_artifacts(user_goal, self._state.plan_info)
+        self._state.required_artifacts = _anchor_bare_artifacts(
+            Path(self.executor.workspace),
+            _extract_required_artifacts(user_goal, self._state.plan_info),
+        )
     self._refresh_completion_requirements()
     self._state.step_budget = max(self._state.step_budget, self.config.max_steps)
     report_rendered = False
@@ -2639,6 +2643,27 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
         seen.add(folded)
         normalized.append(value)
     return normalized[:24]
+
+
+_ARTIFACT_SEARCH_SKIP_DIRS = {".git", ".kvist", ".venv", "venv", "node_modules", "__pycache__"}
+
+
+def _anchor_bare_artifacts(workspace: Path, artifacts: list[str]) -> list[str]:
+    """Point a bare file name at the file it already names deeper in the workspace.
+
+    "fix reminders.py" mentions a file that lives in src/; requiring it at the
+    root made the completion gate demand a duplicate there.
+    """
+    bare = {a for a in artifacts if "/" not in a and not (workspace / a).exists()}
+    if not bare:
+        return artifacts
+    found: dict[str, str] = {}
+    for root, dirs, files in os.walk(workspace):
+        dirs[:] = sorted(d for d in dirs if d not in _ARTIFACT_SEARCH_SKIP_DIRS)
+        for name in sorted(files):
+            if name in bare and name not in found:
+                found[name] = (Path(root) / name).relative_to(workspace).as_posix()
+    return [found.get(a, a) for a in artifacts]
 
 
 def _is_service_not_found_error(error_text: str) -> bool:
