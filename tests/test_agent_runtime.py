@@ -1803,3 +1803,70 @@ def test_keyword_heuristics_cannot_block_writes_on_a_coder_run(agent_factory):
         "read-only" in str(log.get("feedback", {}).get("error", "")).lower()
         for log in agent._state.step_logs
     )
+
+
+def test_feedback_line_for_a_commandless_handoff_says_nothing_ran(agent_factory):
+    agent = agent_factory()
+    command = make_command("delegate_task", {"target_role": "coder", "task": "change a default"})
+    feedback = {"ok": True, "action_type": "delegate_task", "data": {"target_role": "coder", "task": "x", "results": []}}
+
+    line = agent._feedback_to_line(command, feedback)
+
+    assert "recorded only" in line
+    assert "nothing was executed" in line
+
+
+def test_handoff_and_check_if_steps_are_matched_by_the_actions_that_do_them():
+    from agent_runtime import _plan_item_matches_action
+
+    assert _plan_item_matches_action("delegate the fix to coder if below 12", "delegate_task", [])
+    assert _plan_item_matches_action("check if the default is at least 12 characters", "read_file", [])
+    assert not _plan_item_matches_action("check that the tests pass", "read_file", [])
+    assert not _plan_item_matches_action("update the default length", "delegate_task", [])
+
+
+def test_empty_data_cells_finds_blank_csv_fields_and_ignores_other_files():
+    from agent_runtime import _empty_data_cells
+
+    csv_text = "item,qty,unit_price\nwidget,4,2.50\ngadget,2,\nbolt,10,0.30\n"
+    assert _empty_data_cells("orders.csv", csv_text) == ["orders.csv line 3, column unit_price"]
+    assert _empty_data_cells("orders.tsv", "a\tb\n1\t\n") == ["orders.tsv line 2, column b"]
+    assert _empty_data_cells("notes.txt", csv_text) == []
+    assert _empty_data_cells("orders.csv", "a,b\n1,2\n") == []
+
+
+def test_final_answer_is_held_once_when_the_data_read_had_blank_cells(agent_factory):
+    from agent_runtime import _finish_with_final_answer
+
+    agent = agent_factory(max_steps=1)
+    agent._state.read_only_goal = True
+    agent._state.verification_evidence = ["read_file: orders.csv"]
+    agent._state.files_read = ["orders.csv"]
+    agent._update_state_from_success(
+        make_command("read_file", {"path": "orders.csv"}),
+        {"ok": True, "data": {"path": "orders.csv", "content": "item,price\nbolt,\n"}},
+    )
+    command = make_command("final_answer", {"message": "13.00"}, "done")
+
+    first = _finish_with_final_answer(agent, 1, command)
+    second = _finish_with_final_answer(agent, 2, command)
+
+    assert not first.finished
+    assert "orders.csv line 2, column price" in agent._state.pending_instruction
+    assert second.finished
+
+
+def test_final_answer_is_not_held_without_blank_cells(agent_factory):
+    from agent_runtime import _finish_with_final_answer
+
+    agent = agent_factory(max_steps=1)
+    agent._state.read_only_goal = True
+    agent._state.verification_evidence = ["read_file: orders.csv"]
+    agent._update_state_from_success(
+        make_command("read_file", {"path": "orders.csv"}),
+        {"ok": True, "data": {"path": "orders.csv", "content": "item,price\nbolt,2\n"}},
+    )
+
+    outcome = _finish_with_final_answer(agent, 1, make_command("final_answer", {"message": "2"}, "done"))
+
+    assert outcome.finished

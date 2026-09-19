@@ -20,6 +20,7 @@ from typing import Any
 
 from change_journal import (
     JournalUnavailableError,
+    build_diff_report,
     content_digest,
     mark_commit_unconfirmed,
     promote_baseline,
@@ -439,7 +440,11 @@ class SafeExecutor:
                 data={
                     "target_role": target_role,
                     "task": task,
-                    "note": "Delegation registered. No commands to execute.",
+                    "note": (
+                        "Handoff recorded only. No other role was started and nothing "
+                        "was changed: the delegated task has NOT been performed. Say so "
+                        "in the final answer; do not present it as done."
+                    ),
                     "results": [],
                 },
             )
@@ -951,7 +956,12 @@ class SafeExecutor:
     def _read_existing_text_for_diff(self, target: Path) -> str:
         try:
             canonical = self._canonical_workspace_read_target(target)
-            return canonical.read_text(encoding="utf-8", errors="replace")
+            # newline="" disables universal-newline translation: text mode
+            # otherwise silently turns every "\r\n"/"\r" into "\n" on read, so
+            # appending to or diffing against a CRLF file would rewrite its
+            # untouched lines to LF the moment any edit touched the file.
+            with canonical.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+                return handle.read()
         except OSError as error:
             raise ExecutorError(
                 f"Cannot safely read existing file before overwrite: {target.name}"
@@ -1790,6 +1800,8 @@ class SafeExecutor:
                 action_type="git_diff",
                 data=fallback_data,
             )
+        if result.returncode != 0 and "not a git repository" in result.stderr.casefold():
+            return self._journal_diff_result(command)
         stdout = self._sanitize_internal_paths_in_text(result.stdout)
         stderr = self._sanitize_internal_paths_in_text(result.stderr)
         return ExecutionResult(
@@ -1802,6 +1814,27 @@ class SafeExecutor:
                 "stderr": stderr,
                 "fallback_used": False,
                 "git_available": result.returncode == 0,
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
+            },
+        )
+
+    def _journal_diff_result(self, command: list[str]) -> ExecutionResult:
+        # Without git the only ground truth for "what did Kvist change" is its
+        # own change journal; without it the agent can only take the user's word.
+        return ExecutionResult(
+            ok=True,
+            action_type="git_diff",
+            data={
+                "returncode": None,
+                "command": command,
+                "stdout": build_diff_report(self.workspace),
+                "stderr": (
+                    "Not a git repository. stdout is the diff of the changes Kvist itself "
+                    "made in this workspace (its change journal), not a full history."
+                ),
+                "fallback_used": True,
+                "git_available": False,
                 "untrusted": True,
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
@@ -2411,7 +2444,11 @@ class SafeExecutor:
                 f"({size} bytes, limit {self.max_writable_file_bytes})"
             )
         try:
-            return target.read_text(encoding="utf-8")
+            # newline="" preserves the file's actual line endings so a
+            # replace_in_file targeting one fragment doesn't silently
+            # rewrite every other CRLF line in the file to LF.
+            with target.open("r", encoding="utf-8", newline="") as handle:
+                return handle.read()
         except UnicodeDecodeError as error:
             raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
 
@@ -2419,7 +2456,11 @@ class SafeExecutor:
         target = self._canonical_read_target(target)
         size = target.stat().st_size
         try:
-            with target.open("r", encoding="utf-8", errors="replace") as handle:
+            # newline="" disables universal-newline translation: plain text
+            # mode silently turns "\r\n"/"\r" into "\n", hiding CRLF/lone-CR
+            # bytes from the model even when they are the actual bug it was
+            # asked to diagnose (e.g. a parser that splits on b"\n" only).
+            with target.open("r", encoding="utf-8", errors="replace", newline="") as handle:
                 # Bounded read: the previous code pulled the whole file into
                 # memory and only then compared its size against the limit, so
                 # the limit did nothing to protect the process from a huge file.

@@ -89,6 +89,34 @@ _CHANGE_PHRASE_RE = re.compile(
 )
 
 
+# A real extension, not any "x.y": "e.g." and "example.com" must not read as files.
+_NAMED_FILE_RE = re.compile(
+    r"(?<![\w])[\w./-]*\.(?:py|js|ts|tsx|jsx|json|ya?ml|toml|ini|cfg|conf|env|md|txt|csv|log|sql|sh"
+    r"|go|rs|java|kt|c|h|cpp|rb|php|html|css|xml|lock|gradle)(?![\w])"
+)
+
+
+# Verbs that ask to look at something; "why do people name their file .env" has none.
+_INSPECT_VERB_RE = re.compile(
+    r"\b(?:find|look|check|inspect|review|read|open|show|summari[sz]e|count|total|sum|list|analy[sz]e|debug"
+    r"|how many)\b"
+    r"|найди|проверь|посмотри|покажи|прочитай|просмотри|сколько|сумм|итог|проанализ",
+    re.IGNORECASE,
+)
+
+
+def _is_edit_of_named_file(user_goal: str) -> bool:
+    """A change verb aimed at a named file, with no question or infra wording."""
+    lowered = user_goal.casefold()
+    if not (has_change_verb(user_goal) and _NAMED_FILE_RE.search(lowered)):
+        return False
+    # "Do not modify anything ... hand the fix to the coder" is a scope the
+    # router model has to weigh, not a plain edit request.
+    if any(marker in lowered for marker in _NO_WRITE_MARKERS):
+        return False
+    return not any(kw in lowered for kw in _CHAT_KEYWORDS + _DEVOPS_KEYWORDS)
+
+
 def has_change_verb(text: str) -> bool:
     """True when the request asks for something to be changed."""
     lowered = text.casefold()
@@ -343,13 +371,17 @@ _DEVOPS_KEYWORDS: tuple[str, ...] = (
 )
 
 _CODER_KEYWORDS: tuple[str, ...] = (
+    # Verbs, not topic nouns — "file"/"code"/"test" alone matched an ordinary
+    # conceptual sentence ("why do people name their config file .env") as
+    # confidently as an actual action request, which is exactly what
+    # router_prompt.txt's own "classify by action, not topic" rule forbids.
+    # An action request still has a verb (create/write/fix/...) to match on.
     "создай", "напиши", "сделай", "исправь", "рефактор",
     "create", "write", "make", "fix", "refactor",
-    "скрипт", "script", "файл", "file",
+    "скрипт", "script",
     "readme", "README", "логирование", "logging",
-    "код", "code", "тест", "test",
     "сгенерируй", "закоди", "разработай",
-    "generate", "code", "develop",
+    "generate", "develop",
 )
 
 _CHAT_KEYWORDS: tuple[str, ...] = (
@@ -400,13 +432,42 @@ def _keyword_route(user_goal: str) -> str:
         if keyword in lowered:
             return "chat"
 
+    # A change verb aimed at a named file ("add X to pricing.py") is an edit
+    # even when no keyword above knows the verb. Checked after the chat
+    # keywords so "explain how to update package.json" stays a question.
+    if _is_edit_of_named_file(user_goal):
+        return "coder"
+
+    # Chat has no file access, so a question about a named file answered by chat
+    # is a flat refusal; reader can look and cannot write, which makes it the
+    # safe guess when nothing else decided.
+    if _NAMED_FILE_RE.search(lowered) and _INSPECT_VERB_RE.search(lowered):
+        return "reader"
+
     return _DEFAULT_ROLE
 
 
 # ── LLM-based routing ────────────────────────────────────────────
 
+# A router reply is supposed to be one word. Some models (verbose/chatty ones,
+# not just reasoning models burning their thinking budget) sometimes ignore
+# that and answer the user's actual question instead of classifying it. A role
+# word can then appear in that prose by pure coincidence — "explain Docker"
+# answered in full will happily use the word "container" but could just as
+# easily use "code" or "chat" in an unrelated sentence. Trusting any role word
+# found anywhere in an unbounded reply turns the router into a coin flip on
+# whatever word the model happened to write, not its actual classification.
+# Capping the length before searching means a genuine short/noisy answer
+# ("Role: coder", "**reader**") is still trusted, but a full answer is treated
+# as "the model didn't classify" and falls through to the keyword fallback
+# instead of a spuriously "confident" wrong pick.
+_MAX_ROUTER_REPLY_CHARS = 40
+
+
 def _response_names_role(response: str) -> bool:
     cleaned = response.strip().lower()
+    if len(cleaned) > _MAX_ROUTER_REPLY_CHARS:
+        return False
     return any(re.search(rf"\b{role}\b", cleaned) for role in _VALID_ROLES)
 
 
@@ -450,6 +511,16 @@ def route_role_decision_with_llm(
             role=direct_role,
             source="direct",
             matched_rule=f"{rule_label}: {rule_pattern}",
+            model=model,
+        )
+
+    # An edit of a named file is not a judgement call; one model answering
+    # "chat" to it would answer a change request without touching the file.
+    if _is_edit_of_named_file(user_goal):
+        return RoleRouteResult(
+            role="coder",
+            source="direct",
+            matched_rule="change verb on a named file",
             model=model,
         )
 

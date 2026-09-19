@@ -1428,6 +1428,11 @@ def _should_retry_model_error(error: Exception) -> bool:
         "unauthorized",
         "does not exist",
         "not found",
+        # An empty account stays empty between retries.
+        "insufficient balance",
+        "insufficient credit",
+        "payment required",
+        "error code: 402",
         # OmniRoute-specific non-retryable errors
         "bad_request",
         "invalid_request_error",

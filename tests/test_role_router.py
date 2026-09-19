@@ -595,6 +595,18 @@ class TestKeywordFallbackOrder:
         result = route_role("write a script to do something")
         assert result == "coder"
 
+    def test_bare_file_code_test_nouns_do_not_trigger_coder(self):
+        # "file"/"code"/"test" used to sit in _CODER_KEYWORDS as bare nouns,
+        # so an ordinary conceptual sentence that merely mentions one of them
+        # (no create/write/fix/... verb) fell to coder by accident — exactly
+        # the "classify by topic, not action" mistake router_prompt.txt warns
+        # against. Live-observed: "Why do people usually name their config
+        # file .env instead of settings.ini?" -> coder via bare "file".
+        assert route_role(
+            "Why do people usually name their config file .env instead of settings.ini?"
+        ) == "chat"
+        assert route_role("What's a good testing strategy for async code?") == "chat"
+
 
 class TestMainPathDoesNotRouteTwice:
     """Verify that agent.run receives routed_role and doesn't re-route."""
@@ -958,6 +970,29 @@ def test_empty_router_reply_falls_back_to_keywords_not_chat(monkeypatch):
     assert decision.source == "keyword_fallback"
 
 
+def test_long_essay_reply_falls_back_instead_of_trusting_a_stray_role_word(monkeypatch):
+    # A verbose model can ignore "reply with one word" and answer the actual
+    # question instead. A long reply that happens to contain a role word
+    # ("...touch files or run code...") is noise, not a classification — it
+    # must not be trusted over the keyword fallback on the real user goal.
+    monkeypatch.setattr(role_router, "_load_router_prompt", lambda: "route")
+    essay = (
+        "Docker is a containerization platform. Under the hood it relies on "
+        "namespaces and cgroups, not unlike how a coder might sandbox code "
+        "in a container for testing."
+    )
+    client = _make_client(role=essay)
+    decision = route_role_decision_with_llm(
+        "docker production nginx setup",
+        client=client,
+        model="m",
+    )
+    # The essay contains "coder", but the real signal is the keyword
+    # fallback on the actual goal ("docker"/"nginx"/"production" -> devops).
+    assert decision.role == "devops"
+    assert decision.source == "keyword_fallback"
+
+
 def test_pochini_bug_routes_to_coder_directly():
     decision = route_role_decision_with_llm("почини баг", client=_make_client(role="chat"), model="m")
     assert decision.role == "coder"
@@ -1004,3 +1039,60 @@ def test_plain_no_write_request_is_read_only(goal):
     decision = route_role_decision_with_llm(goal, client=_make_client(role="chat"), model="m")
     assert decision.role == "reader"
     assert decision.source == "direct"
+
+
+@pytest.mark.parametrize(
+    "goal, role",
+    [
+        ("Add a function apply_discount(price, percent) to pricing.py", "coder"),
+        ("Update the timeout in settings.py to 30", "coder"),
+        ("How do I add authentication to Flask?", "chat"),
+        ("Explain how to update a dependency in package.json", "chat"),
+    ],
+)
+def test_keyword_fallback_treats_a_change_verb_on_a_named_file_as_an_edit(goal, role):
+    assert role_router._keyword_route(goal) == role
+
+
+def test_edit_of_a_named_file_is_routed_before_the_llm_can_call_it_chat():
+    client = MagicMock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="chat"))]
+    )
+
+    decision = role_router.route_role_decision_with_llm(
+        "Add a function apply_discount(price, percent) to pricing.py", client, "m"
+    )
+
+    assert (decision.role, decision.source) == ("coder", "direct")
+    client.chat.completions.create.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "goal, role",
+    [
+        ("Look through auth.py and find any real bug in how the admin role is checked.", "reader"),
+        ("Найди в auth.py реальную ошибку в проверке роли администратора.", "reader"),
+        ("Why do people say e.g. that Flask is small?", "chat"),
+        ("What does example.com resolve to?", "chat"),
+    ],
+)
+def test_keyword_fallback_sends_a_named_file_to_reader_never_to_chat(goal, role):
+    assert role_router._keyword_route(goal) == role
+
+
+def test_router_outage_still_routes_a_file_question_to_reader():
+    client = MagicMock()
+    client.chat.completions.create.side_effect = RuntimeError("429 rate limit")
+
+    decision = role_router.route_role_decision_with_llm(
+        "Look through auth.py and find any real bug in how the admin role is checked.", client, "m"
+    )
+
+    assert (decision.role, decision.source) == ("reader", "keyword_fallback")
+
+
+def test_named_file_edit_rule_defers_to_the_router_when_the_user_forbids_writing():
+    goal = "Do not modify anything yourself. Review passwords.py and hand the fix over to the coder."
+
+    assert role_router._is_edit_of_named_file(goal) is False

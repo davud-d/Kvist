@@ -134,6 +134,10 @@ class RunState:
     # The model ended the run with outcome "incomplete": seals as "blocked"
     # however clean the evidence looks, because nothing was claimed as done.
     finished_incomplete: bool = False
+    # Blank cells in CSV/TSV files read this run, and whether the model was
+    # already asked to account for them before finishing (asked once, never twice).
+    empty_data_cells: list[str] = field(default_factory=list)
+    empty_cells_flagged: bool = False
     # Rule texts of hard environment denials seen this run (e.g. a sandbox
     # security refusal). Logged only; a denial never obliges the model to
     # try other approaches before finishing.

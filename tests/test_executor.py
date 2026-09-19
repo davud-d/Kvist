@@ -56,6 +56,41 @@ def test_find_files_double_star_matches_root_level_files(tmp_path):
     assert matches == {"setup.py", "src/app.py"}
 
 
+def test_read_file_preserves_crlf_instead_of_hiding_it(tmp_path):
+    # Plain text-mode open() silently turns "\r\n" into "\n" (universal
+    # newlines), which used to hide a CRLF bug from the model even when
+    # diagnosing exactly that bug was the task (e.g. a parser that splits
+    # on b"\n" only and chokes on a leftover b"\r").
+    (tmp_path / "f.txt").write_bytes(b"line1\r\nline2\r\n")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    result = executor._read_file("f.txt")
+
+    assert result.data["content"] == "line1\r\nline2\r\n"
+
+
+def test_replace_in_file_does_not_rewrite_unrelated_crlf_lines(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    (tmp_path / "f.txt").write_bytes(b"line1\r\nline2\r\nline3\r\n")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    executor._replace_in_file("f.txt", "line2", "CHANGED")
+
+    # Only the targeted line changes; line1/line3 keep their original CRLF
+    # instead of the whole file being silently reformatted to LF.
+    assert (tmp_path / "f.txt").read_bytes() == b"line1\r\nCHANGED\r\nline3\r\n"
+
+
+def test_append_file_does_not_rewrite_existing_crlf_lines(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    (tmp_path / "f.txt").write_bytes(b"a\r\nb\r\n")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    executor._append_file("f.txt", "c\n")
+
+    assert (tmp_path / "f.txt").read_bytes() == b"a\r\nb\r\nc\n"
+
+
 def test_executor_blocks_workspace_escape_env_and_internal_paths(tmp_path):
     executor = SafeExecutor(tmp_path)
 
@@ -735,3 +770,30 @@ def test_a_file_just_under_the_cap_is_returned_whole_and_unmarked(tmp_path):
     assert content == "y" * 1_000
     assert truncated is False
     assert "TRUNCATED" not in content
+
+
+def test_git_diff_outside_a_repo_shows_only_what_kvist_changed(tmp_path):
+    executor = SafeExecutor(tmp_path)
+    (tmp_path / "pricing.py").write_text("def tax():\n    return 1\n", encoding="utf-8")
+    executor._replace_in_file("pricing.py", "return 1", "return 2")
+    executor._write_file("new.py", "x = 1\n")
+
+    result = executor._git_diff()
+
+    assert result.ok is True
+    assert result.data["git_available"] is False
+    assert "Kvist itself" in result.data["stderr"]
+    assert "-    return 1" in result.data["stdout"]
+    assert "+    return 2" in result.data["stdout"]
+    assert "+x = 1" in result.data["stdout"]
+    assert result.data["untrusted"] is True
+
+
+def test_delegation_without_commands_says_nothing_was_performed(tmp_path):
+    executor = SafeExecutor(tmp_path)
+
+    result = executor._handle_delegation({"target_role": "coder", "task": "change a default"})
+
+    assert result.ok is True
+    assert result.data["results"] == []
+    assert "NOT been performed" in result.data["note"]

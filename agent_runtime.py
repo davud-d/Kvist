@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 import sys
@@ -277,7 +279,10 @@ _UNSAFE_SQLITE_STATEMENT_RE = re.compile(
 )
 
 _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
-_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|find|tree|search|провер|прочит|просмотр|найти|структур|поиск")
+# "check if/whether X" is a question about existing state, answered by reading;
+# a bare "check" stays a verification step that only a change can precede.
+_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|check (?:if|whether)|find|tree|search|провер|прочит|просмотр|найти|структур|поиск")
+_PLAN_DELEGATE_RE = re.compile(r"delegat|hand ?off|hand (?:it |the \w+ )?over|делегир|передат")
 _PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold|созда|запис|измен|обнов|добав|исправ")
 _PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|провер|запуст|компил|синтакс|импорт")
 _PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final|отчет|отчёт|сводк|резюм|итог|вывест|отображ|показ|результат|представ|вывод")
@@ -976,6 +981,8 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
             is_error=True,
         )
         return _BLOCKED
+    if _flag_empty_data_cells(self, step, command):
+        return _BLOCKED
     final_message = str(command.action.args["message"])
     if self._state.report_goal and not _is_substantive_answer(final_message):
         substance_retries = self._state.seen_actions.get("report_substance_retries", 0)
@@ -1025,6 +1032,8 @@ def _finish_with_report(
             plan_step=command.plan_step,
             is_error=True,
         )
+        return _BLOCKED
+    if not incomplete and _flag_empty_data_cells(self, step, command):
         return _BLOCKED
     # Collect context and hand off to chat reporter
     summary = str(command.action.args.get("summary", ""))
@@ -1237,6 +1246,8 @@ def normalize_error_for_model(self, raw_error: str) -> str:
     
     if is_overloaded:
         return "Provider rate limit or high demand reached. Try again later or switch the provider."
+    if any(m in lowered for m in ("insufficient balance", "insufficient credit", "payment required", "error code: 402")):
+        return "Provider account has insufficient balance or credits (HTTP 402). Top up the account or switch the provider."
     if "invalid api key" in lowered:
         return "Provider API key is invalid. Check the configured key for the selected backend."
     if "no healthy backend available for model" in lowered:
@@ -1428,6 +1439,55 @@ def mark_file_write_applied(self, path: str) -> None:
     self._push_unique(self._state.pending_verification_paths, path)
 
 
+def _empty_data_cells(path: str, content: str) -> list[str]:
+    suffix = Path(path).suffix.casefold()
+    if suffix not in {".csv", ".tsv"}:
+        return []
+    rows = list(csv.reader(io.StringIO(content), delimiter="\t" if suffix == ".tsv" else ","))
+    if not rows:
+        return []
+    header = rows[0]
+    cells: list[str] = []
+    for line, row in enumerate(rows[1:], start=2):
+        for index, value in enumerate(row):
+            if value.strip():
+                continue
+            named = index < len(header) and header[index].strip()
+            column = header[index].strip() if named else f"#{index + 1}"
+            cells.append(f"{path} line {line}, column {column}")
+    return cells
+
+
+def _note_empty_data_cells(self, path: str, content: str) -> None:
+    for cell in _empty_data_cells(path, content):
+        if cell not in self._state.empty_data_cells:
+            self._state.empty_data_cells.append(cell)
+    del self._state.empty_data_cells[20:]
+
+
+def _flag_empty_data_cells(self, step: int, command: AgentCommand) -> bool:
+    """Ask once, before finishing, how blank cells in the data read were handled.
+
+    A blank cell is missing data, not zero; the model had it in front of it and
+    a prompt rule alone does not reliably make it say so.
+    """
+    if not self._state.empty_data_cells or self._state.empty_cells_flagged:
+        return False
+    self._state.empty_cells_flagged = True
+    shown = "; ".join(self._state.empty_data_cells[:8])
+    instruction = (
+        f"Before finishing: the data you read has empty cells ({shown}). "
+        "An empty cell is missing data, not zero. If your answer depends on any of "
+        "them, say which cells were empty and how you handled them (skipped, or "
+        "refused to compute); otherwise send the same answer again."
+    )
+    self._register_feedback(
+        step, command, {"ok": False, "action_type": command.action.type, "error": instruction}
+    )
+    self._set_required_next_actions(["final_answer", "report_to_user"], instruction)
+    return True
+
+
 def update_state_from_success(
     self,
     command: AgentCommand,
@@ -1440,11 +1500,13 @@ def update_state_from_success(
     if action_type == "read_file":
         path = str(data.get("path", "")).strip()
         self._push_unique(self._state.files_read, path)
+        _note_empty_data_cells(self, path, str(data.get("content", "")))
 
     elif action_type == "read_multiple_files":
         for file_info in data.get("files", []):
             path = str(file_info.get("path", "")).strip()
             self._push_unique(self._state.files_read, path)
+            _note_empty_data_cells(self, path, str(file_info.get("content", "")))
 
     elif action_type in {"write_file", "append_file", "replace_in_file"}:
         path = str(data.get("path", "")).strip()
@@ -1658,6 +1720,8 @@ def feedback_to_line(self, command: AgentCommand, feedback: dict[str, Any]) -> s
         if action_type == "delegate_task":
             target_role = data.get("target_role", "unknown")
             results_count = len(data.get("results", []))
+            if not results_count:
+                return f"ok: handoff to {target_role} recorded only; nothing was executed or changed"
             return f"ok: delegated to {target_role}, {results_count} commands executed"
         return f"ok: executed action {action_type}"
 
@@ -2614,6 +2678,10 @@ def _is_terminal_model_error(error_text: str) -> bool:
         "not supported for generatecontent",
         "does not exist",
         "not found",
+        "insufficient balance",
+        "insufficient credit",
+        "payment required",
+        "error code: 402",
     )
     return any(marker in lowered for marker in markers)
 def _missing_required_artifacts(self) -> list[str]:
@@ -2888,6 +2956,8 @@ def _plan_item_matches_action(item: str, action_type: str, files_changed: list[s
     if action_type in {"git_status", "git_diff", "run_shell"}:
         # run_shell is the universal devops action — matches inspect, edit, or verify steps
         return True
+    if action_type == "delegate_task":
+        return bool(_PLAN_DELEGATE_RE.search(item))
     return False
 
 

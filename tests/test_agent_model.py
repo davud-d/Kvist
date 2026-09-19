@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import agent_model
+import agent_runtime
 from agent import LocalAgent
 from agent_state import PlanInfo
 from executor import SafeExecutor
@@ -184,6 +185,24 @@ def test_call_model_raises_after_non_retryable_error(agent_factory, monkeypatch)
     with pytest.raises(RuntimeError, match="Failed to get model response") as caught:
         agent._call_model("model", "system", "user")
     assert synthetic not in str(caught.value)
+
+
+def test_empty_account_402_is_not_retried_and_is_terminal(agent_factory, monkeypatch):
+    agent = agent_factory(stream=False, max_retries=3)
+    monkeypatch.setattr(agent_model.time, "sleep", lambda _: None)
+    calls = []
+
+    def fail(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("Error code: 402 - {'error': {'message': 'Insufficient Balance'}}")
+
+    agent.client.chat.completions.create = fail
+    with pytest.raises(RuntimeError, match="Failed to get model response") as caught:
+        agent._call_model("model", "system", "user")
+
+    assert len(calls) == 1
+    assert agent_runtime._is_terminal_model_error(str(caught.value))
+    assert "insufficient balance or credits" in agent._normalize_error_for_model(str(caught.value))
 
 
 def _prime_pipeline_agent(agent_factory, content):
