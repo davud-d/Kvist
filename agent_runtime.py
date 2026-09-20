@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from change_journal import build_diff_report
+
 # Externally visible actions whose effect cannot be reconciled from workspace
 # state after a crash (their stdout/exit status are lost). Resume never replays
 # them; it stops and reports the state as ambiguous.
@@ -987,6 +989,8 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
         return _BLOCKED
     if _flag_empty_data_cells(self, step, command):
         return _BLOCKED
+    if _flag_removed_security_check(self, step, command):
+        return _BLOCKED
     final_message = str(command.action.args["message"])
     if self._state.report_goal and not _is_substantive_answer(final_message):
         substance_retries = self._state.seen_actions.get("report_substance_retries", 0)
@@ -1038,6 +1042,8 @@ def _finish_with_report(
         )
         return _BLOCKED
     if not incomplete and _flag_empty_data_cells(self, step, command):
+        return _BLOCKED
+    if not incomplete and _flag_removed_security_check(self, step, command):
         return _BLOCKED
     # Collect context and hand off to chat reporter
     summary = str(command.action.args.get("summary", ""))
@@ -1492,6 +1498,47 @@ def _flag_empty_data_cells(self, step: int, command: AgentCommand) -> bool:
     return True
 
 
+_SECURITY_CHECK_RE = re.compile(
+    r"pip[- ]audit|npm audit|yarn audit|snyk|trivy|bandit|semgrep|codeql|gitleaks"
+    r"|dependency-check|safety check|security[ -]scan",
+    re.IGNORECASE,
+)
+
+
+def _removed_security_checks(workspace: Path) -> list[str]:
+    removed = []
+    for line in build_diff_report(workspace).splitlines():
+        if line.startswith("-") and not line.startswith("---") and _SECURITY_CHECK_RE.search(line):
+            removed.append(line[1:].strip())
+    return removed
+
+
+def _flag_removed_security_check(self, step: int, command: AgentCommand) -> bool:
+    """Ask once, before finishing, why a security check the run deleted was failing.
+
+    Deleting a failing scan turns the pipeline green without touching the
+    finding; a prompt rule alone does not reliably make the model look first.
+    """
+    if self._state.security_removal_flagged:
+        return False
+    removed = _removed_security_checks(Path(self.executor.workspace))
+    if not removed:
+        return False
+    self._state.security_removal_flagged = True
+    instruction = (
+        f"Before finishing: your changes removed a security check ({removed[0][:80]}). "
+        "Find out why it was failing (its last output, the pins or code it examines). "
+        "If it shows a real finding, fix the cause and restore the check. If you keep it "
+        "removed, the final answer must say plainly that the check is off and which "
+        "finding stays unaddressed."
+    )
+    self._register_feedback(
+        step, command, {"ok": False, "action_type": command.action.type, "error": instruction}
+    )
+    self._set_required_next_actions(["final_answer", "report_to_user"], instruction)
+    return True
+
+
 def update_state_from_success(
     self,
     command: AgentCommand,
@@ -1521,6 +1568,9 @@ def update_state_from_success(
                 "fact": self._state.web_facts[-1],
             })
             del self._state.applied_facts[:-20]
+
+    elif action_type == "run_shell":
+        _note_moved_files(self, command.action.args.get("command", []))
 
     elif action_type == "search_code":
         results = data.get("results", [])
@@ -2255,6 +2305,16 @@ def update_verification_evidence(self, command: AgentCommand, data: dict[str, An
                         self._state.pending_verification_paths.remove(pv_path)
                         cleared_paths.append(pv_path)
 
+    elif action_type == "read_multiple_files":
+        if self._state.files_changed or self._state.verify_only_goal:
+            paths = [str(info.get("path", "")).strip() for info in data.get("files", [])]
+            for path in filter(None, paths):
+                evidence = f"read_file: {path}"
+                for pv_path in list(self._state.pending_verification_paths):
+                    if pv_path in path or path in pv_path:
+                        self._state.pending_verification_paths.remove(pv_path)
+                        cleared_paths.append(pv_path)
+
     if evidence:
         self._push_unique(self._state.verification_evidence, evidence, limit=12)
 
@@ -2709,12 +2769,87 @@ def _is_terminal_model_error(error_text: str) -> bool:
         "error code: 402",
     )
     return any(marker in lowered for marker in markers)
+def _mv_rm_operands(argv: list[str]) -> tuple[str, list[str], str]:
+    """(verb, sources, destination) of a mv/rm command; verb is "" for anything else."""
+    args = [str(part) for part in argv]
+    if args[:1] == ["git"]:
+        args = args[1:]
+    if not args or args[0] not in {"mv", "rm"}:
+        return "", [], ""
+    operands = [
+        part.replace("\\", "/").removeprefix("./")
+        for part in args[1:]
+        if not part.startswith("-")
+    ]
+    if args[0] == "rm":
+        return "rm", operands, ""
+    if len(operands) < 2:
+        return "", [], ""
+    return "mv", operands[:-1], operands[-1]
+
+
+def _paths_moved_or_removed(self) -> set[str]:
+    """Paths a successful mv/rm in this run took away on purpose."""
+    gone: set[str] = set()
+    for log in self._state.step_logs:
+        action = log.get("command", {}).get("action", {})
+        if log.get("status") != "ok" or action.get("type") != "run_shell":
+            continue
+        _verb, sources, _dest = _mv_rm_operands(action.get("args", {}).get("command", []))
+        gone.update(sources)
+    return gone
+
+
+def _note_moved_files(self, argv: list[str]) -> None:
+    """A successful mv changed the files it landed; without this a pure rename
+    reads as "no files changed" and the completion gate refuses it."""
+    verb, sources, dest = _mv_rm_operands(argv)
+    if not verb:
+        return
+    # A path taken away again (a temp name in a rename chain) cannot be verified.
+    for source in sources:
+        if source in self._state.files_changed:
+            self._state.files_changed.remove(source)
+        if source in self._state.pending_verification_paths:
+            self._state.pending_verification_paths.remove(source)
+    if verb != "mv":
+        return
+    into_dir = (Path(self.executor.workspace) / dest).is_dir()
+    for source in sources:
+        self._mark_file_write_applied(f"{dest}/{Path(source).name}" if into_dir else dest)
+
+
+_REMOVAL_VERB_RE = re.compile(
+    r"\b(?:delet|remov|wip|eras|purg|get rid)\w*|удал|убер|сотр|сотри|стер",
+    re.IGNORECASE,
+)
+
+
+def _named_in_removal_request(user_goal: str, artifact: str) -> bool:
+    """A file named in a sentence that asks to remove things is not one to create.
+
+    rm is blocked, so a requested deletion often runs through a script that the
+    mv/rm bookkeeping never sees; sentence scope keeps "leave coupons.py alone"
+    protected next to "delete scratch.py".
+    """
+    name = artifact.rstrip("/").casefold()
+    for sentence in re.split(r"(?<=[.!?;])\s+|\n", user_goal):
+        if _REMOVAL_VERB_RE.search(sentence) and name in sentence.casefold():
+            return True
+    return False
+
+
 def _missing_required_artifacts(self) -> list[str]:
     missing: list[str] = []
     workspace = Path(self.executor.workspace)
+    gone = _paths_moved_or_removed(self)
     for artifact in self._state.required_artifacts:
+        if artifact.rstrip("/") in gone:
+            continue
+        if _named_in_removal_request(self._state.user_goal, artifact):
+            continue
         is_dir = artifact.endswith("/")
-        target = workspace / artifact.rstrip("/")
+        target = workspace / _anchor_bare_artifacts(workspace, [artifact])[0].rstrip("/")
         if is_dir and not target.is_dir():
             missing.append(artifact)
         elif not is_dir and not target.exists():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -1886,3 +1887,124 @@ def test_bare_artifact_name_is_anchored_to_the_file_it_already_names(tmp_path):
     )
 
     assert anchored == ["src/reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]
+
+
+def test_removed_security_checks_reads_only_deleted_lines_from_the_journal(agent_factory):
+    from agent_runtime import _removed_security_checks
+
+    agent = agent_factory(max_steps=1)
+    workspace = Path(agent.executor.workspace)
+    (workspace / "ci.yml").write_text(
+        "steps:\n  - run: pip-audit -r requirements.txt\n  - run: pytest\n", encoding="utf-8"
+    )
+    agent.executor._replace_in_file("ci.yml", "  - run: pip-audit -r requirements.txt\n", "")
+    agent.executor._write_file("notes.txt", "we should add bandit later\n")
+
+    assert _removed_security_checks(workspace) == ["- run: pip-audit -r requirements.txt"]
+
+
+def test_final_answer_is_held_once_when_the_run_deleted_a_security_check(agent_factory):
+    from agent_runtime import _finish_with_final_answer
+
+    agent = agent_factory(max_steps=1)
+    workspace = Path(agent.executor.workspace)
+    (workspace / "ci.yml").write_text("- run: trivy fs .\n- run: pytest\n", encoding="utf-8")
+    agent.executor._replace_in_file("ci.yml", "- run: trivy fs .\n", "")
+    agent._state.verification_evidence = ["read_file: ci.yml"]
+    agent._state.files_changed = ["ci.yml"]
+    command = make_command("final_answer", {"message": "removed the scan"}, "done")
+
+    first = _finish_with_final_answer(agent, 1, command)
+    second = _finish_with_final_answer(agent, 2, command)
+
+    assert not first.finished
+    assert "removed a security check" in agent._state.pending_instruction
+    assert second.finished
+
+
+def _shell_ok_log(argv, status="ok"):
+    return {"status": status, "command": {"action": {"type": "run_shell", "args": {"command": argv}}}}
+
+
+def test_a_source_the_run_moved_or_removed_is_not_a_missing_required_artifact(agent_factory):
+    from agent_runtime import _missing_required_artifacts
+
+    agent = agent_factory()
+    (Path(agent.executor.workspace) / "chapters").mkdir()
+    (Path(agent.executor.workspace) / "chapters/04_intro.md").write_text("x", encoding="utf-8")
+    agent._state.required_artifacts = [
+        "chapters/01_intro.md",
+        "chapters/04_intro.md",
+        "chapters/gone.md",
+        "chapters/never_made.md",
+    ]
+    agent._state.step_logs = [
+        _shell_ok_log(["mv", "chapters/01_intro.md", "chapters/04_intro.md"]),
+        _shell_ok_log(["git", "rm", "-f", "chapters/gone.md"]),
+        _shell_ok_log(["python", "gen.py", "chapters/never_made.md"]),
+        _shell_ok_log(["mv", "chapters/never_made.md", "chapters/elsewhere.md"], status="error"),
+    ]
+
+    assert _missing_required_artifacts(agent) == ["chapters/never_made.md"]
+
+
+def test_a_bare_name_the_run_created_in_a_subfolder_is_not_missing_at_the_root(agent_factory):
+    from agent_runtime import _missing_required_artifacts
+
+    agent = agent_factory()
+    (Path(agent.executor.workspace) / "chapters").mkdir()
+    (Path(agent.executor.workspace) / "chapters/04_intro.md").write_text("x", encoding="utf-8")
+    agent._state.required_artifacts = ["04_intro.md", "05_absent.md"]
+
+    assert _missing_required_artifacts(agent) == ["05_absent.md"]
+
+
+def test_a_successful_mv_counts_as_a_changed_file(agent_factory):
+    from agent_runtime import _note_moved_files
+
+    agent = agent_factory()
+    (Path(agent.executor.workspace) / "out").mkdir()
+
+    _note_moved_files(agent, ["mv", "a.md", "b.md"])
+    _note_moved_files(agent, ["git", "mv", "c.md", "out"])
+    _note_moved_files(agent, ["rm", "old.md"])
+
+    assert agent._state.files_changed == ["b.md", "out/c.md"]
+
+
+def test_a_temp_name_in_a_rename_chain_is_not_left_awaiting_verification(agent_factory):
+    from agent_runtime import _note_moved_files
+
+    agent = agent_factory()
+
+    _note_moved_files(agent, ["mv", "a.md", "tmp.md"])
+    _note_moved_files(agent, ["mv", "tmp.md", "b.md"])
+
+    assert agent._state.files_changed == ["b.md"]
+    assert agent._state.pending_verification_paths == ["b.md"]
+
+
+def test_reading_changed_files_in_one_batch_clears_their_verification(agent_factory):
+    agent = agent_factory()
+    agent._state.plan_info = make_plan()
+    agent._state.files_changed = ["a.md", "b.md", "c.md"]
+    agent._state.pending_verification_paths = ["a.md", "b.md", "c.md"]
+
+    command = make_command("read_multiple_files", {"paths": ["a.md", "b.md"]}, plan_step="verify")
+    agent._update_verification_evidence(
+        command, {"files": [{"path": "a.md", "content": "x"}, {"path": "b.md", "content": "y"}]}
+    )
+
+    assert agent._state.pending_verification_paths == ["c.md"]
+
+
+def test_a_file_the_goal_asks_to_delete_is_not_a_missing_required_artifact(agent_factory):
+    from agent_runtime import _missing_required_artifacts
+
+    agent = agent_factory()
+    agent._state.user_goal = (
+        "scratch_debug.py is junk from yesterday, delete it. Leave coupons.py alone, that is my feature."
+    )
+    agent._state.required_artifacts = ["scratch_debug.py", "coupons.py"]
+
+    assert _missing_required_artifacts(agent) == ["coupons.py"]

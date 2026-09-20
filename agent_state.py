@@ -138,6 +138,7 @@ class RunState:
     # already asked to account for them before finishing (asked once, never twice).
     empty_data_cells: list[str] = field(default_factory=list)
     empty_cells_flagged: bool = False
+    security_removal_flagged: bool = False
     # Rule texts of hard environment denials seen this run (e.g. a sandbox
     # security refusal). Logged only; a denial never obliges the model to
     # try other approaches before finishing.
