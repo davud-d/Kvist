@@ -128,7 +128,7 @@ from executor import SafeExecutor
 from performance_logger import PerfLogger
 from reasoning_effort import merge_reasoning_kwargs
 from redaction import redact_text, redact_value
-from role_router import route_role_with_llm, route_role
+from role_router import resume_role, route_role_with_llm, route_role
 from system_context import (
     current_os_context,
     current_project_context,
@@ -428,7 +428,11 @@ class LocalAgent:
         self._set_environment_facts()
 
         # ── Role routing: either passed from outside or detected locally ─────
-        self._state.current_agent_role = routed_role or self._route_role(user_goal)
+        self._state.current_agent_role = resume_role(
+            user_goal,
+            routed_role or self._route_role(user_goal),
+            self._session_history,
+        )
         # Shell risk assessment (command_policy) is role-aware; keep it in
         # sync with the routed role for this run.
         self.executor.set_active_role(self._state.current_agent_role)

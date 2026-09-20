@@ -65,6 +65,8 @@ _CHANGE_VERB_RE = re.compile(
     r"|renam(?:e|es|ed|ing)"
     r"|remov(?:e|es|ed|ing)"
     r"|delet(?:e|es|ed|ing)"
+    r"|clear(?:s|ed|ing)?\s+(?:out|up)|clean(?:s|ed|ing)?\s+(?:\w+\s+)?(?:out|up)"
+    r"|wip(?:e|es|ed|ing)|purg(?:e|es|ed|ing)|eras(?:e|es|ed|ing)"
     r"|implement(?:s|ed|ing)?"
     r"|rewrit(?:e|es|ing)|rewrote"
     r"|migrat(?:e|es|ed|ing)"
@@ -72,6 +74,7 @@ _CHANGE_VERB_RE = re.compile(
     r"|bump(?:s|ed|ing)?"
     r"|convert(?:s|ed|ing)?"
     r"|mov(?:e|es|ed|ing)"
+    r"|очист|зачист|вычист|сотри|сотр[её]м"
     r"|исправ|измени|изменить|обнов|добав|отредактир|переделай|доработай"
     r"|переимен|замен|удали|удалить|почин|поправ|реализ|перепиш|переписать"
     r"|мигрир|верни"
@@ -96,6 +99,9 @@ _NAMED_FILE_RE = re.compile(
 )
 
 
+# A directory path ("src/config") is as concrete a target as a file; a URL is not.
+_PATH_RE = re.compile(r"(?<![\w:/.-])[\w.-]+/[\w./-]+")
+
 # Verbs that ask to look at something; "why do people name their file .env" has none.
 _INSPECT_VERB_RE = re.compile(
     r"\b(?:find|look|check|inspect|review|read|open|show|summari[sz]e|count|total|sum|list|analy[sz]e|debug"
@@ -115,6 +121,29 @@ def _is_edit_of_named_file(user_goal: str) -> bool:
     if any(marker in lowered for marker in _NO_WRITE_MARKERS):
         return False
     return not any(kw in lowered for kw in _CHAT_KEYWORDS + _DEVOPS_KEYWORDS)
+
+
+_CONTINUATION_RE = re.compile(
+    r"^\s*(?:(?:please|pls|ok|okay|ну|давай)[,.]?\s+)*"
+    r"(?:continue|carry\s+on|go\s+on|keep\s+going|resume|finish(?:\s+(?:it|this|the\s+rest))?"
+    r"|продолж|доделай|заверши|дальше)",
+    re.IGNORECASE,
+)
+
+
+def resume_role(user_goal: str, routed_role: str, session_history: list[dict]) -> str:
+    """A bare "continue" after a stopped run belongs to that run's role.
+
+    The router sees only the new text, and "please continue" alone reads as
+    chat — which cannot do the work, so it promises to and does nothing.
+    """
+    if routed_role != "chat" or len(user_goal) > 80 or not _CONTINUATION_RE.match(user_goal):
+        return routed_role
+    last = session_history[-1] if session_history else {}
+    previous = last.get("role")
+    if last.get("stopped_by_user") and previous not in (None, "chat"):
+        return previous
+    return routed_role
 
 
 def has_change_verb(text: str) -> bool:
@@ -436,6 +465,11 @@ def _keyword_route(user_goal: str) -> str:
     # even when no keyword above knows the verb. Checked after the chat
     # keywords so "explain how to update package.json" stays a question.
     if _is_edit_of_named_file(user_goal):
+        return "coder"
+
+    # A change verb aimed at a directory ("clean up, leave src/config alone") is
+    # just as much an action request; chat could only answer "reformulate it".
+    if has_change_verb(user_goal) and _PATH_RE.search(lowered):
         return "coder"
 
     # Chat has no file access, so a question about a named file answered by chat

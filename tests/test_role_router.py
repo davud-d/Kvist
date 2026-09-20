@@ -1096,3 +1096,54 @@ def test_named_file_edit_rule_defers_to_the_router_when_the_user_forbids_writing
     goal = "Do not modify anything yourself. Review passwords.py and hand the fix over to the coder."
 
     assert role_router._is_edit_of_named_file(goal) is False
+
+
+@pytest.mark.parametrize(
+    "goal, history, expected",
+    [
+        ("Please continue and finish it.", [{"role": "coder", "stopped_by_user": True}], "coder"),
+        ("продолжай", [{"role": "devops", "stopped_by_user": True}], "devops"),
+        ("continue", [{"role": "coder"}], "chat"),
+        ("continue", [{"role": "chat", "stopped_by_user": True}], "chat"),
+        ("continue the essay about docker " + "x" * 80, [{"role": "coder", "stopped_by_user": True}], "chat"),
+        ("write a poem", [{"role": "coder", "stopped_by_user": True}], "chat"),
+        ("continue", [], "chat"),
+    ],
+)
+def test_bare_continue_after_a_stopped_run_keeps_that_runs_role(goal, history, expected):
+    assert role_router.resume_role(goal, "chat", history) == expected
+
+
+def test_resume_role_never_overrides_a_non_chat_decision():
+    history = [{"role": "coder", "stopped_by_user": True}]
+    assert role_router.resume_role("continue", "reader", history) == "reader"
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "Clear out the generated files in this project so I can rebuild, but do not touch src/ or config/.",
+        "Wipe the build cache, don't touch the source.",
+        "Очисти папку build, но не трогай src.",
+    ],
+)
+def test_a_do_not_touch_scope_next_to_a_cleanup_verb_is_not_read_only(goal):
+    assert role_router.has_change_verb(goal)
+    assert not role_router.has_no_write_marker(goal)
+
+
+def test_a_bare_do_not_touch_is_still_read_only():
+    assert role_router.has_no_write_marker("Look at the project layout, do not touch anything.")
+
+
+@pytest.mark.parametrize(
+    "goal, role",
+    [
+        ("Очисти проект: убери всё лишнее, что можно пересобрать. src/config не трогай.", "coder"),
+        ("Clean everything up. Leave src/config alone.", "coder"),
+        ("Explain how src/config is loaded", "chat"),
+        ("delete https://example.com/x", "chat"),
+    ],
+)
+def test_keyword_fallback_treats_a_change_verb_on_a_directory_as_an_action(goal, role):
+    assert role_router._keyword_route(goal) == role
