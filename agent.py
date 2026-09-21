@@ -128,7 +128,7 @@ from executor import SafeExecutor
 from performance_logger import PerfLogger
 from reasoning_effort import merge_reasoning_kwargs
 from redaction import redact_text, redact_value
-from role_router import resume_role, route_role_with_llm, route_role
+from role_router import RoleRouteResult, resume_role, route_role_decision_with_llm, route_role
 from system_context import (
     current_os_context,
     current_project_context,
@@ -428,11 +428,7 @@ class LocalAgent:
         self._set_environment_facts()
 
         # ── Role routing: either passed from outside or detected locally ─────
-        self._state.current_agent_role = resume_role(
-            user_goal,
-            routed_role or self._route_role(user_goal),
-            self._session_history,
-        )
+        self._state.current_agent_role = self._choose_role(user_goal, routed_role)
         # Shell risk assessment (command_policy) is role-aware; keep it in
         # sync with the routed role for this run.
         self.executor.set_active_role(self._state.current_agent_role)
@@ -808,17 +804,32 @@ class LocalAgent:
 
     # ── Role routing ─────────────────────────────────────────────
 
-    def _route_role(self, user_goal: str) -> str:
+    def _choose_role(self, user_goal: str, routed_role: str | None) -> str:
+        """Pick the turn's role and tell a UI that listens which way it was chosen."""
+        if routed_role:
+            decided, source = routed_role, "explicit"
+        else:
+            decision = self._route_decision(user_goal)
+            decided, source = decision.role, decision.source
+        role = resume_role(user_goal, decided, self._session_history)
+        if role != decided:
+            source = "resume"
+        notify = getattr(self._ui, "print_route", None)
+        if notify is not None:
+            notify(role, source)
+        return role
+
+    def _route_decision(self, user_goal: str) -> RoleRouteResult:
         """Determine agent role via LLM router (fast_model)."""
         try:
-            return route_role_with_llm(
+            return route_role_decision_with_llm(
                 user_goal=user_goal,
                 client=self.client,
                 model=self.config.fast_model,
             )
         except Exception:
             # Fallback to keyword-based routing
-            return route_role(user_goal)
+            return RoleRouteResult(role=route_role(user_goal), source="keyword_fallback")
 
     # ── Chat mode ────────────────────────────────────────────────
 
