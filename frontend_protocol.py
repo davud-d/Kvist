@@ -288,6 +288,74 @@ class ErrorEvent:
 
 
 @dataclass(slots=True)
+class ActionResultEvent:
+    """Outcome of one executed action, so a frontend can show what it did.
+
+    ``summary`` is one short line; ``output`` is the (redacted, size-capped)
+    command output or error text. ``exit_code`` is set for shell-like actions
+    only. ``path``/``first_line`` are set for file writes: ``first_line`` is the
+    1-based line of the resulting file where the written text begins, which lets
+    a frontend number the lines of a diff.
+    """
+
+    step: int
+    action_type: str
+    ok: bool
+    summary: str
+    output: str = ""
+    exit_code: int | None = None
+    path: str | None = None
+    first_line: int | None = None
+    type: ClassVar[str] = "action_result"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "step": self.step,
+            "action_type": self.action_type,
+            "ok": self.ok,
+            "summary": self.summary,
+            "output": self.output,
+            "exit_code": self.exit_code,
+            "path": self.path,
+            "first_line": self.first_line,
+        }
+
+
+@dataclass(slots=True)
+class SessionEvent:
+    """The session a resumed run continues in (may differ from the hello's)."""
+
+    session: str
+    has_checkpoint: bool
+    type: ClassVar[str] = "session"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "session": self.session,
+            "has_checkpoint": self.has_checkpoint,
+        }
+
+
+@dataclass(slots=True)
+class RouteEvent:
+    """The role a turn actually runs under, emitted once per turn.
+
+    ``source`` says who decided: "explicit" (the caller passed the role),
+    "direct"/"llm"/"keyword_fallback"/"default" (the router), or "resume"
+    (a bare "continue" inherited the stopped run's role).
+    """
+
+    role: str
+    source: str
+    type: ClassVar[str] = "route"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "role": self.role, "source": self.source}
+
+
+@dataclass(slots=True)
 class InputRequestEvent:
     request_id: str
     kind: str  # one of "choice", "text", "secret", "confirm"
