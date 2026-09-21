@@ -1,0 +1,76 @@
+{
+  "name": "kvist",
+  "displayName": "Kvist",
+  "description": "Launch Kvist coding agent in VS Code terminal and generate commit messages",
+  "version": "0.1.0",
+  "publisher": "kvist",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/davud-d/Kvist.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "terminal",
+    "commit-message"
+  ],
+  "activationEvents": [],
+  "main": "out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kvist.launch",
+        "title": "Launch Kvist",
+        "category": "Kvist",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "kvist.generateCommitMessage",
+        "title": "Generate Commit Message with Kvist",
+        "category": "Kvist",
+        "icon": "$(sparkle)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "kvist.launch"
+        },
+        {
+          "command": "kvist.generateCommitMessage",
+          "when": "scmProvider == git"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "kvist.generateCommitMessage",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package --no-dependencies --skip-license"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^2.22.0"
+  }
+}

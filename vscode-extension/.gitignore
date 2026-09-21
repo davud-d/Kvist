@@ -1,0 +1,9 @@
+node_modules/
+out/
+*.vsix
+.vscode-test/
+.build/
+bin/linux/*
+bin/win/*
+!bin/linux/.gitkeep
+!bin/win/.gitkeep

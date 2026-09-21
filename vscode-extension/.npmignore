@@ -1,0 +1,8 @@
+node_modules/
+src/
+.vscode/
+.vscode-test/
+.build/
+*.vsix
+out/**/*.map
+build-plugin.*

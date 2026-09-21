@@ -5,9 +5,10 @@ Windows (and, best-effort, macOS).
 
 | Script | What it does |
 | --- | --- |
-| `install.py` | The front door: offers the three installers below as an arrow-key list, all selected by default, and runs the ones you keep. |
+| `install.py` | The front door: offers the four installers below as an arrow-key list, all selected by default, and runs the ones you keep. |
 | `install_cli.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). Formerly at the repo root, then `install.py`. |
 | `install_jetbrains.py` | Finds every installed JetBrains IDE and unpacks the **Kvist Launcher** plugin into each one's `plugins/` folder. |
+| `install_vscode.py` | Finds VS Code, VS Code Insiders and VSCodium command-line launchers and installs the Kvist `.vsix` into each editor. |
 | `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux. |
 | `_common.py` | Shared helpers: the quiet log + spinner every installer reports through, safe ZIP extraction, JetBrains IDE discovery. |
 
@@ -19,6 +20,8 @@ python installer/install.py --cli --gui          # named components, no question
 python installer/install_cli.py                  # or run one on its own
 python installer/install_jetbrains.py            # --build to build the plugin ZIP first
 python installer/install_jetbrains.py --uninstall
+python installer/install_vscode.py               # --build to build the VSIX first
+python installer/install_vscode.py --uninstall
 python installer/install_gui.py                  # --build to run electron-builder first
 python installer/install_gui.py --uninstall
 ```
@@ -26,10 +29,10 @@ python installer/install_gui.py --uninstall
 ## Output
 
 Each installer is quiet by default: the commands it spawns (pip, PyInstaller,
-npm, Gradle) write into its own log under the temp dir while a single spinner
-line names the current step, and a failure prints the tail of that log plus its
-path. Pass `--verbose` to any of them to watch those commands directly instead,
-with no spinner and no log.
+npm, Gradle, vsce) write into its own log under the temp dir while a single
+spinner line names the current step, and a failure prints the tail of that log
+plus its path. Pass `--verbose` to any of them to watch those commands directly
+instead, with no spinner and no log.
 
 Run through `install.py`, the chosen installers run at once as background
 processes and a live panel shows the step each one is on; `install.py --verbose`
@@ -47,6 +50,20 @@ Since 2020.1 every IDE keeps its per-user data under one vendor root:
 PyCharm, WebStorm, GoLand, CLion, Rider, RubyMine, DataGrip, RustRover, Android
 Studio, …) and installs into `.../<Product><version>/plugins/`. Restart the IDE
 afterwards.
+
+## How VS Code editors are discovered
+
+`install_vscode.py` looks for command-line launchers on `PATH`: `code`,
+`code-insiders` and `codium` (with `.cmd` variants on Windows). On Windows it
+also checks the usual per-user and Program Files install locations. It installs
+the built VSIX with:
+
+```bash
+code --install-extension <kvist.vsix> --force
+```
+
+Use `--build` to rebuild the bundled Kvist binary and VSIX before installing, or
+`--vsix path/to/file.vsix` to install a specific package.
 
 ## `assets/`
 

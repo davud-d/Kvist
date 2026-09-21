@@ -21,6 +21,7 @@
   <img alt="Linux" src="https://img.shields.io/badge/Linux-supported-FCC624?style=flat-square&logo=linux&logoColor=black">
   <img alt="Terminal CLI" src="https://img.shields.io/badge/Interface-Terminal_CLI-4D4D4D?style=flat-square&logo=windowsterminal&logoColor=white">
   <img alt="Electron GUI" src="https://img.shields.io/badge/Interface-Electron_GUI-47848F?style=flat-square&logo=electron&logoColor=white">
+  <img alt="VS Code extension" src="https://img.shields.io/badge/VS_Code_Extension-0.1.0-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white">
   <img alt="Local workspace agent" src="https://img.shields.io/badge/Agent-local_workspace-6f42c1?style=flat-square&logo=robotframework&logoColor=white">
   <img alt="Four agent roles plus auto" src="https://img.shields.io/badge/Roles-coder_%7C_reader_%7C_devops_%7C_chat-8A2BE2?style=flat-square">
   <img alt="Six built-in providers" src="https://img.shields.io/badge/LLM_providers-6_builtin-0A7EA4?style=flat-square">
@@ -45,15 +46,15 @@ Kvist is a supervised local coding agent. It works in one project workspace at
 a time, reads and edits project files, runs development or infrastructure
 commands, verifies the result, and keeps resumable named sessions.
 
-It is a terminal application first, with an Electron GUI and a versioned NDJSON
-frontend protocol for other clients.
+It is a terminal application first, with an Electron GUI, JetBrains and VS Code
+plugins, and a versioned NDJSON frontend protocol for other clients.
 
 ## Preview
 
-Kvist has two user-facing entry points. Each preview below shows the same short
-read-only task through its full lifecycle: `start` means the interface is ready,
-`working` means the agent is actively inspecting the workspace, and `end` means
-the answer is complete with no files edited.
+The previews below show the same short read-only task through its full lifecycle:
+`start` means the interface is ready, `working` means the agent is actively
+inspecting the workspace, and `end` means the answer is complete with no files
+edited.
 
 ### Terminal UI in Kitty
 
@@ -100,9 +101,11 @@ and not a complete security boundary: review the diff and command output.
 - an API key and models for one supported provider;
 - a TTY for the interactive terminal configuration and approval prompts.
 
-The CLI is tested on Linux and Windows. macOS is experimental. The optional
-JetBrains plugin supports Linux and Windows and targets IntelliJ Platform 2025.3;
-besides launching Kvist, it writes commit messages from the commit dialog.
+The CLI is tested on Linux and Windows. macOS is experimental. The optional IDE
+plugins support Linux and Windows: the JetBrains plugin targets IntelliJ Platform
+2025.3, and the VS Code extension targets VS Code 1.85+. Both launch Kvist for
+the opened project and can write commit messages from the IDE's source-control
+UI.
 
 Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
 FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
@@ -203,13 +206,26 @@ To install a reusable `kvist` launcher and build a standalone binary when needed
 .venv/bin/python installer/install.py
 ```
 
-The `installer/` directory also holds two desktop installers, both cross-platform
-(Linux + Windows):
+The `installer/` directory also holds IDE and desktop installers for Linux and
+Windows:
 
 ```bash
 .venv/bin/python installer/install_jetbrains.py   # install the plugin into every JetBrains IDE found
+.venv/bin/python installer/install_vscode.py      # install the extension into VS Code / Insiders / VSCodium
 .venv/bin/python installer/install_gui.py         # install the GUI app + launcher/desktop shortcut
 ```
+
+The VS Code extension is packaged as a `.vsix` from `vscode-extension/`:
+
+```bash
+cd vscode-extension
+./build-plugin.sh      # Linux host
+# or on Windows: .\build-plugin.ps1 / build-plugin.bat
+```
+
+The helper builds the current OS Kvist binary with PyInstaller, copies it into
+`vscode-extension/bin/...`, compiles the extension, and writes the package under
+`vscode-extension/.build/vsix/`.
 
 The installer uses `dist/kvist` or `dist/kvist.exe` when available, otherwise
 builds it with PyInstaller. It installs the binary under the per-user data
@@ -352,6 +368,27 @@ Run `npm test` for GUI tests. `npm run dist` builds native Linux (`AppImage`,
 `deb`) or Windows (`nsis`) packages; build separately on each target OS. See
 [`gui/README.md`](gui/README.md) for packaging details.
 
+## VS Code Extension
+
+The VS Code extension starts Kvist in an integrated terminal for the opened
+workspace and adds `Kvist: Generate Commit Message with Kvist` to the Command
+Palette and Source Control title bar. Commit-message generation sends the
+current Git diff plus recent commit subjects to `kvist --commit-message`; the
+extension uses the provider and **fast** model already saved in
+`~/.kvist/config.json`, so configure Kvist once in the terminal first.
+
+Build a local VSIX with the same bundled-binary flow as the JetBrains plugin:
+
+```bash
+cd vscode-extension
+./build-plugin.sh
+```
+
+On Windows, run `./build-plugin.ps1` from PowerShell or `build-plugin.bat` from
+Command Prompt. The package is written to `vscode-extension/.build/vsix/` and can
+be installed with `code --install-extension <file>.vsix` or through Extensions >
+Install from VSIX. Details are in [`vscode-extension/README.md`](vscode-extension/README.md).
+
 ## Configuration and boundaries
 
 Global settings live in `~/.kvist/config.json`. Runtime environment variables
@@ -424,4 +461,5 @@ exists.
 - [`UI_API.md`](UI_API.md) — complete frontend protocol;
 - [`gui/README.md`](gui/README.md) — Electron development and packaging;
 - [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md) — IntelliJ plugin;
+- [`vscode-extension/README.md`](vscode-extension/README.md) — VS Code extension;
 - [`LICENSE`](LICENSE) — MIT license.

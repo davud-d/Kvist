@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Pick what to install and watch it happen.
 
-This is the front door: it offers the three installers (`install_cli.py`,
-`install_jetbrains.py`, `install_gui.py`) as an arrow-key list, all selected
-by default, and runs the ones you keep.
+This is the front door: it offers the four installers (`install_cli.py`,
+`install_jetbrains.py`, `install_vscode.py`, `install_gui.py`) as an arrow-key
+list, all selected by default, and runs the ones you keep.
 
     python installer/install.py             # pick with the arrow keys
     python installer/install.py --all       # everything, no questions
@@ -15,7 +15,7 @@ panel shows what each one is doing; each writes its own log, and a failed one
 prints the tail of its output. With --verbose there is no panel: they run one
 after another with their output going straight to the terminal.
 
-Each installer keeps its own flags (--build, --uninstall, --plugin-zip, ...).
+Each installer keeps its own flags (--build, --uninstall, --plugin-zip, --vsix, ...).
 Run it directly when you need those.
 """
 
@@ -58,6 +58,7 @@ class Component:
 COMPONENTS = (
     Component("cli", "CLI — the `kvist` command", "install_cli.py"),
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),
+    Component("vscode", "VS Code extension", "install_vscode.py"),
     Component("gui", "GUI application", "install_gui.py"),
 )
 

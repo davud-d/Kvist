@@ -18,6 +18,8 @@ if str(INSTALLER_DIR) not in sys.path:
 install = importlib.import_module("install_cli")
 gui = importlib.import_module("install_gui")
 jetbrains = importlib.import_module("install_jetbrains")
+vscode = importlib.import_module("install_vscode")
+install_main = importlib.import_module("install")
 common = importlib.import_module("_common")
 
 @pytest.fixture(autouse=True)
@@ -80,6 +82,39 @@ def test_malformed_plugin_zip_is_reported_as_controlled_error(tmp_path):
 
     with pytest.raises(SystemExit, match="ZIP"):
         jetbrains._zip_layout(broken)
+
+
+def test_malformed_vsix_is_reported_as_controlled_error(tmp_path):
+    broken = tmp_path / "broken.vsix"
+    broken.write_bytes(b"not a zip")
+
+    with pytest.raises(SystemExit, match="VSIX"):
+        vscode._vsix_layout(broken)
+
+
+def test_vsix_layout_requires_kvist_extension_id_and_entrypoint(tmp_path):
+    wrong = _zip(
+        tmp_path / "wrong.vsix",
+        ("extension/package.json", b'{"publisher":"someone","name":"else","main":"out/extension.js"}'),
+        ("extension/out/extension.js", b""),
+    )
+    with pytest.raises(SystemExit, match="expected kvist.kvist"):
+        vscode._vsix_layout(wrong)
+
+    missing_entry = _zip(
+        tmp_path / "missing.vsix",
+        ("extension/package.json", b'{"publisher":"kvist","name":"kvist","main":"out/extension.js"}'),
+    )
+    with pytest.raises(SystemExit, match="entry point missing"):
+        vscode._vsix_layout(missing_entry)
+
+    valid = _zip(
+        tmp_path / "valid.vsix",
+        ("extension/package.json", b'{"publisher":"kvist","name":"kvist","main":"out/extension.js"}'),
+        ("extension/out/extension.js", b""),
+    )
+
+    assert vscode._vsix_layout(valid) == ("kvist.kvist", 2)
 
 
 def test_untrusted_zip_root_cannot_delete_outside_plugin_tree(tmp_path):
@@ -194,6 +229,31 @@ def test_cli_does_not_claim_success_after_jetbrains_install_failure(tmp_path, mo
         jetbrains.main()
 
     assert "Done." not in capsys.readouterr().out
+
+
+def test_cli_does_not_claim_success_after_vscode_install_failure(tmp_path, monkeypatch, capsys):
+    vsix_path = _zip(
+        tmp_path / "kvist.vsix",
+        ("extension/package.json", b'{"publisher":"kvist","name":"kvist","main":"out/extension.js"}'),
+        ("extension/out/extension.js", b""),
+    )
+    monkeypatch.setattr(vscode, "discover_vscode_editors", lambda: [("VS Code", "code")])
+    monkeypatch.setattr(vscode, "install_into_all", lambda *_: ["VS Code: denied"])
+    monkeypatch.setattr(sys, "argv", ["install_vscode.py", "--vsix", str(vsix_path)])
+
+    with pytest.raises(SystemExit, match="VS Code extension installation failed"):
+        vscode.main()
+
+    assert "Done." not in capsys.readouterr().out
+
+
+def test_front_door_includes_vscode_component():
+    assert [(component.key, component.script) for component in install_main.COMPONENTS] == [
+        ("cli", "install_cli.py"),
+        ("jetbrains", "install_jetbrains.py"),
+        ("vscode", "install_vscode.py"),
+        ("gui", "install_gui.py"),
+    ]
 
 
 def test_linux_gui_failure_does_not_destroy_previous_payload(tmp_path, monkeypatch):

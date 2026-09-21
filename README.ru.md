@@ -21,6 +21,7 @@
   <img alt="Linux" src="https://img.shields.io/badge/Linux-supported-FCC624?style=flat-square&logo=linux&logoColor=black">
   <img alt="Terminal CLI" src="https://img.shields.io/badge/Interface-Terminal_CLI-4D4D4D?style=flat-square&logo=windowsterminal&logoColor=white">
   <img alt="Electron GUI" src="https://img.shields.io/badge/Interface-Electron_GUI-47848F?style=flat-square&logo=electron&logoColor=white">
+  <img alt="VS Code extension" src="https://img.shields.io/badge/VS_Code_Extension-0.1.0-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white">
   <img alt="Local workspace agent" src="https://img.shields.io/badge/Agent-local_workspace-6f42c1?style=flat-square&logo=robotframework&logoColor=white">
   <img alt="Four agent roles plus auto" src="https://img.shields.io/badge/Roles-coder_%7C_reader_%7C_devops_%7C_chat-8A2BE2?style=flat-square">
   <img alt="Six built-in providers" src="https://img.shields.io/badge/LLM_providers-6_builtin-0A7EA4?style=flat-square">
@@ -46,14 +47,14 @@ workspace за раз: читает и редактирует файлы про�
 разработки и инфраструктуры, проверяет результат и хранит возобновляемые
 именованные сессии.
 
-Основной интерфейс — терминал. Также есть Electron GUI и версионируемый NDJSON-
-протокол для сторонних frontend-ов.
+Основной интерфейс — терминал. Также есть Electron GUI, плагины для JetBrains и
+VS Code, а для сторонних frontend-ов — версионируемый NDJSON-протокол.
 
 ## Превью
 
-У Kvist две пользовательские точки входа. Ниже каждая показана в полном цикле
-одной короткой read-only задачи: `start` — интерфейс готов, `working` — агент
-действительно изучает workspace, `end` — ответ завершён, файлы не изменены.
+Ниже показан полный цикл одной короткой read-only задачи: `start` — интерфейс
+готов, `working` — агент действительно изучает workspace, `end` — ответ
+завершён, файлы не изменены.
 
 ### Терминальный UI в Kitty
 
@@ -100,9 +101,10 @@ Electron frontend использует тот же runtime и NDJSON-прото�
 - API key и модели хотя бы одного поддерживаемого провайдера;
 - TTY для интерактивной настройки и подтверждений.
 
-CLI проверяется на Linux и Windows. macOS остаётся экспериментальной. Плагин
-для JetBrains поддерживает Linux и Windows и нацелен на IntelliJ Platform 2025.3;
-кроме запуска Kvist, он пишет сообщения коммитов прямо из окна коммита.
+CLI проверяется на Linux и Windows. macOS остаётся экспериментальной. IDE-плагины
+поддерживают Linux и Windows: JetBrains-плагин нацелен на IntelliJ Platform
+2025.3, а расширение VS Code — на VS Code 1.85+. Оба запускают Kvist для
+открытого проекта и умеют писать сообщения коммитов из source-control UI.
 
 Встроенные провайдеры: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute и
 FreeFlow LLM (beta). Дополнительно через `/provider` можно добавить совместимый
@@ -206,13 +208,25 @@ curl -H "Authorization: Bearer $ANYMODEL_API_KEY" https://anymodel.org/v1/models
 .venv/bin/python installer/install.py
 ```
 
-В каталоге `installer/` есть ещё два desktop-установщика, оба кроссплатформенные
-(Linux + Windows):
+В каталоге `installer/` есть IDE- и desktop-установщики для Linux и Windows:
 
 ```bash
 .venv/bin/python installer/install_jetbrains.py   # ставит плагин во все найденные JetBrains IDE
+.venv/bin/python installer/install_vscode.py      # ставит расширение в VS Code / Insiders / VSCodium
 .venv/bin/python installer/install_gui.py         # ставит GUI и ярлык / пункт меню приложений
 ```
+
+Расширение VS Code собирается в `.vsix` из `vscode-extension/`:
+
+```bash
+cd vscode-extension
+./build-plugin.sh      # Linux host
+# или на Windows: .\build-plugin.ps1 / build-plugin.bat
+```
+
+Скрипт собирает binary Kvist для текущей OS через PyInstaller, копирует его в
+`vscode-extension/bin/...`, компилирует расширение и кладёт пакет в
+`vscode-extension/.build/vsix/`.
 
 Установщик использует `dist/kvist` или `dist/kvist.exe`, а при отсутствии
 собирает его PyInstaller-ом. Реальный binary кладётся в пользовательский
@@ -372,6 +386,28 @@ npm start -- --workspace /path/to/project
 Сборка и подробности — в [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md),
 протокол вызова — в [`UI_API.ru.md`](UI_API.ru.md) §8b.
 
+## Расширение VS Code
+
+Расширение запускает Kvist во встроенном терминале VS Code для открытого
+workspace и добавляет команду `Kvist: Generate Commit Message with Kvist` в
+Command Palette и заголовок Source Control. Генерация сообщения коммита
+передаёт текущий Git diff и последние заголовки коммитов в
+`kvist --commit-message`; используются провайдер и **fast**-модель из
+`~/.kvist/config.json`, поэтому сначала один раз настройте Kvist в терминале.
+
+Локальная сборка VSIX использует тот же подход с bundled binary, что и
+JetBrains-плагин:
+
+```bash
+cd vscode-extension
+./build-plugin.sh
+```
+
+На Windows используйте `.\build-plugin.ps1` в PowerShell или `build-plugin.bat`
+в Command Prompt. Готовый пакет лежит в `vscode-extension/.build/vsix/`; его
+можно установить через `code --install-extension <file>.vsix` или Extensions >
+Install from VSIX. Подробности — в [`vscode-extension/README.md`](vscode-extension/README.md).
+
 ## Конфигурация и границы
 
 Глобальные настройки находятся в `~/.kvist/config.json`. Поддерживаемые
@@ -414,4 +450,5 @@ workspace и запросы подтверждения.
 - [`UI_API.ru.md`](UI_API.ru.md) — полный frontend-протокол;
 - [`gui/README.md`](gui/README.md) — разработка и packaging Electron GUI;
 - [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md) — IntelliJ-плагин;
+- [`vscode-extension/README.md`](vscode-extension/README.md) — расширение VS Code;
 - [`LICENSE`](LICENSE) — лицензия MIT.
