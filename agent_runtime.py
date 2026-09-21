@@ -49,6 +49,7 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
         return {**common, "action_kind": "side_effect", "action_type": command.action.type}
     return None
 
+from action_result import build_action_result
 from agent_state import RunCancelled, RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_commands
@@ -115,6 +116,20 @@ def _note_run_context(self, **facts: Any) -> None:
     notify = getattr(self._ui, "set_run_context", None)
     if notify is not None:
         notify(**facts)
+
+
+def _emit_action_result(
+    self, step: int, command: AgentCommand, feedback: dict[str, Any]
+) -> None:
+    """Report what an action did to UIs exposing ``print_action_result``.
+
+    Optional capability, probed with ``getattr`` like ``print_usage``: the
+    classic terminal has no such channel and is left untouched.
+    """
+    notify = getattr(self._ui, "print_action_result", None)
+    if notify is None:
+        return
+    notify(build_action_result(step, command.action.type, command.action.args, feedback))
 
 
 _BLOCKER_LABELS = {
@@ -935,6 +950,7 @@ def _reject_exhausted_web_budget(
         return False
     feedback = self._build_error_feedback(command.action.type, web_error)
     self._register_feedback(step, command, feedback)
+    _emit_action_result(self, step, command, feedback)
     self._ui.update_live(
         user_message=command.user_message,
         status=live_status,
@@ -1089,6 +1105,7 @@ def _execute_action(
         if pending_action is not None:
             self.executor.end_action_transaction()
     self._register_feedback(step, command, feedback)
+    _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
 
     # Store rolling summary on interval steps (every Nth step)
