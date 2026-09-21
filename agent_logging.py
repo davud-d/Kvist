@@ -8,6 +8,7 @@ from typing import Any
 from agent_state import PlanInfo
 from durable_json import (
     JsonStorageCorruptError,
+    JsonStorageError,
     create_json_object,
     delete_json_object,
     exclusive_storage_lock,
@@ -19,6 +20,7 @@ from durable_json import (
     write_json_object,
 )
 from redaction import redact_value
+from session_events import JOURNAL_SUFFIX, delete_journal, journal_size
 
 _SESSION_VERSION = 1
 _SESSION_NAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}\Z", re.ASCII)
@@ -43,6 +45,19 @@ def get_state_path(self, session_name: str = "default"):
         raise ValueError(f"Invalid session name: {session_name!r}")
     return validate_storage_path(
         self.executor.workspace / ".kvist" / "sessions" / f"{session_name}.json",
+        self.executor.workspace,
+    )
+
+
+def get_journal_path(self, session_name: str):
+    """The session's event journal; its lifecycle is the session's own."""
+    if not is_valid_session_name(session_name):
+        raise ValueError(f"Invalid session name: {session_name!r}")
+    return validate_storage_path(
+        self.executor.workspace
+        / ".kvist"
+        / "sessions"
+        / f"{session_name}{JOURNAL_SUFFIX}",
         self.executor.workspace,
     )
 
@@ -209,7 +224,10 @@ def session_is_empty(self, session: str) -> bool:
     """
     try:
         document = read_session_document(self, session)
-    except JsonStorageCorruptError:
+        recorded = journal_size(get_journal_path(self, session)) > 0
+    except JsonStorageError:
+        return False
+    if recorded:
         return False
     if not document:
         return True
@@ -275,11 +293,16 @@ def rotate_to_new_session(self) -> str:
 def create_session(self, session: str) -> bool:
     if not is_valid_session_name(session):
         raise ValueError(f"Invalid session name: {session!r}")
-    return create_json_object(
+    created = create_json_object(
         get_state_path(self, session),
         _empty_session_document(session),
         boundary=self.executor.workspace,
     )
+    if created:
+        # A journal left behind by a session of the same name must not be
+        # replayed into this one.
+        delete_journal(get_journal_path(self, session), self.executor.workspace)
+    return created
 
 
 def save_active_session(self, name: str | None = None) -> None:
@@ -367,12 +390,13 @@ def delete_session(self, name: str) -> bool:
     if name == getattr(self, "current_session", "default"):
         raise ValueError(f"Cannot delete the active session {name!r}")
     path = get_state_path(self, name)
-    if delete_json_object(path, boundary=self.executor.workspace):
+    removed = delete_json_object(path, boundary=self.executor.workspace)
+    delete_journal(get_journal_path(self, name), self.executor.workspace)
+    if removed:
         # Re-assert the marker so a stale marker pointing at the deleted
         # session can never resurrect it on the next start.
         save_active_session(self)
-        return True
-    return False
+    return removed
 
 
 def begin_run(self, user_goal: str, run_id: str) -> None:
@@ -403,6 +427,9 @@ def reset_session(self) -> None:
     """Durably reset the active session to an empty document (the /new
     contract): history, chat, and checkpoint are gone; the name is kept."""
     session = getattr(self, "current_session", "default")
+    # The journal goes first: a crash in between must leave the conversation
+    # without its display log, never a reset session that still shows its old feed.
+    delete_journal(get_journal_path(self, session), self.executor.workspace)
     _write_json_object(
         get_state_path(self, session),
         _empty_session_document(session),

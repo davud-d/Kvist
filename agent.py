@@ -23,6 +23,7 @@ from agent_logging import (
     discard_session_if_empty,
     find_resumable_session,
     generate_session_name,
+    get_journal_path,
     is_valid_session_name,
     list_sessions,
     load_active_session,
@@ -137,6 +138,7 @@ from system_context import (
     current_time_context,
 )
 from sandbox import sandbox_network_allowed
+from session_events import JournalingUI, SessionJournal
 from ui import AgentUI
 from language_utils import detect_request_language
 from language_policy import resolve_response_language, response_language_name
@@ -200,7 +202,14 @@ class LocalAgent:
         self._cancel_event = threading.Event()
         self.console = console or Console()
         self._perf_logger = perf_logger or PerfLogger(executor.workspace)
-        self._ui = ui
+        # Everything the agent shows is also recorded to the session's event
+        # journal, so a frontend can redraw the session later.
+        self._journal = SessionJournal(
+            executor.workspace,
+            lambda: get_journal_path(self, self.current_session),
+            lambda message: self._ui.debug_print(message),
+        )
+        self._ui = JournalingUI(ui, self._journal)
         # Loading tiktoken's rank table costs tens of MiB and is unnecessary
         # for session recovery and chat-only runs. count_tokens initializes it
         # on the first context-budget calculation.
@@ -299,6 +308,7 @@ class LocalAgent:
             entry["outputs"] = outputs
         if stopped_by_user:
             entry["stopped_by_user"] = True
+            self._journal.mark_stopped()
         safe_entry = redact_value(entry)
         assert isinstance(safe_entry, dict)
         self._session_history.append(safe_entry)
@@ -414,6 +424,13 @@ class LocalAgent:
         self._cancel_event.clear()
 
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
+        self._journal.begin_turn(user_goal)
+        try:
+            return self._run_turn(user_goal, routed_role)
+        finally:
+            self._journal.end_turn()
+
+    def _run_turn(self, user_goal: str, routed_role: str | None) -> str:
         # Cleared before routing/planning so a cancel requested during a
         # previous turn never aborts this one's setup.
         self._reset_cancel()
@@ -504,6 +521,13 @@ class LocalAgent:
         return message
 
     def resume(self) -> str | None:
+        self._journal.begin_turn("", resumed=True)
+        try:
+            return self._resume_turn()
+        finally:
+            self._journal.end_turn()
+
+    def _resume_turn(self) -> str | None:
         self._reset_cancel()
         self._reset_run_state()
         self._follow_checkpoint_to_its_session()
@@ -511,6 +535,7 @@ class LocalAgent:
         if result is None:
             return None
         user_goal, last_step = result
+        self._journal.describe_turn(user_goal)
         resumed_phase = getattr(self, "_resumed_phase", "executing")
 
         # Reconcile a mutation that was in-flight when the process died. The

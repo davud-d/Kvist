@@ -290,6 +290,8 @@ is a separate, LLM-free one-shot mode of the same binary:
 
 ```bash
 kvist --workspace WS --session-op status
+kvist --workspace WS --session-op list
+kvist --workspace WS --session-op history --session-name feature [--history-limit N] [--history-before SEQ]
 kvist --workspace WS --session-op launch
 kvist --workspace WS --session-op new
 kvist --workspace WS --session-op create --session-name feature
@@ -318,6 +320,15 @@ after a `launch` is normally not the active one.
 Semantics (identical to the terminal `/session` and `/new` commands):
 
 - `status` — active session, session list, checkpoint summary (`null` if none).
+  Each `session_items` entry carries `name`, `title`, `updated_at`,
+  `has_checkpoint`, `journal_bytes` (size of the session's event journal, `0`
+  if none) and the model-facing `session_history` / `chat_history`. Those two
+  are the whole history of every session, so `status` grows with the
+  workspace (~570 KB for 36 sessions).
+- `list` — the cheap `status`: the same payload without `session_history` and
+  `chat_history` in the items. Use it for a session picker; the rest of
+  `status` is unchanged and still what the Electron GUI reads.
+- `history` — the event journal of one session (below).
 - `launch` — **run this once when your app starts.** A launch always opens its
   own fresh session instead of reopening the previous one. An interrupted run is
   not lost: `status` names the session that still holds it in
@@ -334,6 +345,67 @@ Semantics (identical to the terminal `/session` and `/new` commands):
 - `reset` — empty the active session in place (history, chat, checkpoint); the
   name is kept, other sessions are untouched. Unlike `new`, this **destroys**
   the conversation it is called on.
+
+### Restoring a session's feed: `--session-op history`
+
+The session document keeps only what the model needs (goal, role, a 200-char
+result). Separately, the core keeps a **journal of what the user saw**: the
+same events the §8 stream carries, recorded as they were sent, so a frontend
+redraws an old session by replaying them through the reducer it already has.
+It covers every turn, including ones run from the terminal or by another
+frontend.
+
+```bash
+kvist --workspace WS --session-op history --session-name feature --history-limit 500
+```
+
+```json
+{"ok": true, "session": "feature", "has_more": true, "total_events": 1240,
+ "skipped_lines": 0, "journal_bytes": 913442,
+ "events": [
+   {"seq": 812, "turn": 9, "ts": 1758560000.1, "event": {"type": "user", "text": "fix the tests"}},
+   {"seq": 813, "turn": 9, "ts": 1758560000.9, "event": {"type": "route", "role": "coder", "source": "llm"}},
+   {"seq": 820, "turn": 9, "ts": 1758560014.2, "event": {"type": "action_result", "step": 3, "action_type": "run_shell", "ok": true, "summary": "Command exited with code 0", "output": "12 passed\n", "exit_code": 0, "path": null, "first_line": null}}
+ ]}
+```
+
+- `events` are in order, oldest first; `event` is exactly a §8 event object.
+  `seq` is unique and increasing within the session, `turn` numbers the user
+  requests (1-based), `ts` is the wall-clock time it was recorded.
+- **Recorded** (already redacted): `route`, `plan`, `sandbox_notice`, `step`
+  (with the full `action_args`, so a `run_shell` step has its argv and a
+  `write_file` step its content or `old_text`/`new_text`), `action_result`
+  (output, exit code, path, `first_line`), thoughts as
+  `reasoning_start` / `reasoning_chunk` / `reasoning_commit` (**one**
+  `reasoning_chunk`, holding the final text), the answer as `stream_commit`,
+  `message` or `final` (in full), `error`, and per turn one `usage` event
+  (`kind: "turn"`, summed tokens).
+- **Not recorded** (live-only): `status`, `live_start`/`live_stop`,
+  `stream_chunk`, `action_output`, `debug`, per-step `usage`, `hello`,
+  `input_request`, `command_result`.
+- **Added by the journal**: `user` — `{"type": "user", "text": …}`, the
+  request that opened the turn (`"resumed": true` on a `/resume`), which the
+  stream never carries; `turn_end` (with `"stopped_by_user": true` when the
+  user stopped the turn) closes every turn; `journal_notice` says something was
+  left out: `{"omitted_events": N}` inside a turn, `{"omitted_turns": N}` as the
+  first event of the journal once old turns were dropped.
+- Paging: the newest `--history-limit` events (default 500, max 5000) come
+  back; `has_more` says older ones exist, and `--history-before SEQ` returns the
+  page that ends just before `seq` `SEQ`. A page may start mid-turn.
+- Limits (a truncated string keeps both ends and says
+  `[... N characters omitted ...]`): 20 000 characters per field (written
+  content, arguments, thoughts), 100 000 per answer, 200 items per list, 2 000
+  events and 2 MiB per turn (answers, errors and `turn_end` have a small
+  reserve above that), 8 MiB and 500 turns per session — beyond which the
+  **oldest whole turns** are dropped.
+- `skipped_lines` counts journal lines that could not be parsed (a crash can
+  tear the last one); they cost only themselves. A missing journal is an empty
+  history, so sessions from before the journal existed read as `events: []`.
+  An unknown session is `{"ok": false}`.
+- The journal is display-only: it never reaches a model prompt. It lives and
+  dies with its session — `delete` and `reset` remove it, `new`/`create`/`switch`
+  leave it alone. If it cannot be written, the turn still runs and a `debug`
+  event says so.
 
 To **resume** the active session's checkpoint, run the event frontend with
 `--resume` instead of writing a goal line:

@@ -315,6 +315,106 @@ def delete_json_object(path: Path, *, boundary: Path) -> bool:
         return removed
 
 
+def append_private_bytes(
+    path: Path,
+    data: bytes,
+    *,
+    boundary: Path,
+    sync: bool = False,
+) -> int:
+    """Append ``data`` to a private file and return the file's new size.
+
+    For append-only logs whose whole-file rewrite would be too costly. A file
+    that a crash left without a final newline is closed off first, so the
+    torn record stays one bad line instead of swallowing the next good one.
+    """
+    target = validate_storage_path(path, boundary)
+    with _exclusive_path_lock(target, boundary):
+        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND
+        flags |= getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(target, flags, PRIVATE_FILE_MODE)
+        except OSError as error:
+            if error.errno == errno.ELOOP:
+                raise JsonStorageSecurityError(
+                    f"Storage file {target.name!r} is a symbolic link"
+                ) from error
+            raise JsonStorageError(
+                f"Cannot open storage file {target.name!r}"
+            ) from error
+        try:
+            _validate_open_file(descriptor, target)
+            _fchmod(descriptor, PRIVATE_FILE_MODE)
+            size = os.fstat(descriptor).st_size
+            if size:
+                os.lseek(descriptor, size - 1, os.SEEK_SET)
+                if os.read(descriptor, 1) != b"\n":
+                    data = b"\n" + data
+            _write_all(descriptor, data)
+            if sync:
+                os.fsync(descriptor)
+            return os.fstat(descriptor).st_size
+        except OSError as error:
+            raise JsonStorageError(
+                f"Cannot append to storage file {target.name!r}"
+            ) from error
+        finally:
+            os.close(descriptor)
+
+
+def _write_all(descriptor: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        written = os.write(descriptor, view)
+        view = view[written:]
+
+
+def read_private_bytes(
+    path: Path,
+    *,
+    boundary: Path,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> bytes | None:
+    """Read a private file, or None when it does not exist."""
+    return _read_regular_bytes(validate_storage_path(path, boundary), max_bytes)
+
+
+def update_private_bytes(
+    path: Path,
+    update: Callable[[bytes], bytes],
+    *,
+    boundary: Path,
+    max_bytes: int = DEFAULT_MAX_BYTES,
+) -> None:
+    """Atomically replace a private file with ``update(current content)``."""
+    target = validate_storage_path(path, boundary)
+    with _exclusive_path_lock(target, boundary):
+        current = _read_regular_bytes(target, max_bytes)
+        _atomic_replace_bytes(target, update(current or b""))
+
+
+def delete_private_file(path: Path, *, boundary: Path) -> bool:
+    """Durably remove a private file; False when there was nothing to remove."""
+    target = validate_storage_path(path, boundary)
+    with _exclusive_path_lock(target, boundary):
+        try:
+            target.unlink()
+        except FileNotFoundError:
+            return False
+        except OSError as error:
+            raise JsonStorageError(
+                f"Cannot remove storage file {target.name!r}"
+            ) from error
+        try:
+            _fsync_directory(target.parent)
+        except OSError as error:
+            raise JsonStorageError(
+                f"Cannot sync deletion of storage file {target.name!r}"
+            ) from error
+        return True
+
+
 def _validate_existing_components(
     root: Path,
     relative: Path,

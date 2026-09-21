@@ -94,6 +94,32 @@ configured in-repo.
   `agent_logging.py` / `change_journal.py` on top of `durable_json.py` (atomic
   replace + `.bak` recovery copy). Headless frontends manage sessions via
   `main.py --session-op ...` (`session_store.py`), never by touching the files.
+  **Event journal** (`session_events.py`): next to each session document,
+  `sessions/<name>.events.jsonl` is an append-only, display-only log of the
+  frontend-protocol events a turn produced, so a frontend can redraw a session
+  by replaying them (`--session-op history`, paged newest-first with
+  `--history-limit`/`--history-before`). `agent.py` wraps its UI in
+  `JournalingUI`, which duplicates each visible call onto an `EventStreamUI`
+  whose channel is the `SessionJournal` — the events are built and redacted by
+  the same code a live frontend uses. Live-only events are dropped
+  (`status`, `live_*`, `stream_chunk`, `action_output`, `debug`) and a streamed
+  thought is written once as its last snapshot; `run()`/`resume()` add `user`
+  and `turn_end`, and the turn's tokens fold into one `usage`. It is never
+  read into a prompt and is not the session document (which is rewritten whole
+  every step): lines are appended under the storage lock
+  (`durable_json.append_private_bytes`, private 0600, no symlinks/hardlinks,
+  fsync at `turn_end`), a torn or damaged line costs only itself, a write
+  failure disables recording for the turn with a `debug` notice and never
+  stops the agent. Caps (`session_events.py`): 20k chars per field, 100k per
+  answer, 2000 events / 2 MiB per turn (answers/errors/`turn_end` get a
+  reserve), 8 MiB / 500 turns per session with oldest-whole-turns compaction
+  (atomic rewrite, `journal_notice` records how many were dropped); cuts keep
+  both ends with `[... N characters omitted ...]`. The journal shares its
+  session's lifecycle: `delete_session` and `reset_session` remove it
+  (reset first, so a crash never leaves a reset session with its old feed),
+  `create_session` drops a stale one, and a session with a journal is never
+  auto-discarded as empty. `--session-op list` is `status` without the
+  per-session histories (`status` keeps them: the Electron GUI reads them).
   Session lifecycle: **a launch always opens its own session** — the terminal
   calls `agent.start_fresh_session()` and the GUI calls `--session-op launch` at
   boot, so a new run is never planned against the previous launch's history.

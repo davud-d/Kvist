@@ -274,6 +274,8 @@ fail-closed).
 
 ```bash
 kvist --workspace WS --session-op status
+kvist --workspace WS --session-op list
+kvist --workspace WS --session-op history --session-name feature [--history-limit N] [--history-before SEQ]
 kvist --workspace WS --session-op launch
 kvist --workspace WS --session-op new
 kvist --workspace WS --session-op create --session-name feature
@@ -302,6 +304,15 @@ kvist --workspace WS --session-op reset
 Семантика (идентична терминальным командам `/session` и `/new`):
 
 - `status` — активная сессия, список сессий, сводка checkpoint (`null`, если нет).
+  Каждая запись `session_items` несёт `name`, `title`, `updated_at`,
+  `has_checkpoint`, `journal_bytes` (размер журнала событий сессии, `0`, если
+  его нет) и предназначенные для модели `session_history` / `chat_history`.
+  Эти два поля — вся история каждой сессии, поэтому `status` растёт вместе с
+  workspace (~570 КБ на 36 сессий).
+- `list` — дешёвый `status`: тот же ответ без `session_history` и
+  `chat_history` в записях. Используйте его для выбора сессии; остальной
+  `status` не изменился и по-прежнему нужен Electron GUI.
+- `history` — журнал событий одной сессии (ниже).
 - `launch` — **вызывайте один раз при старте вашего приложения.** Запуск всегда
   открывает собственную новую сессию вместо предыдущей. Прерванный запуск не
   теряется: `status` называет сессию, где он остался, в `resumable_session`, а
@@ -318,6 +329,68 @@ kvist --workspace WS --session-op reset
 - `reset` — опустошить активную сессию на месте (история, чат, checkpoint);
   имя сохраняется, другие сессии не затрагиваются. В отличие от `new`, это
   **уничтожает** ту переписку, на которой вызвано.
+
+### Восстановление ленты сессии: `--session-op history`
+
+Документ сессии хранит только то, что нужно модели (цель, роль, результат в 200
+символов). Отдельно ядро ведёт **журнал того, что видел пользователь**: те же
+события, что несёт поток из §8, в том виде, в каком они были отправлены, —
+фронтенд перерисовывает старую сессию, проигрывая их через уже имеющийся
+reducer. Журнал покрывает каждый ход, в том числе выполненный из терминала или
+другим фронтендом.
+
+```bash
+kvist --workspace WS --session-op history --session-name feature --history-limit 500
+```
+
+```json
+{"ok": true, "session": "feature", "has_more": true, "total_events": 1240,
+ "skipped_lines": 0, "journal_bytes": 913442,
+ "events": [
+   {"seq": 812, "turn": 9, "ts": 1758560000.1, "event": {"type": "user", "text": "fix the tests"}},
+   {"seq": 813, "turn": 9, "ts": 1758560000.9, "event": {"type": "route", "role": "coder", "source": "llm"}},
+   {"seq": 820, "turn": 9, "ts": 1758560014.2, "event": {"type": "action_result", "step": 3, "action_type": "run_shell", "ok": true, "summary": "Command exited with code 0", "output": "12 passed\n", "exit_code": 0, "path": null, "first_line": null}}
+ ]}
+```
+
+- `events` идут по порядку, старые первыми; `event` — в точности объект события
+  из §8. `seq` уникален и растёт в пределах сессии, `turn` нумерует запросы
+  пользователя (с 1), `ts` — время записи по настенным часам.
+- **Записывается** (уже с редакцией секретов): `route`, `plan`,
+  `sandbox_notice`, `step` (с полными `action_args`: у шага `run_shell` есть
+  argv, у `write_file` — содержимое, у замены — `old_text`/`new_text`),
+  `action_result` (вывод, код выхода, путь, `first_line`), мысли как
+  `reasoning_start` / `reasoning_chunk` / `reasoning_commit` (**один**
+  `reasoning_chunk` с итоговым текстом), ответ как `stream_commit`, `message`
+  или `final` (целиком), `error` и по одному `usage` на ход (`kind: "turn"`,
+  суммарные токены).
+- **Не записывается** (только «вживую»): `status`, `live_start`/`live_stop`,
+  `stream_chunk`, `action_output`, `debug`, `usage` по шагам, `hello`,
+  `input_request`, `command_result`.
+- **Добавляет сам журнал**: `user` — `{"type": "user", "text": …}`, запрос,
+  открывший ход (`"resumed": true` для `/resume`), которого в потоке нет;
+  `turn_end` закрывает каждый ход (с `"stopped_by_user": true`, если ход
+  остановил пользователь); `journal_notice` сообщает, что что-то опущено:
+  `{"omitted_events": N}` внутри хода, `{"omitted_turns": N}` первым событием
+  журнала, когда старые ходы отброшены.
+- Пагинация: возвращаются самые новые `--history-limit` событий (по умолчанию
+  500, максимум 5000); `has_more` говорит, что есть более старые, а
+  `--history-before SEQ` возвращает страницу, заканчивающуюся прямо перед
+  `seq` `SEQ`. Страница может начинаться посреди хода.
+- Потолки (усечённая строка сохраняет оба конца и содержит
+  `[... N characters omitted ...]`): 20 000 символов на поле (записанное
+  содержимое, аргументы, мысли), 100 000 на ответ, 200 элементов в списке,
+  2 000 событий и 2 МиБ на ход (у ответов, ошибок и `turn_end` есть небольшой
+  запас сверх этого), 8 МиБ и 500 ходов на сессию — сверх этого отбрасываются
+  **самые старые ходы целиком**.
+- `skipped_lines` считает строки журнала, которые не удалось разобрать (сбой
+  может оборвать последнюю); они стоят только самих себя. Отсутствующий журнал —
+  пустая история, поэтому сессии, созданные до появления журнала, читаются как
+  `events: []`. Неизвестная сессия — `{"ok": false}`.
+- Журнал только для показа: в промпт модели он не попадает. Он живёт и умирает
+  вместе с сессией — `delete` и `reset` его удаляют, `new`/`create`/`switch` не
+  трогают. Если журнал не удаётся записать, ход всё равно выполняется, а
+  событие `debug` сообщает об этом.
 
 Чтобы **возобновить** checkpoint активной сессии, запустите событийный фронтенд
 с `--resume` вместо строки задачи:

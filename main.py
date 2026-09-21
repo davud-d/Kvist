@@ -70,12 +70,32 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--session-op",
-        choices=("status", "create", "new", "launch", "switch", "delete", "reset"),
-        help="Run one headless session lifecycle operation, print JSON, exit.",
+        choices=(
+            "status",
+            "list",
+            "history",
+            "create",
+            "new",
+            "launch",
+            "switch",
+            "delete",
+            "reset",
+        ),
+        help="Run one headless session operation, print JSON, exit.",
     )
     parser.add_argument(
         "--session-name",
-        help="Session name for --session-op create/switch/delete.",
+        help="Session name for --session-op create/switch/delete/history.",
+    )
+    parser.add_argument(
+        "--history-limit",
+        type=int,
+        help="Most events --session-op history returns (default 500, max 5000).",
+    )
+    parser.add_argument(
+        "--history-before",
+        type=int,
+        help="Only events with a smaller seq than this (pages back through history).",
     )
     parser.add_argument(
         "--config-info",
@@ -124,7 +144,13 @@ def _run_session_op(args: argparse.Namespace) -> None:
     from session_store import run_session_op
 
     try:
-        payload = run_session_op(args.workspace, args.session_op, args.session_name)
+        payload = run_session_op(
+            args.workspace,
+            args.session_op,
+            args.session_name,
+            limit=args.history_limit,
+            before=args.history_before,
+        )
     except (ValueError, JsonStorageError, OSError) as error:
         failure = {
             "ok": False,

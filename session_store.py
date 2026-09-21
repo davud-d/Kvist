@@ -3,7 +3,7 @@
 
 Frontends must never read or write ``.kvist`` session files directly. This
 module is the supported core boundary for the lifecycle operations that need
-no model call: status, create, new, launch, switch, delete, and reset. Operations that run
+no model call: status, list, history, create, new, launch, switch, delete, and reset. Operations that run
 the agent (submitting a goal, resuming a checkpoint) go through the event
 frontend (``event_stdio``) instead, which reports the active session and
 checkpoint presence in its hello event.
@@ -27,6 +27,7 @@ from typing import Any
 from agent_logging import (
     create_session,
     delete_session,
+    get_journal_path,
     is_valid_session_name,
     list_sessions,
     load_active_session,
@@ -37,9 +38,25 @@ from agent_logging import (
     rotate_to_new_session,
     save_active_session,
 )
-from durable_json import JsonStorageCorruptError
+from durable_json import JsonStorageCorruptError, JsonStorageError
+from session_events import (
+    DEFAULT_HISTORY_LIMIT,
+    MAX_HISTORY_LIMIT,
+    journal_size,
+    read_history,
+)
 
-SESSION_OPS = ("status", "create", "switch", "delete", "reset", "new", "launch")
+SESSION_OPS = (
+    "status",
+    "list",
+    "history",
+    "create",
+    "switch",
+    "delete",
+    "reset",
+    "new",
+    "launch",
+)
 
 
 @dataclass(slots=True)
@@ -61,7 +78,12 @@ class SessionStore:
         self._storage_warnings: list[str] = []
         self.current_session = load_active_session(self)
 
-    def _session_items(self, sessions: list[str]) -> list[dict[str, Any]]:
+    def _session_items(
+        self,
+        sessions: list[str],
+        *,
+        with_histories: bool = True,
+    ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for name in sessions:
             try:
@@ -104,32 +126,73 @@ class SessionStore:
                 title = checkpoint["goal"].strip()
 
             updated_at = document.get("updated_at")
-            items.append(
-                {
-                    "name": name,
-                    "title": title or name,
-                    "updated_at": (
-                        float(updated_at)
-                        if isinstance(updated_at, (int, float))
-                        else 0.0
-                    ),
-                    "session_history": session_history,
-                    "chat_history": chat_history,
-                    "has_checkpoint": isinstance(checkpoint, dict),
-                }
-            )
+            item = {
+                "name": name,
+                "title": title or name,
+                "updated_at": (
+                    float(updated_at)
+                    if isinstance(updated_at, (int, float))
+                    else 0.0
+                ),
+                "has_checkpoint": isinstance(checkpoint, dict),
+                "journal_bytes": self._journal_bytes(name),
+            }
+            if with_histories:
+                item["session_history"] = session_history
+                item["chat_history"] = chat_history
+            items.append(item)
         return sorted(items, key=lambda item: item["updated_at"], reverse=True)
 
-    def status(self) -> dict[str, Any]:
+    def _journal_bytes(self, name: str) -> int:
+        try:
+            return journal_size(get_journal_path(self, name))
+        except JsonStorageError:
+            self._storage_warnings.append(
+                f"The event journal of session {name!r} is unreadable."
+            )
+            return 0
+
+    def _overview(self, *, with_histories: bool) -> dict[str, Any]:
         sessions = list_sessions(self)
         return {
             "active_session": self.current_session,
             "sessions": sessions,
-            "session_items": self._session_items(sessions),
+            "session_items": self._session_items(
+                sessions, with_histories=with_histories
+            ),
             "checkpoint": peek_checkpoint(self),
             "resumable_session": find_resumable_session(self),
             "warnings": list(self._storage_warnings),
         }
+
+    def status(self) -> dict[str, Any]:
+        return self._overview(with_histories=True)
+
+    def listing(self) -> dict[str, Any]:
+        """``status`` without the per-session histories: cheap for a session picker."""
+        return self._overview(with_histories=False)
+
+    def history(
+        self,
+        name: str,
+        limit: int = DEFAULT_HISTORY_LIMIT,
+        before: int | None = None,
+    ) -> dict[str, Any]:
+        if not is_valid_session_name(name):
+            raise ValueError(f"Invalid session name: {name!r}")
+        if not 1 <= limit <= MAX_HISTORY_LIMIT:
+            raise ValueError(f"History limit must be between 1 and {MAX_HISTORY_LIMIT}")
+        if before is not None and before < 1:
+            raise ValueError("History cursor must be a positive sequence number")
+        if not read_session_document(self, name):
+            raise ValueError(f"Unknown session: {name!r}")
+        page = read_history(
+            get_journal_path(self, name),
+            self.executor.workspace,
+            limit=limit,
+            before=before,
+        )
+        return {"session": name, **page}
 
     def create(self, name: str) -> dict[str, Any]:
         if not is_valid_session_name(name):
@@ -181,15 +244,24 @@ def run_session_op(
     workspace: str | Path,
     op: str,
     name: str | None = None,
+    *,
+    limit: int | None = None,
+    before: int | None = None,
 ) -> dict[str, Any]:
-    """Execute one session lifecycle operation and return its JSON payload."""
+    """Execute one session operation and return its JSON payload."""
     if op not in SESSION_OPS:
         raise ValueError(f"Unknown session operation: {op!r}")
     store = SessionStore(workspace)
     if op in ("status", "reset", "new", "launch"):
         payload = getattr(store, op)()
+    elif op == "list":
+        payload = store.listing()
+    elif not name:
+        raise ValueError(f"Session operation {op!r} requires a session name")
+    elif op == "history":
+        payload = store.history(
+            name, DEFAULT_HISTORY_LIMIT if limit is None else limit, before
+        )
     else:
-        if not name:
-            raise ValueError(f"Session operation {op!r} requires a session name")
         payload = getattr(store, op)(name)
     return {"ok": True, **payload}
