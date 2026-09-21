@@ -283,6 +283,32 @@ def get_saved_role(config_path: Path | None = None) -> str | None:
     return None
 
 
+FRONTEND_KEY = "frontend"
+
+
+def get_saved_frontend(config_path: Path | None = None) -> str:
+    """Return the saved terminal frontend (plain terminal by default)."""
+    payload = load_user_config(config_path)
+    value = payload.get(FRONTEND_KEY)
+    return "tui" if value == "tui" else "terminal"
+
+
+def save_frontend(frontend: str, config_path: Path | None = None) -> None:
+    """Persist the frontend used on the next launch."""
+    normalized = str(frontend).strip().casefold()
+    if normalized not in {"terminal", "tui"}:
+        raise ValueError("Frontend must be 'terminal' or 'tui'.")
+
+    def update(payload: dict[str, object]) -> dict[str, object]:
+        if normalized == "terminal":
+            payload.pop(FRONTEND_KEY, None)
+        else:
+            payload[FRONTEND_KEY] = normalized
+        return payload
+
+    _update_user_config(update, config_path)
+
+
 def save_role_selection(role: str, config_path: Path | None = None) -> None:
     """Save the role selection. Use 'auto' for automatic role detection."""
     normalized_role = role.strip()

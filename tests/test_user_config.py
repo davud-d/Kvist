@@ -34,6 +34,26 @@ def test_planning_enabled_defaults_true_and_round_trips(tmp_path):
     assert user_config.get_saved_planning_enabled(path) is True
 
 
+def test_frontend_preference_round_trips_without_clobbering_settings(tmp_path):
+    path = tmp_path / "config.json"
+    assert user_config.get_saved_frontend(path) == "terminal"
+    user_config.save_user_config({"other": "kept"}, path)
+    user_config.save_frontend("tui", path)
+    assert user_config.get_saved_frontend(path) == "tui"
+    assert user_config.load_user_config(path)["other"] == "kept"
+    user_config.save_frontend("terminal", path)
+    assert user_config.get_saved_frontend(path) == "terminal"
+    with pytest.raises(ValueError):
+        user_config.save_frontend("stdio", path)
+
+
+@pytest.mark.parametrize("value", [None, [], {}, "bogus", True])
+def test_invalid_frontend_preference_falls_back(tmp_path, value):
+    path = tmp_path / "config.json"
+    user_config.save_user_config({"frontend": value}, path)
+    assert user_config.get_saved_frontend(path) == "terminal"
+
+
 @requires_posix
 def test_user_config_file_is_owner_only(tmp_path):
     path = tmp_path / "config.json"
