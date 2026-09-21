@@ -29,6 +29,11 @@ class HelloEvent:
     # separate --session-op mode, not this stream.
     session: str | None = None
     has_checkpoint: bool | None = None
+    # stdio-multi extras: the current reasoning-effort level, whether the
+    # planning stage is on, and the command names the core can execute.
+    effort: str | None = None
+    planning: bool | None = None
+    commands: list[str] | None = None
     type: ClassVar[str] = "hello"
 
     def to_dict(self) -> dict:
@@ -48,6 +53,12 @@ class HelloEvent:
             payload["session"] = self.session
         if self.has_checkpoint is not None:
             payload["has_checkpoint"] = self.has_checkpoint
+        if self.effort is not None:
+            payload["effort"] = self.effort
+        if self.planning is not None:
+            payload["planning"] = self.planning
+        if self.commands is not None:
+            payload["commands"] = self.commands
         return payload
 
 
