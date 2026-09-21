@@ -105,3 +105,78 @@ def test_install_reports_locked_core(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit, match="Close every running kvist"):
         mod.install(binary, tmp_path / "lib", tmp_path / "bin")
+
+
+# --- the Ink terminal UI is built into the binary when Node.js is available ---
+
+
+def _bundle_paths(monkeypatch, tmp_path):
+    bundle = tmp_path / "dist-ui" / "kvist-tui.mjs"
+    monkeypatch.setattr(install, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(install, "UI_BUNDLE", bundle)
+    steps: list[str] = []
+    monkeypatch.setattr(install, "show_step", lambda status, text: steps.append(text))
+    return bundle, steps
+
+
+def test_ui_build_installs_packages_then_bundles(monkeypatch, tmp_path):
+    bundle, steps = _bundle_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/npm")
+    commands: list[list[str]] = []
+
+    def fake_run(command, *, cwd=None):
+        commands.append(command[1:])
+        if command[1:] == ["run", "build"]:
+            bundle.parent.mkdir()
+            bundle.write_text("// bundle")
+
+    monkeypatch.setattr(install, "run_logged", fake_run)
+    assert install.build_terminal_ui() is True
+    assert commands == [["install"], ["run", "build"]]  # no node_modules yet
+    assert install.STEPS["build_ui"] in steps
+
+
+def test_ui_build_skips_npm_install_when_packages_exist(monkeypatch, tmp_path):
+    bundle, _ = _bundle_paths(monkeypatch, tmp_path)
+    (tmp_path / "node_modules").mkdir()
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/npm")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(install, "run_logged", lambda command, *, cwd=None: commands.append(command[1:]))
+    install.build_terminal_ui()
+    assert commands == [["run", "build"]]
+
+
+def test_ui_build_without_npm_warns_and_the_install_goes_on(monkeypatch, tmp_path):
+    _, steps = _bundle_paths(monkeypatch, tmp_path)
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    assert install.build_terminal_ui() is False
+    assert steps == [install.STEPS["ui_no_npm"]]
+
+
+def test_ui_build_without_npm_keeps_an_existing_bundle_quietly(monkeypatch, tmp_path):
+    bundle, steps = _bundle_paths(monkeypatch, tmp_path)
+    bundle.parent.mkdir()
+    bundle.write_text("// bundle")
+    monkeypatch.setattr(install.shutil, "which", lambda name: None)
+    assert install.build_terminal_ui() is True
+    assert steps == []
+
+
+def test_a_failed_ui_build_warns_instead_of_failing_the_install(monkeypatch, tmp_path):
+    _, steps = _bundle_paths(monkeypatch, tmp_path)
+    (tmp_path / "node_modules").mkdir()
+    monkeypatch.setattr(install.shutil, "which", lambda name: "/usr/bin/npm")
+
+    def failing(command, *, cwd=None):
+        raise install.InstallCommandError("command failed (exit 1): npm run build")
+
+    monkeypatch.setattr(install, "run_logged", failing)
+    assert install.build_terminal_ui() is False
+    assert steps[-1] == install.STEPS["ui_failed"]
+
+
+def test_the_spec_packs_the_bundle_only_when_it_exists(tmp_path):
+    spec = Path(__file__).resolve().parent.parent / "kvist.spec"
+    text = spec.read_text(encoding="utf-8")
+    assert "dist-ui" in text and "kvist-tui.mjs" in text
+    assert "os.path.isfile(_UI_BUNDLE)" in text

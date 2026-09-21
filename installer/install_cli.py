@@ -3,7 +3,9 @@
 
 If a prebuilt binary isn't found, builds one first: creates/reuses a venv
 next to this script, installs requirements.txt + pyinstaller into it, and
-runs pyinstaller against kvist.spec.
+runs pyinstaller against kvist.spec. When npm is available it first builds
+the Ink terminal UI (`npm run build`) so the binary carries it; it needs
+Node.js again at run time.
 
 Either way, the resulting binary (core + terminal frontend bundled together
 by PyInstaller) is copied into a per-user data dir, and a small `kvist`
@@ -63,6 +65,9 @@ STEPS = {
     "libpython_missing": "[red]libpython not found[/red]",
     "libpython_found": "Found libpython",
     "bin_check": "Checking for existing binary",
+    "build_ui": "Building the Ink terminal UI",
+    "ui_no_npm": "[yellow]npm not found — the Ink terminal UI will not be included[/yellow]",
+    "ui_failed": "[yellow]Ink terminal UI build failed — it will not be included (see the log)[/yellow]",
     "build_binary": "Building binary",
     "build_done": "Binary built successfully",
     "copy_binary": "Copying binary to install directory",
@@ -74,6 +79,8 @@ IS_WINDOWS = platform.system() == "Windows"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SPEC_FILE = PROJECT_ROOT / "kvist.spec"
+# The Ink terminal UI as one file; kvist.spec packs it into the binary when present.
+UI_BUNDLE = PROJECT_ROOT / "dist-ui" / "kvist-tui.mjs"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 # Dedicated venv, kept separate from the project's own dev .venv so building
 # never touches (or has to match the interpreter of) the dev environment.
@@ -305,11 +312,39 @@ def ensure_build_venv(status: Status | None = None) -> Path:
     return python_path
 
 
+def build_terminal_ui(status: Status | None = None) -> bool:
+    """Build the Ink terminal UI bundle that kvist.spec packs into the binary.
+
+    The UI is optional — it needs Node.js at build time and again at run time —
+    so a missing npm or a failed build only costs the binary this UI (`--frontend
+    tui` then falls back to the classic terminal). The step line says so, because
+    a binary that quietly lacks it is exactly what this step exists to prevent.
+    Returns whether a bundle exists afterwards.
+    """
+    npm = shutil.which("npm")
+    if npm is None:
+        if not UI_BUNDLE.is_file():
+            show_step(status, STEPS["ui_no_npm"])
+        return UI_BUNDLE.is_file()
+
+    show_step(status, STEPS["build_ui"])
+    try:
+        if not (PROJECT_ROOT / "node_modules").is_dir():
+            run_logged([npm, "install"], cwd=PROJECT_ROOT)
+        run_logged([npm, "run", "build"], cwd=PROJECT_ROOT)
+    except InstallCommandError as error:
+        log(str(error))
+        show_step(status, STEPS["ui_failed"])
+        return False
+    return UI_BUNDLE.is_file()
+
+
 def build_binary(status: Status | None = None) -> Path:
     if not SPEC_FILE.is_file():
         raise SystemExit(f"error: spec file not found: {SPEC_FILE}")
 
     python_path = ensure_build_venv(status)
+    build_terminal_ui(status)
 
     show_step(status, STEPS["build_binary"])
     run_logged(
