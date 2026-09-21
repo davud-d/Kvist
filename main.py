@@ -37,10 +37,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
-        choices=("terminal", "stdio", "stdio-multi"),
-        default="terminal",
+        choices=("terminal", "tui", "stdio", "stdio-multi"),
+        default=None,
         help=(
-            "Frontend transport. Use 'stdio' for the single-turn NDJSON event "
+            "Frontend (defaults to the saved /tui preference). Use 'tui' for "
+            "the Node/Ink terminal UI (src/), 'terminal' for the classic UI, "
+            "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
             "per stdin line."
         ),
@@ -248,6 +250,8 @@ from user_config import (
     prompt_secret,
     save_models_for_provider,
     get_saved_role,
+    get_saved_frontend,
+    save_frontend,
     save_role_selection,
     get_saved_planning_enabled,
     save_planning_enabled,
@@ -521,6 +525,112 @@ def parse_plan_value(raw: str, current: bool) -> bool | None:
         return True
     if value == "false":
         return False
+    return None
+
+
+def parse_tui_value(raw: str, current: bool) -> bool | None:
+    parts = raw.split()
+    if not parts or parts[0].casefold() != "/tui" or len(parts) > 2:
+        return None
+    if len(parts) == 1:
+        return not current
+    value = parts[1].strip("<>").casefold()
+    if value in {"true", "on", "1"}:
+        return True
+    if value in {"false", "off", "0"}:
+        return False
+    return None
+
+
+# PyInstaller unpacks bundled data under sys._MEIPASS; from source it sits
+# next to this file. Either way the Ink UI is the single file `npm run build` makes.
+_APP_ROOT = Path(getattr(sys, "_MEIPASS", None) or Path(__file__).resolve().parent)
+_TUI_ENTRY = _APP_ROOT / "dist-ui" / "kvist-tui.mjs"
+# Exit code the Ink app uses for "/tui": the user chose another interface. Which
+# one travels in the file named by KVIST_SWITCH_FILE, so the code stays the same
+# however many interfaces there are.
+_TUI_SWITCH_CODE = 64
+
+
+def launch_tui(args: argparse.Namespace) -> int | None:
+    """Run the Ink frontend (``src/``, bundled to ``dist-ui/kvist-tui.mjs``) with this program as its core.
+
+    Returns the frontend's exit code, or None when it cannot run here so the
+    caller falls back to the classic terminal.
+    """
+    import json
+    import shutil
+    import subprocess
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    node = shutil.which("node")
+    if node is None:
+        print(
+            "The Ink UI needs Node.js 22 or newer on PATH; using the classic terminal.",
+            file=sys.stderr,
+        )
+        return None
+    if not _TUI_ENTRY.is_file():
+        rebuild = (
+            "this build of Kvist was made without it (Node.js was missing at build "
+            "time); reinstall with Node.js available"
+            if getattr(sys, "frozen", False)
+            else "build it with `npm install && npm run build`"
+        )
+        print(f"The Ink UI is not built: {rebuild}. Using the classic terminal.", file=sys.stderr)
+        return None
+    if not (args.provider or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider_or_none()):
+        print(
+            "The Ink UI cannot configure a provider yet; run the classic "
+            "terminal once (`--frontend terminal`) to set one up.",
+            file=sys.stderr,
+        )
+        return None
+
+    workspace = resolve_workspace_path(args.workspace)
+    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(Path(__file__).resolve())]
+    command = [
+        node, str(_TUI_ENTRY),
+        "--workspace", str(workspace),
+        "--role", args.role,
+        "--approval-mode", args.approval_mode,
+    ]
+    if args.provider:
+        command += ["--provider", args.provider]
+    if args.fast_model and args.smart_model and args.planner_model:
+        command += [
+            "--fast-model", args.fast_model,
+            "--smart-model", args.smart_model,
+            "--planner-model", args.planner_model,
+        ]
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
+        switch_file = Path(scratch) / "frontend"
+        env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file)}
+        try:
+            code = subprocess.call(command, env=env)
+        except KeyboardInterrupt:
+            return 130
+        if code != _TUI_SWITCH_CODE:
+            return code
+        return _switch_frontend(switch_file)
+
+
+def _switch_frontend(switch_file: Path) -> int | None:
+    """Apply the interface the Ink app asked for; None hands over to the classic terminal."""
+    try:
+        chosen = switch_file.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    try:
+        save_frontend(chosen)
+    except ValueError:
+        print(f"Unknown interface '{chosen}'; using the classic terminal.", file=sys.stderr)
+        return None
+    # Only the classic terminal can take over from here; another interface
+    # would be launched here once it exists.
     return None
 
 
@@ -1134,6 +1244,7 @@ def render_startup_banner(
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
     console.print("[dim]Command '/role' — select agent role (auto/coder/reader/devops/chat).[/dim]")
     console.print("[dim]Command '/effort' — set reasoning effort (false/low/medium/high/xhigh/max).[/dim]")
+    console.print("[dim]Command '/tui' — choose the Ink terminal UI or the classic one for the next launch.[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
     console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
@@ -3534,6 +3645,11 @@ def main() -> None:
             raise SystemExit(2) from error
         return
 
+    if (args.frontend or get_saved_frontend()) == "tui" and not args.no_banner:
+        exit_code = launch_tui(args)
+        if exit_code is not None:
+            raise SystemExit(exit_code)
+
     max_steps = int(os.getenv("AGENT_MAX_STEPS", "50"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
@@ -3660,6 +3776,24 @@ def main() -> None:
             if user_goal.lower() == "/bye":
                 save_session_for_shutdown(agent)
                 break
+
+            if user_goal.split(maxsplit=1)[0].casefold() == "/tui":
+                selected_tui = parse_tui_value(user_goal, get_saved_frontend() == "tui")
+                if selected_tui is None:
+                    console.print("[yellow]Usage: /tui [true|false|on|off][/yellow]")
+                    continue
+                try:
+                    save_frontend("tui" if selected_tui else "terminal")
+                except RuntimeError as error:
+                    console.print(_display_text(f"Could not save the UI preference: {error}", "yellow"))
+                    continue
+                console.print(_display_text(
+                    "The Ink terminal UI will open on the next launch."
+                    if selected_tui
+                    else "The classic terminal will open on the next launch.",
+                    "green",
+                ))
+                continue
 
             if user_goal.lower() == "/resume":
                 try:
