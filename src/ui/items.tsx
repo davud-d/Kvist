@@ -1,0 +1,91 @@
+import { Box, Text } from "ink"
+
+import { clip, formatThought, lastLines } from "../format.js"
+import { exploreSummary, type Item } from "../state.js"
+import { Markdown } from "./markdown.js"
+import { BAR, color, planStepColor } from "./theme.js"
+import { ToolCard } from "./tools.js"
+
+const THOUGHT_LINES = 12
+
+function Banner() {
+  return (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text>
+        <Text color={color.accent} bold>▌kvist</Text>
+        <Text color={color.dim}>  local coding agent</Text>
+      </Text>
+      <Text color={color.faint}>/help for commands · esc esc to stop a run · ctrl+d to quit</Text>
+    </Box>
+  )
+}
+
+function Step({ item }: { item: Extract<Item, { kind: "step" }> }) {
+  const dot = planStepColor[item.planStep] ?? color.dim
+  return (
+    <Box flexDirection="column">
+      <Text wrap="truncate-end">
+        <Text color={dot}>● </Text>
+        <Text bold>{item.action}</Text>
+        {item.target ? <Text color={color.dim}>  {clip(item.target, 90)}</Text> : null}
+      </Text>
+    </Box>
+  )
+}
+
+function Plan({ item }: { item: Extract<Item, { kind: "plan" }> }) {
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={color.dim}>◇ plan{item.complexity ? ` · ${item.complexity}` : ""}</Text>
+      {item.steps.map((step, i) => (
+        <Text key={i} color={color.dim} wrap="truncate-end">  {i + 1}. {clip(step, 100)}</Text>
+      ))}
+      {item.risks.length ? <Text color={color.faint} wrap="truncate-end">  risks: {clip(item.risks.join("; "), 100)}</Text> : null}
+    </Box>
+  )
+}
+
+const toneColor = { info: color.dim, warn: color.warn, error: color.err, debug: color.faint } as const
+const toneMark = { info: "·", warn: "!", error: "✗", debug: "›" } as const
+
+export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }) {
+  switch (item.kind) {
+    case "banner":
+      return <Banner />
+    case "user":
+      return (
+        <Box marginTop={1} borderStyle={BAR} borderColor={color.accent} borderTop={false} borderBottom={false} borderRight={false} backgroundColor={color.panel} paddingX={1} paddingY={1}>
+          <Text>{item.text}</Text>
+        </Box>
+      )
+    case "plan":
+      return <Plan item={item} />
+    case "step":
+      return <Step item={item} />
+    case "tool":
+      return <ToolCard item={item} />
+    case "thought":
+      return (
+        <Box flexDirection="column" marginTop={1} borderStyle={BAR} borderColor={color.thought} borderTop={false} borderBottom={false} borderRight={false} paddingLeft={1}>
+          <Text color={color.thought}>{formatThought(item.seconds)}</Text>
+          {item.text ? <Text color={color.dim}>{lastLines(item.text, THOUGHT_LINES)}</Text> : null}
+        </Box>
+      )
+    case "explored":
+      return <Text color={color.dim}>→ Explored – {exploreSummary(item.counts)}</Text>
+    case "answer":
+      return (
+        <Box marginTop={1} marginBottom={1} paddingLeft={2}>
+          <Markdown text={item.text} />
+        </Box>
+      )
+    case "note":
+      if (item.tone === "debug" && !showDebug) return null
+      return (
+        <Box>
+          <Text color={toneColor[item.tone]}>{toneMark[item.tone]} </Text>
+          <Box flexShrink={1}><Text color={toneColor[item.tone]}>{item.text}</Text></Box>
+        </Box>
+      )
+  }
+}
