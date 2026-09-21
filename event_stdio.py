@@ -92,6 +92,7 @@ def build_session_hello(
     *,
     routed_role: str | None = None,
     approval_mode: str | None = None,
+    commands: list[str] | None = None,
 ) -> HelloEvent:
     """One authoritative launch-time hello snapshot for every stdio entrypoint.
 
@@ -100,6 +101,7 @@ def build_session_hello(
     worker that clears the checkpoint (e.g. a fast ``--resume`` run).
     """
     config = agent.config
+    skip_planning = getattr(config, "skip_planning", None)
     return HelloEvent(
         provider=config.provider,
         models={
@@ -111,6 +113,9 @@ def build_session_hello(
         approval_mode=approval_mode,
         session=agent.current_session,
         has_checkpoint=agent._peek_checkpoint() is not None,
+        effort=getattr(config, "reasoning_effort", None),
+        planning=None if skip_planning is None else not skip_planning,
+        commands=commands,
     )
 
 
@@ -275,7 +280,7 @@ def launch(
         ui = EventStreamUI(channel)
         executor = SafeExecutor(
             workspace,
-            approvals=EventApprovalGate(channel, mode=approval_mode),
+            approvals=EventApprovalGate(channel, mode=approval_mode, workspace=workspace),
         )
         original_stdin = sys.stdin
         try:
@@ -338,7 +343,7 @@ def launch_multi(
         ui = EventStreamUI(channel)
         executor = SafeExecutor(
             workspace,
-            approvals=EventApprovalGate(channel, mode=approval_mode),
+            approvals=EventApprovalGate(channel, mode=approval_mode, workspace=workspace),
         )
         original_stdin = sys.stdin
         try:
