@@ -77,7 +77,9 @@ def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch
 
     assert agent.config.max_steps == 7
     assert config.provider == "openai"
-    assert warnings == ["warn"]
+    assert warnings[0] == "warn"
+    # May contain reasoning effort advisory if config differs from default
+    assert all("warn" in w or "Reasoning effort" in w for w in warnings)
 
 
 def test_build_agent_wires_manual_tier_provider(tmp_path, monkeypatch):

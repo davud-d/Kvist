@@ -717,7 +717,10 @@ def _anymodel_key_available() -> bool:
     return bool(credentials.get(api_key_key))
 
 
-def resolve_startup_provider(provider_override: str | None = None) -> str:
+def resolve_startup_provider(
+    provider_override: str | None = None,
+    interactive_ui: AgentUI | None = None,
+) -> str:
     if provider_override:
         return normalize_provider(provider_override)
 
@@ -735,6 +738,16 @@ def resolve_startup_provider(provider_override: str | None = None) -> str:
     # built-in providers.
     if _anymodel_key_available():
         return DEFAULT_BLANK_START_PROVIDER
+
+    if interactive_ui is not None:
+        # An event frontend has no browser/OAuth registration screen; the
+        # picker lists AnyModel like any other provider.
+        selected = choose_provider("openai", False, ui=interactive_ui)
+        if selected:
+            return selected
+        raise RuntimeError(
+            "No provider was selected. / Провайдер не выбран."
+        )
 
     # First run, no AnyModel key either: use RichUI if available, fall back
     # to plain-text. The AnyModel registration screen is offered first (it
@@ -763,10 +776,15 @@ def build_agent(
     language_hint: str | None = None,
     ui: AgentUI | None = None,
     skip_planning: bool = False,
+    interactive_ui: AgentUI | None = None,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
+    # ``interactive_ui`` is how an event frontend answers what the terminal
+    # answers through a TTY (provider, models, base URL, secrets). Without a
+    # TTY and without it, those questions fail instead of hanging.
+    can_ask = interactive_ui is not None or sys.stdin.isatty()
     # Captured before the missing-models wizard may rebind the local ``ui``.
     provided_ui = ui
-    provider = resolve_startup_provider(provider_override)
+    provider = resolve_startup_provider(provider_override, interactive_ui)
 
     # For custom providers, load models from the custom provider config
     if is_custom_provider(provider):
@@ -800,13 +818,13 @@ def build_agent(
                 example_model = "the exact model id from the provider's documentation"
             else:
                 example_model = "kr/claude-sonnet-4.5"
-            if not sys.stdin.isatty():
+            if not can_ask:
                 raise RuntimeError(
                     f"{provider_display} models are not configured. Run Kvist in an interactive "
                     f"terminal and set exact model ids with /models, for example {example_model}."
                 )
             # Interactive setup if models are missing
-            ui = TerminalBannerUI(console=console, verbose=verbose)
+            ui = interactive_ui or TerminalBannerUI(console=console, verbose=verbose)
             console.print(
                 _display_text(
                     f"{provider_display} models are not configured.",
@@ -845,7 +863,7 @@ def build_agent(
                 _display_text(f"{provider_display} models saved.", "green")
             )
 
-    if provider in MANUAL_OPENAI_PROVIDERS and sys.stdin.isatty():
+    if provider in MANUAL_OPENAI_PROVIDERS and can_ask:
         manual_config = MANUAL_OPENAI_PROVIDERS[provider]
         api_key_key = manual_config["api_key_key"]
         base_url_key = manual_config["base_url_key"]
@@ -863,7 +881,7 @@ def build_agent(
             # is collected up front and the race is authenticated — a
             # 401/403 excludes that region outright regardless of speed;
             # see race_base_urls in llm_clients.py.
-            secret_ui = TerminalBannerUI(console=console, verbose=verbose)
+            secret_ui = interactive_ui or TerminalBannerUI(console=console, verbose=verbose)
             api_key_label = secret_label_for_key(api_key_key)
             entered_key = secret_ui.prompt_secret(
                 title=api_key_label,
@@ -911,7 +929,7 @@ def build_agent(
             # Single-endpoint provider (or a base URL override is already
             # saved): plain confirm/edit, no race needed. The key itself is
             # still collected afterward by ensure_provider_credentials.
-            base_url_ui = TerminalBannerUI(console=console, verbose=verbose)
+            base_url_ui = interactive_ui or TerminalBannerUI(console=console, verbose=verbose)
             chosen_base_url = base_url_ui.prompt_text(
                 title=f"Base URL for {provider_label(provider)}",
                 current_value=existing.get(base_url_key) or manual_config["default_base_url"],
@@ -936,9 +954,9 @@ def build_agent(
         # real TTY, keep the original stdin-pipe fallback (run_task.py /
         # scripted use can still pipe a secret in) rather than the UI, which
         # would just return nothing.
-        if not sys.stdin.isatty():
+        if interactive_ui is None and not sys.stdin.isatty():
             return prompt_secret(label)
-        secret_ui = TerminalBannerUI(console=console, verbose=verbose)
+        secret_ui = interactive_ui or TerminalBannerUI(console=console, verbose=verbose)
         return secret_ui.prompt_secret(
             title=label,
             help_text="Paste or type the value, then press Enter.",
