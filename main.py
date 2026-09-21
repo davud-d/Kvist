@@ -541,6 +541,15 @@ def parse_strime_value(raw: str, current: bool) -> bool | None:
     return None
 
 
+def resolve_planning_enabled() -> bool:
+    """Startup planning-stage flag: AGENT_SKIP_PLANNING overrides the saved
+    preference, which defaults to on."""
+    env_skip = os.getenv("AGENT_SKIP_PLANNING")
+    if env_skip is not None:
+        return env_skip not in {"1", "true", "True", "yes", "on"}
+    return get_saved_planning_enabled()
+
+
 def apply_verbose_mode(agent, enabled: bool) -> None:
     """Apply a verbose-mode change to the active runtime objects."""
 
@@ -2828,10 +2837,7 @@ def main() -> None:
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
     slash_command_auto_suggest.set_verbose(verbose)
     # Persisted preference is the default; AGENT_SKIP_PLANNING overrides if set.
-    planning_enabled = get_saved_planning_enabled()
-    env_skip = os.getenv("AGENT_SKIP_PLANNING")
-    if env_skip is not None:
-        planning_enabled = env_skip not in {"1", "true", "True", "yes", "on"}
+    planning_enabled = resolve_planning_enabled()
     skip_planning = not planning_enabled
     slash_command_auto_suggest.set_plan(planning_enabled)
     session_language = detect_request_language(os.getenv("LANG", ""), fallback="en")
