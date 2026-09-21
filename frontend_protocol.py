@@ -290,15 +290,6 @@ class UsageEvent:
 
 
 @dataclass(slots=True)
-class ErrorEvent:
-    message: str
-    type: ClassVar[str] = "error"
-
-    def to_dict(self) -> dict:
-        return {"type": self.type, "message": self.message}
-
-
-@dataclass(slots=True)
 class ActionResultEvent:
     """Outcome of one executed action, so a frontend can show what it did.
 
@@ -364,6 +355,15 @@ class RouteEvent:
 
     def to_dict(self) -> dict:
         return {"type": self.type, "role": self.role, "source": self.source}
+
+
+@dataclass(slots=True)
+class ErrorEvent:
+    message: str
+    type: ClassVar[str] = "error"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "message": self.message}
 
 
 @dataclass(slots=True)
