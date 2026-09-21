@@ -1371,6 +1371,7 @@ class SafeExecutor:
             data={
                 "path": path,
                 "bytes_written": len(content_bytes),
+                "first_line": 1,
             },
         )
 
@@ -1414,6 +1415,7 @@ class SafeExecutor:
             data={
                 "path": path,
                 "bytes_appended": len(content.encode("utf-8")),
+                "first_line": old_text.count("\n") + 1,
             },
         )
 
@@ -1485,6 +1487,7 @@ class SafeExecutor:
                 "occurrences_found": occurrences_found,
                 "occurrences_replaced": occurrences_replaced,
                 "bytes_written": updated_size,
+                "first_line": original_text.count("\n", 0, original_text.find(old_text)) + 1,
             },
         )
 
