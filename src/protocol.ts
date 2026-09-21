@@ -33,12 +33,13 @@ export interface InputRequest {
 }
 
 export type CoreEvent =
-  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean }
+  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; planning?: boolean }
   | { type: "live_start" }
   | { type: "live_stop" }
   | { type: "status"; user_message: string; status: string; step: number; progress: number; plan_step: string; is_error: boolean }
   | { type: "step"; step: number; plan_step: string; thought: string; user_message: string; action_type: string; action_args: Record<string, unknown>; reasoning_seconds: number; action_description?: string }
   | { type: "action_result"; step: number; action_type: string; ok: boolean; summary: string; output: string; exit_code: number | null; path: string | null; first_line: number | null }
+  | { type: "action_output"; step: number; output: string }
   | { type: "plan"; goal: string; complexity: string; plan: string[]; success_criteria: string[]; risks: string[] }
   | { type: "route"; role: string; source?: string }
   | { type: "sandbox_notice"; note: string }

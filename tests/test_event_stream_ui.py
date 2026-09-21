@@ -327,3 +327,61 @@ def test_satisfies_agent_ui_surface():
     ):
         assert callable(getattr(ui, name))
     assert hasattr(ui, "verbose")
+
+
+def test_loop_reasoning_is_streamed_and_sealed_once():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.set_thinking("first")
+    ui.set_thinking("first second")
+    ui.end_thinking()
+    ui.end_thinking()
+    start, chunk1, chunk2, commit = ch.drain()
+    assert isinstance(start, ReasoningStartEvent)
+    assert [chunk1.text, chunk2.text] == ["first", "first second"]
+    assert isinstance(commit, ReasoningCommitEvent)
+    assert {start.stream_id, chunk1.stream_id, chunk2.stream_id, commit.stream_id} == {
+        start.stream_id
+    }
+
+
+def test_loop_reasoning_is_not_reported_twice_on_the_step():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.set_thinking("thinking")
+    ui.end_thinking()
+    ch.drain()
+    ui.print_step_header(1, make_command("run_shell", {"command": "ls"}), 4.0)
+    (event,) = ch.drain()
+    assert isinstance(event, StepEvent)
+    assert event.reasoning_seconds == 0.0
+
+
+def test_step_seals_reasoning_that_was_never_ended():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.set_thinking("thinking")
+    ch.drain()
+    ui.print_step_header(1, make_command("run_shell", {"command": "ls"}), 4.0)
+    commit, step = ch.drain()
+    assert isinstance(commit, ReasoningCommitEvent)
+    assert isinstance(step, StepEvent)
+    assert step.reasoning_seconds == 0.0
+
+
+def test_new_call_resets_and_reasoning_free_step_keeps_its_seconds():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.set_thinking("")
+    assert ch.drain() == []
+    ui.print_step_header(1, make_command("run_shell", {"command": "ls"}), 2.5)
+    (event,) = ch.drain()
+    assert event.reasoning_seconds == 2.5
+
+
+def test_loop_reasoning_is_redacted():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.set_thinking("key sk-abcdefghijklmnopqrstuvwxyz0123456789")
+    _, chunk = ch.drain()
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123456789" not in chunk.text

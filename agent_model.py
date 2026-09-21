@@ -871,6 +871,13 @@ def _note_thinking(self, text: str) -> None:
         notify(text)
 
 
+def _note_thinking_end(self) -> None:
+    """Tell a UI that the model has stopped thinking and started answering."""
+    notify = getattr(self._ui, "end_thinking", None)
+    if notify is not None:
+        notify()
+
+
 def call_model_streaming(
     self,
     model: str,
@@ -920,6 +927,7 @@ def call_model_streaming(
                     # Seal thinking with everything buffered: a fast stream can
                     # otherwise end inside the throttle window and drop the tail.
                     _note_thinking(self, "".join(reasoning_chunks))
+                    _note_thinking_end(self)
                 if first_token_time is None:
                     first_token_time = time.monotonic()
                 chunk_count += 1
@@ -953,6 +961,7 @@ def call_model_streaming(
     # Reasoning that never yielded a content token was never sealed in the loop.
     if reasoning_chunks and reasoning_end_time is None:
         _note_thinking(self, "".join(reasoning_chunks))
+        _note_thinking_end(self)
 
     # Reasoning that never yielded content still counts up to stream end.
     if reasoning_start_time is not None:

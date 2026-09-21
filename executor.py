@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from change_journal import (
     JournalUnavailableError,
@@ -310,6 +310,10 @@ class SafeExecutor:
         """Record the active named session for change-journal attribution."""
         normalized = (session or "").strip()
         self._active_session = normalized or "default"
+
+    def set_output_sink(self, sink: Callable[[str], None] | None) -> None:
+        """Watch the output of the shell command about to run; ``None`` stops."""
+        self._terminal.output_sink = sink
 
     def begin_action_transaction(self, run_id: str | None, action_id: str | None) -> None:
         """Bind the write-ahead journal for the action about to execute."""

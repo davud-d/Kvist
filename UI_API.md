@@ -173,6 +173,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number` | the action chosen for a step; `reasoning_seconds` is how long the model spent thinking before it (0 when it did not think) |
 | `action_result` | `step:int, action_type:str, ok:bool, summary:str, output:str, exit_code:int\|null, path:str\|null, first_line:int\|null` | the outcome of one executed action, sent right after it ran (match it to its `step` by `step`). `summary` is one short line ("Wrote 3 lines", "Command exited with code 0", "2 matches"). `output` is the redacted command output (`run_shell`, `git_status`, `git_diff`, `delegate_task`) or the error text of a failed action; it is capped at 4000 characters, keeping the head and the tail with an `[... N characters omitted ...]` marker between them. `exit_code` is set for `run_shell` only (`null` when denied or timed out). `path` and `first_line` are set for `write_file`/`append_file`/`replace_in_file`: `first_line` is the 1-based line of the resulting file where the written text starts (`1` for `write_file`, the first line of the appended text for `append_file`, the first replaced occurrence for `replace_in_file`) so a diff can be numbered; it is `null` for a failed write. Not sent for `final_answer`/`report_to_user`/`refuse`, nor for actions a runtime guard rejected before they ran (repeat, read-only or corrective-action blocks); a web-search/URL budget refusal is sent as `ok:false`. |
+| `action_output` | `step:int, output:str` | live output of a running `run_shell` command, sent while it runs and before its `action_result`. `output` is a **snapshot** of the most recent output (at most 4000 characters, redacted as a whole), not a delta, so replace what you show. Events come at most about every 120 ms, and the last one is never dropped. It is a preview only: the complete, capped output still arrives with the `action_result`, which ends the live output for that `step`. A command that prints nothing sends none. |
 | `route` | `role:str, source:str` | the role the turn actually runs under, sent once per turn before the plan or reply. `role` is `coder`, `reader`, `devops` or `chat`. `source` is `explicit` (the caller passed the role), `direct` / `llm` / `keyword_fallback` / `default` (how the router decided) or `resume` (a bare "continue" after a stopped run inherited that run's role). |
 | `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | the task plan |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
@@ -214,8 +215,13 @@ thinking on a **separate channel** so it never contaminates the answer:
   reasoning models (o-series) do **not** stream the thinking text over
   `chat.completions` — you will get `reasoning_commit` (the elapsed time) but the grey
   block stays empty, which is honest.
-- In the structured coder/devops loop, per-step thinking is reported compactly as
-  `step.reasoning_seconds` rather than a live block.
+- In the structured coder/devops loop the model's thinking for each step is streamed
+  the same way, but as a stream of its own: `reasoning_start` → `reasoning_chunk`* →
+  `reasoning_commit`, all with one `stream_id` that has **no** `stream_start` and no
+  answer. The commit comes when the model starts writing the action, and the `step`
+  event that follows carries `reasoning_seconds: 0` because the time was already
+  reported. A step whose model did not think keeps its `reasoning_seconds` on the `step`
+  event as before.
 
 Inbound request / response:
 

@@ -158,6 +158,7 @@ fail-closed).
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number` | выбранное действие шага; `reasoning_seconds` — сколько модель думала перед ним (0, если не думала) |
 | `action_result` | `step:int, action_type:str, ok:bool, summary:str, output:str, exit_code:int\|null, path:str\|null, first_line:int\|null` | итог одного выполненного действия, отправляется сразу после него (сопоставляйте с шагом по `step`). `summary` — одна короткая строка («Wrote 3 lines», «Command exited with code 0», «2 matches»). `output` — вывод команды после редакции секретов (`run_shell`, `git_status`, `git_diff`, `delegate_task`) или текст ошибки неудачного действия; ограничен 4000 символами: сохраняются начало и конец, между ними маркер `[... N characters omitted ...]`. `exit_code` задан только у `run_shell` (`null`, если команда отклонена или упала по таймауту). `path` и `first_line` заданы для `write_file`/`append_file`/`replace_in_file`: `first_line` — 1-based строка получившегося файла, с которой начинается записанный текст (`1` для `write_file`, первая строка дописанного текста для `append_file`, первое заменённое вхождение для `replace_in_file`), чтобы можно было нумеровать строки диффа; у неудачной записи `null`. Не отправляется для `final_answer`/`report_to_user`/`refuse` и для действий, отклонённых защитой рантайма до выполнения (повтор, read-only, корректирующее действие); отказ по лимиту web_search/URL приходит как `ok:false`. |
+| `action_output` | `step:int, output:str` | живой вывод выполняющейся команды `run_shell`: приходит, пока она работает, и до её `action_result`. `output` — **снапшот** последнего вывода (не больше 4000 символов, редакция секретов применена ко всему целиком), а не дельта, поэтому заменяйте показанное. События идут не чаще раза в ~120 мс, и последнее не теряется. Это только предпросмотр: полный ограниченный вывод по-прежнему приходит в `action_result`, который завершает живой вывод этого `step`. Команда, которая ничего не печатает, не шлёт ничего. |
 | `route` | `role:str, source:str` | роль, под которой фактически идёт ход; отправляется один раз за ход, до плана или ответа. `role` — `coder`, `reader`, `devops` или `chat`. `source` — `explicit` (роль передал вызывающий), `direct` / `llm` / `keyword_fallback` / `default` (как решил роутер) или `resume` (голое «продолжай» после остановленного прогона унаследовало роль того прогона). |
 | `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | план задачи |
 | `sandbox_notice` | `note:str` | одноразовое уведомление о песочнице |
@@ -197,8 +198,12 @@ fail-closed).
   reasoning-модели OpenAI (o-серия) **не** стримят текст раздумий через
   `chat.completions` — придёт `reasoning_commit` (время), но серый блок останется
   пустым, и это честно.
-- В структурном цикле coder/devops раздумья по шагу отдаются компактно через
-  `step.reasoning_seconds`, а не живым блоком.
+- В структурном цикле coder/devops раздумья каждого шага стримятся так же, но отдельным
+  потоком: `reasoning_start` → `reasoning_chunk`* → `reasoning_commit` с одним
+  `stream_id`, у которого **нет** `stream_start` и нет ответа. Commit приходит, когда
+  модель начинает писать действие, а следующее за ним событие `step` несёт
+  `reasoning_seconds: 0`, потому что время уже передано. Шаг, на котором модель не
+  думала, отдаёт `reasoning_seconds` в событии `step`, как раньше.
 
 Входящий запрос / ответ:
 

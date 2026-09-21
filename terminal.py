@@ -619,6 +619,9 @@ class TerminalExecutor:
         approvals: ApprovalGate | None = None,
     ) -> None:
         self._approvals = approvals or TerminalApprovalGate()
+        # Set by the caller around one command to watch its output live; the
+        # captured, bounded result is unaffected.
+        self.output_sink: Callable[[str], None] | None = None
         self.workspace = workspace.resolve()
         self.max_output_chars = max(1000, min(max_output_chars, 200_000))
         self._is_windows = os.name == "nt"
@@ -1089,6 +1092,7 @@ class TerminalExecutor:
                 rlimit_setter=rlimit_setter,
                 is_windows=self._is_windows,
                 use_cgroup=self._cgroup_available,
+                on_output=self.output_sink,
             )
         except FileNotFoundError:
             raise TerminalError(f"Executable not found: {command_snapshot[0]}")

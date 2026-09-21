@@ -325,6 +325,23 @@ class ActionResultEvent:
 
 
 @dataclass(slots=True)
+class ActionOutputEvent:
+    """Live output of a running shell command, before its ``action_result``.
+
+    ``output`` is a rolling snapshot of the most recent output (redacted and
+    capped), not a delta, so a frontend replaces what it shows. The final,
+    complete output still arrives with the ``action_result``.
+    """
+
+    step: int
+    output: str
+    type: ClassVar[str] = "action_output"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "step": self.step, "output": self.output}
+
+
+@dataclass(slots=True)
 class SessionEvent:
     """The session a resumed run continues in (may differ from the hello's)."""
 

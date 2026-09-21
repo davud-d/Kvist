@@ -20,8 +20,6 @@ export interface CoreOptions {
   env?: Record<string, string>
 }
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
-
 // The Python launcher passes the exact interpreter/binary it is running as, so
 // a frozen `kvist` binary and a source checkout both work without guessing.
 export function resolveCoreCommand(env: NodeJS.ProcessEnv = process.env): CoreCommand {
@@ -32,6 +30,7 @@ export function resolveCoreCommand(env: NodeJS.ProcessEnv = process.env): CoreCo
     }
     return { command: parts[0] as string, prefixArgs: parts.slice(1) as string[] }
   }
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
   const venvPython = path.join(repoRoot, ".venv", "bin", "python")
   const python = existsSync(venvPython) ? venvPython : "python3"
   return { command: python, prefixArgs: [path.join(repoRoot, "main.py")] }

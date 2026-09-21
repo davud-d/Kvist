@@ -12,7 +12,7 @@ export type Item =
   | { id: number; kind: "step"; step: number; planStep: string; action: string; target: string; note: string }
   | { id: number; kind: "tool"; step: number; planStep: string; action: string; args: Record<string, unknown>; result: ActionResult }
   | { id: number; kind: "thought"; seconds: number; text: string }
-  | { id: number; kind: "explored"; counts: ExploreCounts }
+  | { id: number; kind: "explored"; counts: ExploreCounts; names: string[] }
   | { id: number; kind: "answer"; text: string; done: boolean }
   | { id: number; kind: "note"; tone: Tone; text: string }
 
@@ -59,6 +59,8 @@ export interface State {
   // printed, so the group lives here and is committed as one item when
   // anything else arrives.
   exploring: ExploreCounts | null
+  // What the group above read or searched, one label per step, for a UI that lists them.
+  exploringNames: string[]
   exploreStep: ExploreStep | null
   inflight: Inflight | null
   running: boolean
@@ -92,6 +94,7 @@ export function initialState(effort = ""): State {
     items: [],
     live: null,
     exploring: null,
+    exploringNames: [],
     exploreStep: null,
     inflight: null,
     running: false,
@@ -147,15 +150,15 @@ function exploreWeight(kind: keyof ExploreCounts, args: Record<string, unknown>)
   return kind === "reads" && Array.isArray(args.paths) && args.paths.length ? args.paths.length : 1
 }
 
-function explore(state: State, kind: keyof ExploreCounts, weight: number): State {
+function explore(state: State, kind: keyof ExploreCounts, weight: number, label: string): State {
   const counts = state.exploring ?? { reads: 0, searches: 0, lists: 0, git: 0 }
-  return { ...state, exploring: { ...counts, [kind]: counts[kind] + weight } }
+  return { ...state, exploring: { ...counts, [kind]: counts[kind] + weight }, exploringNames: [...state.exploringNames, label] }
 }
 
 function flushExploring(state: State): State {
   if (!state.exploring) return state
-  const item: Item = { id: state.nextId, kind: "explored", counts: state.exploring }
-  return { ...state, exploring: null, items: [...state.items, item], nextId: state.nextId + 1 }
+  const item: Item = { id: state.nextId, kind: "explored", counts: state.exploring, names: state.exploringNames }
+  return { ...state, exploring: null, exploringNames: [], items: [...state.items, item], nextId: state.nextId + 1 }
 }
 
 // The step line an action gets when no result ever arrives for it (blocked by
@@ -322,7 +325,7 @@ function onEvent(state: State, event: CoreEvent, now: number): State {
       if (kind) {
         const weight = exploreWeight(kind, args)
         const label = `${event.action_type}  ${actionTarget(args)}`.trim()
-        return { ...explore(next, kind, weight), exploreStep: { step: event.step, kind, weight, label } }
+        return { ...explore(next, kind, weight, label), exploreStep: { step: event.step, kind, weight, label } }
       }
       const inflight: Inflight = { step: event.step, planStep: event.plan_step, action: event.action_type, args, note: event.action_description ?? "" }
       return { ...next, inflight }
@@ -412,6 +415,6 @@ export function reduce(state: State, action: Action): State {
     case "toggle_debug":
       return { ...state, showDebug: !state.showDebug }
     case "clear":
-      return { ...state, items: [], exploring: null, exploreStep: null, inflight: null, epoch: state.epoch + 1 }
+      return { ...state, items: [], exploring: null, exploringNames: [], exploreStep: null, inflight: null, epoch: state.epoch + 1 }
   }
 }

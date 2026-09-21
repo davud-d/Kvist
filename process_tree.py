@@ -19,6 +19,7 @@ Two host problems are solved here:
 """
 from __future__ import annotations
 
+import codecs
 import os
 import signal
 import subprocess
@@ -56,9 +57,18 @@ class ProcessSupervisionError(RuntimeError):
 class _BoundedReader(threading.Thread):
     """Drain a pipe into a fixed-size buffer; keep reading and discard overflow."""
 
-    def __init__(self, stream: Any, limit: int) -> None:
+    def __init__(
+        self,
+        stream: Any,
+        limit: int,
+        on_chunk: Callable[[bytes], None] | None = None,
+    ) -> None:
         super().__init__(daemon=True)
         self._stream = stream
+        self._on_chunk = on_chunk
+        # A failing observer must not stop the drain: the child would block on
+        # a full pipe. It is dropped after its first failure and the error kept.
+        self.observer_error: Exception | None = None
         self._limit = max(0, limit)
         self._chunks: list[bytes] = []
         self._size = 0
@@ -70,6 +80,15 @@ class _BoundedReader(threading.Thread):
         except (AttributeError, OSError, ValueError):
             pass
         self.truncated = False
+
+    def _notify(self, chunk: bytes) -> None:
+        if self._on_chunk is None:
+            return
+        try:
+            self._on_chunk(chunk)
+        except Exception as error:
+            self.observer_error = error
+            self._on_chunk = None
 
     def run(self) -> None:
         try:
@@ -84,6 +103,7 @@ class _BoundedReader(threading.Thread):
                     continue
                 if not chunk:
                     break
+                self._notify(chunk)
                 if self._size < self._limit:
                     room = self._limit - self._size
                     self._chunks.append(chunk[:room])
@@ -305,6 +325,23 @@ def _kill_recorded_descendants(processes: dict[int, int]) -> None:
             pass
 
 
+def _text_observer(
+    on_output: Callable[[str], None] | None,
+) -> Callable[[bytes], None] | None:
+    if on_output is None:
+        return None
+    # Each stream keeps its own decoder so a multi-byte character split across
+    # two reads is not mangled.
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    def observe(chunk: bytes) -> None:
+        text = decoder.decode(chunk)
+        if text:
+            on_output(text)
+
+    return observe
+
+
 def run_supervised(
     argv: list[str],
     *,
@@ -315,8 +352,13 @@ def run_supervised(
     rlimit_setter: Callable[[], None] | None,
     is_windows: bool,
     use_cgroup: bool,
+    on_output: Callable[[str], None] | None = None,
 ) -> SupervisedResult:
-    """Spawn ``argv`` under tree supervision with bounded output capture."""
+    """Spawn ``argv`` under tree supervision with bounded output capture.
+
+    ``on_output`` sees the decoded output as it arrives, from the reader
+    threads (so it must be thread-safe and quick). Capture is unaffected.
+    """
     scope: _CgroupScope | None = None
     if use_cgroup and not is_windows:
         scope = _CgroupScope.create()
@@ -361,8 +403,12 @@ def run_supervised(
             scope.close()
         raise
 
-    stdout_reader = _BoundedReader(proc.stdout, max_capture_bytes)
-    stderr_reader = _BoundedReader(proc.stderr, max_capture_bytes)
+    stdout_reader = _BoundedReader(
+        proc.stdout, max_capture_bytes, _text_observer(on_output)
+    )
+    stderr_reader = _BoundedReader(
+        proc.stderr, max_capture_bytes, _text_observer(on_output)
+    )
     descendant_tracker = (
         _LinuxDescendantTracker(proc.pid)
         if (

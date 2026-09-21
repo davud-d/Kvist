@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import contextlib
+import threading
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from typing import Any
 
 from frontend_protocol import (
+    ActionOutputEvent,
     ActionResultEvent,
     DebugEvent,
     ErrorEvent,
@@ -32,6 +34,9 @@ from frontend_protocol import (
 from redaction import redact_text, redact_value
 
 
+_OUTPUT_TAIL_CHARS = 4000
+
+
 class EventStreamUI:
     """`ui.AgentUI` implementation that serializes agent output onto a channel.
 
@@ -44,12 +49,47 @@ class EventStreamUI:
     def __init__(self, channel: FrontendChannel) -> None:
         self._channel = channel
         self.verbose = False
+        # The action loop streams no answer, so its reasoning has no stream of
+        # its own: one is opened when the first thought arrives and sealed when
+        # the model starts writing the action.
+        self._loop_reasoning: tuple[str, float] | None = None
+        self._loop_reasoning_reported = False
+        # Live command output arrives from the reader threads of a child
+        # process; the rolling tail is emitted at most once per interval.
+        self._output_lock = threading.Lock()
+        self._output_step = -1
+        self._output_tail = ""
+        self._output_last_emit = 0.0
+        self._output_timer: threading.Timer | None = None
+        self.output_interval = 0.12
 
     def start_live(self) -> None:
         self._channel.emit(LiveStartEvent())
 
     def stop_live(self) -> None:
+        self.end_thinking()
         self._channel.emit(LiveStopEvent())
+
+    def set_thinking(self, text: str) -> None:
+        """Cumulative reasoning of the action call in flight ("" = a new call began)."""
+        if not text:
+            self.end_thinking()
+            self._loop_reasoning_reported = False
+            return
+        if self._loop_reasoning is None:
+            self._loop_reasoning = (uuid.uuid4().hex, time.monotonic())
+            self._channel.emit(ReasoningStartEvent(self._loop_reasoning[0]))
+        self._channel.emit(
+            ReasoningChunkEvent(self._loop_reasoning[0], redact_text(text))
+        )
+
+    def end_thinking(self) -> None:
+        if self._loop_reasoning is None:
+            return
+        stream_id, started = self._loop_reasoning
+        self._loop_reasoning = None
+        self._loop_reasoning_reported = True
+        self._channel.emit(ReasoningCommitEvent(stream_id, time.monotonic() - started))
 
     def update_live(
         self,
@@ -85,6 +125,12 @@ class EventStreamUI:
     def print_step_header(
         self, step: int, command: Any, reasoning_seconds: float = 0.0
     ) -> None:
+        self.end_thinking()
+        # The thought already went out as its own reasoning stream: a second
+        # "thought for N seconds" on the step would show it twice.
+        if self._loop_reasoning_reported:
+            reasoning_seconds = 0.0
+            self._loop_reasoning_reported = False
         self._channel.emit(
             StepEvent(
                 step,
@@ -114,7 +160,46 @@ class EventStreamUI:
             )
         )
 
+    def print_action_output(self, step: int, text: str) -> None:
+        """Feed the live output of a running command (called from reader threads)."""
+        with self._output_lock:
+            if step != self._output_step:
+                self._reset_output(step)
+            self._output_tail = (self._output_tail + text)[-_OUTPUT_TAIL_CHARS:]
+            wait = self._output_last_emit + self.output_interval - time.monotonic()
+            if wait <= 0:
+                self._emit_output()
+            elif self._output_timer is None:
+                self._output_timer = threading.Timer(wait, self._flush_output)
+                self._output_timer.daemon = True
+                self._output_timer.start()
+
+    def _flush_output(self) -> None:
+        with self._output_lock:
+            self._output_timer = None
+            # The command finished while the timer was waiting: its result owns the output now.
+            if self._output_step >= 0:
+                self._emit_output()
+
+    def _emit_output(self) -> None:
+        # The whole tail is redacted at once: a secret split across two reads
+        # would slip through if each chunk were redacted alone.
+        self._output_last_emit = time.monotonic()
+        self._channel.emit(
+            ActionOutputEvent(self._output_step, redact_text(self._output_tail))
+        )
+
+    def _reset_output(self, step: int) -> None:
+        if self._output_timer is not None:
+            self._output_timer.cancel()
+            self._output_timer = None
+        self._output_step = step
+        self._output_tail = ""
+        self._output_last_emit = 0.0
+
     def print_action_result(self, result: dict) -> None:
+        with self._output_lock:
+            self._reset_output(-1)
         path = result.get("path")
         self._channel.emit(
             ActionResultEvent(

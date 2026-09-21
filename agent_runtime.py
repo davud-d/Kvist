@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import csv
+import functools
 import io
 import json
 import os
@@ -1099,9 +1100,13 @@ def _execute_action(
             pending_action.get("run_id"), pending_action["action_id"]
         )
         self._save_checkpoint(user_goal, step, pending_action=pending_action)
+    watch_output = getattr(self._ui, "print_action_output", None)
+    if watch_output is not None and command.action.type == "run_shell":
+        self.executor.set_output_sink(functools.partial(watch_output, step))
     try:
         feedback = self._execute_command(command)
     finally:
+        self.executor.set_output_sink(None)
         if pending_action is not None:
             self.executor.end_action_transaction()
     self._register_feedback(step, command, feedback)
