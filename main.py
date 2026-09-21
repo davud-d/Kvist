@@ -181,6 +181,7 @@ from rich.text import Text
 
 import banner
 from agent import AgentConfig, LocalAgent
+from event_stdio import CommandContext, CommandHandler, CommandResult
 from executor import SafeExecutor
 from interactive_screen import InteractiveScreen
 from language_utils import choose_localized_text, detect_request_language
@@ -204,6 +205,7 @@ from llm_clients import (
     OMNIROUTE_PROVIDER,
     OPENROUTER_PROVIDER,
     provider_supports_streaming,
+    SUPPORTED_LLM_PROVIDERS,
     fetch_available_models,
     normalize_provider,
     provider_label,
@@ -2704,6 +2706,658 @@ def configure_manual_provider_models_interactively(
     return None
 
 
+# ── Event-frontend commands (--frontend stdio-multi) ═════════════════════════
+# The same wizards as the classic REPL, run inside the stdio process with the
+# EventStreamUI so every dialog becomes an input_request. A handler reports what
+# changed through CommandResult.effects; it never prints to the frontend.
+
+_ROLE_CHOICES = ("auto", "coder", "reader", "devops", "chat")
+
+
+def _bi(en: str, ru: str) -> str:
+    return f"{en} / {ru}"
+
+
+def _command_cancelled() -> CommandResult:
+    return CommandResult(True, _bi("Cancelled.", "Отменено."), {"cancelled": True})
+
+
+def _save_failure_note(error: RuntimeError) -> str:
+    detail = sanitize_display_text(str(error))
+    return " (" + _bi(f"not saved: {detail}", f"не сохранено: {detail}") + ")"
+
+
+def _stdio_role(ctx: CommandContext) -> CommandResult:
+    if ctx.args:
+        selected = ctx.args[0].casefold()
+        if selected not in _ROLE_CHOICES:
+            return CommandResult(
+                False,
+                _bi(
+                    "Role must be one of: " + ", ".join(_ROLE_CHOICES),
+                    "Роль должна быть одной из: " + ", ".join(_ROLE_CHOICES),
+                ),
+            )
+    else:
+        selected = choose_role(
+            get_saved_role(), ctx.session.agent.config.verbose, ui=ctx.ui
+        )
+    if selected is None:
+        return _command_cancelled()
+    try:
+        save_role_selection(selected)
+    except RuntimeError as error:
+        return CommandResult(
+            False, _bi("Role not saved", "Роль не сохранена") + _save_failure_note(error)
+        )
+    ctx.routed_role = None if selected == "auto" else selected
+    return CommandResult(
+        True,
+        _bi(f"Role set to: {selected}", f"Роль: {selected}"),
+        {"role": selected},
+    )
+
+
+def _stdio_effort(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    if ctx.args:
+        selected = ctx.args[0].casefold()
+        if selected not in EFFORT_LEVELS:
+            return CommandResult(
+                False,
+                _bi(
+                    "Effort must be one of: " + ", ".join(EFFORT_LEVELS),
+                    "Уровень должен быть одним из: " + ", ".join(EFFORT_LEVELS),
+                ),
+            )
+    else:
+        selected = choose_effort(
+            agent.config.reasoning_effort, agent.config.verbose, ui=ctx.ui
+        )
+    if selected is None:
+        return _command_cancelled()
+    selected = normalize_effort(selected)
+    apply_reasoning_effort(agent, agent.config, selected)
+    note = ""
+    try:
+        save_reasoning_effort(selected)
+    except RuntimeError as error:
+        note = _save_failure_note(error)
+    advisory = effort_advisory(agent.config.provider, selected)
+    return CommandResult(
+        True,
+        _bi(f"Reasoning effort set to: {selected}", f"Уровень рассуждений: {selected}")
+        + note,
+        {"effort": selected, "advisory": advisory or ""},
+    )
+
+
+def _stdio_plan(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    enabled = parse_plan_value(
+        "/plan " + " ".join(ctx.args), not agent.config.skip_planning
+    )
+    if enabled is None:
+        return CommandResult(False, _bi("Usage: plan [true|false]", "Использование: plan [true|false]"))
+    apply_plan_mode(agent, enabled)
+    note = ""
+    try:
+        save_planning_enabled(enabled)
+    except RuntimeError as error:
+        note = _save_failure_note(error)
+    return CommandResult(
+        True,
+        (
+            _bi("Planning stage enabled.", "Этап планирования включён.")
+            if enabled
+            else _bi("Planning stage disabled.", "Этап планирования выключен.")
+        )
+        + note,
+        {"plan": enabled},
+    )
+
+
+def _stdio_verbose(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    enabled = parse_verbose_value("/verbose " + " ".join(ctx.args), agent.config.verbose)
+    if enabled is None:
+        return CommandResult(False, _bi("Usage: verbose [true|false]", "Использование: verbose [true|false]"))
+    apply_verbose_mode(agent, enabled)
+    return CommandResult(
+        True,
+        (
+            _bi("Verbose mode enabled.", "Подробный режим включён.")
+            if enabled
+            else _bi("Verbose mode disabled.", "Подробный режим выключен.")
+        ),
+        {"verbose": enabled},
+    )
+
+
+def _stdio_style(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    if len(ctx.args) == 2:
+        chosen: tuple[str, str] | None = (ctx.args[0].casefold(), ctx.args[1])
+    elif ctx.args:
+        return CommandResult(False, _bi("Usage: style [chat|agents NAME]", "Использование: style [chat|agents ИМЯ]"))
+    else:
+        chosen = choose_style(agent.config.verbose, ui=ctx.ui)
+    if chosen is None:
+        return _command_cancelled()
+    style_type, style_name = chosen
+    if style_type not in ("chat", "agents") or not save_style_configuration(style_type, style_name):
+        return CommandResult(False, _bi(f"Unknown style: {style_type} {style_name}", f"Неизвестный стиль: {style_type} {style_name}"))
+    adopted = agent.adopt_session_style(style_type, style_name)
+    message = _bi(f"{style_type.capitalize()} style set to: {style_name}", f"Стиль {style_type}: {style_name}")
+    if not adopted:
+        message += _bi(
+            f". This session keeps {agent.session_style(style_type)}; the new style starts with the next session.",
+            f". Эта сессия сохраняет {agent.session_style(style_type)}; новый стиль начнётся со следующей сессии.",
+        )
+    return CommandResult(
+        True,
+        message,
+        {"style": {"type": style_type, "name": style_name, "applied_to_session": adopted}},
+    )
+
+
+def _session_effects(agent) -> dict:
+    return {
+        "session": agent.current_session,
+        "sessions": agent._list_sessions(),
+        "has_checkpoint": agent._peek_checkpoint() is not None,
+    }
+
+
+def _stdio_session_op(agent, args: list[str]) -> str:
+    """Apply ``switch|new|delete [NAME]`` and return the confirmation text."""
+    op, name = args[0].casefold(), (args[1].strip().lower() if len(args) > 1 else None)
+    if op == "new":
+        created = agent.new_session(name)
+        return _bi(f"Session {created} created.", f"Сессия {created} создана.")
+    if name is None or op not in ("switch", "delete"):
+        raise ValueError(_bi("Usage: session [switch|new|delete] [NAME]", "Использование: session [switch|new|delete] [ИМЯ]"))
+    if op == "switch":
+        agent.switch_session(name)
+        return _bi(f"Switched to session {name}.", f"Переключено на сессию {name}.")
+    if not agent._delete_session(name):
+        raise ValueError(_bi(f"Unknown session: {name!r}", f"Неизвестная сессия: {name!r}"))
+    return _bi(f"Session {name} deleted.", f"Сессия {name} удалена.")
+
+
+def _stdio_session(ctx: CommandContext) -> CommandResult:
+    from durable_json import JsonStorageError
+
+    agent = ctx.session.agent
+    before = agent.current_session
+    try:
+        if ctx.args:
+            message = _stdio_session_op(agent, ctx.args)
+        elif choose_session(agent, agent.config.verbose, ui=ctx.ui) is None:
+            return _command_cancelled()
+        else:
+            message = _bi(f"Active session: {agent.current_session}", f"Активная сессия: {agent.current_session}")
+    except (JsonStorageError, OSError, ValueError) as error:
+        return CommandResult(False, sanitize_display_text(str(error).strip() or type(error).__name__))
+    effects = _session_effects(agent)
+    effects["changed"] = agent.current_session != before
+    return CommandResult(True, message, effects)
+
+
+def _stdio_new(ctx: CommandContext) -> CommandResult:
+    ctx.args = ["new", *ctx.args[:1]]
+    return _stdio_session(ctx)
+
+
+def _provider_offers_model_list(provider: str) -> bool:
+    return bool(
+        provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
+        or provider in MANUAL_OPENAI_PROVIDERS
+        or is_custom_provider(provider)
+        or get_model_options(provider)
+    )
+
+
+def _stdio_models(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    config = agent.config
+    if not _provider_offers_model_list(config.provider):
+        return CommandResult(
+            False,
+            _bi(
+                f"No models available for {provider_label(config.provider)}.",
+                f"Для {provider_label(config.provider)} нет доступных моделей.",
+            ),
+        )
+    if len(ctx.args) == len(MODEL_ROLES):
+        selected = dict(zip(MODEL_ROLES, ctx.args))
+    elif ctx.args:
+        return CommandResult(False, _bi("Usage: models [FAST SMART PLANNER]", "Использование: models [FAST SMART PLANNER]"))
+    else:
+        selected = select_models_interactively(config, config.verbose, ui=ctx.ui)
+    if selected is None:
+        return _command_cancelled()
+
+    credentials = load_available_credentials(
+        (OPENAI_API_KEY_KEY, "gemini_api_key", "groq_api_key", "omniroute_api_key", "openrouter_api_key")
+    )
+    issues = validate_model_selection(config.provider, selected, credentials)
+    if issues:
+        return CommandResult(False, "\n".join(sanitize_display_text(issue) for issue in issues))
+    try:
+        new_agent, new_config, warnings = ctx.rebuild(
+            provider_override=config.provider, models_override=selected
+        )
+    except RuntimeError as error:
+        return CommandResult(False, sanitize_display_text(str(error)))
+    ctx.session.replace_agent(new_agent)
+
+    note = ""
+    try:
+        if is_custom_provider(new_config.provider):
+            name = extract_custom_provider_name(new_config.provider)
+            info = get_custom_provider_by_name(name) or {}
+            info["models"] = selected
+            save_custom_provider(name, info)
+        else:
+            save_models_for_provider(new_config.provider, selected)
+    except RuntimeError as error:
+        note = _save_failure_note(error)
+    return CommandResult(
+        True,
+        _bi("Models updated.", "Модели обновлены.") + note,
+        {
+            "provider": new_config.provider,
+            "models": {
+                "fast": new_config.fast_model,
+                "smart": new_config.smart_model,
+                "planner": new_config.planner_model,
+            },
+            "warnings": warnings,
+        },
+    )
+
+
+def _stdio_changes(ctx: CommandContext) -> CommandResult:
+    from change_journal import JournalUnavailableError, build_diff_report
+
+    try:
+        report = build_diff_report(ctx.session.agent.executor.workspace)
+    except JournalUnavailableError as error:
+        return CommandResult(False, sanitize_display_text(str(error)))
+    return CommandResult(True, report)
+
+
+def _adopt_rebuilt_agent(ctx: CommandContext, **rebuild_kwargs) -> tuple[AgentConfig, list[str]]:
+    """Rebuild through the event stream, so a missing secret becomes a dialog."""
+    new_agent, new_config, warnings = ctx.rebuild(interactive=True, **rebuild_kwargs)
+    ctx.session.replace_agent(new_agent)
+    sync_strime_suggestion(new_config.provider, new_config.stream)
+    return new_config, warnings
+
+
+def _provider_effects(config: AgentConfig, warnings: list[str]) -> dict:
+    return {
+        "provider": config.provider,
+        "models": {
+            "fast": config.fast_model,
+            "smart": config.smart_model,
+            "planner": config.planner_model,
+        },
+        "warnings": warnings,
+    }
+
+
+def _failure_detail(error: Exception) -> str:
+    return sanitize_display_text(str(error).strip() or type(error).__name__)
+
+
+def _known_provider(raw: str) -> str | None:
+    candidate = raw.strip().lower()
+    if candidate in SUPPORTED_LLM_PROVIDERS:
+        return candidate
+    if is_custom_provider(candidate) and get_custom_provider_by_name(
+        extract_custom_provider_name(candidate)
+    ):
+        return candidate
+    return None
+
+
+def _stdio_provider(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    previous = agent.config.provider
+    if ctx.args:
+        selected = _known_provider(ctx.args[0])
+        if selected is None:
+            return CommandResult(
+                False,
+                _bi(f"Unknown provider: {ctx.args[0]}", f"Неизвестный провайдер: {ctx.args[0]}"),
+            )
+    else:
+        selected = choose_provider(previous, agent.config.verbose, ui=ctx.ui)
+    if selected is None:
+        return _command_cancelled()
+    if selected == previous:
+        return CommandResult(
+            True,
+            _bi("Provider unchanged.", "Провайдер не изменён."),
+            {"provider": previous, "changed": False},
+        )
+    try:
+        config, warnings = _adopt_rebuilt_agent(ctx, provider_override=selected)
+    except (RuntimeError, ValueError, OSError) as error:
+        return CommandResult(False, _failure_detail(error))
+    return CommandResult(
+        True,
+        _bi(
+            f"Provider changed to {provider_label(config.provider)}.",
+            f"Провайдер: {provider_label(config.provider)}.",
+        ),
+        {**_provider_effects(config, warnings), "changed": True},
+    )
+
+
+def _stdio_change_api(ctx: CommandContext) -> CommandResult:
+    config = ctx.session.agent.config
+    try:
+        changed = change_provider_api_key(config, config.verbose, ui=ctx.ui)
+    except RuntimeError as error:
+        return CommandResult(
+            False, _bi("API key not saved", "Ключ не сохранён") + _save_failure_note(error)
+        )
+    if not changed:
+        return _command_cancelled()
+    try:
+        new_config, warnings = _adopt_rebuilt_agent(ctx, provider_override=config.provider)
+    except (RuntimeError, ValueError, OSError) as error:
+        detail = _failure_detail(error)
+        return CommandResult(
+            False,
+            _bi(
+                f"The key was saved, but applying it failed: {detail}",
+                f"Ключ сохранён, но применить его не удалось: {detail}",
+            ),
+            {"key_saved": True, "restart_required": True},
+        )
+    label = provider_label(new_config.provider)
+    return CommandResult(
+        True,
+        _bi(f"API key updated for {label}.", f"API-ключ для {label} обновлён."),
+        {**_provider_effects(new_config, warnings), "key_saved": True},
+    )
+
+
+def _stdio_del_provider(ctx: CommandContext) -> CommandResult:
+    config = ctx.session.agent.config
+    if not is_custom_provider(config.provider):
+        return CommandResult(
+            False,
+            _bi(
+                "del-provider works only for a custom provider.",
+                "del-provider работает только для кастомного провайдера.",
+            ),
+        )
+    name = extract_custom_provider_name(config.provider)
+    label = provider_label(config.provider)
+    confirmed = ctx.ui.confirm(
+        f"Delete custom provider '{label}'? / Удалить кастомный провайдер '{label}'?",
+        _bi("This cannot be undone.", "Отменить нельзя."),
+    )
+    if not confirmed:
+        return _command_cancelled()
+    if not delete_custom_provider(name):
+        return CommandResult(
+            False,
+            _bi(f"Custom provider '{name}' was already gone.", f"Кастомный провайдер '{name}' уже удалён."),
+        )
+    clear_saved_provider()
+    try:
+        new_config, warnings = _adopt_rebuilt_agent(ctx)
+    except (RuntimeError, ValueError, OSError) as error:
+        detail = _failure_detail(error)
+        return CommandResult(
+            False,
+            _bi(
+                f"Provider deleted, but selecting a replacement failed: {detail}. "
+                "Restart Kvist or run provider.",
+                f"Провайдер удалён, но выбрать замену не удалось: {detail}. "
+                "Перезапустите Kvist или выполните provider.",
+            ),
+            {"deleted": name, "restart_required": True},
+        )
+    new_label = provider_label(new_config.provider)
+    return CommandResult(
+        True,
+        _bi(
+            f"Custom provider '{name}' deleted. Now using {new_label}.",
+            f"Кастомный провайдер '{name}' удалён. Сейчас: {new_label}.",
+        ),
+        {**_provider_effects(new_config, warnings), "deleted": name},
+    )
+
+
+def _stdio_full_reset(ctx: CommandContext) -> CommandResult:
+    # Two explicit yeses instead of the classic mouse checkbox, which needs a
+    # fullscreen terminal. Any other answer, including EOF, leaves the config alone.
+    warning = _bi(
+        "This wipes ~/.kvist/config.json entirely: every saved API key, custom "
+        "provider, model selection and preference. It cannot be undone.",
+        "Это полностью очистит ~/.kvist/config.json: все сохранённые API-ключи, "
+        "кастомные провайдеры, выбор моделей и настройки. Отменить нельзя.",
+    )
+    if not ctx.ui.confirm(
+        "Continue toward a full provider/config reset? / Продолжить полный сброс?",
+        warning,
+    ):
+        return _command_cancelled()
+    if not ctx.ui.confirm(
+        "Final confirmation: wipe all provider settings now? / "
+        "Последнее подтверждение: стереть все настройки провайдеров сейчас?",
+        warning,
+    ):
+        return _command_cancelled()
+    try:
+        reset_user_config()
+    except RuntimeError as error:
+        return CommandResult(
+            False, _bi("Config was not wiped", "Конфиг не очищен") + _save_failure_note(error)
+        )
+    ctx.routed_role = None
+    try:
+        config, warnings = _adopt_rebuilt_agent(ctx)
+    except (RuntimeError, ValueError, OSError) as error:
+        detail = _failure_detail(error)
+        return CommandResult(
+            False,
+            _bi(
+                f"Config wiped, but no provider was configured: {detail}. "
+                "Restart Kvist or run provider.",
+                f"Конфиг очищен, но провайдер не настроен: {detail}. "
+                "Перезапустите Kvist или выполните provider.",
+            ),
+            {"reset": True, "restart_required": True},
+        )
+    label = provider_label(config.provider)
+    return CommandResult(
+        True,
+        _bi(
+            f"Full reset complete. Now using {label}.",
+            f"Полный сброс выполнен. Сейчас: {label}.",
+        ),
+        {**_provider_effects(config, warnings), "reset": True},
+    )
+
+
+def _stdio_settings_api(ctx: CommandContext) -> CommandResult:
+    config = ctx.session.agent.config
+    try:
+        changed = configure_api_settings(config, config.verbose, ui=ctx.ui)
+    except RuntimeError as error:
+        return CommandResult(
+            False,
+            _bi("API settings not saved", "Настройки API не сохранены") + _save_failure_note(error),
+        )
+    if not changed:
+        return CommandResult(
+            True,
+            _bi("API settings unchanged.", "Настройки API не изменены."),
+            {"changed_keys": []},
+        )
+    saved = load_api_settings()
+    lines = [
+        f"{setting.label}: {format_value(setting, saved[setting.key])}"
+        for setting in API_SETTINGS
+        if setting.key in changed
+    ]
+    restart_required = not changed <= _LIVE_API_SETTING_KEYS
+    if restart_required:
+        lines.append(
+            _bi(
+                "Dynamic model loading applies at the next launch.",
+                "Динамическая загрузка моделей применится при следующем запуске.",
+            )
+        )
+    return CommandResult(
+        True,
+        "\n".join(lines),
+        {
+            "changed_keys": sorted(changed),
+            "values": {key: saved[key] for key in sorted(changed)},
+            "restart_required": restart_required,
+        },
+    )
+
+
+def _stdio_strime(ctx: CommandContext) -> CommandResult:
+    agent = ctx.session.agent
+    if not is_custom_provider(agent.config.provider):
+        return CommandResult(
+            False,
+            _bi(
+                "strime is available only for custom providers.",
+                "strime доступна только для кастомных провайдеров.",
+            ),
+        )
+    enabled = parse_strime_value("/strime " + " ".join(ctx.args), agent.config.stream)
+    if enabled is None:
+        return CommandResult(False, _bi("Usage: strime [true|false]", "Использование: strime [true|false]"))
+    try:
+        applied = apply_strime_mode(agent, enabled)
+    except RuntimeError as error:
+        return CommandResult(
+            False, _bi("Streaming mode not saved", "Режим стриминга не сохранён") + _save_failure_note(error)
+        )
+    if not applied:
+        return CommandResult(
+            False,
+            _bi(
+                "The active custom provider could not be updated.",
+                "Не удалось обновить активный кастомный провайдер.",
+            ),
+        )
+    return CommandResult(
+        True,
+        (
+            _bi("Streaming mode enabled.", "Стриминг включён.")
+            if enabled
+            else _bi("Streaming mode disabled.", "Стриминг выключен.")
+        ),
+        {"stream": enabled},
+    )
+
+
+_REVERT_LISTED_FILES = 50
+
+
+def _revert_confirmation_body(baseline: dict) -> str:
+    paths = sorted(baseline)
+    lines = [sanitize_display_text(path) for path in paths[:_REVERT_LISTED_FILES]]
+    if len(paths) > _REVERT_LISTED_FILES:
+        lines.append(f"... +{len(paths) - _REVERT_LISTED_FILES}")
+    summary = _bi(
+        f"This restores {len(paths)} file(s) tracked by the workspace change journal "
+        "(all sessions) to their state before the agent's first change and cannot be "
+        "undone. Files changed outside the agent's writes are kept.",
+        f"Будет восстановлено файлов: {len(paths)} (журнал изменений рабочей папки, все "
+        "сессии) — до первого изменения агентом; отменить нельзя. Файлы, изменённые "
+        "вне записей агента, сохраняются.",
+    )
+    return summary + "\n\n" + "\n".join(lines)
+
+
+def _stdio_revert(ctx: CommandContext) -> CommandResult:
+    from change_journal import JournalUnavailableError, load_baseline, revert_workspace
+
+    workspace = ctx.session.agent.executor.workspace
+    try:
+        baseline = load_baseline(workspace)
+    except JournalUnavailableError:
+        return CommandResult(
+            False,
+            _bi(
+                "The change journal is corrupt; revert is unavailable until it is reset "
+                "(remove .kvist/change_journal.json). No files were touched.",
+                "Журнал изменений повреждён; revert недоступен, пока его не сбросить "
+                "(удалите .kvist/change_journal.json). Файлы не тронуты.",
+            ),
+        )
+    if not baseline:
+        return CommandResult(
+            True,
+            _bi("Nothing to revert: no tracked changes.", "Откатывать нечего: нет отслеживаемых изменений."),
+            {"reverted": []},
+        )
+    confirmed = ctx.ui.confirm(
+        f"Revert {len(baseline)} agent-changed file(s) to their baselines? / "
+        f"Откатить файлов, изменённых агентом: {len(baseline)}?",
+        _revert_confirmation_body(baseline),
+    )
+    if not confirmed:
+        return _command_cancelled()
+    try:
+        reverted = revert_workspace(workspace)
+    except (JournalUnavailableError, OSError) as error:
+        return CommandResult(False, _failure_detail(error))
+    applied = [item for item in reverted if item.action != "skipped"]
+    skipped = [item for item in reverted if item.action == "skipped"]
+    message = _bi(f"Reverted {len(applied)} file(s).", f"Откачено файлов: {len(applied)}.")
+    if skipped:
+        message += "\n" + _bi(
+            f"Kept {len(skipped)} file(s) that changed outside the agent's tracked writes.",
+            f"Оставлено файлов, изменённых вне записей агента: {len(skipped)}.",
+        )
+    return CommandResult(
+        True,
+        message,
+        {
+            "reverted": [
+                {"path": item.path, "action": item.action, "reason": item.reason}
+                for item in reverted
+            ]
+        },
+    )
+
+
+STDIO_COMMANDS: dict[str, CommandHandler] = {
+    "role": _stdio_role,
+    "effort": _stdio_effort,
+    "plan": _stdio_plan,
+    "verbose": _stdio_verbose,
+    "style": _stdio_style,
+    "session": _stdio_session,
+    "new": _stdio_new,
+    "models": _stdio_models,
+    "changes": _stdio_changes,
+    "provider": _stdio_provider,
+    "change-api": _stdio_change_api,
+    "del-provider": _stdio_del_provider,
+    "full-reset": _stdio_full_reset,
+    "settings-api": _stdio_settings_api,
+    "strime": _stdio_strime,
+    "revert": _stdio_revert,
+}
+
+
 def main() -> None:
     args = (
         _DIRECT_CLI_ARGS
@@ -2836,6 +3490,8 @@ def main() -> None:
                 models_override=models_override,
                 routed_role=None if args.role == "auto" else args.role,
                 approval_mode=args.approval_mode,
+                commands=STDIO_COMMANDS,
+                skip_planning=not resolve_planning_enabled(),
             )
         except RuntimeError as error:
             print(sanitize_display_text(str(error)), file=sys.stderr)
