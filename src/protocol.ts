@@ -1,0 +1,62 @@
+// Event shapes from UI_API.md §7. Only the fields the UI reads are typed;
+// unknown event types are ignored by the reducer (forward compatibility).
+
+export const PROTOCOL_VERSION = 1
+
+export interface InputOption {
+  value: string
+  label: string
+  description?: string
+}
+
+// What an approval is about; older cores omit it (UI_API.md §7, input_request).
+export interface ApprovalSubject {
+  kind: string
+  command?: string
+  reason?: string
+  path?: string
+  diff?: string
+}
+
+export type InputKind = "choice" | "text" | "secret" | "confirm"
+
+export interface InputRequest {
+  request_id: string
+  kind: InputKind
+  title: string
+  body: string
+  options: InputOption[] | null
+  current_value: string
+  help_text: string
+  subject?: ApprovalSubject | null
+  remember_pattern?: string | null
+}
+
+export type CoreEvent =
+  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean }
+  | { type: "live_start" }
+  | { type: "live_stop" }
+  | { type: "status"; user_message: string; status: string; step: number; progress: number; plan_step: string; is_error: boolean }
+  | { type: "step"; step: number; plan_step: string; thought: string; user_message: string; action_type: string; action_args: Record<string, unknown>; reasoning_seconds: number; action_description?: string }
+  | { type: "action_result"; step: number; action_type: string; ok: boolean; summary: string; output: string; exit_code: number | null; path: string | null; first_line: number | null }
+  | { type: "plan"; goal: string; complexity: string; plan: string[]; success_criteria: string[]; risks: string[] }
+  | { type: "route"; role: string; source?: string }
+  | { type: "sandbox_notice"; note: string }
+  | { type: "stream_start"; stream_id: string }
+  | { type: "stream_chunk"; stream_id: string; text: string }
+  | { type: "stream_commit"; stream_id: string; text: string }
+  | { type: "reasoning_start"; stream_id: string }
+  | { type: "reasoning_chunk"; stream_id: string; text: string }
+  | { type: "reasoning_commit"; stream_id: string; duration_seconds: number }
+  | { type: "message"; markdown: string }
+  | { type: "final"; message: string; user_messages: string[] }
+  | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number; context_limit: number; model: string; kind: string; step: number }
+  | { type: "debug"; message: string }
+  | { type: "error"; message: string }
+  | ({ type: "input_request" } & InputRequest)
+  | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
+  | { type: "turn_end" }
+
+export type Reply =
+  | { request_id: string; approved: boolean; remember?: true }
+  | { request_id: string; value: string | null }
