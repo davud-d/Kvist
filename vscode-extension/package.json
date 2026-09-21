@@ -1,7 +1,7 @@
 {
   "name": "kvist",
   "displayName": "Kvist",
-  "description": "Launch Kvist coding agent in VS Code terminal and generate commit messages",
+  "description": "Kvist coding agent as a chat panel in the VS Code secondary side bar, plus commit message generation",
   "version": "0.1.0",
   "publisher": "kvist",
   "repository": {
@@ -9,7 +9,7 @@
     "url": "https://github.com/davud-d/Kvist.git"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.106.0"
   },
   "categories": [
     "Other"
@@ -20,13 +20,51 @@
     "terminal",
     "commit-message"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onView:kvist.chat"
+  ],
   "main": "out/extension.js",
   "contributes": {
+    "viewsContainers": {
+      "secondarySidebar": [
+        {
+          "id": "kvist-sidebar",
+          "title": "Kvist",
+          "icon": "resources/kvist.svg"
+        }
+      ]
+    },
+    "views": {
+      "kvist-sidebar": [
+        {
+          "type": "webview",
+          "id": "kvist.chat",
+          "name": "Kvist"
+        }
+      ]
+    },
     "commands": [
       {
+        "command": "kvist.focus",
+        "title": "Open Kvist Chat",
+        "category": "Kvist",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "kvist.newSession",
+        "title": "New Kvist Session",
+        "category": "Kvist",
+        "icon": "$(add)"
+      },
+      {
+        "command": "kvist.settings",
+        "title": "Kvist Settings",
+        "category": "Kvist",
+        "icon": "$(gear)"
+      },
+      {
         "command": "kvist.launch",
-        "title": "Launch Kvist",
+        "title": "Open Kvist in Terminal",
         "category": "Kvist",
         "icon": "$(terminal)"
       },
@@ -40,9 +78,6 @@
     "menus": {
       "commandPalette": [
         {
-          "command": "kvist.launch"
-        },
-        {
           "command": "kvist.generateCommitMessage",
           "when": "scmProvider == git"
         }
@@ -53,24 +88,62 @@
           "group": "navigation",
           "when": "scmProvider == git"
         }
+      ],
+      "view/title": [
+        {
+          "command": "kvist.newSession",
+          "group": "navigation@1",
+          "when": "view == kvist.chat"
+        },
+        {
+          "command": "kvist.settings",
+          "group": "navigation@2",
+          "when": "view == kvist.chat"
+        }
       ]
+    },
+    "configuration": {
+      "title": "Kvist",
+      "properties": {
+        "kvist.binaryPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the Kvist executable. Leave empty to use the binary bundled with the extension."
+        },
+        "kvist.environment": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "Environment variables for the Kvist core, applied on top of VS Code's own. For example `AGENT_SANDBOX_MODE` (`auto`, `workspace` or `bubblewrap`) and `AGENT_SANDBOX_NET` (`allow` or `deny`). Changes apply when the core restarts. Values are stored in plain text, so keep API keys in the provider settings instead."
+        }
+      }
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile",
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc -p . --noEmit && tsc -p webview --noEmit",
+    "test": "tsx --test webview/*.test.ts src/*.test.ts",
     "lint": "eslint src --ext ts",
     "package": "vsce package --no-dependencies --skip-license"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^18.19.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.138.0",
     "@typescript-eslint/eslint-plugin": "^6.13.0",
     "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.28.2",
     "eslint": "^8.54.0",
-    "typescript": "^5.3.3",
-    "@vscode/vsce": "^2.22.0"
+    "tsx": "^4.23.15",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "markdown-it": "^15.0.2",
+    "preact": "^10.29.8"
   }
 }

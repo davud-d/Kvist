@@ -25,6 +25,11 @@ export class BinaryResolver {
     }
 
     resolveBinaryPath(): string | null {
+        const configured = vscode.workspace.getConfiguration('kvist').get<string>('binaryPath', '').trim();
+        if (configured) {
+            return fs.existsSync(configured) ? configured : null;
+        }
+
         const os = this.getCurrentOs();
         if (!os) {
             return null;

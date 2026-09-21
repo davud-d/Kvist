@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "types": [],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "./**/*",
+    "../../src/state.ts",
+    "../../src/commands.ts",
+    "../../src/protocol.ts",
+    "../../src/format.ts",
+    "../../src/diff.ts"
+  ],
+  "exclude": [
+    "./**/*.test.ts"
+  ]
+}
