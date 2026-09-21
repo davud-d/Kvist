@@ -375,10 +375,12 @@ class InputRequestEvent:
     options: list[dict] | None = None
     current_value: str = ""
     help_text: str = ""
+    subject: dict | None = None  # {kind: "command", command, reason} or {kind: "overwrite", path, diff}
+    remember_pattern: str | None = None  # non-null = user may choose "don't ask again for this pattern"
     type: ClassVar[str] = "input_request"
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "type": self.type,
             "request_id": self.request_id,
             "kind": self.kind,
@@ -388,6 +390,11 @@ class InputRequestEvent:
             "current_value": self.current_value,
             "help_text": self.help_text,
         }
+        if self.subject is not None:
+            payload["subject"] = self.subject
+        if self.remember_pattern is not None:
+            payload["remember_pattern"] = self.remember_pattern
+        return payload
 
 
 # --- Inbound response --------------------------------------------------------
@@ -398,6 +405,7 @@ class InputResponse:
     request_id: str
     value: str | None = None
     approved: bool | None = None
+    remember: bool = False  # true = save this approval pattern to project permissions
 
     @classmethod
     def from_dict(cls, d: dict) -> InputResponse:
@@ -405,6 +413,7 @@ class InputResponse:
             request_id=d.get("request_id", ""),
             value=d.get("value"),
             approved=d.get("approved"),
+            remember=d.get("remember", False),
         )
 
 
@@ -470,6 +479,8 @@ class FrontendChannel:
         options: list[dict] | None = None,
         current_value: str = "",
         help_text: str = "",
+        subject: dict | None = None,
+        remember_pattern: str | None = None,
     ) -> InputResponse:
         request_id = uuid.uuid4().hex
         waiter = _Waiter(event=threading.Event())
@@ -487,6 +498,8 @@ class FrontendChannel:
                 options=options,
                 current_value=current_value,
                 help_text=help_text,
+                subject=subject,
+                remember_pattern=remember_pattern,
             )
         )
 
