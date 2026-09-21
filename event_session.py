@@ -10,8 +10,10 @@ fail-closed when the channel is closed.
 """
 from __future__ import annotations
 
+import shlex
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
 from frontend_protocol import ErrorEvent, FrontendChannel
 
@@ -19,27 +21,77 @@ from frontend_protocol import ErrorEvent, FrontendChannel
 class EventApprovalGate:
     """`approvals.ApprovalGate` that confirms via a `FrontendChannel` request."""
 
-    def __init__(self, channel: FrontendChannel, mode: str = "ask") -> None:
+    def __init__(self, channel: FrontendChannel, mode: str = "ask", workspace: str | Path | None = None) -> None:
         if mode not in {"ask", "deny"}:
             raise ValueError("Approval mode must be 'ask' or 'deny'.")
         self._channel = channel
         self._mode = mode
+        self._workspace = Path(workspace) if workspace else None
 
     def confirm_command(self, command: list[str], reason: str) -> bool:
         if self._mode == "deny":
             return False
+        # Shell-join for display; the pattern for "don't ask again" is the exact
+        # argv joined with spaces (not shell-escaped), which is what the policy
+        # layer matches.
+        command_str = shlex.join(command)
+        pattern = " ".join(command)
+        # Intrinsic DANGEROUS commands must never be saved; the remember option
+        # is shown only when the pattern is eligible.
+        from command_policy import RiskLevel, assess_command
+        assessment = assess_command(command, role="coder")
+        remember_pattern = None if assessment.risk == RiskLevel.DANGEROUS else pattern
+
         response = self._channel.request(
             "confirm",
             "Dangerous command",
-            body=f"argv: {command}\nReason: {reason}",
+            body="",
+            subject={"kind": "command", "command": command_str, "reason": reason},
+            remember_pattern=remember_pattern,
         )
+        if response.approved and response.remember and remember_pattern and self._workspace:
+            self._save_allow_pattern(remember_pattern)
         return bool(response.approved)
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         _ = question
         if self._mode == "deny":
             return False
-        return bool(self._channel.request("confirm", title, body=body).approved)
+        # File overwrites: diff is in body, but we want it structured for the UI.
+        # The diff preview starts after "overwrite <path>:\n\n" and is already unified.
+        subject = None
+        if "overwrite" in title.lower() and "\n\n" in body:
+            parts = body.split("\n\n", 1)
+            if parts[0].startswith("The agent wants to overwrite "):
+                path = parts[0].split("overwrite ", 1)[1].rstrip(":")
+                diff = parts[1] if len(parts) > 1 else ""
+                subject = {"kind": "overwrite", "path": path, "diff": diff}
+        response = self._channel.request(
+            "confirm",
+            title,
+            body=body if not subject else "",
+            subject=subject,
+            remember_pattern=None,  # File overwrites are never saved
+        )
+        return bool(response.approved)
+
+    def _save_allow_pattern(self, pattern: str) -> None:
+        """Append the pattern to project allow rules."""
+        if not self._workspace:
+            return
+        from permission_policy import POLICY_RELATIVE_PATH, load_policy, store_policy
+        try:
+            policy = load_policy(self._workspace)
+            if pattern not in policy.allow:
+                updated = policy.__class__(
+                    allow=policy.allow + (pattern,),
+                    deny=policy.deny,
+                    ask=policy.ask,
+                )
+                store_policy(self._workspace, updated)
+        except Exception:
+            # Saving the rule is best-effort; approval went through regardless.
+            pass
 
 
 class EventSession:
