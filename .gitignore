@@ -17,6 +17,8 @@ venv/
 .eggs/
 *.egg-info/
 dist/
+# Ink terminal UI build output (dist/ is PyInstaller's)
+dist-ui/
 build/
 
 # Kvist project state

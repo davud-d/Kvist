@@ -49,6 +49,8 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -m offline_smoke             # fast credential-free smoke subset
 RUN_LIVE_LLM_TESTS=1 .venv/bin/python -m pytest -m live_llm
 .venv/bin/python -m ruff check .                        # static runtime-error lint
+npm install && npm run build                            # Ink terminal UI -> dist-ui/kvist-tui.mjs (one file)
+npm test && npm run typecheck                           # Ink UI tests and types
 
 .venv/bin/python -m PyInstaller kvist.spec  # build the `kvist` binary (bundles prompts/)
 

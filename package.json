@@ -1,0 +1,29 @@
+{
+  "name": "kvist-tui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Terminal frontend for Kvist: an Ink app that drives the core over the stdio-multi NDJSON protocol",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.tsx --bundle --platform=node --format=esm --target=node22 --alias:react-devtools-core=./src/vendor/react-devtools-core.js --banner:js=\"import { createRequire as __kvistRequire } from 'node:module'; const require = __kvistRequire(import.meta.url);\" --outfile=dist-ui/kvist-tui.mjs",
+    "dev": "tsx src/cli.tsx",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "tsx --test tests/*.test.ts tests/*.test.tsx"
+  },
+  "dependencies": {
+    "ink": "^7.1.1",
+    "react": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "@types/react": "^19.3.0",
+    "esbuild": "^0.28.2",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
