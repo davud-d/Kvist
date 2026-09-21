@@ -240,6 +240,11 @@ class EventStreamUI:
         _ = current_value
         return self._channel.request("secret", title, help_text=help_text).value
 
+    def confirm(self, title: str, body: str = "") -> bool:
+        """Yes/no gate for a destructive step; anything but an explicit yes is no."""
+        response = self._channel.request("confirm", title, body=redact_text(body))
+        return response.approved is True
+
 
 def _normalize_option(option: str | dict[str, str]) -> dict[str, str]:
     if isinstance(option, dict):
