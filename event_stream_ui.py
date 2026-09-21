@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 from frontend_protocol import (
+    ActionResultEvent,
     DebugEvent,
     ErrorEvent,
     FinalEvent,
@@ -19,6 +20,7 @@ from frontend_protocol import (
     ReasoningChunkEvent,
     ReasoningCommitEvent,
     ReasoningStartEvent,
+    RouteEvent,
     SandboxNoticeEvent,
     StatusEvent,
     StepEvent,
@@ -111,6 +113,24 @@ class EventStreamUI:
                 context_limit=max(0, int(usage.get("context_limit", 0))),
             )
         )
+
+    def print_action_result(self, result: dict) -> None:
+        path = result.get("path")
+        self._channel.emit(
+            ActionResultEvent(
+                step=max(0, int(result.get("step", 0))),
+                action_type=str(result.get("action_type", "")),
+                ok=bool(result.get("ok")),
+                summary=redact_text(str(result.get("summary", ""))),
+                output=redact_text(str(result.get("output", ""))),
+                exit_code=result.get("exit_code"),
+                path=None if path is None else redact_text(str(path)),
+                first_line=result.get("first_line"),
+            )
+        )
+
+    def print_route(self, role: str, source: str) -> None:
+        self._channel.emit(RouteEvent(str(role), str(source)))
 
     @contextlib.contextmanager
     def live_markdown(self) -> Iterator[Callable[[str], None]]:

@@ -77,6 +77,12 @@ class AgentUI(Protocol):
     # (``input_tokens``/``output_tokens`` ints, plus ``model``, ``kind``,
     # ``step``). Implementations without a metrics surface simply omit it.
 
+    # Optional capabilities, probed the same way: ``print_action_result(result:
+    # dict)`` receives the outcome of each executed action (``step``,
+    # ``action_type``, ``ok``, ``summary``, ``output``, ``exit_code``, ``path``,
+    # ``first_line``), and ``print_route(role: str, source: str)`` receives the
+    # role a turn runs under, once per turn. The classic terminal omits both.
+
     def render_user_markdown(self, message: str, fallback_style: str = "") -> Any:
         """Return a renderable for ``message`` (frontend-specific)."""
         ...
