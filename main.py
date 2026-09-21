@@ -1161,8 +1161,10 @@ def choose_provider(
     current_provider: str,
     verbose: bool,
     exclude: frozenset[str] | None = None,
+    ui: AgentUI | None = None,
 ) -> str | None:
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
 
     # Built-in providers in order: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute
     options: list[dict[str, str]] = [
@@ -1250,13 +1252,16 @@ def choose_provider(
     return selected
 
 
-def change_provider_api_key(config: AgentConfig, verbose: bool) -> bool:
+def change_provider_api_key(
+    config: AgentConfig, verbose: bool, ui: AgentUI | None = None
+) -> bool:
     """Prompt for and save new API key(s) for the currently active provider.
 
     Returns True if at least one key was updated, False if the user left every
     prompt empty (kept the current key) or cancelled.
     """
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
     provider = config.provider
 
     if is_custom_provider(provider):
@@ -1295,9 +1300,10 @@ def change_provider_api_key(config: AgentConfig, verbose: bool) -> bool:
     return updated_any
 
 
-def choose_session(agent, verbose: bool) -> str | None:
+def choose_session(agent, verbose: bool, ui: AgentUI | None = None) -> str | None:
     """Select or manage sessions via Rich UI."""
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
     sessions = agent._list_sessions()
     current = getattr(agent, "current_session", "default")
 
@@ -1414,9 +1420,12 @@ def choose_session(agent, verbose: bool) -> str | None:
     return None
 
 
-def choose_role(current_role: str | None, verbose: bool) -> str | None:
+def choose_role(
+    current_role: str | None, verbose: bool, ui: AgentUI | None = None
+) -> str | None:
     """Select agent role via Rich UI. Returns role string or None if cancelled."""
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
 
     options: list[dict[str, str]] = [
         {
@@ -1459,9 +1468,12 @@ def choose_role(current_role: str | None, verbose: bool) -> str | None:
     return selected
 
 
-def choose_effort(current_level: str, verbose: bool) -> str | None:
+def choose_effort(
+    current_level: str, verbose: bool, ui: AgentUI | None = None
+) -> str | None:
     """Select the global reasoning-effort level. Returns the level or None."""
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
 
     options = [
         {"value": level, "label": level, "description": EFFORT_DESCRIPTIONS[level]}
@@ -1476,12 +1488,15 @@ def choose_effort(current_level: str, verbose: bool) -> str | None:
     )
 
 
-def choose_style(verbose: bool) -> tuple[str, str] | None:
+def choose_style(
+    verbose: bool, ui: AgentUI | None = None
+) -> tuple[str, str] | None:
     """Pick a response style for chat or for the action-loop agents.
 
     Returns (style_type, style_name) or None if the user cancelled at any step.
     """
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
 
     style_type = ui.choose_option(
         title="Style for which mode?",
@@ -1637,14 +1652,17 @@ def _commit_api_settings(
     apply_api_settings(config)
 
 
-def configure_api_settings(config: AgentConfig, verbose: bool) -> set[str]:
+def configure_api_settings(
+    config: AgentConfig, verbose: bool, ui: AgentUI | None = None
+) -> set[str]:
     """Run the API settings dialog. Returns the keys the user changed.
 
     Every edit is persisted and applied to *config* as it is made, so closing
     the dialog is not a commit step and cancelling one field never discards
     another.
     """
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
     values = load_api_settings()
     changed: set[str] = set()
     # The menu reopens after every edit, so it reopens on the row just edited
@@ -1814,8 +1832,14 @@ def _model_picker_options(provider: str) -> tuple[list[dict[str, str]], bool]:
     return get_model_options(provider), False
 
 
-def choose_models(provider: str, current_models: dict[str, str], verbose: bool) -> dict[str, str] | None:
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+def choose_models(
+    provider: str,
+    current_models: dict[str, str],
+    verbose: bool,
+    ui: AgentUI | None = None,
+) -> dict[str, str] | None:
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
     options, _is_live = _model_picker_options(provider)
     if not options:
         return None
@@ -1844,14 +1868,17 @@ def choose_models(provider: str, current_models: dict[str, str], verbose: bool) 
     return selected
 
 
-def select_models_interactively(config: AgentConfig, verbose: bool) -> dict[str, str] | None:
+def select_models_interactively(
+    config: AgentConfig, verbose: bool, ui: AgentUI | None = None
+) -> dict[str, str] | None:
     """Route the /models wizard to the picker matching the active provider."""
     current_models = {
         "fast": config.fast_model,
         "smart": config.smart_model,
         "planner": config.planner_model,
     }
-    ui = TerminalBannerUI(console=console, verbose=verbose)
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
     if config.provider == OMNIROUTE_PROVIDER:
         return configure_omniroute_models_interactively(ui, current_models=current_models)
     if config.provider == OPENROUTER_PROVIDER:
@@ -1866,6 +1893,7 @@ def select_models_interactively(config: AgentConfig, verbose: bool) -> dict[str,
         provider=config.provider,
         current_models=current_models,
         verbose=verbose,
+        ui=ui,
     )
 
 
