@@ -168,7 +168,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool` | handshake and effective run configuration; always first |
+| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, planning:bool, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level), `planning` (planning stage on) and `commands` (the names `command` accepts, `resume` included) are sent by `--frontend stdio-multi`. |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number` | the action chosen for a step; `reasoning_seconds` is how long the model spent thinking before it (0 when it did not think) |

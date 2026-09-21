@@ -153,7 +153,7 @@ fail-closed).
 
 | `type` | Поля | Смысл |
 |---|---|---|
-| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool` | handshake и эффективная конфигурация прогона; всегда первым |
+| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, planning:bool, commands:string[]` | handshake и эффективная конфигурация прогона; всегда первым. `effort` (уровень reasoning), `planning` (этап планирования включён) и `commands` (имена, которые принимает `command`, включая `resume`) отправляет `--frontend stdio-multi`. |
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number` | выбранное действие шага; `reasoning_seconds` — сколько модель думала перед ним (0, если не думала) |
