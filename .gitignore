@@ -87,7 +87,6 @@ review-workspaces/
 
 # Other
 .mimocode/
-push.py
 text_gitignore.txt
 workspace
 workspace/
@@ -111,6 +110,10 @@ Kvist.zip
 reports/
 memory/
 kvist_repomix.md
+CYBER_WALL_REPORT.md
+progress.json
+progress.json.bak-20260919
+tools
 
 # Postman Local View workspace scaffolding
 .postman/
