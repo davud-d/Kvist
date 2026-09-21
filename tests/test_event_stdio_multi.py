@@ -244,3 +244,24 @@ def test_single_turn_serve_session_unchanged_by_refactor():
     assert events[0]["type"] == "hello"
     assert [e["type"] for e in events if e["type"] == "final"]
     assert agent.goals == ["only goal"]
+
+
+def test_every_turn_ends_with_turn_end_even_without_final():
+    def handler(agent, ui, goal):
+        with ui.live_markdown() as update:
+            update("a chat reply")
+        return "a chat reply"
+
+    agent, reader, out, thread = _run_multi(handler)
+
+    reader.push("hi")
+    out.wait_for(lambda e: e["type"] == "turn_end")
+    reader.push("again")
+    out.wait_for(lambda e: e["type"] == "turn_end" and [x["type"] for x in out.events()].count("turn_end") == 2)
+    reader.eof()
+    thread.join(timeout=3.0)
+
+    types = [e["type"] for e in out.events()]
+    assert "final" not in types
+    assert types.count("turn_end") == 2
+    assert types.index("stream_commit") < types.index("turn_end")

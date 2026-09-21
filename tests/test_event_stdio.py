@@ -86,6 +86,10 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
     )
 
     events = [json.loads(line) for line in output.getvalue().splitlines()]
+    # effort and planning mirror the saved user preferences, so only their
+    # shape is stable across machines.
+    assert events[0].pop("effort") in {"false", "low", "medium", "high", "xhigh", "max"}
+    assert isinstance(events[0].pop("planning"), bool)
     assert events[0] == {
         "type": "hello",
         "protocol_version": 1,
