@@ -247,6 +247,24 @@ def test_cli_pty_launch_resize_response_error_and_shutdown(tmp_path):
         child.close()
 
 
+def test_cli_pty_tui_command_saves_the_preference_for_the_next_launch(tmp_path):
+    workspace, home = tmp_path / "workspace", tmp_path / "home"
+    child = _spawn(workspace, home)
+    try:
+        child.wait_for("❯", timeout=20)
+        child.send("/tui\r")
+        child.wait_for("Ink terminal UI will open on the next launch.")
+        assert json.loads((home / ".kvist" / "config.json").read_text())["frontend"] == "tui"
+        child.send("/tui off\r")
+        child.wait_for("classic terminal will open on the next launch.")
+        assert json.loads((home / ".kvist" / "config.json").read_text()).get("frontend", "terminal") == "terminal"
+        child.send("/bye\r")
+        assert child.wait() == 0
+        assert "Traceback" not in child.visible()
+    finally:
+        child.close()
+
+
 def test_cli_pty_session_create_switch_delete_and_restart(tmp_path):
     workspace = tmp_path / "workspace"
     home = tmp_path / "home"
