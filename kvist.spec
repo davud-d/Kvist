@@ -15,12 +15,17 @@ local_hiddenimports = sorted(
     and name[:-3] not in _NON_APP_MODULES
 )
 
+# The Ink terminal UI is one self-contained file made by `npm run build`; it is
+# optional because building it needs Node.js. Without it the binary still works
+# and `--frontend tui` falls back to the classic terminal with an explanation.
+_UI_BUNDLE = os.path.join(SPECPATH, 'dist-ui', 'kvist-tui.mjs')
+_ui_datas = [(_UI_BUNDLE, 'dist-ui')] if os.path.isfile(_UI_BUNDLE) else []
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('prompts', 'prompts'), ('themes', 'themes'), ('assets', 'assets')],
+    datas=[('prompts', 'prompts'), ('themes', 'themes'), ('assets', 'assets'), *_ui_datas],
     hiddenimports=local_hiddenimports,
     hookspath=[],
     hooksconfig={},
