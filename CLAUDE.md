@@ -347,6 +347,70 @@ that would orphan a build in a session that now survives the stop.
 transport-agnostic mechanism — observed between steps, while consuming an action-loop
 stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
 
+### Ink terminal frontend (`src/`, bundled to `dist-ui/kvist-tui.mjs`)
+A separate Node 22 / TypeScript / Ink app, **not** part of the Python process:
+`main.py --frontend tui` (or the saved `/tui` preference, `user_config.get_saved_frontend`)
+calls `launch_tui`, which runs `node dist-ui/kvist-tui.mjs` and passes the exact core
+command in `KVIST_CORE_CMD` (JSON argv, so a frozen binary and a source checkout both
+work). The app spawns that core as `--frontend stdio-multi` and speaks only the
+UI_API.md events; it never reads `.kvist/`. Session ops go through `--session-op`.
+`launch_tui` returns None — and the classic terminal starts — without a TTY, Node, a
+build (`dist-ui/`; the root `dist/` is PyInstaller's) or a configured provider. Layout: `core.ts` (adapter),
+`state.ts` (pure event reducer, tested), `editor.ts`, `commands.ts`, `ui/*.tsx`.
+Output is Ink `<Static>` into the real scrollback plus a small live region, so the
+streaming answer is clipped to the viewport there and committed whole on
+`stream_commit`. A turn ends on the additive `turn_end` event that
+`serve_session_multi` writes after every turn — a chat reply has no `final`, so the
+stream alone cannot say the turn is over.
+
+Two more additive events feed the tool cards and the role label: `action_result`
+(built by `action_result.build_action_result` and emitted from
+`agent_runtime._execute_action`, not from `register_feedback`, which also runs for
+blocked and recovered actions; carries a redacted, head-and-tail-capped `output`,
+`exit_code`, and `first_line` — the 1-based line where a write starts, which
+`executor` now reports so a diff can be numbered) and `route` (the role the router
+actually chose, emitted once per turn from `agent._choose_role`; `source` is
+`RoleRouteResult.source`, `explicit`, or `resume`). Both go through optional UI
+methods probed with `getattr`, so the classic terminal is untouched.
+
+**Slash commands over the protocol.** stdio-multi also accepts `{"type":"command",
+"name","args"}` and answers with `command_result`. The handler runs the same wizard
+the classic REPL uses, but with the `EventStreamUI` passed as its `ui` (the
+`choose_role`/`choose_effort`/`choose_style`/`choose_session`/`choose_models`
+wizards take an optional `ui`; `None` keeps the classic `TerminalBannerUI`), so every
+dialog becomes an `input_request` the Ink app renders generically. Handlers live in
+`main.STDIO_COMMANDS` and receive an `event_stdio.CommandContext`; a command runs only
+between turns (`_Gate` refuses it with `ok:false` while a turn or another command is
+running). `session` goes through the agent's own methods, never `session_store`,
+because the live agent holds history the file does not. Every slash command is
+ported. The four that rebuild the agent (`provider`, `change-api`, `del-provider`,
+`full-reset`) call `build_agent` through the `rebuild` closure, which substitutes
+`/dev/null` for stdin — the launch-time build happens before the reader starts, so a
+secret prompt there would hang forever; `full-reset`'s mouse checkbox becomes two
+confirmations. **`resume` is the one command that is not a wizard**: the reader
+queues it as `_RESUME` past the handlers, and `serve_session_multi` runs it with
+`submit_resume`, so it answers with the turn's events and `turn_end`, never with
+`command_result` (the Ink app dispatches it as a turn for the same reason, and its
+`turn_end` also clears `state.command` so a core answering any command that way
+cannot wedge the input box). Because `agent.resume()` may switch sessions itself, a
+`session` event announces the target before the first turn event.
+
+**Approvals.** `EventApprovalGate` sends a structured `input_request`: `subject` is
+`{kind: "command", command, reason}` or `{kind: "overwrite", path, diff}`, and
+`remember_pattern` is the argv the user may save — `None` for an intrinsically
+DANGEROUS command (`command_policy.assess_command`), so "don't ask again" is never
+offered for one. A reply carrying `remember: true` appends that pattern to the
+project's allow rules; saving is best-effort and never blocks the approval itself.
+**Switching interfaces.** `/tui` in the Ink app is a *local* dialog: a `choice`
+`input_request` with id `local:frontend`, built in `app.tsx` from `commands.FRONTENDS`
+and answered there, never sent to the core. Picking another interface writes its name
+to the file named by `KVIST_SWITCH_FILE` and exits with code 64; `launch_tui` (which
+creates that file) reads it, validates it through `user_config.save_frontend`, and
+returns `None` so the launcher continues into the classic terminal in the same
+process. The code carries no choice, so a new interface needs only an entry in
+`FRONTENDS` and a launch branch in `_switch_frontend`.
+Tests: `npm test` (the `tests/*.test.ts[x]` files sit beside the Python tests and use `tests/fixtures/fake-core.mjs`, never a real core).
+
 ### Role routing (`role_router.py`)
 Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins
 priority: an explicit no-write marker → `reader` (beats topic) → deterministic regex
