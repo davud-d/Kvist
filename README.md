@@ -254,6 +254,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/revert` | Restore recorded agent changes when safe |
 | `/verbose` | Toggle diagnostic output |
 | `/plan` | Toggle the separate planning call (saved globally) |
+| `/tui` | Choose the terminal interface (Ink or classic); the choice is saved globally. In the Ink UI it opens a picker and switches at once; in the classic terminal `/tui on` / `/tui off` select explicitly |
 | `/strime` | Toggle streaming for a custom provider |
 | `/bye` | Save and exit (`/exit` and `/quit` are aliases) |
 
@@ -271,6 +272,33 @@ checkpoint is written after each step, so `/resume` can continue an interrupted
 run. The change journal powers `/changes` and `/revert`.
 
 ## Headless frontends and scripting
+
+The Ink terminal UI (`src/`, Node 22+, TypeScript) is a separate process that
+drives the Python core over `--frontend stdio-multi`. It writes to the normal
+terminal scrollback, so native scrolling and copying work. Build it once:
+
+```bash
+npm install && npm run build   # one self-contained file: dist-ui/kvist-tui.mjs
+.venv/bin/python main.py --frontend tui   # or: /tui, saved as `frontend`
+```
+
+`--frontend terminal` or `--no-banner` overrides the saved choice for one launch.
+The Ink UI needs a provider configured in the classic terminal first; without
+Node.js, the built file, a provider or a TTY, Kvist starts the classic terminal
+instead and says why. The installer (`installer/install_cli.py`) builds that file
+when npm is available and packs it into the `kvist` binary; the binary then needs
+Node.js 22+ on `PATH` at run time.
+Every slash command works there. `/help`, `/clear`, `/debug` and `/quit` run in the
+UI; the rest — `/role`, `/effort`, `/plan`, `/verbose`, `/style`, `/models`,
+`/session`, `/new`, `/changes`, `/provider`, `/change-api`, `/settings-api`,
+`/strime`, `/del-provider`, `/full-reset`, `/revert` and `/resume` — are run by the
+core itself, with their dialogs (searchable lists, masked secrets, confirmations)
+drawn by the UI. File edits are shown as diffs (split view from 100 columns), shell
+commands with their output. A dangerous command or a file overwrite opens an approval
+screen: arrows or 1/2/3 to choose, a click to move the cursor and a double click to
+confirm, Esc to deny; "don't ask again" saves the pattern to
+`<workspace>/.kvist/permissions.json` and is never offered for an intrinsically
+dangerous command. Keys: Enter sends, Esc twice or Ctrl+C stops a run, Ctrl+D quits.
 
 The built-in stdio frontend speaks newline-delimited JSON (NDJSON). Configure a
 provider once in the terminal, then launch it from another process:
