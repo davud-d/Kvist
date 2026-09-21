@@ -112,9 +112,30 @@ class EventSession:
     def submit(self, user_goal: str, routed_role: str | None = None) -> None:
         self._start_worker(self._run, (user_goal, routed_role))
 
+    def submit_call(self, target: Callable[[], object]) -> None:
+        """Run ``target`` on the worker thread so its dialogs can stream.
+
+        A command wizard blocks on input requests; running it off the caller's
+        thread lets ``events()`` keep delivering those requests. The return
+        value lands in ``result`` like a run's answer does.
+        """
+        self._start_worker(self._run_call, (target,))
+
     def submit_resume(self) -> None:
         """Resume the active session's checkpoint instead of running a new goal."""
         self._start_worker(self._run_resume, ())
+
+    def replace_agent(self, agent) -> None:
+        """Adopt a rebuilt agent (provider/model switch) for the next run.
+
+        Called from a command's own worker, so it cannot refuse while a worker
+        is alive; the transport only runs commands between turns.
+        """
+        self._agent = agent
+
+    def emit(self, event) -> None:
+        """Queue an out-of-band event from any thread, in stream order."""
+        self._channel.emit(event)
 
     def _start_worker(self, target, args: tuple) -> None:
         if self.is_running():
@@ -131,6 +152,13 @@ class EventSession:
         except Exception as exc:
             # Surface the failure both to the caller (``self.error``) and to the
             # event stream, so a transport watching only events still sees it.
+            self.error = exc
+            self._channel.emit(ErrorEvent(str(exc)))
+
+    def _run_call(self, target: Callable[[], object]) -> None:
+        try:
+            self.result = target()
+        except Exception as exc:
             self.error = exc
             self._channel.emit(ErrorEvent(str(exc)))
 
