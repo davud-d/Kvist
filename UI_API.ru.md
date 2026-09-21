@@ -172,6 +172,9 @@ fail-closed).
 | `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | расход токенов одного завершённого вызова модели. `input_tokens`/`output_tokens` — это **траты**: их суммируют по прогону. `context_tokens` — **размер именно этого промпта**, то есть самого диалога, поэтому его надо *заменять*, а не суммировать (0 у вызовов, не несущих диалог, например `kind` `plan` или `report` — тогда сохраняйте прошлое значение). Контекст пересылается на каждом шаге, поэтому сумма трат уходит далеко вперёд от `context_tokens`: показ суммы под словом «токены» читается как гигантский диалог, которого нет. `context_limit` — бюджет, до которого ядро подрезает промпт. |
 | `debug` | `message:str` | verbose-диагностика |
 | `error` | `message:str` | строка ошибки (эмитится и если прогон бросил исключение) |
+| `turn_end` | — | только `--frontend stdio-multi`: ход завершён (после `final`, `error` или chat-ответа, у которого нет `final`); процесс остаётся жить для следующей цели |
+| `session` | `session:str, has_checkpoint:bool` | только `--frontend stdio-multi`: первое событие хода `resume` — сессия, в которой продолжается прерванный прогон; может отличаться от сессии в `hello` (§8c). |
+| `command_result` | `name:str, ok:bool, message:str, effects:object` | только `--frontend stdio-multi`: итог входящего сообщения `command` (§8c). Это последнее событие команды; **`turn_end` после него не приходит**. |
 
 ### Думающие модели (reasoning)
 
@@ -371,6 +374,82 @@ kvist --commit-message < payload.json
 
 ---
 
+## 8c. Команды в процессе ядра (`--frontend stdio-multi`)
+
+Слэш-команды и мастера настройки терминала выполняются в том же долгоживущем
+процессе. Фронтенд их не переписывает: он шлёт одно сообщение, рисует каждый
+диалог команды универсальным видом `input_request` и читает итог из
+`command_result`.
+
+```json
+<<< {"type": "command", "name": "role", "args": []}
+>>> {"type": "input_request", "request_id": "b7dc…", "kind": "choice", "title": "Select Agent Role", "body": "", "options": [{"value": "auto", "label": "Auto (automatic role detection)", "description": "…"}, {"value": "coder", "label": "Coder", "description": "…"}], "current_value": "auto", "help_text": "…"}
+<<< {"request_id": "b7dc…", "value": "coder"}
+>>> {"type": "command_result", "name": "role", "ok": true, "message": "Role set to: coder / Роль: coder", "effects": {"role": "coder"}}
+```
+
+**Входящее сообщение:** `{"type": "command", "name": str, "args": string[]}`.
+`name` — имя слэш-команды без слэша (регистр не важен); `args` необязателен и
+заранее отвечает на первый вопрос команды, так что
+`{"type":"command","name":"role","args":["coder"]}` вообще не открывает диалог.
+Диалоги — обычная пара `input_request` / ответ из §7; ответ `secret` идёт только
+внутрь и никогда не отражается наружу: ни в событии, ни в `message`, ни в
+`effects`, ни в логах. Разрушительные шаги (`revert`, `del-provider`,
+`full-reset`) спрашивают через `kind: "confirm"` с `body`; «да» — только
+`approved: true`, всё остальное (`false`, нет ответа, EOF) ничего не делает.
+
+**Правила**
+
+- Команда выполняется **только между ходами**. Пока идёт ход (или другая
+  команда), ядро сразу отвечает `ok:false` и команду не запускает.
+- Каждая принятая команда заканчивается ровно одним `command_result`; в отличие
+  от хода **`turn_end` нет**. Неизвестное имя, отсутствующее имя и неверные
+  `args` тоже получают `command_result` с `ok:false`.
+- `ok:false` — команда не удалась (`message` объясняет почему). Отменённый
+  пользователем диалог — это `ok:true` и `effects` `{"cancelled": true}`, ничего
+  не изменилось. EOF на stdin отменяет открытый диалог так же.
+- `message` — текст для человека, всегда `English / Русский`, с редакцией
+  секретов.
+- `effects` говорит, что изменилось, чтобы фронтенд обновил своё состояние.
+  Ключи есть только для того, чего команда коснулась.
+
+**Команды и их `effects`**
+
+| `name` | `args` | `effects` |
+|---|---|---|
+| `role` | `[auto\|coder\|reader\|devops\|chat]` | `{"role": str}` — это же роль, с которой отправляются все следующие цели; сохраняется как глобальная настройка |
+| `effort` | `[false\|low\|medium\|high\|xhigh\|max]` | `{"effort": str, "advisory": str}` — `advisory` объясняет, как уровень ложится на активного провайдера (может быть пустым) |
+| `plan` | `[true\|false]` (без аргумента — переключить) | `{"plan": bool}` — сохраняется |
+| `verbose` | `[true\|false]` (без аргумента — переключить) | `{"verbose": bool}` — только для этого процесса |
+| `style` | `[chat\|agents ИМЯ]` | `{"style": {"type": str, "name": str, "applied_to_session": bool}}` — `false` значит, что текущая сессия сохраняет свой стиль до следующей сессии |
+| `session` | `[switch ИМЯ]`, `[new [ИМЯ]]`, `[delete ИМЯ]`; без аргументов — выбор из списка | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |
+| `new` | `[ИМЯ]` | как у `session` |
+| `models` | `[FAST SMART PLANNER]`; без аргументов — выбор для активного провайдера | `{"provider": str, "models": {"fast","smart","planner"}, "warnings": string[]}` — агент пересобран с этими моделями, модели сохранены |
+| `changes` | — | `{}`; отчёт лежит в `message` |
+| `provider` | `[PROVIDER_ID]`; без аргумента — выбор из списка (с «+ Create custom provider…») | `{"provider": str, "models": {…}, "warnings": string[], "changed": bool}`; при `changed:false` (тот же провайдер) только `provider` и `changed`. Агент пересобран, выбор сохранён. Сборка может открыть ещё диалоги: `text` (базовый URL), `secret` (API-ключ), `choice`/`text` (модели). |
+| `change-api` | — | `{"provider", "models", "warnings", "key_saved": true}`. По одному диалогу `secret` на каждый ключ активного провайдера (пустой ответ оставляет ключ; все пустые = `{"cancelled": true}`). Если пересборка затем упала: `ok:false`, `{"key_saved": true, "restart_required": true}` |
+| `del-provider` | — | только кастомный провайдер. Сначала `confirm`, затем замена выбирается тем же списком провайдеров: `{"deleted": str, "provider", "models", "warnings"}`. Замену не выбрали: `ok:false`, `{"deleted": str, "restart_required": true}` (работающий агент использует удалённый провайдер до перезапуска) |
+| `full-reset` | — | два диалога `confirm`, второй называется «Final confirmation»; затем `~/.kvist/config.json` стирается, роль возвращается к auto, провайдер выбирается заново: `{"reset": true, "provider", "models", "warnings"}`. Ничего не выбрали: `ok:false`, `{"reset": true, "restart_required": true}` |
+| `settings-api` | — | цикл-меню: `choice` (строка на настройку, «Reset all», «Done»), затем `choice` on/off или `text` для числа (спрашивается заново, пока не подойдёт). `{"changed_keys": string[], "values": {ключ: значение}, "restart_required": bool}`; `restart_required` = true, если менялась `dynamic_models` (применяется со следующего запуска) |
+| `strime` | `[true\|false]` (без аргумента — переключить) | только кастомный провайдер (иначе `ok:false`): `{"stream": bool}` |
+| `revert` | — | `confirm`, в `body` которого список файлов к восстановлению. `{"reverted": [{"path", "action": "restored\|deleted\|skipped", "reason"}]}`; нечего откатывать: `{"reverted": []}` и без диалога |
+
+**`resume`** — не мастер, а ход агента: `{"type":"command","name":"resume"}`
+продолжает самый свежий прерванный прогон в той сессии, где лежит его чекпоинт.
+Если чекпоинта нет ни в одной сессии, сразу приходит
+`command_result {"name":"resume","ok":false,…}` и больше ничего. Иначе поток
+ровно такой же, как у обычной цели, плюс одно событие в начале:
+
+```
+>>> {"type": "session", "session": "chat-2026…", "has_checkpoint": true}
+>>> … события хода (route/plan/step/action_result/… final или error) …
+>>> {"type": "turn_end"}
+```
+
+У возобновлённого хода **нет `command_result`**; его завершает `turn_end`, а
+`session` говорит фронтенду, какая беседа теперь активна. Как и обычный ход, он
+не принимает `command`, пока идёт.
+
 ## 9. Универсальный диспетчер фронтендов (`frontends.py`)
 
 Все не-терминальные фронтенды имеют одинаковую склейку (`FrontendChannel` →
@@ -465,7 +544,8 @@ Electron просто спавнит бинарь `kvist`.
 - **Терминал — особый дефолт.** Его REPL добавляет slash-команды и визарды
   конфигурации сверх событийной поверхности. Управление же жизненным циклом
   сессий полностью доступно headless-фронтендам через `--session-op` и
-  `--resume` (§8a) — с той же семантикой, что и терминальные команды.
+  `--resume` (§8a) — с той же семантикой, что и терминальные команды. Под
+  `stdio-multi` основные слэш-команды выполняются и в процессе ядра (§8c).
 - **Один процесс = один прогон** в v1. Прогон выполняется в активной
   именованной сессии workspace; между прогонами сессии переключаются через
   `--session-op switch`. Для нескольких одновременных клиентов — процесс на

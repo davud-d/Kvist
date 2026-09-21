@@ -187,6 +187,9 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | token usage of one completed model call. `input_tokens`/`output_tokens` are **spend**: sum them over the run. `context_tokens` is the **size of that one prompt** — the conversation itself — so *replace* the previous value instead of summing (it is 0 for calls that do not carry the conversation, e.g. `kind` `plan` or `report`: keep the last known size). Because every step resends the context, the summed spend runs far ahead of `context_tokens` — showing the sum as "tokens" reads as a huge conversation that does not exist. `context_limit` is the budget the core trims a prompt to. |
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
+| `turn_end` | — | `--frontend stdio-multi` only: the turn ended (after `final`, `error`, or a chat reply that has no `final`); the process stays up for the next goal |
+| `session` | `session:str, has_checkpoint:bool` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` (§8c). |
+| `command_result` | `name:str, ok:bool, message:str, effects:object` | `--frontend stdio-multi` only: the outcome of an inbound `command` message (§8c). It is the last event of that command; **no `turn_end` follows it**. |
 
 ### Thinking / reasoning models
 
@@ -382,6 +385,81 @@ Exit code is 0 on success and 1 on failure. Guarantees a frontend can rely on:
 
 ---
 
+## 8c. In-process commands (`--frontend stdio-multi`)
+
+The terminal's slash-commands and setup wizards run inside the same long-lived
+process too. A frontend does not re-implement them: it sends one message, draws
+every dialog the command opens with a generic `input_request` view, and reads
+the outcome from `command_result`.
+
+```json
+<<< {"type": "command", "name": "role", "args": []}
+>>> {"type": "input_request", "request_id": "b7dc…", "kind": "choice", "title": "Select Agent Role", "body": "", "options": [{"value": "auto", "label": "Auto (automatic role detection)", "description": "…"}, {"value": "coder", "label": "Coder", "description": "…"}], "current_value": "auto", "help_text": "…"}
+<<< {"request_id": "b7dc…", "value": "coder"}
+>>> {"type": "command_result", "name": "role", "ok": true, "message": "Role set to: coder / Роль: coder", "effects": {"role": "coder"}}
+```
+
+**Inbound message:** `{"type": "command", "name": str, "args": string[]}`.
+`name` is the slash-command name without the slash (case-insensitive); `args`
+is optional and answers the command's first question up front, so
+`{"type":"command","name":"role","args":["coder"]}` opens no dialog at all.
+Dialogs use the ordinary `input_request` / response pair of §7; a `secret`
+answer travels only inbound and is never echoed: not in an event, a `message`,
+an `effects` value or a log. Destructive steps (`revert`, `del-provider`,
+`full-reset`) ask with `kind: "confirm"` and a `body`; only `approved: true`
+counts as yes, anything else (`false`, no answer, EOF) does nothing.
+
+**Rules**
+
+- A command runs **between turns** only. While a turn (or another command) is
+  running the core answers at once with `ok:false` and does not run it.
+- Every accepted command ends with exactly one `command_result`; unlike a turn
+  there is **no `turn_end`**. An unknown name, a missing name or malformed
+  `args` also get a `command_result` with `ok:false`.
+- `ok:false` means the command failed (`message` says why). A dialog the user
+  cancelled is `ok:true` with `effects` `{"cancelled": true}` and nothing
+  changed. stdin EOF cancels an open dialog the same way.
+- `message` is human text, always `English / Русский`, secret-redacted.
+- `effects` says what changed, so the frontend can refresh its own state. Keys
+  are present only for what the command touched.
+
+**Commands and their `effects`**
+
+| `name` | `args` | `effects` |
+|---|---|---|
+| `role` | `[auto\|coder\|reader\|devops\|chat]` | `{"role": str}` — also the role every following goal is submitted with; saved as the global preference |
+| `effort` | `[false\|low\|medium\|high\|xhigh\|max]` | `{"effort": str, "advisory": str}` — `advisory` is how the level maps onto the active provider (may be empty) |
+| `plan` | `[true\|false]` (none = toggle) | `{"plan": bool}` — saved |
+| `verbose` | `[true\|false]` (none = toggle) | `{"verbose": bool}` — this process only |
+| `style` | `[chat\|agents NAME]` | `{"style": {"type": str, "name": str, "applied_to_session": bool}}` — `false` means the running session keeps its style until the next session |
+| `session` | `[switch NAME]`, `[new [NAME]]`, `[delete NAME]`; none = the picker | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |
+| `new` | `[NAME]` | as `session` |
+| `models` | `[FAST SMART PLANNER]`; none = the picker for the active provider | `{"provider": str, "models": {"fast","smart","planner"}, "warnings": string[]}` — the agent was rebuilt with these models and they are saved |
+| `changes` | — | `{}`; the report is the `message` |
+| `provider` | `[PROVIDER_ID]`; none = the picker (with "+ Create custom provider…") | `{"provider": str, "models": {…}, "warnings": string[], "changed": bool}`; `changed:false` (same provider) carries only `provider` and `changed`. The agent was rebuilt and the choice saved. Building may open more dialogs: `text` (base URL), `secret` (API key), `choice`/`text` (models). |
+| `change-api` | — | `{"provider", "models", "warnings", "key_saved": true}`. One `secret` dialog per key the active provider needs (an empty answer keeps that key; all empty = `{"cancelled": true}`). If the rebuild then fails: `ok:false`, `{"key_saved": true, "restart_required": true}` |
+| `del-provider` | — | custom provider only. `confirm` first, then the replacement is picked with the provider picker: `{"deleted": str, "provider", "models", "warnings"}`. No replacement chosen: `ok:false`, `{"deleted": str, "restart_required": true}` (the running agent still uses the deleted provider until restart) |
+| `full-reset` | — | two `confirm` dialogs, the second titled "Final confirmation"; then `~/.kvist/config.json` is wiped, the role route returns to auto, and a provider is picked again: `{"reset": true, "provider", "models", "warnings"}`. Nothing chosen: `ok:false`, `{"reset": true, "restart_required": true}` |
+| `settings-api` | — | a menu loop of `choice` (one row per setting, "Reset all", "Done"), then `choice` on/off or `text` for a number (asked again until valid). `{"changed_keys": string[], "values": {key: value}, "restart_required": bool}`; `restart_required` is true when `dynamic_models` changed (it applies at the next launch) |
+| `strime` | `[true\|false]` (none = toggle) | custom provider only (else `ok:false`): `{"stream": bool}` |
+| `revert` | — | `confirm` whose `body` lists the files to restore. `{"reverted": [{"path", "action": "restored\|deleted\|skipped", "reason"}]}`; nothing tracked: `{"reverted": []}` and no dialog |
+
+**`resume`** is not a wizard but a turn of the agent: `{"type":"command","name":"resume"}`
+continues the newest interrupted run, in whichever session holds its checkpoint.
+With no checkpoint in any session the answer is at once
+`command_result {"name":"resume","ok":false,…}` and nothing else. Otherwise the
+stream is exactly what a goal produces, with one extra event first:
+
+```
+>>> {"type": "session", "session": "chat-2026…", "has_checkpoint": true}
+>>> … turn events (route/plan/step/action_result/… final or error) …
+>>> {"type": "turn_end"}
+```
+
+There is **no `command_result`** for a resumed turn; `turn_end` ends it, and
+`session` tells the frontend which conversation is now active. Like any turn it
+takes no `command` while it runs.
+
 ## 9. Universal frontend dispatch (`frontends.py`)
 
 All non-terminal frontends share the same wiring (`FrontendChannel` →
@@ -476,7 +554,8 @@ The core does not change — only the transport.
 - **The terminal is a special default.** Its REPL adds slash-commands and config
   wizards beyond the event surface. Session lifecycle management, however, is
   fully available to headless frontends via `--session-op` and `--resume` (§8a) —
-  with the same semantics as the terminal commands.
+  with the same semantics as the terminal commands. Under `stdio-multi` the
+  common slash-commands also run in-process (§8c).
 - **One process = one run** in v1. A run executes in the workspace's active named
   session; switch sessions between runs with `--session-op switch`. For multiple
   concurrent clients, run one process per workspace or write a multiplexing
