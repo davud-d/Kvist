@@ -1,4 +1,4 @@
-import type { CoreEvent } from '../../src/protocol';
+import type { CoreEvent, JournalEvent } from '../../src/protocol';
 
 export interface ProviderInfo {
     id: string;
@@ -34,6 +34,7 @@ export type ToWebview =
     | { type: 'invoke'; name: string; args: string[] }
     | { type: 'attached'; paths: string[] }
     | { type: 'environment'; env: Record<string, string> }
+    | { type: 'history'; name: string; events: JournalEvent[]; hasMore: boolean }
     | { type: 'showSettings' };
 
 export type ToHost =
@@ -47,5 +48,6 @@ export type ToHost =
     | { type: 'getEnvironment' }
     | { type: 'setEnvironment'; env: Record<string, string> }
     | { type: 'getSessions' }
+    | { type: 'getHistory'; name: string }
     | { type: 'openFile'; path: string; line: number | null }
     | { type: 'openLink'; url: string };

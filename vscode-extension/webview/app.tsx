@@ -83,6 +83,8 @@ export function App() {
             if (typeof effects.plan === "boolean") setPlanning(effects.plan)
             freshSession = core.ok && (core.name === "new" || core.name === "session") && effects.changed !== false && !effects.cancelled
             if (freshSession) post({ type: "getSessions" })
+            // Switching to an existing session redraws it; a new one has nothing to show.
+            if (freshSession && core.name === "session" && typeof effects.session === "string") post({ type: "getHistory", name: effects.session })
             if (core.ok && core.name === "provider") post({ type: "getConfig" })
           }
           if (core.type === "turn_end") post({ type: "getSessions" })
@@ -102,6 +104,9 @@ export function App() {
           return setAttachments((current) => [...new Set([...current, ...message.paths])])
         case "environment":
           return setEnvironment(message.env)
+        case "history":
+          // A page that starts mid-way says so at the top of the feed.
+          return dispatch({ type: "restore", events: message.hasMore ? [{ type: "journal_notice" }, ...message.events] : message.events })
         case "config":
           return setConfig(message.info)
         case "sessions":
@@ -201,7 +206,7 @@ export function App() {
     .map((item) =>
       item.kind === "tool" && item.action === "run_shell"
         ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
-        : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} item={item} />)
+        : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} />)
   if (state.inflight?.action === "run_shell") {
     const { step, args } = state.inflight
     feed.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)

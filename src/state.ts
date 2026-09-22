@@ -1,5 +1,5 @@
 import { clipText, englishOnly } from "./format.js"
-import type { CoreEvent, InputRequest } from "./protocol.js"
+import type { CoreEvent, InputRequest, JournalEvent } from "./protocol.js"
 
 export type ActionResult = Omit<Extract<CoreEvent, { type: "action_result" }>, "type" | "step" | "action_type">
 
@@ -74,10 +74,14 @@ export interface State {
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
   startedAt: number | null
+  // Items up to this id were redrawn from a session's journal rather than seen live, so a UI
+  // can skip the entrance effects meant for fresh work.
+  settledThrough: number
 }
 
 export type Action =
   | { type: "event"; event: CoreEvent; now?: number }
+  | { type: "restore"; events: JournalEvent[]; now?: number }
   | { type: "submit"; text: string; now?: number }
   | { type: "command_start"; name: string }
   | { type: "resume_start"; now?: number }
@@ -106,6 +110,7 @@ export function initialState(effort = ""): State {
     usage: { input: 0, output: 0, context: 0, limit: 0 },
     showDebug: false,
     startedAt: null,
+    settledThrough: 0,
   }
 }
 
@@ -390,10 +395,41 @@ function onEvent(state: State, event: CoreEvent, now: number): State {
   }
 }
 
+function noticeText(event: Extract<JournalEvent, { type: "journal_notice" }>): string {
+  if (event.omitted_turns) return `${event.omitted_turns} older turns are not shown.`
+  if (event.omitted_events) return `${event.omitted_events} events of this turn are not shown.`
+  // A notice with no count is the caller saying the journal it was given starts mid-way.
+  return "Earlier events are not shown."
+}
+
+// A session redrawn from its journal, through the reducer live events use. Token counts are
+// skipped: they describe the conversation now running, not the one being shown.
+function restore(state: State, events: JournalEvent[], now: number): State {
+  let next = reduce(state, { type: "clear" })
+  for (const event of events) {
+    if (event.type === "usage") continue
+    if (event.type === "user") {
+      // A resumed turn has no request text of its own.
+      if (event.text) next = reduce(next, { type: "submit", text: event.text, now })
+      continue
+    }
+    if (event.type === "journal_notice") {
+      next = push(next, (id) => ({ id, kind: "note", tone: "info", text: noticeText(event) }))
+      continue
+    }
+    next = onEvent(next, event, now)
+  }
+  // A journal cut off by a crash has no closing turn_end.
+  const settled = onEvent(next, { type: "turn_end" }, now)
+  return { ...settled, info: { ...settled.info, routedRole: undefined }, settledThrough: settled.nextId - 1 }
+}
+
 export function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "event":
       return onEvent(state, action.event, action.now ?? Date.now())
+    case "restore":
+      return restore(state, action.events, action.now ?? Date.now())
     case "submit":
       return push(
         { ...state, running: true, startedAt: action.now ?? Date.now(), info: { ...state.info, routedRole: undefined } },

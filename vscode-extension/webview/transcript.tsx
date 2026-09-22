@@ -321,9 +321,10 @@ function Tool({ item }: { item: ToolItem }) {
 // Thoughts that already folded once stay folded when the panel is redrawn.
 const folded = new Set<string>()
 
-function Thought({ item, uid }: { item: Extract<Item, { kind: "thought" }>; uid: string }) {
+function Thought({ item, uid, settled }: { item: Extract<Item, { kind: "thought" }>; uid: string; settled: boolean }) {
   const hasText = item.text.trim().length > 0
-  const [open, setOpen] = useState(hasText && !folded.has(uid))
+  // A thought redrawn from history has nothing to fold: it starts closed.
+  const [open, setOpen] = useState(hasText && !settled && !folded.has(uid))
   const touched = useRef(false)
 
   useEffect(() => {
@@ -432,7 +433,7 @@ function Explored({ item }: { item: Extract<Item, { kind: "explored" }> }) {
   )
 }
 
-export function TranscriptItem({ item, uid }: { item: Item; uid: string }) {
+export function TranscriptItem({ item, uid, settled }: { item: Item; uid: string; settled: boolean }) {
   switch (item.kind) {
     case "banner":
       return null
@@ -461,7 +462,7 @@ export function TranscriptItem({ item, uid }: { item: Item; uid: string }) {
     case "tool":
       return <Tool item={item} />
     case "thought":
-      return <Thought item={item} uid={uid} />
+      return <Thought item={item} uid={uid} settled={settled} />
     case "explored":
       return <Explored item={item} />
     case "answer":

@@ -58,6 +58,13 @@ export type CoreEvent =
   | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
   | { type: "turn_end" }
 
+// What `--session-op history` returns per event: the events the stream carried, plus two the journal adds
+// (UI_API.md, "Restoring a session's feed").
+export type JournalEvent =
+  | CoreEvent
+  | { type: "user"; text: string; resumed?: boolean }
+  | { type: "journal_notice"; omitted_events?: number; omitted_turns?: number }
+
 export type Reply =
   | { request_id: string; approved: boolean; remember?: true }
   | { request_id: string; value: string | null }

@@ -6,7 +6,11 @@ import { sessionOp } from '../../src/session';
 import { BinaryResolver } from './binaryResolver';
 import { splitEnvironment } from './environment';
 import { pickWorkspaceFiles } from './filePicker';
-import type { ConfigInfo, SessionInfo, SessionItem, ToHost, ToWebview } from './messages';
+import type { JournalEvent } from '../../src/protocol';
+import type { ConfigInfo, SessionInfo, ToHost, ToWebview } from './messages';
+
+// The newest events of a session: enough for well over a hundred turns of a typical run.
+const HISTORY_LIMIT = 1000;
 
 export class KvistChatView implements vscode.WebviewViewProvider {
     static readonly viewType = 'kvist.chat';
@@ -78,6 +82,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.sendConfig();
             case 'getSessions':
                 return this.sendSessions();
+            case 'getHistory':
+                return this.sendHistory(message.name);
             case 'openFile':
                 return this.openFile(message.path, message.line);
             case 'openLink':
@@ -185,13 +191,32 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         if (!command || !workspace) {
             return;
         }
-        const status = await readJson<SessionInfo & { session_items?: (SessionItem & { session_history?: unknown; chat_history?: unknown })[] }>(command, workspace, ['--workspace', workspace, '--session-op', 'status']);
-        if (!status) {
+        // "list" is "status" without the whole histories of every session.
+        const list = await readJson<SessionInfo>(command, workspace, ['--workspace', workspace, '--session-op', 'list']);
+        if (!list) {
             return;
         }
-        // The core sends whole histories with each item; the list needs only the label and time.
-        const items = status.session_items?.map(({ name, title, updated_at }) => ({ name, title, updated_at }));
-        this.post({ type: 'sessions', info: { active_session: status.active_session, session_items: items } });
+        const items = list.session_items?.map(({ name, title, updated_at }) => ({ name, title, updated_at }));
+        this.post({ type: 'sessions', info: { active_session: list.active_session, session_items: items } });
+    }
+
+    // What the user saw in a session, as the events the core recorded; the panel replays them.
+    private async sendHistory(name: string): Promise<void> {
+        const command = this.coreCommand();
+        const workspace = this.workspacePath();
+        if (!command || !workspace) {
+            return;
+        }
+        const reply = await readJson<{ ok: boolean; error?: string; has_more?: boolean; events?: { event: JournalEvent }[] }>(
+            command,
+            workspace,
+            ['--workspace', workspace, '--session-op', 'history', '--session-name', name, '--history-limit', String(HISTORY_LIMIT)]
+        );
+        if (!reply?.ok) {
+            this.post({ type: 'fault', message: `Could not load the history of "${name}"${reply?.error ? `: ${reply.error}` : ''}.` });
+            return;
+        }
+        this.post({ type: 'history', name, events: (reply.events ?? []).map((entry) => entry.event), hasMore: reply.has_more === true });
     }
 
     private async openFile(relativePath: string, line: number | null): Promise<void> {

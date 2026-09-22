@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import type { CoreEvent } from "../src/protocol.js"
+import type { CoreEvent, JournalEvent } from "../src/protocol.js"
 import { actionTarget, exploreSummary, initialState, reduce, type State } from "../src/state.js"
 
 // Stands in for the translation half of the core's bilingual messages, written
@@ -353,6 +353,73 @@ test("notes that arrive while an action runs do not turn its step into a bare li
   assert.equal(state.inflight, null)
   assert.equal(state.items.filter((i) => i.kind === "tool").length, 1)
   assert.equal(state.items.filter((i) => i.kind === "step").length, 0)
+})
+
+const journal = (...events: JournalEvent[]): State => reduce(feed(hello), { type: "restore", events, now: 1000 })
+
+test("restoring a journal redraws the turns in order and leaves the input free", () => {
+  const state = journal(
+    { type: "user", text: "fix the test" },
+    { type: "route", role: "coder", source: "llm" },
+    { type: "step", step: 1, plan_step: "edit", thought: "", user_message: "", action_type: "write_file", action_args: { path: "a.py", content: "x = 1\n" }, reasoning_seconds: 0 },
+    { type: "action_result", step: 1, action_type: "write_file", ok: true, summary: "Wrote 1 line", output: "", exit_code: null, path: "a.py", first_line: 1 },
+    { type: "final", message: "Done.", user_messages: [] },
+    { type: "usage", input_tokens: 5, output_tokens: 5, context_tokens: 5, context_limit: 10, model: "m", kind: "turn", step: 0 },
+    { type: "turn_end" },
+    { type: "user", text: "and now?" },
+    { type: "final", message: "Nothing more.", user_messages: [] },
+    { type: "turn_end" },
+  )
+  assert.deepEqual(state.items.map((i) => i.kind), ["user", "tool", "answer", "user", "answer"])
+  assert.equal(state.running, false)
+  assert.equal(state.live, null)
+  assert.equal(state.info.routedRole, undefined)
+  // The counters belong to the conversation running now, not to the one redrawn.
+  assert.deepEqual(state.usage, { input: 0, output: 0, context: 0, limit: 0 })
+  // Everything drawn is history, and only history.
+  assert.equal(state.settledThrough, state.nextId - 1)
+})
+
+test("restoring replaces what was on screen, and later live items are not history", () => {
+  const before = feed(hello, { type: "message", markdown: "old screen" })
+  const restored = reduce(before, { type: "restore", events: [{ type: "user", text: "asked" }, { type: "turn_end" }], now: 1000 })
+  assert.deepEqual(restored.items.map((i) => i.kind), ["user"])
+  const later = reduce(restored, { type: "event", event: { type: "message", markdown: "fresh" }, now: 1000 })
+  const fresh = later.items.at(-1)
+  assert.ok(fresh && fresh.id > later.settledThrough)
+})
+
+test("a journal without its closing turn_end still leaves nothing running", () => {
+  const state = journal(
+    { type: "user", text: "long job" },
+    { type: "step", step: 1, plan_step: "verify", thought: "", user_message: "", action_type: "run_shell", action_args: { command: ["make"] }, reasoning_seconds: 0 },
+  )
+  assert.equal(state.running, false)
+  assert.equal(state.inflight, null)
+  assert.deepEqual(state.items.map((i) => i.kind), ["user", "step"])
+})
+
+test("a resumed turn has no request line, and a journal notice says what is missing", () => {
+  const state = journal(
+    { type: "journal_notice", omitted_turns: 3 },
+    { type: "user", text: "", resumed: true },
+    { type: "final", message: "Continued.", user_messages: [] },
+    { type: "turn_end" },
+  )
+  assert.deepEqual(state.items.map((i) => i.kind), ["note", "answer"])
+  assert.match(state.items[0]?.kind === "note" ? state.items[0].text : "", /3 older turns/)
+})
+
+test("thoughts come back with their text so the feed can show them", () => {
+  const state = journal(
+    { type: "user", text: "why" },
+    { type: "reasoning_start", stream_id: "r" },
+    { type: "reasoning_chunk", stream_id: "r", text: "because of the cache" },
+    { type: "reasoning_commit", stream_id: "r", duration_seconds: 2.5 },
+    { type: "turn_end" },
+  )
+  const thought = state.items.find((i) => i.kind === "thought")
+  assert.ok(thought && thought.kind === "thought" && thought.text === "because of the cache" && thought.seconds === 2.5)
 })
 
 test("resume runs as a turn: the input box is freed by turn_end, not command_result", () => {
