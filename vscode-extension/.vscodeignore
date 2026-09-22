@@ -1,6 +1,7 @@
 .vscode/**
 .vscode-test/**
 src/**
+webview/**
 node_modules/**
 out/**/*.map
 *.vsix
@@ -9,4 +10,5 @@ out/**/*.map
 .npmignore
 BUILD.md
 tsconfig.json
+esbuild.mjs
 build-plugin.*

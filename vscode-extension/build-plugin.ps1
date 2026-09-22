@@ -95,7 +95,7 @@ Copy-Item -Path $WinBinarySrc -Destination $WinBinaryDst -Force
 
 Write-Log "Compiling VS Code extension"
 Set-Location $ExtensionDir
-Invoke-Native $NpmBin @("run", "compile")
+Invoke-Native $NpmBin @("run", "build")
 
 $Package = Get-Content (Join-Path $ExtensionDir "package.json") -Raw | ConvertFrom-Json
 $VsixPath = Join-Path $VsixDir "kvist-$($Package.version)-win32-x64.vsix"

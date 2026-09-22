@@ -109,7 +109,7 @@ install -Dm755 "$LINUX_BINARY_SRC" "$LINUX_BINARY_DST"
 
 log "Compiling VS Code extension"
 cd "$EXTENSION_DIR"
-npm run compile
+npm run build
 
 VERSION="$(node -p "require('./package.json').version")"
 VSIX_PATH="$VSIX_DIR/kvist-$VERSION-linux-x64.vsix"
