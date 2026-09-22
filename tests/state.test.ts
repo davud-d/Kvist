@@ -60,6 +60,45 @@ test("reasoning: live thinking, then a committed thought when it took time or sa
   assert.equal(slow.live?.thinking, false)
 })
 
+test("a step right after a streamed reasoning_commit does not repeat it as a second thought", () => {
+  const withStream = feed(
+    { type: "reasoning_start", stream_id: "a" },
+    { type: "reasoning_chunk", stream_id: "a", text: "checking the cache logic" },
+    { type: "reasoning_commit", stream_id: "a", duration_seconds: 3 },
+    stepEvent("write_file", { path: "a.py" }, { thought: "Cache logic needs a guard", user_message: "" }),
+  )
+  assert.deepEqual(withStream.items.map((i) => i.kind), ["thought"])
+})
+
+test("a step with its own thought but no preceding reasoning stream still shows it", () => {
+  const state = feed(stepEvent("write_file", { path: "a.py" }, { thought: "Straightforward edit", user_message: "" }))
+  assert.deepEqual(state.items.map((i) => i.kind), ["thought"])
+})
+
+test("a step's reasoning_seconds alone (no streamed chunks) still shows a thought", () => {
+  const state = feed(stepEvent("write_file", { path: "a.py" }, { thought: "", user_message: "", reasoning_seconds: 4 }))
+  assert.deepEqual(state.items.map((i) => i.kind), ["thought"])
+})
+
+test("a later, unrelated step is unaffected by an earlier reasoning_commit once another event lands between", () => {
+  const state = feed(
+    { type: "reasoning_start", stream_id: "a" },
+    { type: "reasoning_commit", stream_id: "a", duration_seconds: 3 },
+    { type: "plan", goal: "g", complexity: "simple", plan: [], success_criteria: [], risks: [] },
+    stepEvent("write_file", { path: "a.py" }, { thought: "Independent step", user_message: "" }),
+  )
+  assert.deepEqual(state.items.map((i) => i.kind), ["thought", "plan", "thought"])
+})
+
+test("a step's user_message is shown as a say line before its action, but not for explore-kind steps", () => {
+  const write = feed(stepEvent("write_file", { path: "a.py" }, { user_message: "Writing the fix" }))
+  assert.deepEqual(write.items.map((i) => i.kind), ["say"])
+  assert.equal(write.items[0]?.kind === "say" && write.items[0].text, "Writing the fix")
+
+  const read = feed(stepEvent("read_file", { path: "a.py" }, { user_message: "Reading the target file" }))
+  assert.deepEqual(read.items.map((i) => i.kind), [])
+})
+
 test("usage sums spend but replaces context size, and keeps it on a zero", () => {
   const usage = (input: number, context: number, limit: number): CoreEvent => ({
     type: "usage", input_tokens: input, output_tokens: 1, context_tokens: context, context_limit: limit, model: "m", kind: "action", step: 1,

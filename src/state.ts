@@ -15,6 +15,10 @@ export type Item =
   | { id: number; kind: "explored"; counts: ExploreCounts; names: string[] }
   | { id: number; kind: "answer"; text: string; done: boolean }
   | { id: number; kind: "note"; tone: Tone; text: string }
+  // The model's user-facing one-liner for a step ("Reading the target file"), shown
+  // before the action it describes. Explore-kind steps skip it: they are already
+  // folded into one "Explored" line, and a comment per read would defeat that.
+  | { id: number; kind: "say"; text: string }
 
 export interface ExploreCounts {
   reads: number
@@ -77,6 +81,10 @@ export interface State {
   // Items up to this id were redrawn from a session's journal rather than seen live, so a UI
   // can skip the entrance effects meant for fresh work.
   settledThrough: number
+  // True right after a reasoning_commit, until the very next event. The step that
+  // immediately follows already narrated its thinking on that stream, so it must not
+  // print its own short `thought` field as a second, near-duplicate card.
+  justReasoned: boolean
 }
 
 export type Action =
@@ -111,6 +119,7 @@ export function initialState(effort = ""): State {
     showDebug: false,
     startedAt: null,
     settledThrough: 0,
+    justReasoned: false,
   }
 }
 
@@ -288,7 +297,19 @@ function onCommandResult(state: State, event: Extract<CoreEvent, { type: "comman
   return commandNotes(applyEffects(done, effects), event)
 }
 
+// `justReasoned` must survive only from a reasoning_commit to the single event right
+// after it (see the field's own comment); every other event type clears it, so a
+// leftover `true` from an earlier, unrelated commit can never suppress a later step's
+// own thought.
 function onEvent(state: State, event: CoreEvent, now: number): State {
+  const next = applyEvent(state, event, now)
+  if (event.type === "reasoning_start" || event.type === "reasoning_chunk" || event.type === "reasoning_commit" || event.type === "step") {
+    return next
+  }
+  return next.justReasoned ? { ...next, justReasoned: false } : next
+}
+
+function applyEvent(state: State, event: CoreEvent, now: number): State {
   switch (event.type) {
     case "hello": {
       const models = event.models ?? {}
@@ -322,18 +343,25 @@ function onEvent(state: State, event: CoreEvent, now: number): State {
       const kind = EXPLORE_KIND[event.action_type]
       const seconds = event.reasoning_seconds || 0
       const text = (event.thought ?? "").trim()
-      // A routine note on a read-only step would end its group after every
-      // read; only real thinking time earns a break.
-      const shown = kind ? seconds > 0 : Boolean(text) || seconds > 0
+      // A step right after a streamed reasoning_commit already narrated its thinking on
+      // that stream; its own short `thought` field would only repeat it as a second,
+      // near-duplicate card. A routine note on a read-only step would also end its
+      // group after every read, so only real thinking time earns a break there.
+      const alreadyNarrated = state.justReasoned
+      const shown = kind ? seconds > 0 : !alreadyNarrated && (Boolean(text) || seconds > 0)
       const settled = state.inflight ? settle(state) : state
-      const next = shown ? push(settled, (id) => ({ id, kind: "thought", seconds, text })) : settled
+      const withThought = shown ? push(settled, (id) => ({ id, kind: "thought", seconds, text })) : settled
+      // The friendly one-liner precedes the action it describes; explore-kind steps skip
+      // it, since they are already folded into one "Explored" line.
+      const say = kind ? "" : event.user_message.trim()
+      const next = say ? push(withThought, (id) => ({ id, kind: "say", text: say })) : withThought
       if (kind) {
         const weight = exploreWeight(kind, args)
         const label = `${event.action_type}  ${actionTarget(args)}`.trim()
-        return { ...explore(next, kind, weight, label), exploreStep: { step: event.step, kind, weight, label } }
+        return { ...explore(next, kind, weight, label), exploreStep: { step: event.step, kind, weight, label }, justReasoned: false }
       }
       const inflight: Inflight = { step: event.step, planStep: event.plan_step, action: event.action_type, args, note: event.action_description ?? "" }
-      return { ...next, inflight }
+      return { ...next, inflight, justReasoned: false }
     }
     case "action_result":
       return onActionResult(state, event)
@@ -353,9 +381,10 @@ function onEvent(state: State, event: CoreEvent, now: number): State {
       const current = ensureLive(state, event.stream_id)
       const next = { ...state, live: { ...current, thinking: false, thinkingSince: null, reasoning: "" } }
       const text = current.reasoning.trim()
-      return event.duration_seconds >= 1 || text
+      const result = event.duration_seconds >= 1 || text
         ? push(next, (id) => ({ id, kind: "thought", seconds: event.duration_seconds, text }))
         : next
+      return { ...result, justReasoned: true }
     }
     case "message":
       return push(state, (id) => ({ id, kind: "answer", text: event.markdown, done: true }))
@@ -451,6 +480,6 @@ export function reduce(state: State, action: Action): State {
     case "toggle_debug":
       return { ...state, showDebug: !state.showDebug }
     case "clear":
-      return { ...state, items: [], exploring: null, exploringNames: [], exploreStep: null, inflight: null, epoch: state.epoch + 1 }
+      return { ...state, items: [], exploring: null, exploringNames: [], exploreStep: null, inflight: null, justReasoned: false, epoch: state.epoch + 1 }
   }
 }

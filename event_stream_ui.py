@@ -127,10 +127,15 @@ class EventStreamUI:
     ) -> None:
         self.end_thinking()
         # The thought already went out as its own reasoning stream: a second
-        # "thought for N seconds" on the step would show it twice.
+        # "thought for N seconds" on the step would show it twice. A batch runs
+        # every one of its actions through this call with the same per-call
+        # ``reasoning_seconds`` (agent_runtime._run_one_action passes
+        # ``self._last_reasoning_seconds`` unchanged for each action), so the
+        # flag must stay set for the rest of the batch, not just its first
+        # action — it is cleared only when the next model call begins
+        # (``set_thinking("")``).
         if self._loop_reasoning_reported:
             reasoning_seconds = 0.0
-            self._loop_reasoning_reported = False
         self._channel.emit(
             StepEvent(
                 step,

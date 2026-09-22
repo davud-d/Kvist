@@ -357,6 +357,32 @@ def test_loop_reasoning_is_not_reported_twice_on_the_step():
     assert event.reasoning_seconds == 0.0
 
 
+def test_loop_reasoning_is_not_reported_on_every_action_of_a_batch():
+    """A multi-action batch calls print_step_header once per action, all sharing
+    the model call's one ``_last_reasoning_seconds``; every action must stay
+    silent about it, not just the first, until the next model call begins."""
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.set_thinking("thinking")
+    ui.end_thinking()
+    ch.drain()
+    ui.print_step_header(1, make_command("write_file", {"path": "a.py"}), 4.0)
+    ui.print_step_header(2, make_command("run_shell", {"command": "ls"}), 4.0)
+    ui.print_step_header(3, make_command("run_shell", {"command": "pwd"}), 4.0)
+    first, second, third = ch.drain()
+    assert [first.reasoning_seconds, second.reasoning_seconds, third.reasoning_seconds] == [
+        0.0,
+        0.0,
+        0.0,
+    ]
+    # The next model call's own reasoning must not stay suppressed by the
+    # previous batch's flag.
+    ui.set_thinking("")
+    ui.print_step_header(4, make_command("run_shell", {"command": "ls"}), 2.5)
+    (fourth,) = ch.drain()
+    assert fourth.reasoning_seconds == 2.5
+
+
 def test_step_seals_reasoning_that_was_never_ended():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)
