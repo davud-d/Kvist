@@ -6,7 +6,9 @@ import { actionTarget, exploreSummary, type ActionResult, type Item } from "../.
 import { post } from "./host"
 import { Icon } from "./icons"
 import { Markdown } from "./markdown"
+import { turnSlice, turnToText } from "./export"
 import { classifyRun, worseOf, type Tone } from "./outcome"
+import { verbOf } from "./verbs"
 
 type ToolItem = Extract<Item, { kind: "tool" }>
 
@@ -20,21 +22,7 @@ const HIDDEN_STEPS = new Set(["final_answer", "report_to_user", "refuse"])
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
 
 // The action names are the core's vocabulary; a person reads what was done.
-const VERBS: Record<string, string> = {
-  read_file: "Read",
-  read_multiple_files: "Read",
-  list_dir: "Listed",
-  list_tree: "Listed",
-  find_files: "Found",
-  search_code: "Searched",
-  git_status: "Checked git status",
-  web_search: "Searched the web",
-  fetch_url: "Fetched",
-  delegate_task: "Delegated a task",
-}
 const FILE_SUBJECT = new Set(["read_file", "write_file", "append_file", "replace_in_file"])
-
-export const verbOf = (action: string): string => VERBS[action] ?? action
 
 // The file name carries the meaning, so it leads and its folder recedes.
 function FilePath({ path, open }: { path: string; open?: number | null }) {
@@ -433,7 +421,108 @@ function Explored({ item }: { item: Extract<Item, { kind: "explored" }> }) {
   )
 }
 
-export function TranscriptItem({ item, uid, settled }: { item: Item; uid: string; settled: boolean }) {
+// How fast letters appear, and the ceiling so a long line does not take forever.
+const TYPE_MS_PER_CHAR = 12
+const TYPE_MAX_MS = 500
+
+// The model's one-line comment, typed out before the action it describes settles in
+// (the action's own card gets a short matching entrance delay in CSS). A line redrawn
+// from history appears whole: only fresh narration is worth watching type itself out.
+function Say({ text: full, settled }: { text: string; settled: boolean }) {
+  const [shown, setShown] = useState(settled ? full : "")
+  useEffect(() => {
+    if (settled) return
+    const step = Math.max(1, Math.round(full.length / (TYPE_MAX_MS / TYPE_MS_PER_CHAR)))
+    const timer = setInterval(() => {
+      setShown((current) => {
+        const next = full.slice(0, current.length + step)
+        if (next.length >= full.length) clearInterval(timer)
+        return next
+      })
+    }, TYPE_MS_PER_CHAR)
+    return () => clearInterval(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <div class="work quiet say">
+      <Node kind="idle" />
+      {shown}
+    </div>
+  )
+}
+
+// How long the button shows a checkmark after a successful copy.
+const COPIED_HOLD_MS = 1200
+
+async function copy(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    // Some webview states (no focus) reject the async API; the legacy path still works there.
+    const field = document.createElement("textarea")
+    field.value = text
+    field.style.position = "fixed"
+    field.style.opacity = "0"
+    document.body.appendChild(field)
+    field.select()
+    const ok = document.execCommand("copy")
+    field.remove()
+    return ok
+  }
+}
+
+// Bottom-right of the answer: a quiet icon that opens a two-line choice between the
+// answer alone and everything the agent did to produce it.
+function CopyMenu({ answerText, turnText }: { answerText: string; turnText: string }) {
+  const [open, setOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onOutside = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onOutside)
+    return () => document.removeEventListener("mousedown", onOutside)
+  }, [open])
+
+  async function pick(text: string): Promise<void> {
+    setOpen(false)
+    if (await copy(text)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), COPIED_HOLD_MS)
+    }
+  }
+
+  return (
+    <div class="copy-menu" ref={root}>
+      <button class="icon" title="Copy" onClick={() => setOpen(!open)}>
+        <Icon name={copied ? "check" : "copy"} />
+      </button>
+      {open ? (
+        <div class="copy-options">
+          <button onClick={() => pick(answerText)}>Copy answer</button>
+          <button onClick={() => pick(turnText)}>Copy full turn</button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Answer({ item, items }: { item: Extract<Item, { kind: "answer" }>; items: Item[] }) {
+  return (
+    <div class="answer-block">
+      <Markdown text={item.text} />
+      <div class="answer-actions">
+        <CopyMenu answerText={item.text.trim()} turnText={turnToText(turnSlice(items, item.id))} />
+      </div>
+    </div>
+  )
+}
+
+export function TranscriptItem({ item, uid, settled, items }: { item: Item; uid: string; settled: boolean; items: Item[] }) {
   switch (item.kind) {
     case "banner":
       return null
@@ -465,8 +554,10 @@ export function TranscriptItem({ item, uid, settled }: { item: Item; uid: string
       return <Thought item={item} uid={uid} settled={settled} />
     case "explored":
       return <Explored item={item} />
+    case "say":
+      return <Say text={item.text} settled={settled} />
     case "answer":
-      return <Markdown text={item.text} />
+      return <Answer item={item} items={items} />
     case "note":
       return <div class={`note ${item.tone}`}>{item.text}</div>
   }

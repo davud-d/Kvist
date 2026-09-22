@@ -12,7 +12,8 @@ import { Markdown } from "./markdown"
 import { NO_METRICS, shortSeconds, trackMetrics, type TurnMetrics } from "./metrics"
 import { RecentSessions } from "./sessions"
 import { Settings } from "./settings"
-import { ShellCard, Thinking, TranscriptItem, verbOf, Working } from "./transcript"
+import { ShellCard, Thinking, TranscriptItem, Working } from "./transcript"
+import { verbOf } from "./verbs"
 
 // The terminal-only commands make no sense inside an editor panel.
 const PANEL_COMMANDS = COMMANDS.filter((command) => command.name !== "tui" && command.name !== "quit")
@@ -206,7 +207,7 @@ export function App() {
     .map((item) =>
       item.kind === "tool" && item.action === "run_shell"
         ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
-        : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} />)
+        : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
   if (state.inflight?.action === "run_shell") {
     const { step, args } = state.inflight
     feed.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)

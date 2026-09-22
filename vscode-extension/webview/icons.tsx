@@ -12,6 +12,7 @@ const glyphs: Record<string, Glyph> = {
   chevron: { d: "M4.5 6.5l3.5 3.5 3.5-3.5" },
   arrowUp: { d: "M8 13V3.5M4 7l4-3.5L12 7" },
   stop: { d: "M4.5 4.5h7v7h-7z", filled: true },
+  copy: { d: "M6 6h6.5v6.5H6zM3.5 9.5v-6H10" },
 }
 
 export type IconName = keyof typeof glyphs
