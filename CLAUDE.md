@@ -682,7 +682,13 @@ with the same sandboxed PATH, and it must be a trusted system binary or a worksp
 shebang swap between approval and spawn invalidates approval. A project launcher symlink
 whose target is a user-immutable system binary (e.g. `.venv/bin/python -> /usr/bin/python3`)
 is permitted and keeps its own path as argv[0] so venv/`pyvenv.cfg`/site-packages work;
-a symlink to any other target stays denied.
+a symlink to any other target stays denied. In explicit `AGENT_SANDBOX_MODE=workspace`
+only — never `auto`/`bubblewrap` — `_verify_venv_python_launcher` additionally accepts a
+venv Python launcher whose target lives outside those trusted system roots (e.g. a
+`uv`-managed interpreter under the user's HOME), but only when the venv's own
+`pyvenv.cfg` declares that exact resolved path in its `executable` field: the venv can
+vouch only for the interpreter it was built with, never for an arbitrary target, and a
+mismatch between the declared and effective path is denied like any other alias.
 
 **Project toolchains**: the child PATH prepends existing project-local tool directories
 (`.venv/bin`, `venv/bin`, `node_modules/.bin`) inside the workspace, then validated

@@ -2487,7 +2487,12 @@ class TerminalExecutor:
         )
         venv_verified: tuple[FileIdentity, str] | None = None
         if not trusted and lookup is not None and resolved is not None:
-            venv_verified = _verify_venv_python_launcher(self.workspace, lookup, resolved)
+            venv_verified = _verify_venv_python_launcher(
+                self.workspace,
+                lookup,
+                resolved,
+                allow_external_interpreter=self.sandbox_request == "workspace",
+            )
         requested_identity = canonical_executable_name(token)
         effective_identity = (
             canonical_executable_name(resolved.name) if resolved is not None else None
@@ -2684,6 +2689,12 @@ class TerminalExecutor:
             # ``.venv/bin/cat -> /usr/bin/bash``) is never trusted merely
             # because its target lives under a system root; escapes to any
             # other target, or from any other basename/location, stay denied.
+            # In explicit ``AGENT_SANDBOX_MODE=workspace`` only, the target
+            # need not live under a trusted system root (e.g. a uv-managed
+            # interpreter under the user's HOME) — see
+            # ``_verify_venv_python_launcher``'s ``allow_external_interpreter``.
+            # ``auto``/``bubblewrap`` keep the stricter trusted-root
+            # requirement unchanged.
             if (
                 binding.lookup_in_workspace
                 and not binding.target_in_workspace
@@ -3305,7 +3316,11 @@ _VENV_PYTHON_BASENAME_RE = re.compile(r"^python(3(\.\d{1,2})?)?(\.exe)?$", re.IG
 
 
 def _verify_venv_python_launcher(
-    workspace: Path, lookup: Path, resolved: Path
+    workspace: Path,
+    lookup: Path,
+    resolved: Path,
+    *,
+    allow_external_interpreter: bool = False,
 ) -> tuple[FileIdentity, str] | None:
     """Verify ``lookup`` is a genuine project venv Python launcher.
 
@@ -3316,6 +3331,16 @@ def _verify_venv_python_launcher(
     Returns ``(pyvenv_cfg_identity, pyvenv_cfg_digest)`` on success so the
     execution context binds the launcher to its venv's declared identity —
     mutating pyvenv.cfg between approval and spawn invalidates the approval.
+
+    ``allow_external_interpreter`` is set only by the caller for explicit
+    ``AGENT_SANDBOX_MODE=workspace`` (never ``auto``/``bubblewrap``, which
+    already provide OS isolation and keep the stricter trusted-system-root
+    requirement).  It relaxes *where* the final interpreter may live — a
+    venv builder such as ``uv`` places it under the user's HOME, not under
+    ``/usr``/``/bin``/``/sbin`` — but still requires that ``pyvenv.cfg``
+    itself, attested below, declares that exact resolved path as the venv's
+    interpreter, so a venv can only vouch for the interpreter it was built
+    with, never for an arbitrary target.
     """
     try:
         if not _is_relative_to(lookup, workspace):
@@ -3352,10 +3377,25 @@ def _verify_venv_python_launcher(
     # The final target the kernel would actually exec must be a trusted,
     # user-immutable system Python — never Bash, sh, env, Perl, Node, or any
     # other binary, regardless of what the launcher basename claims.
-    if not _is_trusted_system_executable(resolved, resolved):
-        return None
     if not _VENV_PYTHON_BASENAME_RE.match(resolved.name):
         return None
+    trusted_root = _is_trusted_system_executable(resolved, resolved)
+    if not trusted_root:
+        if not allow_external_interpreter:
+            return None
+        # Weaker workspace-only boundary: the interpreter may live outside
+        # the trusted system roots, but only when the venv's own pyvenv.cfg
+        # declares this exact resolved path as its interpreter — the venv
+        # cannot vouch for a target it did not itself record at creation.
+        declared = _read_pyvenv_cfg_executable(pyvenv_cfg)
+        if declared is None:
+            return None
+        try:
+            declared_resolved = declared.resolve(strict=True)
+        except OSError:
+            return None
+        if declared_resolved != resolved:
+            return None
 
     cfg_identity = _path_entry_identity(pyvenv_cfg)
     if cfg_identity is None:
@@ -3365,6 +3405,26 @@ def _verify_venv_python_launcher(
     except OSError:
         return None
     return (cfg_identity, cfg_digest)
+
+
+def _read_pyvenv_cfg_executable(pyvenv_cfg: Path) -> Path | None:
+    """Return the ``executable`` path a venv's ``pyvenv.cfg`` declares, if any."""
+    try:
+        text = pyvenv_cfg.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeDecodeError):
+        return None
+    for line in text.splitlines():
+        key, sep, value = line.partition("=")
+        if not sep or key.strip().lower() != "executable":
+            continue
+        value = value.strip()
+        if not value:
+            return None
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            candidate = pyvenv_cfg.parent / candidate
+        return candidate
+    return None
 
 
 _WINDOWS_BROAD_ACCESS_SID_STRINGS = (

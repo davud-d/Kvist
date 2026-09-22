@@ -42,6 +42,7 @@ from terminal import (
     HardDenyError,
     TerminalExecutor,
     _controlled_child_path,
+    _is_trusted_system_executable,
     _parse_shebang,
 )
 
@@ -905,6 +906,152 @@ def test_venv_without_pyvenv_cfg_is_denied(tmp_path):
     ex = TerminalExecutor(tmp_path, timeout=5)
     with pytest.raises(HardDenyError, match="symlink resolves outside"):
         ex.run([".venv/bin/python", "hi.py"])
+
+
+# ────────────── explicit workspace mode: venv launcher outside system roots ──────────────
+# Mirrors a ``uv``-managed venv, whose interpreter lives under the user's
+# HOME rather than under /usr, /bin or /sbin (see _verify_venv_python_launcher's
+# ``allow_external_interpreter``).  Only ``AGENT_SANDBOX_MODE=workspace`` may
+# accept it, and only when pyvenv.cfg's own ``executable`` field names that
+# exact resolved path.
+
+@pytest.fixture
+def external_python_interpreter():
+    """A real, already-installed Python whose resolved path is outside every
+    trusted system root -- exactly the uv-managed case this feature targets.
+
+    Returned by reference (never copied): modern CPython's getpath locates
+    its stdlib relative to the *real* binary's own directory, so a bare copy
+    of the executable without its sibling ``lib/`` layout fails to start.
+    """
+    resolved = Path(os.path.realpath(sys.executable))
+    if _is_trusted_system_executable(resolved, resolved):
+        pytest.skip(
+            "this interpreter is installed under a trusted system root; "
+            "cannot exercise the external-interpreter path"
+        )
+    return resolved
+
+
+def _write_uv_style_pyvenv_cfg(venv_dir: Path, executable: Path) -> None:
+    venv_dir.mkdir(parents=True, exist_ok=True)
+    (venv_dir / "pyvenv.cfg").write_text(
+        f"home = {executable.parent}\n"
+        "include-system-site-packages = false\n"
+        "version = 3.11.15\n"
+        f"executable = {executable}\n"
+        "command = uv venv\n",
+        encoding="utf-8",
+    )
+
+
+def test_venv_workspace_mode_permits_trusted_root_interpreter(
+    tmp_path, monkeypatch, trusted_python_path
+):
+    """(a) workspace mode + system-rooted interpreter: still permitted, as before."""
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "workspace")
+    _write_policy(tmp_path, ["*"])
+    vb = tmp_path / ".venv" / "bin"
+    vb.mkdir(parents=True)
+    (vb / "python").symlink_to(trusted_python_path)
+    (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
+    (tmp_path / "hi.py").write_text("print('prefix ok')", encoding="utf-8")
+    ex = TerminalExecutor(tmp_path, timeout=10)
+    assert ex.sandbox_mode is SandboxMode.WORKSPACE_ONLY
+    result = ex.run([".venv/bin/python", "hi.py"])
+    assert result.returncode == 0
+    assert "prefix ok" in result.stdout
+
+
+def test_venv_workspace_mode_permits_external_interpreter_matching_pyvenv_cfg(
+    tmp_path, monkeypatch, external_python_interpreter
+):
+    """(b) workspace mode + interpreter outside system roots, attested by pyvenv.cfg: permitted."""
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "workspace")
+    _write_policy(tmp_path, ["*"])
+    external = external_python_interpreter
+    venv_dir = tmp_path / ".venv"
+    _write_uv_style_pyvenv_cfg(venv_dir, external)
+    (venv_dir / "bin").mkdir(parents=True)
+    (venv_dir / "bin" / "python").symlink_to(external)
+    (tmp_path / "hi.py").write_text("print('external ok')", encoding="utf-8")
+    ex = TerminalExecutor(tmp_path, timeout=10)
+    assert ex.sandbox_mode is SandboxMode.WORKSPACE_ONLY
+    assert ex.sandbox_request == "workspace"
+    result = ex.run([".venv/bin/python", "hi.py"])
+    assert result.returncode == 0
+    assert "external ok" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "sandbox_env",
+    [
+        None,
+        "auto",
+        pytest.param("bubblewrap", marks=requires_bwrap),
+    ],
+)
+def test_venv_non_workspace_mode_denies_external_interpreter(
+    tmp_path, monkeypatch, sandbox_env, external_python_interpreter
+):
+    """(c) same external-interpreter venv, but auto/bubblewrap/default: still denied."""
+    if sandbox_env is None:
+        monkeypatch.delenv("AGENT_SANDBOX_MODE", raising=False)
+    else:
+        monkeypatch.setenv("AGENT_SANDBOX_MODE", sandbox_env)
+    _write_policy(tmp_path, ["*"])
+    external = external_python_interpreter
+    venv_dir = tmp_path / ".venv"
+    _write_uv_style_pyvenv_cfg(venv_dir, external)
+    (venv_dir / "bin").mkdir(parents=True)
+    (venv_dir / "bin" / "python").symlink_to(external)
+    (tmp_path / "hi.py").write_text("print('should not run')", encoding="utf-8")
+    ex = TerminalExecutor(tmp_path, timeout=5)
+    with pytest.raises(HardDenyError, match="symlink resolves outside"):
+        ex.run([".venv/bin/python", "hi.py"])
+
+
+def test_venv_workspace_mode_denies_mismatched_pyvenv_cfg_executable(
+    tmp_path, monkeypatch, external_python_interpreter
+):
+    """(d) pyvenv.cfg names a different target than the symlink: denied even in workspace mode."""
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "workspace")
+    _write_policy(tmp_path, ["*"])
+    external = external_python_interpreter
+    # A real, different file than ``external`` -- the declared and effective
+    # interpreter targets must diverge, whether or not the declared one
+    # would itself be a runnable Python.
+    other = tmp_path.parent / f"not_the_venv_interpreter_{tmp_path.name}"
+    other.write_bytes(b"")
+    venv_dir = tmp_path / ".venv"
+    # pyvenv.cfg declares ``other``, but the launcher symlink actually
+    # resolves to ``external`` -- the declared and effective targets diverge.
+    _write_uv_style_pyvenv_cfg(venv_dir, other)
+    (venv_dir / "bin").mkdir(parents=True)
+    (venv_dir / "bin" / "python").symlink_to(external)
+    (tmp_path / "hi.py").write_text("print('should not run')", encoding="utf-8")
+    ex = TerminalExecutor(tmp_path, timeout=5)
+    with pytest.raises(HardDenyError, match="symlink resolves outside"):
+        ex.run([".venv/bin/python", "hi.py"])
+
+
+def test_venv_workspace_mode_denies_non_venv_structure(
+    tmp_path, monkeypatch, external_python_interpreter
+):
+    """(e) workspace mode does not relax the structural venv checks."""
+    monkeypatch.setenv("AGENT_SANDBOX_MODE", "workspace")
+    _write_policy(tmp_path, ["*"])
+    external = external_python_interpreter
+    venv_dir = tmp_path / ".venv"
+    _write_uv_style_pyvenv_cfg(venv_dir, external)
+    # Not a python-named basename under .venv/bin -- fails the launcher
+    # basename check regardless of an otherwise-valid pyvenv.cfg.
+    (venv_dir / "bin").mkdir(parents=True)
+    (venv_dir / "bin" / "run-python").symlink_to(external)
+    (tmp_path / "hi.py").write_text("print('should not run')", encoding="utf-8")
+    ex = TerminalExecutor(tmp_path, timeout=5)
+    with pytest.raises(HardDenyError, match="symlink resolves outside"):
+        ex.run([".venv/bin/run-python", "hi.py"])
 
 
 @requires_bwrap
