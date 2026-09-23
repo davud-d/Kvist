@@ -115,7 +115,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config-op",
-        choices=("add-custom-provider", "delete-custom-provider"),
+        choices=("add-custom-provider", "delete-custom-provider", "set-provider"),
         help="Run one headless config operation, print JSON, exit (no LLM call).",
     )
     parser.add_argument(
@@ -185,6 +185,42 @@ def _run_commit_message_op() -> None:
         print(json.dumps(failure))
         raise SystemExit(1) from error
     print(json.dumps({"ok": True, "message": message}))
+
+
+def _run_set_provider_op(raw: object) -> dict:
+    """Save a provider and its API key non-interactively (a frontend's first-run setup).
+
+    Reuses ``ensure_provider_credentials`` — the same persistence and OpenAI-key
+    validation the interactive terminal wizard uses — with the secret supplied
+    up front instead of prompted, so an event-driven frontend can offer its own
+    setup screen without the core ever needing a TTY or an extra dialog round trip.
+    """
+    from config_info import build_config_info
+
+    provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
+    api_key = str(raw.get("api_key", "")).strip() if isinstance(raw, dict) else ""
+    if not provider:
+        raise CustomProviderError("A provider id is required.")
+
+    normalized = normalize_provider(provider)
+    if is_custom_provider(normalized):
+        raise CustomProviderError("Use --config-op add-custom-provider for a custom provider.")
+
+    models, warnings = resolve_models_for_provider(normalized, {})
+    required = required_secret_keys_for_provider(normalized, list(models.values()))
+    ensure_provider_credentials(
+        normalized,
+        models.get("fast", ""),
+        required_keys=required,
+        prompt_secret_fn=lambda _label: api_key,
+    )
+    return {
+        "ok": True,
+        "provider": normalized,
+        "models": models,
+        "warnings": warnings,
+        "info": build_config_info(),
+    }
 
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
@@ -3535,19 +3571,22 @@ def main() -> None:
             if payload_text is None:
                 payload_text = sys.stdin.read()
             raw = _json.loads(payload_text or "null")
-            if args.config_op == "add-custom-provider":
-                name, provider_config = normalize_custom_provider_payload(raw)
-                save_custom_provider(name, provider_config)
+            if args.config_op == "set-provider":
+                payload = _run_set_provider_op(raw)
             else:
-                name = str(raw.get("name", "")).strip() if isinstance(raw, dict) else ""
-                if not name or not delete_custom_provider(name):
-                    raise CustomProviderError(f"Custom provider {name!r} not found.")
-            payload = {
-                "ok": True,
-                "provider_id": f"{CUSTOM_PROVIDER_PREFIX}{name}",
-                "info": build_config_info(),
-            }
-        except (CustomProviderError, ValueError, OSError) as error:
+                if args.config_op == "add-custom-provider":
+                    name, provider_config = normalize_custom_provider_payload(raw)
+                    save_custom_provider(name, provider_config)
+                else:
+                    name = str(raw.get("name", "")).strip() if isinstance(raw, dict) else ""
+                    if not name or not delete_custom_provider(name):
+                        raise CustomProviderError(f"Custom provider {name!r} not found.")
+                payload = {
+                    "ok": True,
+                    "provider_id": f"{CUSTOM_PROVIDER_PREFIX}{name}",
+                    "info": build_config_info(),
+                }
+        except (CustomProviderError, ValueError, OSError, RuntimeError) as error:
             failure = {
                 "ok": False,
                 "error": sanitize_display_text(str(error).strip() or type(error).__name__),
