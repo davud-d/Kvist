@@ -82,6 +82,12 @@ def test_reader_prompt_stays_within_token_budget():
     # user's claim about existing behavior is not evidence); → 2280 for
     # naming the grounding principle explicitly in section 8 plus two more
     # examples of it (git_status/git_diff cover tracked changes only; a
-    # truncated log/dump can make a naive count wrong). Nothing else may
-    # grow into it.
-    assert tokens <= 2280, f"reader prompt is {tokens} tokens (budget 2280)"
+    # truncated log/dump can make a naive count wrong); → 2520 for naming the
+    # investigation principle in section 5 (an action earns its step only when
+    # you can name the fact it settles), which replaced the "max 2 consecutive
+    # inspects" counter that a run of 50 search_code calls sailed straight
+    # past; → 3200 for sections 11-12 (DELIVERING WORK, CORRECTIONS), ported
+    # verbatim from Claude Code's own system prompt because reader had nothing
+    # on scope discipline or on when an earlier statement is worth correcting.
+    # Nothing else may grow into it.
+    assert tokens <= 3200, f"reader prompt is {tokens} tokens (budget 3200)"

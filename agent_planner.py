@@ -196,7 +196,9 @@ def no_plan_info(self, user_goal: str) -> PlanInfo:
 
     No LLM planner call is made. The single plan step explicitly tells the
     action model that no plan was generated, so it self-orients in the first
-    step (inspect what it needs) instead of assuming a plan exists.
+    step (inspect what it needs) instead of assuming a plan exists. It also
+    says what ends that orientation: an invitation to inspect with no stated
+    end is how a run spends its whole budget looking.
     """
     return PlanInfo(
         goal=user_goal,
@@ -204,7 +206,10 @@ def no_plan_info(self, user_goal: str) -> PlanInfo:
         plan=[
             "No plan was generated for this task (planning skipped). "
             "Orient yourself first: inspect the files/state you need, "
-            "then act directly toward the task.",
+            "then act directly toward the task. Orientation ends as soon as "
+            "you can name the file, line or command the task turns on — it is "
+            "not a phase to fill, and every step spent widening it is a step "
+            "not spent on the task itself.",
         ],
         success_criteria=[
             "the user's task is fully accomplished",
@@ -212,6 +217,7 @@ def no_plan_info(self, user_goal: str) -> PlanInfo:
         ],
         risks=[
             "no upfront plan: verify assumptions before mutating",
+            "no upfront plan: nothing bounds orientation but your own judgement",
         ],
         task_kind=infer_task_kind(user_goal),
     )
