@@ -590,3 +590,53 @@ def test_overflow_does_not_resend_an_identical_prompt(agent_factory, monkeypatch
         assert len(sent) == len(set(sent)), "the same prompt was sent twice"
     finally:
         reset_learned_budgets()
+
+
+def test_json_mode_rejection_keeps_the_rest_of_the_request_and_warns():
+    """Losing JSON mode must cost only JSON mode, and must not be silent.
+
+    The bare fallback rebuilds the request from scratch, dropping the timeout,
+    usage reporting and reasoning kwargs along with response_format. Try the
+    narrowed retry first so a provider that refuses only that parameter keeps
+    everything else.
+    """
+    import agent_model
+    from types import SimpleNamespace
+
+    attempts: list[dict] = []
+    warnings: list[str] = []
+
+    class Completions:
+        def create(self, **kwargs):
+            attempts.append(kwargs)
+            if "response_format" in kwargs:
+                raise RuntimeError("response_format is not supported by this model")
+            return "ok"
+
+    agent = SimpleNamespace(
+        config=SimpleNamespace(
+            provider="deepseek",
+            model_temperature=0.0,
+            api_timeout=30,
+            reasoning_effort="medium",
+        ),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        _ui=SimpleNamespace(
+            print_error=warnings.append,
+            debug_print=lambda *a, **k: None,
+        ),
+    )
+
+    result = agent_model._create_json_completion(
+        agent, "deepseek-reasoner", [{"role": "user", "content": "hi"}]
+    )
+
+    assert result == "ok"
+    assert len(attempts) == 2, "expected one rejected attempt and one narrowed retry"
+    assert "response_format" in attempts[0]
+    retry = attempts[1]
+    assert "response_format" not in retry
+    # Everything unrelated to the refused parameter survives.
+    assert retry["timeout"] == 30
+    assert retry["reasoning_effort"] == "high"
+    assert warnings, "dropping JSON mode must be surfaced, not silent"

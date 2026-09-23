@@ -1029,6 +1029,24 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
         )
 
 
+def _warn_json_mode_dropped(self, error: Exception | None) -> None:
+    """Surface, every time it happens, that native JSON mode was dropped.
+
+    Same contract as `_warn_reasoning_unsupported` and for the same reason: a
+    run that quietly lost its format guarantee spends the rest of its steps
+    paying for answers the parser throws away.
+    """
+    message = (
+        f"Provider rejected JSON mode for '{self.config.provider}' — retrying "
+        "without it. Responses are no longer format-constrained this run."
+    )
+    printer = getattr(self._ui, "print_error", None)
+    if callable(printer):
+        printer(message)
+    if error is not None:
+        self._ui.debug_print(f"[json_mode] dropped after: {redact_text(str(error))}")
+
+
 def _create_json_completion(
     self,
     model: str,
@@ -1060,6 +1078,19 @@ def _create_json_completion(
         if not _supports_plain_json_fallback(error):
             raise
         first_error = error
+
+    # Losing JSON mode is what lets a reasoning model answer with prose the
+    # parser then rejects, so the user pays for the same content twice. Drop
+    # only the parameter that was refused before giving up the rest.
+    if "response_format" in request_kwargs:
+        narrowed = {k: v for k, v in request_kwargs.items() if k != "response_format"}
+        _warn_json_mode_dropped(self, first_error)
+        try:
+            return _create_completion_with_reasoning_fallback(self, narrowed)
+        except Exception as error:
+            if not _supports_plain_json_fallback(error):
+                raise
+            first_error = error
 
     fallback_kwargs: dict[str, Any] = {
         "model": model,
