@@ -53,6 +53,7 @@ from agent_model import (
     _TOKEN_ENCODING_UNINITIALIZED,
     prefer_smart_model,
     safe_extract_completion_content,
+    append_reasoning_delta,
     safe_extract_reasoning_delta,
     safe_extract_stream_delta,
     select_action_model_for_run,
@@ -1133,7 +1134,7 @@ class LocalAgent:
 
                 reasoning_text = safe_extract_reasoning_delta(delta)
                 if reasoning_text and reasoning_update is not None and not chunks:
-                    reasoning_chunks.append(reasoning_text)
+                    append_reasoning_delta(reasoning_chunks, reasoning_text)
                     now = time.monotonic()
                     if now - last_reasoning_update > 0.1:
                         reasoning_update("".join(reasoning_chunks))

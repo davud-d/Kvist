@@ -362,6 +362,7 @@ def _render_report(self, context: str) -> str:
         _emit_usage,
         _load_role_prompt,
         safe_extract_completion_content,
+        append_reasoning_delta,
         safe_extract_reasoning_delta,
         safe_extract_stream_delta,
         _create_json_completion,
@@ -421,7 +422,7 @@ def _render_report(self, context: str) -> str:
 
             reasoning_text = safe_extract_reasoning_delta(delta)
             if reasoning_text and reasoning_update is not None and not chunks:
-                reasoning_chunks.append(reasoning_text)
+                append_reasoning_delta(reasoning_chunks, reasoning_text)
                 now = __import__("time").monotonic()
                 if now - last_reasoning_update > 0.1:
                     reasoning_update("".join(reasoning_chunks))

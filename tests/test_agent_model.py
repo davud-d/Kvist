@@ -273,6 +273,24 @@ def test_streaming_reasoning_reaches_the_live_thinking_panel(agent_factory):
     assert pushed[-1] == "I should read the file."
 
 
+def test_streaming_reasoning_keeps_summary_headings_apart(agent_factory):
+    deltas = [
+        SimpleNamespace(content=None, reasoning_content="**A**"),
+        SimpleNamespace(content=None, reasoning_content="**B**"),
+        SimpleNamespace(content='{"thought":"ok"}', reasoning_content=None),
+    ]
+    agent = agent_factory(stream=True, verbose=False)
+    agent.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        create=lambda **kwargs: [SimpleNamespace(choices=[SimpleNamespace(delta=d)]) for d in deltas]
+    )))
+    pushed: list[str] = []
+    agent._ui.set_thinking = pushed.append
+
+    agent._call_model_streaming("gpt-test", [{"role": "user", "content": "x"}])
+
+    assert pushed[-1] == "**A**\n\n**B**"
+
+
 def test_action_call_clears_thinking_when_provider_streams_no_reasoning(agent_factory):
     agent = agent_factory(stream=True, verbose=False)
     agent.client = FakeLLMClient(stream_chunks=['{"thought"', ':"ok"}'])

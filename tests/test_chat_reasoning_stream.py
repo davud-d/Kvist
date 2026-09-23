@@ -67,6 +67,19 @@ def test_openrouter_reasoning_field_is_also_captured():
     assert [e for e in events if isinstance(e, ReasoningChunkEvent)][-1].text == "pondering"
 
 
+def test_reasoning_summary_headings_stay_separate():
+    # GPT reasoning summaries arrive one part per delta, with no separator.
+    stream = [
+        _delta(content=None, reasoning_content="**A**"),
+        _delta(content=None, reasoning_content="**B**"),
+        _delta(content="answer"),
+    ]
+    _answer, events = _consume(stream)
+    text = [e for e in events if isinstance(e, ReasoningChunkEvent)][-1].text
+    assert "****" not in text
+    assert text == "**A**\n\n**B**"
+
+
 def test_non_thinking_stream_emits_no_reasoning_events():
     stream = [_delta(content="Hi"), _delta(content=" there")]
     answer, events = _consume(stream)

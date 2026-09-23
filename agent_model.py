@@ -915,7 +915,7 @@ def call_model_streaming(
             if reasoning_text:
                 if reasoning_start_time is None:
                     reasoning_start_time = time.monotonic()
-                reasoning_chunks.append(reasoning_text)
+                append_reasoning_delta(reasoning_chunks, reasoning_text)
                 now = time.monotonic()
                 if now - last_reasoning_push > 0.1:
                     _note_thinking(self, "".join(reasoning_chunks))
@@ -1543,3 +1543,16 @@ def safe_extract_reasoning_delta(delta: Any) -> str:
         if isinstance(value, str) and value:
             return value
     return ""
+
+
+def append_reasoning_delta(chunks: list[str], text: str) -> None:
+    """Add a reasoning fragment, keeping reasoning-summary parts apart.
+
+    GPT reasoning summaries arrive one ``**Heading**`` part per delta with no
+    separator, so a plain join fuses them into ``**A****B**``, which no
+    markdown renderer can read. Adjacent bold markers never occur inside one
+    part, so that boundary is where a part ends.
+    """
+    if chunks and chunks[-1].endswith("**") and text.startswith("**"):
+        chunks.append("\n\n")
+    chunks.append(text)
