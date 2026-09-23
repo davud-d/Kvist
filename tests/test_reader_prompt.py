@@ -86,8 +86,12 @@ def test_reader_prompt_stays_within_token_budget():
     # investigation principle in section 5 (an action earns its step only when
     # you can name the fact it settles), which replaced the "max 2 consecutive
     # inspects" counter that a run of 50 search_code calls sailed straight
-    # past; → 3200 for sections 11-12 (DELIVERING WORK, CORRECTIONS), ported
-    # verbatim from Claude Code's own system prompt because reader had nothing
-    # on scope discipline or on when an earlier statement is worth correcting.
-    # Nothing else may grow into it.
-    assert tokens <= 3200, f"reader prompt is {tokens} tokens (budget 3200)"
+    # past. It briefly went to 3200 for DELIVERING WORK and CORRECTIONS, which
+    # then moved into prompts/system/constitution.txt and came back out of
+    # here. This budget covers the role file alone; build_role_system_prompt
+    # prepends the constitution on every call, so the real per-call cost is
+    # this plus that file. Nothing else may grow into either.
+    # → 2700 for the emission paragraphs in section 2: the JSON object is the
+    # only channel out, so the format is nothing to recall at the end of a long
+    # reasoning pass, and an answer worked out in thinking was written nowhere.
+    assert tokens <= 2700, f"reader prompt is {tokens} tokens (budget 2700)"

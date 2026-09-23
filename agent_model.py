@@ -81,6 +81,9 @@ if _STALE_PROMPT_DIR.is_dir():
 
 _PROMPT_CACHE: dict[str, str] = {}
 
+# Not a role, so it can never collide with a _ROLE_PROMPT_FILES key.
+_CONSTITUTION_KEY = "\x00constitution"
+
 _ROLE_PROMPT_FILES: dict[str, str] = {
     "coder": "coder_prompt.txt",
     "devops": "devops_prompt.txt",
@@ -541,11 +544,26 @@ def planner_style_context(self) -> str:
     )
 
 
-def build_role_system_prompt(self, role: str) -> str:
-    """Role prompt, the user's response style, then this workspace's own
-    instruction file — each read per call so edits land on the next step.
+def _load_constitution() -> str:
+    """The layer above every role: what the work is, what outranks what.
+
+    Cached like a role prompt. It is deliberately absent from the report and
+    commit prompts, which `_load_role_prompt` serves directly — those two
+    produce one piece of text from material already gathered and never act.
     """
-    base = _load_role_prompt(role)
+    if _CONSTITUTION_KEY in _PROMPT_CACHE:
+        return _PROMPT_CACHE[_CONSTITUTION_KEY]
+    text = (_PROMPT_DIR / "constitution.txt").read_text(encoding="utf-8").strip()
+    _PROMPT_CACHE[_CONSTITUTION_KEY] = text
+    return text
+
+
+def build_role_system_prompt(self, role: str) -> str:
+    """The constitution, the role prompt, the user's response style, then this
+    workspace's own instruction file — narrowing, each read per call so edits
+    land on the next step.
+    """
+    base = f"{_load_constitution()}\n\n{_load_role_prompt(role)}"
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"

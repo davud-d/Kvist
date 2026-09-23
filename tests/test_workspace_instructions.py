@@ -181,8 +181,11 @@ def test_action_model_system_prompt_carries_the_workspace_file(tmp_path):
 
     call_action_model(Agent(), "task")
 
-    assert captured["system_prompt"].startswith(_load_role_prompt("coder"))
-    assert "Never touch vendor/." in captured["system_prompt"]
+    # The constitution is prepended, so the role prompt sits inside rather than
+    # at the front; the workspace file still lands after both.
+    system_prompt = captured["system_prompt"]
+    role_at = system_prompt.index(_load_role_prompt("coder"))
+    assert system_prompt.index("Never touch vendor/.") > role_at
 
 
 def test_writer_roles_are_taught_to_maintain_the_file():

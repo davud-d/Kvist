@@ -3,7 +3,12 @@
 import json
 from types import SimpleNamespace
 
-from agent_model import call_action_model, _load_role_prompt
+from agent_model import (
+    build_role_system_prompt,
+    call_action_model,
+    _load_constitution,
+    _load_role_prompt,
+)
 from agent_planner import create_plan, PLANNER_PROMPT
 
 
@@ -33,12 +38,35 @@ def test_action_model_uses_current_agent_role_prompt(tmp_path):
 
     call_action_model(Agent(), "test task")
 
-    # build_role_system_prompt appends the selected style and this workspace's
-    # instructions after the role prompt, so the role prompt is a prefix, not
-    # the whole system prompt.
-    assert captured["system_prompt"].startswith(_load_role_prompt("devops"))
-    assert not captured["system_prompt"].startswith(_load_role_prompt("coder"))
-    assert not captured["system_prompt"].startswith(_load_role_prompt("chat"))
+    # build_role_system_prompt narrows: constitution, role prompt, then the
+    # selected style and this workspace's instructions. So the role prompt is
+    # neither the prefix nor the whole system prompt.
+    system_prompt = captured["system_prompt"]
+    assert system_prompt.startswith(_load_constitution())
+    assert _load_role_prompt("devops") in system_prompt
+    assert _load_role_prompt("coder") not in system_prompt
+    assert _load_role_prompt("chat") not in system_prompt
+
+
+def test_constitution_precedes_every_acting_role(tmp_path):
+    """The layer above the roles, and only above the ones that act.
+
+    report and commit turn material already gathered into one piece of text and
+    never choose an action, so they load their prompt directly and never pay
+    for it.
+    """
+    agent = SimpleNamespace(
+        executor=SimpleNamespace(workspace=tmp_path),
+        _session_styles={},
+    )
+    constitution = _load_constitution()
+    for role in ("coder", "reader", "devops", "chat"):
+        built = build_role_system_prompt(agent, role)
+        assert built.startswith(constitution), role
+        assert built.index(_load_role_prompt(role)) >= len(constitution), role
+
+    for role in ("report", "commit"):
+        assert constitution not in _load_role_prompt(role)
 
 
 def test_prompt_dir_resolves_to_correct_directory():
