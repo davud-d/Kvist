@@ -115,7 +115,13 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--config-op",
-        choices=("add-custom-provider", "delete-custom-provider", "set-provider"),
+        choices=(
+            "add-custom-provider",
+            "delete-custom-provider",
+            "set-provider",
+            "list-models",
+            "open-registration",
+        ),
         help="Run one headless config operation, print JSON, exit (no LLM call).",
     )
     parser.add_argument(
@@ -235,6 +241,48 @@ def _run_set_provider_op(raw: object) -> dict:
         "warnings": warnings,
         "info": build_config_info(),
     }
+
+
+def _run_list_models_op(raw: object) -> dict:
+    """List a provider's live models using a key that has not been saved yet.
+
+    Mirrors what the terminal's own live model picker does
+    (``_model_picker_options`` -> ``fetch_available_models``), but that helper
+    reads the key from disk via ``load_available_credentials`` — no use here,
+    since a first-run frontend is asking about a key the person just typed and
+    has not saved. The key is used for this one discovery request and nothing
+    is written to ``~/.kvist/config.json``.
+    """
+    provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
+    api_key = str(raw.get("api_key", "")).strip() if isinstance(raw, dict) else ""
+    if not provider:
+        raise CustomProviderError("A provider id is required.")
+    if not api_key:
+        raise CustomProviderError("An API key is required.")
+
+    normalized = normalize_provider(provider)
+    if is_custom_provider(normalized):
+        raise CustomProviderError("Live model listing is not available for custom providers.")
+
+    required = required_secret_keys_for_provider(normalized, [])
+    credentials = {key: api_key for key in required}
+    models, error = fetch_available_models(normalized, credentials, force_refresh=True)
+    return {"ok": True, "provider": normalized, "models": sorted(models), "error": error}
+
+
+def _run_open_registration_op(raw: object) -> dict:
+    """Open a provider's signup page in a GUI browser (a first-run "register" button).
+
+    Only AnyModel has one today (``anymodel_onboarding.py``); any other
+    provider id is a no-op the caller falls back to plain key entry for.
+    """
+    from anymodel_onboarding import ANYMODEL_REGISTER_URL, open_registration_page
+
+    provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
+    normalized = normalize_provider(provider)
+    if normalized != DEFAULT_BLANK_START_PROVIDER:
+        return {"ok": True, "opened": False, "url": None}
+    return {"ok": True, "opened": open_registration_page(), "url": ANYMODEL_REGISTER_URL}
 
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
@@ -3587,6 +3635,10 @@ def main() -> None:
             raw = _json.loads(payload_text or "null")
             if args.config_op == "set-provider":
                 payload = _run_set_provider_op(raw)
+            elif args.config_op == "list-models":
+                payload = _run_list_models_op(raw)
+            elif args.config_op == "open-registration":
+                payload = _run_open_registration_op(raw)
             else:
                 if args.config_op == "add-custom-provider":
                     name, provider_config = normalize_custom_provider_payload(raw)

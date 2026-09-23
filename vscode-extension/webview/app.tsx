@@ -5,7 +5,7 @@ import { contextLabel, formatSeconds, formatTokens } from "../../src/format"
 import { actionTarget, exploreSummary, initialState, reduce } from "../../src/state"
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
-import { FirstRun } from "./firstRun"
+import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Icon, Ring } from "./icons"
 import { post } from "./host"
@@ -41,6 +41,8 @@ export function App() {
   const [needsSetup, setNeedsSetup] = useState<ProviderInfo[] | null>(null)
   const [setupBusy, setSetupBusy] = useState(false)
   const [setupError, setSetupError] = useState("")
+  const [modelList, setModelList] = useState<ModelListState>({ provider: "", busy: false, options: [], error: "" })
+  const [registration, setRegistration] = useState<RegistrationState | null>(null)
   // When each shell command started, by step: the light around it begins after a couple of seconds.
   const shellStarts = useRef(new Map<number, number>())
   const bottom = useRef<HTMLDivElement>(null)
@@ -72,6 +74,15 @@ export function App() {
     setSetupBusy(true)
     setSetupError("")
     post({ type: "setProvider", provider, apiKey, model })
+  }
+
+  function listModels(provider: string, apiKey: string): void {
+    setModelList({ provider, busy: true, options: [], error: "" })
+    post({ type: "listModels", provider, apiKey })
+  }
+
+  function openRegistration(provider: string): void {
+    post({ type: "openRegistration", provider })
   }
 
   useEffect(() => {
@@ -136,6 +147,10 @@ export function App() {
           if (!message.ok) return setSetupError(message.error || "Could not save the provider.")
           setSetupError("")
           return setNeedsSetup(null)
+        case "modelList":
+          return setModelList({ provider: message.provider, busy: false, options: message.models, error: message.ok ? message.error ?? "" : message.error || "Could not load models." })
+        case "registrationOpened":
+          return setRegistration({ provider: message.provider, opened: message.opened, url: message.url })
       }
     }
     window.addEventListener("message", onMessage)
@@ -237,7 +252,17 @@ export function App() {
     return (
       <>
         <CursorGlow />
-        <FirstRun logoUrl={logoUrl} providers={needsSetup} busy={setupBusy} error={setupError} submit={submitProvider} />
+        <FirstRun
+          logoUrl={logoUrl}
+          providers={needsSetup}
+          busy={setupBusy}
+          error={setupError}
+          submit={submitProvider}
+          modelList={modelList}
+          onListModels={listModels}
+          registration={registration}
+          onOpenRegistration={openRegistration}
+        />
       </>
     )
   }

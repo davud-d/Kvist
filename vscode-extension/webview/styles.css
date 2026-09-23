@@ -173,8 +173,14 @@ body:not(.vscode-light) .first-run-logo { display: block; mix-blend-mode: lighte
 .first-run-provider-label { font-weight: 600; }
 .first-run-provider-blurb { font-size: .82em; color: var(--muted); }
 .first-run-provider.on .first-run-provider-blurb { color: var(--muted); }
+.first-run-register { max-width: 320px; }
+.first-run-register a { color: var(--vscode-textLink-foreground); }
 .first-run-form { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 280px; margin-top: 4px; }
 .first-run-submit { width: 100%; height: 32px; }
+.first-run-model-row { display: flex; gap: 6px; }
+.first-run-model-row .field { flex: 1; min-width: 0; }
+.first-run-load-models { flex-shrink: 0; height: 30px; padding: 0 10px; white-space: nowrap; }
+.first-run-model-hint { text-align: left; }
 
 /* The picture has a near-black backdrop that lighten blending drops (the panel is brighter there); a light theme has no such trick.
    Its width follows the height left over once the header, sessions and input are counted,

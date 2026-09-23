@@ -72,6 +72,10 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.checkAndStart();
             case 'setProvider':
                 return this.setProvider(message.provider, message.apiKey, message.model);
+            case 'listModels':
+                return this.listModels(message.provider, message.apiKey);
+            case 'openRegistration':
+                return this.openRegistration(message.provider);
             case 'submit':
                 return this.send(() => this.core?.send(message.text));
             case 'command':
@@ -161,30 +165,49 @@ export class KvistChatView implements vscode.WebviewViewProvider {
     }
 
     private async setProvider(provider: string, apiKey: string, model: string): Promise<void> {
-        const command = this.coreCommand();
-        const workspace = this.workspacePath();
-        if (!command || !workspace) {
-            return;
-        }
-        const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
-            const child = execFile(
-                command.command,
-                [...command.prefixArgs, '--config-op', 'set-provider'],
-                { cwd: workspace, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
-                (error, stdout) => {
-                    try {
-                        resolve(JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as { ok: boolean; error?: string });
-                    } catch {
-                        resolve({ ok: false, error: error?.message ?? 'Kvist returned an unreadable reply.' });
-                    }
-                }
-            );
-            child.stdin?.end(JSON.stringify({ provider, api_key: apiKey, model }));
-        });
+        const result = await this.runConfigOp<{ ok: boolean; error?: string }>('set-provider', { provider, api_key: apiKey, model });
         this.post({ type: 'setupResult', ok: result.ok, error: result.error });
         if (result.ok) {
             await this.checkAndStart();
         }
+    }
+
+    // The first-run screen's "which model?" field for a router/gateway provider (AnyModel,
+    // OpenRouter, OmniRoute): offers the provider's live /v1/models catalog for the key the
+    // person just typed, same as the terminal's own picker, before that key is ever saved.
+    private async listModels(provider: string, apiKey: string): Promise<void> {
+        const result = await this.runConfigOp<{ ok: boolean; error?: string; models?: string[] }>('list-models', { provider, api_key: apiKey });
+        this.post({ type: 'modelList', provider, ok: result.ok, models: result.models ?? [], error: result.error });
+    }
+
+    // AnyModel is Kvist's own shipped default; the first-run screen offers to pop its signup
+    // page the same way the terminal wizard does (`anymodel_onboarding.py`).
+    private async openRegistration(provider: string): Promise<void> {
+        const result = await this.runConfigOp<{ ok: boolean; opened?: boolean; url?: string | null }>('open-registration', { provider });
+        this.post({ type: 'registrationOpened', provider, opened: result.opened === true, url: result.url ?? null });
+    }
+
+    private async runConfigOp<T extends { ok: boolean; error?: string }>(op: string, payload: unknown): Promise<T> {
+        const command = this.coreCommand();
+        const workspace = this.workspacePath();
+        if (!command || !workspace) {
+            return { ok: false, error: 'Kvist is not ready.' } as T;
+        }
+        return new Promise<T>((resolve) => {
+            const child = execFile(
+                command.command,
+                [...command.prefixArgs, '--config-op', op],
+                { cwd: workspace, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
+                (error, stdout) => {
+                    try {
+                        resolve(JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as T);
+                    } catch {
+                        resolve({ ok: false, error: error?.message ?? 'Kvist returned an unreadable reply.' } as T);
+                    }
+                }
+            );
+            child.stdin?.end(JSON.stringify(payload));
+        });
     }
 
     private async startCore(): Promise<void> {

@@ -110,6 +110,24 @@ def _open_registration_browser() -> None:
         print("Не удалось открыть браузер автоматически — открой ссылку выше вручную.")
 
 
+def open_registration_page() -> bool:
+    """Try to pop the AnyModel registration page in a GUI browser.
+
+    Unlike ``_open_registration_browser`` this prints nothing: a headless
+    frontend (a GUI panel) has its own place to show that message, and calls
+    this instead of the terminal-only screen. Returns whether a GUI session
+    was found to open a window in — the caller shows the URL as plain text
+    when it is False.
+    """
+    if not _gui_browser_available():
+        return False
+    try:
+        webbrowser.open(ANYMODEL_REGISTER_URL)
+    except webbrowser.Error:
+        return False
+    return True
+
+
 def offer_anymodel_registration(ui: AgentUI) -> str | None:
     """First-run "no AnyModel key yet" screen.
 
