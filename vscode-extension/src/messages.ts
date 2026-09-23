@@ -5,6 +5,7 @@ export interface ProviderInfo {
     label: string;
     custom: boolean;
     has_credentials: boolean;
+    requires_manual_models: boolean;
 }
 
 export interface ConfigInfo {
@@ -51,6 +52,6 @@ export type ToHost =
     | { type: 'setEnvironment'; env: Record<string, string> }
     | { type: 'getSessions' }
     | { type: 'getHistory'; name: string }
-    | { type: 'setProvider'; provider: string; apiKey: string }
+    | { type: 'setProvider'; provider: string; apiKey: string; model: string }
     | { type: 'openFile'; path: string; line: number | null }
     | { type: 'openLink'; url: string };

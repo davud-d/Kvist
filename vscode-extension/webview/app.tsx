@@ -68,10 +68,10 @@ export function App() {
     callStart.current = Date.now()
   }
 
-  function submitProvider(provider: string, apiKey: string): void {
+  function submitProvider(provider: string, apiKey: string, model: string): void {
     setSetupBusy(true)
     setSetupError("")
-    post({ type: "setProvider", provider, apiKey })
+    post({ type: "setProvider", provider, apiKey, model })
   }
 
   useEffect(() => {

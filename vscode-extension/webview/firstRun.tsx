@@ -2,10 +2,11 @@ import { useState } from "preact/hooks"
 
 import type { ProviderInfo } from "../src/messages"
 
-// A short, friendly line per provider — the same six config_info.py curates as
-// "built-in", each usable with just one pasted key. Everything else (the ~36
-// manual-tier vendors, custom endpoints) is reachable later via Settings.
+// A short, friendly line per provider — AnyModel (Kvist's own shipped default) plus
+// config_info.py's curated "built-in six". Everything else (the ~35 other manual-tier
+// vendors, custom endpoints) is reachable later via Settings.
 const BLURBS: Record<string, string> = {
+  anymodel: "Kvist's own default router",
   openai: "GPT-5.6 and friends",
   anthropic: "Claude, direct from Anthropic",
   deepseek: "DeepSeek V4, strong and inexpensive",
@@ -19,18 +20,22 @@ interface Props {
   providers: ProviderInfo[]
   busy: boolean
   error: string
-  submit: (provider: string, apiKey: string) => void
+  submit: (provider: string, apiKey: string, model: string) => void
 }
 
 export function FirstRun({ logoUrl, providers, busy, error, submit }: Props) {
   const [providerId, setProviderId] = useState(providers[0]?.id ?? "")
   const [apiKey, setApiKey] = useState("")
+  const [model, setModel] = useState("")
   const provider = providers.find((item) => item.id === providerId)
+  // A router/gateway provider has no default model list; the id typed here is used
+  // for all three roles (fast/smart/planner), tuneable per role later from Settings.
+  const needsModel = provider?.requires_manual_models === true
 
   function onSubmit(event: Event): void {
     event.preventDefault()
-    if (!providerId || !apiKey.trim() || busy) return
-    submit(providerId, apiKey.trim())
+    if (!providerId || !apiKey.trim() || (needsModel && !model.trim()) || busy) return
+    submit(providerId, apiKey.trim(), model.trim())
   }
 
   return (
@@ -66,8 +71,17 @@ export function FirstRun({ logoUrl, providers, busy, error, submit }: Props) {
           value={apiKey}
           onInput={(event) => setApiKey((event.target as HTMLInputElement).value)}
         />
+        {needsModel ? (
+          <input
+            class="field"
+            disabled={busy}
+            placeholder="Model id, e.g. kr/claude-sonnet-4.5"
+            value={model}
+            onInput={(event) => setModel((event.target as HTMLInputElement).value)}
+          />
+        ) : null}
         {error ? <div class="failure">{error}</div> : null}
-        <button class="btn primary first-run-submit" type="submit" disabled={busy || !apiKey.trim()}>
+        <button class="btn primary first-run-submit" type="submit" disabled={busy || !apiKey.trim() || (needsModel && !model.trim())}>
           {busy ? "Connecting…" : "Continue"}
         </button>
       </form>

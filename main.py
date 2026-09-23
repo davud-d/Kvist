@@ -199,6 +199,10 @@ def _run_set_provider_op(raw: object) -> dict:
 
     provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
     api_key = str(raw.get("api_key", "")).strip() if isinstance(raw, dict) else ""
+    # Only asked for a router/gateway provider (OpenRouter, OmniRoute, AnyModel, the
+    # manual tier) that has no default model list — the same one id is used for all
+    # three roles, matching the simplest choice a person would make by hand anyway.
+    model = str(raw.get("model", "")).strip() if isinstance(raw, dict) else ""
     if not provider:
         raise CustomProviderError("A provider id is required.")
 
@@ -207,6 +211,14 @@ def _run_set_provider_op(raw: object) -> dict:
         raise CustomProviderError("Use --config-op add-custom-provider for a custom provider.")
 
     models, warnings = resolve_models_for_provider(normalized, {})
+    missing_roles = [role for role in MODEL_ROLES if not models.get(role)]
+    if missing_roles:
+        if not model:
+            raise CustomProviderError(
+                f"{provider_label(normalized)} has no default models; a model id is required."
+            )
+        models = {role: model for role in MODEL_ROLES}
+
     required = required_secret_keys_for_provider(normalized, list(models.values()))
     ensure_provider_credentials(
         normalized,
@@ -214,6 +226,8 @@ def _run_set_provider_op(raw: object) -> dict:
         required_keys=required,
         prompt_secret_fn=lambda _label: api_key,
     )
+    if missing_roles:
+        save_models_for_provider(normalized, models)
     return {
         "ok": True,
         "provider": normalized,

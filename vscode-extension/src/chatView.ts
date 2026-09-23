@@ -7,15 +7,16 @@ import { BinaryResolver } from './binaryResolver';
 import { splitEnvironment } from './environment';
 import { pickWorkspaceFiles } from './filePicker';
 import type { JournalEvent } from '../../src/protocol';
-import type { ConfigInfo, SessionInfo, ToHost, ToWebview } from './messages';
+import type { ConfigInfo, ProviderInfo, SessionInfo, ToHost, ToWebview } from './messages';
 
 // The newest events of a session: enough for well over a hundred turns of a typical run.
 const HISTORY_LIMIT = 1000;
 
-// The provider ids offered on first run: config_info.py's own curated "built-in six",
-// each usable with just one pasted key. The other ~36 manual-tier vendors and custom
-// endpoints stay reachable later through Settings once the panel is actually running.
-const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow'];
+// The provider ids offered on first run, in priority order: AnyModel first (Kvist's own
+// shipped default, DEFAULT_BLANK_START_PROVIDER in llm_clients.py), then config_info.py's
+// curated "built-in six". The other ~35 manual-tier vendors and custom endpoints stay
+// reachable later through Settings once the panel is actually running.
+const FIRST_RUN_PROVIDERS = ['anymodel', 'openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow'];
 
 export class KvistChatView implements vscode.WebviewViewProvider {
     static readonly viewType = 'kvist.chat';
@@ -70,7 +71,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 this.queued.splice(0).forEach((queued) => this.post(queued));
                 return this.checkAndStart();
             case 'setProvider':
-                return this.setProvider(message.provider, message.apiKey);
+                return this.setProvider(message.provider, message.apiKey, message.model);
             case 'submit':
                 return this.send(() => this.core?.send(message.text));
             case 'command':
@@ -145,7 +146,11 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         const info = await readJson<ConfigInfo>(command, workspace, ['--config-info']);
         const current = info?.providers.find((item) => item.id === info.saved_provider);
         if (info && !current?.has_credentials) {
-            const providers = info.providers.filter((item) => FIRST_RUN_PROVIDERS.includes(item.id));
+            // FIRST_RUN_PROVIDERS' own order is the priority order (AnyModel first, Kvist's
+            // own shipped default); the source list isn't sorted that way, so this is too.
+            const providers = FIRST_RUN_PROVIDERS
+                .map((id) => info.providers.find((item) => item.id === id))
+                .filter((item): item is ProviderInfo => item !== undefined);
             this.post({ type: 'needsSetup', providers });
             return;
         }
@@ -155,7 +160,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         return this.startCore();
     }
 
-    private async setProvider(provider: string, apiKey: string): Promise<void> {
+    private async setProvider(provider: string, apiKey: string, model: string): Promise<void> {
         const command = this.coreCommand();
         const workspace = this.workspacePath();
         if (!command || !workspace) {
@@ -174,7 +179,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                     }
                 }
             );
-            child.stdin?.end(JSON.stringify({ provider, api_key: apiKey }));
+            child.stdin?.end(JSON.stringify({ provider, api_key: apiKey, model }));
         });
         this.post({ type: 'setupResult', ok: result.ok, error: result.error });
         if (result.ok) {
