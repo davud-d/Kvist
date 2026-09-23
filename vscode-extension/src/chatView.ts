@@ -12,6 +12,11 @@ import type { ConfigInfo, SessionInfo, ToHost, ToWebview } from './messages';
 // The newest events of a session: enough for well over a hundred turns of a typical run.
 const HISTORY_LIMIT = 1000;
 
+// The provider ids offered on first run: config_info.py's own curated "built-in six",
+// each usable with just one pasted key. The other ~36 manual-tier vendors and custom
+// endpoints stay reachable later through Settings once the panel is actually running.
+const FIRST_RUN_PROVIDERS = ['openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow'];
+
 export class KvistChatView implements vscode.WebviewViewProvider {
     static readonly viewType = 'kvist.chat';
 
@@ -63,7 +68,9 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             case 'ready':
                 this.ready = true;
                 this.queued.splice(0).forEach((queued) => this.post(queued));
-                return this.startCore();
+                return this.checkAndStart();
+            case 'setProvider':
+                return this.setProvider(message.provider, message.apiKey);
             case 'submit':
                 return this.send(() => this.core?.send(message.text));
             case 'command':
@@ -124,6 +131,55 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             this.post({ type: 'fault', message: 'Open a folder to work with Kvist.' });
         }
         return folder?.uri.fsPath;
+    }
+
+    // The core refuses to start at all without a usable provider (UI_API.md §11: "a
+    // headless frontend needs [credentials] pre-configured"), so a genuinely first-ever
+    // run must be caught here, before spawning it, rather than shown as a startup crash.
+    private async checkAndStart(): Promise<void> {
+        const command = this.coreCommand();
+        const workspace = this.workspacePath();
+        if (!command || !workspace) {
+            return;
+        }
+        const info = await readJson<ConfigInfo>(command, workspace, ['--config-info']);
+        const current = info?.providers.find((item) => item.id === info.saved_provider);
+        if (info && !current?.has_credentials) {
+            const providers = info.providers.filter((item) => FIRST_RUN_PROVIDERS.includes(item.id));
+            this.post({ type: 'needsSetup', providers });
+            return;
+        }
+        if (info) {
+            this.post({ type: 'config', info });
+        }
+        return this.startCore();
+    }
+
+    private async setProvider(provider: string, apiKey: string): Promise<void> {
+        const command = this.coreCommand();
+        const workspace = this.workspacePath();
+        if (!command || !workspace) {
+            return;
+        }
+        const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+            const child = execFile(
+                command.command,
+                [...command.prefixArgs, '--config-op', 'set-provider'],
+                { cwd: workspace, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
+                (error, stdout) => {
+                    try {
+                        resolve(JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as { ok: boolean; error?: string });
+                    } catch {
+                        resolve({ ok: false, error: error?.message ?? 'Kvist returned an unreadable reply.' });
+                    }
+                }
+            );
+            child.stdin?.end(JSON.stringify({ provider, api_key: apiKey }));
+        });
+        this.post({ type: 'setupResult', ok: result.ok, error: result.error });
+        if (result.ok) {
+            await this.checkAndStart();
+        }
     }
 
     private async startCore(): Promise<void> {

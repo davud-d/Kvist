@@ -3,8 +3,9 @@ import { useEffect, useReducer, useRef, useState } from "preact/hooks"
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../src/commands"
 import { contextLabel, formatSeconds, formatTokens } from "../../src/format"
 import { actionTarget, exploreSummary, initialState, reduce } from "../../src/state"
-import type { ConfigInfo, SessionInfo, ToWebview } from "../src/messages"
+import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
+import { FirstRun } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Icon, Ring } from "./icons"
 import { post } from "./host"
@@ -35,6 +36,11 @@ export function App() {
   const [attachments, setAttachments] = useState<string[]>([])
   const [liveOutput, setLiveOutput] = useState<{ step: number; text: string } | null>(null)
   const [environment, setEnvironment] = useState<Record<string, string> | null>(null)
+  // null: unknown yet or already set up. An array: the panel has never run a turn because
+  // no provider has usable credentials, so it shows the setup screen instead of the chat.
+  const [needsSetup, setNeedsSetup] = useState<ProviderInfo[] | null>(null)
+  const [setupBusy, setSetupBusy] = useState(false)
+  const [setupError, setSetupError] = useState("")
   // When each shell command started, by step: the light around it begins after a couple of seconds.
   const shellStarts = useRef(new Map<number, number>())
   const bottom = useRef<HTMLDivElement>(null)
@@ -60,6 +66,12 @@ export function App() {
   function beginTurn(): void {
     setMetrics(NO_METRICS)
     callStart.current = Date.now()
+  }
+
+  function submitProvider(provider: string, apiKey: string): void {
+    setSetupBusy(true)
+    setSetupError("")
+    post({ type: "setProvider", provider, apiKey })
   }
 
   useEffect(() => {
@@ -116,6 +128,14 @@ export function App() {
           return runCommandRef.current(message.name, message.args)
         case "showSettings":
           return setView("settings")
+        case "needsSetup":
+          setSetupBusy(false)
+          return setNeedsSetup(message.providers)
+        case "setupResult":
+          setSetupBusy(false)
+          if (!message.ok) return setSetupError(message.error || "Could not save the provider.")
+          setSetupError("")
+          return setNeedsSetup(null)
       }
     }
     window.addEventListener("message", onMessage)
@@ -211,6 +231,15 @@ export function App() {
   if (state.inflight?.action === "run_shell") {
     const { step, args } = state.inflight
     feed.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)
+  }
+
+  if (needsSetup) {
+    return (
+      <>
+        <CursorGlow />
+        <FirstRun logoUrl={logoUrl} providers={needsSetup} busy={setupBusy} error={setupError} submit={submitProvider} />
+      </>
+    )
   }
 
   if (view === "settings") {

@@ -35,6 +35,8 @@ export type ToWebview =
     | { type: 'attached'; paths: string[] }
     | { type: 'environment'; env: Record<string, string> }
     | { type: 'history'; name: string; events: JournalEvent[]; hasMore: boolean }
+    | { type: 'needsSetup'; providers: ProviderInfo[] }
+    | { type: 'setupResult'; ok: boolean; error?: string }
     | { type: 'showSettings' };
 
 export type ToHost =
@@ -49,5 +51,6 @@ export type ToHost =
     | { type: 'setEnvironment'; env: Record<string, string> }
     | { type: 'getSessions' }
     | { type: 'getHistory'; name: string }
+    | { type: 'setProvider'; provider: string; apiKey: string }
     | { type: 'openFile'; path: string; line: number | null }
     | { type: 'openLink'; url: string };
