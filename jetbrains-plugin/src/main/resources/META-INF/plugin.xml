@@ -5,8 +5,9 @@
     <vendor>Kvist</vendor>
 
     <description><![CDATA[
-    Launches Kvist directly inside the IDE Terminal for the current project,
-    and writes commit messages for the changes selected in the commit dialog.
+    The Kvist coding agent as a chat tool window (the same panel as the VS Code
+    extension, in the IDE's embedded browser), a launcher that runs Kvist inside the
+    IDE Terminal, and commit messages for the changes selected in the commit dialog.
     ]]></description>
 
     <idea-version since-build="253" />
@@ -17,6 +18,13 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <notificationGroup id="Kvist Notifications" displayType="BALLOON" isLogByDefault="false" />
+        <toolWindow
+            id="Kvist"
+            anchor="right"
+            icon="/icons/kvist.svg"
+            canCloseContents="false"
+            factoryClass="com.kvist.intellij.chat.KvistToolWindowFactory"
+        />
     </extensions>
 
     <actions>

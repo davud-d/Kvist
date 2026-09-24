@@ -501,6 +501,18 @@ process. The code carries no choice, so a new interface needs only an entry in
 `FRONTENDS` and a launch branch in `_switch_frontend`.
 Tests: `npm test` (the `tests/*.test.ts[x]` files sit beside the Python tests and use `tests/fixtures/fake-core.mjs`, never a real core).
 
+### IDE chat panel (`vscode-extension/webview/`, shared with `jetbrains-plugin/`)
+One Preact panel serves both IDEs. VS Code hosts it in a webview view
+(`vscode-extension/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
+JCEF tool window (`jetbrains-plugin/.../chat/`): its Gradle build runs the extension's
+`npm run build` and packs `out/webview.{js,css}` as resources, never a copy of the
+sources. `webview/host.ts` is the only file that knows the host (`acquireVsCodeApi`
+vs. the `window.kvistHost` bridge built on a `JBCefJSQuery`); the rest of the panel
+sees `post`/`onMessage`. `KvistChatHost.kt` is a port of `chatView.ts` and
+`KvistCoreProcess.kt` of `src/core.ts`, so a new `ToHost`/`ToWebview` message in
+`src/messages.ts` needs a handler on both sides. Without JCEF the tool window falls
+back to the terminal launcher.
+
 ### Role routing (`role_router.py`)
 Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins
 priority: an explicit no-write marker → `reader` (beats topic) → deterministic regex
