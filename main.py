@@ -361,6 +361,7 @@ from agent_logging import (
     is_valid_session_name,
     list_sessions,
 )
+from session_titler import session_display_title
 from user_config import (
     ensure_provider_credentials,
     get_custom_providers,
@@ -1585,9 +1586,11 @@ def choose_session(agent, verbose: bool, ui: AgentUI | None = None) -> str | Non
     options: list[dict[str, str]] = []
     for name in sessions:
         prefix = "● " if name == current else "  "
+        title = session_display_title(agent._read_session_document(name), name)
+        label = f"{prefix}{name}" if title == name else f"{prefix}{name} — {title}"
         options.append({
             "value": name,
-            "label": f"{prefix}{name}",
+            "label": label,
             "description": "current session" if name == current else "",
         })
     # Always show current session even if no file exists yet

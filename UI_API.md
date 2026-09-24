@@ -190,6 +190,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `error` | `message:str` | an error line (also emitted if the run raises) |
 | `turn_end` | — | `--frontend stdio-multi` only: the turn ended (after `final`, `error`, or a chat reply that has no `final`); the process stays up for the next goal |
 | `session` | `session:str, has_checkpoint:bool` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` (§8c). |
+| `session_title` | `session:str, title:str` | a session's title became known: generated in the background from its first completed turn (never the first user message — see §8a), or set by hand with the `rename` command (§8c). Additive, out-of-band — it can arrive well after the turn's `turn_end`, and `session` may name a different session than the one currently active if the user switched sessions while generation was still running. |
 | `command_result` | `name:str, ok:bool, message:str, effects:object` | `--frontend stdio-multi` only: the outcome of an inbound `command` message (§8c). It is the last event of that command; **no `turn_end` follows it**. |
 
 ### Thinking / reasoning models
@@ -312,6 +313,21 @@ or `1` on failure:
 `checkpoint` describes the **active** session only; `resumable_session` names
 whichever session holds the newest resumable checkpoint (`null` if none), which
 after a `launch` is normally not the active one.
+
+**Session titles.** The `title` in each `status`/`list` item above is derived
+fresh on every call (first goal / first chat message / checkpoint goal, or the
+session name). Separately, the core also generates and *stores* a short title
+in the session document itself: once, in the background, from the session's
+first completed turn (never the first user message alone — the model sees the
+goal plus the first 20 lines of the reply). A model that does not answer in
+time falls back to the user's own first message, cut to 40 characters at a
+word boundary, so a session is never left untitled. `rename` (§8c) sets one by
+hand and blocks the background generation for that session from then on. The
+stored title (or the same fallback, computed on the fly for a session that
+predates this or has none stored yet) is what the interactive `session`
+command's picker shows, and what a `session_title` event (§7) announces the
+moment it becomes known — which can be well after the turn that triggered it
+has already ended.
 
 ```json
 {"ok": false, "error": "Unknown session: 'ghost'"}
@@ -512,6 +528,7 @@ counts as yes, anything else (`false`, no answer, EOF) does nothing.
 | `style` | `[chat\|agents NAME]` | `{"style": {"type": str, "name": str, "applied_to_session": bool}}` — `false` means the running session keeps its style until the next session |
 | `session` | `[switch NAME]`, `[new [NAME]]`, `[delete NAME]`; none = the picker | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |
 | `new` | `[NAME]` | as `session` |
+| `rename` | `NAME` (required; multiple args are joined with spaces) | `{"session": str, "title": str}` — sets the active session's title by hand; blocks background title generation for it from now on (§8a) |
 | `models` | `[FAST SMART PLANNER]`; none = the picker for the active provider | `{"provider": str, "models": {"fast","smart","planner"}, "warnings": string[]}` — the agent was rebuilt with these models and they are saved |
 | `changes` | — | `{}`; the report is the `message` |
 | `provider` | `[PROVIDER_ID]`; none = the picker (with "+ Create custom provider…") | `{"provider": str, "models": {…}, "warnings": string[], "changed": bool}`; `changed:false` (same provider) carries only `provider` and `changed`. The agent was rebuilt and the choice saved. Building may open more dialogs: `text` (base URL), `secret` (API key), `choice`/`text` (models). |

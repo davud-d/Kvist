@@ -375,6 +375,21 @@ class RouteEvent:
 
 
 @dataclass(slots=True)
+class SessionTitleEvent:
+    """A session's title became known: generated in the background from its
+    first completed turn, or set by hand with /rename (session_titler.py,
+    agent_logging.rename_session). ``session`` names the session the title
+    belongs to, which may differ from the one currently active."""
+
+    session: str
+    title: str
+    type: ClassVar[str] = "session_title"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "session": self.session, "title": self.title}
+
+
+@dataclass(slots=True)
 class ErrorEvent:
     message: str
     type: ClassVar[str] = "error"

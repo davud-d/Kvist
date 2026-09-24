@@ -582,6 +582,33 @@ def test_choose_session_rejects_path_like_name(monkeypatch):
     assert created == []
 
 
+def test_choose_session_shows_each_session_title(monkeypatch):
+    captured = {}
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def choose_option(self, **kwargs):
+            captured["options"] = kwargs["options"]
+            return None
+
+    agent = SimpleNamespace(
+        current_session="alpha",
+        _list_sessions=lambda: ["alpha", "beta"],
+        _read_session_document=lambda name: (
+            {"title": "Fix the login bug"} if name == "alpha" else {}
+        ),
+    )
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+
+    main.choose_session(agent, False)
+
+    labels = {option["value"]: option["label"] for option in captured["options"]}
+    assert labels["alpha"] == "● alpha — Fix the login bug"
+    assert labels["beta"] == "  beta"
+
+
 def test_choose_session_successful_delete_returns_active_session(monkeypatch):
     selections = iter(["__delete__", "old_session"])
 
@@ -597,6 +624,7 @@ def test_choose_session_successful_delete_returns_active_session(monkeypatch):
         current_session="current",
         _list_sessions=lambda: ["current", "old_session"],
         _delete_session=deleted.append,
+        _read_session_document=lambda name: {},
     )
     monkeypatch.setattr(main, "TerminalBannerUI",FakeUI)
 

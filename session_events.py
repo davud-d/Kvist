@@ -490,6 +490,12 @@ class JournalingUI:
         self._events.print_route(role, source)
         self._forward("print_route", role, source)
 
+    def print_session_title(self, session: str, title: str) -> None:
+        # Fires from the background title-generation thread, strictly after
+        # the turn that started it has already ended — never routed through
+        # the journal (turn-scoped and inactive by then), only forwarded live.
+        self._forward("print_session_title", session, title)
+
     def print_plan(self, plan_info: Any) -> None:
         self._events.print_plan(plan_info)
         self._ui.print_plan(plan_info)

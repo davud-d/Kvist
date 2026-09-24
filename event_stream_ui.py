@@ -24,6 +24,7 @@ from frontend_protocol import (
     ReasoningStartEvent,
     RouteEvent,
     SandboxNoticeEvent,
+    SessionTitleEvent,
     StatusEvent,
     StepEvent,
     StreamChunkEvent,
@@ -227,6 +228,9 @@ class EventStreamUI:
 
     def print_route(self, role: str, source: str) -> None:
         self._channel.emit(RouteEvent(str(role), str(source)))
+
+    def print_session_title(self, session: str, title: str) -> None:
+        self._channel.emit(SessionTitleEvent(str(session), str(title)))
 
     @contextlib.contextmanager
     def live_markdown(self) -> Iterator[Callable[[str], None]]:
