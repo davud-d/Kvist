@@ -247,6 +247,19 @@ function lastAnswerText(state: State): string | null {
   return last?.kind === "answer" ? last.text.trim() : null
 }
 
+// The `fromEnd`-th answer counting back from the most recent one (1 = last).
+// Plain text as the model produced it: no ANSI, no UI chrome, safe to copy.
+export function answerFromEnd(items: readonly Item[], fromEnd: number): string | null {
+  let seen = 0
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]
+    if (!item || item.kind !== "answer") continue
+    seen += 1
+    if (seen === fromEnd) return item.text.trim()
+  }
+  return null
+}
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value : ""
 }

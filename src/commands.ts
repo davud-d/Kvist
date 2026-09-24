@@ -29,6 +29,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "strime", route: "core", hint: "Streaming for a custom provider (on | off)" },
   { name: "del-provider", route: "core", hint: "Delete the active custom provider" },
   { name: "full-reset", route: "core", hint: "Erase every saved provider and key" },
+  { name: "copy", route: "local", hint: "Copy the last answer to the clipboard (/copy N for older)" },
   { name: "tui", route: "local", hint: "Choose the terminal interface" },
   { name: "debug", route: "local", hint: "Show or hide debug events" },
   { name: "clear", route: "local", hint: "Clear the screen" },
