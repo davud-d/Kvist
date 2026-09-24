@@ -522,6 +522,19 @@ most of what Kvist puts in a prompt. Priority-0 sections are never trimmed, so
 the tiers alone cannot bound the total; the final cut is what makes the promise
 true.
 
+**The detail window and the repeat guard are one mechanism.** Full results
+live in `recent_result_details` (`detailed_feedback_limit`, 16), index-aligned
+with `recent_result_signatures`; a repeated action replaces its own earlier copy
+(`agent_runtime._keep_result_in_view`), so a batch of `git_status`/`list_dir`
+cannot push a file read out. `is_repeat_blocked` refuses a repeated read-only
+action only while its earlier answer is still in that window
+(`_earlier_answer_in_view`): refusing to re-read what the runtime itself evicted
+is how a run once spent its last five calls asking for a file it could no longer
+see, and stopped as a "loop". The prompt marks such files next to `Read files`
+(`agent_context._read_files_out_of_view`). The model's only memory across calls
+is `step_summary` (kept on any step, `_keep_step_summary`) — reasoning and
+`thought` never reach the next prompt.
+
 **Section headers in `agent_context.SECTION_PRIORITIES` must match what
 `build_runtime_prompt` renders, character for character.** A header that does
 not match is not a section at all: its text folds into the section above and is

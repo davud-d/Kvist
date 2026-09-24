@@ -5,6 +5,7 @@ import json
 import re
 from typing import Any
 
+from agent_state import is_unplanned
 from language_policy import response_language_name
 from system_context import current_time_context
 
@@ -158,14 +159,39 @@ _RUNTIME_TEXT = {
             "the task forward and does not repeat dead-end steps."
         ),
         "completion_instruction": (
-            "If completion blockers exist, final_answer and report_to_user are forbidden. "
-            "If verification finds a gap, the next step must be a corrective action, not a summary of the problem."
+            "Completion blockers are the runtime's reasons it will not accept a \"done\" finish yet: "
+            "they say what \"done\" still lacks, and they never forbid an accurate account of where the work stands. "
+            "While the work can still be finished, finish it — a gap that verification found is closed by a "
+            "corrective action, not by describing it. When it cannot or should not be finished (the premise is "
+            "false, the environment refuses, a blocker asks for something no action here can produce), finish "
+            "with \"outcome\": \"incomplete\" and say which blocker stood and why."
         ),
         "error_instruction": (
             "If normalized_error is present, use it for the next step; do not copy raw_error into public text."
         ),
     },
 }
+
+
+def _read_files_out_of_view(state: Any) -> list[str]:
+    """Files read in this run whose content has since left the prompt.
+
+    The model otherwise sees the name in "Read files" and takes it for the
+    content, then reasons about a file it can no longer see.
+    """
+    signatures = state.recent_result_signatures
+    if len(signatures) != len(state.recent_result_details) or "" in signatures:
+        return []
+    in_view: set[str] = set()
+    for signature in signatures:
+        action = json.loads(signature)
+        args = action.get("args", {})
+        if action.get("type") == "read_file":
+            in_view.add(str(args.get("path", "")))
+        elif action.get("type") == "read_multiple_files":
+            in_view.update(str(path) for path in args.get("paths", []))
+    in_view = {path.strip().removeprefix("./") for path in in_view}
+    return [path for path in state.files_read[-8:] if path not in in_view]
 
 
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
@@ -276,8 +302,13 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         for error, count in list(self._state.error_patterns.items())[-5:]
     )
     files_read = ", ".join(self._state.files_read[-8:]) or text["none"]
+    out_of_view = _read_files_out_of_view(self._state)
+    if out_of_view:
+        files_read += f" (content no longer in this prompt: {', '.join(out_of_view)})"
     files_changed = ", ".join(self._state.files_changed[-8:]) or text["none"]
-    completed_steps = ", ".join(sorted(self._state.completed_plan_steps)) or text["none"]
+    completed_steps = text["none"]
+    if not is_unplanned(self._state.plan_info):
+        completed_steps = ", ".join(sorted(self._state.completed_plan_steps)) or text["none"]
     missing_artifacts = ", ".join(self._state.missing_artifacts[-12:]) or text["none"]
     verification_evidence = "\n".join(f"- {item}" for item in self._state.verification_evidence[-6:]) or text["none"]
     completion_blockers = "\n".join(f"- {item}" for item in self._state.completion_blockers[-6:]) or text["none"]
@@ -402,7 +433,7 @@ def truncate_for_prompt(self, text: str, limit: int) -> str:
 def build_summary(self, language: str = "en") -> str:
     parts = []
 
-    if self._state.plan_info:
+    if self._state.plan_info and not is_unplanned(self._state.plan_info):
         parts.append(
             f"Completed plan steps: {self._effective_completed_plan_steps()}"
             f"/{len(self._state.plan_info.plan)}"

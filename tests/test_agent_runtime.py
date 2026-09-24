@@ -60,16 +60,88 @@ def test_runtime_feedback_updates_read_write_web_and_verification_state(agent_fa
 
 
 def test_runtime_error_feedback_and_repeat_blocking(agent_factory, tmp_path):
+    from agent_runtime import _keep_result_in_view
+
     agent = agent_factory(repeat_action_limit=2)
     command = make_command("read_file", {"path": "missing.py"})
 
     assert agent._is_repeat_blocked(command) is False
     assert agent._is_repeat_blocked(command) is False
+    _keep_result_in_view(agent, agent._action_signature(command), "missing.py result")
     assert agent._is_repeat_blocked(command) is True
     assert agent._state.stagnation_count == 1
 
     feedback = agent._build_error_feedback("read_file", "invalid api key")
     assert "API key is invalid" in feedback["normalized_error"]
+
+
+def test_reread_is_allowed_once_its_content_has_left_the_prompt(agent_factory):
+    from agent_runtime import _keep_result_in_view
+
+    agent = agent_factory(repeat_action_limit=2, detailed_feedback_limit=2)
+    read = make_command("read_file", {"path": "src/billing.py"})
+    for _ in range(2):
+        assert agent._is_repeat_blocked(read) is False
+    _keep_result_in_view(agent, agent._action_signature(read), "file content")
+    for path in ("a", "b"):
+        listing = make_command("list_dir", {"path": path})
+        _keep_result_in_view(agent, agent._action_signature(listing), f"{path} listing")
+
+    assert agent._is_repeat_blocked(read) is False
+    assert agent._state.stagnation_count == 0
+
+
+def test_repeated_side_effect_action_stays_blocked_out_of_view(agent_factory):
+    agent = agent_factory(repeat_action_limit=2)
+    status = make_command("git_status", {})
+
+    assert agent._is_repeat_blocked(status) is False
+    assert agent._is_repeat_blocked(status) is False
+    assert agent._is_repeat_blocked(status) is True
+
+
+def test_a_repeated_result_replaces_its_own_copy_instead_of_evicting_a_read(agent_factory):
+    from agent_runtime import _keep_result_in_view
+
+    agent = agent_factory(detailed_feedback_limit=3)
+    _keep_result_in_view(agent, '{"read": "billing.py"}', "file content")
+    for index in range(5):
+        _keep_result_in_view(agent, '{"git_status": {}}', f"status {index}")
+    _keep_result_in_view(agent, '{"list_dir": "."}', "listing")
+
+    assert agent._state.recent_result_details == ["file content", "status 4", "listing"]
+
+
+def test_prompt_names_reads_whose_content_left_the_prompt(agent_factory):
+    from agent_context import _read_files_out_of_view
+    from agent_runtime import _keep_result_in_view
+
+    agent = agent_factory(detailed_feedback_limit=2)
+    agent._state.files_read = ["src/billing.py", "src/invoice.py"]
+    for command in (
+        make_command("read_file", {"path": "src/billing.py"}),
+        make_command("read_multiple_files", {"paths": ["src/invoice.py"]}),
+        make_command("git_status", {}),
+    ):
+        _keep_result_in_view(agent, agent._action_signature(command), "result")
+
+    assert _read_files_out_of_view(agent._state) == ["src/billing.py"]
+
+
+def test_unplanned_run_takes_progress_from_its_phase_not_the_stand_in_plan(agent_factory):
+    from agent_state import NO_PLAN_STEP
+
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = PlanInfo(
+        goal="fix it", complexity="complex", plan=[NO_PLAN_STEP], success_criteria=[], risks=[]
+    )
+    agent._state.completed_plan_steps.add(NO_PLAN_STEP)
+
+    agent._update_progress(make_command("read_file", {"path": "a.py"}, plan_step="inspect"), True)
+
+    assert agent._plan_progress() == 0
+    assert agent._state.progress == 15
+    assert "Completed plan steps" not in agent._build_summary()
 
 
 def test_completion_requirements_and_final_answer(agent_factory):
@@ -576,51 +648,28 @@ def test_run_loop_cleanup_does_not_mask_keyboard_interrupt(agent_factory):
     assert "[REDACTED]" in reported
 
 
-def test_rolling_summary_stored_on_summary_step(agent_factory, tmp_path):
-    """Rolling summary from command is stored in state on step % interval == 0."""
-    agent = agent_factory(rolling_summary_interval=5)
-    agent._state.plan_info = PlanInfo(
-        goal="Test", complexity="simple", plan=["step 1"], success_criteria=[], risks=[]
-    )
-    agent._state.selected_action_model = "mock"
+def test_step_summary_is_kept_on_any_step_it_is_given(agent_factory):
+    from agent_runtime import _keep_step_summary
 
-    command = make_command(
-        "write_file", {"path": "test.py", "content": "print(1)"},
-        plan_step="edit",
-        step_summary="Steps 1-5: Created test.py with basic print"
-    )
+    agent = agent_factory(max_steps=1)
+    note = "billing.py:40 already rounds half-up; the reported cause is ruled out"
 
-    feedback = {"ok": True, "action_type": "write_file", "data": {"path": "test.py"}}
-    agent._register_feedback(5, command, feedback)
+    _keep_step_summary(agent, 7, make_command("read_file", {"path": "a.py"}, step_summary=note))
 
-    if 5 % agent.config.rolling_summary_interval == 0 and command.step_summary:
-        agent._state.rolling_summaries[5] = command.step_summary
-
-    assert 5 in agent._state.rolling_summaries
-    assert agent._state.rolling_summaries[5] == "Steps 1-5: Created test.py with basic print"
+    assert agent._state.rolling_summaries == {7: note}
 
 
-def test_rolling_summary_not_stored_without_summary_field(agent_factory):
-    """When command has no step_summary, nothing is stored even on interval step."""
-    agent = agent_factory(rolling_summary_interval=5)
-    agent._state.plan_info = PlanInfo(
-        goal="Test", complexity="simple", plan=["step 1"], success_criteria=[], risks=[]
-    )
-    agent._state.selected_action_model = "mock"
+def test_step_summary_shared_by_a_batch_is_kept_once(agent_factory):
+    from agent_runtime import _keep_step_summary
 
-    command = make_command(
-        "read_file", {"path": "test.py"},
-        plan_step="inspect",
-        step_summary=""  # empty — model didn't provide summary
-    )
+    agent = agent_factory(max_steps=1)
+    note = "invoice.py never applies the discount"
 
-    feedback = {"ok": True, "action_type": "read_file", "data": {"path": "test.py"}}
-    agent._register_feedback(5, command, feedback)
+    for step, path in ((11, "a.py"), (12, "b.py"), (13, "c.py")):
+        _keep_step_summary(agent, step, make_command("read_file", {"path": path}, step_summary=note))
+    _keep_step_summary(agent, 14, make_command("read_file", {"path": "d.py"}, step_summary=""))
 
-    if 5 % agent.config.rolling_summary_interval == 0 and command.step_summary:
-        agent._state.rolling_summaries[5] = command.step_summary
-
-    assert 5 not in agent._state.rolling_summaries
+    assert agent._state.rolling_summaries == {11: note}
 
 
 # ── P0: api_timeout ──────────────────────────────────────────────────
@@ -1874,7 +1923,7 @@ def test_final_answer_is_not_held_without_blank_cells(agent_factory):
 
 
 def test_bare_artifact_name_is_anchored_to_the_file_it_already_names(tmp_path):
-    from agent_runtime import _anchor_bare_artifacts
+    from agent_runtime import _anchor_artifacts
 
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "reminders.py").write_text("x = 1\n", encoding="utf-8")
@@ -1882,11 +1931,34 @@ def test_bare_artifact_name_is_anchored_to_the_file_it_already_names(tmp_path):
     (tmp_path / "node_modules" / "vendored.py").write_text("", encoding="utf-8")
     (tmp_path / "main.py").write_text("", encoding="utf-8")
 
-    anchored = _anchor_bare_artifacts(
+    anchored = _anchor_artifacts(
         tmp_path, ["reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]
     )
 
     assert anchored == ["src/reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]
+
+
+def test_partial_artifact_path_is_anchored_to_the_file_it_already_names(tmp_path):
+    from agent_runtime import _anchor_artifacts
+
+    (tmp_path / "web" / "dist").mkdir(parents=True)
+    (tmp_path / "web" / "dist" / "app.js").write_text("", encoding="utf-8")
+
+    anchored = _anchor_artifacts(tmp_path, ["dist/app.js", "dist/missing.js"])
+
+    assert anchored == ["web/dist/app.js", "dist/missing.js"]
+
+
+def test_paths_outside_the_workspace_are_never_required_artifacts():
+    from agent_runtime import _extract_required_artifacts
+
+    goal = (
+        "Проверь гипотезы: редактор читает ~/.config/editor/settings.json, "
+        "Flatpak — ~/.var/app/org.example.Editor/data. "
+        "Не трогай /etc/hosts. Почини src/billing.py."
+    )
+
+    assert _extract_required_artifacts(goal, None) == ["src/billing.py"]
 
 
 def test_removed_security_checks_reads_only_deleted_lines_from_the_journal(agent_factory):

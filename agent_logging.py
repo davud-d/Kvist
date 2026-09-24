@@ -680,6 +680,7 @@ def save_checkpoint(
         "recent_feedback": self._state.recent_feedback,
         "recent_events": self._state.recent_events,
         "recent_result_details": self._state.recent_result_details,
+        "recent_result_signatures": self._state.recent_result_signatures,
         "error_history": self._state.error_history,
         "error_patterns": self._state.error_patterns,
         "seen_actions": self._state.seen_actions,
@@ -788,6 +789,7 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.recent_feedback = data.get("recent_feedback", [])
     self._state.recent_events = data.get("recent_events", [])
     self._state.recent_result_details = data.get("recent_result_details", [])
+    self._state.recent_result_signatures = data.get("recent_result_signatures", [])
     self._state.error_history = data.get("error_history", [])
     self._state.error_patterns = data.get("error_patterns", {})
     self._state.seen_actions = data.get("seen_actions", {})

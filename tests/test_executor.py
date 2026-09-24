@@ -365,8 +365,9 @@ def test_hardlink_to_external_inode_is_rejected_for_file_actions(tmp_path):
         executor._append_file("alias.txt", "append\n")
     with pytest.raises(ExecutorError, match="hard links"):
         executor._replace_in_file("alias.txt", "outside", "inside")
-    with pytest.raises(ExecutorError, match="hard links"):
-        executor._search_code("outside")
+    searched = executor._search_code("outside")
+    assert searched.data["results"] == []
+    assert searched.data["skipped_unreadable_files"] == 1
 
     assert external.read_text(encoding="utf-8") == "outside fixture\n"
 
@@ -422,10 +423,13 @@ def test_search_code_revalidates_discovered_symlink_targets(tmp_path):
     external = outside / "public.txt"
     external.write_text("outside fixture\n", encoding="utf-8")
     (workspace / "alias.txt").symlink_to(external)
+    (workspace / "inside.txt").write_text("outside is a word here too\n", encoding="utf-8")
     executor = SafeExecutor(workspace)
 
-    with pytest.raises(ExecutorError, match="outside workspace"):
-        executor._search_code("outside")
+    result = executor._search_code("outside")
+
+    assert [match["path"] for match in result.data["results"]] == ["inside.txt"]
+    assert result.data["skipped_unreadable_files"] == 1
 
 
 def test_search_code_rejects_alias_to_internal_or_env_file(tmp_path):
@@ -433,8 +437,10 @@ def test_search_code_rejects_alias_to_internal_or_env_file(tmp_path):
     (tmp_path / ".env").write_text("SECRET_FIXTURE=1\n", encoding="utf-8")
     (tmp_path / "env-alias").symlink_to(".env")
 
-    with pytest.raises(ExecutorError, match="env file"):
-        executor._search_code("SECRET_FIXTURE")
+    result = executor._search_code("SECRET_FIXTURE")
+
+    assert result.data["results"] == []
+    assert result.data["skipped_unreadable_files"] == 1
 
 
 # ── File overwrite approval gate (AGENT_WRITE_APPROVAL) ─────────────

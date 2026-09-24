@@ -27,11 +27,13 @@ class AgentConfig:
     repeat_action_limit: int = 4
     summary_recent_events: int = 8
     recent_feedback_limit: int = 4
-    # How many *full* action payloads stay in the prompt. At 3 a file read fell
-    # out of context three steps later and the model re-read it; the prompt
-    # budget (context_budget.py) is what actually caps this now.
-    detailed_feedback_limit: int = 8
-    rolling_summary_interval: int = 5
+    # How many *full* action payloads stay in the prompt, one per distinct
+    # action. At 3 a file read fell out of context three steps later and the
+    # model re-read it; at 8, once a response could carry a batch of 8 actions,
+    # one batch of listings pushed every file read out before the model could
+    # edit from it. The prompt budget (context_budget.py) is what actually caps
+    # the size.
+    detailed_feedback_limit: int = 16
     # Char caps on one action payload and on one string inside it. They exist to
     # stop a single runaway value from filling the window, not to summarize: a
     # file the executor already capped at max_read_chars must reach the model
@@ -78,6 +80,25 @@ class PlanInfo:
     # "action" for pure mutation/run tasks. Classified by the planner (which
     # already reads task intent); a keyword heuristic is the fallback only.
     task_kind: str = "action"
+
+
+NO_PLAN_STEP = (
+    "No plan was generated for this task (planning skipped). "
+    "Orient yourself first: inspect the files/state you need, "
+    "then act directly toward the task. Orientation ends as soon as "
+    "you can name the file, line or command the task turns on — it is "
+    "not a phase to fill, and every step spent widening it is a step "
+    "not spent on the task itself."
+)
+
+
+def is_unplanned(plan_info: PlanInfo | None) -> bool:
+    """True for the stand-in plan of a run with planning turned off.
+
+    Its one step is closed by the first read, so counting it as the plan made
+    such a run report 99% from step 1 while nothing had been done.
+    """
+    return plan_info is not None and plan_info.plan == [NO_PLAN_STEP]
 
 
 @dataclass(slots=True)
@@ -150,6 +171,9 @@ class RunState:
     recent_feedback: list[str] = field(default_factory=list)
     recent_events: list[str] = field(default_factory=list)
     recent_result_details: list[str] = field(default_factory=list)
+    # The action signature each detail came from, index-aligned with
+    # recent_result_details ("" when unknown, e.g. an older checkpoint).
+    recent_result_signatures: list[str] = field(default_factory=list)
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)

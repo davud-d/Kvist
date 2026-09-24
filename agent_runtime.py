@@ -51,7 +51,7 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
     return None
 
 from action_result import build_action_result
-from agent_state import RunCancelled, RunState
+from agent_state import RunCancelled, RunState, is_unplanned
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from parser import CommandValidationError, parse_agent_commands
 from protocol import AgentCommand
@@ -538,7 +538,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.report_goal = _resolve_report_goal(self, user_goal)
     # "check if main.py exists" names a file it must not be required to create.
     if not self._state.required_artifacts and not (read_only_goal or verify_only_goal):
-        self._state.required_artifacts = _anchor_bare_artifacts(
+        self._state.required_artifacts = _anchor_artifacts(
             Path(self.executor.workspace),
             _extract_required_artifacts(user_goal, self._state.plan_info),
         )
@@ -1114,12 +1114,7 @@ def _execute_action(
     _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
 
-    # Store rolling summary on interval steps (every Nth step)
-    if (
-        step % self.config.rolling_summary_interval == 0
-        and command.step_summary
-    ):
-        self._state.rolling_summaries[step] = command.step_summary
+    _keep_step_summary(self, step, command)
 
     # Only the model may declare the task done, and it may still want to
     # verify, so readiness is a hint rather than a gate.
@@ -1303,6 +1298,42 @@ def feedback_error_for_model(self, feedback: dict[str, Any]) -> str:
     return self._normalize_error_for_model(str(raw))
 
 
+def _keep_step_summary(self, step: int, command: AgentCommand) -> None:
+    """Carry the model's own note into every later prompt.
+
+    Nothing else the model concludes outlives its call: neither its reasoning
+    nor its thought is shown again. Kept only on every fifth step, a batch
+    whose actions skipped that number dropped the note, and a whole run could
+    end with none — its diagnosis re-derived, at full price, on every call.
+    """
+    note = command.step_summary
+    summaries = self._state.rolling_summaries
+    if not note or (summaries and summaries[max(summaries)] == note):
+        return
+    summaries[step] = note
+
+
+def _keep_result_in_view(self, signature: str, detail: str) -> None:
+    """Show the newest result of each distinct action, newest last.
+
+    A repeated action replaces its own earlier copy, so a second git_status
+    does not cost a file read its place in the prompt.
+    """
+    details = self._state.recent_result_details
+    signatures = self._state.recent_result_signatures
+    if len(signatures) != len(details):
+        signatures[:] = [""] * len(details)
+    if signature in signatures:
+        index = signatures.index(signature)
+        del signatures[index]
+        del details[index]
+    signatures.append(signature)
+    details.append(detail)
+    limit = self.config.detailed_feedback_limit
+    del signatures[:-limit]
+    del details[:-limit]
+
+
 def register_parse_error(self, step: int, raw_text: str, error_text: str) -> None:
     self._state.parse_errors += 1
     self._state.consecutive_errors += 1
@@ -1428,8 +1459,7 @@ def register_feedback(
     self._state.recent_feedback = self._state.recent_feedback[-self.config.recent_feedback_limit :]
     self._state.recent_events.append(summary_line)
     self._state.recent_events = self._state.recent_events[-self.config.summary_recent_events :]
-    self._state.recent_result_details.append(detail_line)
-    self._state.recent_result_details = self._state.recent_result_details[-self.config.detailed_feedback_limit :]
+    _keep_result_in_view(self, signature, detail_line)
     self._update_recovery_tracking(
         command, ok, "" if ok else self._feedback_error_for_model(feedback)
     )
@@ -2005,31 +2035,32 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
             self._ui.debug_print(f"DevOps repeat blocked: {command_text}")
             return True
 
-    if seen_count >= self.config.repeat_action_limit:
-        if command.action.type in self._state.required_next_actions:
-            pass # allow it
-        else:
-            message = (
-                "You are repeating a useless action with the same args. "
-                "Choose a different step: a different file, a different search, or honestly complete the task."
-            )
-            self._state.pending_instruction = message
-            self._state.stagnation_count += 1
-            self._state.step_logs.append(
-                {
-                    "status": "repeat_blocked",
-                    "command": {
-                        "plan_step": command.plan_step,
-                        "user_message": command.user_message,
-                        "action": {
-                            "type": command.action.type,
-                            "args": command.action.args,
-                        },
+    if (
+        seen_count >= self.config.repeat_action_limit
+        and command.action.type not in self._state.required_next_actions
+        and _earlier_answer_in_view(self, command, signature)
+    ):
+        self._state.pending_instruction = (
+            "This exact action already ran and its result is still shown under "
+            "\"Detailed recent action data\"; running it again returns the same answer. "
+            "Work from that result, or take an action that answers a different question."
+        )
+        self._state.stagnation_count += 1
+        self._state.step_logs.append(
+            {
+                "status": "repeat_blocked",
+                "command": {
+                    "plan_step": command.plan_step,
+                    "user_message": command.user_message,
+                    "action": {
+                        "type": command.action.type,
+                        "args": command.action.args,
                     },
-                }
-            )
-            self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
-            return True
+                },
+            }
+        )
+        self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
+        return True
 
     if command.action.type == "write_file":
         path = str(command.action.args.get("path", "")).strip()
@@ -2070,6 +2101,18 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
     self._state.seen_actions[signature] = seen_count + 1
     self._state.last_action_signature = signature
     return False
+
+
+def _earlier_answer_in_view(self, command: AgentCommand, signature: str) -> bool:
+    """A repeat is useless only while its earlier answer is in front of the model.
+
+    Once a read has left the prompt, running it again is the only way to see
+    it: refusing that left the model reasoning about a file it could no longer
+    read. Actions with side effects stay counted as repeats regardless.
+    """
+    if command.action.type not in _READ_ONLY_ACTIONS:
+        return True
+    return signature in self._state.recent_result_signatures
 
 
 def action_signature(self, command: AgentCommand) -> str:
@@ -2689,8 +2732,13 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
     ]
     ignored_re = re.compile("|".join(ignored_patterns), re.IGNORECASE)
 
-    for match in _ARTIFACT_RE.findall(user_goal):
-        cleaned = match.strip().strip(".,:;()[]{}\"'")
+    for match in _ARTIFACT_RE.finditer(user_goal):
+        # A path outside the workspace ("~/.vscode/extensions", "/etc/hosts") is
+        # context about the machine, not something this run can produce; read
+        # as relative it became a deliverable no action could ever satisfy.
+        if match.group(1).startswith("/") or user_goal[match.start() - 1 : match.start()] == "~":
+            continue
+        cleaned = match.group(1).strip().strip(".,:;()[]{}\"'")
         if not cleaned:
             continue
             
@@ -2717,7 +2765,6 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
         value = candidate.replace("\\", "/")
         while value.startswith("./"):
             value = value[2:]
-        value = value.lstrip("/")
         if not value or value in {".", ".."}:
             continue
         folded = value.casefold()
@@ -2731,21 +2778,24 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
 _ARTIFACT_SEARCH_SKIP_DIRS = {".git", ".kvist", ".venv", "venv", "node_modules", "__pycache__"}
 
 
-def _anchor_bare_artifacts(workspace: Path, artifacts: list[str]) -> list[str]:
-    """Point a bare file name at the file it already names deeper in the workspace.
+def _anchor_artifacts(workspace: Path, artifacts: list[str]) -> list[str]:
+    """Point a partial file path at the file it already names deeper in the workspace.
 
-    "fix reminders.py" mentions a file that lives in src/; requiring it at the
-    root made the completion gate demand a duplicate there.
+    "fix reminders.py" mentions a file that lives in src/, and a task quoting
+    out/extension.js means vscode-extension/out/extension.js; requiring either
+    where it was written made the completion gate demand a duplicate there.
     """
-    bare = {a for a in artifacts if "/" not in a and not (workspace / a).exists()}
-    if not bare:
+    partial = {a for a in artifacts if not a.endswith("/") and not (workspace / a).exists()}
+    if not partial:
         return artifacts
     found: dict[str, str] = {}
     for root, dirs, files in os.walk(workspace):
         dirs[:] = sorted(d for d in dirs if d not in _ARTIFACT_SEARCH_SKIP_DIRS)
         for name in sorted(files):
-            if name in bare and name not in found:
-                found[name] = (Path(root) / name).relative_to(workspace).as_posix()
+            relative = (Path(root) / name).relative_to(workspace).as_posix()
+            for artifact in partial - found.keys():
+                if relative.endswith("/" + artifact):
+                    found[artifact] = relative
     return [found.get(a, a) for a in artifacts]
 
 
@@ -2866,13 +2916,14 @@ def _missing_required_artifacts(self) -> list[str]:
     missing: list[str] = []
     workspace = Path(self.executor.workspace)
     gone = _paths_moved_or_removed(self)
-    for artifact in self._state.required_artifacts:
+    artifacts = self._state.required_artifacts
+    for artifact, anchored in zip(artifacts, _anchor_artifacts(workspace, artifacts)):
         if artifact.rstrip("/") in gone:
             continue
         if _named_in_removal_request(self._state.user_goal, artifact):
             continue
         is_dir = artifact.endswith("/")
-        target = workspace / _anchor_bare_artifacts(workspace, [artifact])[0].rstrip("/")
+        target = workspace / anchored.rstrip("/")
         if is_dir and not target.is_dir():
             missing.append(artifact)
         elif not is_dir and not target.exists():
@@ -3041,7 +3092,7 @@ def _effective_completed_plan_steps(self) -> int:
     nothing is closed, and the count can never exceed (total - remaining).
     """
     plan_info = self._state.plan_info
-    if not plan_info or not plan_info.plan:
+    if not plan_info or not plan_info.plan or is_unplanned(plan_info):
         return 0
     total = len(plan_info.plan)
     done = len(self._state.completed_plan_steps & set(plan_info.plan))
@@ -3165,7 +3216,10 @@ def _plan_item_matches_paths(item: str, touched_paths: set[str]) -> bool:
 
 def _build_missing_artifacts_error(language: str, missing: list[str]) -> str:
     joined = ", ".join(missing[:8])
-    return f"Task cannot finish: required artifacts are still missing: {joined}."
+    return (
+        f"Task cannot finish as done: the task names these workspace files and they do not exist yet: {joined}. "
+        f"{_HONEST_EXIT_HINT}"
+    )
 
 
 def _build_incomplete_plan_error(language: str, remaining_steps: list[str]) -> str:

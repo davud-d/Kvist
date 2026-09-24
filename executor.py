@@ -1682,12 +1682,21 @@ class SafeExecutor:
             base_dir = self._resolve_read_dir(path)
             files_to_search = self._iter_files(base_dir)
 
+        unreadable = 0
         for file_path in files_to_search:
             if self._ENV_PATTERN.search(file_path.name):
                 continue
             if self._skip_during_walk(file_path):
                 continue
-            readable_path = self._canonical_read_target(file_path)
+            # One symlink pointing out of the workspace used to fail the whole
+            # search, and the model took that error for its own attempt to read
+            # outside. The file is left unread either way; the count says the
+            # search did not cover everything.
+            try:
+                readable_path = self._canonical_read_target(file_path)
+            except ExecutorError:
+                unreadable += 1
+                continue
             try:
                 text = readable_path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
@@ -1715,6 +1724,7 @@ class SafeExecutor:
                 "query": query,
                 "path": path,
                 "results": results,
+                "skipped_unreadable_files": unreadable,
                 "untrusted": True,
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },

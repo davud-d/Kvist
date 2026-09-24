@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from agent_model import planner_style_context
-from agent_state import PlanInfo
+from agent_state import NO_PLAN_STEP, PlanInfo
 from parser import CommandValidationError, load_single_json_object
 from redaction import defang_prompt_boundary_tags
 
@@ -203,14 +203,7 @@ def no_plan_info(self, user_goal: str) -> PlanInfo:
     return PlanInfo(
         goal=user_goal,
         complexity="complex" if self._is_complex_goal(user_goal) else "simple",
-        plan=[
-            "No plan was generated for this task (planning skipped). "
-            "Orient yourself first: inspect the files/state you need, "
-            "then act directly toward the task. Orientation ends as soon as "
-            "you can name the file, line or command the task turns on — it is "
-            "not a phase to fill, and every step spent widening it is a step "
-            "not spent on the task itself.",
-        ],
+        plan=[NO_PLAN_STEP],
         success_criteria=[
             "the user's task is fully accomplished",
             "result verified by available means",
