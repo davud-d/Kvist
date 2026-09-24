@@ -2094,6 +2094,25 @@ def test_a_bare_name_the_run_created_in_a_subfolder_is_not_missing_at_the_root(a
     assert _missing_required_artifacts(agent) == ["05_absent.md"]
 
 
+def test_artifact_search_reruns_only_after_an_action_that_can_create_files(agent_factory):
+    from agent_runtime import _execute_action, _missing_required_artifacts
+
+    agent = agent_factory()
+    workspace = Path(agent.executor.workspace)
+    agent._state.plan_info = make_plan()
+    agent._state.required_artifacts = ["04_intro.md"]
+    assert _missing_required_artifacts(agent) == ["04_intro.md"]
+
+    (workspace / "chapters").mkdir()
+    (workspace / "chapters/04_intro.md").write_text("x", encoding="utf-8")
+    # Nothing this run did could have created it, so the cached search stands.
+    assert _missing_required_artifacts(agent) == ["04_intro.md"]
+
+    _execute_action(agent, "g", 1, make_command("write_file", {"path": "notes.md", "content": "n"}, "edit"))
+
+    assert _missing_required_artifacts(agent) == []
+
+
 def test_a_successful_mv_counts_as_a_changed_file(agent_factory):
     from agent_runtime import _note_moved_files
 

@@ -724,7 +724,11 @@ def _leave_native_tools(self, error: Exception) -> None:
     forget_native_tools(self, self._state.selected_action_model)
     self._state.native_tools = False
     self._state.native_messages = []
-    self._ui.print_error("The provider refused tool calls; this run continues with the JSON protocol.")
+    self._ui.print_error(
+        "Провайдер отказался от вызова инструментов; этот прогон продолжается на JSON-протоколе."
+        if self._state.response_language == "ru"
+        else "The provider refused tool calls; this run continues with the JSON protocol."
+    )
     self._ui.debug_print(f"[native tools] {redact_text(str(error))}")
 
 
@@ -745,8 +749,32 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
             {"role": "user", "content": f"Additional instruction:\n{state.pending_instruction}"}
         )
         state.native_note_sent = state.pending_instruction
+    _note_unchanged_run(state)
     _note_run_context(self, action="calling tools")
     return call_native_action_model(self, state.native_messages, state.native_tool_defs)
+
+
+_UNCHANGED_NOTE_EVERY = 10
+
+
+def _note_unchanged_run(state: RunState) -> None:
+    """Tell a run that should change files how long it has gone without doing so.
+
+    A native conversation carries no step counter, so a model circling in
+    analysis cannot see from inside that thirty calls changed nothing. The note
+    is a fact about its own work, not an order: what it means is the
+    model's to weigh. A read-only task is expected to only read, so it gets none.
+    """
+    if state.files_changed or not (state.modify_goal or state.create_goal):
+        return
+    calls = sum(1 for message in state.native_messages if message.get("role") == "tool")
+    mark = calls // _UNCHANGED_NOTE_EVERY
+    if mark <= state.native_unchanged_mark:
+        return
+    state.native_unchanged_mark = mark
+    state.native_messages.append(
+        {"role": "user", "content": f"Run so far: {calls} tool calls, and none of them changed a file."}
+    )
 
 
 def _run_native_turn(self, user_goal: str, step: int, turn: NativeTurn) -> tuple[_ActionOutcome, int]:
@@ -1246,6 +1274,7 @@ def _execute_action(
         self.executor.set_output_sink(None)
         if pending_action is not None:
             self.executor.end_action_transaction()
+            self._anchored_artifacts = None
     self._register_feedback(step, command, feedback)
     _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
@@ -3057,7 +3086,7 @@ def _missing_required_artifacts(self) -> list[str]:
     workspace = Path(self.executor.workspace)
     gone = _paths_moved_or_removed(self)
     artifacts = self._state.required_artifacts
-    for artifact, anchored in zip(artifacts, _anchor_artifacts(workspace, artifacts)):
+    for artifact, anchored in zip(artifacts, _anchored_required_artifacts(self, workspace)):
         if artifact.rstrip("/") in gone:
             continue
         if _named_in_removal_request(self._state.user_goal, artifact):
@@ -3069,6 +3098,22 @@ def _missing_required_artifacts(self) -> list[str]:
         elif not is_dir and not target.exists():
             missing.append(artifact)
     return missing
+
+
+def _anchored_required_artifacts(self, workspace: Path) -> list[str]:
+    """_anchor_artifacts, walked again only after an action that can create files.
+
+    A file named by the task can appear deeper in the tree only through a
+    write, a shell command or a delegation; the walk re-ran on every refresh —
+    twice per action, reads included — and cost seconds per action on a large
+    repository. _execute_action drops the cache after a side effect.
+    """
+    artifacts = self._state.required_artifacts
+    cached = getattr(self, "_anchored_artifacts", None)
+    if cached is None or cached[0] != artifacts:
+        cached = (list(artifacts), _anchor_artifacts(workspace, artifacts))
+        self._anchored_artifacts = cached
+    return cached[1]
 
 
 def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:

@@ -181,6 +181,7 @@ class RunState:
     native_messages: list[dict[str, Any]] = field(default_factory=list)
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
+    native_unchanged_mark: int = 0
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)

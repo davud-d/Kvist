@@ -746,7 +746,10 @@ def call_native_action_model(
             if is_context_overflow_error(error):
                 budget = note_input_overflow(model, input_tokens)
                 self._ui.print_error(
-                    f"{model}: the provider refused a conversation of ~{input_tokens} tokens. "
+                    f"{model}: провайдер не принял разговор на ~{input_tokens} токенов. "
+                    f"Старые выводы инструментов сокращаются до {budget}."
+                    if self._state.response_language == "ru"
+                    else f"{model}: the provider refused a conversation of ~{input_tokens} tokens. "
                     f"Older tool output is being shortened to fit {budget}."
                 )
                 continue
@@ -784,10 +787,16 @@ def _request_native_turn(
         request["stream"] = True
         request["stream_options"] = {"include_usage": True}
     merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
+    # The thinking clock starts with the request: a provider may hold the
+    # connection silently for the whole time the model thinks.
+    started = time.monotonic()
+    _note_thinking(self, "")
     response = _create_completion_with_reasoning_fallback(self, request)
     if not self.config.stream:
-        return _native_turn_from_message(response.choices[0].message)
-    return _native_turn_from_stream(self, response)
+        turn = _native_turn_from_message(response.choices[0].message)
+        self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
+        return turn
+    return _native_turn_from_stream(self, response, started)
 
 
 def _native_turn_from_message(message: Any) -> NativeTurn:
@@ -804,15 +813,19 @@ def _native_turn_from_message(message: Any) -> NativeTurn:
     )
 
 
-def _native_turn_from_stream(self, stream: Any) -> NativeTurn:
-    """Collect a streamed turn; tool-call fragments arrive keyed by index."""
+def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
+    """Collect a streamed turn; tool-call fragments arrive keyed by index.
+
+    Thinking ends at the first output — text or a call — not at the end of the
+    stream: the minutes spent writing a whole-file edit are not thinking.
+    """
     content: list[str] = []
     reasoning: list[str] = []
     echo_reasoning = False
     calls: dict[int, dict[str, str]] = {}
-    reasoning_started: float | None = None
+    first_output: float | None = None
     last_push = 0.0
-    _note_thinking(self, "")
+    last_call_push = 0.0
     try:
         for chunk in stream:
             if self._cancel_event.is_set():
@@ -823,15 +836,21 @@ def _native_turn_from_stream(self, stream: Any) -> NativeTurn:
             fragment = safe_extract_reasoning_delta(delta)
             if fragment:
                 echo_reasoning = echo_reasoning or bool(getattr(delta, "reasoning_content", None))
-                reasoning_started = reasoning_started or time.monotonic()
                 append_reasoning_delta(reasoning, fragment)
-                if time.monotonic() - last_push > 0.1:
+                if first_output is None and time.monotonic() - last_push > 0.1:
                     _note_thinking(self, "".join(reasoning))
                     last_push = time.monotonic()
+            pieces = getattr(delta, "tool_calls", None) or []
+            if first_output is None and (getattr(delta, "content", None) or pieces):
+                first_output = time.monotonic()
+                _seal_thinking(self, reasoning)
             if getattr(delta, "content", None):
                 content.append(delta.content)
-            for piece in getattr(delta, "tool_calls", None) or []:
+            for piece in pieces:
                 _merge_tool_call_delta(calls, piece)
+            if calls and time.monotonic() - last_call_push > 0.5:
+                _note_tool_call_progress(self, calls[max(calls)])
+                last_call_push = time.monotonic()
     finally:
         close = getattr(stream, "close", None)
         if close is not None:
@@ -839,10 +858,11 @@ def _native_turn_from_stream(self, stream: Any) -> NativeTurn:
                 close()
             except Exception as error:
                 self._ui.debug_print(f"Native stream close failed: {redact_text(str(error))}")
-    if reasoning:
-        _note_thinking(self, "".join(reasoning))
-        _note_thinking_end(self)
-        self._last_reasoning_seconds = time.monotonic() - (reasoning_started or time.monotonic())
+    if first_output is None:
+        _seal_thinking(self, reasoning)
+    self._last_reasoning_seconds = _thinking_seconds(
+        (first_output or time.monotonic()) - started, bool(reasoning)
+    )
     return NativeTurn(
         content="".join(content),
         reasoning="".join(reasoning),
@@ -851,6 +871,55 @@ def _native_turn_from_stream(self, stream: Any) -> NativeTurn:
             ToolCall(call_id=entry["id"], name=entry["name"], arguments=entry["arguments"] or "{}")
             for _index, entry in sorted(calls.items())
         ],
+    )
+
+
+# Below this, a wait with no visible reasoning is ordinary latency, and
+# reporting it would put a "thought for 1 s" card on every quick step.
+_SILENT_THINKING_FLOOR = 3.0
+
+
+def _thinking_seconds(elapsed: float, reasoning_shown: bool) -> float:
+    """How long the model thought before its first output.
+
+    With visible reasoning, all of it: some providers send the reasoning in one
+    piece at the end. Without, only a wait long enough to be thinking at all.
+    """
+    if reasoning_shown or elapsed >= _SILENT_THINKING_FLOOR:
+        return elapsed
+    return 0.0
+
+
+def _seal_thinking(self, reasoning: list[str]) -> None:
+    if not reasoning:
+        return
+    _note_thinking(self, "".join(reasoning))
+    _note_thinking_end(self)
+
+
+_PATH_IN_ARGUMENTS_RE = re.compile(r'"path"\s*:\s*"([^"]*)"')
+
+
+def _note_tool_call_progress(self, entry: dict[str, str]) -> None:
+    """Show a call the model is still writing.
+
+    Arguments stream like any other text, and a whole-file edit takes minutes
+    of it with nothing else moving on screen — a run stopped as frozen while it
+    was writing its first change.
+    """
+    target = _PATH_IN_ARGUMENTS_RE.search(entry["arguments"])
+    subject = f"{entry['name']} → {target.group(1)}" if target else entry["name"]
+    size = len(entry["arguments"])
+    if self._state.response_language == "ru":
+        message = f"Пишет {subject} · {size} символов"
+    else:
+        message = f"Writing {subject} · {size} characters"
+    self._ui.update_live(
+        user_message=message,
+        status="writing a tool call",
+        step=getattr(self, "_current_step", 0),
+        progress=self._state.progress,
+        plan_step="tool call",
     )
 
 
@@ -1157,6 +1226,11 @@ def call_model_streaming(
     model: str,
     messages: list[ChatCompletionMessageParam],
 ) -> str:
+    # A new call owns the thinking column: drop the previous step's reasoning
+    # so a provider that streams none does not leave stale text on screen. The
+    # clock starts with the request, since a provider may think silently.
+    _note_thinking(self, "")
+    stream_start = time.monotonic()
     stream = self._create_json_completion(
         model=model,
         messages=messages,
@@ -1166,16 +1240,12 @@ def call_model_streaming(
     reasoning_chunks: list[str] = []
     last_reasoning_push = 0.0
     thought_shown = False
-    stream_start = time.monotonic()
     first_token_time: float | None = None
     reasoning_start_time: float | None = None
     reasoning_end_time: float | None = None
     chunk_count = 0
     total_chunk_bytes = 0
     renderer = ThrottledRenderer(max_fps=10)
-    # A new call owns the thinking column: drop the previous step's reasoning
-    # so a provider that streams none does not leave stale text on screen.
-    _note_thinking(self, "")
     try:
         for chunk in stream:
             # Checked each chunk so a cancellation stops generation without
@@ -1237,12 +1307,12 @@ def call_model_streaming(
         _note_thinking(self, "".join(reasoning_chunks))
         _note_thinking_end(self)
 
-    # Reasoning that never yielded content still counts up to stream end.
-    if reasoning_start_time is not None:
-        end = reasoning_end_time if reasoning_end_time is not None else stream_end
-        self._last_reasoning_seconds = end - reasoning_start_time
-    else:
-        self._last_reasoning_seconds = 0.0
+    # Thinking runs from the request to the first answer token; reasoning that
+    # never yielded content still counts up to stream end.
+    thinking_end = reasoning_end_time or first_token_time or stream_end
+    self._last_reasoning_seconds = _thinking_seconds(
+        thinking_end - stream_start, reasoning_start_time is not None
+    )
 
     # store streaming metrics for the parent call_model to pick up
     self._last_ttft = (first_token_time - stream_start) if first_token_time is not None else None

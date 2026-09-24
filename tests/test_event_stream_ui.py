@@ -345,6 +345,20 @@ def test_loop_reasoning_is_streamed_and_sealed_once():
     }
 
 
+def test_reasoning_that_arrives_in_one_piece_is_timed_from_the_call(monkeypatch):
+    clock = iter([100.0, 145.0])
+    monkeypatch.setattr("event_stream_ui.time.monotonic", lambda: next(clock))
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+
+    ui.set_thinking("")  # the call begins at t=100
+    ui.set_thinking("the whole reasoning, sent at the end")
+    ui.end_thinking()  # t=145
+
+    commit = [event for event in ch.drain() if isinstance(event, ReasoningCommitEvent)][0]
+    assert commit.duration_seconds == 45.0
+
+
 def test_loop_reasoning_is_not_reported_twice_on_the_step():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)

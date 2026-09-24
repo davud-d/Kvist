@@ -294,7 +294,24 @@ JSON protocol's own object and pass `parse_agent_commands`, then run through
 Every call is answered, including the ones a refusal kept from running (an API
 rejects an unanswered call). A reply with no call is the final answer.
 `compact_history` elides the oldest tool outputs when the conversation outgrows
-the budget. The conversation is not checkpointed: a resumed run starts a new one
+the budget. The conversation has no step counter, so a run expected to change
+files (`modify_goal`/`create_goal`) gets one factual user message every 10
+answered calls while nothing has changed (`_note_unchanged_run`: "Run so far: N
+tool calls, and none of them changed a file.") — a fact about its own work,
+never an order; a read-only task gets none. A silent turn's `user_message` is
+what the calls touch in full (paths, queries, commands), not the tool names; only the
+banner's 16-character Action row gets the shortened form. While a call's arguments
+stream, `_note_tool_call_progress` shows "Writing <tool> → <path> · N characters"
+(Russian when the response language is): a whole-file edit is minutes of pure
+generation, and a run was once stopped as frozen while writing its first change.
+Thinking time runs from the request to the first output (text or a call), in both
+paths: `EventStreamUI` starts its clock at `set_thinking("")`, which the model layer
+calls just before the request, because a provider may think silently and send its
+reasoning in one piece at the end ("thought for 0 s" after minutes). With no visible
+reasoning, a wait counts only from `_SILENT_THINKING_FLOOR` (3 s) up. When to speak
+is a principle in `native_tools.txt`, not a counter: a line when the picture changes
+for the person (first call, a finding, a change of course, a long or file-changing
+call), silence in between. The conversation is not checkpointed: a resumed run starts a new one
 from the runtime prompt. A mid-run tools rejection (`is_tools_rejection`) raises
 `NativeToolsRejected`, and `_leave_native_tools` continues on the JSON protocol.
 `AGENT_NATIVE_TOOLS=0` skips the probe entirely.
@@ -551,6 +568,13 @@ left a code-heavy prompt nearly three times over budget — and source code is
 most of what Kvist puts in a prompt. Priority-0 sections are never trimmed, so
 the tiers alone cannot bound the total; the final cut is what makes the promise
 true.
+
+**Required artifacts are searched for once, not per refresh.** `_anchor_artifacts`
+walks the tree to find a partial path the task named; `_anchored_required_artifacts`
+caches that walk and `_execute_action` drops the cache only after an action with a
+side effect — a read cannot create a file. Re-walking on every refresh (twice per
+action) cost ~3 s per action on this repository whenever a named file did not
+exist yet.
 
 **The detail window and the repeat guard are one mechanism.** Full results
 live in `recent_result_details` (`detailed_feedback_limit`, 16), index-aligned

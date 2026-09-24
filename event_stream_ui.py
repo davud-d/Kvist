@@ -54,6 +54,7 @@ class EventStreamUI:
         # the model starts writing the action.
         self._loop_reasoning: tuple[str, float] | None = None
         self._loop_reasoning_reported = False
+        self._call_started: float | None = None
         # Live command output arrives from the reader threads of a child
         # process; the rolling tail is emitted at most once per interval.
         self._output_lock = threading.Lock()
@@ -75,9 +76,14 @@ class EventStreamUI:
         if not text:
             self.end_thinking()
             self._loop_reasoning_reported = False
+            self._call_started = time.monotonic()
             return
         if self._loop_reasoning is None:
-            self._loop_reasoning = (uuid.uuid4().hex, time.monotonic())
+            # Timed from the call, not from the first fragment: a provider that
+            # sends its reasoning in one piece after thinking silently showed
+            # "thought for 0 s" for minutes of work.
+            started = self._call_started or time.monotonic()
+            self._loop_reasoning = (uuid.uuid4().hex, started)
             self._channel.emit(ReasoningStartEvent(self._loop_reasoning[0]))
         self._channel.emit(
             ReasoningChunkEvent(self._loop_reasoning[0], redact_text(text))

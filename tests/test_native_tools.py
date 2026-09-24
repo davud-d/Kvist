@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from types import SimpleNamespace
 from typing import get_args
 
@@ -66,6 +67,12 @@ def _native_agent(agent_factory, turns: list):
     return agent
 
 
+def test_silent_thinking_counts_only_when_it_is_long_enough():
+    assert agent_model._thinking_seconds(20.0, reasoning_shown=False) == 20.0
+    assert agent_model._thinking_seconds(1.2, reasoning_shown=False) == 0.0
+    assert agent_model._thinking_seconds(1.2, reasoning_shown=True) == 1.2
+
+
 def test_every_action_is_offered_as_a_tool():
     assert set(ACTION_TOOLS) == set(get_args(ActionType))
 
@@ -108,6 +115,22 @@ def test_calls_become_the_json_protocol_commands():
     assert commands[0].user_message == "Reading the installer"
     assert commands[0].plan_step == "inspect"
     assert commands[0].action.description == "install.py"
+
+
+def test_a_silent_turn_says_what_its_calls_touch():
+    turn = NativeTurn(
+        content="",
+        tool_calls=[
+            ToolCall("c1", "search_code", json.dumps({"query": "extensions.json"})),
+            ToolCall("c2", "read_file", json.dumps({"path": "installer/install_vscode.py"})),
+            ToolCall("c3", "git_status", "{}"),
+        ],
+    )
+
+    commands = commands_from_turn(turn, files_changed=False)
+
+    assert commands[0].user_message == "extensions.json · installer/install_vscode.py · git_status"
+    assert [command.action.description for command in commands] == ["extensions.json", "install_vscode.p", "git_status"]
 
 
 def test_bad_arguments_are_a_validation_error():
@@ -181,6 +204,33 @@ def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory)
     assert "response_format" not in agent.client.requests[-1]
 
 
+def test_a_fix_run_hears_how_many_calls_changed_nothing(agent_factory):
+    from agent_runtime import _note_unchanged_run
+
+    agent = _native_agent(agent_factory, [])
+    state = agent._state
+    state.modify_goal = True
+    state.native_messages = [{"role": "tool", "tool_call_id": str(i), "content": "x"} for i in range(10)]
+
+    _note_unchanged_run(state)
+    _note_unchanged_run(state)
+
+    notes = [m["content"] for m in state.native_messages if m["role"] == "user"]
+    assert notes == ["Run so far: 10 tool calls, and none of them changed a file."]
+
+
+def test_an_analysis_run_is_not_told_it_only_reads(agent_factory):
+    from agent_runtime import _note_unchanged_run
+
+    agent = _native_agent(agent_factory, [])
+    state = agent._state
+    state.native_messages = [{"role": "tool", "tool_call_id": str(i), "content": "x"} for i in range(30)]
+
+    _note_unchanged_run(state)
+
+    assert all(m["role"] == "tool" for m in state.native_messages)
+
+
 def test_calls_after_a_refused_one_are_answered_not_run(agent_factory):
     turns = [
         _response("", [_call("c1", "read_file", path="missing.py"), _call("c2", "read_file", path="b.py")]),
@@ -227,8 +277,21 @@ def test_streamed_tool_call_fragments_are_reassembled(agent_factory):
         chunk(content=None, tool_calls=[fragment(1, "c2", "git_status", "{}")]),
     ]
 
-    turn = agent_model._native_turn_from_stream(agent, iter(stream))
+    shown: list[str] = []
+    agent._ui.update_live = lambda **kwargs: shown.append(kwargs["user_message"])
+    agent._state.response_language = "ru"
 
+    started = time.monotonic() - 40
+
+    turn = agent_model._native_turn_from_stream(agent, iter(stream), started)
+
+    assert shown and shown[0].startswith("Пишет read_file")
+    # Thinking is timed from the request, not from the first reasoning fragment.
+    assert agent._last_reasoning_seconds >= 40
+    agent._state.response_language = "en"
+    shown.clear()
+    agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+    assert shown and shown[0].startswith("Writing read_file")
     assert turn.content == "Looking"
     assert turn.echo_reasoning and turn.reasoning == "let me look"
     assert [(c.call_id, c.name, c.arguments) for c in turn.tool_calls] == [

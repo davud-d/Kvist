@@ -21,6 +21,24 @@ from protocol import AgentCommand
 _STRING: dict[str, Any] = {"type": "string"}
 _STRINGS: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
 _OUTCOME: dict[str, Any] = {"type": "string", "enum": ["done", "incomplete"]}
+# The schema is what a model reads while it fills the arguments, so the path
+# rule belongs here as well as in the prompt: a task naming the repository by
+# its absolute path otherwise walks the model into refusals.
+_PATH: dict[str, Any] = {"type": "string", "description": "Relative to the workspace root."}
+_PATHS: dict[str, Any] = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": "Paths relative to the workspace root.",
+}
+_ARGV: dict[str, Any] = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": (
+        'The argv list, e.g. ["git", "status"]. Paths relative to cwd, no shell operators; '
+        "git takes no global options such as -C."
+    ),
+}
+_CWD: dict[str, Any] = {"type": "string", "description": "Directory relative to the workspace root; defaults to it."}
 
 
 def _integer(low: int, high: int) -> dict[str, Any]:
@@ -41,32 +59,32 @@ ACTION_TOOLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
         ("summary", "result"),
     ),
     "refuse": ("Refuse an illegal or malicious task.", {"reason": _STRING}, ("reason",)),
-    "read_file": ("Read one workspace file.", {"path": _STRING}, ("path",)),
-    "read_multiple_files": ("Read several workspace files.", {"paths": _STRINGS}, ("paths",)),
-    "write_file": ("Create or overwrite a file.", {"path": _STRING, "content": _STRING}, ("path", "content")),
-    "append_file": ("Append to a file.", {"path": _STRING, "content": _STRING}, ("path", "content")),
+    "read_file": ("Read one workspace file.", {"path": _PATH}, ("path",)),
+    "read_multiple_files": ("Read several workspace files.", {"paths": _PATHS}, ("paths",)),
+    "write_file": ("Create or overwrite a file.", {"path": _PATH, "content": _STRING}, ("path", "content")),
+    "append_file": ("Append to a file.", {"path": _PATH, "content": _STRING}, ("path", "content")),
     "replace_in_file": (
         "Replace an exact fragment of a file.",
-        {"path": _STRING, "old_text": _STRING, "new_text": _STRING, "count": _integer(1, 1000)},
+        {"path": _PATH, "old_text": _STRING, "new_text": _STRING, "count": _integer(1, 1000)},
         ("path", "old_text", "new_text"),
     ),
-    "list_dir": ("List one directory.", {"path": _STRING}, ("path",)),
-    "list_tree": ("List a directory tree.", {"path": _STRING, "max_depth": _integer(1, 10)}, ("path",)),
-    "find_files": ("Find files by glob.", {"pattern": _STRING, "path": _STRING}, ("pattern",)),
+    "list_dir": ("List one directory.", {"path": _PATH}, ("path",)),
+    "list_tree": ("List a directory tree.", {"path": _PATH, "max_depth": _integer(1, 10)}, ("path",)),
+    "find_files": ("Find files by glob.", {"pattern": _STRING, "path": _PATH}, ("pattern",)),
     "search_code": (
         "Search file contents for a fixed string, case-insensitively.",
-        {"query": _STRING, "path": _STRING, "max_results": _integer(1, 200)},
+        {"query": _STRING, "path": _PATH, "max_results": _integer(1, 200)},
         ("query",),
     ),
     "git_status": ("Show git status.", {}, ()),
     "git_diff": (
         "Show a git diff.",
-        {"path": _STRING, "ref": _STRING, "staged": {"type": "boolean"}},
+        {"path": _PATH, "ref": _STRING, "staged": {"type": "boolean"}},
         (),
     ),
     "run_shell": (
         "Run one command as an argv list, never a shell string.",
-        {"command": _STRINGS, "cwd": _STRING, "timeout": {"type": "number"}},
+        {"command": _ARGV, "cwd": _CWD, "timeout": {"type": "number"}},
         ("command",),
     ),
     "web_search": (
@@ -191,25 +209,35 @@ def commands_from_turn(turn: NativeTurn, *, files_changed: bool) -> list[AgentCo
     an unknown tool, or a batch the parser refuses.
     """
     names = [call.name for call in turn.tool_calls]
+    labels = [_label(call) for call in turn.tool_calls]
     actions = [
-        {"type": call.name, "args": _arguments(call), "description": _describe(call)}
-        for call in turn.tool_calls
+        {"type": call.name, "args": _arguments(call), "description": _banner_label(label)}
+        for call, label in zip(turn.tool_calls, labels)
     ]
-    return _parse(turn.content, names, actions, files_changed)
+    return _parse(turn.content, names, actions, files_changed, labels)
 
 
 def final_answer_from_turn(turn: NativeTurn) -> list[AgentCommand]:
     """A response without calls ends the task; its text is the final answer."""
     action = {"type": "final_answer", "args": {"message": turn.content.strip()}}
-    return _parse(turn.content, ["final_answer"], [action], files_changed=False)
+    return _parse(turn.content, ["final_answer"], [action], False, ["final_answer"])
 
 
-def _parse(text: str, names: list[str], actions: list[dict[str, Any]], files_changed: bool) -> list[AgentCommand]:
+def _parse(
+    text: str,
+    names: list[str],
+    actions: list[dict[str, Any]],
+    files_changed: bool,
+    call_labels: list[str],
+) -> list[AgentCommand]:
     line = text.strip()
+    # A model that calls tools without a word leaves the person reading
+    # "search_code · search_code"; what each call touches says more.
+    labels = " · ".join(call_labels)
     payload = {
-        "thought": line.splitlines()[0][:140] if line else "Calling " + ", ".join(names),
+        "thought": line.splitlines()[0][:140] if line else labels,
         "plan_step": _plan_step(names, files_changed),
-        "user_message": line or " · ".join(names),
+        "user_message": line or labels,
         "actions": actions,
     }
     return parse_agent_commands(json.dumps(payload, ensure_ascii=False))
@@ -225,22 +253,28 @@ def _arguments(call: ToolCall) -> dict[str, Any]:
     return value
 
 
-def _describe(call: ToolCall) -> str:
-    """A label for the banner's Action row, which holds 16 characters."""
+def _label(call: ToolCall) -> str:
+    """What a call touches, in full: a path, a query, a command."""
     try:
         args = json.loads(call.arguments or "{}")
     except json.JSONDecodeError:
-        return call.name[:16]
+        return call.name
     if not isinstance(args, dict):
-        return call.name[:16]
+        return call.name
     for key in ("path", "query", "pattern", "url"):
         value = args.get(key)
         if isinstance(value, str) and value:
-            return (Path(value).name if key == "path" else value)[:16]
-    command = args.get("command")
-    if isinstance(command, list) and command:
-        return " ".join(str(part) for part in command)[:16]
-    return call.name[:16]
+            return value
+    for key in ("paths", "command"):
+        value = args.get(key)
+        if isinstance(value, list) and value:
+            return (", " if key == "paths" else " ").join(str(part) for part in value)
+    return call.name
+
+
+def _banner_label(label: str) -> str:
+    """The banner's Action row holds 16 characters: a path shows its file name."""
+    return (Path(label).name if "/" in label and " " not in label else label)[:16]
 
 
 def _plan_step(names: list[str], files_changed: bool) -> str:
