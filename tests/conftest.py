@@ -137,6 +137,20 @@ def _isolate_home(request, monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _disable_session_titles(monkeypatch):
+    """Keep background session-title generation from firing in ordinary tests.
+
+    ``LocalAgent._start_title_generation`` spawns a real daemon thread that
+    calls the configured LLM client and writes the session document as soon
+    as the first turn completes. Against ``FakeLLMClient`` that thread still
+    races the test's own assertions and tmp_path teardown, which is a source
+    of flakes unrelated to what a given test is checking. Tests that exercise
+    the titler itself opt back in with ``monkeypatch.setenv("AGENT_SESSION_TITLES", "1")``.
+    """
+    monkeypatch.setenv("AGENT_SESSION_TITLES", "0")
+
+
+@pytest.fixture(autouse=True)
 def _disable_write_approval_gate(monkeypatch):
     """Tests run without a TTY; the overwrite gate would deny every edit.
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
 import threading
 import uuid
 from typing import Any
@@ -343,7 +344,12 @@ class LocalAgent:
 
         Split from ``_generate_and_store_title`` so a test can call the worker
         directly and synchronously instead of racing a background thread.
+        ``AGENT_SESSION_TITLES=0`` skips the spawn entirely (default off in the
+        test suite via tests/conftest.py: the thread would otherwise race a
+        test's own assertions and tmp_path teardown against a real LLM call).
         """
+        if os.getenv("AGENT_SESSION_TITLES", "1") == "0":
+            return
         thread = threading.Thread(
             target=self._generate_and_store_title,
             args=(session_name, user_goal, agent_reply),
