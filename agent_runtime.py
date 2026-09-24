@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -799,6 +800,8 @@ class _PlannedCall:
         return self.request.name in READONLY_TOOLS
 
 
+# Read-only calls of one response that may run at the same time.
+MAX_PARALLEL_CALLS = 4
 _NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already ended the task."
 _NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
 _NOT_RUN_BUDGET = "Not executed: the step budget ran out."
@@ -837,10 +840,11 @@ def _run_calls(
 ) -> tuple[_ActionOutcome, int, list[str]]:
     """Run a response's calls in call order and answer every one of them.
 
-    Every call is its own step, so step logs, checkpoints, the pending-action
-    record and the step budget keep their meaning. A failed read costs only
-    itself. A failed or refused write stops the writes after it — a later
-    write may rest on it — but not the reads.
+    Consecutive read-only calls run as one group, in parallel; a writing call
+    runs alone. Every call is its own step, so step logs, checkpoints, the
+    pending-action record and the step budget keep their meaning. A failed
+    read costs only itself. A failed or refused write stops the writes after
+    it — a later write may rest on it — but not the reads.
     """
     answers: list[str] = []
     not_run: list[str] = []
@@ -850,21 +854,35 @@ def _run_calls(
         (item for item in planned if item.command is not None and item.command.action.type == "refuse"),
         None,
     )
-    for index, item in enumerate(planned):
+    index = 0
+    while index < len(planned):
+        item = planned[index]
         if outcome.finished or (refusal is not None and item is not refusal):
             answers.append(_NOT_RUN_AFTER_FINISH if outcome.finished else _NOT_RUN_BESIDE_REFUSAL)
+            index += 1
             continue
         if item.command is None:
             _register_unreadable_call(self, item.error)
             answers.append(item.error)
             not_run.append(item.error)
             write_failed = write_failed or not item.readonly
+            index += 1
             continue
-        if index and step > self._state.step_budget:
+        if item.readonly:
+            group = _readonly_run(planned, index)
+            step, group_answers, group_not_run = _run_readonly_group(
+                self, user_goal, step, group, first_in_response=index == 0
+            )
+            answers.extend(group_answers)
+            not_run.extend(group_not_run)
+            index += len(group)
+            continue
+        index += 1
+        if step > self._state.step_budget and index > 1:
             answers.append(_NOT_RUN_BUDGET)
             not_run.append(f"{item.command.action.description}: {_NOT_RUN_BUDGET}")
             continue
-        if write_failed and not item.readonly:
+        if write_failed:
             _show_skipped_call(self, step, item.command)
             step += 1
             answers.append(_SKIPPED_AFTER_FAILED_WRITE)
@@ -878,11 +896,63 @@ def _run_calls(
         if result.finished:
             outcome = result
         elif not result.proceed:
-            write_failed = write_failed or not item.readonly
+            write_failed = True
             if getattr(self, "_result_serial", 0) == serial:
                 not_run.append(f"{item.command.action.description}: {answer}")
     _note_calls_not_run(self, not_run)
     return outcome, step, answers
+
+
+def _readonly_run(planned: list[_PlannedCall], start: int) -> list[_PlannedCall]:
+    """The read-only calls that follow each other from ``start``, at most a response's worth."""
+    group: list[_PlannedCall] = []
+    for item in planned[start:]:
+        if item.command is None or not item.readonly:
+            break
+        group.append(item)
+    return group
+
+
+def _run_readonly_group(
+    self, user_goal: str, step: int, group: list[_PlannedCall], *, first_in_response: bool
+) -> tuple[int, list[str], list[str]]:
+    """Guards in call order, the executor in parallel, results registered in call order.
+
+    Only the executor call leaves the main thread: every guard and every
+    change to the run state stays where it was, so a group behaves like the
+    same reads made one by one, just sooner.
+    """
+    answers: list[str] = [""] * len(group)
+    not_run: list[str] = []
+    ready: list[tuple[int, int, int]] = []  # (position, step, result serial)
+    for position, item in enumerate(group):
+        command = item.command
+        assert command is not None
+        if step > self._state.step_budget and (position or not first_in_response):
+            answers[position] = _NOT_RUN_BUDGET
+            not_run.append(f"{command.action.description}: {_NOT_RUN_BUDGET}")
+            continue
+        serial = getattr(self, "_result_serial", 0)
+        if _prepare_action(self, user_goal, step, command):
+            ready.append((position, step, serial))
+        else:
+            answers[position] = _call_answer(self, serial, _BLOCKED)
+            if getattr(self, "_result_serial", 0) == serial:
+                not_run.append(f"{command.action.description}: {answers[position]}")
+        step += 1
+    feedbacks = _execute_in_parallel(self, [group[position].command for position, _step, _serial in ready])
+    for (position, call_step, serial), feedback in zip(ready, feedbacks):
+        result = _finish_action(self, call_step, group[position].command, feedback)
+        answers[position] = _call_answer(self, serial, result)
+    return step, answers, not_run
+
+
+def _execute_in_parallel(self, commands: list[AgentCommand]) -> list[dict[str, Any]]:
+    """Executor results in the order of ``commands``, whatever order they finish in."""
+    if len(commands) < 2:
+        return [self._execute_command(command) for command in commands]
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_CALLS, thread_name_prefix="kvist-read") as pool:
+        return list(pool.map(self._execute_command, commands))
 
 
 def _register_unreadable_call(self, error: str) -> None:
@@ -968,18 +1038,35 @@ def _run_one_action(
     if command.action.type == "refuse":
         return _stop_for_safety_refusal(self, step, command)
 
-    if _reject_wrong_language(self, step, command):
+    if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
 
+    if command.action.type == "final_answer":
+        return _finish_with_final_answer(self, step, command)
+    if command.action.type == "report_to_user":
+        return _finish_with_report(self, user_goal, step, command)
+    return _execute_action(self, user_goal, step, command)
+
+
+def _prepare_action(self, user_goal: str, step: int, command: AgentCommand) -> bool:
+    """Every guard that runs before an action, and its header on screen.
+
+    False when a guard turned the action away; the reason is already in
+    pending_instruction or in a registered error result.
+    """
+    self._current_step = step
+    if _reject_wrong_language(self, step, command):
+        return False
+
     if _reject_before_execution(self, step, command):
-        return _BLOCKED
+        return False
 
     self._ui.print_step_header(
         step, command, getattr(self, "_last_reasoning_seconds", 0.0)
     )
 
     if _reject_exhausted_web_budget(self, user_goal, step, command):
-        return _BLOCKED
+        return False
 
     _note_run_context(
         self,
@@ -995,12 +1082,7 @@ def _run_one_action(
         progress=self._state.progress,
         plan_step=command.plan_step,
     )
-
-    if command.action.type == "final_answer":
-        return _finish_with_final_answer(self, step, command)
-    if command.action.type == "report_to_user":
-        return _finish_with_report(self, user_goal, step, command)
-    return _execute_action(self, user_goal, step, command)
+    return True
 
 
 def _stop_for_safety_refusal(self, step: int, command: AgentCommand) -> _ActionOutcome:
@@ -1327,6 +1409,21 @@ def _execute_action(
         if pending_action is not None:
             self.executor.end_action_transaction()
             self._anchored_artifacts = None
+    outcome = _finish_action(self, step, command, feedback)
+    # A side effect is on disk the moment it runs, so its checkpoint cannot
+    # wait. A read has nothing to recover — resume simply reads again — and is
+    # saved once with the rest of its batch (run_loop): each durable write
+    # costs up to a second on a spinning disk, several per action.
+    if pending_action is not None:
+        self._save_checkpoint(user_goal, step)
+    return outcome
+
+
+def _finish_action(
+    self, step: int, command: AgentCommand, feedback: dict[str, Any]
+) -> _ActionOutcome:
+    """Everything that follows an executed action, on the main thread."""
+    self._current_step = step
     self._register_feedback(step, command, feedback)
     _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
@@ -1357,13 +1454,6 @@ def _execute_action(
         plan_step=command.plan_step,
         is_error=not ok,
     )
-
-    # A side effect is on disk the moment it runs, so its checkpoint cannot
-    # wait. A read has nothing to recover — resume simply reads again — and is
-    # saved once with the rest of its batch (run_loop): each durable write
-    # costs up to a second on a spinning disk, several per action.
-    if pending_action is not None:
-        self._save_checkpoint(user_goal, step)
     return _ActionOutcome(proceed=ok)
 
 

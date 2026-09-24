@@ -2227,3 +2227,182 @@ def test_run_loop_a_response_without_calls_ends_the_turn_with_its_text(agent_fac
     assert len(prompts) == 2
     assert agent._state.user_messages == ["Смотрю, что лежит в корне."]
     assert agent._state.rolling_summaries == {1: "Смотрю, что лежит в корне."}
+
+
+# ── v2 batches: parallel reads, order, limits ──────────────────────────
+
+def _concurrency_probe(delays: dict[str, float]):
+    """An executor that sleeps per path and records how many calls overlapped."""
+    import threading
+    import time as _time
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0, "finished": []}
+
+    def execute(command):
+        path = command.action.args.get("path", "")
+        with lock:
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        _time.sleep(delays.get(path, 0.05))
+        with lock:
+            state["active"] -= 1
+            state["finished"].append(path)
+        return ExecutionResult(True, command.action.type, {"path": path, "content": f"content of {path}"})
+
+    return execute, state
+
+
+def test_parallel_reads_return_results_in_call_order_not_finish_order(agent_factory):
+    agent = agent_factory(max_steps=4)
+    agent._state.plan_info = make_plan()
+    execute, probe = _concurrency_probe({"slow.py": 0.4, "mid.py": 0.2, "fast.py": 0.01})
+    agent.executor.execute = execute
+    responses = iter([
+        _v2(
+            "Читаю три файла",
+            _tool("read_file", path="slow.py"),
+            _tool("read_file", path="mid.py"),
+            _tool("read_file", path="fast.py"),
+        ),
+        "Прочитал.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert probe["finished"] == ["fast.py", "mid.py", "slow.py"]
+    assert probe["peak"] == 3
+    registered = [log["command"]["action"]["args"]["path"] for log in agent._state.step_logs if "feedback" in log]
+    assert registered == ["slow.py", "mid.py", "fast.py"]
+    assert [log["step"] for log in agent._state.step_logs if "feedback" in log] == [1, 2, 3]
+    details = agent._state.recent_result_details
+    assert all(f"content of {name}" in detail for name, detail in zip(("slow.py", "mid.py", "fast.py"), details))
+    assert all(d.startswith('<UNTRUSTED_TOOL_OUTPUT source="read_file" call_id="call_') for d in details)
+
+
+def test_no_more_than_four_reads_run_at_once(agent_factory):
+    agent = agent_factory(max_steps=8)
+    agent._state.plan_info = make_plan()
+    execute, probe = _concurrency_probe({})
+    agent.executor.execute = execute
+    agent._call_action_model = lambda prompt: _v2(
+        "", *(_tool("read_file", path=f"f{i}.py") for i in range(8))
+    )
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert len(probe["finished"]) == 8
+    assert probe["peak"] == 4
+
+
+def test_no_more_than_eight_calls_run_per_response(agent_factory):
+    agent = agent_factory(max_steps=12)
+    agent._state.plan_info = make_plan()
+    prompts = []
+    executed = []
+    responses = iter([
+        _v2("", *(_tool("list_dir", path=f"d{i}") for i in range(10))),
+        "Готово.",
+    ])
+
+    def fake_call_action_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    def fake_execute(command):
+        executed.append(command.action.args["path"])
+        return ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._call_action_model = fake_call_action_model
+    agent.executor.execute = fake_execute
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert sorted(executed) == sorted(f"d{i}" for i in range(8))
+    assert "at most 8 tool calls" in prompts[1]
+
+
+def test_a_read_after_a_write_in_the_same_response_sees_the_write(agent_factory):
+    agent = agent_factory(max_steps=4)
+    agent._state.plan_info = make_plan()
+    agent._call_action_model = lambda prompt: _v2(
+        "",
+        _tool("write_file", path="new.txt", content="fresh"),
+        _tool("read_file", path="new.txt"),
+    )
+
+    agent._run_loop("Create new.txt", start_step=1)
+
+    read = next(log for log in agent._state.step_logs if log.get("command", {}).get("action", {}).get("type") == "read_file")
+    assert read["feedback"]["ok"] is True
+    assert "fresh" in json.dumps(read["feedback"]["data"])
+
+
+def test_shell_never_runs_in_parallel_with_reads(agent_factory):
+    agent = agent_factory(max_steps=4)
+    agent._state.plan_info = make_plan()
+    order = []
+
+    def fake_execute(command):
+        order.append(command.action.type)
+        return ExecutionResult(True, command.action.type, {"returncode": 0, "stdout": "", "stderr": "", "entries": []})
+
+    agent.executor.execute = fake_execute
+    responses = iter([
+        _v2(
+            "",
+            _tool("list_dir", path="a"),
+            _tool("run_shell", command=["ls"], purpose="смотрю корень"),
+            _tool("list_dir", path="b"),
+        ),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert order == ["list_dir", "run_shell", "list_dir"]
+
+
+def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
+    from types import SimpleNamespace
+
+    import agent_model
+    from agent_state import NO_PLAN_STEP
+
+    def call(call_id, name, **args):
+        return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(args)))
+
+    def response(content, calls):
+        message = SimpleNamespace(content=content, tool_calls=calls or None, reasoning_content=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    turns = [
+        response("", [call(f"c{i}", "read_file", path=f"f{i}.py") for i in range(9)]),
+        response("Готово.", []),
+    ]
+    requests = []
+
+    def create(**kwargs):
+        requests.append(kwargs)
+        if kwargs["tools"][0]["function"]["name"] == "ping":
+            return response("", [call("probe", "ping", ok=True)])
+        return turns.pop(0)
+
+    agent_model._NATIVE_TOOL_SUPPORT.clear()
+    agent = agent_factory(max_steps=12, stream=False)
+    agent.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    agent._state.plan_info = PlanInfo(goal="read", complexity="simple", plan=[NO_PLAN_STEP], success_criteria=[], risks=[])
+    execute, _probe = _concurrency_probe({"f0.py": 0.3})
+    agent.executor.execute = execute
+
+    try:
+        agent._run_loop("Прочитай файлы", start_step=1)
+    finally:
+        agent_model._NATIVE_TOOL_SUPPORT.clear()
+
+    answers = [m for m in requests[-1]["messages"] if m["role"] == "tool"]
+    assert [m["tool_call_id"] for m in answers] == [f"c{i}" for i in range(9)]
+    assert "content of f0.py" in answers[0]["content"]
+    assert answers[8]["content"].startswith("Not executed: a response holds at most 8 tool calls")
