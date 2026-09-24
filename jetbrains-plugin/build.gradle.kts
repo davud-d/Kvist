@@ -26,6 +26,12 @@ kotlin {
     jvmToolchain(21)
 }
 
+// The UI is Swing plus a JCEF page, with no GUI Designer .form files, so there is
+// nothing to instrument, and the task would download a Java compiler for nothing.
+intellijPlatform {
+    instrumentCode = false
+}
+
 val hostOsName = System.getProperty("os.name").lowercase(Locale.US)
 val pluginDistributionDirectoryName = project.name
 
