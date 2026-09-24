@@ -159,8 +159,10 @@ def test_advisory_always_warns_for_custom_providers():
 # ── anthropic thinking translation ──────────────────────────────────────────
 
 
-def test_anthropic_thinking_config_is_none_for_false():
-    assert anthropic_thinking_config("false") is None
+def test_anthropic_thinking_config_raises_false_to_the_minimum():
+    # Thinking-off is the state where an Anthropic model narrates an action
+    # instead of emitting one, so "false" buys the cheapest thinking, not none.
+    assert anthropic_thinking_config("false") == anthropic_thinking_config("low")
 
 
 def test_anthropic_thinking_config_scales_the_budget():
@@ -197,7 +199,9 @@ def test_anthropic_wrapper_enables_thinking_and_drops_temperature():
     assert record["max_tokens"] > record["thinking"]["budget_tokens"]
 
 
-def test_anthropic_wrapper_keeps_temperature_when_effort_is_false():
+def test_anthropic_wrapper_drops_temperature_when_effort_is_false():
+    # "false" now leaves thinking on at its lowest budget, and extended thinking
+    # rejects a non-default temperature — so the knob costs temperature too.
     client = AnthropicCompatibleClient(api_key="test-key")
     record: dict = {}
     client._client = _fake_anthropic(record)
@@ -207,6 +211,21 @@ def test_anthropic_wrapper_keeps_temperature_when_effort_is_false():
         messages=[{"role": "user", "content": "hi"}],
         temperature=0.1,
         reasoning_effort="false",
+    )
+
+    assert record["thinking"]["budget_tokens"] == anthropic_thinking_config("low")["budget_tokens"]
+    assert "temperature" not in record
+
+
+def test_anthropic_wrapper_keeps_temperature_when_no_effort_marker():
+    client = AnthropicCompatibleClient(api_key="test-key")
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+
+    client.chat.completions.create(
+        model="claude-sonnet-4-6",
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=0.1,
     )
 
     assert "thinking" not in record
@@ -263,3 +282,26 @@ def test_reasoning_rejection_retries_without_it_and_keeps_warning(agent_factory)
     assert len(agent.client.requests) == 2
     assert "reasoning_effort" not in agent.client.requests[1]
     assert warnings and "high" in warnings[0]
+
+
+def test_anthropic_false_is_raised_to_the_minimum_not_disabled():
+    """Thinking-off is the state where these models narrate an action instead
+    of emitting one, so 'false' buys the cheapest thinking rather than none."""
+    from reasoning_effort import anthropic_thinking_config, effort_advisory
+
+    off = anthropic_thinking_config("false")
+    assert off is not None
+    assert off == anthropic_thinking_config("low")
+
+    advisory = effort_advisory("anthropic", "false")
+    assert advisory is not None
+    assert "not" in advisory and "off" in advisory
+
+
+def test_absent_reasoning_marker_still_means_no_thinking_block():
+    """Only an explicit 'false' is raised; no marker at all stays no marker."""
+    from llm_clients import _anthropic_thinking_from_effort
+
+    assert _anthropic_thinking_from_effort(None) is None
+    assert _anthropic_thinking_from_effort("") is None
+    assert _anthropic_thinking_from_effort("false") is not None

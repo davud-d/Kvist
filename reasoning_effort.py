@@ -141,10 +141,17 @@ def uses_anthropic_protocol(provider: str) -> bool:
 
 
 def anthropic_thinking_config(level: str) -> dict[str, Any] | None:
-    """Anthropic ``thinking`` block for ``level``, or ``None`` to omit it."""
+    """Anthropic ``thinking`` block for ``level``, or ``None`` to omit it.
+
+    ``false`` asks for the minimum, never for none. With thinking off, Anthropic
+    models write a tool call into the visible text instead of emitting it as a
+    call: the turn succeeds, nothing runs, and no error is raised — which in
+    Kvist's action loop is the response the parser throws away, billing the user
+    for content twice. The lowest budget costs less than one discarded step.
+    """
     normalized = normalize_effort(level)
     if normalized == "false":
-        return None
+        normalized = "low"
     return {"type": "enabled", "budget_tokens": _ANTHROPIC_BUDGET[normalized]}
 
 
@@ -296,7 +303,11 @@ def effort_advisory(provider: str, level: str) -> str | None:
 
     if uses_anthropic_protocol(normalized_provider):
         if normalized_level == "false":
-            return "Anthropic: 'false' disables extended thinking (today's default)."
+            return (
+                "Anthropic: 'false' is raised to the lowest thinking level, not "
+                "off. With thinking off these models tend to write an action as "
+                "plain text instead of emitting it, which costs a discarded step."
+            )
         return (
             f"Anthropic: '{normalized_level}' sets an extended-thinking token "
             "budget; temperature is not applied while thinking is on."
