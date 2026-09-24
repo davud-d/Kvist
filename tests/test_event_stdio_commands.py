@@ -134,7 +134,7 @@ def test_unknown_command_is_refused_and_process_survives():
     reader.push(_command("nope"))
     result = _result(out, "nope")
     assert result["ok"] is False
-    assert "Неизвестная команда" in result["message"]
+    assert "Unknown command" in result["message"]
 
     reader.push("still alive")
     out.wait_for(lambda e: e["type"] == "turn_end")

@@ -981,9 +981,7 @@ def resolve_startup_provider(
         selected = choose_provider("openai", False, ui=interactive_ui)
         if selected:
             return selected
-        raise RuntimeError(
-            "No provider was selected. / Провайдер не выбран."
-        )
+        raise RuntimeError("No provider was selected.")
 
     # First run, no AnyModel key either: use RichUI if available, fall back
     # to plain-text. The AnyModel registration screen is offered first (it
@@ -2954,12 +2952,12 @@ def _bi(en: str, ru: str) -> str:
 
 
 def _command_cancelled() -> CommandResult:
-    return CommandResult(True, _bi("Cancelled.", "Отменено."), {"cancelled": True})
+    return CommandResult(True, "Cancelled.", {"cancelled": True})
 
 
 def _save_failure_note(error: RuntimeError) -> str:
     detail = sanitize_display_text(str(error))
-    return " (" + _bi(f"not saved: {detail}", f"не сохранено: {detail}") + ")"
+    return f" (not saved: {detail})"
 
 
 def _stdio_role(ctx: CommandContext) -> CommandResult:
@@ -2968,10 +2966,7 @@ def _stdio_role(ctx: CommandContext) -> CommandResult:
         if selected not in _ROLE_CHOICES:
             return CommandResult(
                 False,
-                _bi(
-                    "Role must be one of: " + ", ".join(_ROLE_CHOICES),
-                    "Роль должна быть одной из: " + ", ".join(_ROLE_CHOICES),
-                ),
+                "Role must be one of: " + ", ".join(_ROLE_CHOICES),
             )
     else:
         selected = choose_role(
@@ -2983,12 +2978,12 @@ def _stdio_role(ctx: CommandContext) -> CommandResult:
         save_role_selection(selected)
     except RuntimeError as error:
         return CommandResult(
-            False, _bi("Role not saved", "Роль не сохранена") + _save_failure_note(error)
+            False, "Role not saved" + _save_failure_note(error)
         )
     ctx.routed_role = None if selected == "auto" else selected
     return CommandResult(
         True,
-        _bi(f"Role set to: {selected}", f"Роль: {selected}"),
+        f"Role set to: {selected}",
         {"role": selected},
     )
 
@@ -3000,10 +2995,7 @@ def _stdio_effort(ctx: CommandContext) -> CommandResult:
         if selected not in EFFORT_LEVELS:
             return CommandResult(
                 False,
-                _bi(
-                    "Effort must be one of: " + ", ".join(EFFORT_LEVELS),
-                    "Уровень должен быть одним из: " + ", ".join(EFFORT_LEVELS),
-                ),
+                "Effort must be one of: " + ", ".join(EFFORT_LEVELS),
             )
     else:
         selected = choose_effort(
@@ -3021,7 +3013,7 @@ def _stdio_effort(ctx: CommandContext) -> CommandResult:
     advisory = effort_advisory(agent.config.provider, selected)
     return CommandResult(
         True,
-        _bi(f"Reasoning effort set to: {selected}", f"Уровень рассуждений: {selected}")
+        f"Reasoning effort set to: {selected}"
         + note,
         {"effort": selected, "advisory": advisory or ""},
     )
@@ -3033,7 +3025,7 @@ def _stdio_plan(ctx: CommandContext) -> CommandResult:
         "/plan " + " ".join(ctx.args), not agent.config.skip_planning
     )
     if enabled is None:
-        return CommandResult(False, _bi("Usage: plan [true|false]", "Использование: plan [true|false]"))
+        return CommandResult(False, "Usage: plan [true|false]")
     apply_plan_mode(agent, enabled)
     note = ""
     try:
@@ -3043,9 +3035,9 @@ def _stdio_plan(ctx: CommandContext) -> CommandResult:
     return CommandResult(
         True,
         (
-            _bi("Planning stage enabled.", "Этап планирования включён.")
+            "Planning stage enabled."
             if enabled
-            else _bi("Planning stage disabled.", "Этап планирования выключен.")
+            else "Planning stage disabled."
         )
         + note,
         {"plan": enabled},
@@ -3056,14 +3048,14 @@ def _stdio_verbose(ctx: CommandContext) -> CommandResult:
     agent = ctx.session.agent
     enabled = parse_verbose_value("/verbose " + " ".join(ctx.args), agent.config.verbose)
     if enabled is None:
-        return CommandResult(False, _bi("Usage: verbose [true|false]", "Использование: verbose [true|false]"))
+        return CommandResult(False, "Usage: verbose [true|false]")
     apply_verbose_mode(agent, enabled)
     return CommandResult(
         True,
         (
-            _bi("Verbose mode enabled.", "Подробный режим включён.")
+            "Verbose mode enabled."
             if enabled
-            else _bi("Verbose mode disabled.", "Подробный режим выключен.")
+            else "Verbose mode disabled."
         ),
         {"verbose": enabled},
     )
@@ -3074,20 +3066,19 @@ def _stdio_style(ctx: CommandContext) -> CommandResult:
     if len(ctx.args) == 2:
         chosen: tuple[str, str] | None = (ctx.args[0].casefold(), ctx.args[1])
     elif ctx.args:
-        return CommandResult(False, _bi("Usage: style [chat|agents NAME]", "Использование: style [chat|agents ИМЯ]"))
+        return CommandResult(False, "Usage: style [chat|agents NAME]")
     else:
         chosen = choose_style(agent.config.verbose, ui=ctx.ui)
     if chosen is None:
         return _command_cancelled()
     style_type, style_name = chosen
     if style_type not in ("chat", "agents") or not save_style_configuration(style_type, style_name):
-        return CommandResult(False, _bi(f"Unknown style: {style_type} {style_name}", f"Неизвестный стиль: {style_type} {style_name}"))
+        return CommandResult(False, f"Unknown style: {style_type} {style_name}")
     adopted = agent.adopt_session_style(style_type, style_name)
-    message = _bi(f"{style_type.capitalize()} style set to: {style_name}", f"Стиль {style_type}: {style_name}")
+    message = f"{style_type.capitalize()} style set to: {style_name}"
     if not adopted:
-        message += _bi(
-            f". This session keeps {agent.session_style(style_type)}; the new style starts with the next session.",
-            f". Эта сессия сохраняет {agent.session_style(style_type)}; новый стиль начнётся со следующей сессии.",
+        message += (
+            f". This session keeps {agent.session_style(style_type)}; the new style starts with the next session."
         )
     return CommandResult(
         True,
@@ -3109,15 +3100,15 @@ def _stdio_session_op(agent, args: list[str]) -> str:
     op, name = args[0].casefold(), (args[1].strip().lower() if len(args) > 1 else None)
     if op == "new":
         created = agent.new_session(name)
-        return _bi(f"Session {created} created.", f"Сессия {created} создана.")
+        return f"Session {created} created."
     if name is None or op not in ("switch", "delete"):
-        raise ValueError(_bi("Usage: session [switch|new|delete] [NAME]", "Использование: session [switch|new|delete] [ИМЯ]"))
+        raise ValueError("Usage: session [switch|new|delete] [NAME]")
     if op == "switch":
         agent.switch_session(name)
-        return _bi(f"Switched to session {name}.", f"Переключено на сессию {name}.")
+        return f"Switched to session {name}."
     if not agent._delete_session(name):
-        raise ValueError(_bi(f"Unknown session: {name!r}", f"Неизвестная сессия: {name!r}"))
-    return _bi(f"Session {name} deleted.", f"Сессия {name} удалена.")
+        raise ValueError(f"Unknown session: {name!r}")
+    return f"Session {name} deleted."
 
 
 def _stdio_session(ctx: CommandContext) -> CommandResult:
@@ -3131,7 +3122,7 @@ def _stdio_session(ctx: CommandContext) -> CommandResult:
         elif choose_session(agent, agent.config.verbose, ui=ctx.ui) is None:
             return _command_cancelled()
         else:
-            message = _bi(f"Active session: {agent.current_session}", f"Активная сессия: {agent.current_session}")
+            message = f"Active session: {agent.current_session}"
     except (JsonStorageError, OSError, ValueError) as error:
         return CommandResult(False, sanitize_display_text(str(error).strip() or type(error).__name__))
     effects = _session_effects(agent)
@@ -3159,15 +3150,12 @@ def _stdio_models(ctx: CommandContext) -> CommandResult:
     if not _provider_offers_model_list(config.provider):
         return CommandResult(
             False,
-            _bi(
-                f"No models available for {provider_label(config.provider)}.",
-                f"Для {provider_label(config.provider)} нет доступных моделей.",
-            ),
+            f"No models available for {provider_label(config.provider)}.",
         )
     if len(ctx.args) == len(MODEL_ROLES):
         selected = dict(zip(MODEL_ROLES, ctx.args))
     elif ctx.args:
-        return CommandResult(False, _bi("Usage: models [FAST SMART PLANNER]", "Использование: models [FAST SMART PLANNER]"))
+        return CommandResult(False, "Usage: models [FAST SMART PLANNER]")
     else:
         selected = select_models_interactively(config, config.verbose, ui=ctx.ui)
     if selected is None:
@@ -3200,7 +3188,7 @@ def _stdio_models(ctx: CommandContext) -> CommandResult:
         note = _save_failure_note(error)
     return CommandResult(
         True,
-        _bi("Models updated.", "Модели обновлены.") + note,
+        "Models updated." + note,
         {
             "provider": new_config.provider,
             "models": {
@@ -3266,7 +3254,7 @@ def _stdio_provider(ctx: CommandContext) -> CommandResult:
         if selected is None:
             return CommandResult(
                 False,
-                _bi(f"Unknown provider: {ctx.args[0]}", f"Неизвестный провайдер: {ctx.args[0]}"),
+                f"Unknown provider: {ctx.args[0]}",
             )
     else:
         selected = choose_provider(previous, agent.config.verbose, ui=ctx.ui)
@@ -3275,7 +3263,7 @@ def _stdio_provider(ctx: CommandContext) -> CommandResult:
     if selected == previous:
         return CommandResult(
             True,
-            _bi("Provider unchanged.", "Провайдер не изменён."),
+            "Provider unchanged.",
             {"provider": previous, "changed": False},
         )
     try:
@@ -3284,10 +3272,7 @@ def _stdio_provider(ctx: CommandContext) -> CommandResult:
         return CommandResult(False, _failure_detail(error))
     return CommandResult(
         True,
-        _bi(
-            f"Provider changed to {provider_label(config.provider)}.",
-            f"Провайдер: {provider_label(config.provider)}.",
-        ),
+        f"Provider changed to {provider_label(config.provider)}.",
         {**_provider_effects(config, warnings), "changed": True},
     )
 
@@ -3298,7 +3283,7 @@ def _stdio_change_api(ctx: CommandContext) -> CommandResult:
         changed = change_provider_api_key(config, config.verbose, ui=ctx.ui)
     except RuntimeError as error:
         return CommandResult(
-            False, _bi("API key not saved", "Ключ не сохранён") + _save_failure_note(error)
+            False, "API key not saved" + _save_failure_note(error)
         )
     if not changed:
         return _command_cancelled()
@@ -3308,16 +3293,13 @@ def _stdio_change_api(ctx: CommandContext) -> CommandResult:
         detail = _failure_detail(error)
         return CommandResult(
             False,
-            _bi(
-                f"The key was saved, but applying it failed: {detail}",
-                f"Ключ сохранён, но применить его не удалось: {detail}",
-            ),
+            f"The key was saved, but applying it failed: {detail}",
             {"key_saved": True, "restart_required": True},
         )
     label = provider_label(new_config.provider)
     return CommandResult(
         True,
-        _bi(f"API key updated for {label}.", f"API-ключ для {label} обновлён."),
+        f"API key updated for {label}.",
         {**_provider_effects(new_config, warnings), "key_saved": True},
     )
 
@@ -3430,12 +3412,12 @@ def _stdio_settings_api(ctx: CommandContext) -> CommandResult:
     except RuntimeError as error:
         return CommandResult(
             False,
-            _bi("API settings not saved", "Настройки API не сохранены") + _save_failure_note(error),
+            "API settings not saved" + _save_failure_note(error),
         )
     if not changed:
         return CommandResult(
             True,
-            _bi("API settings unchanged.", "Настройки API не изменены."),
+            "API settings unchanged.",
             {"changed_keys": []},
         )
     saved = load_api_settings()
@@ -3446,12 +3428,7 @@ def _stdio_settings_api(ctx: CommandContext) -> CommandResult:
     ]
     restart_required = not changed <= _LIVE_API_SETTING_KEYS
     if restart_required:
-        lines.append(
-            _bi(
-                "Dynamic model loading applies at the next launch.",
-                "Динамическая загрузка моделей применится при следующем запуске.",
-            )
-        )
+        lines.append("Dynamic model loading applies at the next launch.")
     return CommandResult(
         True,
         "\n".join(lines),
@@ -3468,34 +3445,28 @@ def _stdio_strime(ctx: CommandContext) -> CommandResult:
     if not is_custom_provider(agent.config.provider):
         return CommandResult(
             False,
-            _bi(
-                "strime is available only for custom providers.",
-                "strime доступна только для кастомных провайдеров.",
-            ),
+            "strime is available only for custom providers.",
         )
     enabled = parse_strime_value("/strime " + " ".join(ctx.args), agent.config.stream)
     if enabled is None:
-        return CommandResult(False, _bi("Usage: strime [true|false]", "Использование: strime [true|false]"))
+        return CommandResult(False, "Usage: strime [true|false]")
     try:
         applied = apply_strime_mode(agent, enabled)
     except RuntimeError as error:
         return CommandResult(
-            False, _bi("Streaming mode not saved", "Режим стриминга не сохранён") + _save_failure_note(error)
+            False, "Streaming mode not saved" + _save_failure_note(error)
         )
     if not applied:
         return CommandResult(
             False,
-            _bi(
-                "The active custom provider could not be updated.",
-                "Не удалось обновить активный кастомный провайдер.",
-            ),
+            "The active custom provider could not be updated.",
         )
     return CommandResult(
         True,
         (
-            _bi("Streaming mode enabled.", "Стриминг включён.")
+            "Streaming mode enabled."
             if enabled
-            else _bi("Streaming mode disabled.", "Стриминг выключен.")
+            else "Streaming mode disabled."
         ),
         {"stream": enabled},
     )

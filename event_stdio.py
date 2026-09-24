@@ -217,8 +217,8 @@ class _Command:
     args: list[str]
 
 
-def _rejected(name: str, en: str, ru: str) -> CommandResultEvent:
-    return CommandResultEvent(name, False, f"{en} / {ru}", {})
+def _rejected(name: str, message: str) -> CommandResultEvent:
+    return CommandResultEvent(name, False, message, {})
 
 
 # Sentinel the reader pushes onto the goal queue so the multi-turn loop wakes up
@@ -320,7 +320,7 @@ def _queue_command(
     name = data.get("name")
     args = data.get("args", [])
     if not isinstance(name, str) or not name.strip():
-        _refuse(session, goal_queue, gate, _rejected("", "Command needs a name.", "Команде нужно имя."))
+        _refuse(session, goal_queue, gate, _rejected("", "Command needs a name."))
         return
     name = name.strip().lstrip("/").casefold()
     if not isinstance(args, list) or not all(isinstance(item, str) for item in args):
@@ -328,7 +328,7 @@ def _queue_command(
             session,
             goal_queue,
             gate,
-            _rejected(name, "Command args must be a list of strings.", "Аргументы команды должны быть списком строк."),
+            _rejected(name, "Command args must be a list of strings."),
         )
         return
     with gate.lock:
@@ -337,7 +337,6 @@ def _queue_command(
                 _rejected(
                     name,
                     "A turn or another command is running; wait for it to finish.",
-                    "Выполняется ход или другая команда; дождитесь завершения.",
                 )
             )
             return
@@ -357,7 +356,7 @@ def _run_command(
     if handler is None:
         result = CommandResult(
             False,
-            f"Unknown command: {command.name} / Неизвестная команда: {command.name}",
+            f"Unknown command: {command.name}",
         )
     else:
         context.args = command.args
@@ -387,7 +386,7 @@ def _run_resume(session: EventSession, out_stream) -> None:
             CommandResultEvent(
                 "resume",
                 False,
-                f"Resume failed: {detail} / Не удалось возобновить: {detail}",
+                f"Resume failed: {detail}",
                 {},
             ),
             out_stream,
@@ -398,7 +397,6 @@ def _run_resume(session: EventSession, out_stream) -> None:
             _rejected(
                 "resume",
                 "No saved checkpoint to resume.",
-                "Нет сохранённого чекпоинта для возобновления.",
             ),
             out_stream,
         )
@@ -424,7 +422,7 @@ def _guarded(handler: CommandHandler, context: CommandContext) -> CommandResult:
         # A wizard failing halfway (storage, provider, network) must still end
         # in a command_result, or the frontend would wait for one forever.
         detail = str(exc).strip() or type(exc).__name__
-        return CommandResult(False, f"Command failed: {detail} / Команда не выполнена: {detail}")
+        return CommandResult(False, f"Command failed: {detail}")
 
 
 def serve_session_multi(

@@ -87,10 +87,10 @@ def _print_registration_screen() -> None:
     # an OSC 8 hyperlink is exactly the kind of sequence it would strip. This
     # one is ours, not untrusted content, so it is written raw.
     lines = [
-        "Нет ключа AnyModel. Регистрация займёт минуту.",
+        "No AnyModel key yet. Registration takes a minute.",
         "",
-        "  Enter — открыть регистрацию в браузере (email + пароль)",
-        "  Esc   — выбрать другого провайдера",
+        "  Enter — open registration in browser (email + password)",
+        "  Esc   — choose another provider",
         "",
         format_hyperlink(ANYMODEL_REGISTER_URL, ANYMODEL_REGISTER_URL),
         ANYMODEL_REGISTER_URL,
@@ -102,12 +102,12 @@ def _print_registration_screen() -> None:
 
 def _open_registration_browser() -> None:
     if not _gui_browser_available():
-        print("Графический браузер не найден — открой ссылку выше вручную.")
+        print("No GUI browser found — open the link above manually.")
         return
     try:
         webbrowser.open(ANYMODEL_REGISTER_URL)
     except webbrowser.Error:
-        print("Не удалось открыть браузер автоматически — открой ссылку выше вручную.")
+        print("Could not open the browser automatically — open the link above manually.")
 
 
 def open_registration_page() -> bool:
@@ -149,11 +149,11 @@ def offer_anymodel_registration(ui: AgentUI) -> str | None:
         options=[
             {
                 "value": "register",
-                "label": "Открыть регистрацию в браузере",
+                "label": "Open registration in browser",
                 "description": ANYMODEL_REGISTER_URL,
             }
         ],
-        help_text="Enter — открыть регистрацию, Esc — выбрать другого провайдера",
+        help_text="Enter — open registration, Esc — choose another provider",
     )
     if selected != "register":
         return None
@@ -162,7 +162,7 @@ def offer_anymodel_registration(ui: AgentUI) -> str | None:
 
     while True:
         api_key = ui.prompt_secret(
-            title="Вставь API-ключ после регистрации:",
+            title="Paste your API key after registering:",
             help_text="Paste or type the value, then press Enter.",
         )
         if not api_key:
@@ -171,7 +171,7 @@ def offer_anymodel_registration(ui: AgentUI) -> str | None:
         try:
             fetch_model_coefficients(api_key, force_refresh=True)
         except AnyModelAuthError:
-            print("Ключ не сработал, проверь и вставь заново.")
+            print("The key didn't work, check it and paste it again.")
             continue
         except AnyModelUnavailableError as error:
             raise RuntimeError(f"AnyModel is unreachable: {error}") from error

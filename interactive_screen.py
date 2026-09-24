@@ -895,7 +895,7 @@ class InteractiveScreen:
                 )
             )
         fragments.append(
-            ("class:choice.hint", "\n  ↑/↓ — выбор, Enter — подтвердить\n")
+            ("class:choice.hint", "\n  ↑/↓ — select, Enter — confirm\n")
         )
         return fragments
 
