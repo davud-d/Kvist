@@ -112,6 +112,9 @@ export function App() {
             if (core.ok && core.name === "provider") post({ type: "getConfig" })
           }
           if (core.type === "turn_end") post({ type: "getSessions" })
+          // Background generation lands after that turn's own refresh above, so the
+          // sidebar needs its own trigger or a late title never reaches it.
+          if (core.type === "session_title") post({ type: "getSessions" })
           dispatch({ type: "event", event: core })
           // Cleared after the event: the reducer turns the core's "session started" message into a
           // note, and a note left behind would keep the welcome screen from showing.

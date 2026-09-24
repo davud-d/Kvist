@@ -57,6 +57,10 @@ export type CoreEvent =
   | ({ type: "input_request" } & InputRequest)
   | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
   | { type: "turn_end" }
+  // Additive, out-of-band: a session's title became known in the background,
+  // well after that turn's own turn_end, and possibly for a session the user
+  // has since switched away from (UI_API.md §7).
+  | { type: "session_title"; session: string; title: string }
 
 // What `--session-op history` returns per event: the events the stream carried, plus two the journal adds
 // (UI_API.md, "Restoring a session's feed").
