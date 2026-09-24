@@ -138,6 +138,78 @@ def test_save_bug_report_writes_under_home_and_returns_path(agent_factory, tmp_p
     assert "crash on save" in content
 
 
+@pytest.mark.parametrize(
+    "secret_line",
+    [
+        "ANYMODEL_KEY=abcd1234efgh5678ijkl",
+        "deepseekKey: zyx987ab12cd34ef56gh",
+        "X_TOKEN=mnop5678qrst1234uvwx",
+    ],
+)
+def test_vendor_shaped_key_assignments_are_redacted(agent_factory, secret_line):
+    agent = agent_factory()
+    value = secret_line.split(("=" if "=" in secret_line else ":"), 1)[1].strip()
+    _write_journal_events(agent, [{"type": "action_result", "output": secret_line}])
+
+    report = build_bug_report(agent, frontend="terminal")
+
+    assert value not in report
+    assert "[REDACTED]" in report
+
+
+def test_bare_high_entropy_token_is_redacted_even_without_a_key_prefix(agent_factory):
+    agent = agent_factory()
+    token = "zxq9mwer8tyui2opas3dfgh4jklzx6cvbnm1qwer"
+    _write_journal_events(
+        agent, [{"type": "action_result", "output": f"the run printed {token} then exited"}]
+    )
+
+    report = build_bug_report(agent, frontend="terminal")
+
+    assert token not in report
+    assert "[REDACTED]" in report
+
+
+def test_git_commit_hash_is_not_redacted(agent_factory):
+    agent = agent_factory()
+    commit_hash = "a94a8fe5ccb19ba61c4c0873d391e987982fbbd"
+    _write_journal_events(
+        agent, [{"type": "action_result", "output": f"fixed in commit {commit_hash}"}]
+    )
+
+    report = build_bug_report(agent, frontend="terminal")
+
+    assert commit_hash in report
+    assert "[REDACTED]" not in report
+
+
+def test_file_path_component_is_not_redacted(agent_factory):
+    agent = agent_factory()
+    path = "/home/user/.cache/uv/builds-v0/abcdefghij1234567890klmnopqrstuv/bin"
+    _write_journal_events(agent, [{"type": "action_result", "output": f"wrote to {path}"}])
+
+    report = build_bug_report(agent, frontend="terminal")
+
+    assert path in report
+    assert "[REDACTED]" not in report
+
+
+def test_letters_only_or_digits_only_long_run_is_not_redacted(agent_factory):
+    agent = agent_factory()
+    letters_only = "abcdefghijklmnopqrstuvwxyzabcdefgh"
+    digits_only = "12345678901234567890123456789012"
+    _write_journal_events(
+        agent,
+        [{"type": "action_result", "output": f"{letters_only} and {digits_only}"}],
+    )
+
+    report = build_bug_report(agent, frontend="terminal")
+
+    assert letters_only in report
+    assert digits_only in report
+    assert "[REDACTED]" not in report
+
+
 def test_save_bug_report_secret_never_reaches_disk(agent_factory, tmp_path):
     agent = agent_factory()
     home = tmp_path / "home"
