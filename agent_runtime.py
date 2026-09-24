@@ -783,8 +783,11 @@ def _run_native_turn(self, user_goal: str, step: int, turn: NativeTurn) -> tuple
     if not turn.tool_calls and not turn.content.strip():
         self._state.consecutive_errors += 1
         self._record_error("The model returned neither a tool call nor text.")
+        # A fact, not a nudge: "or finish with final_answer" was once taken
+        # literally, and a progress line went out as the final answer.
         self._state.pending_instruction = (
-            "Your last response had neither a tool call nor text. Call a tool, or finish with final_answer."
+            "Your last response reached the runtime empty: no text and no tool call. "
+            "If you made a call, it was lost on the way and did not run."
         )
         return _BLOCKED, step + 1
     if not turn.tool_calls:

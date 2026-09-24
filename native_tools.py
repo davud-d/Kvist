@@ -162,8 +162,23 @@ def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:
     return [_tool(name) for name in names if name in ACTION_TOOLS]
 
 
+# A call with an empty argument object was lost on the way at least one
+# gateway (Claude through AnyModel): git_status arrived as a response with
+# neither text nor a call, nine times in one run. A tool with no required
+# argument therefore asks for the fact the call should settle, which is also
+# the constitution's test of whether a call earns its step; the runtime drops
+# it before the action runs, so the protocol is unchanged.
+_PURPOSE: dict[str, Any] = {
+    "type": "string",
+    "description": "One short phrase: what this call should settle.",
+}
+_PURPOSE_TOOLS = frozenset(name for name, (_summary, _props, required) in ACTION_TOOLS.items() if not required)
+
+
 def _tool(name: str) -> dict[str, Any]:
     summary, properties, required = ACTION_TOOLS[name]
+    if name in _PURPOSE_TOOLS:
+        properties, required = {**properties, "purpose": _PURPOSE}, ("purpose",)
     return {
         "type": "function",
         "function": {
@@ -250,6 +265,8 @@ def _arguments(call: ToolCall) -> dict[str, Any]:
         raise CommandValidationError(f"Arguments of {call.name} are not valid JSON: {error}") from error
     if not isinstance(value, dict):
         raise CommandValidationError(f"Arguments of {call.name} must be a JSON object")
+    if call.name in _PURPOSE_TOOLS:
+        value.pop("purpose", None)
     return value
 
 

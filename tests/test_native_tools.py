@@ -133,6 +133,19 @@ def test_a_silent_turn_says_what_its_calls_touch():
     assert [command.action.description for command in commands] == ["extensions.json", "install_vscode.p", "git_status"]
 
 
+def test_argumentless_tools_ask_for_a_purpose_and_drop_it_before_running():
+    tools = {tool["function"]["name"]: tool["function"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
+
+    assert tools["git_status"]["parameters"]["required"] == ["purpose"]
+    assert tools["git_diff"]["parameters"]["required"] == ["purpose"]
+    assert "purpose" not in tools["read_file"]["parameters"]["properties"]
+
+    turn = NativeTurn("", tool_calls=[ToolCall("c1", "git_status", json.dumps({"purpose": "see what changed"}))])
+    commands = commands_from_turn(turn, files_changed=False)
+
+    assert commands[0].action.args == {}
+
+
 def test_bad_arguments_are_a_validation_error():
     with pytest.raises(CommandValidationError):
         commands_from_turn(NativeTurn("", tool_calls=[ToolCall("c1", "read_file", "{not json")]), files_changed=False)

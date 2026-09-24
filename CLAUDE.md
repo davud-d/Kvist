@@ -288,7 +288,12 @@ message, then each turn's assistant message (with `reasoning_content` when the
 provider returned it under that name — DeepSeek requires it back), one `tool`
 answer per call, and `pending_instruction` as an "Additional instruction" user
 message when it changes. The tools are the role prompt's ALLOWED ACTIONS
-(`tools_for_role`), so the reader gets no write tools. A turn's calls become the
+(`tools_for_role`), so the reader gets no write tools. A tool with no required
+argument (`git_status`, `git_diff`) is offered with a required `purpose` ("what this
+call should settle"), dropped by `_arguments` before the action runs: Claude through
+AnyModel loses a call whose argument object is empty — it arrives as a response with
+neither text nor a call — and nine such losses once ended a run on "too many
+consecutive errors". A turn's calls become the
 JSON protocol's own object and pass `parse_agent_commands`, then run through
 `_run_one_action` like any batch — the guards, gates and journal are shared.
 Every call is answered, including the ones a refusal kept from running (an API
