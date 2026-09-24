@@ -743,7 +743,7 @@ def test_response_text_is_kept_as_the_step_note(agent_factory):
     agent = agent_factory(max_steps=1)
     note = "billing.py:40 already rounds half-up; the reported cause is ruled out"
 
-    _keep_step_summary(agent, 7, make_command("read_file", {"path": "a.py"}, text=note))
+    _keep_step_summary(agent, 7, note)
 
     assert agent._state.rolling_summaries == {7: note}
 
@@ -754,9 +754,9 @@ def test_response_text_shared_by_a_batch_is_kept_once(agent_factory):
     agent = agent_factory(max_steps=1)
     note = "invoice.py never applies the discount"
 
-    for step, path in ((11, "a.py"), (12, "b.py"), (13, "c.py")):
-        _keep_step_summary(agent, step, make_command("read_file", {"path": path}, text=note))
-    _keep_step_summary(agent, 14, make_command("read_file", {"path": "d.py"}, text=""))
+    for step in (11, 12, 13):
+        _keep_step_summary(agent, step, note)
+    _keep_step_summary(agent, 14, "")
 
     assert agent._state.rolling_summaries == {11: note}
 
@@ -2438,3 +2438,19 @@ def test_final_event_says_whether_the_run_is_done(agent_factory):
     agent._run_loop("Investigate files", start_step=1)
 
     assert finals == ["incomplete"]
+
+
+def test_the_words_of_a_response_whose_calls_were_all_refused_are_kept(agent_factory):
+    agent = agent_factory(max_steps=3)
+    agent._state.plan_info = make_plan()
+    agent._state.read_only_goal = True
+    agent._state.current_agent_role = "reader"
+    responses = iter([
+        _v2("Нашёл причину: счётчик не сбрасывается.", _tool("write_file", path="a.py", content="x")),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    agent._run_loop("Посмотри, почему растёт счётчик", start_step=1)
+
+    assert "Нашёл причину: счётчик не сбрасывается." in agent._state.rolling_summaries.values()

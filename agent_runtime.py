@@ -693,9 +693,9 @@ def _native_tools_for_run(self) -> bool:
 
 
 def _leave_native_tools(self, error: Exception) -> None:
-    """Continue the run on the JSON protocol after the provider refused tools.
+    """Continue the run on the text protocol after the provider refused tools.
 
-    The runtime prompt the JSON path builds already carries the recent results,
+    The runtime prompt the text path builds already carries the recent results,
     so the switch loses no work — only the conversation.
     """
     from agent_model import forget_native_tools
@@ -704,9 +704,9 @@ def _leave_native_tools(self, error: Exception) -> None:
     self._state.native_tools = False
     self._state.native_messages = []
     self._ui.print_error(
-        "Провайдер отказался от вызова инструментов; этот прогон продолжается на JSON-протоколе."
+        "Провайдер отказался от вызова инструментов; этот прогон продолжается на текстовом протоколе."
         if self._state.response_language == "ru"
-        else "The provider refused tool calls; this run continues with the JSON protocol."
+        else "The provider refused tool calls; this run continues with the text protocol."
     )
     self._ui.debug_print(f"[native tools] {redact_text(str(error))}")
 
@@ -774,6 +774,7 @@ def _run_turn(
     if response.text:
         _note_response_text(self, response.text)
         self._record_user_message(response.text)
+        _keep_step_summary(self, step, response.text)
     planned = _plan_calls(self, response, uuid.uuid4().hex[:12])
     outcome, next_step, answers = _run_calls(self, user_goal, step, planned)
     if turn is not None:
@@ -1490,7 +1491,6 @@ def _finish_action(
     _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
 
-    _keep_step_summary(self, step, command)
 
     # Only the model may declare the task done, and it may still want to
     # verify, so readiness is a hint rather than a gate.
@@ -1658,15 +1658,13 @@ def feedback_error_for_model(self, feedback: dict[str, Any]) -> str:
     return self._normalize_error_for_model(str(raw))
 
 
-def _keep_step_summary(self, step: int, command: AgentCommand) -> None:
-    """Carry the model's own note into every later prompt.
+def _keep_step_summary(self, step: int, note: str) -> None:
+    """Carry the model's own words into every later prompt.
 
-    Nothing else the model concludes outlives its call: neither its reasoning
-    nor its thought is shown again. Kept only on every fifth step, a batch
-    whose actions skipped that number dropped the note, and a whole run could
-    end with none — its diagnosis re-derived, at full price, on every call.
+    Nothing else the model concludes outlives its call: its reasoning is not
+    shown again. A response's text is kept once, whether or not its calls ran:
+    words that announce a finding before a refused edit still hold the finding.
     """
-    note = command.text
     summaries = self._state.rolling_summaries
     if not note or (summaries and summaries[max(summaries)] == note):
         return

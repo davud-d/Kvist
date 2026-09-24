@@ -420,7 +420,7 @@ def build_role_system_prompt(self, role: str, *, native_tools: bool = False) -> 
     workspace's own instruction file — narrowing, each read per call so edits
     land on the next step.
 
-    ``native_tools`` swaps the role prompt's JSON-protocol sections for the
+    ``native_tools`` swaps the role prompt's text-mode protocol sections for the
     tool-call channel (``native_tools.native_role_prompt``).
     """
     role_prompt = _load_role_prompt(role)
@@ -496,7 +496,7 @@ _PROBE_TOOL: dict[str, Any] = {
 def native_tools_supported(self, model: str) -> bool:
     """Whether this provider and model call tools natively, probed once per process.
 
-    ``AGENT_NATIVE_TOOLS=0`` keeps every run on the JSON protocol.
+    ``AGENT_NATIVE_TOOLS=0`` keeps every run on the text protocol (<tool_call> blocks).
     """
     if os.environ.get("AGENT_NATIVE_TOOLS", "").strip() == "0":
         return False
@@ -505,7 +505,7 @@ def native_tools_supported(self, model: str) -> bool:
         _NATIVE_TOOL_SUPPORT[key] = _probe_native_tools(self, model)
         self._ui.debug_print(
             f"[native tools] {self.config.provider}/{model}: "
-            f"{'supported' if _NATIVE_TOOL_SUPPORT[key] else 'not supported, using the JSON protocol'}"
+            f"{'supported' if _NATIVE_TOOL_SUPPORT[key] else 'not supported, using <tool_call> text blocks'}"
         )
     return _NATIVE_TOOL_SUPPORT[key]
 
@@ -523,7 +523,7 @@ def _probe_native_tools(self, model: str) -> bool:
     ``auto``, a model that answers correctly with prose (a fair choice given how
     little the probe tells it) failed the probe and was wrongly written off as
     "no native tools" for the rest of the process, falling back to the more
-    fragile JSON protocol for the whole run. A provider that rejects the
+    fragile text protocol for the whole run. A provider that rejects the
     ``tool_choice`` parameter itself (but still takes ``tools``) gets one retry
     without it, so it is not penalized for a parameter this probe does not
     need. A wrapper client that drops ``tools`` entirely still fails the same

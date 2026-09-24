@@ -146,7 +146,7 @@ READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.r
 
 _ALLOWED_ACTIONS_RE = re.compile(r"^== \d+\. ALLOWED ACTIONS ==\s*\n\s*([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
-# Sections that describe the JSON protocol itself; the tools replace them.
+# Sections that describe the text-mode protocol itself; the tools replace them.
 _PROTOCOL_SECTIONS = ("RESPONSE FORMAT", "ARGS SCHEMAS", "EXAMPLES", "SELF-CHECK")
 ELIDED_OUTPUT = "[output removed to fit the context window; run the action again if you need it]"
 # Closes the first user message of a native run. Said only in the system
