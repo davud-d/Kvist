@@ -216,7 +216,11 @@ def _append_network_mounts(wrapped: list[str]) -> None:
             wrapped.extend(("--ro-bind", raw_path, raw_path))
 
 
-def _append_secret_masks(wrapped: list[str], workspace: Path) -> None:
+def _append_secret_masks(
+    wrapped: list[str],
+    workspace: Path,
+    targets: tuple[list[Path], list[Path]] | None,
+) -> None:
     """Hide protected workspace secrets so arbitrary child code cannot read them.
 
     Directories become empty tmpfs mounts; files are shadowed by ``/dev/null``,
@@ -224,7 +228,7 @@ def _append_secret_masks(wrapped: list[str], workspace: Path) -> None:
     target also neutralises symlinks and runtime-constructed paths that resolve
     to it — the OS view, not argv scanning, is the boundary.
     """
-    secret_files, secret_dirs = enumerate_secret_targets(workspace)
+    secret_files, secret_dirs = targets if targets is not None else enumerate_secret_targets(workspace)
     for path in secret_dirs:
         wrapped.extend(("--tmpfs", str(path)))
     for path in secret_files:
@@ -321,11 +325,14 @@ def wrap_command_for_sandbox(
     network_allowed: bool | None = None,
     tool_paths: tuple[Path, ...] = (),
     links: tuple[tuple[str, str], ...] = (),
+    secret_targets: tuple[list[Path], list[Path]] | None = None,
 ) -> list[str]:
     """Wrap a validated command in a minimal Bubblewrap filesystem.
 
     ``links`` recreates single symlinks (target, path) inside the sandbox
-    without exposing anything else beside them.
+    without exposing anything else beside them. ``secret_targets`` is the
+    enumeration the spawn-time context digest was built from; walking the
+    workspace again milliseconds later cost seconds on every command.
     """
     if mode is not SandboxMode.BUBBLEWRAP:
         return command
@@ -377,6 +384,6 @@ def wrap_command_for_sandbox(
     internal_dir = workspace / ".kvist"
     wrapped.extend(("--tmpfs", str(internal_dir)))
     # Secret masks come after the workspace bind so they shadow the real files.
-    _append_secret_masks(wrapped, workspace)
+    _append_secret_masks(wrapped, workspace, secret_targets)
     wrapped.extend(("--chdir", str(cwd), "--", *command))
     return wrapped

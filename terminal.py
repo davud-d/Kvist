@@ -66,6 +66,7 @@ from sandbox import (
 from secret_paths import (
     UnsafeSecretPathError,
     count_workspace_inode_aliases,
+    enumerate_secret_targets,
     secret_mask_digest,
 )
 
@@ -1028,6 +1029,12 @@ class TerminalExecutor:
         bindings = self._resolve_executable_bindings(command_snapshot, work_dir, env)
         self._validate_executable_boundaries(command_snapshot, work_dir, bindings)
         self._hard_validate(command_snapshot, work_dir, bindings)
+        try:
+            secret_targets = enumerate_secret_targets(workspace)
+        except UnsafeSecretPathError as error:
+            raise HardDenyError(
+                f"Hard security denial: cannot build a complete secret mask: {error}"
+            ) from error
         context = self._build_execution_context(
             command_snapshot,
             work_dir,
@@ -1037,6 +1044,7 @@ class TerminalExecutor:
             sandbox_mode=sandbox_mode,
             network_allowed=network_allowed,
             bwrap_path=bwrap_path,
+            secret_targets=secret_targets,
         )
         if context != expected_context:
             raise HardDenyError(
@@ -1075,6 +1083,7 @@ class TerminalExecutor:
                 network_allowed=network_allowed,
                 tool_paths=self._external_tool_paths + venv_interpreter_roots(bindings),
                 links=venv_interpreter_links(bindings, workspace),
+                secret_targets=secret_targets,
             )
         except ValueError as error:
             raise HardDenyError(f"Hard security denial: {error}") from error
@@ -2360,6 +2369,7 @@ class TerminalExecutor:
         sandbox_mode: SandboxMode,
         network_allowed: bool,
         bwrap_path: str | None,
+        secret_targets: tuple[list[Path], list[Path]] | None = None,
     ) -> ExecutionContext:
         referenced = tuple(self._hash_referenced_files(command, work_dir))
         environment_payload = json.dumps(sorted(env.items()), ensure_ascii=False, separators=(",", ":"))
@@ -2378,7 +2388,7 @@ class TerminalExecutor:
             _path_identity(Path(bwrap_path)) if bwrap_path else None
         )
         try:
-            mask_digest = secret_mask_digest(self.workspace)
+            mask_digest = secret_mask_digest(self.workspace, secret_targets)
         except UnsafeSecretPathError as error:
             raise HardDenyError(
                 f"Hard security denial: cannot build a complete secret mask: {error}"

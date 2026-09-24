@@ -108,17 +108,19 @@ def _resolve_symlink_chain(entry: Path) -> tuple[Path | None, bool]:
     return None, False
 
 
+_SECRET_BASENAMES_FOLDED = frozenset(name.casefold() for name in _SECRET_BASENAMES)
+_SECRET_DIR_NAMES_FOLDED = frozenset(name.casefold() for name in _SECRET_DIR_NAMES)
+
+
 def is_secret_basename(name: str) -> bool:
-    lowered = name.casefold()
     if _ENV_RE.match(name):
         return True
-    if name in _SECRET_BASENAMES or lowered in {b.casefold() for b in _SECRET_BASENAMES}:
-        return True
-    return lowered.endswith(_SECRET_SUFFIXES)
+    lowered = name.casefold()
+    return lowered in _SECRET_BASENAMES_FOLDED or lowered.endswith(_SECRET_SUFFIXES)
 
 
 def is_secret_dir_name(name: str) -> bool:
-    return name.casefold() in {d.casefold() for d in _SECRET_DIR_NAMES}
+    return name.casefold() in _SECRET_DIR_NAMES_FOLDED
 
 
 def is_secret_path(path: Path) -> bool:
@@ -338,9 +340,15 @@ def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
     return count
 
 
-def secret_mask_digest(workspace: Path) -> str:
-    """Stable digest of the protected-path set for approval binding."""
-    files, dirs = enumerate_secret_targets(workspace)
+def secret_mask_digest(
+    workspace: Path, targets: tuple[list[Path], list[Path]] | None = None
+) -> str:
+    """Stable digest of the protected-path set for approval binding.
+
+    ``targets`` is an enumeration the caller already made at this instant, so
+    the spawn-time digest and the mask it goes with come from one walk.
+    """
+    files, dirs = targets if targets is not None else enumerate_secret_targets(workspace)
     payload_lines: list[str] = []
     for kind, paths in (("f", files), ("d", dirs)):
         for path in paths:
