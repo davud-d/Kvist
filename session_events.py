@@ -280,6 +280,8 @@ class SessionJournal:
         self._input_tokens = 0
         self._output_tokens = 0
         self._model = ""
+        self._context_tokens = 0
+        self._context_limit = 0
 
     # -- turn lifecycle --
 
@@ -293,6 +295,7 @@ class SessionJournal:
             self._stopped = False
             self._reasoning = {}
             self._input_tokens = self._output_tokens = 0
+            self._context_tokens = self._context_limit = 0
             self._pending_user = {"type": "user", "text": text}
             if resumed:
                 self._pending_user["resumed"] = True
@@ -328,8 +331,8 @@ class SessionJournal:
                     "model": self._model,
                     "kind": "turn",
                     "step": 0,
-                    "context_tokens": 0,
-                    "context_limit": 0,
+                    "context_tokens": self._context_tokens,
+                    "context_limit": self._context_limit,
                 }
             )
         if self._dropped:
@@ -362,6 +365,8 @@ class SessionJournal:
         self._input_tokens += payload["input_tokens"]
         self._output_tokens += payload["output_tokens"]
         self._model = payload["model"] or self._model
+        self._context_tokens = payload.get("context_tokens", 0) or self._context_tokens
+        self._context_limit = payload.get("context_limit", 0) or self._context_limit
 
     def _write_reasoning(self, commit: dict[str, Any]) -> None:
         stream_id = commit["stream_id"]

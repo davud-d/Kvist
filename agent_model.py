@@ -683,21 +683,40 @@ def forget_native_tools(self, model: str) -> None:
 def _probe_native_tools(self, model: str) -> bool:
     """One tiny request that must come back as a well-formed call of ``ping``.
 
-    A wrapper client that drops ``tools``, a model that answers in prose and
-    a provider that rejects the parameter all fail it the same way.
+    ``tool_choice`` names ``ping`` explicitly so the probe measures whether the
+    provider can emit a call at all, not whether a bare one-line prompt with no
+    system context happens to make the model choose to. Left on the default
+    ``auto``, a model that answers correctly with prose (a fair choice given how
+    little the probe tells it) failed the probe and was wrongly written off as
+    "no native tools" for the rest of the process, falling back to the more
+    fragile JSON protocol for the whole run. A provider that rejects the
+    ``tool_choice`` parameter itself (but still takes ``tools``) gets one retry
+    without it, so it is not penalized for a parameter this probe does not
+    need. A wrapper client that drops ``tools`` entirely still fails the same
+    way.
     """
     request: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": "Call the ping tool with ok set to true."}],
         "tools": [_PROBE_TOOL],
+        "tool_choice": {"type": "function", "function": {"name": "ping"}},
         "timeout": self.config.api_timeout,
     }
     merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
     try:
         response = _create_completion_with_reasoning_fallback(self, request)
     except Exception as error:
-        self._ui.debug_print(f"[native tools] probe request failed: {redact_text(str(error))}")
-        return False
+        if "tool_choice" not in str(error).casefold():
+            self._ui.debug_print(f"[native tools] probe request failed: {redact_text(str(error))}")
+            return False
+        request.pop("tool_choice", None)
+        try:
+            response = _create_completion_with_reasoning_fallback(self, request)
+        except Exception as retry_error:
+            self._ui.debug_print(
+                f"[native tools] probe request failed: {redact_text(str(retry_error))}"
+            )
+            return False
     choices = getattr(response, "choices", None) or []
     message = getattr(choices[0], "message", None) if choices else None
     calls = getattr(message, "tool_calls", None) or []
@@ -1324,11 +1343,13 @@ def call_model_streaming(
     return "".join(chunks)
 
 
-def _warn_reasoning_unsupported(self, error: Exception) -> None:
+def _warn_reasoning_unsupported(self, error: Exception | None) -> None:
     """Surface, every time it happens, that reasoning effort was dropped.
 
     The user asked for a persistent warning rather than a one-time notice, so
-    there is deliberately no de-duplication here.
+    there is deliberately no de-duplication here. ``error`` is ``None`` when
+    the drop came from ``_REASONING_UNSUPPORTED`` rather than a fresh rejection
+    this call.
     """
     level = normalize_effort(self.config.reasoning_effort)
     message = (
@@ -1338,21 +1359,33 @@ def _warn_reasoning_unsupported(self, error: Exception) -> None:
     printer = getattr(self._ui, "print_error", None)
     if callable(printer):
         printer(message)
-    self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")
+    if error is not None:
+        self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")
+
+
+# (provider, model) -> the provider has already rejected a reasoning-control
+# kwarg once this process. Warned every time regardless (see
+# `_warn_reasoning_unsupported`); this only stops resending the same rejected
+# kwarg on every remaining step of a run.
+_REASONING_UNSUPPORTED: set[tuple[str, str]] = set()
 
 
 def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, Any]):
     """Create a completion; on a reasoning-control rejection, warn and retry
     once without any reasoning kwargs. Other errors propagate unchanged."""
+    stripped = strip_reasoning_kwargs(request_kwargs)
+    key = (self.config.provider, str(request_kwargs.get("model", "")))
+    if stripped != request_kwargs and key in _REASONING_UNSUPPORTED:
+        _warn_reasoning_unsupported(self, None)
+        return self.client.chat.completions.create(**stripped)
     try:
         return self.client.chat.completions.create(**request_kwargs)
     except Exception as error:
         if not is_reasoning_error(error):
             raise
+        _REASONING_UNSUPPORTED.add(key)
         _warn_reasoning_unsupported(self, error)
-        return self.client.chat.completions.create(
-            **strip_reasoning_kwargs(request_kwargs)
-        )
+        return self.client.chat.completions.create(**stripped)
 
 
 def _warn_json_mode_dropped(self, error: Exception | None) -> None:
@@ -1373,6 +1406,13 @@ def _warn_json_mode_dropped(self, error: Exception | None) -> None:
         self._ui.debug_print(f"[json_mode] dropped after: {redact_text(str(error))}")
 
 
+# (provider, model) -> the provider has already rejected response_format
+# once this process. Warned every time regardless (see
+# `_warn_json_mode_dropped`); this only stops resending the same rejected
+# kwarg on every remaining step of a run.
+_JSON_MODE_UNSUPPORTED: set[tuple[str, str]] = set()
+
+
 def _create_json_completion(
     self,
     model: str,
@@ -1388,7 +1428,10 @@ def _create_json_completion(
         "temperature": self.config.model_temperature,
         "timeout": self.config.api_timeout,
     }
-    if json_mode and provider_supports_json_mode(self.config.provider):
+    json_mode_key = (self.config.provider, model)
+    wants_json_mode = json_mode and provider_supports_json_mode(self.config.provider)
+    known_unsupported = wants_json_mode and json_mode_key in _JSON_MODE_UNSUPPORTED
+    if wants_json_mode and not known_unsupported:
         request_kwargs["response_format"] = {"type": "json_object"}
     if stream:
         request_kwargs["stream"] = True
@@ -1396,6 +1439,10 @@ def _create_json_completion(
     merge_reasoning_kwargs(
         request_kwargs, self.config.provider, self.config.reasoning_effort
     )
+
+    if known_unsupported:
+        _warn_json_mode_dropped(self, None)
+        return _create_completion_with_reasoning_fallback(self, request_kwargs)
 
     first_error: Exception | None = None
     try:
@@ -1409,6 +1456,7 @@ def _create_json_completion(
     # parser then rejects, so the user pays for the same content twice. Drop
     # only the parameter that was refused before giving up the rest.
     if "response_format" in request_kwargs:
+        _JSON_MODE_UNSUPPORTED.add(json_mode_key)
         narrowed = {k: v for k, v in request_kwargs.items() if k != "response_format"}
         _warn_json_mode_dropped(self, first_error)
         try:
