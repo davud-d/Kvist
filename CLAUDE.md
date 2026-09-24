@@ -677,7 +677,11 @@ degrades to configured models with a warning when that fails.
 
 ### Execution boundary (`executor.py` + `terminal.py` + `command_policy.py` + `sandbox.py` + `process_tree.py` + `secret_paths.py`)
 `SafeExecutor` is the single gate for every action and returns an `ExecutionResult`
-(`ok`, `action_type`, `data`). It enforces the workspace boundary (all paths resolved and
+(`ok`, `action_type`, `data`). `search_code` runs a trusted system `rg` (`--no-config`,
+fixed-string, case-insensitive, `.gitignore`-aware, symlinks not followed; the result
+says `skips_gitignored_files`) and passes every hit through the same read boundary as
+`read_file`; without one it falls back to walking the tree in Python, which read every
+file whole and took 8.5 s on this repository. It enforces the workspace boundary (all paths resolved and
 checked with `relative_to`, symlink-escape protection), blocks the internal `.kvist`
 dir, and **strictly forbids reading or writing `.env` files**.
 

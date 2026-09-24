@@ -7,7 +7,9 @@ import json
 import os
 import re
 import secrets
+import shutil
 import stat
+import subprocess
 import tempfile
 import urllib.error
 import urllib.parse
@@ -35,7 +37,7 @@ from secret_paths import (
     is_secret_path,
 )
 from approvals import ApprovalGate, TerminalApprovalGate
-from terminal import TerminalExecutor, TerminalError, is_hitl_active
+from terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
 
 
 class ExecutorError(Exception):
@@ -1671,51 +1673,15 @@ class SafeExecutor:
         path: str = "",
         max_results: int = 20,
     ) -> ExecutionResult:
-        query_folded = query.casefold()
-        results: list[dict[str, Any]] = []
         safe_limit = max(1, min(max_results, self.max_search_results))
-
         target = self._resolve_read_path(path) if path else self.workspace
-        if target.is_file():
-            files_to_search = [target]
+        search_root = target if target.is_file() else self._resolve_read_dir(path)
+
+        ripgrep = _trusted_ripgrep()
+        if ripgrep is None:
+            results, unreadable = self._search_by_walking(query, search_root, safe_limit)
         else:
-            base_dir = self._resolve_read_dir(path)
-            files_to_search = self._iter_files(base_dir)
-
-        unreadable = 0
-        for file_path in files_to_search:
-            if self._ENV_PATTERN.search(file_path.name):
-                continue
-            if self._skip_during_walk(file_path):
-                continue
-            # One symlink pointing out of the workspace used to fail the whole
-            # search, and the model took that error for its own attempt to read
-            # outside. The file is left unread either way; the count says the
-            # search did not cover everything.
-            try:
-                readable_path = self._canonical_read_target(file_path)
-            except ExecutorError:
-                unreadable += 1
-                continue
-            try:
-                text = readable_path.read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                continue
-
-            for line_number, line in enumerate(text.splitlines(), start=1):
-                if query_folded in line.casefold():
-                    results.append(
-                        {
-                            "path": self._display_path(readable_path),
-                            "line": line_number,
-                            "text": self._truncate_text(line.strip(), 300),
-                        }
-                    )
-                if len(results) >= safe_limit:
-                    break
-
-            if len(results) >= safe_limit:
-                break
+            results, unreadable = self._search_with_ripgrep(ripgrep, query, search_root, safe_limit)
 
         return ExecutionResult(
             ok=True,
@@ -1725,10 +1691,101 @@ class SafeExecutor:
                 "path": path,
                 "results": results,
                 "skipped_unreadable_files": unreadable,
+                "skips_gitignored_files": ripgrep is not None,
                 "untrusted": True,
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
+
+    def _search_with_ripgrep(
+        self, ripgrep: str, query: str, search_root: Path, limit: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Search with ripgrep: it skips binaries and .gitignore'd trees.
+
+        Walking in Python read every file whole to learn it was not text — on
+        this repository 2.1 GB of build output and a vendored venv, 8.5 s per
+        search. Every hit still passes the same read boundary as a file read.
+        """
+        excludes = [arg for name in (*self.ignored_dirs, ".env", ".env.*") for arg in ("--glob", f"!{name}")]
+        command = [
+            ripgrep, "--no-config", "--json", "--fixed-strings", "--ignore-case", "--hidden",
+            *excludes, "--", query, str(search_root),
+        ]
+        results: list[dict[str, Any]] = []
+        refused: set[Path] = set()
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env={"PATH": os.defpath},
+            cwd=str(self.workspace),
+        )
+        try:
+            for raw in process.stdout:
+                match = _ripgrep_match(raw)
+                if match is None:
+                    continue
+                file_path, line_number, line = match
+                try:
+                    readable_path = self._search_readable_path(file_path)
+                except ExecutorError:
+                    refused.add(file_path)
+                    continue
+                if readable_path is None:
+                    continue
+                results.append(self._search_hit(readable_path, line_number, line))
+                if len(results) >= limit:
+                    break
+        finally:
+            process.kill()
+            process.wait()
+        return results, len(refused)
+
+    def _search_by_walking(
+        self, query: str, search_root: Path, limit: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Fallback for a machine without a trusted ripgrep."""
+        query_folded = query.casefold()
+        files = [search_root] if search_root.is_file() else self._iter_files(search_root)
+        results: list[dict[str, Any]] = []
+        unreadable = 0
+        for file_path in files:
+            try:
+                readable_path = self._search_readable_path(file_path)
+            except ExecutorError:
+                unreadable += 1
+                continue
+            if readable_path is None:
+                continue
+            try:
+                text = readable_path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if query_folded in line.casefold():
+                    results.append(self._search_hit(readable_path, line_number, line))
+                if len(results) >= limit:
+                    return results, unreadable
+        return results, unreadable
+
+    def _search_readable_path(self, file_path: Path) -> Path | None:
+        """The path a search may read, None for one it skips silently.
+
+        Raises ExecutorError for a file the read boundary refuses. One symlink
+        pointing out of the workspace used to fail the whole search, and the
+        model took that error for its own attempt to read outside; the caller
+        counts it instead, so the result says the search did not cover everything.
+        """
+        if self._ENV_PATTERN.search(file_path.name) or self._skip_during_walk(file_path):
+            return None
+        return self._canonical_read_target(file_path)
+
+    def _search_hit(self, readable_path: Path, line_number: int, line: str) -> dict[str, Any]:
+        return {
+            "path": self._display_path(readable_path),
+            "line": line_number,
+            "text": self._truncate_text(line.strip(), 300),
+        }
 
     def git_context_summary(self) -> str | None:
         """One-line 'branch (clean|N uncommitted)' summary for prompt context.
@@ -2508,3 +2565,35 @@ class SafeExecutor:
                 path = root_path / filename
                 if path.is_file():
                     yield path
+
+
+def _trusted_ripgrep() -> str | None:
+    """A ripgrep from the system roots only.
+
+    It runs in Kvist's own process tree, outside the sandbox, so a binary the
+    workspace or the user's PATH could supply is not good enough.
+    """
+    found = shutil.which("rg", path=os.defpath)
+    if found is None:
+        return None
+    path = Path(found)
+    if not _is_trusted_system_executable(path, path.resolve()):
+        return None
+    return found
+
+
+def _ripgrep_match(raw: bytes) -> tuple[Path, int, str] | None:
+    """One ``--json`` event as (path, line number, line), None for non-matches.
+
+    A path or line that is not UTF-8 arrives as base64 bytes; those are skipped,
+    as the walking search skipped files it could not decode.
+    """
+    event = json.loads(raw)
+    if event.get("type") != "match":
+        return None
+    data = event["data"]
+    path_text = data["path"].get("text")
+    line_text = data["lines"].get("text")
+    if path_text is None or line_text is None:
+        return None
+    return Path(path_text), int(data["line_number"]), line_text

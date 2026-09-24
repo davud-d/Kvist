@@ -415,7 +415,19 @@ def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
         executor._read_file("alias.txt")
 
 
-def test_search_code_revalidates_discovered_symlink_targets(tmp_path):
+@pytest.fixture(params=["ripgrep", "walk"])
+def search_engine(request, monkeypatch):
+    """Run a search test against both engines; skip ripgrep where it is absent."""
+    import executor as executor_module
+
+    if request.param == "walk":
+        monkeypatch.setattr(executor_module, "_trusted_ripgrep", lambda: None)
+    elif executor_module._trusted_ripgrep() is None:
+        pytest.skip("no trusted ripgrep on this machine")
+    return request.param
+
+
+def test_search_code_revalidates_discovered_symlink_targets(tmp_path, search_engine):
     workspace = tmp_path / "ws"
     outside = tmp_path / "outside"
     workspace.mkdir()
@@ -429,18 +441,30 @@ def test_search_code_revalidates_discovered_symlink_targets(tmp_path):
     result = executor._search_code("outside")
 
     assert [match["path"] for match in result.data["results"]] == ["inside.txt"]
-    assert result.data["skipped_unreadable_files"] == 1
+    # ripgrep never follows the link; the walk follows it, refuses it, counts it.
+    assert result.data["skipped_unreadable_files"] == (1 if search_engine == "walk" else 0)
 
 
-def test_search_code_rejects_alias_to_internal_or_env_file(tmp_path):
+def test_search_code_rejects_alias_to_internal_or_env_file(tmp_path, search_engine):
     executor = SafeExecutor(tmp_path)
     (tmp_path / ".env").write_text("SECRET_FIXTURE=1\n", encoding="utf-8")
     (tmp_path / "env-alias").symlink_to(".env")
+    (tmp_path / "config.env").write_text("SECRET_FIXTURE=2\n", encoding="utf-8")
 
     result = executor._search_code("SECRET_FIXTURE")
 
     assert result.data["results"] == []
-    assert result.data["skipped_unreadable_files"] == 1
+
+
+def test_search_code_skips_internal_dir(tmp_path, search_engine):
+    executor = SafeExecutor(tmp_path)
+    (tmp_path / ".kvist").mkdir()
+    (tmp_path / ".kvist" / "state.json").write_text("NEEDLE internal\n", encoding="utf-8")
+    (tmp_path / "app.py").write_text("NEEDLE = 1\n", encoding="utf-8")
+
+    result = executor._search_code("needle")
+
+    assert [match["path"] for match in result.data["results"]] == ["app.py"]
 
 
 # ── File overwrite approval gate (AGENT_WRITE_APPROVAL) ─────────────
