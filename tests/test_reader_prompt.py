@@ -10,7 +10,14 @@ from parser import ALLOWED_ACTIONS
 from tests.conftest import commands_from_response
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
-_EXAMPLE_LINE_RE = re.compile(r'^\{"thought".*\}$', re.MULTILINE)
+_TOOL_CALL_RE = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL)
+
+
+def _example_calls(prompt_text: str) -> list[str]:
+    """The <tool_call> blocks of the EXAMPLES section (RESPONSE FORMAT shows a template)."""
+    examples = prompt_text[re.search(r"^== \d+\. EXAMPLES ==$", prompt_text, re.MULTILINE).end():]
+    following = re.search(r"^== \d+\. ", examples, re.MULTILINE)
+    return _TOOL_CALL_RE.findall(examples[: following.start()] if following else examples)
 
 
 def _reader_allowed_actions(prompt_text: str) -> set[str]:
@@ -35,8 +42,10 @@ def test_reader_prompt_lists_only_read_only_actions():
     # A real subset of the parser contract, with every write action removed.
     assert actions <= ALLOWED_ACTIONS
     assert actions.isdisjoint(_WRITE_ACTIONS)
-    # Still offers the essential read/analyze/report surface.
-    assert {"read_file", "search_code", "report_to_user", "final_answer"} <= actions
+    # Still offers the essential read/analyze surface; a response without a
+    # tool call is the report, so no finishing tool is offered.
+    assert {"read_file", "search_code"} <= actions
+    assert actions.isdisjoint({"final_answer", "report_to_user"})
 
 
 def test_reader_prompt_has_no_write_or_patch_guidance():
@@ -45,15 +54,13 @@ def test_reader_prompt_has_no_write_or_patch_guidance():
         assert token not in reader
 
 
-def test_reader_prompt_keeps_report_and_untrusted_and_examples():
+def test_reader_prompt_keeps_the_turn_end_untrusted_and_examples():
     reader = _load_role_prompt("reader")
-    assert "report_to_user" in reader
+    assert "A response with no tool call ends your turn" in reader
     assert "UNTRUSTED" in reader
-    examples = _EXAMPLE_LINE_RE.findall(reader)
+    examples = _example_calls(reader)
     assert examples
     for example in examples:
-        # Examples teach the batch form; the single-action form is only tolerated.
-        assert '"actions"' in example
         for command in commands_from_response(example):
             assert command.action.type in ALLOWED_ACTIONS
 
@@ -95,4 +102,6 @@ def test_reader_prompt_stays_within_token_budget():
     # → 2700 for the emission paragraphs in section 2: the JSON object is the
     # only channel out, so the format is nothing to recall at the end of a long
     # reasoning pass, and an answer worked out in thinking was written nowhere.
-    assert tokens <= 2700, f"reader prompt is {tokens} tokens (budget 2700)"
+    # → 2900 for the v2 contract: the <tool_call> block, when to speak, which
+    # calls run together, and how an end of the turn is checked.
+    assert tokens <= 2900, f"reader prompt is {tokens} tokens (budget 2900)"

@@ -148,7 +148,6 @@ _ALLOWED_ACTIONS_RE = re.compile(r"^== \d+\. ALLOWED ACTIONS ==\s*\n\s*([^\n]+)"
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 # Sections that describe the JSON protocol itself; the tools replace them.
 _PROTOCOL_SECTIONS = ("RESPONSE FORMAT", "ARGS SCHEMAS", "EXAMPLES", "SELF-CHECK")
-_JSON_ONLY_LINE_RE = re.compile(r"\s*Return only one valid JSON object\. Always\.")
 ELIDED_OUTPUT = "[output removed to fit the context window; run the action again if you need it]"
 # Closes the first user message of a native run. Said only in the system
 # prompt, the opening line lost to a gateway's own hidden prompt (Claude via
@@ -228,10 +227,10 @@ def _tool(name: str) -> dict[str, Any]:
 
 
 def native_role_prompt(role_prompt: str, channel_section: str) -> str:
-    """The role prompt with its JSON-protocol sections replaced by the tool channel.
+    """The role prompt with its text-mode protocol sections replaced by the tool channel.
 
-    Left in, "every response = exactly one JSON object" and a page of JSON
-    examples would contradict the tools on every call.
+    Left in, the <tool_call> block format and a page of its examples would
+    contradict the tools on every call.
     """
     parts: list[str] = []
     position = 0
@@ -246,11 +245,7 @@ def native_role_prompt(role_prompt: str, channel_section: str) -> str:
             parts.append(role_prompt[match.start():end])
         position = end
     parts.append(role_prompt[position:])
-    # "No chat" meant "no text outside the JSON object". Kept in a channel where
-    # text beside the calls is how the person hears from you, it read as an
-    # order to stay silent, and Claude obeyed it for a whole run.
-    text = "".join(parts).replace(" Strict JSON protocol.", "").replace("No chat, no fantasy.", "No fantasy.")
-    return _JSON_ONLY_LINE_RE.sub("", text).rstrip() + "\n"
+    return "".join(parts).rstrip() + "\n"
 
 
 def calls_from_turn(turn: NativeTurn) -> list[ToolCallRequest]:

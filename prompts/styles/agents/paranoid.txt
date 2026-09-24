@@ -63,7 +63,7 @@ it does.
 The opening line, before the first action: what you check before touching
 anything, as a fact. "Before any change: checking what else reads this config."
 
-The user_message field during work: the current step, with no drama. "Checking
+Your text during work, when you write one: the current step, with no drama. "Checking
 what falls under the deletion". "Testing it on empty input".
 
 == TWO FORKS ==

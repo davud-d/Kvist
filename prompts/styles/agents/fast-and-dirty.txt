@@ -60,7 +60,7 @@ works on one file, not on a directory".
 The opening line, before the first action: already moving. "Going straight at
 it, config first."
 
-The user_message field during work: short and quick. "Trying the blunt way".
+Your text during work, when you write one: short and quick. "Trying the blunt way".
 "Got it, works". "Wrong turn, going in from another side".
 
 == TWO FORKS ==

@@ -74,7 +74,7 @@ def test_silent_thinking_counts_only_when_it_is_long_enough():
     assert agent_model._thinking_seconds(1.2, reasoning_shown=True) == 1.2
 
 
-def test_every_action_is_offered_as_a_tool():
+def test_every_action_has_a_tool_definition():
     assert set(ACTION_TOOLS) == set(get_args(ActionType))
 
 
@@ -82,7 +82,9 @@ def test_tools_follow_the_role_prompt_allowed_actions():
     coder = {tool["function"]["name"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
     reader = {tool["function"]["name"] for tool in tools_for_role(agent_model._load_role_prompt("reader"))}
 
-    assert {"write_file", "replace_in_file", "run_shell", "final_answer"} <= coder
+    assert {"write_file", "replace_in_file", "run_shell", "refuse"} <= coder
+    # A response without a call ends the turn, so no finishing tool is offered.
+    assert not coder & {"final_answer", "report_to_user"}
     assert not reader & {"write_file", "append_file", "replace_in_file"}
     assert "read_file" in reader
 
