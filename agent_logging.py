@@ -178,6 +178,8 @@ def _session_document(
         "response_language": getattr(self, "_last_response_language", None),
         "styles": getattr(self, "_session_styles", None) or session_styles({}),
         "checkpoint": checkpoint,
+        "title": getattr(self, "_session_title", None),
+        "title_manual": bool(getattr(self, "_title_manual", False)),
     }
     sanitized = redact_value(document)
     assert isinstance(sanitized, dict)
@@ -194,6 +196,8 @@ def _empty_session_document(session: str) -> dict[str, Any]:
         "response_language": None,
         "styles": session_styles({}),
         "checkpoint": None,
+        "title": None,
+        "title_manual": False,
     }
 
 
@@ -486,6 +490,66 @@ def save_session(self) -> None:
     save_active_session(self, session)
 
 
+def store_session_title(self, session: str, title: str) -> None:
+    """Persist a generated title for *session* directly on disk.
+
+    Targets the session by name rather than ``self.current_session``: title
+    generation runs on a background thread, and the user may have switched
+    (or even deleted) sessions by the time it finishes. A title is never
+    written over one the session already has (generated or manual) — set by
+    ``update``, so this is safe to call even if two generations somehow race.
+    A missing session (deleted meanwhile) is silently skipped: there is
+    nothing left to title.
+    """
+    state_path = get_state_path(self, session)
+    try:
+        if not _read_json_object(state_path, boundary=self.executor.workspace):
+            return  # Session was deleted (or never saved) before this landed.
+    except JsonStorageError:
+        return
+
+    def update(existing: dict[str, Any]) -> dict[str, Any]:
+        if not existing:
+            return existing
+        if existing.get("title_manual") or (
+            isinstance(existing.get("title"), str) and existing["title"].strip()
+        ):
+            return existing
+        existing["title"] = title
+        return existing
+
+    try:
+        update_json_object(state_path, update, boundary=self.executor.workspace)
+    except JsonStorageError:
+        return
+    if session == getattr(self, "current_session", None) and not getattr(
+        self, "_title_manual", False
+    ):
+        self._session_title = title
+
+
+def rename_session(self, title: str) -> None:
+    """Set the active session's title by hand; automatic generation never
+    overwrites a manually-set title again.
+
+    Naming a session is deliberate content in its own right, so this writes
+    even for an otherwise-untouched session — unlike ``save_session``, which
+    skips materializing one that holds nothing yet.
+    """
+    self._session_title = title
+    self._title_manual = True
+    session = getattr(self, "current_session", "default")
+    update_json_object(
+        get_state_path(self, session),
+        lambda existing: _session_document(
+            self, checkpoint=_session_checkpoint(existing)
+        ),
+        boundary=self.executor.workspace,
+        empty_as_missing=True,
+    )
+    save_active_session(self, session)
+
+
 def session_style(self, style_type: str) -> str:
     """The style this session runs under, whatever the global preference says."""
     styles = getattr(self, "_session_styles", None)
@@ -546,6 +610,9 @@ def restore_session_document(self, data: dict[str, Any]) -> bool:
     # Stamped before the empty-document exit: a session that starts here owns a
     # style from its first step, not from its first save.
     self._session_styles = session_styles(data)
+    title = data.get("title") if isinstance(data, dict) else None
+    self._session_title = title if isinstance(title, str) and title.strip() else None
+    self._title_manual = bool(data.get("title_manual")) if isinstance(data, dict) else False
     if not data:
         return False
 

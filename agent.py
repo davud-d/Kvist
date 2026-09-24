@@ -35,11 +35,13 @@ from agent_logging import (
     read_session_document,
     adopt_session_style,
     restore_session_document,
+    rename_session,
     session_style,
     sanitize_for_log,
     save_active_session,
     save_checkpoint,
     save_session,
+    store_session_title,
 )
 from agent_model import (
     call_action_model,
@@ -140,6 +142,7 @@ from system_context import (
 )
 from sandbox import sandbox_network_allowed
 from session_events import JournalingUI, SessionJournal
+from session_titler import generate_session_title
 from ui import AgentUI
 from language_utils import detect_request_language
 from language_policy import resolve_response_language, response_language_name
@@ -226,6 +229,10 @@ class LocalAgent:
         self.current_session = load_active_session(self)
         self.executor.set_active_session(self.current_session)
         self._session_history: list[dict[str, Any]] = []
+        # Set by restore_session_document / rename_session; None until a title
+        # exists (generated in the background, or set by hand via /rename).
+        self._session_title: str | None = None
+        self._title_manual: bool = False
         # Set by load_checkpoint; describes a mutation interrupted mid-flight.
         self._pending_action: dict[str, Any] | None = None
         # Identifies the active run; a new run() stamps a fresh id.
@@ -317,6 +324,49 @@ class LocalAgent:
         if len(self._session_history) > 10:
             self._session_history = self._session_history[-10:]
         self.save_session()
+        # First completed turn of a brand-new session: start naming it in the
+        # background. A resumed session that already has history (whether or
+        # not it has a title) never reaches this — len == 1 only right after
+        # the very first entry is appended.
+        if (
+            len(self._session_history) == 1
+            and not stopped_by_user
+            and not self._title_manual
+            and not self._session_title
+        ):
+            self._start_title_generation(self.current_session, user_goal, result)
+
+    def _start_title_generation(
+        self, session_name: str, user_goal: str, agent_reply: str
+    ) -> None:
+        """Spawn the title-generation call on its own thread.
+
+        Split from ``_generate_and_store_title`` so a test can call the worker
+        directly and synchronously instead of racing a background thread.
+        """
+        thread = threading.Thread(
+            target=self._generate_and_store_title,
+            args=(session_name, user_goal, agent_reply),
+            daemon=True,
+            name="kvist-session-title",
+        )
+        thread.start()
+
+    def _generate_and_store_title(
+        self, session_name: str, user_goal: str, agent_reply: str
+    ) -> None:
+        ui = self._ui
+        title = generate_session_title(
+            self.client,
+            self.config,
+            user_goal,
+            agent_reply,
+            report=lambda message: ui.debug_print(f"[title] {message}"),
+        )
+        self._store_session_title(session_name, title)
+        notify = getattr(ui, "print_session_title", None)
+        if notify is not None:
+            notify(session_name, title)
 
     def new_session(self, name: str | None = None) -> str:
         """Save the current session, then create and activate a fresh empty one.
@@ -827,6 +877,8 @@ class LocalAgent:
     _save_active_session = save_active_session
     _list_sessions = list_sessions
     _delete_session = delete_session
+    _store_session_title = store_session_title
+    rename_session = rename_session
 
     # ── Role routing ─────────────────────────────────────────────
 

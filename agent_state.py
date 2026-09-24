@@ -21,6 +21,11 @@ class AgentConfig:
     fast_model: str = "gpt-5-mini"
     smart_model: str = "gpt-5-mini"
     planner_model: str = "gpt-5-mini"
+    # Model used for background session-title generation (session_titler.py).
+    # Empty means "derive": the fast tier is already the cheapest configured
+    # model for the active provider, so it is the default rather than a
+    # fourth model id the user has to set explicitly.
+    title_model: str = ""
     max_steps: int = 20
     stagnation_limit: int = 6
     max_consecutive_errors: int = 6
