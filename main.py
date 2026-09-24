@@ -54,8 +54,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--role",
         choices=("auto", "coder", "reader", "devops", "chat"),
-        default="auto",
-        help="Agent role override for the stdio frontend.",
+        default=None,
+        help=(
+            "Agent role override for the stdio frontend. Defaults to the "
+            "saved /role preference (see _resolve_startup_role)."
+        ),
     )
     parser.add_argument(
         "--approval-mode",
@@ -784,6 +787,21 @@ def resolve_planning_enabled() -> bool:
     if env_skip is not None:
         return env_skip not in {"1", "true", "True", "yes", "on"}
     return get_saved_planning_enabled()
+
+
+def resolve_startup_role(explicit_role: str | None) -> str:
+    """Startup role: an explicit --role always wins and is never written back
+    to the saved preference (it is a one-run override, like
+    AGENT_REASONING_EFFORT is for --reasoning-effort). Omitting --role falls
+    back to the saved /role preference, defaulting to 'auto' when nothing was
+    ever saved. Every frontend that launches a Kvist core process (the TUI's
+    launch_tui, and the stdio/stdio-multi frontends main() serves directly)
+    reads the resolved value from args.role instead of re-deriving it, so a
+    role saved through /role survives a relaunch instead of resetting to the
+    CLI parser's default."""
+    if explicit_role is not None:
+        return explicit_role
+    return get_saved_role() or "auto"
 
 
 def apply_verbose_mode(agent, enabled: bool) -> None:
@@ -3570,6 +3588,7 @@ def main() -> None:
         if _DIRECT_CLI_ARGS is not None
         else _build_cli_parser().parse_args()
     )
+    args.role = resolve_startup_role(args.role)
 
     if args.config_info:
         import json as _json
