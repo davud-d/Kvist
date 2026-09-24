@@ -435,6 +435,27 @@ def test_new_starts_a_session_and_keeps_the_old_one(home, agent_factory):
     assert "keep-me" in result.effects["sessions"]
 
 
+def test_rename_sets_the_title_and_blocks_autogeneration(home, agent_factory):
+    agent = agent_factory()
+    calls = []
+    agent._start_title_generation = lambda *args: calls.append(args)
+
+    result, _, _ = _run_handler("rename", agent, args=["My", "custom", "title"])
+
+    assert result.ok
+    assert result.effects["title"] == "My custom title"
+    assert agent._session_title == "My custom title"
+
+    agent._add_to_session_history("do something", "coder", "done")
+    assert calls == []
+
+
+def test_rename_without_a_title_is_refused(home, agent_factory):
+    agent = agent_factory()
+    result, _, _ = _run_handler("rename", agent, args=[])
+    assert result.ok is False
+
+
 def test_models_wizard_rebuilds_the_agent_and_persists(home, agent_factory, monkeypatch):
     agent = agent_factory()
     options = [{"value": "gpt-5.4", "label": "a"}, {"value": "gpt-5.4-mini", "label": "b"}]
@@ -506,9 +527,9 @@ def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
 
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
-        "role", "effort", "plan", "verbose", "style", "session", "new", "models", "changes",
-        "provider", "change-api", "del-provider", "full-reset", "settings-api", "strime",
-        "revert", "bug",
+        "role", "effort", "plan", "verbose", "style", "session", "new", "rename", "models",
+        "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
+        "strime", "revert", "bug",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)

@@ -384,6 +384,8 @@ from user_config import (
     save_planning_enabled,
     get_saved_reasoning_effort,
     save_reasoning_effort,
+    get_saved_title_model,
+    save_title_model,
     get_saved_style,
     get_style_options,
     save_style_configuration,
@@ -1273,6 +1275,7 @@ def build_agent(
         verbose=verbose,
         skip_planning=skip_planning,
         reasoning_effort=resolve_reasoning_effort(),
+        title_model=get_saved_title_model() or "",
     )
     apply_api_settings(config)
     agent_console = Console()
@@ -1386,6 +1389,7 @@ def render_startup_banner(
     console.print("[dim]Command '/effort' — set reasoning effort (false/low/medium/high/xhigh/max).[/dim]")
     console.print("[dim]Command '/tui' — choose the Ink terminal UI or the classic one for the next launch.[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
+    console.print("[dim]Command '/rename NAME' — set the active session's title by hand.[/dim]")
     console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
     console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
@@ -3153,6 +3157,19 @@ def _stdio_new(ctx: CommandContext) -> CommandResult:
     return _stdio_session(ctx)
 
 
+def _stdio_rename(ctx: CommandContext) -> CommandResult:
+    title = " ".join(ctx.args).strip()
+    if not title:
+        return CommandResult(False, "Usage: rename NAME")
+    agent = ctx.session.agent
+    agent.rename_session(title)
+    return CommandResult(
+        True,
+        f"Session renamed to: {title}",
+        {"session": agent.current_session, "title": title},
+    )
+
+
 def _provider_offers_model_list(provider: str) -> bool:
     return bool(
         provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
@@ -3591,6 +3608,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "style": _stdio_style,
     "session": _stdio_session,
     "new": _stdio_new,
+    "rename": _stdio_rename,
     "models": _stdio_models,
     "changes": _stdio_changes,
     "provider": _stdio_provider,
@@ -4627,6 +4645,17 @@ def main() -> None:
                             f"Active session: {agent.current_session}",
                             "dim",
                         )
+                    )
+                continue
+
+            if user_goal.strip().lower().startswith("/rename"):
+                title = user_goal.strip()[len("/rename"):].strip()
+                if not title:
+                    console.print("[yellow]Usage: /rename NAME[/yellow]")
+                else:
+                    agent.rename_session(title)
+                    console.print(
+                        _display_text(f"Session renamed to: {title}", "green")
                     )
                 continue
 
