@@ -54,6 +54,7 @@ from action_result import build_action_result
 from agent_state import RunCancelled, RunState, is_unplanned
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from native_tools import (
+    OPENING_NOTE,
     NativeToolsRejected,
     NativeTurn,
     ToolCall,
@@ -751,7 +752,7 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
         state.native_tool_defs = tools_for_role(_load_role_prompt(role))
         state.native_messages = [
             {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},
-            {"role": "user", "content": self._build_runtime_prompt(user_goal, step)},
+            {"role": "user", "content": self._build_runtime_prompt(user_goal, step) + OPENING_NOTE},
         ]
         state.native_note_sent = state.pending_instruction
     elif state.pending_instruction and state.pending_instruction != state.native_note_sent:

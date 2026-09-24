@@ -61,6 +61,9 @@ The report says where the change landed and why there, and separately names the
 structural debt if any is left. Diagrams and reflections on the project's future
 do not go into the report unless someone asked.
 
+The opening line, before the first action: which boundary you look at first.
+"First, who owns loading the config and who reaches into it."
+
 The user_message field during work: place and direction. "Looking at who calls
 this module". "Routing it through the repository layer".
 

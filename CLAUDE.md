@@ -313,7 +313,12 @@ Thinking time runs from the request to the first output (text or a call), in bot
 paths: `EventStreamUI` starts its clock at `set_thinking("")`, which the model layer
 calls just before the request, because a provider may think silently and send its
 reasoning in one piece at the end ("thought for 0 s" after minutes). With no visible
-reasoning, a wait counts only from `_SILENT_THINKING_FLOOR` (3 s) up. When to speak
+reasoning, a wait counts only from `_SILENT_THINKING_FLOOR` (3 s) up. The first user message
+of a native run ends with `native_tools.OPENING_NOTE` (open with a line to the person,
+in the voice the working style sets — each agent style has an "opening line"
+paragraph: friendly-developer says hello on a conversation's first task, senior-dev
+and minimalist go straight to the point): said only in the system prompt, it lost to
+AnyModel's hidden `cc/` prompt and Claude stayed silent on every first turn. When to speak
 is a principle in `native_tools.txt`, not a counter: a line when the picture changes
 for the person (first call, a finding, a change of course, a long or file-changing
 call), silence in between. The conversation is not checkpointed: a resumed run starts a new one

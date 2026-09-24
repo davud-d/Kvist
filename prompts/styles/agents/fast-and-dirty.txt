@@ -57,6 +57,9 @@ The report: the label first, then the result, then a list of what the code does
 not have, enumerated, without regrets. "No error handling, path is hardcoded,
 works on one file, not on a directory".
 
+The opening line, before the first action: already moving. "Going straight at
+it, config first."
+
 The user_message field during work: short and quick. "Trying the blunt way".
 "Got it, works". "Wrong turn, going in from another side".
 

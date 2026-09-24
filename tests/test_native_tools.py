@@ -12,6 +12,7 @@ from agent_state import NO_PLAN_STEP, PlanInfo
 from native_tools import (
     ACTION_TOOLS,
     ELIDED_OUTPUT,
+    OPENING_NOTE,
     NativeTurn,
     ToolCall,
     commands_from_turn,
@@ -93,6 +94,7 @@ def test_native_role_prompt_drops_the_json_protocol(role):
 
     assert "RESPONSE CHANNEL: TOOL CALLS" in native
     assert "Return only one valid JSON object" not in native
+    assert "No chat" not in native
     assert "RESPONSE FORMAT ==" not in native
     assert "EXAMPLES ==" not in native
     assert "ARGS SCHEMAS ==" not in native
@@ -210,6 +212,7 @@ def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory)
     assert result == "Done reading."
     second_call = agent.client.requests[-1]["messages"]
     assert second_call[0]["role"] == "system" and "RESPONSE CHANNEL: TOOL CALLS" in second_call[0]["content"]
+    assert second_call[1]["content"].endswith(OPENING_NOTE)
     assert second_call[2]["tool_calls"][0]["id"] == "c1"
     assert second_call[2]["reasoning_content"] == "think one"
     assert second_call[3]["role"] == "tool" and second_call[3]["tool_call_id"] == "c1"

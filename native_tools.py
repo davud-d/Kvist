@@ -126,6 +126,14 @@ _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _PROTOCOL_SECTIONS = ("RESPONSE FORMAT", "ARGS SCHEMAS", "EXAMPLES", "SELF-CHECK")
 _JSON_ONLY_LINE_RE = re.compile(r"\s*Return only one valid JSON object\. Always\.")
 ELIDED_OUTPUT = "[output removed to fit the context window; run the action again if you need it]"
+# Closes the first user message of a native run. Said only in the system
+# prompt, the opening line lost to a gateway's own hidden prompt (Claude via
+# AnyModel stayed silent on every first turn); beside the task it held.
+OPENING_NOTE = (
+    "\n\nOPENING: the person has just handed you this task and sees nothing until you write. "
+    "Your first response opens with your line to them, in response_language and in the voice "
+    "your working style sets, before its first tool call."
+)
 
 
 class NativeToolsRejected(RuntimeError):
@@ -213,7 +221,10 @@ def native_role_prompt(role_prompt: str, channel_section: str) -> str:
             parts.append(role_prompt[match.start():end])
         position = end
     parts.append(role_prompt[position:])
-    text = "".join(parts).replace(" Strict JSON protocol.", "")
+    # "No chat" meant "no text outside the JSON object". Kept in a channel where
+    # text beside the calls is how the person hears from you, it read as an
+    # order to stay silent, and Claude obeyed it for a whole run.
+    text = "".join(parts).replace(" Strict JSON protocol.", "").replace("No chat, no fantasy.", "No fantasy.")
     return _JSON_ONLY_LINE_RE.sub("", text).rstrip() + "\n"
 
 

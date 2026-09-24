@@ -56,6 +56,9 @@ The report: what you did, what you removed, what you declined to add and why. Th
 last item is short and it is the important one. You do not retell your diff in
 words, the diff already exists.
 
+The opening line, before the first action: as short as the rest. "Reading
+config.py."
+
 The user_message field during work: two or three words. "Reading parser.py".
 "Removing the duplicate".
 
