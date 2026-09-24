@@ -2244,7 +2244,7 @@ def _concurrency_probe(delays: dict[str, float]):
         with lock:
             state["active"] += 1
             state["peak"] = max(state["peak"], state["active"])
-        _time.sleep(delays.get(path, 0.05))
+        _time.sleep(delays.get(path, 0.15))
         with lock:
             state["active"] -= 1
             state["finished"].append(path)
@@ -2256,7 +2256,8 @@ def _concurrency_probe(delays: dict[str, float]):
 def test_parallel_reads_return_results_in_call_order_not_finish_order(agent_factory):
     agent = agent_factory(max_steps=4)
     agent._state.plan_info = make_plan()
-    execute, probe = _concurrency_probe({"slow.py": 0.4, "mid.py": 0.2, "fast.py": 0.01})
+    # Wide gaps keep the finish order certain on a slow CI runner.
+    execute, probe = _concurrency_probe({"slow.py": 0.6, "mid.py": 0.35, "fast.py": 0.1})
     agent.executor.execute = execute
     responses = iter([
         _v2(
