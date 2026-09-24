@@ -190,9 +190,12 @@ def sandbox_network_allowed(value: str | None = None) -> bool:
     return (raw or "deny").strip().casefold() == "allow"
 
 
+RUNTIME_MOUNT_ROOTS = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
+
+
 def _append_runtime_mounts(wrapped: list[str]) -> None:
     """Mount only system runtime trees needed by ordinary dynamically linked CLIs."""
-    for raw_path in ("/usr", "/bin", "/sbin", "/lib", "/lib64"):
+    for raw_path in RUNTIME_MOUNT_ROOTS:
         path = Path(raw_path)
         if path.exists():
             wrapped.extend(("--ro-bind", raw_path, raw_path))
@@ -317,8 +320,13 @@ def wrap_command_for_sandbox(
     bwrap_path: str | None = None,
     network_allowed: bool | None = None,
     tool_paths: tuple[Path, ...] = (),
+    links: tuple[tuple[str, str], ...] = (),
 ) -> list[str]:
-    """Wrap a validated command in a minimal Bubblewrap filesystem."""
+    """Wrap a validated command in a minimal Bubblewrap filesystem.
+
+    ``links`` recreates single symlinks (target, path) inside the sandbox
+    without exposing anything else beside them.
+    """
     if mode is not SandboxMode.BUBBLEWRAP:
         return command
 
@@ -364,6 +372,8 @@ def wrap_command_for_sandbox(
         )
     )
     _append_tool_path_mounts(wrapped, tool_paths, workspace)
+    for target, path in links:
+        wrapped.extend(("--symlink", target, path))
     internal_dir = workspace / ".kvist"
     wrapped.extend(("--tmpfs", str(internal_dir)))
     # Secret masks come after the workspace bind so they shadow the real files.

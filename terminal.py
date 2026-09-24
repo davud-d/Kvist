@@ -54,6 +54,7 @@ from process_tree import (
 from protocol import MAX_SHELL_TIMEOUT_SECONDS
 from redaction import redact_text, sanitize_display_text
 from sandbox import (
+    RUNTIME_MOUNT_ROOTS,
     SandboxMode,
     detect_sandbox_mode,
     normalize_sandbox_request,
@@ -1072,7 +1073,8 @@ class TerminalExecutor:
                 work_dir,
                 bwrap_path=bwrap_path,
                 network_allowed=network_allowed,
-                tool_paths=self._external_tool_paths,
+                tool_paths=self._external_tool_paths + venv_interpreter_roots(bindings),
+                links=venv_interpreter_links(bindings, workspace),
             )
         except ValueError as error:
             raise HardDenyError(f"Hard security denial: {error}") from error
@@ -2487,12 +2489,7 @@ class TerminalExecutor:
         )
         venv_verified: tuple[FileIdentity, str] | None = None
         if not trusted and lookup is not None and resolved is not None:
-            venv_verified = _verify_venv_python_launcher(
-                self.workspace,
-                lookup,
-                resolved,
-                allow_external_interpreter=self.sandbox_request == "workspace",
-            )
+            venv_verified = _verify_venv_python_launcher(self.workspace, lookup, resolved)
         requested_identity = canonical_executable_name(token)
         effective_identity = (
             canonical_executable_name(resolved.name) if resolved is not None else None
@@ -2689,12 +2686,9 @@ class TerminalExecutor:
             # ``.venv/bin/cat -> /usr/bin/bash``) is never trusted merely
             # because its target lives under a system root; escapes to any
             # other target, or from any other basename/location, stay denied.
-            # In explicit ``AGENT_SANDBOX_MODE=workspace`` only, the target
-            # need not live under a trusted system root (e.g. a uv-managed
-            # interpreter under the user's HOME) — see
-            # ``_verify_venv_python_launcher``'s ``allow_external_interpreter``.
-            # ``auto``/``bubblewrap`` keep the stricter trusted-root
-            # requirement unchanged.
+            # The target need not live under a trusted system root (e.g. a
+            # uv-managed interpreter under the user's HOME) when pyvenv.cfg
+            # declares it — see ``_verify_venv_python_launcher``.
             if (
                 binding.lookup_in_workspace
                 and not binding.target_in_workspace
@@ -2768,10 +2762,12 @@ class TerminalExecutor:
         # path as argv[0] so the interpreter finds pyvenv.cfg and its
         # site-packages; substituting the resolved system binary would break
         # venv semantics.  The launcher inode is attested, so a swap between
-        # approval and spawn invalidates the bound context.
+        # approval and spawn invalidates the bound context.  A bare "python"
+        # found on the child PATH in .venv/bin is the same launcher: given
+        # the resolved binary instead, it ran outside the venv and could not
+        # import the project's own packages.
         if (
-            not is_bare_executable_token(token)
-            and binding.lookup_path
+            binding.lookup_path
             and binding.lookup_path != binding.resolved_path
             and binding.venv_launcher
         ):
@@ -3319,8 +3315,6 @@ def _verify_venv_python_launcher(
     workspace: Path,
     lookup: Path,
     resolved: Path,
-    *,
-    allow_external_interpreter: bool = False,
 ) -> tuple[FileIdentity, str] | None:
     """Verify ``lookup`` is a genuine project venv Python launcher.
 
@@ -3332,15 +3326,14 @@ def _verify_venv_python_launcher(
     execution context binds the launcher to its venv's declared identity —
     mutating pyvenv.cfg between approval and spawn invalidates the approval.
 
-    ``allow_external_interpreter`` is set only by the caller for explicit
-    ``AGENT_SANDBOX_MODE=workspace`` (never ``auto``/``bubblewrap``, which
-    already provide OS isolation and keep the stricter trusted-system-root
-    requirement).  It relaxes *where* the final interpreter may live — a
-    venv builder such as ``uv`` places it under the user's HOME, not under
-    ``/usr``/``/bin``/``/sbin`` — but still requires that ``pyvenv.cfg``
-    itself, attested below, declares that exact resolved path as the venv's
-    interpreter, so a venv can only vouch for the interpreter it was built
-    with, never for an arbitrary target.
+    The final interpreter may live outside the trusted system roots — a venv
+    builder such as ``uv`` or ``pyenv`` places it under the user's HOME — but
+    only when ``pyvenv.cfg`` itself, attested below, declares that exact
+    resolved path as the venv's interpreter, so a venv can only vouch for the
+    interpreter it was built with, never for an arbitrary target.  Under
+    Bubblewrap that interpreter's installation root is then mounted read-only
+    (``venv_interpreter_roots``); refusing it left a project's own Python —
+    and so its tests and linters — unrunnable in the default sandbox.
     """
     try:
         if not _is_relative_to(lookup, workspace):
@@ -3381,12 +3374,8 @@ def _verify_venv_python_launcher(
         return None
     trusted_root = _is_trusted_system_executable(resolved, resolved)
     if not trusted_root:
-        if not allow_external_interpreter:
-            return None
-        # Weaker workspace-only boundary: the interpreter may live outside
-        # the trusted system roots, but only when the venv's own pyvenv.cfg
-        # declares this exact resolved path as its interpreter — the venv
-        # cannot vouch for a target it did not itself record at creation.
+        # The venv cannot vouch for a target it did not itself record at
+        # creation.
         declared = _read_pyvenv_cfg_executable(pyvenv_cfg)
         if declared is None:
             return None
@@ -3405,6 +3394,81 @@ def _verify_venv_python_launcher(
     except OSError:
         return None
     return (cfg_identity, cfg_digest)
+
+
+def venv_interpreter_roots(bindings: tuple[ExecutableBinding, ...]) -> tuple[Path, ...]:
+    """Installation roots of attested venv interpreters outside the system roots.
+
+    Bubblewrap hides HOME, where uv and pyenv install interpreters, so the
+    launcher resolved but could not exec (``bwrap: execvp ... No such file``).
+    ``<root>/bin/python3.x`` needs ``<root>/lib`` beside it; the root is bound
+    read-only through the same validation as ``AGENT_TOOL_PATHS``.
+    """
+    return tuple(
+        interpreter.parent.parent
+        for binding in bindings
+        if (interpreter := _external_venv_interpreter(binding)) is not None
+    )
+
+
+def venv_interpreter_links(
+    bindings: tuple[ExecutableBinding, ...], workspace: Path
+) -> tuple[tuple[str, str], ...]:
+    """``(link target, link path)`` for each hop from a launcher to its interpreter
+    that the sandbox would otherwise not see.
+
+    A venv built by ``python3.11 -m venv`` points at ``~/.local/bin/python3.11``,
+    itself a link into the uv install; with only the install root mounted, the
+    middle hop is missing and exec fails. Only the link itself is recreated —
+    nothing else under that directory becomes visible.
+    """
+    links: list[tuple[str, str]] = []
+    for binding in bindings:
+        interpreter = _external_venv_interpreter(binding)
+        if interpreter is None or not binding.lookup_path:
+            continue
+        mounted = (workspace, interpreter.parent.parent, *map(Path, RUNTIME_MOUNT_ROOTS))
+        for target, link in _symlinks_along(Path(binding.lookup_path)):
+            if not any(_is_relative_to(Path(link), root) for root in mounted):
+                links.append((target, link))
+    return tuple(links)
+
+
+_MAX_VENV_LINK_HOPS = 16
+
+
+def _symlinks_along(path: Path) -> list[tuple[str, str]]:
+    """Every symlink ``realpath`` passes through on ``path``, as (target, link).
+
+    Directory components count too: uv's ``cpython-3.11-...`` is itself a
+    link to the versioned install, so following only the last component
+    missed it.
+    """
+    pending = list(path.parts[1:])
+    current = Path(path.anchor)
+    links: list[tuple[str, str]] = []
+    while pending and len(links) < _MAX_VENV_LINK_HOPS:
+        part = pending.pop(0)
+        candidate = current / part
+        if not candidate.is_symlink():
+            current = current.parent if part == ".." else candidate
+            continue
+        target = os.readlink(candidate)
+        links.append((target, str(candidate)))
+        target_path = Path(target)
+        if target_path.is_absolute():
+            current = Path(target_path.anchor)
+        pending = list(target_path.parts[1:] if target_path.is_absolute() else target_path.parts) + pending
+    return links
+
+
+def _external_venv_interpreter(binding: ExecutableBinding) -> Path | None:
+    if not binding.venv_launcher or not binding.resolved_path:
+        return None
+    resolved = Path(binding.resolved_path)
+    if _is_trusted_system_executable(resolved, resolved):
+        return None
+    return resolved
 
 
 def _read_pyvenv_cfg_executable(pyvenv_cfg: Path) -> Path | None:

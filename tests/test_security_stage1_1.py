@@ -991,10 +991,11 @@ def test_venv_workspace_mode_permits_external_interpreter_matching_pyvenv_cfg(
         pytest.param("bubblewrap", marks=requires_bwrap),
     ],
 )
-def test_venv_non_workspace_mode_denies_external_interpreter(
+def test_venv_non_workspace_mode_runs_external_interpreter_read_only(
     tmp_path, monkeypatch, sandbox_env, external_python_interpreter
 ):
-    """(c) same external-interpreter venv, but auto/bubblewrap/default: still denied."""
+    """(c) auto/bubblewrap/default: the attested interpreter runs, and under
+    Bubblewrap its installation root is visible read-only only."""
     if sandbox_env is None:
         monkeypatch.delenv("AGENT_SANDBOX_MODE", raising=False)
     else:
@@ -1005,10 +1006,27 @@ def test_venv_non_workspace_mode_denies_external_interpreter(
     _write_uv_style_pyvenv_cfg(venv_dir, external)
     (venv_dir / "bin").mkdir(parents=True)
     (venv_dir / "bin" / "python").symlink_to(external)
-    (tmp_path / "hi.py").write_text("print('should not run')", encoding="utf-8")
-    ex = TerminalExecutor(tmp_path, timeout=5)
-    with pytest.raises(HardDenyError, match="symlink resolves outside"):
-        ex.run([".venv/bin/python", "hi.py"])
+    (tmp_path / "hi.py").write_text(
+        "import pathlib, sys\n"
+        "probe = pathlib.Path(sys.base_prefix) / 'kvist-write-probe'\n"
+        "try:\n"
+        "    probe.write_text('x')\n"
+        "except OSError:\n"
+        "    print('external ok, root read-only')\n"
+        "else:\n"
+        "    probe.unlink()\n"
+        "    print('external ok, root writable')\n",
+        encoding="utf-8",
+    )
+    ex = TerminalExecutor(tmp_path, timeout=20)
+
+    result = ex.run([".venv/bin/python", "hi.py"])
+
+    assert result.returncode == 0, result.stderr
+    if ex.sandbox_mode is SandboxMode.BUBBLEWRAP:
+        assert "external ok, root read-only" in result.stdout
+    else:
+        assert "external ok" in result.stdout
 
 
 def test_venv_workspace_mode_denies_mismatched_pyvenv_cfg_executable(

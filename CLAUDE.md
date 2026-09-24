@@ -705,13 +705,21 @@ with the same sandboxed PATH, and it must be a trusted system binary or a worksp
 shebang swap between approval and spawn invalidates approval. A project launcher symlink
 whose target is a user-immutable system binary (e.g. `.venv/bin/python -> /usr/bin/python3`)
 is permitted and keeps its own path as argv[0] so venv/`pyvenv.cfg`/site-packages work;
-a symlink to any other target stays denied. In explicit `AGENT_SANDBOX_MODE=workspace`
-only — never `auto`/`bubblewrap` — `_verify_venv_python_launcher` additionally accepts a
-venv Python launcher whose target lives outside those trusted system roots (e.g. a
-`uv`-managed interpreter under the user's HOME), but only when the venv's own
-`pyvenv.cfg` declares that exact resolved path in its `executable` field: the venv can
-vouch only for the interpreter it was built with, never for an arbitrary target, and a
-mismatch between the declared and effective path is denied like any other alias.
+a symlink to any other target stays denied. `_verify_venv_python_launcher` also
+accepts a venv Python launcher whose target lives outside those trusted system roots
+(e.g. a `uv`/`pyenv` interpreter under the user's HOME), in every sandbox mode, but only
+when the venv's own `pyvenv.cfg` declares that exact resolved path in its `executable`
+field: the venv can vouch only for the interpreter it was built with, never for an
+arbitrary target, and a mismatch between the declared and effective path is denied
+like any other alias. Under Bubblewrap, HOME is hidden, so `terminal.venv_interpreter_roots`
+read-only binds that interpreter's install root (validated like `AGENT_TOOL_PATHS`) and
+`venv_interpreter_links` recreates, with `--symlink`, only the individual links on the
+way to it (`.venv/bin/python3.11 -> ~/.local/bin/python3.11 -> uv/cpython-3.11-… ->
+cpython-3.11.15-…`, directory links included) — nothing else under those directories
+becomes visible. Without this the project's own Python, and so its tests and linters,
+could not run in the default sandbox. A launcher keeps its own path as argv[0] even when
+found through a bare `python` on the child PATH, or the interpreter starts outside the
+venv and cannot import the project's packages.
 
 **Project toolchains**: the child PATH prepends existing project-local tool directories
 (`.venv/bin`, `venv/bin`, `node_modules/.bin`) inside the workspace, then validated
