@@ -213,7 +213,7 @@ def find_system_library(python_exe: str, status: Status | None = None) -> str:
             "    Install the matching runtime, e.g.:\n"
             + _distro_hints(
                 {
-                    "Debian/Ubuntu:": f"sudo apt install libpython{version_short}",
+                    "Debian/Ubuntu:": f"sudo apt install libpython{version_short}-dev",
                     "Fedora/RHEL:": "sudo dnf install python3-libs",
                     "Arch:": "sudo pacman -S python",
                 }
