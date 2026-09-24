@@ -415,6 +415,53 @@ def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
         executor._read_file("alias.txt")
 
 
+def test_absolute_paths_inside_the_workspace_run_in_relative_form(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "marker.txt").write_text("x", encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+    workspace = str(executor.workspace)
+
+    result = executor._run_shell(["ls", f"{workspace}/sub"], cwd=workspace)
+
+    assert result.ok, result.data
+    assert "marker.txt" in result.data["stdout"]
+    assert f'"{workspace}/sub" -> "sub"' in result.data["path_note"]
+
+
+def test_git_dash_c_on_the_workspace_becomes_its_cwd(tmp_path):
+    executor = SafeExecutor(tmp_path)
+    workspace = str(executor.workspace)
+
+    command, cwd, rewrites = executor._relativize_workspace_paths(
+        ["git", "-C", workspace, "log", "--", f"{workspace}/a.py"], None
+    )
+
+    assert (command, cwd) == (["git", "log", "--", "a.py"], ".")
+    assert len(rewrites) == 2
+
+
+def test_paths_that_really_lead_outside_stay_absolute(tmp_path):
+    executor = SafeExecutor(tmp_path)
+    workspace = executor.workspace
+    (workspace / "out_link").symlink_to(tmp_path.parent)
+
+    command, cwd, rewrites = executor._relativize_workspace_paths(
+        ["cat", "/etc/hosts", f"{workspace}/out_link/x"], f"{workspace}/out_link"
+    )
+
+    assert command == ["cat", "/etc/hosts", f"{workspace}/out_link/x"]
+    assert cwd == f"{workspace}/out_link"
+    assert rewrites == []
+
+
+def test_a_refused_command_still_tells_the_model_about_the_rewrite(tmp_path):
+    executor = SafeExecutor(tmp_path)
+    workspace = str(executor.workspace)
+
+    with pytest.raises(ExecutorError, match="Kvist rewrote paths"):
+        executor._run_shell(["rm", f"{workspace}/nothing"])
+
+
 @pytest.fixture(params=["ripgrep", "walk"])
 def search_engine(request, monkeypatch):
     """Run a search test against both engines; skip ripgrep where it is absent."""

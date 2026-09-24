@@ -711,6 +711,17 @@ file whole and took 8.5 s on this repository. It enforces the workspace boundary
 checked with `relative_to`, symlink-escape protection), blocks the internal `.kvist`
 dir, and **strictly forbids reading or writing `.env` files**.
 
+Before any of that, `SafeExecutor._relativize_workspace_paths` rewrites an absolute
+`cwd`, absolute argv tokens and a leading `git -C <dir>` into relative form **only when
+the path's real (resolved) location is inside the workspace** — anything else stays as
+written and is refused as before. The policy never sees an absolute path it would
+refuse for being absolute, and the model is told each rewrite (`path_note` in the
+result, appended to the error when the command is refused anyway) so it switches form
+instead of repeating it: a task naming the repository by its absolute path otherwise
+produced "Hard security denial" after "Hard security denial" for paths that never left
+the workspace. The native tool schemas carry the same rule in their `path`/`cwd`/
+`command` descriptions.
+
 Shell path, in order: `SafeExecutor._run_shell` (arg checks, `.env`/`.kvist` guards,
 forwards the routed role) → `TerminalExecutor.run(command, role=...)` → project deny →
 one authoritative hard validator for every pipe segment → intrinsic risk → project

@@ -1927,6 +1927,9 @@ class SafeExecutor:
         if timeout is not None and not isinstance(timeout, (int, float)):
             raise ExecutorError("run_shell.timeout must be a number")
 
+        command, cwd, rewrites = self._relativize_workspace_paths(command, cwd)
+        path_note = _path_rewrite_note(rewrites)
+
         if cwd is not None:
             self._guard_internal_agent_path(cwd)
 
@@ -1944,7 +1947,7 @@ class SafeExecutor:
         try:
             result = self._terminal.run(command, cwd=cwd, timeout=timeout, role=self.active_role)
         except TerminalError as exc:
-            raise ExecutorError(str(exc))
+            raise ExecutorError(f"{exc} {path_note}".strip())
 
         if result.denied:
             return ExecutionResult(
@@ -1954,6 +1957,7 @@ class SafeExecutor:
                     "command": result.command,
                     "error": result.stderr,
                     "denied": True,
+                    **({"path_note": path_note} if path_note else {}),
                 },
             )
 
@@ -1966,10 +1970,55 @@ class SafeExecutor:
                 "stdout": self._sanitize_internal_paths_in_text(result.stdout),
                 "stderr": self._sanitize_internal_paths_in_text(result.stderr),
                 "timed_out": result.timed_out,
+                **({"path_note": path_note} if path_note else {}),
                 "untrusted": True,
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
+
+    def _relativize_workspace_paths(
+        self, command: list[str], cwd: str | None
+    ) -> tuple[list[str], str | None, list[tuple[str, str]]]:
+        """Absolute paths that end inside the workspace, in the relative form the shell accepts.
+
+        The shell policy refuses absolute paths and git's -C outright. A task that
+        named the repository by its absolute path led a model straight into those
+        refusals, which read as attempts to leave the workspace although every
+        path pointed inside it. Only a path whose real location is in the
+        workspace is rewritten; anything else stays as written and is refused as
+        before. Returns the command, the cwd and each (old, new) rewrite.
+        """
+        rewrites: list[tuple[str, str]] = []
+        if cwd is not None and os.path.isabs(cwd):
+            relative = self._workspace_relative(cwd, self.workspace)
+            if relative is not None:
+                rewrites.append((cwd, relative))
+                cwd = relative
+        if command[:2] == ["git", "-C"] and len(command) > 3 and cwd in (None, "."):
+            relative = self._workspace_relative(command[2], self.workspace) if os.path.isabs(command[2]) else None
+            if relative is not None:
+                rewrites.append((f"git -C {command[2]}", f"cwd {relative}"))
+                command, cwd = ["git", *command[3:]], relative
+        base = self.workspace / (cwd or ".")
+        rewritten = [command[0]]
+        for token in command[1:]:
+            relative = self._workspace_relative(token, base) if os.path.isabs(token) else None
+            if relative is not None:
+                rewrites.append((token, relative))
+            rewritten.append(token if relative is None else relative)
+        return rewritten, cwd, rewrites
+
+    def _workspace_relative(self, path_text: str, base: Path) -> str | None:
+        """``path_text`` relative to ``base`` when it really lies in the workspace, else None."""
+        candidate = Path(os.path.normpath(path_text))
+        try:
+            relative = candidate.relative_to(Path(os.path.normpath(base)))
+            resolved = candidate.resolve(strict=False)
+        except (ValueError, OSError, RuntimeError):
+            return None
+        if not resolved.is_relative_to(self.workspace):
+            return None
+        return relative.as_posix()
 
     def _web_search(
         self,
@@ -2565,6 +2614,22 @@ class SafeExecutor:
                 path = root_path / filename
                 if path.is_file():
                     yield path
+
+
+def _path_rewrite_note(rewrites: list[tuple[str, str]]) -> str:
+    """What the runtime changed in a command, told to the model that wrote it.
+
+    A silent rewrite would leave the model believing absolute paths work and
+    writing them again; saying it once, with the reason, lets it switch form.
+    """
+    if not rewrites:
+        return ""
+    pairs = "; ".join(f'"{old}" -> "{new}"' for old, new in rewrites)
+    return (
+        f"[Kvist rewrote paths inside the workspace to relative form: {pairs}. "
+        "Shell commands run from the workspace root and refuse absolute paths "
+        "and git -C; write paths relative to the workspace.]"
+    )
 
 
 def _trusted_ripgrep() -> str | None:
