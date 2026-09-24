@@ -115,6 +115,28 @@ class FakeLLMClient:
 
 
 @pytest.fixture(autouse=True)
+def _isolate_home(request, monkeypatch, tmp_path):
+    """Redirect every test's notion of the user's home directory into tmp_path.
+
+    Without this, a test that reaches user_config.py (directly or through
+    build_agent/main.py) reads and writes the real ``~/.kvist/config.json`` on
+    the machine running the suite — nondeterministic across machines and
+    liable to corrupt the developer's own saved settings. ``Path.home()`` is
+    patched too, alongside the env vars, in case some future call site caches
+    it instead of re-deriving it from HOME/USERPROFILE per call.
+
+    Exception: tests marked ``live_llm`` (tests/test_role_router_live.py)
+    intentionally read the real ``~/.kvist/config.json`` to exercise a live
+    provider, so this fixture is a no-op for them.
+    """
+    if request.node.get_closest_marker("live_llm") is not None:
+        return
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+
+
+@pytest.fixture(autouse=True)
 def _disable_write_approval_gate(monkeypatch):
     """Tests run without a TTY; the overwrite gate would deny every edit.
 

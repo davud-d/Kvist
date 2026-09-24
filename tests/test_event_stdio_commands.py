@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -259,9 +260,14 @@ def test_stdin_eof_during_a_dialog_cancels_it_and_ends_the_process():
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    # A subdirectory of tmp_path, not tmp_path itself: the autouse HOME
+    # isolation fixture in conftest.py already points HOME/Path.home() at
+    # tmp_path, so both are re-pointed here to keep them consistent with the
+    # returned path.
     home_dir = tmp_path / "home"
     home_dir.mkdir()
     monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
     monkeypatch.delenv("AGENT_REASONING_EFFORT", raising=False)
     return home_dir
 

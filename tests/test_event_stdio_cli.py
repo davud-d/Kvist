@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import io
-from pathlib import Path
 
 import pytest
 
@@ -22,14 +21,8 @@ def test_main_dispatches_stdio_frontend_without_starting_terminal(monkeypatch, t
         )
 
     # resolve_startup_role() (main.py) reads the saved /role preference from
-    # ~/.kvist/config.json; without isolating HOME this test picks up
-    # whatever role happens to be saved on the machine running it and
-    # captured["options"]["routed_role"] stops being deterministic.
-    home = tmp_path / "home"
-    home.mkdir()
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
-
+    # ~/.kvist/config.json; the autouse HOME-isolation fixture in conftest.py
+    # keeps this deterministic across the machine running it.
     monkeypatch.setattr(
         main.sys,
         "argv",

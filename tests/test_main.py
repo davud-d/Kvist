@@ -982,13 +982,7 @@ class _ApiSettingsUI:
         return next(self._typed)
 
 
-def _isolated_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-
-
 def test_settings_api_dialog_persists_and_applies_one_edit(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
     ui = _ApiSettingsUI(choices=["context_tokens", "__done__"], typed=["1m"])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
@@ -1004,7 +998,6 @@ def test_settings_api_dialog_persists_and_applies_one_edit(tmp_path, monkeypatch
 def test_settings_api_dialog_reprompts_after_an_impossible_value(
     tmp_path, monkeypatch
 ):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(
         choices=["max_retries", "__done__"],
         typed=["99", "4"],
@@ -1020,7 +1013,6 @@ def test_settings_api_dialog_reprompts_after_an_impossible_value(
 
 
 def test_settings_api_dialog_writes_nothing_when_closed(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(choices=[None])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig()
@@ -1032,7 +1024,6 @@ def test_settings_api_dialog_writes_nothing_when_closed(tmp_path, monkeypatch):
 def test_settings_api_dialog_cancelled_field_keeps_the_old_value(
     tmp_path, monkeypatch
 ):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(choices=["request_timeout", "__done__"], typed=[None])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig()
@@ -1042,7 +1033,6 @@ def test_settings_api_dialog_cancelled_field_keeps_the_old_value(
 
 
 def test_settings_api_dialog_reset_restores_every_default(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
     values = main.default_api_settings()
     values["request_interval"] = 0.0
@@ -1064,7 +1054,6 @@ def test_settings_api_dialog_reset_restores_every_default(tmp_path, monkeypatch)
 
 
 def test_settings_api_dialog_toggles_dynamic_model_loading(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(choices=["dynamic_models", "off", "__done__"])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig()
@@ -1078,7 +1067,6 @@ def test_settings_api_dialog_toggles_dynamic_model_loading(tmp_path, monkeypatch
 def test_build_agent_skips_discovery_when_dynamic_loading_is_off(
     tmp_path, monkeypatch
 ):
-    _isolated_home(monkeypatch, tmp_path)
     values = main.default_api_settings()
     values["dynamic_models"] = False
     values["request_timeout"] = 240.0

@@ -218,7 +218,7 @@ def _write_config(home: Path, payload: dict) -> None:
 
 @pytest.fixture
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
+    # HOME is already redirected to tmp_path by the autouse fixture in conftest.py.
     for name in ("AGENT_LLM_PROVIDER", "DEEPSEEK_API_KEY", "AGENT_REASONING_EFFORT"):
         monkeypatch.delenv(name, raising=False)
     return tmp_path
