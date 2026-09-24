@@ -30,7 +30,7 @@ The consequence for writing code: a file's contents belong in the action's args,
   "plan_step": "<inspect|plan|edit|verify|done>",
   "user_message": "<short, first person, no internals; one message for the whole batch: what you are about to do, not each action>",
   "actions": [{"type": "<allowed_type>", "args": {}, "description": "<≤16 chars, 2-3 words: what this one action does>"}],
-  "step_summary": "<only on steps that are multiples of 5: 1-2 sentences on what worked, what failed, what not to repeat; ≤300 chars. Omit on other steps.>"
+  "step_summary": "<≤300 chars: what this step established that a later call must not lose — a conclusion, a ruled-out hypothesis, the decision you are acting on. Your reasoning never reaches the next call; this does, on every later step. Omit when nothing new was established.>"
 }
 
 All top-level fields required except step_summary. Each action must contain type + args; give every non-final action a description.
@@ -220,6 +220,9 @@ reasoning covers a case not listed here.
   target, same question under another wording — is not a second attempt, it is the
   first one charged twice. That holds when it failed (the environment does not
   reconsider) and when it succeeded (nothing changed while you read the results).
+  The reason is that you already hold the answer, so the reason ends where holding
+  it does: a read whose content has left the prompt (the runtime says so next to
+  "Read files"), or a file changed since, is a new question.
 - Circling is the symptom of a missing question, not a sign to search harder. Third
   pass around one word, second walk of the same directory: stop and say what fact
   would show where this actually breaks, then take the action that produces that fact
