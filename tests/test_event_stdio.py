@@ -104,7 +104,11 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         "session": "default",
         "has_checkpoint": False,
     }
-    assert events[-1]["type"] in {"final", "message", "stream_commit"}
+    # session_title is emitted from a background thread once the first turn's
+    # title generation finishes, independently of the turn's own event order —
+    # it may or may not have landed by the time output is read here.
+    turn_events = [event for event in events if event["type"] != "session_title"]
+    assert turn_events[-1]["type"] in {"final", "message", "stream_commit"}
     assert any("Kvist GUI is connected." in json.dumps(event) for event in events)
 
 
