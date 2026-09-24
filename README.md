@@ -282,10 +282,18 @@ levels collapse — e.g. DeepSeek treats `low`/`medium` as `high`; Gemini ignore
 it). If a provider rejects the setting, Kvist retries the request without it and
 warns each time. `AGENT_REASONING_EFFORT` overrides the saved level for a launch.
 
+On the first task of a launch, Kvist sends one tiny request to check whether the
+active provider and model call tools natively. If they do, the run is one growing
+conversation of tool calls and results, which the model keeps across steps and
+the provider can cache; if not, the run uses Kvist's JSON protocol as before. A
+provider that refuses tools mid-run moves that run to the JSON protocol.
+`AGENT_NATIVE_TOOLS=0` keeps every run on the JSON protocol.
+
 Named sessions have 1–64 lowercase letters, digits, `-`, or `_`, and start with
 a letter or digit. Each session stores its own history and checkpoint. A
-checkpoint is written after each step, so `/resume` can continue an interrupted
-run. The change journal powers `/changes` and `/revert`.
+checkpoint is written after every step that changes something and after every
+batch of reads, so `/resume` can continue an interrupted run. The change journal
+powers `/changes` and `/revert`.
 
 ## Headless frontends and scripting
 
@@ -395,7 +403,8 @@ Global settings live in `~/.kvist/config.json`. Runtime environment variables
 include `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`,
 `AGENT_PLANNER_MODEL`, `AGENT_VERBOSE`, `AGENT_MAX_STEPS`,
 `AGENT_PERSIST_LOGS`, `AGENT_SKIP_PLANNING`, `AGENT_REASONING_EFFORT`,
-`AGENT_MAX_CONTEXT_TOKENS`, `AGENT_SANDBOX_MODE`, and `AGENT_SANDBOX_NET`.
+`AGENT_MAX_CONTEXT_TOKENS`, `AGENT_NATIVE_TOOLS`, `AGENT_SANDBOX_MODE`, and
+`AGENT_SANDBOX_NET`.
 Prefer `/provider`, `/models`, `/role`, and `/effort` for interactive
 configuration; do not commit keys or local `.kvist` data.
 

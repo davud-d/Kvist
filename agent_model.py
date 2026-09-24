@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -45,6 +46,13 @@ from llm_clients import (
     OPENROUTER_PROVIDER,
 )
 from agent_state import RunCancelled
+from native_tools import (
+    NativeToolsRejected,
+    NativeTurn,
+    ToolCall,
+    compact_history,
+    native_role_prompt,
+)
 from reasoning_effort import (
     is_reasoning_error,
     merge_reasoning_kwargs,
@@ -558,12 +566,27 @@ def _load_constitution() -> str:
     return text
 
 
-def build_role_system_prompt(self, role: str) -> str:
+def _load_native_channel_section() -> str:
+    if _NATIVE_CHANNEL_KEY not in _PROMPT_CACHE:
+        _PROMPT_CACHE[_NATIVE_CHANNEL_KEY] = (_PROMPT_DIR / "native_tools.txt").read_text(encoding="utf-8").strip()
+    return _PROMPT_CACHE[_NATIVE_CHANNEL_KEY]
+
+
+_NATIVE_CHANNEL_KEY = "__native_tools__"
+
+
+def build_role_system_prompt(self, role: str, *, native_tools: bool = False) -> str:
     """The constitution, the role prompt, the user's response style, then this
     workspace's own instruction file — narrowing, each read per call so edits
     land on the next step.
+
+    ``native_tools`` swaps the role prompt's JSON-protocol sections for the
+    tool-call channel (``native_tools.native_role_prompt``).
     """
-    base = f"{_load_constitution()}\n\n{_load_role_prompt(role)}"
+    role_prompt = _load_role_prompt(role)
+    if native_tools:
+        role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())
+    base = f"{_load_constitution()}\n\n{role_prompt}"
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"
@@ -571,7 +594,7 @@ def build_role_system_prompt(self, role: str) -> str:
     return f"{base}\n\n{project}" if project else base
 
 
-def call_action_model(self, prompt: str) -> str:
+def resolve_action_model(self) -> str:
     # The model is pinned once per run, so the escalation conditions inside
     # _prefer_smart_model (errors, parse failures, stagnation) could never fire
     # after the first step. Escalate once, never downgrade.
@@ -584,8 +607,11 @@ def call_action_model(self, prompt: str) -> str:
         self._state.selected_action_model = self.config.smart_model
 
     preferred_model = str(getattr(self._state, "selected_action_model", "")).strip()
-    if not preferred_model:
-        preferred_model = self._select_action_model_for_run()
+    return preferred_model or self._select_action_model_for_run()
+
+
+def call_action_model(self, prompt: str) -> str:
+    preferred_model = resolve_action_model(self)
 
     # Consume a pipeline prefetch computed while the previous step was on screen,
     # but only when it matches this exact prompt+model; otherwise call normally.
@@ -612,6 +638,236 @@ def call_action_model(self, prompt: str) -> str:
         raise
     self._last_model_duration = time.monotonic() - started
     return content
+
+
+# (provider, model) -> whether it answered the probe with a real tool call.
+# Per process: a launch asks once, at its first task on that model.
+_NATIVE_TOOL_SUPPORT: dict[tuple[str, str], bool] = {}
+
+_PROBE_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "ping",
+        "description": "Confirm that the tool channel works.",
+        "parameters": {
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": False,
+        },
+    },
+}
+
+
+def native_tools_supported(self, model: str) -> bool:
+    """Whether this provider and model call tools natively, probed once per process.
+
+    ``AGENT_NATIVE_TOOLS=0`` keeps every run on the JSON protocol.
+    """
+    if os.environ.get("AGENT_NATIVE_TOOLS", "").strip() == "0":
+        return False
+    key = (self.config.provider, model)
+    if key not in _NATIVE_TOOL_SUPPORT:
+        _NATIVE_TOOL_SUPPORT[key] = _probe_native_tools(self, model)
+        self._ui.debug_print(
+            f"[native tools] {self.config.provider}/{model}: "
+            f"{'supported' if _NATIVE_TOOL_SUPPORT[key] else 'not supported, using the JSON protocol'}"
+        )
+    return _NATIVE_TOOL_SUPPORT[key]
+
+
+def forget_native_tools(self, model: str) -> None:
+    _NATIVE_TOOL_SUPPORT[(self.config.provider, model)] = False
+
+
+def _probe_native_tools(self, model: str) -> bool:
+    """One tiny request that must come back as a well-formed call of ``ping``.
+
+    A wrapper client that drops ``tools``, a model that answers in prose and
+    a provider that rejects the parameter all fail it the same way.
+    """
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Call the ping tool with ok set to true."}],
+        "tools": [_PROBE_TOOL],
+        "timeout": self.config.api_timeout,
+    }
+    merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
+    try:
+        response = _create_completion_with_reasoning_fallback(self, request)
+    except Exception as error:
+        self._ui.debug_print(f"[native tools] probe request failed: {redact_text(str(error))}")
+        return False
+    choices = getattr(response, "choices", None) or []
+    message = getattr(choices[0], "message", None) if choices else None
+    calls = getattr(message, "tool_calls", None) or []
+    if not calls:
+        return False
+    function = getattr(calls[0], "function", None)
+    if getattr(function, "name", "") != "ping":
+        return False
+    try:
+        arguments = json.loads(getattr(function, "arguments", "") or "{}")
+    except json.JSONDecodeError:
+        return False
+    return isinstance(arguments, dict)
+
+
+def is_tools_rejection(error: Exception) -> bool:
+    """A provider error that refuses tool calling itself, not one request."""
+    text = str(error).casefold()
+    names_tools = "tool" in text or "function call" in text or "function_call" in text
+    refuses = any(
+        marker in text
+        for marker in ("not support", "unsupported", "not allowed", "unrecognized", "unknown parameter", "not enabled")
+    )
+    return names_tools and refuses
+
+
+def call_native_action_model(
+    self, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+) -> NativeTurn:
+    """One step of a native-tools run: the whole conversation in, one turn out."""
+    model = resolve_action_model(self)
+    self._retries_exhausted = False
+    started = time.monotonic()
+    self._last_reasoning_seconds = 0.0
+    for attempt in range(1, self.config.max_retries + 1):
+        compact_history(messages, self._count_tokens, context_token_limit(self))
+        input_tokens = sum(self._count_tokens(json.dumps(message, ensure_ascii=False)) for message in messages)
+        _throttle_request_rate(self)
+        try:
+            turn = _request_native_turn(self, model, messages, tools)
+        except RunCancelled:
+            raise
+        except Exception as error:
+            if is_tools_rejection(error):
+                raise NativeToolsRejected(redact_text(str(error))) from error
+            if is_context_overflow_error(error):
+                budget = note_input_overflow(model, input_tokens)
+                self._ui.print_error(
+                    f"{model}: the provider refused a conversation of ~{input_tokens} tokens. "
+                    f"Older tool output is being shortened to fit {budget}."
+                )
+                continue
+            if not _should_retry_model_error(error) or attempt == self.config.max_retries:
+                self._retries_exhausted = True
+                raise
+            time.sleep(self.config.retry_base_delay * (2 ** (attempt - 1)))
+            continue
+        self._last_model_duration = time.monotonic() - started
+        output_text = turn.content + "".join(call.arguments for call in turn.tool_calls)
+        _emit_usage(
+            self,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=self._count_tokens(output_text),
+            kind="step",
+            duration_seconds=self._last_model_duration,
+        )
+        return turn
+    self._retries_exhausted = True
+    raise RuntimeError("Failed to get model response: the conversation does not fit the model")
+
+
+def _request_native_turn(
+    self, model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]]
+) -> NativeTurn:
+    request: dict[str, Any] = {
+        "model": model,
+        "messages": redact_value(messages),
+        "tools": tools,
+        "temperature": self.config.model_temperature,
+        "timeout": self.config.api_timeout,
+    }
+    if self.config.stream:
+        request["stream"] = True
+        request["stream_options"] = {"include_usage": True}
+    merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
+    response = _create_completion_with_reasoning_fallback(self, request)
+    if not self.config.stream:
+        return _native_turn_from_message(response.choices[0].message)
+    return _native_turn_from_stream(self, response)
+
+
+def _native_turn_from_message(message: Any) -> NativeTurn:
+    reasoning = getattr(message, "reasoning_content", None)
+    calls = [
+        ToolCall(call_id=call.id, name=call.function.name, arguments=call.function.arguments or "{}")
+        for call in (getattr(message, "tool_calls", None) or [])
+    ]
+    return NativeTurn(
+        content=getattr(message, "content", None) or "",
+        reasoning=reasoning or safe_extract_reasoning_delta(message),
+        echo_reasoning=isinstance(reasoning, str) and bool(reasoning),
+        tool_calls=calls,
+    )
+
+
+def _native_turn_from_stream(self, stream: Any) -> NativeTurn:
+    """Collect a streamed turn; tool-call fragments arrive keyed by index."""
+    content: list[str] = []
+    reasoning: list[str] = []
+    echo_reasoning = False
+    calls: dict[int, dict[str, str]] = {}
+    reasoning_started: float | None = None
+    last_push = 0.0
+    _note_thinking(self, "")
+    try:
+        for chunk in stream:
+            if self._cancel_event.is_set():
+                raise RunCancelled
+            delta = safe_extract_stream_delta(chunk)
+            if delta is None:
+                continue
+            fragment = safe_extract_reasoning_delta(delta)
+            if fragment:
+                echo_reasoning = echo_reasoning or bool(getattr(delta, "reasoning_content", None))
+                reasoning_started = reasoning_started or time.monotonic()
+                append_reasoning_delta(reasoning, fragment)
+                if time.monotonic() - last_push > 0.1:
+                    _note_thinking(self, "".join(reasoning))
+                    last_push = time.monotonic()
+            if getattr(delta, "content", None):
+                content.append(delta.content)
+            for piece in getattr(delta, "tool_calls", None) or []:
+                _merge_tool_call_delta(calls, piece)
+    finally:
+        close = getattr(stream, "close", None)
+        if close is not None:
+            try:
+                close()
+            except Exception as error:
+                self._ui.debug_print(f"Native stream close failed: {redact_text(str(error))}")
+    if reasoning:
+        _note_thinking(self, "".join(reasoning))
+        _note_thinking_end(self)
+        self._last_reasoning_seconds = time.monotonic() - (reasoning_started or time.monotonic())
+    return NativeTurn(
+        content="".join(content),
+        reasoning="".join(reasoning),
+        echo_reasoning=echo_reasoning,
+        tool_calls=[
+            ToolCall(call_id=entry["id"], name=entry["name"], arguments=entry["arguments"] or "{}")
+            for _index, entry in sorted(calls.items())
+        ],
+    )
+
+
+def _merge_tool_call_delta(calls: dict[int, dict[str, str]], piece: Any) -> None:
+    index = getattr(piece, "index", None)
+    index = len(calls) if index is None else index
+    entry = calls.setdefault(index, {"id": f"call_{index}", "name": "", "arguments": ""})
+    if getattr(piece, "id", None):
+        entry["id"] = piece.id
+    function = getattr(piece, "function", None)
+    if function is None:
+        return
+    # Some providers repeat the name on every fragment; only arguments stream.
+    if getattr(function, "name", None) and not entry["name"]:
+        entry["name"] = function.name
+    if getattr(function, "arguments", None):
+        entry["arguments"] += function.arguments
 
 
 def select_action_model_for_run(self) -> str:

@@ -53,6 +53,16 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
 from action_result import build_action_result
 from agent_state import RunCancelled, RunState, is_unplanned
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
+from native_tools import (
+    NativeToolsRejected,
+    NativeTurn,
+    ToolCall,
+    assistant_message,
+    commands_from_turn,
+    final_answer_from_turn,
+    tool_message,
+    tools_for_role,
+)
 from parser import CommandValidationError, parse_agent_commands
 from protocol import AgentCommand
 from redaction import defang_prompt_boundary_tags, redact_text, redact_value
@@ -562,12 +572,17 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 final_message = early_stop_message
                 break
 
-            prompt = self._build_runtime_prompt(user_goal, step)
+            if self._state.native_tools is None:
+                self._state.native_tools = _native_tools_for_run(self)
             self._current_step = step
-            _note_run_context(self, action="generating JSON")
             loop_pre = time.monotonic()
             try:
-                raw_text = self._call_action_model(prompt)
+                if self._state.native_tools:
+                    turn = _call_native_turn(self, user_goal, step)
+                else:
+                    prompt = self._build_runtime_prompt(user_goal, step)
+                    _note_run_context(self, action="generating JSON")
+                    raw_text = self._call_action_model(prompt)
             except RunCancelled:
                 # Cancelled mid-generation: the stream was closed and no action
                 # ran, so exit through the same safe-stop finalization as a
@@ -575,48 +590,25 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 # written, no half-applied work.
                 final_message = _stop_by_user(self)
                 break
+            except NativeToolsRejected as error:
+                _leave_native_tools(self, error)
+                continue
             except Exception as error:
-                error_text = redact_text(
-                    str(error).strip() or type(error).__name__
-                )
-                self._state.consecutive_errors += 1
-                self._record_error(error_text)
-                self._state.step_logs.append(
-                    {
-                        "step": step,
-                        "status": "model_error",
-                        "error": error_text,
-                    }
-                )
-                self._ui.update_live(
-                    user_message="The model returned an error; retrying or stopping safely",
-                    status="model error",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step="model request",
-                    is_error=True,
-                )
-                if _is_terminal_model_error(error_text):
-                    normalized = self._normalize_error_for_model(error_text)
-                    final_message = f"Agent stopped: the model is unavailable. {normalized}"
+                stop_message = _handle_model_error(self, step, error, loop_pre)
+                if stop_message:
+                    final_message = stop_message
                     break
-                loop_post = time.monotonic()
-                model_duration = getattr(self, "_last_model_duration", loop_post - loop_pre)
-                lag_ms = ((loop_post - loop_pre) - model_duration) * 1000
-                self._perf_logger.log_event_loop_lag(
-                    lag_ms=lag_ms,
-                    step=step,
-                    context="model_call_error",
-                )
                 step += 1
-                # Cooldown to avoid burning through all steps on transient API failures.
-                # Skip if the model layer already exhausted its own retries (avoid double-sleep).
-                if getattr(self, "_retries_exhausted", False):
-                    continue
-                cooldown = self.config.retry_base_delay * (2 ** min(self._state.consecutive_errors, 4))
-                if any(m in error_text.casefold() for m in ("rate limit", "too many requests", "high demand", "503", "timeout")):
-                    cooldown = 5.0
-                time.sleep(cooldown)
+                continue
+
+            if self._state.native_tools:
+                outcome, step = _run_native_turn(self, user_goal, step, turn)
+                if outcome.finished:
+                    final_message = outcome.final_message
+                    report_rendered = outcome.report_rendered
+                    task_completed = True
+                    break
+                self._save_checkpoint(user_goal, step - 1)
                 continue
 
             try:
@@ -678,6 +670,146 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 def _stop_by_user(self) -> str:
     self._state.stopped_by_user = True
     return self._build_cancellation_message()
+
+
+def _handle_model_error(self, step: int, error: Exception, loop_pre: float) -> str | None:
+    """Record a failed model call and cool down; the stop message when it is terminal."""
+    error_text = redact_text(str(error).strip() or type(error).__name__)
+    self._state.consecutive_errors += 1
+    self._record_error(error_text)
+    self._state.step_logs.append({"step": step, "status": "model_error", "error": error_text})
+    self._ui.update_live(
+        user_message="The model returned an error; retrying or stopping safely",
+        status="model error",
+        step=step,
+        progress=self._state.progress,
+        plan_step="model request",
+        is_error=True,
+    )
+    if _is_terminal_model_error(error_text):
+        normalized = self._normalize_error_for_model(error_text)
+        return f"Agent stopped: the model is unavailable. {normalized}"
+    loop_post = time.monotonic()
+    model_duration = getattr(self, "_last_model_duration", loop_post - loop_pre)
+    self._perf_logger.log_event_loop_lag(
+        lag_ms=((loop_post - loop_pre) - model_duration) * 1000,
+        step=step,
+        context="model_call_error",
+    )
+    # Cooldown to avoid burning through all steps on transient API failures.
+    # Skip if the model layer already exhausted its own retries (avoid double-sleep).
+    if getattr(self, "_retries_exhausted", False):
+        return None
+    cooldown = self.config.retry_base_delay * (2 ** min(self._state.consecutive_errors, 4))
+    if any(m in error_text.casefold() for m in ("rate limit", "too many requests", "high demand", "503", "timeout")):
+        cooldown = 5.0
+    time.sleep(cooldown)
+    return None
+
+
+def _native_tools_for_run(self) -> bool:
+    from agent_model import native_tools_supported, resolve_action_model
+
+    return native_tools_supported(self, resolve_action_model(self))
+
+
+def _leave_native_tools(self, error: Exception) -> None:
+    """Continue the run on the JSON protocol after the provider refused tools.
+
+    The runtime prompt the JSON path builds already carries the recent results,
+    so the switch loses no work — only the conversation.
+    """
+    from agent_model import forget_native_tools
+
+    forget_native_tools(self, self._state.selected_action_model)
+    self._state.native_tools = False
+    self._state.native_messages = []
+    self._ui.print_error("The provider refused tool calls; this run continues with the JSON protocol.")
+    self._ui.debug_print(f"[native tools] {redact_text(str(error))}")
+
+
+def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
+    from agent_model import _load_role_prompt, build_role_system_prompt, call_native_action_model
+
+    state = self._state
+    if not state.native_messages:
+        role = state.current_agent_role
+        state.native_tool_defs = tools_for_role(_load_role_prompt(role))
+        state.native_messages = [
+            {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},
+            {"role": "user", "content": self._build_runtime_prompt(user_goal, step)},
+        ]
+        state.native_note_sent = state.pending_instruction
+    elif state.pending_instruction and state.pending_instruction != state.native_note_sent:
+        state.native_messages.append(
+            {"role": "user", "content": f"Additional instruction:\n{state.pending_instruction}"}
+        )
+        state.native_note_sent = state.pending_instruction
+    _note_run_context(self, action="calling tools")
+    return call_native_action_model(self, state.native_messages, state.native_tool_defs)
+
+
+def _run_native_turn(self, user_goal: str, step: int, turn: NativeTurn) -> tuple[_ActionOutcome, int]:
+    """Run one native turn's calls and answer every one of them in the conversation."""
+    self._state.native_messages.append(assistant_message(turn))
+    if not turn.tool_calls and not turn.content.strip():
+        self._state.consecutive_errors += 1
+        self._record_error("The model returned neither a tool call nor text.")
+        self._state.pending_instruction = (
+            "Your last response had neither a tool call nor text. Call a tool, or finish with final_answer."
+        )
+        return _BLOCKED, step + 1
+    if not turn.tool_calls:
+        return _run_action_batch(self, user_goal, step, final_answer_from_turn(turn))
+    try:
+        commands = commands_from_turn(turn, files_changed=bool(self._state.files_changed))
+    except CommandValidationError as error:
+        self._state.parse_errors += 1
+        self._state.consecutive_errors += 1
+        self._record_error(redact_text(str(error)))
+        for call in turn.tool_calls:
+            self._state.native_messages.append(tool_message(call.call_id, f"Not executed: {error}"))
+        return _BLOCKED, step + 1
+    return _run_native_batch(self, user_goal, step, commands, turn.tool_calls)
+
+
+def _run_native_batch(
+    self, user_goal: str, step: int, commands: list[AgentCommand], calls: list[ToolCall]
+) -> tuple[_ActionOutcome, int]:
+    """Like _run_action_batch, but every call gets its answer in the conversation.
+
+    An API rejects a turn whose calls are not all answered, so the ones that
+    never ran are answered too, with why.
+    """
+    _note_thought(self, commands[0].thought)
+    outcome = _BLOCKED
+    answered = 0
+    for index, (command, call) in enumerate(zip(commands, calls)):
+        if index and step > self._state.step_budget:
+            break
+        serial = getattr(self, "_result_serial", 0)
+        outcome = _run_one_action(self, user_goal, step, command)
+        step += 1
+        answered += 1
+        self._state.native_messages.append(tool_message(call.call_id, _native_call_answer(self, serial, outcome)))
+        if outcome.finished or not outcome.proceed:
+            break
+    for call in calls[answered:]:
+        self._state.native_messages.append(
+            tool_message(call.call_id, "Not executed: an earlier call in this response did not succeed.")
+        )
+    return outcome, step
+
+
+def _native_call_answer(self, serial: int, outcome: _ActionOutcome) -> str:
+    """The executed action's result, or the reason the runtime did not run it."""
+    if outcome.finished:
+        return "Accepted."
+    if getattr(self, "_result_serial", 0) != serial:
+        return self._last_result_detail
+    reason = self._state.pending_instruction or "The runtime refused this call."
+    self._state.native_note_sent = self._state.pending_instruction
+    return f"Not executed: {reason}"
 
 
 def _run_action_batch(
@@ -1325,6 +1457,8 @@ def _keep_result_in_view(self, signature: str, detail: str) -> None:
     A repeated action replaces its own earlier copy, so a second git_status
     does not cost a file read its place in the prompt.
     """
+    self._result_serial = getattr(self, "_result_serial", 0) + 1
+    self._last_result_detail = detail
     details = self._state.recent_result_details
     signatures = self._state.recent_result_signatures
     if len(signatures) != len(details):

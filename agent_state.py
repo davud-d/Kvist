@@ -174,6 +174,13 @@ class RunState:
     # The action signature each detail came from, index-aligned with
     # recent_result_details ("" when unknown, e.g. an older checkpoint).
     recent_result_signatures: list[str] = field(default_factory=list)
+    # Native tool calling (native_tools.py): None until the first step decides.
+    # The conversation is not checkpointed; a resumed run starts a new one from
+    # the runtime prompt, which already carries the recent results.
+    native_tools: bool | None = None
+    native_messages: list[dict[str, Any]] = field(default_factory=list)
+    native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
+    native_note_sent: str = ""
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)

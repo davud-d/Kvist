@@ -178,6 +178,8 @@ configured in-repo.
   persisted `reasoning_effort` preference — runtime-toggled by `/effort`),
   `AGENT_MAX_CONTEXT_TOKENS` (overrides the per-model prompt budget derived in
   `context_budget.py`),
+  `AGENT_NATIVE_TOOLS` (0 keeps every run on the JSON protocol and skips the
+  native tool-calling probe),
   `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
   `AGENT_SANDBOX_NET` (allow|deny, default deny under bubblewrap),
   `AGENT_CHILD_ENV_ALLOW` (comma-separated safe child variables),
@@ -272,6 +274,30 @@ that row holds 17 (`banner.LIVE_METRICS_WIDTH` minus the label). A status messag
 least 2.5 s before a newer one replaces it (`terminal_banner._MESSAGE_HOLD_SECONDS`,
 `STATUS_HOLD_MS` in `gui/renderer/app.js`) — a timer on the UI side, never a sleep in
 the agent thread, so the hold costs the run no time.
+
+**Native tool calling (`native_tools.py`).** On the first step of a run,
+`agent_model.native_tools_supported` asks — once per process for each
+`(provider, model)` — with one tiny request carrying a `ping` tool: a well-formed
+`ping` call means native tools, anything else (prose, a wrapper client that drops
+`tools`, an error) means the JSON protocol. A native run keeps one growing
+conversation in `RunState.native_messages`: the system prompt from
+`build_role_system_prompt(..., native_tools=True)` (the role prompt with its
+RESPONSE FORMAT / ARGS SCHEMAS / EXAMPLES / SELF-CHECK sections swapped for
+`prompts/system/native_tools.txt`), the ordinary runtime prompt as the first user
+message, then each turn's assistant message (with `reasoning_content` when the
+provider returned it under that name — DeepSeek requires it back), one `tool`
+answer per call, and `pending_instruction` as an "Additional instruction" user
+message when it changes. The tools are the role prompt's ALLOWED ACTIONS
+(`tools_for_role`), so the reader gets no write tools. A turn's calls become the
+JSON protocol's own object and pass `parse_agent_commands`, then run through
+`_run_one_action` like any batch — the guards, gates and journal are shared.
+Every call is answered, including the ones a refusal kept from running (an API
+rejects an unanswered call). A reply with no call is the final answer.
+`compact_history` elides the oldest tool outputs when the conversation outgrows
+the budget. The conversation is not checkpointed: a resumed run starts a new one
+from the runtime prompt. A mid-run tools rejection (`is_tools_rejection`) raises
+`NativeToolsRejected`, and `_leave_native_tools` continues on the JSON protocol.
+`AGENT_NATIVE_TOOLS=0` skips the probe entirely.
 
 ### LocalAgent composition pattern (important & non-obvious)
 `agent.py::LocalAgent` is assembled by binding functions from other modules as methods
