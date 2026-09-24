@@ -60,6 +60,7 @@ class EventStreamUI:
         # process; the rolling tail is emitted at most once per interval.
         self._output_lock = threading.Lock()
         self._output_step = -1
+        self._output_call_id = ""
         self._output_tail = ""
         self._output_last_emit = 0.0
         self._output_timer: threading.Timer | None = None
@@ -159,6 +160,8 @@ class EventStreamUI:
                 redact_value(command.action.args),
                 reasoning_seconds,
                 redact_text(command.action.description),
+                command.call_id,
+                command.batch_id,
             )
         )
 
@@ -178,11 +181,12 @@ class EventStreamUI:
             )
         )
 
-    def print_action_output(self, step: int, text: str) -> None:
+    def print_action_output(self, step: int, text: str, call_id: str = "") -> None:
         """Feed the live output of a running command (called from reader threads)."""
         with self._output_lock:
             if step != self._output_step:
                 self._reset_output(step)
+                self._output_call_id = call_id
             self._output_tail = (self._output_tail + text)[-_OUTPUT_TAIL_CHARS:]
             wait = self._output_last_emit + self.output_interval - time.monotonic()
             if wait <= 0:
@@ -204,7 +208,7 @@ class EventStreamUI:
         # would slip through if each chunk were redacted alone.
         self._output_last_emit = time.monotonic()
         self._channel.emit(
-            ActionOutputEvent(self._output_step, redact_text(self._output_tail))
+            ActionOutputEvent(self._output_step, redact_text(self._output_tail), self._output_call_id)
         )
 
     def _reset_output(self, step: int) -> None:
@@ -229,6 +233,8 @@ class EventStreamUI:
                 exit_code=result.get("exit_code"),
                 path=None if path is None else redact_text(str(path)),
                 first_line=result.get("first_line"),
+                call_id=str(result.get("call_id") or ""),
+                batch_id=str(result.get("batch_id") or ""),
             )
         )
 
@@ -286,12 +292,13 @@ class EventStreamUI:
         self._channel.emit(MessageEvent(redact_text(message)))
 
     def print_final(
-        self, final_message: str, user_messages: list[str] | None = None
+        self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:
         self._channel.emit(
             FinalEvent(
                 redact_text(final_message),
                 [redact_text(m) for m in (user_messages or [])],
+                outcome,
             )
         )
 

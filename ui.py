@@ -91,8 +91,10 @@ class AgentUI(Protocol):
         """Render a Markdown message to the user."""
         ...
 
-    def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
-        """Render the final answer of a run."""
+    def print_final(
+        self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
+    ) -> None:
+        """Render the final answer of a run; ``outcome`` is "done" or "incomplete"."""
         ...
 
     def print_result(self, message: str) -> None:

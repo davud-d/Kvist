@@ -9,10 +9,24 @@ MAX_OUTPUT_CHARS = 4000
 MAX_SUMMARY_CHARS = 120
 
 _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
+# The runtime's answer to a write it did not run because an earlier write of
+# the same response failed (agent_runtime._SKIPPED_AFTER_FAILED_WRITE).
+SKIPPED_ERROR = "Skipped: an earlier write in this response failed."
+SKIPPED_SUMMARY = "Skipped: an earlier write failed"
+
+
+def feedback_skipped(error: str) -> bool:
+    return error == SKIPPED_ERROR
 
 
 def build_action_result(
-    step: int, action_type: str, args: dict[str, Any], feedback: dict[str, Any]
+    step: int,
+    action_type: str,
+    args: dict[str, Any],
+    feedback: dict[str, Any],
+    *,
+    call_id: str = "",
+    batch_id: str = "",
 ) -> dict[str, Any]:
     """Describe one executed action for a frontend, from real executor data.
 
@@ -34,6 +48,8 @@ def build_action_result(
         "exit_code": _exit_code(action_type, data),
         "path": _path(action_type, args, data),
         "first_line": _first_line(action_type, data, ok),
+        "call_id": call_id,
+        "batch_id": batch_id,
     }
 
 
@@ -44,6 +60,8 @@ def _plural(count: int, noun: str, many: str = "") -> str:
 def _summary(
     action_type: str, args: dict[str, Any], data: dict[str, Any], ok: bool, error: str
 ) -> str:
+    if feedback_skipped(error):
+        return SKIPPED_SUMMARY
     if action_type == "run_shell":
         return _shell_summary(data, error)
     if not ok:

@@ -534,7 +534,9 @@ class TerminalBannerUI:
             f"{redact_value(command.action.args)}"
         )
 
-    def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
+    def print_final(
+        self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
+    ) -> None:
         _ = user_messages
         if self._plain:
             print(f"[final] {sanitize_display_text(final_message)}")

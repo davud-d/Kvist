@@ -2406,3 +2406,35 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
     assert [m["tool_call_id"] for m in answers] == [f"c{i}" for i in range(9)]
     assert "content of f0.py" in answers[0]["content"]
     assert answers[8]["content"].startswith("Not executed: a response holds at most 8 tool calls")
+
+
+def test_call_events_carry_call_and_batch_ids(agent_factory):
+    agent = agent_factory(max_steps=3)
+    agent._state.plan_info = make_plan()
+    headers = []
+    results = []
+    agent._ui.print_step_header = lambda step, command, seconds=0.0: headers.append(command)
+    agent._ui.print_action_result = results.append
+    responses = iter([_v2("Смотрю", _tool("list_dir", path="a"), _tool("list_dir", path="b")), "Готово."])
+    agent._call_action_model = lambda prompt: next(responses)
+    agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    calls = [command for command in headers if command.action.type == "list_dir"]
+    assert len({command.batch_id for command in calls}) == 1 and calls[0].batch_id
+    assert [result["call_id"] for result in results] == [command.call_id for command in calls]
+    assert {result["batch_id"] for result in results} == {calls[0].batch_id}
+
+
+def test_final_event_says_whether_the_run_is_done(agent_factory):
+    agent = agent_factory(max_steps=2)
+    agent._state.plan_info = make_plan()
+    finals = []
+    agent._ui.print_final = lambda message, user_messages=None, outcome="done": finals.append(outcome)
+    agent._call_action_model = lambda prompt: _batch_response([_list_dir("a")])
+    agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert finals == ["incomplete"]

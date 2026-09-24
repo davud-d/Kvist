@@ -55,7 +55,29 @@ def test_write_file_result_reports_lines_path_and_first_line():
         "exit_code": None,
         "path": "a.py",
         "first_line": 1,
+        "call_id": "",
+        "batch_id": "",
     }
+
+
+def test_result_names_its_call_and_batch():
+    from action_result import build_action_result
+
+    result = build_action_result(
+        2, "read_file", {"path": "a.py"}, _ok("read_file", {"content": "x"}), call_id="call_1", batch_id="b1"
+    )
+
+    assert (result["call_id"], result["batch_id"]) == ("call_1", "b1")
+
+
+def test_a_skipped_write_says_so_instead_of_failed():
+    from action_result import SKIPPED_ERROR, build_action_result
+
+    result = build_action_result(
+        4, "write_file", {"path": "b.py", "content": "x"}, {"ok": False, "error": SKIPPED_ERROR}
+    )
+
+    assert result["summary"] == "Skipped: an earlier write failed"
 
 
 def test_append_and_replace_results():
@@ -352,6 +374,7 @@ def test_event_stream_ui_emits_action_result_event_redacted():
     assert payload["exit_code"] == 0
     assert set(payload) == {
         "type", "step", "action_type", "ok", "summary", "output", "exit_code", "path", "first_line",
+        "call_id", "batch_id",
     }
 
 

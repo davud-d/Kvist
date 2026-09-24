@@ -51,7 +51,7 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
         return {**common, "action_kind": "side_effect", "action_type": command.action.type}
     return None
 
-from action_result import build_action_result
+from action_result import SKIPPED_ERROR, build_action_result
 from agent_state import RunCancelled, RunState, is_unplanned
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from call_labels import call_label
@@ -148,7 +148,16 @@ def _emit_action_result(
     notify = getattr(self._ui, "print_action_result", None)
     if notify is None:
         return
-    notify(build_action_result(step, command.action.type, command.action.args, feedback))
+    notify(
+        build_action_result(
+            step,
+            command.action.type,
+            command.action.args,
+            feedback,
+            call_id=command.call_id,
+            batch_id=command.batch_id,
+        )
+    )
 
 
 _BLOCKER_LABELS = {
@@ -617,9 +626,20 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         )
 
     if not self.config.verbose and not report_rendered:
-        self._ui.print_final(final_message, self._state.user_messages)
+        self._ui.print_final(
+            final_message, self._state.user_messages, outcome=_final_outcome(self, task_completed)
+        )
 
     return final_message
+
+
+def _final_outcome(self, task_completed: bool) -> str:
+    """"done" only for a run that finished and passed its completion gates."""
+    state = self._state
+    refused = any(log.get("status") == "safety_refusal" for log in state.step_logs)
+    if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not refused:
+        return "done"
+    return "incomplete"
 
 
 def _stop_by_user(self) -> str:
@@ -805,7 +825,7 @@ MAX_PARALLEL_CALLS = 4
 _NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already ended the task."
 _NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
 _NOT_RUN_BUDGET = "Not executed: the step budget ran out."
-_SKIPPED_AFTER_FAILED_WRITE = "Skipped: an earlier write in this response failed."
+_SKIPPED_AFTER_FAILED_WRITE = SKIPPED_ERROR
 _SKIPPED_LABELS = ("пропущено: предыдущая запись упала", "skipped: an earlier write failed")
 
 
@@ -982,7 +1002,6 @@ def _show_skipped_call(self, step: int, command: AgentCommand) -> None:
         "ok": False,
         "action_type": command.action.type,
         "error": _SKIPPED_AFTER_FAILED_WRITE,
-        "skipped": True,
     }
     _emit_action_result(self, step, command, feedback)
     self._state.step_logs.append(
@@ -1401,7 +1420,7 @@ def _execute_action(
         self._save_checkpoint(user_goal, step, pending_action=pending_action)
     watch_output = getattr(self._ui, "print_action_output", None)
     if watch_output is not None and command.action.type == "run_shell":
-        self.executor.set_output_sink(functools.partial(watch_output, step))
+        self.executor.set_output_sink(functools.partial(watch_output, step, call_id=command.call_id))
     try:
         feedback = self._execute_command(command)
     finally:
