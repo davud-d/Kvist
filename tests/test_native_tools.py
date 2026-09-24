@@ -14,14 +14,14 @@ from native_tools import (
     ELIDED_OUTPUT,
     OPENING_NOTE,
     NativeTurn,
+    READONLY_TOOLS,
     ToolCall,
-    commands_from_turn,
+    calls_from_turn,
     compact_history,
-    final_answer_from_turn,
     native_role_prompt,
     tools_for_role,
 )
-from parser import CommandValidationError
+from parser import CommandValidationError, build_command
 from protocol import ActionType
 
 
@@ -102,7 +102,14 @@ def test_native_role_prompt_drops_the_json_protocol(role):
     assert "UNTRUSTED" in native  # the rest of the prompt survives
 
 
-def test_calls_become_the_json_protocol_commands():
+def _commands(turn: NativeTurn) -> list:
+    return [
+        build_command(call, text=turn.content, batch_id="b", plan_step="inspect", language="en")
+        for call in calls_from_turn(turn)
+    ]
+
+
+def test_calls_become_call_requests_in_order():
     turn = NativeTurn(
         content="Reading the installer",
         tool_calls=[
@@ -111,28 +118,15 @@ def test_calls_become_the_json_protocol_commands():
         ],
     )
 
-    commands = commands_from_turn(turn, files_changed=False)
+    commands = _commands(turn)
 
     assert [command.action.type for command in commands] == ["read_file", "search_code"]
-    assert commands[0].user_message == "Reading the installer"
-    assert commands[0].plan_step == "inspect"
-    assert commands[0].action.description == "install.py"
-
-
-def test_a_silent_turn_says_what_its_calls_touch():
-    turn = NativeTurn(
-        content="",
-        tool_calls=[
-            ToolCall("c1", "search_code", json.dumps({"query": "extensions.json"})),
-            ToolCall("c2", "read_file", json.dumps({"path": "installer/install_vscode.py"})),
-            ToolCall("c3", "git_status", "{}"),
-        ],
-    )
-
-    commands = commands_from_turn(turn, files_changed=False)
-
-    assert commands[0].user_message == "extensions.json · installer/install_vscode.py · git_status"
-    assert [command.action.description for command in commands] == ["extensions.json", "install_vscode.p", "git_status"]
+    assert [command.call_id for command in commands] == ["c1", "c2"]
+    assert commands[0].text == "Reading the installer"
+    assert [command.action.description for command in commands] == [
+        "reads installer/install.py",
+        'searches for "vsix"',
+    ]
 
 
 def test_argumentless_tools_ask_for_a_purpose_and_drop_it_before_running():
@@ -143,23 +137,43 @@ def test_argumentless_tools_ask_for_a_purpose_and_drop_it_before_running():
     assert "purpose" not in tools["read_file"]["parameters"]["properties"]
 
     turn = NativeTurn("", tool_calls=[ToolCall("c1", "git_status", json.dumps({"purpose": "see what changed"}))])
-    commands = commands_from_turn(turn, files_changed=False)
 
-    assert commands[0].action.args == {}
+    assert _commands(turn)[0].action.args == {}
 
 
-def test_bad_arguments_are_a_validation_error():
+def test_shell_asks_for_a_purpose_that_becomes_its_label():
+    tools = {tool["function"]["name"]: tool["function"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
+
+    assert tools["run_shell"]["parameters"]["required"] == ["command", "purpose"]
+    turn = NativeTurn("", tool_calls=[ToolCall("c1", "run_shell", json.dumps({"command": ["pytest"], "purpose": "run the parser tests"}))])
+
+    (command,) = _commands(turn)
+    assert command.action.args == {"command": ["pytest"]}
+    assert command.action.description == "run the parser tests"
+
+
+def test_bad_arguments_cost_only_their_own_call():
+    calls = calls_from_turn(
+        NativeTurn(
+            "",
+            tool_calls=[
+                ToolCall("c1", "read_file", "{not json"),
+                ToolCall("c2", "read_file", json.dumps({"path": "a.py"})),
+            ],
+        )
+    )
+
+    assert "not valid JSON" in calls[0].error and calls[0].arguments is None
+    assert (calls[1].arguments, calls[1].error) == ({"path": "a.py"}, "")
     with pytest.raises(CommandValidationError):
-        commands_from_turn(NativeTurn("", tool_calls=[ToolCall("c1", "read_file", "{not json")]), files_changed=False)
-    with pytest.raises(CommandValidationError):
-        commands_from_turn(NativeTurn("", tool_calls=[ToolCall("c1", "read_file", "{}")]), files_changed=False)
+        build_command(calls[0], text="", batch_id="b", plan_step="inspect", language="en")
 
 
-def test_text_without_calls_is_a_final_answer():
-    commands = final_answer_from_turn(NativeTurn("Nothing to change: the code already does this."))
-
-    assert commands[0].action.type == "final_answer"
-    assert commands[0].plan_step == "done"
+def test_registry_marks_only_side_effect_free_tools_readonly():
+    assert READONLY_TOOLS == {
+        "read_file", "read_multiple_files", "list_dir", "list_tree",
+        "find_files", "search_code", "web_search", "fetch_url",
+    }
 
 
 def test_compaction_elides_oldest_tool_output_first():
@@ -247,18 +261,20 @@ def test_an_analysis_run_is_not_told_it_only_reads(agent_factory):
     assert all(m["role"] == "tool" for m in state.native_messages)
 
 
-def test_calls_after_a_refused_one_are_answered_not_run(agent_factory):
+def test_a_failed_read_does_not_stop_the_next_one(agent_factory):
     turns = [
         _response("", [_call("c1", "read_file", path="missing.py"), _call("c2", "read_file", path="b.py")]),
         _response("", [_call("c3", "final_answer", message="Stopping.", outcome="incomplete")]),
     ]
     agent = _native_agent(agent_factory, turns)
+    (agent.executor.workspace / "b.py").write_text("B = 2\n", encoding="utf-8")
 
     agent._run_loop("read files", start_step=1)
 
     answers = [m for m in agent.client.requests[-1]["messages"] if m["role"] == "tool"]
     assert [m["tool_call_id"] for m in answers] == ["c1", "c2"]
-    assert answers[1]["content"].startswith("Not executed")
+    assert 'call_id="c1"' in answers[0]["content"] and '"ok": false' in answers[0]["content"]
+    assert 'call_id="c2"' in answers[1]["content"] and "B = 2" in answers[1]["content"]
 
 
 def test_rejected_tools_fall_back_to_the_json_protocol(agent_factory):

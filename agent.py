@@ -96,7 +96,6 @@ from agent_runtime import (
     register_feedback,
     register_final_answer,
     register_language_error,
-    register_parse_error,
     register_safety_refusal,
     render_feedback,
     required_followup_error,
@@ -220,9 +219,7 @@ class LocalAgent:
         # on the first context-budget calculation.
         self._encoding = _TOKEN_ENCODING_UNINITIALIZED
         self._current_step = 0
-        # Perceived-latency pipeline: single in-flight prefetch of the next
-        # step's action call, and the last call's wall-clock (dwell tuning).
-        self._prefetch: dict[str, Any] | None = None
+        # Wall-clock of the last model call (performance log).
         self._last_model_duration = 0.0
         # Last resolved user-facing language for this session; used as the
         # fallback when a new request has no detectable language.
@@ -738,11 +735,8 @@ class LocalAgent:
         path = str(pending.get("path") or "")
         step = int(pending.get("step") or self._current_step or 1)
         command = AgentCommand(
-            thought="[recovered after interruption]",
             plan_step=str(pending.get("plan_step") or "edit"),
-            user_message="[recovered after interruption]",
             action=Action(type=action_type, args={"path": path}),
-            step_summary="",
         )
         feedback = {"ok": True, "action_type": action_type, "data": {"path": path}}
         self._register_feedback(step, command, feedback)
@@ -818,7 +812,6 @@ class LocalAgent:
     _command_language_error = command_language_error
     _feedback_error_for_model = feedback_error_for_model
     _normalize_error_for_model = normalize_error_for_model
-    _register_parse_error = register_parse_error
     _register_language_error = register_language_error
     _register_feedback = register_feedback
     _update_state_from_success = update_state_from_success

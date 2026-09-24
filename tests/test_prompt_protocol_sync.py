@@ -5,7 +5,8 @@ import re
 import pytest
 
 from agent_model import _load_role_prompt
-from parser import ALLOWED_ACTIONS, parse_agent_commands
+from parser import ALLOWED_ACTIONS
+from tests.conftest import commands_from_response
 
 _EXAMPLE_LINE_RE = re.compile(r"^\{\"thought\".*\}$", re.MULTILINE)
 
@@ -53,7 +54,7 @@ def test_prompt_json_examples_pass_parser(role):
     for example in examples:
         # Examples teach the batch form; the single-action form is only tolerated.
         assert '"actions"' in example
-        for command in parse_agent_commands(example):
+        for command in commands_from_response(example):
             assert command.action.type in ALLOWED_ACTIONS
 
 

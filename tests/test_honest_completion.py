@@ -9,7 +9,7 @@ import json
 import pytest
 
 from agent_state import PlanInfo
-from parser import CommandValidationError, parse_agent_commands
+from parser import CommandValidationError, validate_action_args
 from tests.conftest import make_command
 
 _FIX_PLAN = PlanInfo(
@@ -74,16 +74,11 @@ def _fix_agent(agent_factory, **overrides):
 
 
 def test_parser_accepts_finish_outcome_and_rejects_unknown_values():
-    for action_type, args in (
-        ("final_answer", {"message": "Not done: file missing.", "outcome": "incomplete"}),
-        ("report_to_user", {"summary": "s", "result": "r", "outcome": "done"}),
-    ):
-        commands = parse_agent_commands(json.dumps(_step(action_type, args, "done")))
-        assert commands[0].action.args["outcome"] == args["outcome"]
+    validate_action_args("final_answer", {"message": "Not done: file missing.", "outcome": "incomplete"})
+    validate_action_args("report_to_user", {"summary": "s", "result": "r", "outcome": "done"})
 
-    bad = _step("final_answer", {"message": "x", "outcome": "success"}, "done")
     with pytest.raises(CommandValidationError, match="outcome"):
-        parse_agent_commands(json.dumps(bad))
+        validate_action_args("final_answer", {"message": "x", "outcome": "success"})
 
 
 def test_modify_task_with_missing_target_ends_honestly_on_first_final_answer(agent_factory):

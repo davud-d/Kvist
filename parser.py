@@ -7,6 +7,7 @@ import uuid
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from call_labels import call_label, trim_purpose
 from protocol import (
     MAX_SHELL_TIMEOUT_SECONDS,
     MIN_SHELL_TIMEOUT_SECONDS,
@@ -37,11 +38,17 @@ ALLOWED_ACTIONS = {
     "report_to_user",
 }
 
-ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
-
 MAX_BATCH_ACTIONS = 8
 
-_FINISHING_ACTIONS = {"final_answer", "report_to_user"}
+# Not offered to the model since the v2 contract (a response without calls
+# ends the turn), but still honoured when a model prompted with an older
+# schema calls them.
+FINISHING_ACTIONS = frozenset({"final_answer", "report_to_user", "refuse"})
+_WRITE_ACTIONS = frozenset({"write_file", "append_file", "replace_in_file"})
+PURPOSE_KEY = "purpose"
+# run_shell's purpose is its label; git_status/git_diff take a stand-in one
+# (native_tools._PURPOSE) that is dropped unseen.
+_PURPOSE_ACTIONS = frozenset({"run_shell", "git_status", "git_diff"})
 # "incomplete" lets the model end a run it cannot or should not finish
 # without having to claim success.
 FINISH_OUTCOMES = ("done", "incomplete")
@@ -82,109 +89,45 @@ def load_single_json_object(text: str) -> Any:
     raise CommandValidationError(f"Invalid JSON: {last_error}")
 
 
-def parse_agent_commands(text: str) -> list[AgentCommand]:
-    raw = load_single_json_object(text)
+def build_command(
+    call: ToolCallRequest, *, text: str, batch_id: str, plan_step: str, language: str
+) -> AgentCommand:
+    """One call of a response as a runtime command, or CommandValidationError.
 
-    if not isinstance(raw, dict):
-        raise CommandValidationError("Root object must be a JSON object")
-
-    # "progress" is accepted and discarded: the runtime derives progress from the
-    # plan and plan_step, but a model prompted from a cached older schema still
-    # emits the key, and rejecting it would cost a step for nothing. A single
-    # "action" object is the pre-batch form and is accepted for the same reason.
-    require_only_allowed_keys(
-        raw,
-        {"thought", "plan_step", "progress", "user_message", "action", "actions", "step_summary"},
+    A call's ``purpose`` (run_shell's reason, and the stand-in argument of the
+    tools that take none) is taken off before the arguments are checked: the
+    executor never sees it, and only run_shell's reaches the person.
+    """
+    if call.error:
+        raise CommandValidationError(call.error)
+    if call.name not in ALLOWED_ACTIONS:
+        raise CommandValidationError(f"Unknown tool {call.name!r}")
+    args = dict(call.arguments or {})
+    purpose = trim_purpose(args.pop(PURPOSE_KEY, "")) if call.name in _PURPOSE_ACTIONS else ""
+    validate_action_args(call.name, args)
+    return AgentCommand(
+        plan_step=plan_step,
+        action=Action(
+            type=call.name,  # type: ignore[arg-type]
+            args=args,
+            description=call_label(call.name, args, language, purpose),
+        ),
+        text=text,
+        call_id=call.call_id,
+        batch_id=batch_id,
     )
 
-    thought = raw.get("thought")
-    plan_step = raw.get("plan_step")
-    user_message = raw.get("user_message")
-    step_summary = raw.get("step_summary")
 
-    if not isinstance(thought, str) or not thought.strip():
-        raise CommandValidationError("Field 'thought' must be a non-empty string")
-
-    if not isinstance(plan_step, str) or not plan_step.strip():
-        raise CommandValidationError("Field 'plan_step' must be a non-empty string")
-
-    if plan_step.strip() not in ALLOWED_PLAN_STEPS:
-        raise CommandValidationError(
-            "Field 'plan_step' must be one of: inspect, plan, edit, verify, done"
-        )
-
-    if not isinstance(user_message, str) or not user_message.strip():
-        raise CommandValidationError("Field 'user_message' must be a non-empty string")
-
-    if step_summary is not None and not isinstance(step_summary, str):
-        raise CommandValidationError("Field 'step_summary' must be a string")
-
-    actions = [_parse_action(item) for item in _raw_actions(raw)]
-    _validate_batch_order(actions)
-
-    return [
-        AgentCommand(
-            thought=thought.strip(),
-            plan_step=plan_step.strip(),
-            user_message=user_message.strip(),
-            action=action,
-            step_summary=step_summary.strip() if isinstance(step_summary, str) else "",
-        )
-        for action in actions
-    ]
-
-
-def _raw_actions(raw: dict[str, Any]) -> list[Any]:
-    if "action" in raw and "actions" in raw:
-        raise CommandValidationError("Use either 'actions' or 'action', not both")
-    if "action" in raw:
-        return [raw["action"]]
-
-    actions = raw.get("actions")
-    if not isinstance(actions, list) or not actions:
-        raise CommandValidationError("Field 'actions' must be a non-empty list of action objects")
-    # A response cut off by the output-token limit is invalid JSON and loses
-    # every action in it, so a batch is kept short.
-    if len(actions) > MAX_BATCH_ACTIONS:
-        raise CommandValidationError(
-            f"Field 'actions' may hold at most {MAX_BATCH_ACTIONS} actions"
-        )
-    return actions
-
-
-def _parse_action(item: Any) -> Action:
-    if not isinstance(item, dict):
-        raise CommandValidationError("Each action must be an object")
-
-    action_type = item.get("type")
-    args = item.get("args")
-    description = item.get("description", "")
-
-    if action_type not in ALLOWED_ACTIONS:
-        raise CommandValidationError(f"Invalid action.type: {action_type!r}")
-
-    if not isinstance(args, dict):
-        raise CommandValidationError("Field 'action.args' must be an object")
-
-    if not isinstance(description, str):
-        raise CommandValidationError("Field 'action.description' must be a string")
-
-    validate_action_args(str(action_type), args)
-    return Action(type=action_type, args=args, description=description.strip())
-
-
-def _validate_batch_order(actions: list[Action]) -> None:
-    # A terminal action reports on work it has not seen finish when anything
-    # follows it, and a refusal must stop the run before any other action runs.
-    if len(actions) == 1:
-        return
-    types = [action.type for action in actions]
-    if "refuse" in types:
-        raise CommandValidationError("'refuse' must be the only action in a response")
-    if any(action_type in _FINISHING_ACTIONS for action_type in types[:-1]):
-        raise CommandValidationError(
-            "final_answer and report_to_user may only be the last action in 'actions'"
-        )
+def plan_step_for_calls(names: list[str], files_changed: bool) -> str:
+    """The phase a response is in, read from what it calls, never declared by the model."""
+    kinds = set(names)
+    if kinds & FINISHING_ACTIONS:
+        return "done"
+    if kinds & _WRITE_ACTIONS:
+        return "edit"
+    if "run_shell" in kinds and files_changed:
+        return "verify"
+    return "inspect"
 
 
 def validate_action_args(action_type: str, args: dict[str, Any]) -> None:

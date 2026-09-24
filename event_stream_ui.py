@@ -64,6 +64,8 @@ class EventStreamUI:
         self._output_last_emit = 0.0
         self._output_timer: threading.Timer | None = None
         self.output_interval = 0.12
+        # A response's words go out once, on the first step of its batch.
+        self._said_batch = ""
 
     def start_live(self) -> None:
         self._channel.emit(LiveStartEvent())
@@ -143,12 +145,16 @@ class EventStreamUI:
         # (``set_thinking("")``).
         if self._loop_reasoning_reported:
             reasoning_seconds = 0.0
+        text = ""
+        if not command.batch_id or command.batch_id != self._said_batch:
+            self._said_batch = command.batch_id
+            text = command.text
         self._channel.emit(
             StepEvent(
                 step,
                 command.plan_step,
-                redact_text(command.thought),
-                redact_text(command.user_message),
+                "",
+                redact_text(text),
                 str(command.action.type),
                 redact_value(command.action.args),
                 reasoning_seconds,

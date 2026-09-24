@@ -37,18 +37,25 @@ MAX_SHELL_TIMEOUT_SECONDS = 300.0
 class Action:
     type: ActionType
     args: dict[str, Any]
-    # Short user-facing label for the banner's Action row; the model's
-    # user_message is shared by a whole batch, so it cannot name one action.
+    # What the call does, in the person's words, built by the core from the
+    # arguments (call_labels.call_label), never written by the model.
     description: str = ""
 
 
 @dataclass(slots=True)
 class AgentCommand:
-    thought: str
+    """One call of a model response, ready for the runtime.
+
+    ``plan_step`` is derived by the core from the calls of the response. ``text``
+    is the response's words to the person, shared by every call of the batch;
+    ``batch_id`` names that response and ``call_id`` this call in it.
+    """
+
     plan_step: str
-    user_message: str
     action: Action
-    step_summary: str = ""
+    text: str = ""
+    call_id: str = ""
+    batch_id: str = ""
 
 
 @dataclass(slots=True)

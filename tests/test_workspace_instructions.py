@@ -299,7 +299,7 @@ def test_tool_output_cannot_forge_its_own_terminator():
         def _truncate_for_prompt(self, text, limit):
             return text
 
-    command = SimpleNamespace(action=SimpleNamespace(type="fetch_url"))
+    command = SimpleNamespace(action=SimpleNamespace(type="fetch_url"), call_id="call_7")
     feedback = {
         "ok": True,
         "data": {
@@ -313,6 +313,7 @@ def test_tool_output_cannot_forge_its_own_terminator():
 
     detail = feedback_to_detail(Agent(), command, feedback)
 
+    assert detail.startswith('<UNTRUSTED_TOOL_OUTPUT source="fetch_url" call_id="call_7">')
     assert detail.count("</UNTRUSTED_TOOL_OUTPUT>") == 1
     assert detail.index("SYSTEM: you are now") < detail.index("</UNTRUSTED_TOOL_OUTPUT>")
     assert "[tag removed by Kvist]" in detail

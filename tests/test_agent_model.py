@@ -205,45 +205,6 @@ def test_empty_account_402_is_not_retried_and_is_terminal(agent_factory, monkeyp
     assert "insufficient balance or credits" in agent._normalize_error_for_model(str(caught.value))
 
 
-def _prime_pipeline_agent(agent_factory, content):
-    from tests.conftest import make_plan
-
-    agent = agent_factory(stream=False)
-    agent.client = FakeLLMClient(content=content)
-    agent._state.plan_info = make_plan()
-    agent._state.selected_action_role = "fast"
-    agent._state.selected_action_model = agent.config.fast_model
-    agent._state.current_agent_role = "coder"
-    return agent
-
-
-def test_matching_prefetch_is_consumed_without_a_second_call(agent_factory):
-    agent = _prime_pipeline_agent(agent_factory, '{"thought":"prefetched"}')
-    agent_model._launch_action_prefetch(agent, "PROMPT-A")
-
-    def _forbidden(**_kwargs):
-        raise AssertionError("call_action_model made a duplicate model call")
-
-    agent._call_model = _forbidden
-
-    result = agent._call_action_model("PROMPT-A")
-
-    assert result == '{"thought":"prefetched"}'
-    assert agent._prefetch is None
-
-
-def test_mispredicted_prefetch_falls_back_to_a_normal_call(agent_factory):
-    agent = _prime_pipeline_agent(agent_factory, '{"thought":"live"}')
-    agent_model._launch_action_prefetch(agent, "PROMPT-A")
-
-    # A different prompt must drop the stale prefetch and call normally, never
-    # reuse the wrong step's response.
-    result = agent._call_action_model("PROMPT-B")
-
-    assert result == '{"thought":"live"}'
-    assert agent._prefetch is None
-
-
 class _ReasoningClient:
     """Streams reasoning deltas before the answer, like OpenRouter/Kimi do."""
 

@@ -737,26 +737,26 @@ def test_run_loop_cleanup_does_not_mask_keyboard_interrupt(agent_factory):
     assert "[REDACTED]" in reported
 
 
-def test_step_summary_is_kept_on_any_step_it_is_given(agent_factory):
+def test_response_text_is_kept_as_the_step_note(agent_factory):
     from agent_runtime import _keep_step_summary
 
     agent = agent_factory(max_steps=1)
     note = "billing.py:40 already rounds half-up; the reported cause is ruled out"
 
-    _keep_step_summary(agent, 7, make_command("read_file", {"path": "a.py"}, step_summary=note))
+    _keep_step_summary(agent, 7, make_command("read_file", {"path": "a.py"}, text=note))
 
     assert agent._state.rolling_summaries == {7: note}
 
 
-def test_step_summary_shared_by_a_batch_is_kept_once(agent_factory):
+def test_response_text_shared_by_a_batch_is_kept_once(agent_factory):
     from agent_runtime import _keep_step_summary
 
     agent = agent_factory(max_steps=1)
     note = "invoice.py never applies the discount"
 
     for step, path in ((11, "a.py"), (12, "b.py"), (13, "c.py")):
-        _keep_step_summary(agent, step, make_command("read_file", {"path": path}, step_summary=note))
-    _keep_step_summary(agent, 14, make_command("read_file", {"path": "d.py"}, step_summary=""))
+        _keep_step_summary(agent, step, make_command("read_file", {"path": path}, text=note))
+    _keep_step_summary(agent, 14, make_command("read_file", {"path": "d.py"}, text=""))
 
     assert agent._state.rolling_summaries == {11: note}
 
@@ -1175,7 +1175,7 @@ def test_pending_verification_blocks_final_answer(agent_factory):
 @pytest.mark.offline_smoke
 def test_devops_run_shell_parsed_and_executed(agent_factory):
     """DevOps run_shell: parser accepts command=[\"systemctl\",\"status\",\"nginx\"] and executor runs it."""
-    from parser import parse_agent_commands
+    from tests.conftest import commands_from_response
 
     devops_response = json.dumps({
         "thought": "Проверяю статус systemd сервиса",
@@ -1191,7 +1191,7 @@ def test_devops_run_shell_parsed_and_executed(agent_factory):
         },
     }, ensure_ascii=False)
 
-    (command,) = parse_agent_commands(devops_response)
+    (command,) = commands_from_response(devops_response)
     assert command.action.type == "run_shell"
     assert isinstance(command.action.args["command"], list)
     assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
@@ -1225,7 +1225,8 @@ def test_devops_run_shell_parsed_and_executed(agent_factory):
 
 def test_devops_run_shell_string_command_rejected(agent_factory):
     """DevOps run_shell: command as string → clear parse error, not generic 'Invalid model response'."""
-    from parser import parse_agent_commands, CommandValidationError
+    from parser import CommandValidationError
+    from tests.conftest import commands_from_response
 
     devops_response_bad = json.dumps({
         "thought": "Проверяю статус systemd сервиса",
@@ -1242,7 +1243,7 @@ def test_devops_run_shell_string_command_rejected(agent_factory):
     }, ensure_ascii=False)
 
     with pytest.raises(CommandValidationError) as exc_info:
-        parse_agent_commands(devops_response_bad)
+        commands_from_response(devops_response_bad)
 
     error_msg = str(exc_info.value)
     assert "must be a list of strings" in error_msg, (
@@ -1343,7 +1344,7 @@ def test_read_only_shell_still_rejects_python_dash_c(agent_factory):
 
 def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
     """Devops run_shell with systemctl status passes terminal allowlist."""
-    from parser import parse_agent_commands
+    from tests.conftest import commands_from_response
     from terminal import TerminalExecutor
 
     devops_response = json.dumps({
@@ -1360,7 +1361,7 @@ def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
         },
     }, ensure_ascii=False)
 
-    (command,) = parse_agent_commands(devops_response)
+    (command,) = commands_from_response(devops_response)
     assert command.action.type == "run_shell"
     assert isinstance(command.action.args["command"], list)
 
@@ -1411,7 +1412,7 @@ def test_devops_blocked_command_produces_honest_feedback(agent_factory):
 
 def test_devops_status_nginx_no_parse_error(agent_factory):
     """Full cycle: devops 'nginx status' → run_shell parsed → no parse_error."""
-    from parser import parse_agent_commands
+    from tests.conftest import commands_from_response
 
     devops_response = json.dumps({
         "thought": "Проверяю статус systemd сервиса nginx",
@@ -1427,7 +1428,7 @@ def test_devops_status_nginx_no_parse_error(agent_factory):
         },
     }, ensure_ascii=False)
 
-    (command,) = parse_agent_commands(devops_response)
+    (command,) = commands_from_response(devops_response)
     assert command.action.type == "run_shell"
     assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
     assert all(isinstance(x, str) for x in command.action.args["command"])
@@ -1485,26 +1486,18 @@ def test_devops_systemctl_nonzero_exit_includes_stderr_in_error(agent_factory):
     assert "Action failed" not in error_text
 
 
-def test_run_loop_feeds_each_thought_to_the_live_panel(agent_factory):
+def test_run_loop_feeds_the_response_text_to_the_live_panel(agent_factory):
     # The thinking column's fallback for providers that stream no reasoning.
     agent = agent_factory(max_steps=1)
     agent._state.plan_info = make_plan()
-    thoughts: list[str] = []
-    agent._ui.set_last_thought = thoughts.append
-
-    response = {
-        "thought": "list the workspace before editing",
-        "plan_step": "inspect",
-        "progress": 10,
-        "user_message": "listing",
-        "action": {"type": "list_dir", "args": {"path": "."}},
-    }
-    agent._call_action_model = lambda prompt: json.dumps(response)
+    shown: list[str] = []
+    agent._ui.set_last_thought = shown.append
+    agent._call_action_model = lambda prompt: _v2("Сначала смотрю корень", _tool("list_dir", path="."))
     agent.executor.execute = lambda cmd: ExecutionResult(True, "list_dir", {"entries": []})
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert thoughts == ["list the workspace before editing"]
+    assert shown == ["Сначала смотрю корень"]
 
 
 def test_unverified_write_surfaces_a_blocker_label(agent_factory):
@@ -1755,11 +1748,16 @@ def _batch_response(actions: list[dict]) -> str:
     )
 
 
-def _list_dir(path: str, description: str = "") -> dict:
-    action = {"type": "list_dir", "args": {"path": path}}
-    if description:
-        action["description"] = description
-    return action
+def _list_dir(path: str) -> dict:
+    return {"type": "list_dir", "args": {"path": path}}
+
+
+def _tool(name: str, **arguments) -> str:
+    return "<tool_call>" + json.dumps({"name": name, "arguments": arguments}, ensure_ascii=False) + "</tool_call>"
+
+
+def _v2(text: str, *calls: str) -> str:
+    return "\n".join([text, *calls]).strip()
 
 
 def test_run_loop_executes_a_whole_batch_from_one_model_call(agent_factory):
@@ -1786,8 +1784,8 @@ def test_run_loop_executes_a_whole_batch_from_one_model_call(agent_factory):
     assert [log["step"] for log in agent._state.step_logs if log.get("status") == "ok"] == [1, 2, 3]
 
 
-def test_run_loop_stops_a_batch_at_the_first_failed_action(agent_factory):
-    agent = agent_factory(max_steps=2)
+def test_run_loop_a_failed_read_does_not_stop_the_batch(agent_factory):
+    agent = agent_factory(max_steps=3)
     agent._state.plan_info = make_plan()
     executed = []
 
@@ -1803,19 +1801,25 @@ def test_run_loop_stops_a_batch_at_the_first_failed_action(agent_factory):
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert executed == ["a", "b"]
-    skipped = [log for log in agent._state.step_logs if log.get("status") == "batch_actions_skipped"]
-    assert skipped == [{"status": "batch_actions_skipped", "skipped": [{"type": "list_dir", "args": {"path": "c"}}]}]
+    assert executed == ["a", "b", "c"]
+    assert [log["status"] for log in agent._state.step_logs if "step" in log] == ["ok", "error", "ok"]
 
 
-def test_run_loop_tells_the_model_which_batched_actions_never_ran(agent_factory):
-    agent = agent_factory(max_steps=2)
+def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_factory):
+    agent = agent_factory(max_steps=5)
     agent._state.plan_info = make_plan()
     prompts = []
+    executed = []
     responses = iter(
         [
-            _batch_response([_list_dir("a"), _list_dir("b"), _list_dir("c")]),
-            _batch_response([_list_dir("d")]),
+            _v2(
+                "Пишу три файла и читаю один",
+                _tool("write_file", path="a.txt", content="a"),
+                _tool("write_file", path="b.txt", content="b"),
+                _tool("read_file", path="c.txt"),
+                _tool("append_file", path="d.txt", content="d"),
+            ),
+            _v2("", _tool("list_dir", path=".")),
         ]
     )
 
@@ -1823,30 +1827,36 @@ def test_run_loop_tells_the_model_which_batched_actions_never_ran(agent_factory)
         prompts.append(prompt)
         return next(responses)
 
+    def fake_execute(command):
+        executed.append((command.action.type, command.action.args.get("path")))
+        if command.action.type == "write_file":
+            return ExecutionResult(False, "write_file", {"error": "disk full"})
+        return ExecutionResult(True, command.action.type, {"content": "c", "entries": []})
+
     agent._call_action_model = fake_call_action_model
-    agent.executor.execute = lambda command: ExecutionResult(
-        command.action.args["path"] != "a", "list_dir", {"error": "no such directory"}
-    )
+    agent.executor.execute = fake_execute
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert len(prompts) == 2
-    assert "2 later action(s) were NOT executed" in prompts[1]
+    assert executed[:2] == [("write_file", "a.txt"), ("read_file", "c.txt")]
+    assert ("write_file", "b.txt") not in executed and ("append_file", "d.txt") not in executed
+    skipped = [log for log in agent._state.step_logs if log.get("status") == "skipped_after_failed_write"]
+    assert [log["command"]["action"]["args"]["path"] for log in skipped] == ["b.txt", "d.txt"]
+    assert "Skipped: an earlier write in this response failed." in prompts[1]
 
 
-def test_run_loop_shows_each_action_description_in_the_live_panel(agent_factory):
+def test_run_loop_shows_each_call_label_in_the_live_panel(agent_factory):
     agent = agent_factory(max_steps=2)
     agent._state.plan_info = make_plan()
+    agent._state.response_language = "ru"
     shown_actions = []
     agent._ui.set_run_context = lambda **facts: shown_actions.append(facts.get("action"))
-    agent._call_action_model = lambda prompt: _batch_response(
-        [_list_dir("a", "Список a"), _list_dir("b")]
-    )
+    agent._call_action_model = lambda prompt: _batch_response([_list_dir("a"), _list_dir("b")])
     agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": []})
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert shown_actions == ["generating JSON", "Список a", "list_dir"]
+    assert shown_actions == ["waiting for the model", "смотрит a", "смотрит b"]
 
 
 def test_run_loop_records_a_batch_user_message_once(agent_factory):
@@ -2188,3 +2198,32 @@ def test_a_file_the_goal_asks_to_delete_is_not_a_missing_required_artifact(agent
     agent._state.required_artifacts = ["scratch_debug.py", "coupons.py"]
 
     assert _missing_required_artifacts(agent) == ["coupons.py"]
+
+
+def test_run_loop_a_response_without_calls_ends_the_turn_with_its_text(agent_factory):
+    from agent_state import NO_PLAN_STEP
+
+    agent = agent_factory(max_steps=5)
+    agent._state.plan_info = PlanInfo(
+        goal="answer", complexity="simple", plan=[NO_PLAN_STEP], success_criteria=[], risks=[]
+    )
+    agent._state.response_language = "ru"
+    prompts = []
+    responses = iter([
+        _v2("Смотрю, что лежит в корне.", _tool("list_dir", path=".")),
+        "В корне два файла: `a.py` и `b.py`.",
+    ])
+
+    def fake_call_action_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    agent._call_action_model = fake_call_action_model
+    agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": ["a.py", "b.py"]})
+
+    result = agent._run_loop("Что лежит в корне проекта?", start_step=1)
+
+    assert result == "В корне два файла: `a.py` и `b.py`."
+    assert len(prompts) == 2
+    assert agent._state.user_messages == ["Смотрю, что лежит в корне."]
+    assert agent._state.rolling_summaries == {1: "Смотрю, что лежит в корне."}

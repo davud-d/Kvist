@@ -527,8 +527,8 @@ class TerminalBannerUI:
         print(f"Stage: {sanitize_display_text(str(command.plan_step))}")
         if reasoning_seconds > 0:
             print(f"Thought for {reasoning_seconds:.0f}s")
-        print(f"Thought: {sanitize_display_text(str(command.thought))}")
-        print(f"Message: {sanitize_display_text(str(command.user_message))}")
+        if command.text:
+            print(f"Message: {sanitize_display_text(str(command.text))}")
         print(
             f"Action: {command.action.type} "
             f"{redact_value(command.action.args)}"

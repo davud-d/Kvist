@@ -102,11 +102,10 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
 }
 
 # Direct official-API providers (OpenAI, Anthropic, DeepSeek) are reached
-# straight at the vendor endpoint and answer fast, so every artificial
-# mechanism is pure overhead for them: no request pacing and no
-# perceived-latency prefetch pipeline — clean sequential speed. Relay and
-# aggregator providers (OpenRouter, FreeFlow, OmniRoute, custom endpoints)
-# keep the paced defaults for rate-limit politeness.
+# straight at the vendor endpoint and answer fast, so request pacing is pure
+# overhead for them. Relay and aggregator providers (OpenRouter, FreeFlow,
+# OmniRoute, custom endpoints) keep the paced defaults for rate-limit
+# politeness.
 _FAST_DIRECT_PROVIDERS: frozenset[str] = frozenset(
     {OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER}
 )
@@ -165,165 +164,6 @@ def _throttle_request_rate(self) -> None:
             time.sleep(remaining)
             now = time.monotonic()
     self._last_request_start_ts = now
-
-
-# ── Perceived-latency pipeline ───────────────────────────────────────────────
-# While the current step is on screen, the *next* step's action call is computed
-# off the main loop so it is ready (or nearly so) when the loop asks for it. Only
-# the pure LLM call runs ahead — never the executor — so journaling, checkpoints,
-# and crash-consistency are untouched. Correctness is guaranteed because a
-# prefetched response is used only when its prompt and model match exactly what
-# the foreground would send anyway; any mismatch is discarded and re-called.
-_PIPELINE_DWELL_MIN = 0.5
-_PIPELINE_DWELL_CAP = 2.5
-
-
-def _pipeline_allowed(self) -> bool:
-    """Whether the perceived-latency prefetch pipeline may run for this run.
-
-    Fast direct providers (OpenAI, Anthropic, DeepSeek) never pipeline: they
-    run strictly sequential, with no next step computed in the background —
-    clean speed. The pipeline is also off in verbose mode, whose debug stream
-    must stay strictly sequential, and whenever request pacing is disabled
-    (tests, ``api_request_interval=0``).
-    """
-    if self.config.verbose:
-        return False
-    provider = getattr(self.config, "provider", "")
-    if provider in _FAST_DIRECT_PROVIDERS:
-        return False
-    return _get_api_interval(self) > 0
-
-
-def _speculative_action_call(
-    self, prompt: str, model: str, system_prompt: str
-) -> tuple[str, int, int, float]:
-    """Compute one action-model response off the main loop, side-effect free.
-
-    Touches none of the shared per-call state (``self._last_*``, usage, perf
-    logs): the foreground step emits usage when it consumes the result, so
-    accounting stays attributed to the right step. Returns
-    ``(content, input_tokens, output_tokens, duration)``.
-    """
-    trimmed = self._trim_prompt_to_token_limit(system_prompt, prompt)
-    messages: list[ChatCompletionMessageParam] = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": trimmed},
-    ]
-    messages = trim_history(messages, max_recent=4)
-    input_tokens = self._count_tokens(system_prompt) + self._count_tokens(trimmed)
-
-    _throttle_request_rate(self)
-    started = time.monotonic()
-    response = self._create_json_completion(model=model, messages=messages)
-    content = safe_extract_completion_content(response, self.config.provider, model)
-    duration = time.monotonic() - started
-    if not content:
-        raise RuntimeError("Model returned an empty response")
-    return content, input_tokens, self._count_tokens(content), duration
-
-
-def _launch_action_prefetch(self, prompt: str) -> None:
-    """Start computing *prompt*'s action response in a daemon thread.
-
-    At most one prefetch is in flight: a still-running worker is left alone; a
-    finished-but-unconsumed one (a prior mispredict) is dropped first. The
-    consuming side guarantees a single request is ever active by joining a stale
-    worker before falling back to a normal call.
-    """
-    import threading
-
-    holder = getattr(self, "_prefetch", None)
-    if holder is not None:
-        if holder["thread"].is_alive():
-            return
-        self._prefetch = None
-
-    model = str(getattr(self._state, "selected_action_model", "")).strip()
-    if not model:
-        return
-    system_prompt = build_role_system_prompt(
-        self, getattr(self._state, "current_agent_role", "coder")
-    )
-    holder = {
-        "prompt": prompt,
-        "model": model,
-        "content": None,
-        "error": None,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "duration": 0.0,
-    }
-
-    def _worker() -> None:
-        try:
-            content, input_tokens, output_tokens, duration = _speculative_action_call(
-                self, prompt, model, system_prompt
-            )
-            holder["content"] = content
-            holder["input_tokens"] = input_tokens
-            holder["output_tokens"] = output_tokens
-            holder["duration"] = duration
-        except Exception as error:
-            holder["error"] = error
-
-    thread = threading.Thread(target=_worker, name="kvist-prefetch", daemon=True)
-    holder["thread"] = thread
-    self._prefetch = holder
-    thread.start()
-
-
-def _consume_action_prefetch(self, prompt: str, model: str) -> str | None:
-    """Return a matching prefetched response, or ``None`` to call normally.
-
-    A mismatch joins and drops the stale worker so at most one API request is
-    ever in flight (a rare mispredict may briefly stall here — acceptable). A
-    prefetch that errored also returns ``None`` so the foreground retries.
-    """
-    holder = getattr(self, "_prefetch", None)
-    if holder is None:
-        return None
-    self._prefetch = None
-    holder["thread"].join()
-    if holder["prompt"] != prompt or holder["model"] != model or holder["error"] is not None:
-        return None
-    _emit_usage(
-        self,
-        model=model,
-        input_tokens=holder["input_tokens"],
-        output_tokens=holder["output_tokens"],
-        kind="step",
-        duration_seconds=holder["duration"],
-    )
-    self._last_reasoning_seconds = 0.0
-    self._last_model_duration = holder["duration"]
-    # The prefetch is a non-streaming call, so it produced no reasoning: drop
-    # the previous step's thinking instead of leaving it on the live panel.
-    _note_thinking(self, "")
-    return holder["content"]
-
-
-def _pipeline_dwell_seconds(self) -> float:
-    """On-screen dwell for the current step ≈ last model latency, clamped.
-
-    Matching the dwell to the last call's duration means the prefetched next
-    step is usually ready exactly as the dwell ends, so the pipeline adds no net
-    wall-clock: latency that used to be a dead spinner is spent reading the
-    current step instead.
-    """
-    last = float(getattr(self, "_last_model_duration", 0.0) or 0.0)
-    return max(_PIPELINE_DWELL_MIN, min(last, _PIPELINE_DWELL_CAP))
-
-
-def _join_pending_prefetch(self) -> None:
-    """Wait out any in-flight prefetch so no worker thread outlives the run."""
-    holder = getattr(self, "_prefetch", None)
-    if holder is None:
-        return
-    thread = holder.get("thread")
-    if thread is not None:
-        thread.join(timeout=self.config.api_timeout)
-    self._prefetch = None
 
 
 def _format_llm_error(error: Exception, provider: str | None = None) -> str:
@@ -612,13 +452,6 @@ def resolve_action_model(self) -> str:
 
 def call_action_model(self, prompt: str) -> str:
     preferred_model = resolve_action_model(self)
-
-    # Consume a pipeline prefetch computed while the previous step was on screen,
-    # but only when it matches this exact prompt+model; otherwise call normally.
-    prefetched = _consume_action_prefetch(self, prompt, preferred_model)
-    if prefetched is not None:
-        return prefetched
-
     role = getattr(self._state, "current_agent_role", "coder")
     system_prompt = build_role_system_prompt(self, role)
     self._retries_exhausted = False
@@ -629,6 +462,7 @@ def call_action_model(self, prompt: str) -> str:
             system_prompt=system_prompt,
             user_prompt=prompt,
             usage_kind="step",
+            json_mode=False,
         )
     except RunCancelled:
         # Not a model error: don't mark retries exhausted, just propagate.
@@ -1048,7 +882,11 @@ def call_model(
     user_prompt: str,
     *,
     usage_kind: str = "model",
+    json_mode: bool = True,
 ) -> str:
+    """One model call. ``json_mode`` asks a provider that supports it for a
+    JSON object; the action loop turns it off, since a v2 response is text
+    with <tool_call> blocks, which JSON mode would make impossible."""
     trimmed_prompt = self._trim_prompt_to_token_limit(system_prompt, user_prompt)
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
@@ -1102,11 +940,12 @@ def call_model(
             request_start = time.monotonic()
             try:
                 if self.config.stream:
-                    content = self._call_model_streaming(current_model, messages)
+                    content = self._call_model_streaming(current_model, messages, json_mode)
                 else:
                     response = self._create_json_completion(
                         model=current_model,
                         messages=messages,
+                        json_mode=json_mode,
                     )
                     content = safe_extract_completion_content(
                         response, self.config.provider, current_model
@@ -1244,6 +1083,7 @@ def call_model_streaming(
     self,
     model: str,
     messages: list[ChatCompletionMessageParam],
+    json_mode: bool = True,
 ) -> str:
     # A new call owns the thinking column: drop the previous step's reasoning
     # so a provider that streams none does not leave stale text on screen. The
@@ -1254,11 +1094,12 @@ def call_model_streaming(
         model=model,
         messages=messages,
         stream=True,
+        json_mode=json_mode,
     )
     chunks: list[str] = []
     reasoning_chunks: list[str] = []
     last_reasoning_push = 0.0
-    thought_shown = False
+    preview_shown = False
     first_token_time: float | None = None
     reasoning_start_time: float | None = None
     reasoning_end_time: float | None = None
@@ -1297,10 +1138,10 @@ def call_model_streaming(
                 total_chunk_bytes += len(delta.content)
                 chunks.append(delta.content)
                 renderer.feed(delta.content)
-                if self.config.verbose and not thought_shown:
+                if self.config.verbose and not preview_shown:
                     rendered = renderer.maybe_render()
-                    if rendered and '"thought"' in rendered and len(rendered) > 80:
-                        thought_shown = True
+                    if rendered and len(rendered) > 80:
+                        preview_shown = True
                         print(f"  [streaming] {rendered[:120]}...", flush=True)
     finally:
         # An abandoned HTTP stream would otherwise hold its connection open;
@@ -1314,9 +1155,9 @@ def call_model_streaming(
                     f"Action stream close failed: {redact_text(str(error))}"
                 )
     # flush any remaining buffered output
-    if self.config.verbose and not thought_shown:
+    if self.config.verbose and not preview_shown:
         leftover = renderer.flush()
-        if leftover and '"thought"' in leftover and len(leftover) > 80:
+        if leftover and len(leftover) > 80:
             print(f"  [streaming] {leftover[:120]}...", flush=True)
     stream_end = time.monotonic()
     stream_duration = stream_end - stream_start

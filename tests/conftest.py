@@ -230,14 +230,20 @@ def agent_factory(tmp_path):
     return build
 
 
-def make_command(action_type: str, args: dict, plan_step: str = "inspect", step_summary: str = "") -> AgentCommand:
-    return AgentCommand(
-        thought="Inspecting current state",
-        plan_step=plan_step,
-        user_message="Working on the task",
-        action=Action(type=action_type, args=args),
-        step_summary=step_summary,
-    )
+def commands_from_response(text: str, language: str = "en") -> list[AgentCommand]:
+    """A response read the way the runtime reads it; raises on the first call it would refuse."""
+    from parser import build_command, parse_model_response, plan_step_for_calls
+
+    response = parse_model_response(text)
+    plan_step = plan_step_for_calls([call.name for call in response.calls], False)
+    return [
+        build_command(call, text=response.text, batch_id="batch", plan_step=plan_step, language=language)
+        for call in response.calls
+    ]
+
+
+def make_command(action_type: str, args: dict, plan_step: str = "inspect", text: str = "") -> AgentCommand:
+    return AgentCommand(plan_step=plan_step, action=Action(type=action_type, args=args), text=text)
 
 
 def make_plan() -> PlanInfo:

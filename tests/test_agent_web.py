@@ -4,13 +4,8 @@ from agent_state import RunState
 from protocol import Action, AgentCommand
 
 
-def make_web_command(query: str, thought: str = "Need current SDK docs"):
-    return AgentCommand(
-        thought=thought,
-        plan_step="inspect",
-        user_message="Searching docs",
-        action=Action(type="web_search", args={"query": query}),
-    )
+def make_web_command(query: str, text: str = "Need current SDK docs"):
+    return AgentCommand(plan_step="inspect", action=Action(type="web_search", args={"query": query}), text=text)
 
 
 def test_web_topic_detection_and_package_token(agent_factory):
@@ -44,17 +39,12 @@ def test_prepare_web_search_rejects_non_web_topic(agent_factory):
 
 def test_fetch_url_defaults_and_fact_summaries(agent_factory):
     agent = agent_factory()
-    command = AgentCommand(
-        thought="Read docs",
-        plan_step="inspect",
-        user_message="Reading URL",
-        action=Action(type="fetch_url", args={"url": "https://docs.python.org/3/"}),
-    )
+    command = AgentCommand(plan_step="inspect", action=Action(type="fetch_url", args={"url": "https://docs.python.org/3/"}))
 
     assert agent._prepare_fetch_url_command(command) is None
     assert command.action.args["max_chars"] == 12000
     assert agent._prepare_fetch_url_command(
-        AgentCommand("x", "inspect", "x", Action("fetch_url", {"url": "ftp://x"}))
+        AgentCommand("inspect", Action("fetch_url", {"url": "ftp://x"}))
     ).startswith("fetch_url only")
     assert agent._extract_version_token(">=1.2.3,<2") == "1.2.3"
     assert agent._summarize_search_results([{"title": "A"}, {"title": "B"}, {"title": ""}, {"title": "C"}]) == "A; B; C"

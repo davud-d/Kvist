@@ -6,22 +6,18 @@ import pytest
 
 from parser import (
     CommandValidationError,
-    MAX_BATCH_ACTIONS,
+    build_command,
     load_single_json_object,
-    parse_agent_commands,
     parse_model_response,
+    plan_step_for_calls,
     validate_action_args,
 )
+from protocol import ToolCallRequest
 
 
-def valid_payload(action_type: str = "final_answer", args: dict | None = None) -> dict:
-    return {
-        "thought": "I will do the next step",
-        "plan_step": "done" if action_type == "final_answer" else "inspect",
-        "progress": 50,
-        "user_message": "Working on it",
-        "action": {"type": action_type, "args": args or {"message": "Done"}},
-    }
+def command_for(name: str, arguments: dict | None, *, text: str = "", language: str = "en"):
+    call = ToolCallRequest(call_id="call_1", name=name, arguments=arguments)
+    return build_command(call, text=text, batch_id="batch_1", plan_step="inspect", language=language)
 
 
 def test_load_single_json_object_accepts_fenced_json_and_trailing_commas():
@@ -39,37 +35,62 @@ def test_load_single_json_object_rejects_missing_json():
         load_single_json_object("no json here")
 
 
-def test_parse_agent_command_returns_typed_command():
-    (command,) = parse_agent_commands(
-        '{"thought":"Think","plan_step":"inspect","progress":10,'
-        '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}}}'
-    )
+def test_build_command_returns_a_typed_command_carrying_the_batch():
+    command = command_for("read_file", {"path": "ui.py"}, text="Читаю ui.py")
 
     assert command.action.type == "read_file"
-    assert command.action.args["path"] == "ui.py"
-
-
-def test_parse_agent_command_ignores_a_declared_progress():
-    """The runtime derives progress; a model still emitting one must not cost a step."""
-    (command,) = parse_agent_commands(json.dumps({**valid_payload(), "progress": 101}))
-    assert command.action.type == "final_answer"
-    assert not hasattr(command, "progress")
+    assert command.action.args == {"path": "ui.py"}
+    assert (command.text, command.call_id, command.batch_id) == ("Читаю ui.py", "call_1", "batch_1")
+    assert command.action.description == "reads ui.py"
+    assert not hasattr(command, "thought") and not hasattr(command, "user_message")
 
 
 @pytest.mark.parametrize(
-    "payload,error",
+    "name,arguments,error",
     [
-        ({**valid_payload(), "extra": 1}, "Extra fields"),
-        ({**valid_payload(), "thought": ""}, "thought"),
-        ({**valid_payload(), "plan_step": "unknown"}, "plan_step"),
-        ({**valid_payload(), "action": {"type": "missing", "args": {}}}, "Invalid action"),
+        ("missing", {}, "Unknown tool"),
+        ("read_file", {}, "Missing required fields"),
+        ("read_file", {"path": "a", "extra": 1}, "Extra fields"),
     ],
 )
-def test_parse_agent_command_rejects_invalid_root_schema(payload, error):
-    import json
-
+def test_build_command_rejects_an_invalid_call(name, arguments, error):
     with pytest.raises(CommandValidationError, match=error):
-        parse_agent_commands(json.dumps(payload))
+        command_for(name, arguments)
+
+
+def test_build_command_passes_on_a_call_that_could_not_be_read():
+    call = ToolCallRequest(call_id="c", name="read_file", arguments=None, error="Tool call 1 was not run: invalid JSON.")
+    with pytest.raises(CommandValidationError, match="invalid JSON"):
+        build_command(call, text="", batch_id="b", plan_step="inspect", language="en")
+
+
+def test_shell_purpose_becomes_the_label_and_never_reaches_the_executor():
+    command = command_for(
+        "run_shell",
+        {"command": ["pytest", "-q"], "purpose": "гоняю тесты парсера перед правкой, чтобы видеть исходное состояние прямо сейчас"},
+        language="ru",
+    )
+
+    assert "purpose" not in command.action.args
+    assert command.action.description == "гоняю тесты парсера перед правкой, чтобы видеть исходное состояние прямо"
+
+
+def test_shell_without_purpose_is_labelled_by_its_command():
+    assert command_for("run_shell", {"command": ["ls"]}, language="ru").action.description == "запускает ls"
+
+
+@pytest.mark.parametrize(
+    "names,files_changed,expected",
+    [
+        (["read_file", "search_code"], False, "inspect"),
+        (["read_file", "replace_in_file"], False, "edit"),
+        (["run_shell"], True, "verify"),
+        (["run_shell"], False, "inspect"),
+        (["refuse"], False, "done"),
+    ],
+)
+def test_plan_step_is_derived_from_the_calls(names, files_changed, expected):
+    assert plan_step_for_calls(names, files_changed) == expected
 
 
 @pytest.mark.parametrize(
@@ -131,143 +152,18 @@ def test_run_shell_timeout_is_clamped_not_rejected(given, expected):
     assert args["timeout"] == expected
 
 
-def test_parse_agent_commands_clamps_out_of_range_timeout():
-    (command,) = parse_agent_commands(
-        '{"thought":"Run the tests","plan_step":"verify","user_message":"Testing",'
-        '"action":{"type":"run_shell","args":{"command":["pytest"],"timeout":600}}}'
-    )
-    assert command.action.args["timeout"] == 300.0
-
-
-def test_parse_agent_command_accepts_optional_step_summary():
-    (command,) = parse_agent_commands(
-        '{"thought":"Think","plan_step":"inspect","progress":10,'
-        '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}},'
-        '"step_summary":"Read ui.py, found auth bug on line 42"}'
-    )
-    assert command.step_summary == "Read ui.py, found auth bug on line 42"
-
-
-def test_parse_agent_command_accepts_missing_step_summary():
-    (command,) = parse_agent_commands(
-        '{"thought":"Think","plan_step":"inspect","progress":10,'
-        '"user_message":"Reading","action":{"type":"read_file","args":{"path":"ui.py"}}}'
-    )
-    assert command.step_summary == ""
-
-
-def test_parse_agent_command_rejects_non_string_step_summary():
-    import json
-
-    payload = {**valid_payload("read_file", {"path": "ui.py"}), "step_summary": 123}
-    with pytest.raises(CommandValidationError, match="step_summary"):
-        parse_agent_commands(json.dumps(payload))
+def test_build_command_clamps_out_of_range_timeout():
+    assert command_for("run_shell", {"command": ["pytest"], "timeout": 600}).action.args["timeout"] == 300.0
 
 
 def test_devops_run_shell_accepts_list_command():
-    """DevOps run_shell: parser must accept command as list[str]."""
-    payload = {
-        "thought": "Проверяю статус systemd сервиса",
-        "plan_step": "edit",
-        "progress": 60,
-        "user_message": "Проверяю статус nginx",
-        "action": {
-            "type": "run_shell",
-            "args": {
-                "command": ["systemctl", "status", "nginx", "--no-pager"],
-                "timeout": 15,
-            },
-        },
-    }
-    import json
-    (command,) = parse_agent_commands(json.dumps(payload))
-    assert command.action.type == "run_shell"
+    command = command_for("run_shell", {"command": ["systemctl", "status", "nginx", "--no-pager"], "timeout": 15})
     assert command.action.args["command"] == ["systemctl", "status", "nginx", "--no-pager"]
-    assert isinstance(command.action.args["command"], list)
-    assert all(isinstance(x, str) for x in command.action.args["command"])
 
 
 def test_devops_run_shell_rejects_string_command_with_clear_error():
-    """DevOps run_shell: if command is a string, the error message must mention 'list of strings'."""
-    payload = {
-        "thought": "Проверяю статус systemd сервиса",
-        "plan_step": "edit",
-        "progress": 60,
-        "user_message": "Проверяю статус nginx",
-        "action": {
-            "type": "run_shell",
-            "args": {
-                "command": "systemctl status nginx --no-pager",
-                "timeout": 15,
-            },
-        },
-    }
-    import json
     with pytest.raises(CommandValidationError, match="must be a list of strings"):
-        parse_agent_commands(json.dumps(payload))
-
-
-def batch_payload(actions: list[dict]) -> dict:
-    return {
-        "thought": "Both inputs are known",
-        "plan_step": "edit",
-        "user_message": "Creating the files",
-        "actions": actions,
-    }
-
-
-def test_parse_agent_commands_expands_a_batch_in_order_with_shared_fields():
-    commands = parse_agent_commands(
-        json.dumps(
-            batch_payload(
-                [
-                    {"type": "write_file", "args": {"path": "a.txt", "content": "a"}, "description": "Create a.txt"},
-                    {"type": "write_file", "args": {"path": "b.txt", "content": "b"}},
-                ]
-            )
-        )
-    )
-
-    assert [command.action.args["path"] for command in commands] == ["a.txt", "b.txt"]
-    assert [command.action.description for command in commands] == ["Create a.txt", ""]
-    assert {command.user_message for command in commands} == {"Creating the files"}
-
-
-@pytest.mark.parametrize(
-    "payload,error",
-    [
-        (batch_payload([]), "non-empty list"),
-        (batch_payload([{"type": "list_dir", "args": {"path": "."}}] * (MAX_BATCH_ACTIONS + 1)), "at most"),
-        ({**batch_payload([{"type": "list_dir", "args": {"path": "."}}]), "action": {"type": "list_dir", "args": {"path": "."}}}, "not both"),
-        (batch_payload([{"type": "list_dir", "args": {"path": "."}, "description": 3}]), "description"),
-        (batch_payload(["list_dir"]), "must be an object"),
-        (
-            batch_payload([{"type": "final_answer", "args": {"message": "done"}}, {"type": "list_dir", "args": {"path": "."}}]),
-            "only be the last",
-        ),
-        (
-            batch_payload([{"type": "list_dir", "args": {"path": "."}}, {"type": "refuse", "args": {"reason": "no"}}]),
-            "only action",
-        ),
-    ],
-)
-def test_parse_agent_commands_rejects_malformed_batches(payload, error):
-    with pytest.raises(CommandValidationError, match=error):
-        parse_agent_commands(json.dumps(payload))
-
-
-def test_parse_agent_commands_accepts_a_terminal_action_closing_the_batch():
-    commands = parse_agent_commands(
-        json.dumps(
-            batch_payload(
-                [
-                    {"type": "list_dir", "args": {"path": "."}},
-                    {"type": "final_answer", "args": {"message": "done"}},
-                ]
-            )
-        )
-    )
-    assert [command.action.type for command in commands] == ["list_dir", "final_answer"]
+        command_for("run_shell", {"command": "systemctl status nginx --no-pager", "timeout": 15})
 
 
 # --- v2 response: text plus <tool_call> blocks --------------------------------
