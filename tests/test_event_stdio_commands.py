@@ -491,11 +491,24 @@ def test_changes_reports_an_empty_journal(home, agent_factory):
     assert result.ok and isinstance(result.message, str)
 
 
+def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
+    agent = agent_factory()
+    result, _, _ = _run_handler("bug", agent, args=["crashed", "on", "save"])
+
+    assert result.ok
+    saved_path = home / ".kvist" / "bug-reports"
+    assert saved_path.is_dir()
+    reports = [p for p in saved_path.iterdir() if not p.name.startswith(".")]
+    assert len(reports) == 1
+    assert "crashed on save" in reports[0].read_text(encoding="utf-8")
+    assert str(reports[0]) in result.message
+
+
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "plan", "verbose", "style", "session", "new", "models", "changes",
         "provider", "change-api", "del-provider", "full-reset", "settings-api", "strime",
-        "revert",
+        "revert", "bug",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)

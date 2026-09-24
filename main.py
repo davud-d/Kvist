@@ -3229,6 +3229,27 @@ def _stdio_changes(ctx: CommandContext) -> CommandResult:
     return CommandResult(True, report)
 
 
+def _stdio_bug(ctx: CommandContext) -> CommandResult:
+    from bug_report import save_bug_report
+    from durable_json import JsonStorageError
+
+    user_text = " ".join(ctx.args)
+    try:
+        path = save_bug_report(
+            ctx.session.agent,
+            frontend="stdio",
+            routed_role=ctx.routed_role,
+            user_text=user_text,
+        )
+    except (JsonStorageError, OSError, ValueError) as error:
+        return CommandResult(False, _failure_detail(error))
+    return CommandResult(
+        True,
+        _bi(f"Bug report saved to {path}", f"Отчёт об ошибке сохранён: {path}"),
+        {"path": str(path)},
+    )
+
+
 def _adopt_rebuilt_agent(ctx: CommandContext, **rebuild_kwargs) -> tuple[AgentConfig, list[str]]:
     """Rebuild through the event stream, so a missing secret becomes a dialog."""
     new_agent, new_config, warnings = ctx.rebuild(interactive=True, **rebuild_kwargs)
@@ -3579,6 +3600,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "settings-api": _stdio_settings_api,
     "strime": _stdio_strime,
     "revert": _stdio_revert,
+    "bug": _stdio_bug,
 }
 
 
@@ -4380,6 +4402,26 @@ def main() -> None:
                 else:
                     console.clear()
                 render_new_session_notice(started)
+                continue
+
+            if user_goal.lower() == "/bug" or user_goal.lower().startswith("/bug "):
+                from bug_report import save_bug_report
+                from durable_json import JsonStorageError
+
+                user_text = user_goal[len("/bug"):].strip()
+                try:
+                    report_path = save_bug_report(
+                        agent, frontend="terminal", user_text=user_text
+                    )
+                except (JsonStorageError, OSError, ValueError) as error:
+                    console.print(
+                        _display_text(
+                            f"Bug report failed safely: {sanitize_display_text(str(error))}",
+                            "red",
+                        )
+                    )
+                    continue
+                console.print(_display_text(f"Bug report saved to {report_path}", "green"))
                 continue
 
             if user_goal.lower() == "/changes":

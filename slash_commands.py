@@ -56,6 +56,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("plan", "Enable or disable the planning stage"),
     SlashCommand("changes", "Show agent file changes across all sessions"),
     SlashCommand("revert", "Restore agent-changed files to their baselines"),
+    SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
     SlashCommand(
         "del-provider",
