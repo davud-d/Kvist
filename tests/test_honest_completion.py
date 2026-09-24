@@ -125,33 +125,69 @@ def test_incomplete_report_skips_gates_and_tells_the_reporter(agent_factory, mon
     assert agent._state.run_status == "blocked"
 
 
-def test_done_claim_without_changes_on_modify_task_is_still_blocked(agent_factory):
+def test_done_claim_without_changes_is_refused_then_taken_as_not_done(agent_factory):
     agent = _fix_agent(agent_factory, max_steps=4)
     (agent.executor.workspace / "src").mkdir()
     (agent.executor.workspace / "src" / "payment.py").write_text("x = 1\n", encoding="utf-8")
-    _script(agent, [
+    prompts = _script(agent, [
         _step("read_file", {"path": "src/payment.py"}),
         _step("final_answer", {"message": "Fixed.", "outcome": "done"}, "done"),
         _step("final_answer", {"message": "Fixed, really."}, "done"),
-        _step("final_answer", {"message": "I did not change anything.", "outcome": "incomplete"}, "done"),
     ])
 
     result = agent._run_loop("Fix the bug in src/payment.py", start_step=1)
 
     blocked = [log for log in agent._state.step_logs if log.get("status") == "blocked_final_answer"]
-    # The second claim is stopped earlier, by the corrective-action gate the
-    # first refusal armed, so it never reaches the completion gate.
-    gated = [
-        log for log in agent._state.step_logs
-        if log.get("status") == "blocked_for_corrective_action"
-        and log["command"]["action"]["type"] == "final_answer"
-    ]
     assert len(blocked) == 1
-    assert len(gated) == 1
-    assert '"outcome": "incomplete"' in gated[0]["reason"]
     # The refusal must name the honest exit instead of ordering a fix.
-    assert '"outcome": "incomplete"' in blocked[0]["reason"]
-    assert result == "I did not change anything."
+    assert "what was not done and why" in blocked[0]["reason"]
+    # The second claim, with the blockers still standing, is its answer to
+    # them: accepted, never as done, and the core says so under it.
+    assert len(prompts) == 3
+    assert result.startswith("Fixed, really.")
+    assert "the task is not marked as done" in result
+    assert agent._state.finished_incomplete
+    assert agent._state.run_status == "blocked"
+
+
+def test_a_turn_ending_without_calls_on_a_fix_with_no_changes_is_never_done(agent_factory):
+    agent = _fix_agent(agent_factory, max_steps=5)
+    agent._state.response_language = "ru"
+    finals = []
+    agent._ui.print_final = lambda message, user_messages=None, outcome="done": finals.append((message, outcome))
+    answers = iter(["Исправил баг в src/payment.py.", "Исправил, правда."])
+    prompts = []
+
+    def fake_call_action_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(answers)
+
+    agent._call_action_model = fake_call_action_model
+
+    result = agent._run_loop("Исправь баг в src/payment.py", start_step=1)
+
+    assert "Ending the turn as done is not accepted" in prompts[1] or "not accepted as done" in prompts[1]
+    assert result.startswith("Исправил, правда.")
+    assert "задача не отмечена как выполненная" in result
+    assert finals == [(result, "incomplete")]
+
+
+def test_a_turn_ending_after_a_failed_call_with_no_changes_is_never_done(agent_factory):
+    agent = _planned_agent(agent_factory, PlanInfo(
+        goal="Run the build", complexity="simple", plan=["run the build"], success_criteria=[], risks=[],
+    ), max_steps=6)
+    responses = iter([
+        '<tool_call>{"name": "read_file", "arguments": {"path": "missing.cfg"}}</tool_call>',
+        "The build config is fine.",
+        "The build config is fine.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+
+    result = agent._run_loop("Run the build and check the config", start_step=1)
+
+    assert "errors_present" in agent._state.completion_blocker_kinds
+    assert "the task is not marked as done (" in result
+    assert "the last call failed, no file changed" in result
     assert agent._state.run_status == "blocked"
 
 
@@ -164,8 +200,8 @@ def test_every_blocker_text_names_the_honest_exit(agent_factory):
 
     assert agent._state.completion_blockers
     for blocker in agent._state.completion_blockers:
-        assert '"outcome": "incomplete"' in blocker, blocker
-    assert '"outcome": "incomplete"' in agent._state.pending_instruction
+        assert "what was not done and why" in blocker, blocker
+    assert "what was not done and why" in agent._state.pending_instruction
 
 
 def test_incomplete_finish_passes_the_required_action_gate(agent_factory):
@@ -289,4 +325,4 @@ def test_report_substance_feedback_reaches_the_model_as_its_text(agent_factory):
 
     assert not outcome.finished
     error = agent._feedback_error_for_model(_last_feedback(agent))
-    assert "final_answer.args.message" in error
+    assert "your final answer" in error

@@ -101,13 +101,14 @@ _RECOVERY_ATTEMPTS_REQUIRED = 2
 # not be done ends truthfully instead of in forced busywork.
 _HONEST_EXIT_HINT = (
     "If the work cannot or should not be done (target missing, premise false, "
-    "user denied the change, environment blocks it), finish with final_answer or "
-    'report_to_user using "outcome": "incomplete" and say why.'
+    "user denied the change, environment blocks it), end your turn again with a "
+    "response that has no tool call and says plainly what was not done and why; "
+    "it is recorded as not done."
 )
 _HONEST_EXIT_HINT_RU = (
     "Если работу нельзя или не нужно выполнять (цели нет, предпосылка ложна, "
-    "пользователь отклонил правку, среда не даёт), заверши final_answer или "
-    'report_to_user с "outcome": "incomplete" и объясни причину.'
+    "пользователь отклонил правку, среда не даёт), закончи ход ещё раз ответом "
+    "без вызовов и прямо скажи, что не сделано и почему; ход запишется как незавершённый."
 )
 
 
@@ -167,6 +168,9 @@ _BLOCKER_LABELS = {
     "plan_incomplete": ("план не завершён", "plan not finished"),
     "artifacts_missing": ("не хватает файлов", "required files missing"),
     "unverified": ("ждёт проверки правок", "changes not verified"),
+    "no_changes": ("файлы не изменены", "no file changed"),
+    "errors_present": ("последний вызов упал, файлы не изменены", "the last call failed, no file changed"),
+    "no_activity": ("ничего не прочитано и не изменено", "nothing read or changed"),
 }
 
 
@@ -807,6 +811,44 @@ def _finish_turn(self, user_goal: str, step: int, text: str) -> _ActionOutcome:
     return _run_one_action(self, user_goal, step, command)
 
 
+def _run_final_answer(self, user_goal: str, step: int, command: AgentCommand) -> _ActionOutcome:
+    """An end of the turn, through every guard and the finish gates.
+
+    The first end the runtime refuses sends the model the reasons. An end
+    after that, while the completion blockers still hold, is its answer to
+    them: accepted, but as "not done", with one line from the core saying why.
+    A run can then never claim what its evidence does not show, and can never
+    be trapped between a refused finish and nothing left to do.
+    """
+    if self._state.finish_refusals and not _is_incomplete_finish(command):
+        self._refresh_completion_requirements(force_enforcement=True)
+        if self._state.completion_blockers:
+            message = str(command.action.args["message"]) + _incomplete_note(self)
+            command.action.args.update({"message": message, "outcome": "incomplete"})
+    outcome = (
+        _finish_with_final_answer(self, step, command)
+        if _prepare_action(self, user_goal, step, command)
+        else _BLOCKED
+    )
+    if not outcome.finished:
+        self._state.finish_refusals += 1
+    return outcome
+
+
+def _incomplete_note(self) -> str:
+    """The core's own line under an answer accepted as not done."""
+    ru = self._state.response_language == "ru"
+    labels = [
+        _BLOCKER_LABELS[kind][0 if ru else 1]
+        for kind in dict.fromkeys(self._state.completion_blocker_kinds)
+        if kind in _BLOCKER_LABELS
+    ]
+    reason = "; ".join(labels) or ("проверки завершения не пройдены" if ru else "completion checks did not pass")
+    if ru:
+        return f"\n\n_Kvist: задача не отмечена как выполненная ({reason})._"
+    return f"\n\n_Kvist: the task is not marked as done ({reason})._"
+
+
 @dataclass(slots=True, frozen=True)
 class _PlannedCall:
     """A call of the response: the command to run, or why it cannot run."""
@@ -1057,11 +1099,12 @@ def _run_one_action(
     if command.action.type == "refuse":
         return _stop_for_safety_refusal(self, step, command)
 
+    if command.action.type == "final_answer":
+        return _run_final_answer(self, user_goal, step, command)
+
     if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
 
-    if command.action.type == "final_answer":
-        return _finish_with_final_answer(self, step, command)
     if command.action.type == "report_to_user":
         return _finish_with_report(self, user_goal, step, command)
     return _execute_action(self, user_goal, step, command)
@@ -1215,7 +1258,7 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
         feedback = {
             "ok": False,
             "action_type": command.action.type,
-            "error": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
+            "error": "Task is already complete. Do not write report artifacts. Give your final answer: a response with no tool call.",
         }
         live_status = "completion enforced"
         live_message = "Task is complete, requiring final_answer"
@@ -1223,7 +1266,7 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
         feedback = {
             "ok": False,
             "action_type": command.action.type,
-            "error": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
+            "error": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report in your final answer (a response with no tool call) only at the end.",
         }
         live_status = "report artifact blocked"
         live_message = "Report artifact blocked; continue the actual task"
@@ -1245,7 +1288,7 @@ def _reject_read_only_violation(self, step: int, command: AgentCommand) -> bool:
     feedback = {
         "ok": False,
         "action_type": command.action.type,
-        "error": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
+        "error": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then give your final answer (a response with no tool call).",
     }
     self._register_feedback(step, command, feedback)
     self._ui.update_live(
@@ -1549,7 +1592,7 @@ def command_language_error(self, command: AgentCommand) -> str | None:
     if not _matches_response_language(message, language):
         language_name = "Russian" if language == "ru" else "English"
         return (
-            f"Field final_answer.args.message is not written in {language_name} "
+            f"Your final answer is not written in {language_name} "
             f"(response_language: {language})."
         )
     return None
@@ -1568,9 +1611,9 @@ def register_language_error(
     language_name = "Russian" if language == "ru" else "English"
     self._state.pending_instruction = (
         f"{error_text} The previous step was rejected and was not executed. "
-        f"Retry the same intended step, but write final_answer.args.message in "
+        f"Retry the same intended step, but write your final answer in "
         f"{language_name} (response_language: {language}). "
-        "JSON action keys and action types stay English."
+        "Tool names and argument keys stay English."
     )
     self._state.step_logs.append(
         {
@@ -1668,6 +1711,7 @@ def register_feedback(
 
     if ok:
         self._state.consecutive_errors = 0
+        self._state.unresolved_failure = ""
         self._state.pending_instruction = ""
         self._update_state_from_success(command, feedback)
         if command.action.type in _READ_ONLY_ACTIONS:
@@ -1686,6 +1730,8 @@ def register_feedback(
 
         if not terminal_not_found:
             self._state.consecutive_errors += 1
+        if not terminal_not_found and command.action.type not in _FINISH_ACTIONS:
+            self._state.unresolved_failure = error_text
         if command.action.type in _WRITE_ACTIONS:
             self._state.read_only_streak = 0
         self._record_error(error_text)
@@ -1720,7 +1766,7 @@ def register_feedback(
                 "is not found on this system. This IS the answer — the service unit "
                 "does not exist. Do NOT run grep, list-unit-files, is-active, "
                 "or any other systemctl command. Do NOT repeat status. "
-                "Give final_answer or report_to_user with an honest message: "
+                "Give your final answer with an honest message: "
                 f"'Service {service_name} not found: the systemd unit does not exist on this system.'"
             )
         elif (
@@ -2948,12 +2994,12 @@ def build_report_failure_message(self) -> str:
 def _build_report_substance_instruction(language: str) -> str:
     if language == "ru":
         return (
-            "Ответь по сути на вопрос пользователя в final_answer.args.message: "
+            "Ответь по сути на вопрос пользователя в финальном ответе: "
             "приведи конкретные находки и рекомендации со ссылками на прочитанные "
             "файлы. Шаблонные фразы вроде «все проверки пройдены» запрещены."
         )
     return (
-        "Answer the user's question in final_answer.args.message: give concrete "
+        "Answer the user's question in your final answer: give concrete "
         "findings and recommendations that reference the files you read. Template "
         "phrases like 'all checks passed' are forbidden."
     )
@@ -2961,7 +3007,7 @@ def _build_report_substance_instruction(language: str) -> str:
 
 def _build_create_guidance(language: str) -> str:
     return (
-        "This is a CREATE task. Do not loop on inspect and do not use final_answer or report_to_user without changes. "
+        "This is a CREATE task. Do not loop on inspect and do not end the turn without changes. "
         "Choose a path inside the workspace and move to write_file or append_file, then verify with facts."
     )
 
@@ -2985,8 +3031,8 @@ def _build_missing_implementation_error(language: str) -> str:
 
 def _build_completion_hint(self) -> str:
     hint = (
-        "The task looks complete. If nothing is left to verify, finish with "
-        "final_answer or report_to_user."
+        "The task looks complete. If nothing is left to verify, give your final "
+        "answer: a response with no tool call."
     )
     if self._state.report_goal:
         hint += " " + _build_report_substance_instruction(self._state.task_language)
@@ -3313,7 +3359,9 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
     for kind, text in _evidence_completion_blockers(self):
         kinds.append(kind)
         blockers.append(text)
-        required_actions.update(_WRITE_ACTIONS)
+        # Errors are resolved by looking again or explaining them, never by
+        # writing something to make the blocker go away.
+        required_actions.update(_VERIFY_ONLY_ACTIONS if kind == "errors_present" else _WRITE_ACTIONS)
 
     return blockers, kinds, sorted(required_actions)
 
@@ -3346,18 +3394,20 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
             f"Внеси реальную правку, прежде чем заявлять о готовности. {_HONEST_EXIT_HINT_RU}",
         ))
 
-    if (
-        st.progress >= 100
-        and st.error_history
-        and (st.recovery_pending or not st.files_changed)
-    ):
+    # A run that changed nothing while its last call failed cannot call itself
+    # done: that failure may be exactly why nothing changed. A failure a later
+    # call got past (a wrong path, then the right one) is not held against it,
+    # and a read-only task is expected to change nothing.
+    errors_without_changes = bool(st.unresolved_failure) and not st.files_changed and not st.read_only_goal
+    if st.error_history and (errors_without_changes or (st.progress >= 100 and st.recovery_pending)):
+        last = st.unresolved_failure or st.error_history[-1]
         out.append((
             "errors_present",
-            "Completion blocked: progress is 100% but there are unresolved errors "
-            f"({st.error_history[-1]}). Resolve them. {_HONEST_EXIT_HINT}"
+            f"Completion blocked: the run changed no file and its last call failed ({last}). "
+            f"Resolve the error or explain it. {_HONEST_EXIT_HINT}"
             if not ru else
-            "Завершение заблокировано: прогресс 100%, но есть неустранённые ошибки "
-            f"({st.error_history[-1]}). Устрани их. {_HONEST_EXIT_HINT_RU}",
+            f"Завершение заблокировано: ни один файл не изменён, а последний вызов упал ({last}). "
+            f"Устрани ошибку или объясни её. {_HONEST_EXIT_HINT_RU}",
         ))
 
     if (
@@ -3545,9 +3595,10 @@ def _build_completion_blocker_instruction(language: str, blockers: list[str], ac
     action_text = ", ".join(actions) or "none"
     blocker_text = _join_blockers(blockers, with_hint=False)
     return (
-        f'final_answer and report_to_user with "outcome": "done" are forbidden. Blockers: {blocker_text} '
+        f"Ending the turn as done is not accepted yet. Blockers: {blocker_text} "
         f"Next, either take a corrective action using one of: {action_text}; "
-        'or, if the work cannot or should not be done, finish with "outcome": "incomplete" and say why.'
+        "or, if the work cannot or should not be done, end the turn again without a tool call "
+        "and say plainly what was not done and why."
     )
 
 
@@ -3566,9 +3617,10 @@ def _build_strict_next_action_instruction(
     first_artifact = missing_artifacts[0] if missing_artifacts else ""
     message = (
         f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
-        "Do not use inspect/read/list_tree/find/search/final_answer/report_to_user on the next step. "
+        "Do not use inspect/read/list_tree/find/search on the next step, and do not end the turn yet. "
         "For a CREATE task, switch directly to changing files inside the workspace. "
-        'The one exception: if the work cannot or should not be done, finish with "outcome": "incomplete" and say why.'
+        "The one exception: if the work cannot or should not be done, end the turn without a tool call "
+        "and say plainly what was not done and why."
     )
     if first_artifact:
         message += f" Start with artifact: {first_artifact}."

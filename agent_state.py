@@ -160,6 +160,12 @@ class RunState:
     # The model ended the run with outcome "incomplete": seals as "blocked"
     # however clean the evidence looks, because nothing was claimed as done.
     finished_incomplete: bool = False
+    # Ends of a turn (a response without calls) the runtime refused this run.
+    # After one refusal the next end is taken as an honest "not done".
+    finish_refusals: int = 0
+    # The error of the latest tool call that failed, cleared by the next call
+    # that succeeds. The finish gate's own refusals never set it.
+    unresolved_failure: str = ""
     # Blank cells in CSV/TSV files read this run, and whether the model was
     # already asked to account for them before finishing (asked once, never twice).
     empty_data_cells: list[str] = field(default_factory=list)
