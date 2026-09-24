@@ -693,3 +693,45 @@ def test_cached_json_mode_rejection_still_falls_through_to_a_temperature_error()
     assert all("response_format" not in call for call in attempts)
     assert "temperature" not in attempts[-1]
     assert (provider, model) in agent_model._TEMPERATURE_UNSUPPORTED
+
+
+def test_json_mode_warning_prints_once_per_run_not_once_per_step():
+    """The rejection is cached at process scope, but the warning should not
+    repeat on every step of the same run once the run has already seen it —
+    only a fresh run (a fresh RunState) earns a fresh warning.
+    """
+    import agent_model
+    from agent_state import RunState
+
+    provider = "openai"
+    model = "gpt-6-astra-dedup"
+
+    class Completions:
+        def create(self, **kwargs):
+            if "response_format" in kwargs:
+                raise RuntimeError("response_format is not supported by this model")
+            return "ok"
+
+    warnings: list[str] = []
+    agent = SimpleNamespace(
+        config=SimpleNamespace(
+            provider=provider,
+            model_temperature=0.1,
+            api_timeout=30,
+            reasoning_effort="medium",
+        ),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+        _ui=SimpleNamespace(
+            print_error=warnings.append,
+            debug_print=lambda *a, **k: None,
+        ),
+        _state=RunState(),
+    )
+
+    agent_model._create_json_completion(agent, model, [{"role": "user", "content": "1"}])
+    agent_model._create_json_completion(agent, model, [{"role": "user", "content": "2"}])
+    assert len(warnings) == 1, "second step of the same run must stay silent"
+
+    agent._state = RunState()
+    agent_model._create_json_completion(agent, model, [{"role": "user", "content": "3"}])
+    assert len(warnings) == 2, "a new run must warn again"

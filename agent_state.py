@@ -182,6 +182,12 @@ class RunState:
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
     native_unchanged_mark: int = 0
+    # (provider, model) pairs already warned about this run for a dropped
+    # reasoning-control kwarg / dropped JSON mode (agent_model.py). Warned once
+    # per run rather than once per process: the rejection itself is cached at
+    # process scope, but a fresh run is a fresh chance to notice it.
+    warned_reasoning_unsupported: set[tuple[str, str]] = field(default_factory=set)
+    warned_json_mode_unsupported: set[tuple[str, str]] = field(default_factory=set)
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)
