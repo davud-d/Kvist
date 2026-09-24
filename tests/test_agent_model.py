@@ -487,11 +487,12 @@ def test_trimming_keeps_the_sections_the_model_cannot_work_without(agent_factory
     agent = agent_factory(max_context_tokens=2_000)
     agent._state.plan_info = make_plan()
     agent._state.recent_result_details = ["Detailed recent action data:\n" + "x=1\n" * 20_000]
+    agent._state.pending_instruction = "Your finish was not accepted as done. REASON_MARKER"
 
     trimmed = agent._trim_prompt_to_token_limit("system", agent._build_runtime_prompt("СДЕЛАЙ ЭТО", 2))
 
     assert "СДЕЛАЙ ЭТО" in trimmed
-    assert "Completion status:" in trimmed
+    assert "REASON_MARKER" in trimmed
 
 
 def test_an_untrimmed_prompt_is_returned_untouched(agent_factory):

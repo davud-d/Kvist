@@ -535,6 +535,16 @@ see, and stopped as a "loop". The prompt marks such files next to `Read files`
 is `step_summary` (kept on any step, `_keep_step_summary`) — reasoning and
 `thought` never reach the next prompt.
 
+**The prompt carries no standing governance.** Completion blockers, progress,
+required/missing artifacts, "completion status", a compressed restatement of the
+other sections, and the stand-in plan of an unplanned run are not rendered: the
+model spent its reasoning reconciling them with the task (one "required artifact"
+sent it to read a 938-line bundle, twice). The gates themselves are unchanged and
+act when a finish is attempted — `_finish_with_final_answer` and
+`_finish_with_report` put the refusal reason into `pending_instruction`
+("Additional instruction", priority 0). "Allowed next actions now" appears only
+while `required_next_actions` actually restricts the next step.
+
 **Section headers in `agent_context.SECTION_PRIORITIES` must match what
 `build_runtime_prompt` renders, character for character.** A header that does
 not match is not a section at all: its text folds into the section above and is

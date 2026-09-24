@@ -980,6 +980,9 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
         error_text = _join_blockers(self._state.completion_blockers)
         self._state.consecutive_errors += 1
         self._record_error(error_text)
+        # The prompt no longer lists blockers on every step, so the refusal
+        # itself is where the model learns what "done" still lacks.
+        self._state.pending_instruction = f"Your finish was not accepted as done. {error_text}"
         self._state.step_logs.append(
             {
                 "step": step,
@@ -2733,7 +2736,7 @@ def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
     ignored_re = re.compile("|".join(ignored_patterns), re.IGNORECASE)
 
     for match in _ARTIFACT_RE.finditer(user_goal):
-        # A path outside the workspace ("~/.vscode/extensions", "/etc/hosts") is
+        # A path outside the workspace ("~/.config/editor", "/etc/hosts") is
         # context about the machine, not something this run can produce; read
         # as relative it became a deliverable no action could ever satisfy.
         if match.group(1).startswith("/") or user_goal[match.start() - 1 : match.start()] == "~":
@@ -2782,8 +2785,8 @@ def _anchor_artifacts(workspace: Path, artifacts: list[str]) -> list[str]:
     """Point a partial file path at the file it already names deeper in the workspace.
 
     "fix reminders.py" mentions a file that lives in src/, and a task quoting
-    out/extension.js means vscode-extension/out/extension.js; requiring either
-    where it was written made the completion gate demand a duplicate there.
+    dist/app.js means web/dist/app.js; requiring either where it was written
+    made the completion gate demand a duplicate there.
     """
     partial = {a for a in artifacts if not a.endswith("/") and not (workspace / a).exists()}
     if not partial:

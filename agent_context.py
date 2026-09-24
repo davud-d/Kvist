@@ -23,23 +23,13 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Task language:": 0,
     "User task:": 0,
     "Plan goal:": 0,
-    "Complexity:": 3,
-    "Execution model:": 3,
-    "Current progress:": 2,
     "Plan:": 2,
     "Completed plan steps:": 2,
     "Success criteria:": 2,
-    "Required artifacts:": 2,
-    "Still missing:": 1,
-    "Verified checks:": 1,
-    "Completion blockers:": 1,
-    "Completion status:": 0,
     "Allowed next actions now:": 0,
-    "Forbidden next actions now:": 0,
     "Known dependency versions:": 3,
     "USER-FACING LANGUAGE:": 0,
     "Short external facts:": 3,
-    "Compressed state:": 2,
     "Read files:": 2,
     "Changed files:": 2,
     # These two must match what build_runtime_prompt renders verbatim, or the
@@ -129,21 +119,12 @@ _RUNTIME_TEXT = {
         "task_language": "Task language",
         "user_task": "User task",
         "plan_goal": "Plan goal",
-        "complexity": "Complexity",
-        "execution_model": "Execution model",
-        "current_progress": "Current progress",
         "plan": "Plan",
         "completed_steps": "Completed plan steps",
         "success_criteria": "Success criteria",
-        "required_artifacts": "Required artifacts",
-        "missing_artifacts": "Still missing",
-        "verification_evidence": "Verified checks",
-        "completion_blockers": "Completion blockers",
         "allowed_next_actions": "Allowed next actions now",
-        "forbidden_next_actions": "Forbidden next actions now",
         "dependency_versions": "Known dependency versions",
         "web_facts": "Short external facts",
-        "compressed_state": "Compressed state",
         "read_files": "Read files",
         "changed_files": "Changed files",
         "recent_observations": "Recent useful observations",
@@ -153,24 +134,59 @@ _RUNTIME_TEXT = {
         "step_summaries": "Step summaries",
         "additional_instruction": "Additional instruction",
         "none": "none",
-        "no_context": "No accumulated context yet.",
         "truth_instruction": (
             "Use detailed data as the source of truth. Choose the next action so it moves "
             "the task forward and does not repeat dead-end steps."
         ),
         "completion_instruction": (
-            "Completion blockers are the runtime's reasons it will not accept a \"done\" finish yet: "
-            "they say what \"done\" still lacks, and they never forbid an accurate account of where the work stands. "
-            "While the work can still be finished, finish it — a gap that verification found is closed by a "
-            "corrective action, not by describing it. When it cannot or should not be finished (the premise is "
-            "false, the environment refuses, a blocker asks for something no action here can produce), finish "
-            "with \"outcome\": \"incomplete\" and say which blocker stood and why."
+            "A finish is checked when you send it. If the runtime does not accept it as done, the reason comes "
+            "back under \"Additional instruction\": it says what \"done\" still lacks, and it never forbids an "
+            "accurate account of where the work stands. While the work can still be finished, finish it — a gap "
+            "that verification found is closed by a corrective action, not by describing it. When it cannot or "
+            "should not be finished (the premise is false, the environment refuses, the missing piece is something "
+            "no action here can produce), finish with \"outcome\": \"incomplete\" and say why."
         ),
         "error_instruction": (
             "If normalized_error is present, use it for the next step; do not copy raw_error into public text."
         ),
     },
 }
+
+
+def _plan_block(plan_info: Any, text: dict[str, str]) -> str:
+    """The plan and its success criteria, or nothing when no plan was made.
+
+    The stand-in plan of an unplanned run only restates the task in generic
+    words, and every line of it is one more thing the model reasons about.
+    """
+    if is_unplanned(plan_info):
+        return ""
+    plan_text = "\n".join(f"{index + 1}. {item}" for index, item in enumerate(plan_info.plan))
+    success_text = "\n".join(f"- {item}" for item in plan_info.success_criteria)
+    return f"{text['plan']}:\n{plan_text}\n\n{text['success_criteria']}:\n{success_text}\n\n"
+
+
+def _completed_plan_steps_block(state: Any, text: dict[str, str]) -> str:
+    if is_unplanned(state.plan_info):
+        return ""
+    completed = ", ".join(sorted(state.completed_plan_steps)) or text["none"]
+    return f"{text['completed_steps']}: {completed}\n\n"
+
+
+def _required_next_actions_block(state: Any, text: dict[str, str]) -> str:
+    """Name the allowed actions only while the runtime actually restricts them.
+
+    Shown on every step as "none", the two lines were governance the model
+    reasoned about without it constraining anything.
+    """
+    if not state.required_next_actions:
+        return ""
+    allowed = ", ".join(state.required_next_actions)
+    return (
+        f"{text['allowed_next_actions']}: {allowed} (until one of these runs, the runtime refuses "
+        f"other actions except {state.corrective_read_budget} more read-only look(s) and an "
+        "\"incomplete\" finish)\n\n"
+    )
 
 
 def _read_files_out_of_view(state: Any) -> list[str]:
@@ -206,15 +222,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     # ── static prefix (computed once per run, cached) ──────────
     cached_prefix = self._state.cached_static_prompt
     if not cached_prefix:
-        plan_text = "\n".join(
-            f"{index + 1}. {item}"
-            for index, item in enumerate(self._state.plan_info.plan)
-        )
-        success_text = "\n".join(
-            f"- {item}"
-            for item in self._state.plan_info.success_criteria
-        )
-        required_artifacts = ", ".join(self._state.required_artifacts[-12:]) or text["none"]
+        plan_block = _plan_block(self._state.plan_info, text)
         dependency_versions = self._format_dependency_versions_for_prompt("en")
         current_time = current_time_context()["current_time"]
         system_lines = [
@@ -255,10 +263,9 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             session_history +
             f"{text['task_language']}: {response_language_name(response_language)}\n\n"
             f"{text['user_task']}:\n{user_goal}\n\n"
-            f"{text['plan_goal']}:\n{self._state.plan_info.goal}\n\n"
-            f"{text['complexity']}: {self._state.plan_info.complexity}\n"
-            f"{text['execution_model']}: {self._state.selected_action_role or 'n/a'} / {self._state.selected_action_model or 'n/a'}\n"
         )
+        if self._state.plan_info.goal.strip() != user_goal.strip():
+            cached_prefix += f"{text['plan_goal']}:\n{self._state.plan_info.goal}\n\n"
         language_block = (
             "USER-FACING LANGUAGE:\n"
             "- JSON action keys, action types, and tool schemas are always English.\n"
@@ -273,9 +280,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
                 "Example for a read task: \"В `hello.txt`:\\n\\nHello\"\n"
             )
         cached_suffix = (
-            f"{text['plan']}:\n{plan_text}\n\n"
-            f"{text['success_criteria']}:\n{success_text}\n\n"
-            f"{text['required_artifacts']}: {required_artifacts}\n"
+            f"{plan_block}"
             f"{text['dependency_versions']}:\n{dependency_versions}\n\n"
             f"{language_block}\n"
             f"{text['error_instruction']}\n\n"
@@ -306,38 +311,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     if out_of_view:
         files_read += f" (content no longer in this prompt: {', '.join(out_of_view)})"
     files_changed = ", ".join(self._state.files_changed[-8:]) or text["none"]
-    completed_steps = text["none"]
-    if not is_unplanned(self._state.plan_info):
-        completed_steps = ", ".join(sorted(self._state.completed_plan_steps)) or text["none"]
-    missing_artifacts = ", ".join(self._state.missing_artifacts[-12:]) or text["none"]
-    verification_evidence = "\n".join(f"- {item}" for item in self._state.verification_evidence[-6:]) or text["none"]
-    completion_blockers = "\n".join(f"- {item}" for item in self._state.completion_blockers[-6:]) or text["none"]
     pending_instruction = self._state.pending_instruction or text["none"]
-    allowed_next_actions = ", ".join(self._state.required_next_actions) or text["none"]
-
-    completion_status = "READY - finish with final_answer or report_to_user unless something still needs verifying" if self._state.completion_ready else "NOT READY - Continue with required actions"
-    forbidden_next_actions = text["none"]
-    if self._state.required_next_actions:
-        forbidden = sorted({
-            "final_answer",
-            "report_to_user",
-            "read_file",
-            "read_multiple_files",
-            "write_file",
-            "append_file",
-            "replace_in_file",
-            "list_dir",
-            "list_tree",
-            "find_files",
-            "search_code",
-            "git_status",
-            "git_diff",
-            "run_shell",
-            "web_search",
-            "fetch_url",
-        } - set(self._state.required_next_actions))
-        forbidden_next_actions = ", ".join(forbidden) or text["none"]
-    summary = self._build_summary("en")
     web_facts = self._format_web_facts_for_prompt("en")
 
     rolling_summary_lines: list[str] = []
@@ -355,17 +329,10 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     final_answer_style = f"{_FINAL_ANSWER_STYLE}\n\n" if finalization_imminent else ""
 
     dynamic = (
-        f"{text['step']}: {step}\n"
-        f"{text['current_progress']}: {self._state.progress}%\n\n"
-        f"{text['completed_steps']}: {completed_steps}\n\n"
-        f"{text['missing_artifacts']}: {missing_artifacts}\n\n"
-        f"{text['verification_evidence']}:\n{verification_evidence}\n\n"
-        f"{text['completion_blockers']}:\n{completion_blockers}\n\n"
-        f"Completion status: {completion_status}\n\n"
-        f"{text['allowed_next_actions']}: {allowed_next_actions}\n"
-        f"{text['forbidden_next_actions']}: {forbidden_next_actions}\n\n"
+        f"{text['step']}: {step}\n\n"
+        f"{_completed_plan_steps_block(self._state, text)}"
+        f"{_required_next_actions_block(self._state, text)}"
         f"{text['web_facts']}:\n{web_facts}\n\n"
-        f"{text['compressed_state']}:\n{summary or text['no_context']}\n\n"
         f"{text['step_summaries']}:\n{rolling_summaries_text}\n\n"
         f"{text['read_files']}: {files_read}\n"
         f"{text['changed_files']}: {files_changed}\n\n"

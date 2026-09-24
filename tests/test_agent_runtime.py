@@ -128,6 +128,38 @@ def test_prompt_names_reads_whose_content_left_the_prompt(agent_factory):
     assert _read_files_out_of_view(agent._state) == ["src/billing.py"]
 
 
+def test_refused_finish_tells_the_model_why(agent_factory):
+    from agent_runtime import _finish_with_final_answer
+
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = make_plan()
+    agent._state.modify_goal = True
+
+    outcome = _finish_with_final_answer(agent, 3, make_command("final_answer", {"message": "done"}, "done"))
+
+    assert not outcome.finished
+    assert agent._state.pending_instruction.startswith("Your finish was not accepted as done.")
+    assert "no files were changed" in agent._state.pending_instruction
+
+
+def test_prompt_carries_no_standing_governance(agent_factory):
+    from agent_state import NO_PLAN_STEP
+
+    agent = agent_factory(max_steps=1)
+    agent._state.plan_info = PlanInfo(
+        goal="почини инсталлятор", complexity="complex", plan=[NO_PLAN_STEP], success_criteria=["x"], risks=[]
+    )
+    agent._state.modify_goal = True
+    agent._state.required_artifacts = ["src/billing.py"]
+    agent._refresh_completion_requirements()
+
+    prompt = agent._build_runtime_prompt("почини инсталлятор", 3)
+
+    for gone in ("Completion blockers", "Current progress", "Required artifacts", "Compressed state",
+                 "Completion status", "Forbidden next actions", "Plan goal", NO_PLAN_STEP[:40]):
+        assert gone not in prompt
+
+
 def test_unplanned_run_takes_progress_from_its_phase_not_the_stand_in_plan(agent_factory):
     from agent_state import NO_PLAN_STEP
 
