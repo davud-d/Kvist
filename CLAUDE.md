@@ -356,6 +356,13 @@ the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
   tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
   consecutive errors, repeated-action blocking, write-required-on-create-tasks).
 
+**`_PLAN_EDIT_RE` must know every way a planner says "edit".** "Заменить a - b на
+a + b" matched none of its stems, so a finished `replace_in_file` never closed its
+step and every report was refused as "plan not complete" — the model then rewrote
+the same file to satisfy the tracker. The same pattern decides whether a task must
+change files at all, so a new stem must not match reading words ("правк" is inside
+"справка", "удал" inside "удалённый").
+
 **A plan step no action can satisfy must never gate completion.** Plan steps are
 matched to actions by vocabulary (`_PLAN_INSPECT_RE` / `_PLAN_EDIT_RE` /
 `_PLAN_VERIFY_RE` / `_PLAN_REPORT_RE`). A planner given an analysis task writes

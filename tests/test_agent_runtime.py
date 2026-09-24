@@ -159,6 +159,32 @@ def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
     assert saves[:4] == [False, True, False, False]
 
 
+@pytest.mark.parametrize(
+    "step",
+    [
+        "Заменить операцию вычитания на сложение внутри add",
+        "Переименовать функцию load в read",
+        "Поправить таймаут в client.py",
+        "Replace the subtraction with addition",
+        "Rename load to read",
+    ],
+)
+def test_a_write_closes_an_edit_step_however_it_is_worded(agent_factory, step):
+    from agent_runtime import _plan_item_matches_action
+
+    assert _plan_item_matches_action(step.casefold(), "replace_in_file", ["calc.py"])
+
+
+@pytest.mark.parametrize(
+    "step",
+    ["Прочитать справку по API", "Подключиться к удалённому серверу", "Verify correctness of the output"],
+)
+def test_reading_steps_are_not_mistaken_for_edits(step):
+    from agent_runtime import _PLAN_EDIT_RE
+
+    assert not _PLAN_EDIT_RE.search(step.casefold())
+
+
 def test_refused_finish_tells_the_model_why(agent_factory):
     from agent_runtime import _finish_with_final_answer
 

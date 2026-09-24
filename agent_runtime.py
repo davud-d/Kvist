@@ -312,7 +312,17 @@ _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w
 # a bare "check" stays a verification step that only a change can precede.
 _PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|check (?:if|whether)|find|tree|search|провер|прочит|просмотр|найти|структур|поиск")
 _PLAN_DELEGATE_RE = re.compile(r"delegat|hand ?off|hand (?:it |the \w+ )?over|делегир|передат")
-_PLAN_EDIT_RE = re.compile(r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold|созда|запис|измен|обнов|добав|исправ")
+# "Заменить a - b на a + b" once matched none of these, so a completed
+# replace_in_file never closed its plan step and every report was refused as
+# "plan not complete" until the model rewrote the same file to please it.
+_PLAN_EDIT_RE = re.compile(
+    r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold"
+    r"|replac|renam|rewrit|refactor|patch|modif|updat|remov|delet"
+    # Narrow Russian stems: "правк" also matches "справка", "удал" also
+    # "удалённый сервер" — and this pattern also decides whether a task must
+    # change files at all.
+    r"|созда|запис|измен|обнов|добав|исправ|замен|переимен|перепис|поправ|почин|удали|удаля|убра|убер"
+)
 _PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|провер|запуст|компил|синтакс|импорт")
 _PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final|отчет|отчёт|сводк|резюм|итог|вывест|отображ|показ|результат|представ|вывод")
 _VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|python(?:3)?\s+\S+\.py(?:\s|$)|uv\s+run|node\s+--check")
