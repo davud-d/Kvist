@@ -2,7 +2,7 @@ import { Box, Text, useWindowSize } from "ink"
 import { useEffect, useState } from "react"
 
 import { clip, formatSeconds, lastLines } from "../format.js"
-import { actionTarget, exploreSummary, type State } from "../state.js"
+import { actionTarget, exploreSummary, lastInflight, type State } from "../state.js"
 import { Markdown } from "./markdown.js"
 import { BAR, color, planStepColor, SPINNER } from "./theme.js"
 
@@ -35,7 +35,7 @@ export function Live({ state }: { state: State }) {
   const { rows } = useWindowSize()
   const spinner = SPINNER[Math.floor(now / 120) % SPINNER.length] ?? ""
   const exploring = state.exploring ? <Text color={color.dim}>⋮ Exploring – {exploreSummary(state.exploring)}</Text> : null
-  const { inflight } = state
+  const inflight = lastInflight(state)
   const pendingAction = inflight ? (
     <Text wrap="truncate-end">
       <Text color={planStepColor[inflight.planStep] ?? color.dim}>{state.pending ? "●" : spinner} </Text>

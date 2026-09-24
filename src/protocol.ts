@@ -37,9 +37,13 @@ export type CoreEvent =
   | { type: "live_start" }
   | { type: "live_stop" }
   | { type: "status"; user_message: string; status: string; step: number; progress: number; plan_step: string; is_error: boolean }
-  | { type: "step"; step: number; plan_step: string; thought: string; user_message: string; action_type: string; action_args: Record<string, unknown>; reasoning_seconds: number; action_description?: string }
-  | { type: "action_result"; step: number; action_type: string; ok: boolean; summary: string; output: string; exit_code: number | null; path: string | null; first_line: number | null }
-  | { type: "action_output"; step: number; output: string }
+  // call_id / batch_id are additive (v2 response contract): the calls of one model response
+  // share a batch_id, and a call's result carries its call_id. An older core sends neither.
+  // `thought` is always "" from a v2 core; `user_message` carries the response's text on the
+  // first step of its batch only.
+  | { type: "step"; step: number; plan_step: string; thought: string; user_message: string; action_type: string; action_args: Record<string, unknown>; reasoning_seconds: number; action_description?: string; call_id?: string; batch_id?: string }
+  | { type: "action_result"; step: number; action_type: string; ok: boolean; summary: string; output: string; exit_code: number | null; path: string | null; first_line: number | null; call_id?: string; batch_id?: string }
+  | { type: "action_output"; step: number; output: string; call_id?: string }
   | { type: "plan"; goal: string; complexity: string; plan: string[]; success_criteria: string[]; risks: string[] }
   | { type: "route"; role: string; source?: string }
   | { type: "sandbox_notice"; note: string }
@@ -50,7 +54,7 @@ export type CoreEvent =
   | { type: "reasoning_chunk"; stream_id: string; text: string }
   | { type: "reasoning_commit"; stream_id: string; duration_seconds: number }
   | { type: "message"; markdown: string }
-  | { type: "final"; message: string; user_messages: string[] }
+  | { type: "final"; message: string; user_messages: string[]; outcome?: "done" | "incomplete" }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number; context_limit: number; model: string; kind: string; step: number }
   | { type: "debug"; message: string }
   | { type: "error"; message: string }

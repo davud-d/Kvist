@@ -163,8 +163,8 @@ if __name__ == "__main__":
     _demo()
 
 
-def test_last_thought_fills_the_column_when_no_reasoning_streams():
-    # Providers without a reasoning channel still write a thought per action.
+def test_last_words_fill_the_column_when_no_reasoning_streams():
+    # Providers without a reasoning channel still write text beside their calls.
     state = LivePanelState(
         running=True,
         state_label="working",
@@ -174,7 +174,7 @@ def test_last_thought_fills_the_column_when_no_reasoning_streams():
     joined = " ".join(
         render_live_panel(state, metrics_width=26, thinking_width=60, height=8)
     )
-    assert "find the shell gate" in joined
+    assert "Reading the executor" in joined and "the shell gate." in joined
     assert "no live reasoning" in joined
     assert "does not stream" not in joined
 

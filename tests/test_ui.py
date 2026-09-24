@@ -635,3 +635,31 @@ def test_stopping_the_run_drops_a_held_message(held_status_ui):
     _ManualTimer.created[0].callback()
 
     assert screen.statuses[-1] is None
+
+
+def test_classic_ui_prints_a_batch_text_once_above_its_calls(capsys):
+    from tests.conftest import make_command
+
+    ui = AgentUI(console=Console(force_terminal=False), verbose=False)
+    first = make_command("read_file", {"path": "a.py"}, text="Читаю оба файла")
+    second = make_command("read_file", {"path": "b.py"}, text="Читаю оба файла")
+    first.batch_id = second.batch_id = "b1"
+    silent = make_command("list_dir", {"path": "."})
+    silent.batch_id = "b2"
+
+    for step, command in enumerate((first, second, silent), start=1):
+        ui.print_step_header(step, command)
+
+    assert capsys.readouterr().out.splitlines() == ["» Читаю оба файла"]
+
+
+def test_classic_ui_marks_a_final_answer_that_is_not_done(capsys):
+    ui = AgentUI(console=Console(force_terminal=False), verbose=False)
+
+    ui.print_final("Не удалось проверить.", [], outcome="incomplete")
+    ui.print_final("Готово.", [])
+
+    assert capsys.readouterr().out.splitlines() == [
+        "[final, not done] Не удалось проверить.",
+        "[final] Готово.",
+    ]

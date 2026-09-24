@@ -138,6 +138,9 @@ class TerminalBannerUI:
         self._shown_at = 0.0
         self._held_status: dict[str, Any] | None = None
         self._release_timer: threading.Timer | None = None
+        # The model response whose words were already printed: a batch shares
+        # one text across its calls and shows it once.
+        self._said_batch = ""
 
     def attach_screen(self, screen: Any | None) -> None:
         """Route transient agent output through a persistent TUI screen.
@@ -222,7 +225,7 @@ class TerminalBannerUI:
         self._publish_live()
 
     def set_last_thought(self, text: str) -> None:
-        """Record the thought of the latest action for the thinking column.
+        """Record the words of the latest model response for the thinking column.
 
         This is what fills the column for providers that stream no reasoning.
         """
@@ -521,6 +524,7 @@ class TerminalBannerUI:
     ) -> None:
         # In plain mode the compact per-step line comes from update_live.
         if not self.verbose:
+            self._say_batch_text(command)
             return
 
         print(f"\n[Step {step}]")
@@ -534,19 +538,32 @@ class TerminalBannerUI:
             f"{redact_value(command.action.args)}"
         )
 
+    def _say_batch_text(self, command: Any) -> None:
+        """The response's words, once per batch, above the calls they introduce."""
+        text = str(getattr(command, "text", "") or "").strip()
+        batch = str(getattr(command, "batch_id", "") or "")
+        if not text or (batch and batch == self._said_batch):
+            return
+        self._said_batch = batch
+        if self._plain:
+            print(f"» {sanitize_display_text(text)}")
+            return
+        self.console.print(Text(f"» {sanitize_display_text(text)}", style="bright_white"))
+
     def print_final(
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:
         _ = user_messages
+        done = outcome != "incomplete"
         if self._plain:
-            print(f"[final] {sanitize_display_text(final_message)}")
+            print(f"[{'final' if done else 'final, not done'}] {sanitize_display_text(final_message)}")
             return
         try:
             final_panel = Panel(
                 self.render_user_markdown(final_message, fallback_style="bright_green"),
-                title="Final Answer",
+                title="Final Answer" if done else "Final Answer · not done",
                 title_align="left",
-                border_style="bright_green",
+                border_style="bright_green" if done else "yellow",
                 box=box.ROUNDED,
                 padding=(1, 2),
             )

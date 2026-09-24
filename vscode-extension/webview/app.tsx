@@ -2,7 +2,7 @@ import { useEffect, useReducer, useRef, useState } from "preact/hooks"
 
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../src/commands"
 import { contextLabel, formatSeconds, formatTokens } from "../../src/format"
-import { actionTarget, exploreSummary, initialState, reduce } from "../../src/state"
+import { actionTarget, exploreSummary, initialState, lastInflight, reduce } from "../../src/state"
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
@@ -246,8 +246,9 @@ export function App() {
       item.kind === "tool" && item.action === "run_shell"
         ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
         : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
-  if (state.inflight?.action === "run_shell") {
-    const { step, args } = state.inflight
+  const running = lastInflight(state)
+  if (running?.action === "run_shell") {
+    const { step, args } = running
     feed.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)
   }
 
@@ -332,7 +333,7 @@ export function App() {
         ) : null}
         {feed}
         {state.exploring ? <Working label="Exploring" target={exploreSummary(state.exploring)} /> : null}
-        {state.inflight && state.inflight.action !== "run_shell" ? <Working label={verbOf(state.inflight.action)} target={actionTarget(state.inflight.args)} /> : null}
+        {running && running.action !== "run_shell" ? <Working label={verbOf(running.action)} target={actionTarget(running.args)} /> : null}
         {thinking ? <Thinking reasoning={state.live?.reasoning ?? ""} since={state.live?.thinkingSince ?? null} /> : null}
         {state.live?.answer ? <Markdown text={state.live.answer} /> : null}
         {state.pending ? <Dialog key={state.pending.request_id} request={state.pending} answer={answer} /> : null}

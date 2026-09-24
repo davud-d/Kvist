@@ -1555,3 +1555,8 @@ kbd {
     padding-right: 4px;
   }
 }
+
+/* The calls of one model response, grouped under the words it carried. */
+.step-batch { display: flex; flex-direction: column; gap: 4px; }
+.step-batch > .step-card { margin: 0; }
+.step-say { color: var(--text-muted); padding: 2px 0 2px 2px; }

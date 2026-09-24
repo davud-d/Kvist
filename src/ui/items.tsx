@@ -1,4 +1,5 @@
 import { Box, Text } from "ink"
+import type { ReactNode } from "react"
 
 import { clip, formatThought, lastLines } from "../format.js"
 import { exploreSummary, type Item } from "../state.js"
@@ -16,6 +17,18 @@ function Banner() {
         <Text color={color.dim}>  local coding agent</Text>
       </Text>
       <Text color={color.faint}>/help for commands · esc esc to stop a run · ctrl+d to quit</Text>
+    </Box>
+  )
+}
+
+// The later calls of one model response hang off the first with a faint rail,
+// so a batch reads as one group.
+function InBatch({ index, children }: { index: number; children: ReactNode }) {
+  if (index === 0) return <>{children}</>
+  return (
+    <Box>
+      <Text color={color.faint}>┆ </Text>
+      <Box flexDirection="column" flexShrink={1}>{children}</Box>
     </Box>
   )
 }
@@ -61,9 +74,9 @@ export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }
     case "plan":
       return <Plan item={item} />
     case "step":
-      return <Step item={item} />
+      return <InBatch index={item.batchIndex}><Step item={item} /></InBatch>
     case "tool":
-      return <ToolCard item={item} />
+      return <InBatch index={item.batchIndex}><ToolCard item={item} /></InBatch>
     case "thought":
       return (
         <Box flexDirection="column" marginTop={1} borderStyle={BAR} borderColor={color.thought} borderTop={false} borderBottom={false} borderRight={false} paddingLeft={1}>
@@ -74,7 +87,7 @@ export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }
     case "explored":
       return <Text color={color.dim}>→ Explored – {exploreSummary(item.counts)}</Text>
     case "say":
-      return <Text color={color.dim} wrap="truncate-end">» {item.text}</Text>
+      return <Text color={color.dim}>» {item.text}</Text>
     case "answer":
       return (
         <Box marginTop={1} marginBottom={1} paddingLeft={2}>

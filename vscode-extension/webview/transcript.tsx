@@ -549,7 +549,8 @@ export function TranscriptItem({ item, uid, settled, items }: { item: Item; uid:
         </div>
       )
     case "tool":
-      return <Tool item={item} />
+      // The later calls of one model response sit under the first as one group.
+      return item.batchIndex > 0 ? <div class="in-batch"><Tool item={item} /></div> : <Tool item={item} />
     case "thought":
       return <Thought item={item} uid={uid} settled={settled} />
     case "explored":
