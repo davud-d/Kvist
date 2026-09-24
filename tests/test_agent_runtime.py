@@ -128,6 +128,37 @@ def test_prompt_names_reads_whose_content_left_the_prompt(agent_factory):
     assert _read_files_out_of_view(agent._state) == ["src/billing.py"]
 
 
+def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
+    agent = agent_factory(max_steps=10)
+    agent._state.plan_info = make_plan()
+    agent._state.selected_action_model = "mock"
+    for name in ("a.py", "b.py", "c.py"):
+        (agent.executor.workspace / name).write_text("x = 1\n", encoding="utf-8")
+    reads = [{"type": "read_file", "args": {"path": name}, "description": "read"} for name in ("a.py", "b.py", "c.py")]
+    responses = [
+        {"thought": "t", "plan_step": "inspect", "user_message": "m", "actions": reads},
+        {"thought": "t", "plan_step": "edit", "user_message": "m", "actions": [
+            {"type": "write_file", "args": {"path": "d.py", "content": "y = 2\n"}, "description": "write"}]},
+        {"thought": "t", "plan_step": "done", "user_message": "m", "actions": [
+            {"type": "final_answer", "args": {"message": "stop", "outcome": "incomplete"}}]},
+    ]
+    agent._call_action_model = lambda prompt: json.dumps(responses.pop(0))
+    saves: list[bool] = []
+    original = agent._save_checkpoint
+
+    def counting_save(goal, step, pending_action=None):
+        saves.append(pending_action is not None)
+        return original(goal, step, pending_action=pending_action)
+
+    agent._save_checkpoint = counting_save
+
+    agent._run_loop("look around", start_step=1)
+
+    # batch of three reads: one save; the write: its write-ahead record, its
+    # post-step save, and the batch save.
+    assert saves[:4] == [False, True, False, False]
+
+
 def test_refused_finish_tells_the_model_why(agent_factory):
     from agent_runtime import _finish_with_final_answer
 

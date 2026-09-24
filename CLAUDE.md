@@ -254,8 +254,12 @@ enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
 
 **Action batches.** The model sends `"actions": [...]` (1 to `parser.MAX_BATCH_ACTIONS`
 = 8); a bare `"action"` object is still accepted for a model prompted from an older
-schema. **Every action is its own step** — step logs, checkpoints, `pending_action` and
-the step budget stay per action; only the number of model calls drops.
+schema. **Every action is its own step** — step logs, `pending_action` and the step
+budget stay per action; only the number of model calls drops. The checkpoint is
+written right after an action with a side effect (a file write, `run_shell`,
+`delegate_task` — the ones `_build_pending_action` records) and otherwise once per
+batch in `run_loop`: a read has nothing to recover, and each durable write cost up to
+a second on a spinning disk.
 `agent_runtime._run_action_batch` runs the actions in order through `_run_one_action`
 (the same guards as a single action) and **stops at the first action that is blocked
 or fails**: a later action must never run on the assumption that an earlier one

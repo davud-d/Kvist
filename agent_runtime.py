@@ -644,6 +644,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 report_rendered = outcome.report_rendered
                 task_completed = True
                 break
+            self._save_checkpoint(user_goal, step - 1)
 
             # Only pipeline off a clean, successful step: after an error the
             # model tier and pending instruction are volatile, so predicting the
@@ -1144,10 +1145,12 @@ def _execute_action(
         is_error=not ok,
     )
 
-    # Checkpoint every step: mutating actions land on disk immediately,
-    # so a coarser interval leaves resume state trailing the real
-    # workspace. The atomic write is negligible next to the LLM call.
-    self._save_checkpoint(user_goal, step)
+    # A side effect is on disk the moment it runs, so its checkpoint cannot
+    # wait. A read has nothing to recover — resume simply reads again — and is
+    # saved once with the rest of its batch (run_loop): each durable write
+    # costs up to a second on a spinning disk, several per action.
+    if pending_action is not None:
+        self._save_checkpoint(user_goal, step)
     return _ActionOutcome(proceed=ok)
 
 
