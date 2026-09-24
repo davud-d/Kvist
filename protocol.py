@@ -49,3 +49,25 @@ class AgentCommand:
     user_message: str
     action: Action
     step_summary: str = ""
+
+
+@dataclass(slots=True)
+class ToolCallRequest:
+    """One call as the model wrote it, before validation.
+
+    ``error`` is set when the call could not be read at all (broken JSON, no
+    name); such a call is answered with the error instead of running.
+    """
+
+    call_id: str
+    name: str
+    arguments: dict[str, Any] | None
+    error: str = ""
+
+
+@dataclass(slots=True)
+class ModelResponse:
+    """A response of the v2 contract: words to the person and zero or more calls."""
+
+    text: str
+    calls: list[ToolCallRequest]

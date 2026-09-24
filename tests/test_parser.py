@@ -4,7 +4,14 @@ import json
 
 import pytest
 
-from parser import CommandValidationError, MAX_BATCH_ACTIONS, load_single_json_object, parse_agent_commands, validate_action_args
+from parser import (
+    CommandValidationError,
+    MAX_BATCH_ACTIONS,
+    load_single_json_object,
+    parse_agent_commands,
+    parse_model_response,
+    validate_action_args,
+)
 
 
 def valid_payload(action_type: str = "final_answer", args: dict | None = None) -> dict:
@@ -261,3 +268,170 @@ def test_parse_agent_commands_accepts_a_terminal_action_closing_the_batch():
         )
     )
     assert [command.action.type for command in commands] == ["list_dir", "final_answer"]
+
+
+# --- v2 response: text plus <tool_call> blocks --------------------------------
+
+def _call(name: str, **arguments) -> str:
+    return "<tool_call>" + json.dumps({"name": name, "arguments": arguments}) + "</tool_call>"
+
+
+def test_model_response_splits_text_and_calls_in_order():
+    response = parse_model_response(
+        "Нашёл два места. Читаю оба.\n"
+        + _call("read_file", path="a.py")
+        + "\n"
+        + _call("search_code", query="role", path="src/")
+    )
+
+    assert response.text == "Нашёл два места. Читаю оба."
+    assert [(call.name, call.arguments) for call in response.calls] == [
+        ("read_file", {"path": "a.py"}),
+        ("search_code", {"query": "role", "path": "src/"}),
+    ]
+    assert all(not call.error for call in response.calls)
+    assert len({call.call_id for call in response.calls}) == 2
+
+
+def test_model_response_without_calls_is_the_end_of_the_turn():
+    response = parse_model_response("  Готово: тесты зелёные.  ")
+
+    assert response.text == "Готово: тесты зелёные."
+    assert response.calls == []
+
+
+def test_model_response_finds_json_in_the_middle_of_text():
+    response = parse_model_response(
+        "Сначала посмотрю конфиг " + _call("read_file", path="app.conf") + " и потом решу."
+    )
+
+    assert response.text == "Сначала посмотрю конфиг\n\nи потом решу."
+    assert response.calls[0].arguments == {"path": "app.conf"}
+
+
+def test_model_response_tolerates_extra_whitespace_inside_and_around_tags():
+    response = parse_model_response(
+        '< tool_call >\n\n   {  "name" :  "list_dir" ,  "arguments" : { "path" : "." } }   \n\n</ TOOL_CALL >'
+    )
+
+    assert [(call.name, call.arguments) for call in response.calls] == [("list_dir", {"path": "."})]
+    assert response.text == ""
+
+
+def test_model_response_strips_a_markdown_fence_around_the_tag():
+    response = parse_model_response(
+        "Смотрю.\n```json\n" + _call("read_file", path="a.py") + "\n```\nДальше по результату."
+    )
+
+    assert response.text == "Смотрю.\n\nДальше по результату."
+    assert response.calls[0].name == "read_file"
+
+
+def test_model_response_strips_a_markdown_fence_inside_the_tag():
+    response = parse_model_response(
+        '<tool_call>\n```json\n{"name": "read_file", "arguments": {"path": "a.py"}}\n```\n</tool_call>'
+    )
+
+    assert response.calls[0].arguments == {"path": "a.py"}
+    assert response.text == ""
+
+
+def test_model_response_keeps_a_code_block_that_does_not_touch_a_tag():
+    response = parse_model_response(
+        "Было:\n```python\nx = 1\n```\nПравлю.\n" + _call("read_file", path="x.py")
+    )
+
+    assert "```python\nx = 1\n```" in response.text
+
+
+def test_model_response_reads_an_unclosed_tag_to_the_end_of_its_json():
+    response = parse_model_response(
+        'Читаю.\n<tool_call>{"name": "read_file", "arguments": {"path": "a.py"}}\nПосле вызова.'
+    )
+
+    assert response.calls[0].arguments == {"path": "a.py"}
+    assert response.text == "Читаю.\n\nПосле вызова."
+
+
+def test_model_response_ends_an_unclosed_tag_at_the_next_tag():
+    response = parse_model_response(
+        '<tool_call>{"name": "read_file", "arguments": {"path": "a.py"}}\n'
+        '<tool_call>{"name": "read_file", "arguments": {"path": "b.py"}}</tool_call>'
+    )
+
+    assert [call.arguments["path"] for call in response.calls] == ["a.py", "b.py"]
+
+
+def test_model_response_turns_a_broken_call_into_an_error_without_losing_the_rest():
+    response = parse_model_response(
+        '<tool_call>{"name": "read_file", "arguments": {"path": }}</tool_call>'
+        + _call("list_dir", path=".")
+    )
+
+    broken, good = response.calls
+    assert broken.name == "read_file"
+    assert broken.arguments is None
+    assert "Tool call 1 was not run" in broken.error and "invalid JSON" in broken.error
+    assert (good.name, good.arguments, good.error) == ("list_dir", {"path": "."}, "")
+
+
+def test_model_response_reports_a_call_without_a_name():
+    (call,) = parse_model_response('<tool_call>{"arguments": {"path": "a"}}</tool_call>').calls
+
+    assert call.arguments is None
+    assert "no tool name" in call.error
+
+
+def test_model_response_reports_a_tag_without_json():
+    (call,) = parse_model_response("<tool_call>read_file a.py</tool_call>").calls
+
+    assert "no JSON object" in call.error
+
+
+def test_model_response_accepts_argument_strings_and_openai_shaped_calls():
+    response = parse_model_response(
+        '<tool_call>{"name": "read_file", "arguments": "{\\"path\\": \\"a.py\\"}"}</tool_call>'
+        '<tool_call>{"type": "function", "function": {"name": "list_dir", "arguments": {"path": "."}}}</tool_call>'
+        '<tool_call>{"tool": "git_status", "args": {}}</tool_call>'
+    )
+
+    assert [(call.name, call.arguments) for call in response.calls] == [
+        ("read_file", {"path": "a.py"}),
+        ("list_dir", {"path": "."}),
+        ("git_status", {}),
+    ]
+
+
+def test_model_response_repairs_smart_quotes_and_trailing_commas_inside_a_tag():
+    (call,) = parse_model_response('<tool_call>{“name”: “read_file”, “arguments”: {“path”: “a.py”,},}</tool_call>').calls
+
+    assert (call.name, call.arguments, call.error) == ("read_file", {"path": "a.py"}, "")
+
+
+def test_model_response_reads_the_pre_v2_object_as_calls():
+    response = parse_model_response(
+        json.dumps(
+            {
+                "thought": "ignored",
+                "plan_step": "inspect",
+                "user_message": "Читаю файл",
+                "actions": [{"type": "read_file", "args": {"path": "a.py"}, "description": "Read"}],
+                "step_summary": "ignored",
+            }
+        )
+    )
+
+    assert response.text == "Читаю файл"
+    assert [(call.name, call.arguments) for call in response.calls] == [("read_file", {"path": "a.py"})]
+
+
+def test_model_response_never_runs_a_json_example_inside_an_answer():
+    response = parse_model_response('Пример ответа: {"actions": [{"type": "write_file", "args": {}}]} — вот так.')
+
+    assert response.calls == []
+
+
+def test_model_response_reads_a_bare_call_object_without_tags():
+    (call,) = parse_model_response('```json\n{"name": "read_file", "arguments": {"path": "a.py"}}\n```').calls
+
+    assert (call.name, call.arguments) == ("read_file", {"path": "a.py"})

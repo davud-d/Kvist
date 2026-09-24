@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
@@ -11,6 +12,8 @@ from protocol import (
     MIN_SHELL_TIMEOUT_SECONDS,
     AgentCommand,
     Action,
+    ModelResponse,
+    ToolCallRequest,
 )
 
 ALLOWED_ACTIONS = {
@@ -483,3 +486,182 @@ def _extract_embedded_json_object(decoder: json.JSONDecoder, text: str) -> Any:
         if isinstance(parsed, dict):
             return parsed
     return _JSON_NOT_FOUND
+
+
+# --- v2 response: free text plus <tool_call>{json}</tool_call> blocks --------
+
+_OPEN_TAG_RE = re.compile(r"<\s*tool_call\s*>", re.IGNORECASE)
+_CLOSE_TAG_RE = re.compile(r"<\s*/\s*tool_call\s*>", re.IGNORECASE)
+# A model that wraps its tags in a markdown fence leaves the fence lines in
+# the text around them; only a fence touching a tag is removed, so a code
+# block in the narration itself survives.
+_FENCE_BEFORE_TAG_RE = re.compile(r"```[\w+-]*[ \t]*$")
+_FENCE_AFTER_TAG_RE = re.compile(r"^```[ \t]*(?:\n|$)")
+_NAME_KEYS = ("name", "tool", "type")
+_ARGUMENT_KEYS = ("arguments", "args", "parameters", "input")
+_CALL_SHAPE = '{"name": "<tool>", "arguments": {...}}'
+
+
+def parse_model_response(text: str) -> ModelResponse:
+    """Split a text-mode response into the words for the person and its calls.
+
+    Never raises: a call that cannot be read becomes a call carrying an error,
+    so one broken block costs only itself.
+    """
+    if not _OPEN_TAG_RE.search(text):
+        return _whole_object_response(text) or ModelResponse(text=text.strip(), calls=[])
+    pieces: list[str] = []
+    calls: list[ToolCallRequest] = []
+    position = 0
+    for start, body, end, closed in _tagged_bodies(text):
+        pieces.append(text[position:start])
+        call, trailing = _read_tagged_call(body, len(calls) + 1, closed)
+        calls.append(call)
+        if trailing:
+            pieces.append(trailing)
+        position = end
+    pieces.append(text[position:])
+    return ModelResponse(text=_join_outside_text(pieces), calls=calls)
+
+
+def _tagged_bodies(text: str) -> Iterable[tuple[int, str, int, bool]]:
+    """(tag start, body, end, closed) per <tool_call>; an unclosed body runs to the next tag."""
+    opens = list(_OPEN_TAG_RE.finditer(text))
+    for index, match in enumerate(opens):
+        limit = opens[index + 1].start() if index + 1 < len(opens) else len(text)
+        close = _CLOSE_TAG_RE.search(text, match.end(), limit)
+        if close is not None:
+            yield match.start(), text[match.end():close.start()], close.end(), True
+        else:
+            yield match.start(), text[match.end():limit], limit, False
+
+
+def _read_tagged_call(body: str, number: int, closed: bool) -> tuple[ToolCallRequest, str]:
+    """The call in one tag body, and text that followed the JSON of an unclosed tag."""
+    stripped = _strip_inner_fence(body.strip())
+    start = stripped.find("{")
+    if start < 0:
+        return _broken_call(number, f"no JSON object inside the tag; write {_CALL_SHAPE}", stripped), ""
+    decoded = _decode_object(stripped[start:])
+    if decoded is None:
+        return _broken_call(number, f"invalid JSON; write {_CALL_SHAPE}", stripped), ""
+    value, end = decoded
+    trailing = "" if closed or end is None else stripped[start + end:]
+    return _call_from_object(value, number), trailing
+
+
+def _strip_inner_fence(body: str) -> str:
+    if body.startswith("```"):
+        body = body.split("\n", 1)[1] if "\n" in body else body[3:]
+    if body.rstrip().endswith("```"):
+        body = body.rstrip()[:-3]
+    return body.strip()
+
+
+def _decode_object(text: str) -> tuple[Any, int | None] | None:
+    """The first JSON value in ``text`` and where it ended in the raw text.
+
+    The end is None when only a repaired copy (smart quotes, trailing commas)
+    parsed, since its offsets no longer match the raw text.
+    """
+    decoder = json.JSONDecoder()
+    try:
+        value, end = decoder.raw_decode(text)
+        return value, end
+    except json.JSONDecodeError:
+        pass
+    for sanitized in _sanitized_candidates(text):
+        try:
+            value, _end = decoder.raw_decode(sanitized)
+        except json.JSONDecodeError:
+            continue
+        return value, None
+    return None
+
+
+def _call_from_object(value: Any, number: int) -> ToolCallRequest:
+    if not isinstance(value, dict):
+        return _broken_call(number, f"a call must be a JSON object: {_CALL_SHAPE}")
+    function = value.get("function")
+    if isinstance(function, dict):
+        value = {**value, **function}
+    name = next((value[key] for key in _NAME_KEYS if isinstance(value.get(key), str) and value[key].strip()), "")
+    if not name or name == "function":
+        return _broken_call(number, f"the call has no tool name: {_CALL_SHAPE}")
+    arguments: Any = next((value[key] for key in _ARGUMENT_KEYS if key in value), None)
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError as error:
+            return _broken_call(number, f"arguments of {name} are not valid JSON ({error})", name=name)
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return _broken_call(number, f"arguments of {name} must be a JSON object", name=name)
+    return ToolCallRequest(call_id=_new_call_id(), name=name.strip(), arguments=arguments)
+
+
+def _broken_call(number: int, reason: str, raw: str = "", *, name: str = "") -> ToolCallRequest:
+    if not name and raw:
+        match = re.search(r'"(?:name|tool)"\s*:\s*"([A-Za-z_]+)"', raw)
+        name = match.group(1) if match else ""
+    return ToolCallRequest(
+        call_id=_new_call_id(),
+        name=name,
+        arguments=None,
+        error=f"Tool call {number} was not run: {reason}.",
+    )
+
+
+def _new_call_id() -> str:
+    return f"call_{uuid.uuid4().hex[:12]}"
+
+
+def _join_outside_text(pieces: list[str]) -> str:
+    cleaned: list[str] = []
+    last = len(pieces) - 1
+    for index, piece in enumerate(pieces):
+        if index > 0:
+            piece = _FENCE_AFTER_TAG_RE.sub("", piece.lstrip(" \t\r\n"), count=1)
+        if index < last:
+            piece = _FENCE_BEFORE_TAG_RE.sub("", piece.rstrip(), count=1)
+        cleaned.append(piece.strip())
+    return "\n\n".join(piece for piece in cleaned if piece)
+
+
+def _whole_object_response(text: str) -> ModelResponse | None:
+    """A response that is nothing but one JSON object of a call-like shape.
+
+    The pre-v2 contract ({"actions": [...]}) from a model prompted with a cached
+    older schema, or a bare call object without its tags. Only a response that
+    is the object and nothing else qualifies: a JSON example inside an answer
+    must never run.
+    """
+    stripped = text.strip()
+    candidates = [stripped]
+    fenced = FENCE_RE.fullmatch(stripped)
+    if fenced is not None:
+        candidates.append(fenced.group(1).strip())
+    for candidate in candidates:
+        for sanitized in _sanitized_candidates(candidate):
+            try:
+                value = json.loads(sanitized)
+            except json.JSONDecodeError:
+                continue
+            return _response_from_object(value)
+    return None
+
+
+def _response_from_object(value: Any) -> ModelResponse | None:
+    if not isinstance(value, dict):
+        return None
+    if "actions" in value or "action" in value:
+        items = value.get("actions") if "actions" in value else [value.get("action")]
+        if not isinstance(items, list):
+            items = [items]
+        words = value.get("user_message")
+        calls = [_call_from_object(item, number) for number, item in enumerate(items, start=1)]
+        return ModelResponse(text=words.strip() if isinstance(words, str) else "", calls=calls)
+    if isinstance(value.get("name"), str) and any(key in value for key in _ARGUMENT_KEYS):
+        return ModelResponse(text="", calls=[_call_from_object(value, 1)])
+    return None
