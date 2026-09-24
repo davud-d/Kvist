@@ -88,6 +88,23 @@ export function windowStart(count: number, selected: number, size: number): numb
   return Math.min(Math.max(0, selected - size + 1), count - size)
 }
 
+// The bordered input box (3 lines), its caption line, the footer below it and
+// the counter line the suggestion list adds once it is capped are always on
+// screen alongside the suggestions themselves. Ink redraws this whole live
+// region in place by moving the cursor up by the *previous* frame's height;
+// once that height reaches the terminal's row count, some of it has already
+// scrolled off, so the next redraw can't erase it and Ink falls back to a
+// full-screen clear (which also wipes scrollback) that keeps repeating on
+// later frames even as the content shrinks back down. The extra margin keeps
+// the frame safely under the row count rather than flush with it.
+export const MAX_VISIBLE_SUGGESTIONS = 6
+const RESERVED_ROWS = 6
+const SAFETY_MARGIN = 2
+
+export function visibleSuggestionCount(rows: number): number {
+  return Math.max(1, Math.min(MAX_VISIBLE_SUGGESTIONS, rows - RESERVED_ROWS - SAFETY_MARGIN))
+}
+
 export type EnterAction = { kind: "submit"; text: string } | { kind: "fill"; text: string }
 
 // What Enter does for the text in the box while the suggestion list is open.
