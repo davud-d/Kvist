@@ -125,6 +125,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "print JSON, exit.",
     )
     parser.add_argument(
+        "--complete",
+        action="store_true",
+        help="Generate an inline code completion from a JSON payload on stdin "
+        "(requires --workspace), print JSON, exit.",
+    )
+    parser.add_argument(
         "--config-op",
         choices=(
             "add-custom-provider",
@@ -202,6 +208,28 @@ def _run_commit_message_op() -> None:
         print(json.dumps(failure))
         raise SystemExit(1) from error
     print(json.dumps({"ok": True, "message": message}))
+
+
+def _run_complete_op(args: argparse.Namespace) -> None:
+    import json
+    from contextlib import redirect_stdout
+
+    from completion import CompletionError, generate_completion, resolve_workspace_for_completion
+    from redaction import sanitize_display_text
+
+    payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    try:
+        with redirect_stdout(sys.stderr):
+            workspace = resolve_workspace_for_completion(args.workspace)
+            completion_text = generate_completion(payload_text, workspace)
+    except (CompletionError, RuntimeError, OSError) as error:
+        failure = {
+            "ok": False,
+            "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+        }
+        print(json.dumps(failure))
+        raise SystemExit(1) from error
+    print(json.dumps({"ok": True, "completion": completion_text}))
 
 
 def _run_set_provider_op(raw: object) -> dict:
@@ -298,6 +326,11 @@ def _run_open_registration_op(raw: object) -> dict:
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
     _run_commit_message_op()
+    raise SystemExit(0)
+
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.complete:
+    _run_complete_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
 
@@ -3660,6 +3693,10 @@ def main() -> None:
 
     if args.commit_message:
         _run_commit_message_op()
+        return
+
+    if args.complete:
+        _run_complete_op(args)
         return
 
     if args.config_op:
