@@ -27,11 +27,17 @@
   без доверенного bubblewrap/TTY, проверено через `git stash`), 57
   skipped. `ruff check` — чисто.
 
+## В работе
+
+- [ ] Два агента запущены параллельно, каждый в своём git worktree (не в
+  этой ветке напрямую — сливаю их результат вручную после строгой
+  проверки):
+  - VS Code: `src/completionClient.ts`, provider в `extension.ts`,
+    настройки в `package.json`, тесты.
+  - JetBrains: проверка EP для inline-completion под платформу 2025.3,
+    `KvistCompletionClient.kt`, provider, `plugin.xml`.
+
 ## Осталось
 
-- [ ] VS Code: `src/completionClient.ts`, provider в `extension.ts`,
-  настройки в `package.json`, тесты.
-- [ ] JetBrains: проверить EP для inline-completion под платформу 2025.3,
-  `KvistCompletionClient.kt`, provider, `plugin.xml`.
 - [ ] Строгая проверка обоих плагинов (диффы, тесты/линт/тайпчек,
-  соответствие контракту).
+  соответствие контракту) и слияние их веток в `claude/wonderful-shannon-egazos`.
