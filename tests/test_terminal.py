@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -824,3 +825,27 @@ def test_unix_resource_limits_set_nproc(monkeypatch):
 
     assert calls[resource.RLIMIT_NPROC] == (99, 99)
     assert calls[resource.RLIMIT_CPU] == (10, 10)
+
+
+@pytest.mark.xfail(
+    sys.platform == "win32",
+    strict=True,
+    reason=(
+        "_path_is_user_mutable: на windows st_mode всегда 0o666, "
+        "ни одно исполняемое не trusted, каждая команда требует approval"
+    ),
+)
+def test_allowlisted_command_runs_without_approval_gate(tmp_path):
+    """An allowlisted read-only command (git --version) executes without
+    the approval gate on Linux.
+
+    On Windows every executable fails the origin-approval gate because
+    _is_trusted_system_executable always returns False — the mode bits
+    never distinguish admin-only writers.  The xfail marks this known
+    limitation until the executor gains a Windows-aware trust model.
+    """
+    executor = TerminalExecutor(tmp_path, timeout=5)
+    result = executor.run(["git", "--version"])
+
+    assert result.returncode == 0
+    assert "git" in result.stdout.lower()
