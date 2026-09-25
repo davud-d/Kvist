@@ -74,7 +74,7 @@ export interface State {
   command: string | null
   // The last `/effort` result; the core does not announce it in `hello`.
   effort: string
-  info: { provider: string; model: string; role: string; session: string; routedRole?: string }
+  info: { provider: string; model: string; role: string; session: string; routedRole?: string; kvistVersion?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
   startedAt: number | null
@@ -247,6 +247,19 @@ function lastAnswerText(state: State): string | null {
   return last?.kind === "answer" ? last.text.trim() : null
 }
 
+// The `fromEnd`-th answer counting back from the most recent one (1 = last).
+// Plain text as the model produced it: no ANSI, no UI chrome, safe to copy.
+export function answerFromEnd(items: readonly Item[], fromEnd: number): string | null {
+  let seen = 0
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index]
+    if (!item || item.kind !== "answer") continue
+    seen += 1
+    if (seen === fromEnd) return item.text.trim()
+  }
+  return null
+}
+
 function asText(value: unknown): string {
   return typeof value === "string" ? value : ""
 }
@@ -319,6 +332,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
         model,
         role: event.role ?? state.info.role,
         session: event.session ?? "",
+        kvistVersion: event.kvist_version ?? state.info.kvistVersion,
       }
       // Any earlier routed role belonged to a core that is gone.
       const first = state.items.length === 0

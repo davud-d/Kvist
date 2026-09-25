@@ -3,10 +3,11 @@ import { writeFileSync } from "node:fs"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
 import { CLASSIC_COMMAND, COMMANDS, CURRENT_FRONTEND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, parseSlash, routeOf, sessionArgs } from "../commands.js"
+import { copyToClipboard } from "../clipboard.js"
 import { KvistCore, type CoreCommand } from "../core.js"
 import type { CoreEvent } from "../protocol.js"
 import { contextLabel } from "../format.js"
-import { initialState, reduce } from "../state.js"
+import { answerFromEnd, initialState, reduce } from "../state.js"
 import { InputBox } from "./input.js"
 import { ItemView } from "./items.js"
 import { Live } from "./live.js"
@@ -36,12 +37,13 @@ function ModeLine({ model, role, effort }: { model: string; role: string; effort
   )
 }
 
-function Footer({ running, armed, usage }: { running: boolean; armed: boolean; usage: { context: number; limit: number } }) {
+function Footer({ running, armed, usage, version }: { running: boolean; armed: boolean; usage: { context: number; limit: number }; version?: string }) {
   const context = contextLabel(usage.context, usage.limit)
   return (
     <Box justifyContent="space-between" paddingX={2}>
       {armed ? <Text color={color.warn}>esc again to interrupt</Text> : running ? <Text color={color.dim}>esc interrupt</Text> : <Text> </Text>}
       <Text>
+        {version ? <Text color={color.dim}>v{version}   </Text> : null}
         {context ? <Text color={color.dim}>{context}   </Text> : null}
         <Text>/</Text>
         <Text color={color.dim}> commands</Text>
@@ -108,7 +110,7 @@ export function App(props: AppProps) {
     }
   }, [note])
 
-  const runLocal = useCallback((name: string) => {
+  const runLocal = useCallback((name: string, args: string[]) => {
     switch (name) {
       case "help":
         return note(HELP)
@@ -119,6 +121,13 @@ export function App(props: AppProps) {
         return dispatch({ type: "clear" })
       case "debug":
         return dispatch({ type: "toggle_debug" })
+      case "copy": {
+        const fromEnd = Math.max(1, Number.parseInt(args[0] ?? "1", 10) || 1)
+        const text = answerFromEnd(stateRef.current.items, fromEnd)
+        if (!text) return note("No answer to copy yet.", "warn")
+        const { chars } = copyToClipboard(text)
+        return note(`Copied ${chars} character${chars === 1 ? "" : "s"} to the clipboard.`)
+      }
       case "tui":
         // A local dialog: it is answered here, never sent to the core.
         return dispatch({
@@ -157,7 +166,7 @@ export function App(props: AppProps) {
     const { name, args } = parsed
     switch (routeOf(name)) {
       case "local":
-        return runLocal(name)
+        return runLocal(name, args)
       case "core":
         return sendCommand(name, name === "session" ? sessionArgs(args) : name === "new" ? args.slice(0, 1) : args)
       case "classic":
@@ -242,7 +251,7 @@ export function App(props: AppProps) {
           onSubmit={submit}
         />
       )}
-      <Footer running={state.running} armed={stopArmedAt > 0} usage={state.usage} />
+      <Footer running={state.running} armed={stopArmedAt > 0} usage={state.usage} version={state.info.kvistVersion} />
     </>
   )
 }

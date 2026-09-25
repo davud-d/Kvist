@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { parseSlash, resolveEnter, suggest, windowStart } from "../src/commands.js"
+import { MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleSuggestionCount, windowStart } from "../src/commands.js"
 import { applyKey, emptyEditor, insert } from "../src/editor.js"
 import { parseBlocks } from "../src/ui/markdown.js"
 
@@ -65,6 +65,19 @@ test("the suggestion window follows the selection and never leaves the list", ()
     const first = windowStart(9, selected, 6)
     assert.ok(selected >= first && selected < first + 6, `row ${selected} must be visible`)
   }
+})
+
+test("the suggestion list shrinks on a short terminal so its live frame never reaches the row count", () => {
+  // A tall terminal keeps the usual cap.
+  assert.equal(visibleSuggestionCount(30), MAX_VISIBLE_SUGGESTIONS)
+  // A short terminal (the reported bug: opening the menu on a small window
+  // made Ink fall back to a full-screen clear that never recovered) must
+  // leave enough margin that the whole live frame — the bordered input box,
+  // caption, suggestions, counter and footer — stays under the row count.
+  assert.equal(visibleSuggestionCount(10), 2)
+  // Never collapses to zero, however small the window.
+  assert.equal(visibleSuggestionCount(1), 1)
+  assert.equal(visibleSuggestionCount(5), 1)
 })
 
 test("Enter runs the highlighted command, or completes one that needs an argument", () => {

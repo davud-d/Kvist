@@ -33,7 +33,7 @@ export interface InputRequest {
 }
 
 export type CoreEvent =
-  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; planning?: boolean }
+  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; planning?: boolean; kvist_version?: string }
   | { type: "live_start" }
   | { type: "live_stop" }
   | { type: "status"; user_message: string; status: string; step: number; progress: number; plan_step: string; is_error: boolean }
@@ -57,6 +57,10 @@ export type CoreEvent =
   | ({ type: "input_request" } & InputRequest)
   | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
   | { type: "turn_end" }
+  // Additive, out-of-band: a session's title became known in the background,
+  // well after that turn's own turn_end, and possibly for a session the user
+  // has since switched away from (UI_API.md §7).
+  | { type: "session_title"; session: string; title: string }
 
 // What `--session-op history` returns per event: the events the stream carried, plus two the journal adds
 // (UI_API.md, "Restoring a session's feed").

@@ -88,8 +88,11 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
     events = [json.loads(line) for line in output.getvalue().splitlines()]
     # effort and planning mirror the saved user preferences, so only their
     # shape is stable across machines.
+    from version import kvist_version
+
     assert events[0].pop("effort") in {"false", "low", "medium", "high", "xhigh", "max"}
     assert isinstance(events[0].pop("planning"), bool)
+    assert events[0].pop("kvist_version") == kvist_version()
     assert events[0] == {
         "type": "hello",
         "protocol_version": 1,
@@ -104,7 +107,11 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         "session": "default",
         "has_checkpoint": False,
     }
-    assert events[-1]["type"] in {"final", "message", "stream_commit"}
+    # session_title is emitted from a background thread once the first turn's
+    # title generation finishes, independently of the turn's own event order —
+    # it may or may not have landed by the time output is read here.
+    turn_events = [event for event in events if event["type"] != "session_title"]
+    assert turn_events[-1]["type"] in {"final", "message", "stream_commit"}
     assert any("Kvist GUI is connected." in json.dumps(event) for event in events)
 
 
@@ -144,3 +151,7 @@ def test_launch_hello_reports_resumable_checkpoint(monkeypatch, tmp_path):
     hello = json.loads(output.getvalue().splitlines()[0])
     assert hello["session"] == "feature"
     assert hello["has_checkpoint"] is True
+
+    from version import kvist_version
+
+    assert hello["kvist_version"] == kvist_version()

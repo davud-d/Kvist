@@ -1,11 +1,9 @@
-import { Box, Text, useInput, usePaste } from "ink"
+import { Box, Text, useInput, usePaste, useWindowSize } from "ink"
 import { useReducer, useRef, type ReactNode } from "react"
 
-import { NAME_WIDTH, resolveEnter, suggest, windowStart } from "../commands.js"
+import { NAME_WIDTH, resolveEnter, suggest, visibleSuggestionCount, windowStart } from "../commands.js"
 import { applyKey, emptyEditor, insert, type Editor } from "../editor.js"
 import { color } from "./theme.js"
-
-const VISIBLE_SUGGESTIONS = 6
 
 interface Props {
   active: boolean
@@ -47,10 +45,13 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
     redraw()
   }
 
+  const { rows } = useWindowSize()
+  const visible = visibleSuggestionCount(rows)
+
   const { editor, pick } = model.current
   const options = mask ? [] : suggest(editor.text)
   const chosen = Math.min(pick, Math.max(0, options.length - 1))
-  const first = windowStart(options.length, chosen, VISIBLE_SUGGESTIONS)
+  const first = windowStart(options.length, chosen, visible)
 
   const change = (next: Editor) => update({ editor: next, pick: 0 })
 
@@ -106,14 +107,14 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
         )}
       </Box>
       {caption}
-      {options.slice(first, first + VISIBLE_SUGGESTIONS).map((command, i) => (
+      {options.slice(first, first + visible).map((command, i) => (
         <Text key={command.name} color={first + i === chosen ? color.accent : command.route === "classic" ? color.faint : color.dim} wrap="truncate-end">
           {"  "}
           {first + i === chosen ? "▸" : " "} /{command.name.padEnd(NAME_WIDTH)}
           <Text color={color.faint}> {command.hint}</Text>
         </Text>
       ))}
-      {options.length > VISIBLE_SUGGESTIONS ? (
+      {options.length > visible ? (
         <Text color={color.faint}>  {chosen + 1}/{options.length} · ↑↓ select · tab complete</Text>
       ) : null}
     </Box>

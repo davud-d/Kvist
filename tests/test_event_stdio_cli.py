@@ -20,6 +20,9 @@ def test_main_dispatches_stdio_frontend_without_starting_terminal(monkeypatch, t
             options=options,
         )
 
+    # resolve_startup_role() (main.py) reads the saved /role preference from
+    # ~/.kvist/config.json; the autouse HOME-isolation fixture in conftest.py
+    # keeps this deterministic across the machine running it.
     monkeypatch.setattr(
         main.sys,
         "argv",

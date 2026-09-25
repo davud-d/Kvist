@@ -9,9 +9,17 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from version import kvist_version
+
 
 def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local AI agent")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=kvist_version(),
+        help="Print the version and exit.",
+    )
     parser.add_argument(
         "--workspace",
         help=(
@@ -54,8 +62,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--role",
         choices=("auto", "coder", "reader", "devops", "chat"),
-        default="auto",
-        help="Agent role override for the stdio frontend.",
+        default=None,
+        help=(
+            "Agent role override for the stdio frontend. Defaults to the "
+            "saved /role preference (see _resolve_startup_role)."
+        ),
     )
     parser.add_argument(
         "--approval-mode",
@@ -358,6 +369,7 @@ from agent_logging import (
     is_valid_session_name,
     list_sessions,
 )
+from session_titler import session_display_title
 from user_config import (
     ensure_provider_credentials,
     get_custom_providers,
@@ -381,6 +393,8 @@ from user_config import (
     save_planning_enabled,
     get_saved_reasoning_effort,
     save_reasoning_effort,
+    get_saved_title_model,
+    save_title_model,
     get_saved_style,
     get_style_options,
     save_style_configuration,
@@ -784,6 +798,21 @@ def resolve_planning_enabled() -> bool:
     if env_skip is not None:
         return env_skip not in {"1", "true", "True", "yes", "on"}
     return get_saved_planning_enabled()
+
+
+def resolve_startup_role(explicit_role: str | None) -> str:
+    """Startup role: an explicit --role always wins and is never written back
+    to the saved preference (it is a one-run override, like
+    AGENT_REASONING_EFFORT is for --reasoning-effort). Omitting --role falls
+    back to the saved /role preference, defaulting to 'auto' when nothing was
+    ever saved. Every frontend that launches a Kvist core process (the TUI's
+    launch_tui, and the stdio/stdio-multi frontends main() serves directly)
+    reads the resolved value from args.role instead of re-deriving it, so a
+    role saved through /role survives a relaunch instead of resetting to the
+    CLI parser's default."""
+    if explicit_role is not None:
+        return explicit_role
+    return get_saved_role() or "auto"
 
 
 def apply_verbose_mode(agent, enabled: bool) -> None:
@@ -1255,6 +1284,7 @@ def build_agent(
         verbose=verbose,
         skip_planning=skip_planning,
         reasoning_effort=resolve_reasoning_effort(),
+        title_model=get_saved_title_model() or "",
     )
     apply_api_settings(config)
     agent_console = Console()
@@ -1368,6 +1398,7 @@ def render_startup_banner(
     console.print("[dim]Command '/effort' — set reasoning effort (false/low/medium/high/xhigh/max).[/dim]")
     console.print("[dim]Command '/tui' — choose the Ink terminal UI or the classic one for the next launch.[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
+    console.print("[dim]Command '/rename NAME' — set the active session's title by hand.[/dim]")
     console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")
     console.print("[dim]Command '/verbose' — enable or disable verbose output.[/dim]")
     console.print("[dim]Command '/strime' — toggle custom-provider streaming.[/dim]")
@@ -1563,9 +1594,11 @@ def choose_session(agent, verbose: bool, ui: AgentUI | None = None) -> str | Non
     options: list[dict[str, str]] = []
     for name in sessions:
         prefix = "● " if name == current else "  "
+        title = session_display_title(agent._read_session_document(name), name)
+        label = f"{prefix}{name}" if title == name else f"{prefix}{name} — {title}"
         options.append({
             "value": name,
-            "label": f"{prefix}{name}",
+            "label": label,
             "description": "current session" if name == current else "",
         })
     # Always show current session even if no file exists yet
@@ -3135,6 +3168,19 @@ def _stdio_new(ctx: CommandContext) -> CommandResult:
     return _stdio_session(ctx)
 
 
+def _stdio_rename(ctx: CommandContext) -> CommandResult:
+    title = " ".join(ctx.args).strip()
+    if not title:
+        return CommandResult(False, "Usage: rename NAME")
+    agent = ctx.session.agent
+    agent.rename_session(title)
+    return CommandResult(
+        True,
+        f"Session renamed to: {title}",
+        {"session": agent.current_session, "title": title},
+    )
+
+
 def _provider_offers_model_list(provider: str) -> bool:
     return bool(
         provider in (OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER)
@@ -3209,6 +3255,27 @@ def _stdio_changes(ctx: CommandContext) -> CommandResult:
     except JournalUnavailableError as error:
         return CommandResult(False, sanitize_display_text(str(error)))
     return CommandResult(True, report)
+
+
+def _stdio_bug(ctx: CommandContext) -> CommandResult:
+    from bug_report import save_bug_report
+    from durable_json import JsonStorageError
+
+    user_text = " ".join(ctx.args)
+    try:
+        path = save_bug_report(
+            ctx.session.agent,
+            frontend="stdio",
+            routed_role=ctx.routed_role,
+            user_text=user_text,
+        )
+    except (JsonStorageError, OSError, ValueError) as error:
+        return CommandResult(False, _failure_detail(error))
+    return CommandResult(
+        True,
+        _bi(f"Bug report saved to {path}", f"Отчёт об ошибке сохранён: {path}"),
+        {"path": str(path)},
+    )
 
 
 def _adopt_rebuilt_agent(ctx: CommandContext, **rebuild_kwargs) -> tuple[AgentConfig, list[str]]:
@@ -3552,6 +3619,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "style": _stdio_style,
     "session": _stdio_session,
     "new": _stdio_new,
+    "rename": _stdio_rename,
     "models": _stdio_models,
     "changes": _stdio_changes,
     "provider": _stdio_provider,
@@ -3561,6 +3629,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "settings-api": _stdio_settings_api,
     "strime": _stdio_strime,
     "revert": _stdio_revert,
+    "bug": _stdio_bug,
 }
 
 
@@ -3570,6 +3639,7 @@ def main() -> None:
         if _DIRECT_CLI_ARGS is not None
         else _build_cli_parser().parse_args()
     )
+    args.role = resolve_startup_role(args.role)
 
     if args.config_info:
         import json as _json
@@ -4363,6 +4433,26 @@ def main() -> None:
                 render_new_session_notice(started)
                 continue
 
+            if user_goal.lower() == "/bug" or user_goal.lower().startswith("/bug "):
+                from bug_report import save_bug_report
+                from durable_json import JsonStorageError
+
+                user_text = user_goal[len("/bug"):].strip()
+                try:
+                    report_path = save_bug_report(
+                        agent, frontend="terminal", user_text=user_text
+                    )
+                except (JsonStorageError, OSError, ValueError) as error:
+                    console.print(
+                        _display_text(
+                            f"Bug report failed safely: {sanitize_display_text(str(error))}",
+                            "red",
+                        )
+                    )
+                    continue
+                console.print(_display_text(f"Bug report saved to {report_path}", "green"))
+                continue
+
             if user_goal.lower() == "/changes":
                 from change_journal import build_diff_report
 
@@ -4566,6 +4656,17 @@ def main() -> None:
                             f"Active session: {agent.current_session}",
                             "dim",
                         )
+                    )
+                continue
+
+            if user_goal.strip().lower().startswith("/rename"):
+                title = user_goal.strip()[len("/rename"):].strip()
+                if not title:
+                    console.print("[yellow]Usage: /rename NAME[/yellow]")
+                else:
+                    agent.rename_session(title)
+                    console.print(
+                        _display_text(f"Session renamed to: {title}", "green")
                     )
                 continue
 

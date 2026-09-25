@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import type { CoreEvent, JournalEvent } from "../src/protocol.js"
-import { actionTarget, exploreSummary, initialState, reduce, type State } from "../src/state.js"
+import { actionTarget, answerFromEnd, exploreSummary, initialState, reduce, type State } from "../src/state.js"
 
 // Stands in for the translation half of the core's bilingual messages, written
 // with escapes so no Russian text lives in this file.
@@ -16,8 +16,13 @@ const hello: CoreEvent = { type: "hello", protocol_version: 1, provider: "p", mo
 
 test("hello fills the header info and prints the banner once", () => {
   const state = feed(hello, hello)
-  assert.deepEqual(state.info, { provider: "p", model: "m", role: "coder", session: "s" })
+  assert.deepEqual(state.info, { provider: "p", model: "m", role: "coder", session: "s", kvistVersion: undefined })
   assert.equal(state.items.filter((item) => item.kind === "banner").length, 1)
+})
+
+test("hello carries the running kvist's version into state.info", () => {
+  const state = feed({ ...hello, kvist_version: "0.1.0b1" })
+  assert.equal(state.info.kvistVersion, "0.1.0b1")
 })
 
 test("a streamed reply is committed once and the live block is cleared", () => {
@@ -475,4 +480,28 @@ test("turn_end also clears a pending command, so a core that answers one as a tu
   const busy = reduce(feed(hello), { type: "command_start", name: "resume" })
   assert.equal(busy.command, "resume")
   assert.equal(reduce(busy, { type: "event", event: { type: "turn_end" } }).command, null)
+})
+
+test("answerFromEnd counts back from the most recent answer, 1-indexed", () => {
+  const state = feed(
+    { type: "final", message: "first ", user_messages: [] },
+    { type: "final", message: "second ", user_messages: [] },
+    { type: "final", message: "third ", user_messages: [] },
+  )
+  assert.equal(answerFromEnd(state.items, 1), "third")
+  assert.equal(answerFromEnd(state.items, 2), "second")
+  assert.equal(answerFromEnd(state.items, 3), "first")
+  assert.equal(answerFromEnd(state.items, 4), null)
+})
+
+test("answerFromEnd skips non-answer items (steps, notes) in between", () => {
+  const state = feed(
+    { type: "final", message: "earlier answer ", user_messages: [] },
+    { type: "debug", message: "noise" },
+  )
+  assert.equal(answerFromEnd(state.items, 1), "earlier answer")
+})
+
+test("answerFromEnd returns null when nothing was ever answered", () => {
+  assert.equal(answerFromEnd(feed(hello).items, 1), null)
 })

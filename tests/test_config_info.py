@@ -21,8 +21,8 @@ _CREDENTIAL_ENVS = (
 
 @pytest.fixture
 def isolated_config(tmp_path, monkeypatch):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    # HOME/USERPROFILE are already redirected to tmp_path by the autouse
+    # fixture in conftest.py.
     for env in _CREDENTIAL_ENVS:
         monkeypatch.delenv(env, raising=False)
     (tmp_path / ".kvist").mkdir()

@@ -14,6 +14,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "help", route: "local", hint: "Show commands and keys" },
   { name: "new", route: "core", hint: "Start a new session (the current one is kept)" },
   { name: "session", route: "core", hint: "Pick a session, or /session <name> to switch" },
+  { name: "rename", route: "core", hint: "Set the active session's title by hand", needsArgument: true },
   { name: "role", route: "core", hint: "Agent role: auto, coder, reader, devops, chat" },
   { name: "effort", route: "core", hint: "Reasoning effort: false … max" },
   { name: "plan", route: "core", hint: "Toggle the planning stage (on | off)" },
@@ -29,6 +30,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "strime", route: "core", hint: "Streaming for a custom provider (on | off)" },
   { name: "del-provider", route: "core", hint: "Delete the active custom provider" },
   { name: "full-reset", route: "core", hint: "Erase every saved provider and key" },
+  { name: "copy", route: "local", hint: "Copy the last answer to the clipboard (/copy N for older)" },
   { name: "tui", route: "local", hint: "Choose the terminal interface" },
   { name: "debug", route: "local", hint: "Show or hide debug events" },
   { name: "clear", route: "local", hint: "Clear the screen" },
@@ -86,6 +88,23 @@ export function parseSlash(text: string): Parsed | null {
 export function windowStart(count: number, selected: number, size: number): number {
   if (count <= size) return 0
   return Math.min(Math.max(0, selected - size + 1), count - size)
+}
+
+// The bordered input box (3 lines), its caption line, the footer below it and
+// the counter line the suggestion list adds once it is capped are always on
+// screen alongside the suggestions themselves. Ink redraws this whole live
+// region in place by moving the cursor up by the *previous* frame's height;
+// once that height reaches the terminal's row count, some of it has already
+// scrolled off, so the next redraw can't erase it and Ink falls back to a
+// full-screen clear (which also wipes scrollback) that keeps repeating on
+// later frames even as the content shrinks back down. The extra margin keeps
+// the frame safely under the row count rather than flush with it.
+export const MAX_VISIBLE_SUGGESTIONS = 6
+const RESERVED_ROWS = 6
+const SAFETY_MARGIN = 2
+
+export function visibleSuggestionCount(rows: number): number {
+  return Math.max(1, Math.min(MAX_VISIBLE_SUGGESTIONS, rows - RESERVED_ROWS - SAFETY_MARGIN))
 }
 
 export type EnterAction = { kind: "submit"; text: string } | { kind: "fill"; text: string }

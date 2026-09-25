@@ -25,6 +25,79 @@ def test_cli_parser_accepts_frontend_flag():
     assert main._build_cli_parser().parse_args(["--frontend", "tui"]).frontend == "tui"
 
 
+def test_cli_parser_role_defaults_to_none_for_saved_preference_resolution():
+    default = main._build_cli_parser().parse_args(["--workspace", "x"])
+    assert default.role is None  # resolved from the saved /role preference in main()
+    assert main._build_cli_parser().parse_args(["--role", "auto"]).role == "auto"
+    assert main._build_cli_parser().parse_args(["--role", "coder"]).role == "coder"
+
+
+def test_resolve_startup_role_falls_back_to_the_saved_preference_only_when_omitted(monkeypatch):
+    monkeypatch.setattr(main, "get_saved_role", lambda: "coder")
+    assert main.resolve_startup_role(None) == "coder"
+    # An explicit --role always wins, even over a different saved role, and
+    # "auto" typed explicitly (the GUI and VS Code extension always send an
+    # explicit role) must pass through unchanged rather than being treated as
+    # "nothing was specified".
+    assert main.resolve_startup_role("reader") == "reader"
+    assert main.resolve_startup_role("auto") == "auto"
+
+
+def test_resolve_startup_role_defaults_to_auto_with_nothing_saved(monkeypatch):
+    monkeypatch.setattr(main, "get_saved_role", lambda: None)
+    assert main.resolve_startup_role(None) == "auto"
+
+
+def test_resolve_startup_role_never_persists_an_explicit_override(monkeypatch):
+    monkeypatch.setattr(main, "get_saved_role", lambda: "coder")
+    saved = []
+    monkeypatch.setattr(main, "save_role_selection", lambda *a, **k: saved.append((a, k)))
+    assert main.resolve_startup_role("devops") == "devops"
+    assert saved == []  # a one-run override is never written back to the saved preference
+
+
+def test_main_resolves_role_from_the_saved_preference_before_launching_the_tui(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_launch_tui(args):
+        captured["role"] = args.role
+        return 0
+
+    monkeypatch.setattr(main, "launch_tui", fake_launch_tui)
+    monkeypatch.setattr(main, "get_saved_role", lambda: "devops")
+    monkeypatch.setattr(main, "_DIRECT_CLI_ARGS", None)
+    monkeypatch.setattr(
+        main.sys,
+        "argv",
+        ["main.py", "--workspace", str(tmp_path), "--frontend", "tui"],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        main.main()
+    assert excinfo.value.code == 0
+    assert captured["role"] == "devops"
+
+
+def test_main_lets_an_explicit_role_override_the_saved_preference(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_launch_tui(args):
+        captured["role"] = args.role
+        return 0
+
+    monkeypatch.setattr(main, "launch_tui", fake_launch_tui)
+    monkeypatch.setattr(main, "get_saved_role", lambda: "devops")
+    monkeypatch.setattr(main, "_DIRECT_CLI_ARGS", None)
+    monkeypatch.setattr(
+        main.sys,
+        "argv",
+        ["main.py", "--workspace", str(tmp_path), "--frontend", "tui", "--role", "reader"],
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        main.main()
+    assert excinfo.value.code == 0
+    assert captured["role"] == "reader"
+
+
 def test_load_launcher_builtin_and_unknown():
     assert callable(frontends.load_launcher("stdio"))
     with pytest.raises(RuntimeError):

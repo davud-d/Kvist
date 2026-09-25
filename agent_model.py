@@ -1343,14 +1343,22 @@ def call_model_streaming(
     return "".join(chunks)
 
 
-def _warn_reasoning_unsupported(self, error: Exception | None) -> None:
-    """Surface, every time it happens, that reasoning effort was dropped.
+def _warn_reasoning_unsupported(self, error: Exception | None, key: tuple[str, str]) -> None:
+    """Surface that reasoning effort was dropped, once per (provider, model) per run.
 
-    The user asked for a persistent warning rather than a one-time notice, so
-    there is deliberately no de-duplication here. ``error`` is ``None`` when
-    the drop came from ``_REASONING_UNSUPPORTED`` rather than a fresh rejection
-    this call.
+    The rejection itself is cached at process scope (``_REASONING_UNSUPPORTED``)
+    so the request is not repeated, but a fresh run is a fresh chance to notice
+    the warning — de-duplication instead lives on ``RunState``, which a new run
+    replaces. ``error`` is ``None`` when the drop came from the cache rather
+    than a fresh rejection this call.
     """
+    warned = getattr(getattr(self, "_state", None), "warned_reasoning_unsupported", None)
+    if warned is not None:
+        if key in warned:
+            if error is not None:
+                self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")
+            return
+        warned.add(key)
     level = normalize_effort(self.config.reasoning_effort)
     message = (
         f"Provider rejected reasoning effort '{level}' — retrying this request "
@@ -1364,9 +1372,9 @@ def _warn_reasoning_unsupported(self, error: Exception | None) -> None:
 
 
 # (provider, model) -> the provider has already rejected a reasoning-control
-# kwarg once this process. Warned every time regardless (see
-# `_warn_reasoning_unsupported`); this only stops resending the same rejected
-# kwarg on every remaining step of a run.
+# kwarg once this process. This only stops resending the same rejected kwarg
+# on every remaining step of a run; the warning's own de-dup is separate (see
+# `_warn_reasoning_unsupported`) and resets every run.
 _REASONING_UNSUPPORTED: set[tuple[str, str]] = set()
 
 
@@ -1376,7 +1384,7 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
     stripped = strip_reasoning_kwargs(request_kwargs)
     key = (self.config.provider, str(request_kwargs.get("model", "")))
     if stripped != request_kwargs and key in _REASONING_UNSUPPORTED:
-        _warn_reasoning_unsupported(self, None)
+        _warn_reasoning_unsupported(self, None, key)
         return self.client.chat.completions.create(**stripped)
     try:
         return self.client.chat.completions.create(**request_kwargs)
@@ -1384,17 +1392,25 @@ def _create_completion_with_reasoning_fallback(self, request_kwargs: dict[str, A
         if not is_reasoning_error(error):
             raise
         _REASONING_UNSUPPORTED.add(key)
-        _warn_reasoning_unsupported(self, error)
+        _warn_reasoning_unsupported(self, error, key)
         return self.client.chat.completions.create(**stripped)
 
 
-def _warn_json_mode_dropped(self, error: Exception | None) -> None:
-    """Surface, every time it happens, that native JSON mode was dropped.
+def _warn_json_mode_dropped(self, error: Exception | None, key: tuple[str, str]) -> None:
+    """Surface that native JSON mode was dropped, once per (provider, model) per run.
 
     Same contract as `_warn_reasoning_unsupported` and for the same reason: a
-    run that quietly lost its format guarantee spends the rest of its steps
-    paying for answers the parser throws away.
+    run that quietly lost its format guarantee spends its early steps paying
+    for answers the parser throws away — but once the run has noticed, saying
+    it again on every remaining step is noise, not information.
     """
+    warned = getattr(getattr(self, "_state", None), "warned_json_mode_unsupported", None)
+    if warned is not None:
+        if key in warned:
+            if error is not None:
+                self._ui.debug_print(f"[json_mode] dropped after: {redact_text(str(error))}")
+            return
+        warned.add(key)
     message = (
         f"Provider rejected JSON mode for '{self.config.provider}' — retrying "
         "without it. Responses are no longer format-constrained this run."
@@ -1407,10 +1423,17 @@ def _warn_json_mode_dropped(self, error: Exception | None) -> None:
 
 
 # (provider, model) -> the provider has already rejected response_format
-# once this process. Warned every time regardless (see
-# `_warn_json_mode_dropped`); this only stops resending the same rejected
-# kwarg on every remaining step of a run.
+# once this process. This only stops resending the same rejected kwarg on
+# every remaining step of a run; the warning's own de-dup is separate (see
+# `_warn_json_mode_dropped`) and resets every run.
 _JSON_MODE_UNSUPPORTED: set[tuple[str, str]] = set()
+
+# (provider, model) -> the provider has already rejected a non-default
+# temperature once this process (reasoning-tier models like o1/o3 fix it to 1
+# and error on anything else). Silent, unlike the two caches above: losing
+# temperature control changes nothing the model formats or the user parses,
+# so there is nothing here worth nagging about every step.
+_TEMPERATURE_UNSUPPORTED: set[tuple[str, str]] = set()
 
 
 def _create_json_completion(
@@ -1422,12 +1445,14 @@ def _create_json_completion(
 ):
     safe_messages = redact_value(messages)
     assert isinstance(safe_messages, list)
+    temperature_key = (self.config.provider, model)
     request_kwargs: dict[str, Any] = {
         "model": model,
         "messages": safe_messages,
-        "temperature": self.config.model_temperature,
         "timeout": self.config.api_timeout,
     }
+    if temperature_key not in _TEMPERATURE_UNSUPPORTED:
+        request_kwargs["temperature"] = self.config.model_temperature
     json_mode_key = (self.config.provider, model)
     wants_json_mode = json_mode and provider_supports_json_mode(self.config.provider)
     known_unsupported = wants_json_mode and json_mode_key in _JSON_MODE_UNSUPPORTED
@@ -1440,25 +1465,25 @@ def _create_json_completion(
         request_kwargs, self.config.provider, self.config.reasoning_effort
     )
 
-    if known_unsupported:
-        _warn_json_mode_dropped(self, None)
-        return _create_completion_with_reasoning_fallback(self, request_kwargs)
-
     first_error: Exception | None = None
-    try:
-        return _create_completion_with_reasoning_fallback(self, request_kwargs)
-    except Exception as error:
-        if not _supports_plain_json_fallback(error):
-            raise
-        first_error = error
+    if not known_unsupported:
+        try:
+            return _create_completion_with_reasoning_fallback(self, request_kwargs)
+        except Exception as error:
+            if not _supports_plain_json_fallback(error):
+                raise
+            first_error = error
 
     # Losing JSON mode is what lets a reasoning model answer with prose the
     # parser then rejects, so the user pays for the same content twice. Drop
-    # only the parameter that was refused before giving up the rest.
-    if "response_format" in request_kwargs:
+    # only the parameter that was refused before giving up the rest. A known
+    # rejection from an earlier step skips straight here without repeating it
+    # — but still falls through to the fallback tier below on a further
+    # failure (e.g. a fixed-temperature model), same as a fresh rejection.
+    if known_unsupported or "response_format" in request_kwargs:
         _JSON_MODE_UNSUPPORTED.add(json_mode_key)
         narrowed = {k: v for k, v in request_kwargs.items() if k != "response_format"}
-        _warn_json_mode_dropped(self, first_error)
+        _warn_json_mode_dropped(self, first_error, json_mode_key)
         try:
             return _create_completion_with_reasoning_fallback(self, narrowed)
         except Exception as error:
@@ -1471,8 +1496,11 @@ def _create_json_completion(
         "messages": safe_messages,
     }
     # Omit temperature when the first error was temperature-related so that the
-    # fallback request does not repeat the same failure.
-    if first_error is None or "temperature" not in str(first_error).casefold():
+    # fallback request does not repeat the same failure, and remember it so the
+    # next step does not send temperature at all.
+    if first_error is not None and "temperature" in str(first_error).casefold():
+        _TEMPERATURE_UNSUPPORTED.add(temperature_key)
+    elif temperature_key not in _TEMPERATURE_UNSUPPORTED:
         fallback_kwargs["temperature"] = self.config.model_temperature
     if stream:
         fallback_kwargs["stream"] = True

@@ -34,6 +34,9 @@ class HelloEvent:
     effort: str | None = None
     planning: bool | None = None
     commands: list[str] | None = None
+    # The running kvist's own version (version.kvist_version()), for a
+    # frontend footer or a bug report — never part of the handshake check.
+    kvist_version: str | None = None
     type: ClassVar[str] = "hello"
 
     def to_dict(self) -> dict:
@@ -59,6 +62,8 @@ class HelloEvent:
             payload["planning"] = self.planning
         if self.commands is not None:
             payload["commands"] = self.commands
+        if self.kvist_version is not None:
+            payload["kvist_version"] = self.kvist_version
         return payload
 
 
@@ -372,6 +377,21 @@ class RouteEvent:
 
     def to_dict(self) -> dict:
         return {"type": self.type, "role": self.role, "source": self.source}
+
+
+@dataclass(slots=True)
+class SessionTitleEvent:
+    """A session's title became known: generated in the background from its
+    first completed turn, or set by hand with /rename (session_titler.py,
+    agent_logging.rename_session). ``session`` names the session the title
+    belongs to, which may differ from the one currently active."""
+
+    session: str
+    title: str
+    type: ClassVar[str] = "session_title"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "session": self.session, "title": self.title}
 
 
 @dataclass(slots=True)

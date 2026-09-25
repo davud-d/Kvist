@@ -33,6 +33,7 @@ from frontend_protocol import (
 )
 from redaction import redact_text, redact_value
 from user_config import get_saved_provider_or_none
+from version import kvist_version
 
 
 def _read_responses(session: EventSession, in_reader) -> None:
@@ -121,6 +122,7 @@ def build_session_hello(
         effort=getattr(config, "reasoning_effort", None),
         planning=None if skip_planning is None else not skip_planning,
         commands=commands,
+        kvist_version=kvist_version(),
     )
 
 

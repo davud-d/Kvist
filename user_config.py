@@ -34,6 +34,7 @@ LLM_MODELS_KEY = "llm_models"
 ROLE_SELECTION_KEY = "role_selection"
 PLANNING_ENABLED_KEY = "planning_enabled"
 REASONING_EFFORT_KEY = "reasoning_effort"
+TITLE_MODEL_KEY = "title_model"
 API_SETTINGS_KEY = "api_settings"
 DEFAULT_LLM_PROVIDER = OPENAI_PROVIDER
 FALLBACK_LLM_PROVIDER = FREEFLOW_PROVIDER
@@ -361,6 +362,30 @@ def save_reasoning_effort(level: str, config_path: Path | None = None) -> None:
         return payload
 
     _update_user_config(save_effort, config_path)
+
+
+def get_saved_title_model(config_path: Path | None = None) -> str | None:
+    """The model id saved for session-title generation, or None (derive it
+    from the active provider's fast/cheap tier — see ``AgentConfig.title_model``)."""
+    payload = load_user_config(config_path)
+    value = payload.get(TITLE_MODEL_KEY)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def save_title_model(model: str, config_path: Path | None = None) -> None:
+    """Persist the session-title model, or clear it back to "derive" on empty."""
+    normalized = str(model).strip()
+
+    def save_model(payload: dict[str, object]) -> dict[str, object]:
+        if normalized:
+            payload[TITLE_MODEL_KEY] = normalized
+        else:
+            payload.pop(TITLE_MODEL_KEY, None)
+        return payload
+
+    _update_user_config(save_model, config_path)
 
 
 def get_saved_api_settings(config_path: Path | None = None) -> dict[str, object]:

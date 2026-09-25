@@ -21,6 +21,11 @@ class AgentConfig:
     fast_model: str = "gpt-5-mini"
     smart_model: str = "gpt-5-mini"
     planner_model: str = "gpt-5-mini"
+    # Model used for background session-title generation (session_titler.py).
+    # Empty means "derive": the fast tier is already the cheapest configured
+    # model for the active provider, so it is the default rather than a
+    # fourth model id the user has to set explicitly.
+    title_model: str = ""
     max_steps: int = 20
     stagnation_limit: int = 6
     max_consecutive_errors: int = 6
@@ -182,6 +187,12 @@ class RunState:
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
     native_unchanged_mark: int = 0
+    # (provider, model) pairs already warned about this run for a dropped
+    # reasoning-control kwarg / dropped JSON mode (agent_model.py). Warned once
+    # per run rather than once per process: the rejection itself is cached at
+    # process scope, but a fresh run is a fresh chance to notice it.
+    warned_reasoning_unsupported: set[tuple[str, str]] = field(default_factory=set)
+    warned_json_mode_unsupported: set[tuple[str, str]] = field(default_factory=set)
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)

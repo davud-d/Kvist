@@ -36,6 +36,31 @@ def test_cli_help_exits_before_terminal_and_provider_initialization(tmp_path):
     assert completed.stderr == ""
 
 
+def test_cli_version_exits_before_terminal_and_provider_initialization(tmp_path):
+    from version import kvist_version
+
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["HOME"] = str(tmp_path)
+    environment.pop("FORCE_COLOR", None)
+    environment["NO_COLOR"] = "1"
+    environment["PYTHON_COLORS"] = "0"
+
+    completed = subprocess.run(
+        [sys.executable, str(root / "main.py"), "--version"],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == kvist_version()
+    assert completed.stderr == ""
+
+
 def test_resolve_workspace_path_creates_directory_and_rejects_file(tmp_path):
     workspace = main.resolve_workspace_path(str(tmp_path / "new"))
     assert workspace.is_dir()
@@ -582,6 +607,33 @@ def test_choose_session_rejects_path_like_name(monkeypatch):
     assert created == []
 
 
+def test_choose_session_shows_each_session_title(monkeypatch):
+    captured = {}
+
+    class FakeUI:
+        def __init__(self, **kwargs):
+            pass
+
+        def choose_option(self, **kwargs):
+            captured["options"] = kwargs["options"]
+            return None
+
+    agent = SimpleNamespace(
+        current_session="alpha",
+        _list_sessions=lambda: ["alpha", "beta"],
+        _read_session_document=lambda name: (
+            {"title": "Fix the login bug"} if name == "alpha" else {}
+        ),
+    )
+    monkeypatch.setattr(main, "TerminalBannerUI", FakeUI)
+
+    main.choose_session(agent, False)
+
+    labels = {option["value"]: option["label"] for option in captured["options"]}
+    assert labels["alpha"] == "● alpha — Fix the login bug"
+    assert labels["beta"] == "  beta"
+
+
 def test_choose_session_successful_delete_returns_active_session(monkeypatch):
     selections = iter(["__delete__", "old_session"])
 
@@ -597,6 +649,7 @@ def test_choose_session_successful_delete_returns_active_session(monkeypatch):
         current_session="current",
         _list_sessions=lambda: ["current", "old_session"],
         _delete_session=deleted.append,
+        _read_session_document=lambda name: {},
     )
     monkeypatch.setattr(main, "TerminalBannerUI",FakeUI)
 
@@ -954,13 +1007,7 @@ class _ApiSettingsUI:
         return next(self._typed)
 
 
-def _isolated_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
-
-
 def test_settings_api_dialog_persists_and_applies_one_edit(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
     ui = _ApiSettingsUI(choices=["context_tokens", "__done__"], typed=["1m"])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
@@ -976,7 +1023,6 @@ def test_settings_api_dialog_persists_and_applies_one_edit(tmp_path, monkeypatch
 def test_settings_api_dialog_reprompts_after_an_impossible_value(
     tmp_path, monkeypatch
 ):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(
         choices=["max_retries", "__done__"],
         typed=["99", "4"],
@@ -992,7 +1038,6 @@ def test_settings_api_dialog_reprompts_after_an_impossible_value(
 
 
 def test_settings_api_dialog_writes_nothing_when_closed(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(choices=[None])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig()
@@ -1004,7 +1049,6 @@ def test_settings_api_dialog_writes_nothing_when_closed(tmp_path, monkeypatch):
 def test_settings_api_dialog_cancelled_field_keeps_the_old_value(
     tmp_path, monkeypatch
 ):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(choices=["request_timeout", "__done__"], typed=[None])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig()
@@ -1014,7 +1058,6 @@ def test_settings_api_dialog_cancelled_field_keeps_the_old_value(
 
 
 def test_settings_api_dialog_reset_restores_every_default(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
     values = main.default_api_settings()
     values["request_interval"] = 0.0
@@ -1036,7 +1079,6 @@ def test_settings_api_dialog_reset_restores_every_default(tmp_path, monkeypatch)
 
 
 def test_settings_api_dialog_toggles_dynamic_model_loading(tmp_path, monkeypatch):
-    _isolated_home(monkeypatch, tmp_path)
     ui = _ApiSettingsUI(choices=["dynamic_models", "off", "__done__"])
     monkeypatch.setattr(main, "TerminalBannerUI", ui)
     config = main.AgentConfig()
@@ -1050,7 +1092,6 @@ def test_settings_api_dialog_toggles_dynamic_model_loading(tmp_path, monkeypatch
 def test_build_agent_skips_discovery_when_dynamic_loading_is_off(
     tmp_path, monkeypatch
 ):
-    _isolated_home(monkeypatch, tmp_path)
     values = main.default_api_settings()
     values["dynamic_models"] = False
     values["request_timeout"] = 240.0

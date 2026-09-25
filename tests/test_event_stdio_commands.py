@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -259,9 +260,14 @@ def test_stdin_eof_during_a_dialog_cancels_it_and_ends_the_process():
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
+    # A subdirectory of tmp_path, not tmp_path itself: the autouse HOME
+    # isolation fixture in conftest.py already points HOME/Path.home() at
+    # tmp_path, so both are re-pointed here to keep them consistent with the
+    # returned path.
     home_dir = tmp_path / "home"
     home_dir.mkdir()
     monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home_dir))
     monkeypatch.delenv("AGENT_REASONING_EFFORT", raising=False)
     return home_dir
 
@@ -435,6 +441,27 @@ def test_new_starts_a_session_and_keeps_the_old_one(home, agent_factory):
     assert "keep-me" in result.effects["sessions"]
 
 
+def test_rename_sets_the_title_and_blocks_autogeneration(home, agent_factory):
+    agent = agent_factory()
+    calls = []
+    agent._start_title_generation = lambda *args: calls.append(args)
+
+    result, _, _ = _run_handler("rename", agent, args=["My", "custom", "title"])
+
+    assert result.ok
+    assert result.effects["title"] == "My custom title"
+    assert agent._session_title == "My custom title"
+
+    agent._add_to_session_history("do something", "coder", "done")
+    assert calls == []
+
+
+def test_rename_without_a_title_is_refused(home, agent_factory):
+    agent = agent_factory()
+    result, _, _ = _run_handler("rename", agent, args=[])
+    assert result.ok is False
+
+
 def test_models_wizard_rebuilds_the_agent_and_persists(home, agent_factory, monkeypatch):
     agent = agent_factory()
     options = [{"value": "gpt-5.4", "label": "a"}, {"value": "gpt-5.4-mini", "label": "b"}]
@@ -491,11 +518,24 @@ def test_changes_reports_an_empty_journal(home, agent_factory):
     assert result.ok and isinstance(result.message, str)
 
 
+def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
+    agent = agent_factory()
+    result, _, _ = _run_handler("bug", agent, args=["crashed", "on", "save"])
+
+    assert result.ok
+    saved_path = home / ".kvist" / "bug-reports"
+    assert saved_path.is_dir()
+    reports = [p for p in saved_path.iterdir() if not p.name.startswith(".")]
+    assert len(reports) == 1
+    assert "crashed on save" in reports[0].read_text(encoding="utf-8")
+    assert str(reports[0]) in result.message
+
+
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
-        "role", "effort", "plan", "verbose", "style", "session", "new", "models", "changes",
-        "provider", "change-api", "del-provider", "full-reset", "settings-api", "strime",
-        "revert",
+        "role", "effort", "plan", "verbose", "style", "session", "new", "rename", "models",
+        "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
+        "strime", "revert", "bug",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)
