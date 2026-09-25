@@ -332,3 +332,73 @@ def test_streamed_tool_call_fragments_are_reassembled(agent_factory):
         ("c1", "read_file", '{"path": "a.py"}'),
         ("c2", "git_status", "{}"),
     ]
+
+
+class _FlakyProbeClient:
+    """Fails the first probe with ``error``, then answers it with a ping call."""
+
+    def __init__(self, error: Exception):
+        self.error = error
+        self.requests: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        if len(self.requests) == 1:
+            raise self.error
+        return _response(calls=[_call("probe", "ping", ok=True)])
+
+
+@pytest.mark.parametrize(
+    "error",
+    [TimeoutError("Request timed out."), ConnectionError("Connection reset by peer"), RuntimeError("Error code: 503 - upstream unavailable")],
+)
+def test_a_probe_lost_to_the_network_is_asked_again_next_run(agent_factory, error):
+    agent = agent_factory(max_steps=1)
+    agent.client = _FlakyProbeClient(error)
+
+    assert agent_model.native_tools_supported(agent, "m") is False
+    assert not agent_model._NATIVE_TOOL_SUPPORT
+    assert agent_model.native_tools_supported(agent, "m") is True
+    assert len(agent.client.requests) == 2
+
+
+def test_an_explicit_refusal_of_tools_is_remembered(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.client = _FlakyProbeClient(RuntimeError("Error code: 400 - tools is not supported for this model"))
+
+    assert agent_model.native_tools_supported(agent, "m") is False
+    assert agent_model.native_tools_supported(agent, "m") is False
+    assert len(agent.client.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("model", "sends"),
+    [("gpt-6-astra", False), ("openai/gpt-6-astra", False), ("gpt-5.6-luna", False), ("o3-mini", False), ("mock-model", True)],
+)
+def test_native_turns_send_no_temperature_to_reasoning_models(agent_factory, model, sends):
+    agent = _native_agent(agent_factory, [_response("Done.")])
+    agent._state.selected_action_model = model
+    agent._state.selected_action_role = "smart"
+
+    agent._run_loop("say done", start_step=1)
+
+    turn_request = agent.client.requests[-1]
+    assert ("temperature" in turn_request) is sends
+
+
+def test_a_temperature_refusal_is_learned_and_the_turn_asked_again(agent_factory, monkeypatch):
+    monkeypatch.setattr(agent_model, "_TEMPERATURE_UNSUPPORTED", set())
+    refusal = RuntimeError("Unsupported value: 'temperature' does not support 0.1 with this model.")
+    agent = _native_agent(agent_factory, [refusal, _response("Done."), _response("Done.")])
+    agent._state.selected_action_model = "custom-thinker"
+    agent._state.selected_action_role = "smart"
+
+    agent._run_loop("say done", start_step=1)
+
+    turns = [request for request in agent.client.requests if request["tools"][0]["function"]["name"] != "ping"]
+    assert "temperature" in turns[0]
+    assert all("temperature" not in turn for turn in turns[1:])
+    # The refusal cost a retry of the same turn, not a failed step.
+    assert not any("temperature" in error for error in agent._state.error_history)
+    assert not any(log.get("status") == "model_error" for log in agent._state.step_logs)

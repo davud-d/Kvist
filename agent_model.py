@@ -501,21 +501,28 @@ def native_tools_supported(self, model: str) -> bool:
     if os.environ.get("AGENT_NATIVE_TOOLS", "").strip() == "0":
         return False
     key = (self.config.provider, model)
-    if key not in _NATIVE_TOOL_SUPPORT:
-        _NATIVE_TOOL_SUPPORT[key] = _probe_native_tools(self, model)
-        self._ui.debug_print(
-            f"[native tools] {self.config.provider}/{model}: "
-            f"{'supported' if _NATIVE_TOOL_SUPPORT[key] else 'not supported, using <tool_call> text blocks'}"
-        )
-    return _NATIVE_TOOL_SUPPORT[key]
+    if key in _NATIVE_TOOL_SUPPORT:
+        return _NATIVE_TOOL_SUPPORT[key]
+    verdict = _probe_native_tools(self, model)
+    # Only the provider's own answer is remembered. A probe lost to a timeout
+    # or the network says nothing about tool calling: this run uses the text
+    # protocol and the next run asks again.
+    if verdict is not None:
+        _NATIVE_TOOL_SUPPORT[key] = verdict
+    outcome = {True: "supported", False: "not supported", None: "probe failed, asking again next run"}[verdict]
+    self._ui.debug_print(f"[native tools] {self.config.provider}/{model}: {outcome}")
+    return bool(verdict)
 
 
 def forget_native_tools(self, model: str) -> None:
     _NATIVE_TOOL_SUPPORT[(self.config.provider, model)] = False
 
 
-def _probe_native_tools(self, model: str) -> bool:
+def _probe_native_tools(self, model: str) -> bool | None:
     """One tiny request that must come back as a well-formed call of ``ping``.
+
+    None when the request never got the provider's answer (a timeout, the
+    network, a rate limit or an outage): no verdict, nothing to remember.
 
     ``tool_choice`` names ``ping`` explicitly so the probe measures whether the
     provider can emit a call at all, not whether a bare one-line prompt with no
@@ -541,16 +548,12 @@ def _probe_native_tools(self, model: str) -> bool:
         response = _create_completion_with_reasoning_fallback(self, request)
     except Exception as error:
         if "tool_choice" not in str(error).casefold():
-            self._ui.debug_print(f"[native tools] probe request failed: {redact_text(str(error))}")
-            return False
+            return _failed_probe_verdict(self, error)
         request.pop("tool_choice", None)
         try:
             response = _create_completion_with_reasoning_fallback(self, request)
         except Exception as retry_error:
-            self._ui.debug_print(
-                f"[native tools] probe request failed: {redact_text(str(retry_error))}"
-            )
-            return False
+            return _failed_probe_verdict(self, retry_error)
     choices = getattr(response, "choices", None) or []
     message = getattr(choices[0], "message", None) if choices else None
     calls = getattr(message, "tool_calls", None) or []
@@ -564,6 +567,35 @@ def _probe_native_tools(self, model: str) -> bool:
     except json.JSONDecodeError:
         return False
     return isinstance(arguments, dict)
+
+
+def _failed_probe_verdict(self, error: Exception) -> bool | None:
+    self._ui.debug_print(f"[native tools] probe request failed: {redact_text(str(error))}")
+    return None if _is_transient_error(error) else False
+
+
+_TRANSIENT_ERROR_TYPES = (
+    APITimeoutError,
+    APIConnectionError,
+    RateLimitError,
+    InternalServerError,
+    TimeoutError,
+    ConnectionError,
+)
+# Wrapper clients (Anthropic, FreeFlow) raise their own types; their text is
+# all that tells a lost request from a provider's answer.
+_TRANSIENT_ERROR_MARKERS = (
+    "timed out", "timeout", "connection", "network", "temporarily unavailable",
+    "rate limit", "too many requests", "429", "502", "503", "504",
+)
+
+
+def _is_transient_error(error: Exception) -> bool:
+    """The request never got the provider's answer: nothing it says is a verdict."""
+    if isinstance(error, _TRANSIENT_ERROR_TYPES):
+        return True
+    text = str(error).casefold()
+    return any(marker in text for marker in _TRANSIENT_ERROR_MARKERS)
 
 
 def is_tools_rejection(error: Exception) -> bool:
@@ -596,6 +628,11 @@ def call_native_action_model(
         except Exception as error:
             if is_tools_rejection(error):
                 raise NativeToolsRejected(redact_text(str(error))) from error
+            if "temperature" in str(error).casefold() and _sends_temperature(self, model):
+                # A reasoning model the id pattern does not know yet: learned
+                # once, and the same turn is asked again without it.
+                _TEMPERATURE_UNSUPPORTED.add((self.config.provider, model))
+                continue
             if is_context_overflow_error(error):
                 budget = note_input_overflow(model, input_tokens)
                 self._ui.print_error(
@@ -633,9 +670,10 @@ def _request_native_turn(
         "model": model,
         "messages": redact_value(messages),
         "tools": tools,
-        "temperature": self.config.model_temperature,
         "timeout": self.config.api_timeout,
     }
+    if _sends_temperature(self, model):
+        request["temperature"] = self.config.model_temperature
     if self.config.stream:
         request["stream"] = True
         request["stream_options"] = {"include_usage": True}
@@ -650,6 +688,23 @@ def _request_native_turn(
         self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
         return turn
     return _native_turn_from_stream(self, response, started)
+
+
+# Reasoning models fix temperature at its default and refuse any other value
+# ("Unsupported value: 'temperature' does not support 0.1"), and the native
+# path had no way back from that refusal: every turn of the run failed.
+_REASONING_MODEL_RE = re.compile(r"^(?:o\d+(?:-|$)|gpt-5|gpt-6|deepseek-reasoner)")
+
+
+def is_reasoning_model(model: str) -> bool:
+    """A model id from a family that reasons before answering (vendor prefix ignored)."""
+    return bool(_REASONING_MODEL_RE.match(model.rsplit("/", 1)[-1].strip().casefold()))
+
+
+def _sends_temperature(self, model: str) -> bool:
+    if is_reasoning_model(model):
+        return False
+    return (self.config.provider, model) not in _TEMPERATURE_UNSUPPORTED
 
 
 def _native_turn_from_message(message: Any) -> NativeTurn:
