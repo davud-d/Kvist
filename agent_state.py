@@ -81,9 +81,11 @@ class PlanInfo:
     plan: list[str]
     success_criteria: list[str]
     risks: list[str]
-    # "report" when the user expects a substantive spoken answer/analysis,
-    # "action" for pure mutation/run tasks. Classified by the planner (which
-    # already reads task intent); a keyword heuristic is the fallback only.
+    # "change" when the requested result is a change to files (it cannot be
+    # done while files_changed is empty), "report" when the user expects a
+    # substantive spoken answer/analysis, "action" for commands to run and
+    # checks with a short status. Classified by the planner (which already
+    # reads task intent); a keyword heuristic is the fallback only.
     task_kind: str = "action"
 
 
@@ -163,9 +165,6 @@ class RunState:
     # Ends of a turn (a response without calls) the runtime refused this run.
     # After one refusal the next end is taken as an honest "not done".
     finish_refusals: int = 0
-    # The error of the latest tool call that failed, cleared by the next call
-    # that succeeds. The finish gate's own refusals never set it.
-    unresolved_failure: str = ""
     # Blank cells in CSV/TSV files read this run, and whether the model was
     # already asked to account for them before finishing (asked once, never twice).
     empty_data_cells: list[str] = field(default_factory=list)

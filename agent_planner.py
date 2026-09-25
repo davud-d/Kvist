@@ -8,6 +8,7 @@ from agent_model import planner_style_context
 from agent_state import NO_PLAN_STEP, PlanInfo
 from parser import CommandValidationError, load_single_json_object
 from redaction import defang_prompt_boundary_tags
+from role_router import has_change_verb
 
 _PROMPT_DIR = Path(__file__).resolve().parent
 
@@ -42,10 +43,35 @@ _REPORT_MARKERS: tuple[str, ...] = (
 )
 
 
-def infer_task_kind(user_goal: str) -> str:
-    """Heuristic 'report' vs 'action' classification used only as a fallback."""
+# The words that ask for something new to be made; the router's change verbs
+# cover every other kind of edit.
+_CREATE_MARKERS: tuple[str, ...] = (
+    "create ", "build ", "generate ", "scaffold", "bootstrap", "создай", "сгенерируй",
+)
+
+TASK_KINDS = frozenset({"report", "change", "action"})
+
+
+def is_create_goal(user_goal: str) -> bool:
     lowered = user_goal.casefold()
-    return "report" if any(marker in lowered for marker in _REPORT_MARKERS) else "action"
+    return any(marker in lowered for marker in _CREATE_MARKERS)
+
+
+def asks_for_explanation(user_goal: str) -> bool:
+    """The request expects a substantive spoken answer (an explanation, a review)."""
+    lowered = user_goal.casefold()
+    return any(marker in lowered for marker in _REPORT_MARKERS)
+
+
+def infer_task_kind(user_goal: str) -> str:
+    """Heuristic 'change' / 'report' / 'action' classification used only as a fallback.
+
+    A request that changes files is "change" even when it also asks for an
+    explanation: what it must deliver first is the change.
+    """
+    if has_change_verb(user_goal) or is_create_goal(user_goal):
+        return "change"
+    return "report" if asks_for_explanation(user_goal) else "action"
 
 def _reset_client_disabled_backends(agent_self: Any) -> None:
     """Clear any disabled-backend state on the LLM client.
@@ -153,7 +179,7 @@ def create_plan(self, user_goal: str) -> PlanInfo:
         risks = data.get("risks")
         complexity = str(data.get("complexity", "simple")).strip().lower()
         task_kind = str(data.get("task_kind", "")).strip().lower()
-        if task_kind not in {"report", "action"}:
+        if task_kind not in TASK_KINDS:
             task_kind = infer_task_kind(user_goal)
 
         if not isinstance(plan, list) or not plan:

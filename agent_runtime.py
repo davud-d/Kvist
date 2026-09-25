@@ -74,7 +74,7 @@ from parser import (
 )
 from protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from agent_planner import infer_task_kind
+from agent_planner import asks_for_explanation, infer_task_kind, is_create_goal
 from role_router import has_change_verb, has_no_write_marker
 
 _READ_ONLY_ACTIONS = {
@@ -169,7 +169,7 @@ _BLOCKER_LABELS = {
     "artifacts_missing": ("не хватает файлов", "required files missing"),
     "unverified": ("ждёт проверки правок", "changes not verified"),
     "no_changes": ("файлы не изменены", "no file changed"),
-    "errors_present": ("последний вызов упал, файлы не изменены", "the last call failed, no file changed"),
+    "errors_present": ("есть неустранённые ошибки", "unresolved errors"),
     "no_activity": ("ничего не прочитано и не изменено", "nothing read or changed"),
 }
 
@@ -1709,7 +1709,6 @@ def register_feedback(
 
     if ok:
         self._state.consecutive_errors = 0
-        self._state.unresolved_failure = ""
         self._state.pending_instruction = ""
         self._update_state_from_success(command, feedback)
         if command.action.type in _READ_ONLY_ACTIONS:
@@ -1728,8 +1727,6 @@ def register_feedback(
 
         if not terminal_not_found:
             self._state.consecutive_errors += 1
-        if not terminal_not_found and command.action.type not in _FINISH_ACTIONS:
-            self._state.unresolved_failure = error_text
         if command.action.type in _WRITE_ACTIONS:
             self._state.read_only_streak = 0
         self._record_error(error_text)
@@ -2865,18 +2862,7 @@ def _token_match(word: str, text: str) -> bool:
     return bool(re.search(pattern, text))
 
 
-def _is_create_goal(user_goal: str) -> bool:
-    lowered = user_goal.casefold()
-    markers = (
-        "create ",
-        "build ",
-        "generate ",
-        "scaffold",
-        "bootstrap",
-        "создай",
-        "сгенерируй",
-    )
-    return any(marker in lowered for marker in markers)
+_is_create_goal = is_create_goal
 
 
 # The router owns the change-verb vocabulary; the run loop reads the same list
@@ -2940,6 +2926,9 @@ def _resolve_report_goal(self, user_goal: str) -> bool:
     task_kind = getattr(plan, "task_kind", "") if plan is not None else ""
     if task_kind in {"report", "action"}:
         return task_kind == "report"
+    # A change that also asks for an explanation still owes the explanation.
+    if task_kind == "change":
+        return asks_for_explanation(user_goal)
     return _is_report_goal(user_goal)
 
 
@@ -3357,9 +3346,7 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
     for kind, text in _evidence_completion_blockers(self):
         kinds.append(kind)
         blockers.append(text)
-        # Errors are resolved by looking again or explaining them, never by
-        # writing something to make the blocker go away.
-        required_actions.update(_VERIFY_ONLY_ACTIONS if kind == "errors_present" else _WRITE_ACTIONS)
+        required_actions.update(_WRITE_ACTIONS)
 
     return blockers, kinds, sorted(required_actions)
 
@@ -3375,14 +3362,21 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
     ru = st.task_language == "ru"
     out: list[tuple[str, str]] = []
 
+    # The planner's word that the result is a change to files is not second-
+    # guessed: whatever the last call did, nothing changed means not done.
+    # The keyword guesses keep their exceptions for read-only and verify-only
+    # runs, since they can mistake a question for an edit.
+    change_by_plan = _plan_expects_changes(self)
     change_task = (
-        st.create_goal
+        change_by_plan
+        or st.create_goal
         or st.modify_goal
         or bool(st.required_artifacts)
         or _plan_requires_file_changes(self)
     )
     verify_only_done = st.verify_only_goal and bool(st.verification_evidence)
-    if change_task and not st.read_only_goal and not verify_only_done and not st.files_changed:
+    guessed_change_open = change_task and not st.read_only_goal and not verify_only_done
+    if not st.files_changed and (change_by_plan or guessed_change_open):
         out.append((
             "no_changes",
             "Completion blocked: this task changes files but files_changed is empty. "
@@ -3392,20 +3386,18 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
             f"Внеси реальную правку, прежде чем заявлять о готовности. {_HONEST_EXIT_HINT_RU}",
         ))
 
-    # A run that changed nothing while its last call failed cannot call itself
-    # done: that failure may be exactly why nothing changed. A failure a later
-    # call got past (a wrong path, then the right one) is not held against it,
-    # and a read-only task is expected to change nothing.
-    errors_without_changes = bool(st.unresolved_failure) and not st.files_changed and not st.read_only_goal
-    if st.error_history and (errors_without_changes or (st.progress >= 100 and st.recovery_pending)):
-        last = st.unresolved_failure or st.error_history[-1]
+    if (
+        st.progress >= 100
+        and st.error_history
+        and (st.recovery_pending or not st.files_changed)
+    ):
         out.append((
             "errors_present",
-            f"Completion blocked: the run changed no file and its last call failed ({last}). "
-            f"Resolve the error or explain it. {_HONEST_EXIT_HINT}"
+            "Completion blocked: progress is 100% but there are unresolved errors "
+            f"({st.error_history[-1]}). Resolve them. {_HONEST_EXIT_HINT}"
             if not ru else
-            f"Завершение заблокировано: ни один файл не изменён, а последний вызов упал ({last}). "
-            f"Устрани ошибку или объясни её. {_HONEST_EXIT_HINT_RU}",
+            "Завершение заблокировано: прогресс 100%, но есть неустранённые ошибки "
+            f"({st.error_history[-1]}). Устрани их. {_HONEST_EXIT_HINT_RU}",
         ))
 
     if (
@@ -3495,6 +3487,11 @@ def update_recovery_tracking(self, command: AgentCommand, ok: bool, error_text: 
     self._state.recovery_signatures.add(self._action_signature(command))
     if len(self._state.recovery_signatures) >= _RECOVERY_ATTEMPTS_REQUIRED:
         self._state.recovery_pending = False
+
+
+def _plan_expects_changes(self) -> bool:
+    plan_info = self._state.plan_info
+    return plan_info is not None and plan_info.task_kind == "change"
 
 
 def _plan_requires_file_changes(self) -> bool:

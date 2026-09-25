@@ -172,23 +172,77 @@ def test_a_turn_ending_without_calls_on_a_fix_with_no_changes_is_never_done(agen
     assert finals == [(result, "incomplete")]
 
 
-def test_a_turn_ending_after_a_failed_call_with_no_changes_is_never_done(agent_factory):
-    agent = _planned_agent(agent_factory, PlanInfo(
-        goal="Run the build", complexity="simple", plan=["run the build"], success_criteria=[], risks=[],
-    ), max_steps=6)
-    responses = iter([
-        '<tool_call>{"name": "read_file", "arguments": {"path": "missing.cfg"}}</tool_call>',
-        "The build config is fine.",
-        "The build config is fine.",
+def _call(name: str, **arguments) -> str:
+    return "<tool_call>" + json.dumps({"name": name, "arguments": arguments}) + "</tool_call>"
+
+
+def _scripted(agent, responses: list[str]) -> list[str]:
+    prompts: list[str] = []
+
+    def fake_call_action_model(prompt: str) -> str:
+        prompts.append(prompt)
+        return responses[min(len(prompts), len(responses)) - 1]
+
+    agent._call_action_model = fake_call_action_model
+    return prompts
+
+
+def test_a_change_task_is_never_done_with_no_file_changed_even_after_a_good_last_call(agent_factory):
+    plan = PlanInfo(
+        goal="Поправь таймаут в client.py", complexity="simple",
+        plan=["прочитать client.py", "поправить таймаут"], success_criteria=["таймаут 15"], risks=[],
+        task_kind="change",
+    )
+    agent = _planned_agent(agent_factory, plan, max_steps=8)
+    agent._state.response_language = "ru"
+    workspace = agent.executor.workspace
+    (workspace / "client.py").write_text("TIMEOUT = 5\n", encoding="utf-8")
+    (workspace / "config.py").write_text("RETRIES = 3\n", encoding="utf-8")
+    finals = []
+    agent._ui.print_final = lambda message, user_messages=None, outcome="done": finals.append(outcome)
+    # The write fails in the middle of the batch; the batch still ends on a
+    # successful read, so the last call of the run succeeded.
+    prompts = _scripted(agent, [
+        "Читаю, правлю и сверяю конфиг.\n"
+        + _call("read_file", path="client.py")
+        + _call("replace_in_file", path="client.py", old_text="TIMEOUT = 50", new_text="TIMEOUT = 15")
+        + _call("read_file", path="config.py"),
+        "Готово.",
+        "Готово.",
     ])
-    agent._call_action_model = lambda prompt: next(responses)
 
-    result = agent._run_loop("Run the build and check the config", start_step=1)
+    result = agent._run_loop("Поправь таймаут в client.py", start_step=1)
 
-    assert "errors_present" in agent._state.completion_blocker_kinds
-    assert "the task is not marked as done (" in result
-    assert "the last call failed, no file changed" in result
-    assert agent._state.run_status == "blocked"
+    calls = [log for log in agent._state.step_logs if "feedback" in log]
+    assert [log["feedback"]["ok"] for log in calls] == [True, False, True]
+    blocked = [log for log in agent._state.step_logs if log.get("status") == "blocked_final_answer"]
+    assert len(blocked) == 1 and "files_changed is empty" in blocked[0]["reason"]
+    assert "no_changes" in agent._state.completion_blocker_kinds
+    assert len(prompts) == 3
+    assert result.startswith("Готово.") and "задача не отмечена как выполненная" in result
+    assert finals == ["incomplete"]
+
+
+def test_a_question_is_answered_as_done_after_a_failed_read(agent_factory):
+    plan = PlanInfo(
+        goal="Какой таймаут в client.py?", complexity="simple",
+        plan=["прочитать client.py", "ответить"], success_criteria=["ответ дан"], risks=[],
+        task_kind="report",
+    )
+    agent = _planned_agent(agent_factory, plan, max_steps=6)
+    agent._state.response_language = "ru"
+    (agent.executor.workspace / "client.py").write_text("TIMEOUT = 5\n", encoding="utf-8")
+    prompts = _scripted(agent, [
+        _call("read_file", path="src/client.py"),
+        _call("read_file", path="client.py"),
+        "В `client.py` таймаут равен 5 секундам: `TIMEOUT = 5`. Файла `src/client.py` в проекте нет, поэтому значение берётся только отсюда.",
+    ])
+
+    result = agent._run_loop("Какой таймаут в client.py?", start_step=1)
+
+    assert len(prompts) == 3
+    assert result == "В `client.py` таймаут равен 5 секундам: `TIMEOUT = 5`. Файла `src/client.py` в проекте нет, поэтому значение берётся только отсюда."
+    assert not agent._state.finished_incomplete
 
 
 def test_every_blocker_text_names_the_honest_exit(agent_factory):

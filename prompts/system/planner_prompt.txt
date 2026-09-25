@@ -22,7 +22,7 @@ RESPONSE SCHEMA:
 {
   "goal": "short exact user goal",
   "complexity": "simple|complex",
-  "task_kind": "report|action",
+  "task_kind": "report|change|action",
   "plan": [
     "step 1",
     "step 2",
@@ -221,21 +221,26 @@ explanation, analysis, review, opinion, recommendations, or "what would you
 change / what's wrong / where are the weak spots". Reading or inspecting files
 to produce that answer still counts as "report".
 
-task_kind="action" when the user only wants the workspace changed or commands
-run — create/edit/fix files, run tests, build — with no substantive answer
+task_kind="change" when the requested result is a change to files — create,
+edit, fix, rename or delete them. The run cannot be done while no file changed.
+
+task_kind="action" when the user wants commands run or state checked — run
+tests, build, show a status — with no file to change and no substantive answer
 expected beyond a short status.
 
-If the task both changes files AND asks for an explanation, choose "report":
-the executor must still deliver the substantive answer, not a status stub.
+If the task both changes files AND asks for an explanation, choose "change":
+the change is the result, and the executor still owes the explanation in its
+final answer.
 
 Examples:
 - "какие места тут улучшить?" -> report
 - "что не так с этим конфигом" -> report
 - "твоё мнение по структуре модуля" -> report
 - "what's wrong with this setup" -> report
-- "создай hello.py" -> action
-- "исправь баг в main.py" -> action
-- "исправь баг и объясни, что было не так" -> report
+- "создай hello.py" -> change
+- "исправь баг в main.py" -> change
+- "исправь баг и объясни, что было не так" -> change
+- "прогони тесты" -> action
 
 RULES FOR plan
 
@@ -391,7 +396,7 @@ JSON must parse through json.loads.
 All strings must be strings.
 plan, success_criteria, and risks must be arrays of strings.
 complexity must be only "simple" or "complex".
-task_kind must be only "report" or "action".
+task_kind must be only "report", "change" or "action".
 Do not add fields like "notes", "commands", "files", "explanation", "reasoning".
 Do not use markdown.
 Do not use numbering inside array strings.
