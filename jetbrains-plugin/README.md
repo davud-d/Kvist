@@ -1,6 +1,6 @@
 # Kvist IntelliJ Plugin
 
-IntelliJ Platform plugin for Kvist: a chat tool window with the same panel as the VS Code extension, a launcher that starts the Kvist binary inside the IDE Terminal for the currently opened project, and commit messages.
+IntelliJ Platform plugin for Kvist: a chat tool window with the same panel as the VS Code extension, a launcher that starts the Kvist binary inside the IDE Terminal for the currently opened project, commit messages, and ghost-text inline completion.
 
 ## Chat tool window
 
@@ -23,6 +23,16 @@ While it runs, the button shows a spinner; hovering turns it into a red stop squ
 - Secret files (`.env`, keys, certificates, ...) and `.kvist/` are dropped before anything reaches the model.
 - The feature needs the bundled Git plugin. With Git disabled, only the launcher is available.
 - The bundled binary must be built from a Kvist version that has `--commit-message`; rebuild it with the scripts below.
+
+## Inline completion
+
+As you type, the editor shows a gray-text ("ghost text") suggestion from `kvist --complete`, accepted with Tab like any other inline completion. Toggle it from **Tools | Kvist Inline Completion**; it is on by default.
+
+- One short-lived `kvist --complete` process per suggestion, independent of the chat tool window's core process: it runs even while an agent turn is in progress, and never waits behind one.
+- The IDE's own debounce-and-cancel mechanism for inline completion providers is reused as-is: a short pause after typing before a request fires, and a further keystroke cancels whatever request is still in flight (and kills its process) instead of queuing behind it.
+- `prefix`/`suffix` are the live, unsaved buffer split at the caret — never a save to disk first.
+- Only Python and JS/TS variants get their imports resolved into extra context by the core; every other language still gets a plain completion.
+- The bundled binary must be built from a Kvist version that has `--complete`; rebuild it with the scripts below.
 
 ## Compatibility
 

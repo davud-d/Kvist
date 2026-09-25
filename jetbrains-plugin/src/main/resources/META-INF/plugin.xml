@@ -7,7 +7,8 @@
     <description><![CDATA[
     The Kvist coding agent as a chat tool window (the same panel as the VS Code
     extension, in the IDE's embedded browser), a launcher that runs Kvist inside the
-    IDE Terminal, and commit messages for the changes selected in the commit dialog.
+    IDE Terminal, commit messages for the changes selected in the commit dialog, and
+    ghost-text inline completion as you type.
     ]]></description>
 
     <idea-version since-build="253" />
@@ -25,6 +26,7 @@
             canCloseContents="false"
             factoryClass="com.kvist.intellij.chat.KvistToolWindowFactory"
         />
+        <inline.completion.provider implementation="com.kvist.intellij.completion.KvistInlineCompletionProvider" />
     </extensions>
 
     <actions>
@@ -36,6 +38,14 @@
             description="Start Kvist in the IDE Terminal"
         >
             <add-to-group group-id="MainToolbarRight" anchor="last" />
+            <add-to-group group-id="ToolsMenu" anchor="last" />
+        </action>
+        <action
+            id="com.kvist.intellij.ToggleInlineCompletionAction"
+            class="com.kvist.intellij.actions.ToggleInlineCompletionAction"
+            text="Kvist Inline Completion"
+            description="Toggle ghost-text inline completion from Kvist"
+        >
             <add-to-group group-id="ToolsMenu" anchor="last" />
         </action>
     </actions>
