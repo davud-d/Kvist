@@ -27,17 +27,26 @@
   без доверенного bubblewrap/TTY, проверено через `git stash`), 57
   skipped. `ruff check` — чисто.
 
+- [x] VS Code готов и проверен, слит в эту ветку (`c44ab10`):
+  `src/completionClient.ts` (spawn/debounce/отмена/LRU-кэш,
+  `child_process.spawn` с массивом argv — без shell, инъекция аргументов
+  невозможна), `src/completionProvider.ts`
+  (`InlineCompletionItemProvider`), provider зарегистрирован в
+  `extension.ts`, `activationEvents` дополнен `onStartupFinished` (иначе
+  расширение не активируется при открытии файла), настройки
+  `kvist.inlineCompletion.{enabled,debounceMs}` в `package.json`.
+  Я сам (не со слов агента) прогнал `npm install/build/typecheck/lint/test`
+  в его ворктри — чисто, 42/42 теста зелёные. Прочитал весь код построчно:
+  не нашёл багов, не трогал запрещённые файлы (core/docs), не роутит
+  completion через долгоживущий core-процесс.
+
 ## В работе
 
-- [ ] Два агента запущены параллельно, каждый в своём git worktree (не в
-  этой ветке напрямую — сливаю их результат вручную после строгой
-  проверки):
-  - VS Code: `src/completionClient.ts`, provider в `extension.ts`,
-    настройки в `package.json`, тесты.
-  - JetBrains: проверка EP для inline-completion под платформу 2025.3,
-    `KvistCompletionClient.kt`, provider, `plugin.xml`.
+- [ ] JetBrains-агент работает в своём git worktree: проверка EP для
+  inline-completion под платформу 2025.3, `KvistCompletionClient.kt`,
+  provider, `plugin.xml`.
 
 ## Осталось
 
-- [ ] Строгая проверка обоих плагинов (диффы, тесты/линт/тайпчек,
-  соответствие контракту) и слияние их веток в `claude/wonderful-shannon-egazos`.
+- [ ] Строгая проверка JetBrains-плагина (дифф, компиляция, соответствие
+  контракту) и слияние его ветки в `claude/wonderful-shannon-egazos`.
