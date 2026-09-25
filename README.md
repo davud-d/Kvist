@@ -1,5 +1,7 @@
 <p align="center">
-  <img alt="Kvist logo" src="preview/logo.png" width="480">
+  <video src="https://github.com/davud-d/Kvist/raw/main/preview/kvist_x_anymodel.mp4" controls width="480">
+    Kvist x AnyModel preview video
+  </video>
 </p>
 
 # Kvist
