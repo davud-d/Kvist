@@ -7,6 +7,16 @@ Launch the Kvist coding agent directly in VS Code and generate commit messages w
 - **Launch Kvist**: Open Kvist in a VS Code terminal with one command
 - **Generate Commit Messages**: AI-powered commit message generation based on staged changes
 
+## The chat panel in JetBrains IDEs
+
+The chat panel's webview (`webview/`) is also the JetBrains plugin's chat tool
+window: the plugin's Gradle build runs `npm run build` here and packs
+`out/webview.js` and `out/webview.css`. `webview/host.ts` is the only file that
+knows the host: it calls `acquireVsCodeApi` in VS Code and the `window.kvistHost`
+bridge the JetBrains plugin injects. Keep IDE-specific code out of the other
+webview files, and keep `src/messages.ts` in step with
+`jetbrains-plugin/.../chat/KvistChatHost.kt`, which answers the same messages.
+
 ## Usage
 
 ### Launch Kvist

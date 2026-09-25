@@ -8,7 +8,7 @@ import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Icon, Ring } from "./icons"
-import { post } from "./host"
+import { onMessage, post } from "./host"
 import { Markdown } from "./markdown"
 import { NO_METRICS, shortSeconds, trackMetrics, type TurnMetrics } from "./metrics"
 import { RecentSessions } from "./sessions"
@@ -86,8 +86,7 @@ export function App() {
   }
 
   useEffect(() => {
-    function onMessage(event: MessageEvent<ToWebview>): void {
-      const message = event.data
+    function handle(message: ToWebview): void {
       switch (message.type) {
         case "event": {
           const core = message.event
@@ -156,11 +155,11 @@ export function App() {
           return setRegistration({ provider: message.provider, opened: message.opened, url: message.url })
       }
     }
-    window.addEventListener("message", onMessage)
+    const stop = onMessage(handle)
     post({ type: "ready" })
     post({ type: "getConfig" })
     post({ type: "getSessions" })
-    return () => window.removeEventListener("message", onMessage)
+    return stop
   }, [])
 
   useEffect(() => {

@@ -1,4 +1,5 @@
 import org.gradle.api.GradleException
+import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Zip
 import java.io.File
@@ -25,8 +26,61 @@ kotlin {
     jvmToolchain(21)
 }
 
+// The UI is Swing plus a JCEF page, with no GUI Designer .form files, so there is
+// nothing to instrument, and the task would download a Java compiler for nothing.
+intellijPlatform {
+    instrumentCode = false
+}
+
 val hostOsName = System.getProperty("os.name").lowercase(Locale.US)
 val pluginDistributionDirectoryName = project.name
+
+// The chat tool window shows the VS Code extension's webview. Its sources stay in
+// vscode-extension/; the plugin takes the bundle that extension's own build produces.
+val vscodeExtensionDir = layout.projectDirectory.dir("../vscode-extension")
+val webviewResourcesDir = layout.buildDirectory.dir("generated/webview")
+
+fun npmCommand(vararg args: String): List<String> {
+    return if (hostOsName.contains("win")) listOf("cmd", "/c", "npm", *args) else listOf("npm", *args)
+}
+
+val installWebviewDependencies = tasks.register<Exec>("installWebviewDependencies") {
+    group = "build"
+    description = "Installs the VS Code extension's npm dependencies when they are missing."
+    workingDir = vscodeExtensionDir.asFile
+    commandLine(npmCommand("ci", "--no-audit", "--no-fund"))
+    onlyIf { !vscodeExtensionDir.dir("node_modules").asFile.isDirectory }
+}
+
+val buildWebview = tasks.register<Exec>("buildWebview") {
+    group = "build"
+    description = "Builds the VS Code extension, whose webview bundle the chat tool window loads."
+    dependsOn(installWebviewDependencies)
+    workingDir = vscodeExtensionDir.asFile
+    commandLine(npmCommand("run", "build"))
+    inputs.dir(vscodeExtensionDir.dir("webview"))
+    inputs.dir(vscodeExtensionDir.dir("src"))
+    inputs.dir(layout.projectDirectory.dir("../src"))
+    inputs.files(vscodeExtensionDir.file("package.json"), vscodeExtensionDir.file("esbuild.mjs"))
+    outputs.files(vscodeExtensionDir.file("out/webview.js"), vscodeExtensionDir.file("out/webview.css"))
+}
+
+val syncWebview = tasks.register<Sync>("syncWebview") {
+    group = "build"
+    description = "Copies the webview bundle and the logo into the plugin resources."
+    dependsOn(buildWebview)
+    from(vscodeExtensionDir.file("out/webview.js"), vscodeExtensionDir.file("out/webview.css"))
+    from(vscodeExtensionDir.file("resources/kvist-logo.png"))
+    into(webviewResourcesDir.map { it.dir("kvist-webview") })
+}
+
+sourceSets.main {
+    resources.srcDir(webviewResourcesDir)
+}
+
+tasks.named("processResources") {
+    dependsOn(syncWebview)
+}
 
 fun requiredBinariesForBuild(): List<File> = listOf(
     file("bin/win/kvist.exe"),

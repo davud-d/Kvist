@@ -15,6 +15,8 @@ import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import kotlin.io.path.invariantSeparatorsPathString
 
+data class KvistTarget(val binaryPath: Path, val workspace: Path)
+
 object KvistLauncher {
     private val LOG = logger<KvistLauncher>()
 
@@ -41,9 +43,10 @@ object KvistLauncher {
             return
         }
 
-        val launchSpec = prepareLaunch(project, notifyUser = true, logFailures = true) ?: return
+        val notify = notifier(project)
+        val launchSpec = prepareLaunch(project, notify, logFailures = true) ?: return
 
-        if (!ensureBinaryReadyForLaunch(project, launchSpec)) {
+        if (!ensureBinaryReadyForLaunch(launchSpec, notify)) {
             return
         }
 
@@ -81,25 +84,31 @@ object KvistLauncher {
 
     /** Resolves an executable Kvist binary for headless calls, notifying the user on failure. */
     fun prepareBinary(project: Project): Path? {
-        val launchSpec = prepareLaunch(project, notifyUser = true, logFailures = true) ?: return null
-        if (!ensureBinaryReadyForLaunch(project, launchSpec)) {
+        return prepareTarget(project, notifier(project))?.binaryPath
+    }
+
+    /** Resolves the binary and the project directory for a process the plugin drives itself. */
+    fun prepareTarget(project: Project, report: (String) -> Unit): KvistTarget? {
+        val launchSpec = prepareLaunch(project, report, logFailures = true) ?: return null
+        if (!ensureBinaryReadyForLaunch(launchSpec, report)) {
             return null
         }
-        return launchSpec.binaryPath
+        return KvistTarget(launchSpec.binaryPath, launchSpec.projectPath)
     }
 
     fun isLaunchContextAvailable(project: Project?): Boolean {
-        return project != null && prepareLaunch(project, notifyUser = false, logFailures = false) != null
+        return project != null && prepareLaunch(project, report = {}, logFailures = false) != null
     }
 
-    private fun prepareLaunch(project: Project, notifyUser: Boolean, logFailures: Boolean): LaunchSpec? {
-        val projectPath = resolveProjectPath(project, notifyUser, logFailures) ?: return null
+    private fun notifier(project: Project): (String) -> Unit = { message -> KvistNotifications.error(project, message) }
+
+    private fun prepareLaunch(project: Project, report: (String) -> Unit, logFailures: Boolean): LaunchSpec? {
+        val projectPath = resolveProjectPath(project, report, logFailures) ?: return null
 
         val operatingSystem = KvistBinaryResolver.currentOs()
             ?: run {
                 fail(
-                    project = project,
-                    notifyUser = notifyUser,
+                    report = report,
                     logFailures = logFailures,
                     userMessage = "This operating system is not supported.",
                 )
@@ -110,8 +119,7 @@ object KvistLauncher {
         val binaryPath = KvistBinaryResolver.resolveBinaryPath(operatingSystem, logDetails = logFailures)
             ?: run {
                 fail(
-                    project = project,
-                    notifyUser = notifyUser,
+                    report = report,
                     logFailures = logFailures,
                     userMessage = "Kvist binary was not found.",
                     logMessage = "Kvist binary was not found at $expectedBinaryPath.",
@@ -122,8 +130,7 @@ object KvistLauncher {
         val validationError = validateBinary(binaryPath, logFailures)
         if (validationError != null) {
             fail(
-                project = project,
-                notifyUser = notifyUser,
+                report = report,
                 logFailures = logFailures,
                 userMessage = "Failed to start Kvist.",
                 logMessage = validationError,
@@ -142,13 +149,12 @@ object KvistLauncher {
         return LaunchSpec(projectPath, binaryPath, operatingSystem)
     }
 
-    private fun resolveProjectPath(project: Project, notifyUser: Boolean, logFailures: Boolean): Path? {
+    private fun resolveProjectPath(project: Project, report: (String) -> Unit, logFailures: Boolean): Path? {
         val rawProjectPath = sequenceOf(project.guessProjectDir()?.path, project.basePath)
             .firstNotNullOfOrNull { it?.takeIf { candidate -> candidate.isNotBlank() } }
             ?: run {
                 fail(
-                    project = project,
-                    notifyUser = notifyUser,
+                    report = report,
                     logFailures = logFailures,
                     userMessage = "Project path is unavailable.",
                     logMessage = "Project path is unavailable: basePath and guessProjectDir are empty.",
@@ -161,8 +167,7 @@ object KvistLauncher {
         }
         catch (exception: InvalidPathException) {
             fail(
-                project = project,
-                notifyUser = notifyUser,
+                report = report,
                 logFailures = logFailures,
                 userMessage = "Project path is unavailable.",
                 logMessage = "Project path is unavailable: $rawProjectPath",
@@ -173,8 +178,7 @@ object KvistLauncher {
 
         if (!Files.isDirectory(projectPath)) {
             fail(
-                project = project,
-                notifyUser = notifyUser,
+                report = report,
                 logFailures = logFailures,
                 userMessage = "Project path is unavailable.",
                 logMessage = "Project path is unavailable: ${projectPath.invariantSeparatorsPathString} is not a directory.",
@@ -217,7 +221,7 @@ object KvistLauncher {
         return null
     }
 
-    private fun ensureBinaryReadyForLaunch(project: Project, launchSpec: LaunchSpec): Boolean {
+    private fun ensureBinaryReadyForLaunch(launchSpec: LaunchSpec, report: (String) -> Unit): Boolean {
         if (launchSpec.operatingSystem != SupportedOs.LINUX || Files.isExecutable(launchSpec.binaryPath)) {
             return true
         }
@@ -227,8 +231,7 @@ object KvistLauncher {
         }
         catch (exception: IOException) {
             fail(
-                project = project,
-                notifyUser = true,
+                report = report,
                 logFailures = true,
                 userMessage = "Failed to start Kvist.",
                 logMessage = "Failed to update execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
@@ -239,8 +242,7 @@ object KvistLauncher {
         catch (exception: InterruptedException) {
             Thread.currentThread().interrupt()
             fail(
-                project = project,
-                notifyUser = true,
+                report = report,
                 logFailures = true,
                 userMessage = "Failed to start Kvist.",
                 logMessage = "Interrupted while updating execute permissions for ${launchSpec.binaryPath.invariantSeparatorsPathString}",
@@ -259,8 +261,7 @@ object KvistLauncher {
                 ?.let { ": $it" }
                 .orEmpty()
             fail(
-                project = project,
-                notifyUser = true,
+                report = report,
                 logFailures = true,
                 userMessage = "Failed to start Kvist.",
                 logMessage = "Failed to make Kvist binary executable with chmod +x: ${launchSpec.binaryPath.invariantSeparatorsPathString}$suffix",
@@ -341,8 +342,7 @@ object KvistLauncher {
     }
 
     private fun fail(
-        project: Project,
-        notifyUser: Boolean,
+        report: (String) -> Unit,
         logFailures: Boolean,
         userMessage: String,
         logMessage: String = userMessage,
@@ -357,9 +357,7 @@ object KvistLauncher {
             }
         }
 
-        if (notifyUser) {
-            KvistNotifications.error(project, userMessage)
-        }
+        report(userMessage)
     }
 
     private fun Throwable.userFacingMessage(): String {

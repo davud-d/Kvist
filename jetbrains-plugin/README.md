@@ -1,6 +1,16 @@
 # Kvist IntelliJ Plugin
 
-Minimal IntelliJ Platform plugin that starts the Kvist binary directly inside the IDE Terminal for the currently opened project.
+IntelliJ Platform plugin for Kvist: a chat tool window with the same panel as the VS Code extension, a launcher that starts the Kvist binary inside the IDE Terminal for the currently opened project, and commit messages.
+
+## Chat tool window
+
+The **Kvist** tool window (right side) shows the VS Code extension's chat panel in the IDE's embedded browser (JCEF, `JBCefBrowser`). The panel is not copied: the Gradle build runs the extension's own `npm run build` in `../vscode-extension` and packs `out/webview.js`, `out/webview.css` and the logo into the plugin as resources (`buildWebview` and `syncWebview` tasks). So the build needs Node.js 22+ and npm; it runs `npm ci` there when `node_modules/` is missing.
+
+- The page talks to the plugin through one `JBCefJSQuery`. `vscode-extension/webview/host.ts` is the only place in the panel that knows which IDE it runs in.
+- The plugin starts the bundled core as a child process in mode B (`--frontend stdio-multi`, UI_API.md) and passes NDJSON between it and the page. The first event must be `hello` with `protocol_version` 1. Approvals are fail-closed: open requests are denied when the core stops.
+- Title buttons: New Session, Settings, Reload (a new page and a new core, like Reload Window in VS Code; also how an exited core is restarted) and Run Kvist in the terminal.
+- Environment variables for the core (Settings in the panel) are stored in the IDE's application properties in plain text. Keep API keys in the provider settings.
+- Without JCEF (a boot runtime without it, or JCEF turned off) the tool window says so and offers the terminal mode instead. **Run Kvist** in the toolbar and the Tools menu works as before.
 
 ## Commit messages
 
