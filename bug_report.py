@@ -29,6 +29,7 @@ from agent_logging import get_journal_path
 from durable_json import JsonStorageError, append_private_bytes
 from redaction import REDACTED, redact_text, redact_value
 from session_events import read_history
+from version import kvist_version
 
 # The last 50 events are enough to see what the agent was doing without
 # turning the report itself into a second copy of the whole journal.
@@ -98,16 +99,6 @@ def _redact_bug_report_extra(text: str) -> str:
     return _BUG_BARE_TOKEN_RE.sub(_replace_bare_token, redacted)
 
 
-def _kvist_version() -> str:
-    package_json = Path(__file__).resolve().parent / "package.json"
-    try:
-        data = json.loads(package_json.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return "unknown"
-    version = data.get("version")
-    return str(version) if version else "unknown"
-
-
 def _node_version() -> str:
     try:
         result = subprocess.run(
@@ -124,7 +115,7 @@ def _node_version() -> str:
 
 def _environment_lines() -> list[str]:
     return [
-        f"Kvist version: {_kvist_version()}",
+        f"Kvist version: {kvist_version()}",
         f"OS: {platform.platform()}",
         f"Python: {platform.python_version()}",
         f"Node (TS TUI): {_node_version()}",
