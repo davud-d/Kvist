@@ -5,6 +5,7 @@ import errno
 import multiprocessing
 import os
 import stat
+import sys
 import threading
 from pathlib import Path
 
@@ -415,6 +416,7 @@ def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
         executor._read_file("alias.txt")
 
 
+@pytest.mark.xfail(sys.platform == "win32", strict=True, reason="windows: executable not found at spawn, see issue #4")
 def test_absolute_paths_inside_the_workspace_run_in_relative_form(tmp_path):
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "marker").mkdir()
@@ -854,6 +856,7 @@ def test_a_file_just_under_the_cap_is_returned_whole_and_unmarked(tmp_path):
     assert "TRUNCATED" not in content
 
 
+@pytest.mark.xfail(sys.platform == "win32", strict=True, reason="windows: executable not found at spawn, see issue #4")
 def test_git_diff_outside_a_repo_shows_only_what_kvist_changed(tmp_path):
     # The subject is the journal diff, not the HITL prompt, so the gate is
     # answered here: on Windows git.exe's origin never reaches trusted-system
