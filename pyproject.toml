@@ -25,13 +25,26 @@ dependencies = [
 kvist = "main:main"
 
 [tool.setuptools]
-# The one real package directory the app imports (providers/), alongside the
-# flat top-level modules listed in py-modules below. setuptools has no
-# automatic "find" for py-modules (only for package directories), so the
-# module list is explicit — it mirrors kvist.spec's local_hiddenimports,
-# minus the dev-only entry scripts that one also excludes (run_task,
-# package_script).
-packages = ["providers"]
+# Two kinds of thing the app imports: the `providers` package directory, and
+# the flat top-level modules in py-modules below. `packages` also names the
+# data directories the code reads at runtime by path relative to __file__
+# (prompts/, themes/, assets/, dist-ui/) as namespace packages — no
+# __init__.py — so setuptools installs them next to the flat modules in
+# site-packages, at the same relative paths the loaders expect. py-modules is
+# explicit because setuptools has no automatic "find" for top-level modules;
+# it mirrors kvist.spec's local_hiddenimports, minus the dev-only entry
+# scripts that one also excludes (run_task, package_script).
+packages = [
+    "providers",
+    "prompts",
+    "prompts.system",
+    "prompts.styles",
+    "prompts.styles.agents",
+    "prompts.styles.chat",
+    "themes",
+    "assets",
+    "dist-ui",
+]
 py-modules = [
     "action_result",
     "agent",
@@ -95,3 +108,11 @@ py-modules = [
     "user_config",
     "version",
 ]
+
+[tool.setuptools.package-data]
+"prompts.system" = ["*.txt"]
+"prompts.styles.agents" = ["*.txt"]
+"prompts.styles.chat" = ["*.txt"]
+themes = ["*.json"]
+assets = ["*.png"]
+"dist-ui" = ["*.mjs"]
