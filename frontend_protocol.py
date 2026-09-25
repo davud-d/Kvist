@@ -115,6 +115,12 @@ class StepEvent:
     action_args: dict
     reasoning_seconds: float = 0.0
     action_description: str = ""
+    # Additive (protocol v1 unchanged): the call this step runs and the model
+    # response it came from. ``thought`` is always "" since the v2 contract;
+    # ``user_message`` carries the response's words on the first step of its
+    # batch and "" on the others, so an older frontend shows them once.
+    call_id: str = ""
+    batch_id: str = ""
     type: ClassVar[str] = "step"
 
     def to_dict(self) -> dict:
@@ -128,6 +134,8 @@ class StepEvent:
             "action_args": self.action_args,
             "reasoning_seconds": self.reasoning_seconds,
             "action_description": self.action_description,
+            "call_id": self.call_id,
+            "batch_id": self.batch_id,
         }
 
 
@@ -164,6 +172,10 @@ class SandboxNoticeEvent:
 class FinalEvent:
     message: str
     user_messages: list[str]
+    # Additive: "done" when the run finished and passed its completion gates,
+    # "incomplete" for every other ending (an honest "not done", a stop, the
+    # step budget, a refusal).
+    outcome: str = "done"
     type: ClassVar[str] = "final"
 
     def to_dict(self) -> dict:
@@ -171,6 +183,7 @@ class FinalEvent:
             "type": self.type,
             "message": self.message,
             "user_messages": self.user_messages,
+            "outcome": self.outcome,
         }
 
 
@@ -313,6 +326,9 @@ class ActionResultEvent:
     exit_code: int | None = None
     path: str | None = None
     first_line: int | None = None
+    # Additive: the call this result answers (see StepEvent).
+    call_id: str = ""
+    batch_id: str = ""
     type: ClassVar[str] = "action_result"
 
     def to_dict(self) -> dict:
@@ -326,6 +342,8 @@ class ActionResultEvent:
             "exit_code": self.exit_code,
             "path": self.path,
             "first_line": self.first_line,
+            "call_id": self.call_id,
+            "batch_id": self.batch_id,
         }
 
 
@@ -340,10 +358,11 @@ class ActionOutputEvent:
 
     step: int
     output: str
+    call_id: str = ""
     type: ClassVar[str] = "action_output"
 
     def to_dict(self) -> dict:
-        return {"type": self.type, "step": self.step, "output": self.output}
+        return {"type": self.type, "step": self.step, "output": self.output, "call_id": self.call_id}
 
 
 @dataclass(slots=True)

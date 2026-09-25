@@ -61,12 +61,7 @@ def _fix_plan() -> PlanInfo:
 
 
 def _command(action_type: str, args: dict, plan_step: str = "edit") -> AgentCommand:
-    return AgentCommand(
-        thought="step under test",
-        plan_step=plan_step,
-        user_message="работаю",
-        action=Action(type=action_type, args=args),
-    )
+    return AgentCommand(plan_step=plan_step, action=Action(type=action_type, args=args), text="работаю")
 
 
 def _unified_diff(removed: int, added: int) -> str:

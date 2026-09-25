@@ -95,13 +95,14 @@ test("a later, unrelated step is unaffected by an earlier reasoning_commit once 
   assert.deepEqual(state.items.map((i) => i.kind), ["thought", "plan", "thought"])
 })
 
-test("a step's user_message is shown as a say line before its action, but not for explore-kind steps", () => {
+test("a response's words are shown once as a say line before its calls, reads included", () => {
   const write = feed(stepEvent("write_file", { path: "a.py" }, { user_message: "Writing the fix" }))
   assert.deepEqual(write.items.map((i) => i.kind), ["say"])
   assert.equal(write.items[0]?.kind === "say" && write.items[0].text, "Writing the fix")
 
   const read = feed(stepEvent("read_file", { path: "a.py" }, { user_message: "Reading the target file" }))
-  assert.deepEqual(read.items.map((i) => i.kind), [])
+  assert.deepEqual(read.items.map((i) => i.kind), ["say"])
+  assert.deepEqual(read.exploring, { reads: 1, searches: 0, lists: 0, git: 0 })
 })
 
 test("usage sums spend but replaces context size, and keeps it on a zero", () => {
@@ -233,9 +234,9 @@ function result(step: number, action_type: string, fields: Partial<Extract<CoreE
 test("a running action waits in the live area and commits once, with its result", () => {
   const started = feed(stepEvent("run_shell", { command: ["npm", "test"] }, { step: 3, plan_step: "verify" }))
   assert.deepEqual(started.items, [])
-  assert.equal(started.inflight?.action, "run_shell")
+  assert.equal(started.inflight[0]?.action, "run_shell")
   const done = reduce(started, { type: "event", event: result(3, "run_shell", { summary: "Command exited with code 0", output: "ok", exit_code: 0 }) })
-  assert.equal(done.inflight, null)
+  assert.deepEqual(done.inflight, [])
   assert.deepEqual(done.items.map((i) => i.kind), ["tool"])
   const card = done.items[0]
   assert.equal(card?.kind === "tool" && card.result.output, "ok")
@@ -246,14 +247,14 @@ test("a step that never gets a result is committed as a plain step line", () => 
   for (const later of [stepEvent("write_file", { path: "b" }, { step: 2 }), { type: "turn_end" } as CoreEvent, { type: "final", message: "x", user_messages: [] } as CoreEvent]) {
     const state = feed(stepEvent("write_file", { path: "a" }), later, { type: "turn_end" })
     assert.equal(state.items[0]?.kind, "step")
-    assert.equal(state.inflight, null)
+    assert.deepEqual(state.inflight, [])
   }
 })
 
 test("a result for an unknown step is ignored", () => {
   const state = feed(stepEvent("write_file", { path: "a" }, { step: 1 }), result(9, "write_file"))
   assert.deepEqual(state.items, [])
-  assert.equal(state.inflight?.step, 1)
+  assert.equal(state.inflight[0]?.step, 1)
 })
 
 test("a card keeps its place after the read group that came before it", () => {
@@ -299,7 +300,7 @@ test("git_diff is a card, not part of the explored group", () => {
 
 test("clear drops a pending action", () => {
   const state = reduce(feed(stepEvent("run_shell", { command: "ls" })), { type: "clear" })
-  assert.equal(state.inflight, null)
+  assert.deepEqual(state.inflight, [])
 })
 
 const cmdResult = (fields: Partial<Extract<CoreEvent, { type: "command_result" }>>): CoreEvent => ({
@@ -394,7 +395,7 @@ test("notes that arrive while an action runs do not turn its step into a bare li
     { type: "error", message: "a retry warning" },
     result(1, "write_file", { summary: "Wrote 1 line", path: "a.py", first_line: 1 }),
   )
-  assert.equal(state.inflight, null)
+  assert.deepEqual(state.inflight, [])
   assert.equal(state.items.filter((i) => i.kind === "tool").length, 1)
   assert.equal(state.items.filter((i) => i.kind === "step").length, 0)
 })
@@ -439,7 +440,7 @@ test("a journal without its closing turn_end still leaves nothing running", () =
     { type: "step", step: 1, plan_step: "verify", thought: "", user_message: "", action_type: "run_shell", action_args: { command: ["make"] }, reasoning_seconds: 0 },
   )
   assert.equal(state.running, false)
-  assert.equal(state.inflight, null)
+  assert.deepEqual(state.inflight, [])
   assert.deepEqual(state.items.map((i) => i.kind), ["user", "step"])
 })
 
@@ -504,4 +505,62 @@ test("answerFromEnd skips non-answer items (steps, notes) in between", () => {
 
 test("answerFromEnd returns null when nothing was ever answered", () => {
   assert.equal(answerFromEnd(feed(hello).items, 1), null)
+})
+
+
+// ── v2 batches: several calls of one response in flight at once ──────────
+
+function call(step: number, action_type: string, action_args: Record<string, unknown>, callId: string, batch = "b1"): CoreEvent {
+  return stepEvent(action_type, action_args, { step, call_id: callId, batch_id: batch })
+}
+
+test("parallel calls of one response wait together and commit in their results' order", () => {
+  const state = feed(
+    call(1, "web_search", { query: "a" }, "c1"),
+    call(2, "fetch_url", { url: "https://x" }, "c2"),
+    result(1, "web_search", { call_id: "c1", summary: "3 results" }),
+    result(2, "fetch_url", { call_id: "c2", summary: "Fetched" }),
+  )
+  assert.deepEqual(state.inflight, [])
+  assert.deepEqual(state.items.map((i) => i.kind === "tool" && [i.step, i.batchIndex]), [[1, 0], [2, 1]])
+})
+
+test("a second call of the same response does not settle the first", () => {
+  const state = feed(call(1, "web_search", { query: "a" }, "c1"), call(2, "fetch_url", { url: "https://x" }, "c2"))
+  assert.deepEqual(state.items, [])
+  assert.deepEqual(state.inflight.map((waiting) => waiting.callId), ["c1", "c2"])
+})
+
+test("a new response settles calls of the last one that never got a result", () => {
+  const state = feed(call(1, "write_file", { path: "a" }, "c1", "b1"), call(2, "write_file", { path: "b" }, "c2", "b2"))
+  assert.deepEqual(state.items.map((i) => i.kind), ["step"])
+  assert.deepEqual(state.inflight.map((waiting) => waiting.callId), ["c2"])
+})
+
+test("results are matched by call id, not by step", () => {
+  const state = feed(call(1, "fetch_url", { url: "https://x" }, "c1"), result(9, "fetch_url", { call_id: "c1" }))
+  assert.deepEqual(state.items.map((i) => i.kind), ["tool"])
+})
+
+test("parallel reads each find their own failure", () => {
+  const state = feed(
+    stepEvent("read_file", { path: "a" }, { step: 1, call_id: "c1", batch_id: "b1", user_message: "Reading both" }),
+    stepEvent("read_file", { path: "b" }, { step: 2, call_id: "c2", batch_id: "b1" }),
+    result(1, "read_file", { call_id: "c1", ok: false, summary: "Failed: missing" }),
+    result(2, "read_file", { call_id: "c2" }),
+    { type: "turn_end" },
+  )
+  assert.deepEqual(state.items.map((i) => i.kind), ["say", "explored", "note"])
+  const note = state.items.find((i) => i.kind === "note")
+  assert.equal(note?.kind === "note" && note.text, "read_file  a: Failed: missing")
+})
+
+test("thinking time shows once per response, not on every call of it", () => {
+  const state = feed(
+    stepEvent("run_shell", { command: ["ls"] }, { step: 1, call_id: "c1", batch_id: "b1", reasoning_seconds: 5 }),
+    result(1, "run_shell", { call_id: "c1" }),
+    stepEvent("run_shell", { command: ["pwd"] }, { step: 2, call_id: "c2", batch_id: "b1", reasoning_seconds: 5 }),
+    result(2, "run_shell", { call_id: "c2" }),
+  )
+  assert.deepEqual(state.items.map((i) => i.kind), ["thought", "tool", "tool"])
 })

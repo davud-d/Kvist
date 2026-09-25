@@ -1169,6 +1169,21 @@ function addPlan(event) {
   scrollToBottom()
 }
 
+// The calls of one model response (one batch_id) share a group; its first step
+// carries the response's words for the person, shown once above the calls.
+let stepBatch = { id: "", container: null }
+
+function stepContainer(event) {
+  const id = event.batch_id || ""
+  if (id && id === stepBatch.id && stepBatch.container?.isConnected) return stepBatch.container
+  const container = createElement("div", "step-batch")
+  const say = String(event.user_message || "").trim()
+  if (say && id) container.append(createElement("div", "step-say", say))
+  messages.append(container)
+  stepBatch = { id, container }
+  return container
+}
+
 function addStep(event) {
   enterConversation()
   const details = createElement("details", "message step-card")
@@ -1190,7 +1205,7 @@ function addStep(event) {
     content.append(createElement("pre", "", JSON.stringify(event.action_args, null, 2)))
   }
   details.append(summary, content)
-  messages.append(details)
+  stepContainer(event).append(details)
   scrollToBottom()
 }
 
@@ -1378,7 +1393,9 @@ function handleEvent(event) {
     case "final":
       if (event.message && event.message !== lastAssistantText) addAssistantMessage(event.message)
       setRunning(false)
-      setActivity("Done", { progress: 100 })
+      // An older core sends no outcome; only an explicit "incomplete" is not done.
+      if (event.outcome === "incomplete") setActivity("Finished, not done", { error: true })
+      else setActivity("Done", { progress: 100 })
       void refreshNavigation()
       break
     case "debug":

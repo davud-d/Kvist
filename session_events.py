@@ -520,9 +520,11 @@ class JournalingUI:
         self._events.end_thinking()
         self._forward("end_thinking")
 
-    def print_final(self, final_message: str, user_messages: list[str] | None = None) -> None:
-        self._events.print_final(final_message, user_messages)
-        self._ui.print_final(final_message, user_messages)
+    def print_final(
+        self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
+    ) -> None:
+        self._events.print_final(final_message, user_messages, outcome)
+        self._ui.print_final(final_message, user_messages, outcome=outcome)
 
     def print_user_markdown(self, message: str) -> None:
         self._events.print_user_markdown(message)

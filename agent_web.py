@@ -24,7 +24,9 @@ def prepare_web_search_command(self, user_goal: str, command: AgentCommand) -> s
     command.action.args["query"] = enhanced_query
 
     normalized_query = self._normalize_message(enhanced_query)
-    normalized_thought = self._normalize_message(command.thought)
+    # The response's words stand for the hypothesis: the same query under the
+    # same words asks the same question again.
+    normalized_thought = self._normalize_message(command.text)
     if (
         normalized_query == self._state.last_web_query
         and normalized_thought == self._state.last_web_thought

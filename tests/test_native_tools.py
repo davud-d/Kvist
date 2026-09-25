@@ -14,14 +14,14 @@ from native_tools import (
     ELIDED_OUTPUT,
     OPENING_NOTE,
     NativeTurn,
+    READONLY_TOOLS,
     ToolCall,
-    commands_from_turn,
+    calls_from_turn,
     compact_history,
-    final_answer_from_turn,
     native_role_prompt,
     tools_for_role,
 )
-from parser import CommandValidationError
+from parser import CommandValidationError, build_command
 from protocol import ActionType
 
 
@@ -74,7 +74,7 @@ def test_silent_thinking_counts_only_when_it_is_long_enough():
     assert agent_model._thinking_seconds(1.2, reasoning_shown=True) == 1.2
 
 
-def test_every_action_is_offered_as_a_tool():
+def test_every_action_has_a_tool_definition():
     assert set(ACTION_TOOLS) == set(get_args(ActionType))
 
 
@@ -82,7 +82,9 @@ def test_tools_follow_the_role_prompt_allowed_actions():
     coder = {tool["function"]["name"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
     reader = {tool["function"]["name"] for tool in tools_for_role(agent_model._load_role_prompt("reader"))}
 
-    assert {"write_file", "replace_in_file", "run_shell", "final_answer"} <= coder
+    assert {"write_file", "replace_in_file", "run_shell", "refuse"} <= coder
+    # A response without a call ends the turn, so no finishing tool is offered.
+    assert not coder & {"final_answer", "report_to_user"}
     assert not reader & {"write_file", "append_file", "replace_in_file"}
     assert "read_file" in reader
 
@@ -102,7 +104,14 @@ def test_native_role_prompt_drops_the_json_protocol(role):
     assert "UNTRUSTED" in native  # the rest of the prompt survives
 
 
-def test_calls_become_the_json_protocol_commands():
+def _commands(turn: NativeTurn) -> list:
+    return [
+        build_command(call, text=turn.content, batch_id="b", plan_step="inspect", language="en")
+        for call in calls_from_turn(turn)
+    ]
+
+
+def test_calls_become_call_requests_in_order():
     turn = NativeTurn(
         content="Reading the installer",
         tool_calls=[
@@ -111,28 +120,15 @@ def test_calls_become_the_json_protocol_commands():
         ],
     )
 
-    commands = commands_from_turn(turn, files_changed=False)
+    commands = _commands(turn)
 
     assert [command.action.type for command in commands] == ["read_file", "search_code"]
-    assert commands[0].user_message == "Reading the installer"
-    assert commands[0].plan_step == "inspect"
-    assert commands[0].action.description == "install.py"
-
-
-def test_a_silent_turn_says_what_its_calls_touch():
-    turn = NativeTurn(
-        content="",
-        tool_calls=[
-            ToolCall("c1", "search_code", json.dumps({"query": "extensions.json"})),
-            ToolCall("c2", "read_file", json.dumps({"path": "installer/install_vscode.py"})),
-            ToolCall("c3", "git_status", "{}"),
-        ],
-    )
-
-    commands = commands_from_turn(turn, files_changed=False)
-
-    assert commands[0].user_message == "extensions.json · installer/install_vscode.py · git_status"
-    assert [command.action.description for command in commands] == ["extensions.json", "install_vscode.p", "git_status"]
+    assert [command.call_id for command in commands] == ["c1", "c2"]
+    assert commands[0].text == "Reading the installer"
+    assert [command.action.description for command in commands] == [
+        "reads installer/install.py",
+        'searches for "vsix"',
+    ]
 
 
 def test_argumentless_tools_ask_for_a_purpose_and_drop_it_before_running():
@@ -143,23 +139,43 @@ def test_argumentless_tools_ask_for_a_purpose_and_drop_it_before_running():
     assert "purpose" not in tools["read_file"]["parameters"]["properties"]
 
     turn = NativeTurn("", tool_calls=[ToolCall("c1", "git_status", json.dumps({"purpose": "see what changed"}))])
-    commands = commands_from_turn(turn, files_changed=False)
 
-    assert commands[0].action.args == {}
+    assert _commands(turn)[0].action.args == {}
 
 
-def test_bad_arguments_are_a_validation_error():
+def test_shell_asks_for_a_purpose_that_becomes_its_label():
+    tools = {tool["function"]["name"]: tool["function"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
+
+    assert tools["run_shell"]["parameters"]["required"] == ["command", "purpose"]
+    turn = NativeTurn("", tool_calls=[ToolCall("c1", "run_shell", json.dumps({"command": ["pytest"], "purpose": "run the parser tests"}))])
+
+    (command,) = _commands(turn)
+    assert command.action.args == {"command": ["pytest"]}
+    assert command.action.description == "run the parser tests"
+
+
+def test_bad_arguments_cost_only_their_own_call():
+    calls = calls_from_turn(
+        NativeTurn(
+            "",
+            tool_calls=[
+                ToolCall("c1", "read_file", "{not json"),
+                ToolCall("c2", "read_file", json.dumps({"path": "a.py"})),
+            ],
+        )
+    )
+
+    assert "not valid JSON" in calls[0].error and calls[0].arguments is None
+    assert (calls[1].arguments, calls[1].error) == ({"path": "a.py"}, "")
     with pytest.raises(CommandValidationError):
-        commands_from_turn(NativeTurn("", tool_calls=[ToolCall("c1", "read_file", "{not json")]), files_changed=False)
-    with pytest.raises(CommandValidationError):
-        commands_from_turn(NativeTurn("", tool_calls=[ToolCall("c1", "read_file", "{}")]), files_changed=False)
+        build_command(calls[0], text="", batch_id="b", plan_step="inspect", language="en")
 
 
-def test_text_without_calls_is_a_final_answer():
-    commands = final_answer_from_turn(NativeTurn("Nothing to change: the code already does this."))
-
-    assert commands[0].action.type == "final_answer"
-    assert commands[0].plan_step == "done"
+def test_registry_marks_only_side_effect_free_tools_readonly():
+    assert READONLY_TOOLS == {
+        "read_file", "read_multiple_files", "list_dir", "list_tree",
+        "find_files", "search_code", "web_search", "fetch_url",
+    }
 
 
 def test_compaction_elides_oldest_tool_output_first():
@@ -247,18 +263,20 @@ def test_an_analysis_run_is_not_told_it_only_reads(agent_factory):
     assert all(m["role"] == "tool" for m in state.native_messages)
 
 
-def test_calls_after_a_refused_one_are_answered_not_run(agent_factory):
+def test_a_failed_read_does_not_stop_the_next_one(agent_factory):
     turns = [
         _response("", [_call("c1", "read_file", path="missing.py"), _call("c2", "read_file", path="b.py")]),
         _response("", [_call("c3", "final_answer", message="Stopping.", outcome="incomplete")]),
     ]
     agent = _native_agent(agent_factory, turns)
+    (agent.executor.workspace / "b.py").write_text("B = 2\n", encoding="utf-8")
 
     agent._run_loop("read files", start_step=1)
 
     answers = [m for m in agent.client.requests[-1]["messages"] if m["role"] == "tool"]
     assert [m["tool_call_id"] for m in answers] == ["c1", "c2"]
-    assert answers[1]["content"].startswith("Not executed")
+    assert 'call_id="c1"' in answers[0]["content"] and '"ok": false' in answers[0]["content"]
+    assert 'call_id="c2"' in answers[1]["content"] and "B = 2" in answers[1]["content"]
 
 
 def test_rejected_tools_fall_back_to_the_json_protocol(agent_factory):
@@ -314,3 +332,73 @@ def test_streamed_tool_call_fragments_are_reassembled(agent_factory):
         ("c1", "read_file", '{"path": "a.py"}'),
         ("c2", "git_status", "{}"),
     ]
+
+
+class _FlakyProbeClient:
+    """Fails the first probe with ``error``, then answers it with a ping call."""
+
+    def __init__(self, error: Exception):
+        self.error = error
+        self.requests: list[dict] = []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        if len(self.requests) == 1:
+            raise self.error
+        return _response(calls=[_call("probe", "ping", ok=True)])
+
+
+@pytest.mark.parametrize(
+    "error",
+    [TimeoutError("Request timed out."), ConnectionError("Connection reset by peer"), RuntimeError("Error code: 503 - upstream unavailable")],
+)
+def test_a_probe_lost_to_the_network_is_asked_again_next_run(agent_factory, error):
+    agent = agent_factory(max_steps=1)
+    agent.client = _FlakyProbeClient(error)
+
+    assert agent_model.native_tools_supported(agent, "m") is False
+    assert not agent_model._NATIVE_TOOL_SUPPORT
+    assert agent_model.native_tools_supported(agent, "m") is True
+    assert len(agent.client.requests) == 2
+
+
+def test_an_explicit_refusal_of_tools_is_remembered(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent.client = _FlakyProbeClient(RuntimeError("Error code: 400 - tools is not supported for this model"))
+
+    assert agent_model.native_tools_supported(agent, "m") is False
+    assert agent_model.native_tools_supported(agent, "m") is False
+    assert len(agent.client.requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("model", "sends"),
+    [("gpt-6-astra", False), ("openai/gpt-6-astra", False), ("gpt-5.6-luna", False), ("o3-mini", False), ("mock-model", True)],
+)
+def test_native_turns_send_no_temperature_to_reasoning_models(agent_factory, model, sends):
+    agent = _native_agent(agent_factory, [_response("Done.")])
+    agent._state.selected_action_model = model
+    agent._state.selected_action_role = "smart"
+
+    agent._run_loop("say done", start_step=1)
+
+    turn_request = agent.client.requests[-1]
+    assert ("temperature" in turn_request) is sends
+
+
+def test_a_temperature_refusal_is_learned_and_the_turn_asked_again(agent_factory, monkeypatch):
+    monkeypatch.setattr(agent_model, "_TEMPERATURE_UNSUPPORTED", set())
+    refusal = RuntimeError("Unsupported value: 'temperature' does not support 0.1 with this model.")
+    agent = _native_agent(agent_factory, [refusal, _response("Done."), _response("Done.")])
+    agent._state.selected_action_model = "custom-thinker"
+    agent._state.selected_action_role = "smart"
+
+    agent._run_loop("say done", start_step=1)
+
+    turns = [request for request in agent.client.requests if request["tools"][0]["function"]["name"] != "ping"]
+    assert "temperature" in turns[0]
+    assert all("temperature" not in turn for turn in turns[1:])
+    # The refusal cost a retry of the same turn, not a failed step.
+    assert not any("temperature" in error for error in agent._state.error_history)
+    assert not any(log.get("status") == "model_error" for log in agent._state.step_logs)

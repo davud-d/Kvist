@@ -3,14 +3,18 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
+from call_labels import call_label, trim_purpose
 from protocol import (
     MAX_SHELL_TIMEOUT_SECONDS,
     MIN_SHELL_TIMEOUT_SECONDS,
     AgentCommand,
     Action,
+    ModelResponse,
+    ToolCallRequest,
 )
 
 ALLOWED_ACTIONS = {
@@ -34,11 +38,17 @@ ALLOWED_ACTIONS = {
     "report_to_user",
 }
 
-ALLOWED_PLAN_STEPS = {"inspect", "plan", "edit", "verify", "done"}
-
 MAX_BATCH_ACTIONS = 8
 
-_FINISHING_ACTIONS = {"final_answer", "report_to_user"}
+# Not offered to the model since the v2 contract (a response without calls
+# ends the turn), but still honoured when a model prompted with an older
+# schema calls them.
+FINISHING_ACTIONS = frozenset({"final_answer", "report_to_user", "refuse"})
+_WRITE_ACTIONS = frozenset({"write_file", "append_file", "replace_in_file"})
+PURPOSE_KEY = "purpose"
+# run_shell's purpose is its label; git_status/git_diff take a stand-in one
+# (native_tools._PURPOSE) that is dropped unseen.
+_PURPOSE_ACTIONS = frozenset({"run_shell", "git_status", "git_diff"})
 # "incomplete" lets the model end a run it cannot or should not finish
 # without having to claim success.
 FINISH_OUTCOMES = ("done", "incomplete")
@@ -79,109 +89,45 @@ def load_single_json_object(text: str) -> Any:
     raise CommandValidationError(f"Invalid JSON: {last_error}")
 
 
-def parse_agent_commands(text: str) -> list[AgentCommand]:
-    raw = load_single_json_object(text)
+def build_command(
+    call: ToolCallRequest, *, text: str, batch_id: str, plan_step: str, language: str
+) -> AgentCommand:
+    """One call of a response as a runtime command, or CommandValidationError.
 
-    if not isinstance(raw, dict):
-        raise CommandValidationError("Root object must be a JSON object")
-
-    # "progress" is accepted and discarded: the runtime derives progress from the
-    # plan and plan_step, but a model prompted from a cached older schema still
-    # emits the key, and rejecting it would cost a step for nothing. A single
-    # "action" object is the pre-batch form and is accepted for the same reason.
-    require_only_allowed_keys(
-        raw,
-        {"thought", "plan_step", "progress", "user_message", "action", "actions", "step_summary"},
+    A call's ``purpose`` (run_shell's reason, and the stand-in argument of the
+    tools that take none) is taken off before the arguments are checked: the
+    executor never sees it, and only run_shell's reaches the person.
+    """
+    if call.error:
+        raise CommandValidationError(call.error)
+    if call.name not in ALLOWED_ACTIONS:
+        raise CommandValidationError(f"Unknown tool {call.name!r}")
+    args = dict(call.arguments or {})
+    purpose = trim_purpose(args.pop(PURPOSE_KEY, "")) if call.name in _PURPOSE_ACTIONS else ""
+    validate_action_args(call.name, args)
+    return AgentCommand(
+        plan_step=plan_step,
+        action=Action(
+            type=call.name,  # type: ignore[arg-type]
+            args=args,
+            description=call_label(call.name, args, language, purpose),
+        ),
+        text=text,
+        call_id=call.call_id,
+        batch_id=batch_id,
     )
 
-    thought = raw.get("thought")
-    plan_step = raw.get("plan_step")
-    user_message = raw.get("user_message")
-    step_summary = raw.get("step_summary")
 
-    if not isinstance(thought, str) or not thought.strip():
-        raise CommandValidationError("Field 'thought' must be a non-empty string")
-
-    if not isinstance(plan_step, str) or not plan_step.strip():
-        raise CommandValidationError("Field 'plan_step' must be a non-empty string")
-
-    if plan_step.strip() not in ALLOWED_PLAN_STEPS:
-        raise CommandValidationError(
-            "Field 'plan_step' must be one of: inspect, plan, edit, verify, done"
-        )
-
-    if not isinstance(user_message, str) or not user_message.strip():
-        raise CommandValidationError("Field 'user_message' must be a non-empty string")
-
-    if step_summary is not None and not isinstance(step_summary, str):
-        raise CommandValidationError("Field 'step_summary' must be a string")
-
-    actions = [_parse_action(item) for item in _raw_actions(raw)]
-    _validate_batch_order(actions)
-
-    return [
-        AgentCommand(
-            thought=thought.strip(),
-            plan_step=plan_step.strip(),
-            user_message=user_message.strip(),
-            action=action,
-            step_summary=step_summary.strip() if isinstance(step_summary, str) else "",
-        )
-        for action in actions
-    ]
-
-
-def _raw_actions(raw: dict[str, Any]) -> list[Any]:
-    if "action" in raw and "actions" in raw:
-        raise CommandValidationError("Use either 'actions' or 'action', not both")
-    if "action" in raw:
-        return [raw["action"]]
-
-    actions = raw.get("actions")
-    if not isinstance(actions, list) or not actions:
-        raise CommandValidationError("Field 'actions' must be a non-empty list of action objects")
-    # A response cut off by the output-token limit is invalid JSON and loses
-    # every action in it, so a batch is kept short.
-    if len(actions) > MAX_BATCH_ACTIONS:
-        raise CommandValidationError(
-            f"Field 'actions' may hold at most {MAX_BATCH_ACTIONS} actions"
-        )
-    return actions
-
-
-def _parse_action(item: Any) -> Action:
-    if not isinstance(item, dict):
-        raise CommandValidationError("Each action must be an object")
-
-    action_type = item.get("type")
-    args = item.get("args")
-    description = item.get("description", "")
-
-    if action_type not in ALLOWED_ACTIONS:
-        raise CommandValidationError(f"Invalid action.type: {action_type!r}")
-
-    if not isinstance(args, dict):
-        raise CommandValidationError("Field 'action.args' must be an object")
-
-    if not isinstance(description, str):
-        raise CommandValidationError("Field 'action.description' must be a string")
-
-    validate_action_args(str(action_type), args)
-    return Action(type=action_type, args=args, description=description.strip())
-
-
-def _validate_batch_order(actions: list[Action]) -> None:
-    # A terminal action reports on work it has not seen finish when anything
-    # follows it, and a refusal must stop the run before any other action runs.
-    if len(actions) == 1:
-        return
-    types = [action.type for action in actions]
-    if "refuse" in types:
-        raise CommandValidationError("'refuse' must be the only action in a response")
-    if any(action_type in _FINISHING_ACTIONS for action_type in types[:-1]):
-        raise CommandValidationError(
-            "final_answer and report_to_user may only be the last action in 'actions'"
-        )
+def plan_step_for_calls(names: list[str], files_changed: bool) -> str:
+    """The phase a response is in, read from what it calls, never declared by the model."""
+    kinds = set(names)
+    if kinds & FINISHING_ACTIONS:
+        return "done"
+    if kinds & _WRITE_ACTIONS:
+        return "edit"
+    if "run_shell" in kinds and files_changed:
+        return "verify"
+    return "inspect"
 
 
 def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
@@ -483,3 +429,182 @@ def _extract_embedded_json_object(decoder: json.JSONDecoder, text: str) -> Any:
         if isinstance(parsed, dict):
             return parsed
     return _JSON_NOT_FOUND
+
+
+# --- v2 response: free text plus <tool_call>{json}</tool_call> blocks --------
+
+_OPEN_TAG_RE = re.compile(r"<\s*tool_call\s*>", re.IGNORECASE)
+_CLOSE_TAG_RE = re.compile(r"<\s*/\s*tool_call\s*>", re.IGNORECASE)
+# A model that wraps its tags in a markdown fence leaves the fence lines in
+# the text around them; only a fence touching a tag is removed, so a code
+# block in the narration itself survives.
+_FENCE_BEFORE_TAG_RE = re.compile(r"```[\w+-]*[ \t]*$")
+_FENCE_AFTER_TAG_RE = re.compile(r"^```[ \t]*(?:\n|$)")
+_NAME_KEYS = ("name", "tool", "type")
+_ARGUMENT_KEYS = ("arguments", "args", "parameters", "input")
+_CALL_SHAPE = '{"name": "<tool>", "arguments": {...}}'
+
+
+def parse_model_response(text: str) -> ModelResponse:
+    """Split a text-mode response into the words for the person and its calls.
+
+    Never raises: a call that cannot be read becomes a call carrying an error,
+    so one broken block costs only itself.
+    """
+    if not _OPEN_TAG_RE.search(text):
+        return _whole_object_response(text) or ModelResponse(text=text.strip(), calls=[])
+    pieces: list[str] = []
+    calls: list[ToolCallRequest] = []
+    position = 0
+    for start, body, end, closed in _tagged_bodies(text):
+        pieces.append(text[position:start])
+        call, trailing = _read_tagged_call(body, len(calls) + 1, closed)
+        calls.append(call)
+        if trailing:
+            pieces.append(trailing)
+        position = end
+    pieces.append(text[position:])
+    return ModelResponse(text=_join_outside_text(pieces), calls=calls)
+
+
+def _tagged_bodies(text: str) -> Iterable[tuple[int, str, int, bool]]:
+    """(tag start, body, end, closed) per <tool_call>; an unclosed body runs to the next tag."""
+    opens = list(_OPEN_TAG_RE.finditer(text))
+    for index, match in enumerate(opens):
+        limit = opens[index + 1].start() if index + 1 < len(opens) else len(text)
+        close = _CLOSE_TAG_RE.search(text, match.end(), limit)
+        if close is not None:
+            yield match.start(), text[match.end():close.start()], close.end(), True
+        else:
+            yield match.start(), text[match.end():limit], limit, False
+
+
+def _read_tagged_call(body: str, number: int, closed: bool) -> tuple[ToolCallRequest, str]:
+    """The call in one tag body, and text that followed the JSON of an unclosed tag."""
+    stripped = _strip_inner_fence(body.strip())
+    start = stripped.find("{")
+    if start < 0:
+        return _broken_call(number, f"no JSON object inside the tag; write {_CALL_SHAPE}", stripped), ""
+    decoded = _decode_object(stripped[start:])
+    if decoded is None:
+        return _broken_call(number, f"invalid JSON; write {_CALL_SHAPE}", stripped), ""
+    value, end = decoded
+    trailing = "" if closed or end is None else stripped[start + end:]
+    return _call_from_object(value, number), trailing
+
+
+def _strip_inner_fence(body: str) -> str:
+    if body.startswith("```"):
+        body = body.split("\n", 1)[1] if "\n" in body else body[3:]
+    if body.rstrip().endswith("```"):
+        body = body.rstrip()[:-3]
+    return body.strip()
+
+
+def _decode_object(text: str) -> tuple[Any, int | None] | None:
+    """The first JSON value in ``text`` and where it ended in the raw text.
+
+    The end is None when only a repaired copy (smart quotes, trailing commas)
+    parsed, since its offsets no longer match the raw text.
+    """
+    decoder = json.JSONDecoder()
+    try:
+        value, end = decoder.raw_decode(text)
+        return value, end
+    except json.JSONDecodeError:
+        pass
+    for sanitized in _sanitized_candidates(text):
+        try:
+            value, _end = decoder.raw_decode(sanitized)
+        except json.JSONDecodeError:
+            continue
+        return value, None
+    return None
+
+
+def _call_from_object(value: Any, number: int) -> ToolCallRequest:
+    if not isinstance(value, dict):
+        return _broken_call(number, f"a call must be a JSON object: {_CALL_SHAPE}")
+    function = value.get("function")
+    if isinstance(function, dict):
+        value = {**value, **function}
+    name = next((value[key] for key in _NAME_KEYS if isinstance(value.get(key), str) and value[key].strip()), "")
+    if not name or name == "function":
+        return _broken_call(number, f"the call has no tool name: {_CALL_SHAPE}")
+    arguments: Any = next((value[key] for key in _ARGUMENT_KEYS if key in value), None)
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments) if arguments.strip() else {}
+        except json.JSONDecodeError as error:
+            return _broken_call(number, f"arguments of {name} are not valid JSON ({error})", name=name)
+    if arguments is None:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        return _broken_call(number, f"arguments of {name} must be a JSON object", name=name)
+    return ToolCallRequest(call_id=_new_call_id(), name=name.strip(), arguments=arguments)
+
+
+def _broken_call(number: int, reason: str, raw: str = "", *, name: str = "") -> ToolCallRequest:
+    if not name and raw:
+        match = re.search(r'"(?:name|tool)"\s*:\s*"([A-Za-z_]+)"', raw)
+        name = match.group(1) if match else ""
+    return ToolCallRequest(
+        call_id=_new_call_id(),
+        name=name,
+        arguments=None,
+        error=f"Tool call {number} was not run: {reason}.",
+    )
+
+
+def _new_call_id() -> str:
+    return f"call_{uuid.uuid4().hex[:12]}"
+
+
+def _join_outside_text(pieces: list[str]) -> str:
+    cleaned: list[str] = []
+    last = len(pieces) - 1
+    for index, piece in enumerate(pieces):
+        if index > 0:
+            piece = _FENCE_AFTER_TAG_RE.sub("", piece.lstrip(" \t\r\n"), count=1)
+        if index < last:
+            piece = _FENCE_BEFORE_TAG_RE.sub("", piece.rstrip(), count=1)
+        cleaned.append(piece.strip())
+    return "\n\n".join(piece for piece in cleaned if piece)
+
+
+def _whole_object_response(text: str) -> ModelResponse | None:
+    """A response that is nothing but one JSON object of a call-like shape.
+
+    The pre-v2 contract ({"actions": [...]}) from a model prompted with a cached
+    older schema, or a bare call object without its tags. Only a response that
+    is the object and nothing else qualifies: a JSON example inside an answer
+    must never run.
+    """
+    stripped = text.strip()
+    candidates = [stripped]
+    fenced = FENCE_RE.fullmatch(stripped)
+    if fenced is not None:
+        candidates.append(fenced.group(1).strip())
+    for candidate in candidates:
+        for sanitized in _sanitized_candidates(candidate):
+            try:
+                value = json.loads(sanitized)
+            except json.JSONDecodeError:
+                continue
+            return _response_from_object(value)
+    return None
+
+
+def _response_from_object(value: Any) -> ModelResponse | None:
+    if not isinstance(value, dict):
+        return None
+    if "actions" in value or "action" in value:
+        items = value.get("actions") if "actions" in value else [value.get("action")]
+        if not isinstance(items, list):
+            items = [items]
+        words = value.get("user_message")
+        calls = [_call_from_object(item, number) for number, item in enumerate(items, start=1)]
+        return ModelResponse(text=words.strip() if isinstance(words, str) else "", calls=calls)
+    if isinstance(value.get("name"), str) and any(key in value for key in _ARGUMENT_KEYS):
+        return ModelResponse(text="", calls=[_call_from_object(value, 1)])
+    return None

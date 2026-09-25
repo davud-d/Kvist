@@ -9,15 +9,16 @@ export type Item =
   | { id: number; kind: "banner" }
   | { id: number; kind: "user"; text: string }
   | { id: number; kind: "plan"; complexity: string; steps: string[]; risks: string[] }
-  | { id: number; kind: "step"; step: number; planStep: string; action: string; target: string; note: string }
-  | { id: number; kind: "tool"; step: number; planStep: string; action: string; args: Record<string, unknown>; result: ActionResult }
+  // batchIndex: the call's place in its model response (0 = the first call), so a UI can
+  // show the calls of one response as a group.
+  | { id: number; kind: "step"; step: number; planStep: string; action: string; target: string; note: string; batchIndex: number }
+  | { id: number; kind: "tool"; step: number; planStep: string; action: string; args: Record<string, unknown>; result: ActionResult; batchIndex: number }
   | { id: number; kind: "thought"; seconds: number; text: string }
   | { id: number; kind: "explored"; counts: ExploreCounts; names: string[] }
   | { id: number; kind: "answer"; text: string; done: boolean }
   | { id: number; kind: "note"; tone: Tone; text: string }
-  // The model's user-facing one-liner for a step ("Reading the target file"), shown
-  // before the action it describes. Explore-kind steps skip it: they are already
-  // folded into one "Explored" line, and a comment per read would defeat that.
+  // The words a model response carries for the person, shown once, before the calls
+  // of that response.
   | { id: number; kind: "say"; text: string }
 
 export interface ExploreCounts {
@@ -29,18 +30,23 @@ export interface ExploreCounts {
 
 // An action that has started and has no result yet. Static items cannot change
 // once printed, so it waits here and is committed once, together with its
-// result, as a single card.
+// result, as a single card. Several can wait at once: the read-only calls of
+// one response run in parallel.
 export interface Inflight {
   step: number
+  callId: string
   planStep: string
   action: string
   args: Record<string, unknown>
   note: string
+  batchIndex: number
 }
 
-// The read-only step that may still fail: its result arrives right after it.
+// A read-only step that may still fail; its result arrives after it, possibly
+// after the other reads of the same response have started.
 interface ExploreStep {
   step: number
+  callId: string
   kind: keyof ExploreCounts
   weight: number
   label: string
@@ -65,8 +71,10 @@ export interface State {
   exploring: ExploreCounts | null
   // What the group above read or searched, one label per step, for a UI that lists them.
   exploringNames: string[]
-  exploreStep: ExploreStep | null
-  inflight: Inflight | null
+  exploreSteps: ExploreStep[]
+  inflight: Inflight[]
+  // The model response the latest step came from, and how many of its calls arrived.
+  batch: { id: string; count: number } | null
   running: boolean
   status: { text: string; step: number; planStep: string; error: boolean } | null
   pending: InputRequest | null
@@ -107,8 +115,9 @@ export function initialState(effort = ""): State {
     live: null,
     exploring: null,
     exploringNames: [],
-    exploreStep: null,
-    inflight: null,
+    exploreSteps: [],
+    inflight: [],
+    batch: null,
     running: false,
     status: null,
     pending: null,
@@ -178,18 +187,23 @@ function flushExploring(state: State): State {
 // The step line an action gets when no result ever arrives for it (blocked by
 // the runtime, or the turn ended first).
 function commitInflight(state: State): State {
-  const { inflight } = state
-  if (!inflight) return state
-  const item: Item = {
-    id: state.nextId,
+  const items = state.inflight.map((call, index): Item => ({
+    id: state.nextId + index,
     kind: "step",
-    step: inflight.step,
-    planStep: inflight.planStep,
-    action: inflight.action,
-    target: actionTarget(inflight.args),
-    note: inflight.note,
-  }
-  return { ...state, inflight: null, items: [...state.items, item], nextId: state.nextId + 1 }
+    step: call.step,
+    planStep: call.planStep,
+    action: call.action,
+    target: actionTarget(call.args),
+    note: call.note,
+    batchIndex: call.batchIndex,
+  }))
+  if (!items.length) return state
+  return { ...state, inflight: [], items: [...state.items, ...items], nextId: state.nextId + items.length }
+}
+
+// The newest call still running, for a UI that shows one.
+export function lastInflight(state: State): Inflight | null {
+  return state.inflight.at(-1) ?? null
 }
 
 // Order matters: the read group started before the pending action did.
@@ -202,7 +216,16 @@ function settle(state: State): State {
 // printed as a bare line and its result card would be lost.
 function push(state: State, item: (id: number) => Item): State {
   const settled = item(state.nextId).kind === "note" ? state : settle(state)
-  return { ...settled, items: [...settled.items, item(settled.nextId)], nextId: settled.nextId + 1 }
+  return append(settled, item)
+}
+
+function append(state: State, item: (id: number) => Item): State {
+  return { ...state, items: [...state.items, item(state.nextId)], nextId: state.nextId + 1 }
+}
+
+// A result names its call; a core older than call ids only names its step.
+function answers(call: { step: number; callId: string }, event: { step: number; call_id?: string }): boolean {
+  return call.callId && event.call_id ? call.callId === event.call_id : call.step === event.step
 }
 
 function withoutCount(counts: ExploreCounts, step: ExploreStep): ExploreCounts | null {
@@ -214,21 +237,24 @@ function withoutCount(counts: ExploreCounts, step: ExploreStep): ExploreCounts |
 // and gets its own line.
 function failExploreStep(state: State, step: ExploreStep, summary: string): State {
   const remaining = state.exploring ? withoutCount(state.exploring, step) : null
-  const flushed = flushExploring({ ...state, exploring: remaining, exploreStep: null })
+  const flushed = flushExploring({ ...state, exploring: remaining })
   const text = `${step.label}: ${summary}`
   return push(flushed, (id) => ({ id, kind: "note", tone: "error", text }))
 }
 
 function onActionResult(state: State, event: Extract<CoreEvent, { type: "action_result" }>): State {
-  const { inflight, exploreStep } = state
   const result: ActionResult = { ok: event.ok, summary: event.summary, output: event.output, exit_code: event.exit_code, path: event.path, first_line: event.first_line }
-  if (inflight && inflight.step === event.step) {
-    const done = { ...state, inflight: null }
-    return push(done, (id) => ({ id, kind: "tool", step: inflight.step, planStep: inflight.planStep, action: inflight.action, args: inflight.args, result }))
+  const call = state.inflight.find((waiting) => answers(waiting, event))
+  if (call) {
+    // The other calls of the response may still be running: only the read group
+    // before this card settles, never they.
+    const done = flushExploring({ ...state, inflight: state.inflight.filter((waiting) => waiting !== call) })
+    return append(done, (id) => ({ id, kind: "tool", step: call.step, planStep: call.planStep, action: call.action, args: call.args, result, batchIndex: call.batchIndex }))
   }
-  if (!exploreStep || exploreStep.step !== event.step) return state
-  if (event.ok) return { ...state, exploreStep: null }
-  return failExploreStep(state, exploreStep, event.summary)
+  const read = state.exploreSteps.find((waiting) => answers(waiting, event))
+  if (!read) return state
+  const pending = { ...state, exploreSteps: state.exploreSteps.filter((waiting) => waiting !== read) }
+  return event.ok ? pending : failExploreStep(pending, read, event.summary)
 }
 
 function ensureLive(state: State, streamId: string): Live {
@@ -357,25 +383,35 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       const kind = EXPLORE_KIND[event.action_type]
       const seconds = event.reasoning_seconds || 0
       const text = (event.thought ?? "").trim()
+      const callId = event.call_id ?? ""
+      const batchId = event.batch_id ?? ""
+      // The calls of one response arrive one after another before their results; a new
+      // response means whatever is still waiting from the last one never got a result.
+      const sameBatch = batchId !== "" && state.batch?.id === batchId
+      const batchIndex = sameBatch ? (state.batch?.count ?? 0) : 0
+      const batch = { id: batchId, count: batchIndex + 1 }
       // A step right after a streamed reasoning_commit already narrated its thinking on
       // that stream; its own short `thought` field would only repeat it as a second,
       // near-duplicate card. A routine note on a read-only step would also end its
-      // group after every read, so only real thinking time earns a break there.
+      // group after every read, so only real thinking time earns a break there. The
+      // thinking belongs to the response, so only its first call shows it.
       const alreadyNarrated = state.justReasoned
-      const shown = kind ? seconds > 0 : !alreadyNarrated && (Boolean(text) || seconds > 0)
-      const settled = state.inflight ? settle(state) : state
+      const shown = batchIndex === 0 && (kind ? seconds > 0 : !alreadyNarrated && (Boolean(text) || seconds > 0))
+      const settled = state.inflight.length && !sameBatch ? settle(state) : state
       const withThought = shown ? push(settled, (id) => ({ id, kind: "thought", seconds, text })) : settled
-      // The friendly one-liner precedes the action it describes; explore-kind steps skip
-      // it, since they are already folded into one "Explored" line.
-      const say = kind ? "" : event.user_message.trim()
+      // The response's words precede the calls they introduce, reads included.
+      const say = event.user_message.trim()
       const next = say ? push(withThought, (id) => ({ id, kind: "say", text: say })) : withThought
       if (kind) {
         const weight = exploreWeight(kind, args)
         const label = `${event.action_type}  ${actionTarget(args)}`.trim()
-        return { ...explore(next, kind, weight, label), exploreStep: { step: event.step, kind, weight, label }, justReasoned: false }
+        const read: ExploreStep = { step: event.step, callId, kind, weight, label }
+        return { ...explore(next, kind, weight, label), exploreSteps: [...next.exploreSteps, read], batch, justReasoned: false }
       }
-      const inflight: Inflight = { step: event.step, planStep: event.plan_step, action: event.action_type, args, note: event.action_description ?? "" }
-      return { ...next, inflight, justReasoned: false }
+      // A writing call runs alone, so the read group before it is complete.
+      const flushed = flushExploring(next)
+      const call: Inflight = { step: event.step, callId, planStep: event.plan_step, action: event.action_type, args, note: event.action_description ?? "", batchIndex }
+      return { ...flushed, inflight: [...flushed.inflight, call], batch, justReasoned: false }
     }
     case "action_result":
       return onActionResult(state, event)
@@ -432,7 +468,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
       // the input box disabled forever.
-      return { ...settle(state), running: false, live: null, status: null, pending: null, startedAt: null, command: null }
+      return { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, command: null }
     default:
       return state
   }
@@ -487,13 +523,13 @@ export function reduce(state: State, action: Action): State {
     case "answered":
       return { ...state, pending: null }
     case "core_exit": {
-      const next = { ...settle(state), running: false, live: null, status: null, pending: null, command: null }
+      const next = { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, command: null }
       if (action.expected) return next
       return push(next, (id) => ({ id, kind: "note", tone: "error", text: `The Kvist core stopped unexpectedly (exit code ${action.code ?? "?"}).` }))
     }
     case "toggle_debug":
       return { ...state, showDebug: !state.showDebug }
     case "clear":
-      return { ...state, items: [], exploring: null, exploringNames: [], exploreStep: null, inflight: null, justReasoned: false, epoch: state.epoch + 1 }
+      return { ...state, items: [], exploring: null, exploringNames: [], exploreSteps: [], inflight: [], batch: null, justReasoned: false, epoch: state.epoch + 1 }
   }
 }

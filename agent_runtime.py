@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -50,24 +51,30 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
         return {**common, "action_kind": "side_effect", "action_type": command.action.type}
     return None
 
-from action_result import build_action_result
+from action_result import SKIPPED_ERROR, build_action_result
 from agent_state import RunCancelled, RunState, is_unplanned
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
+from call_labels import call_label
 from native_tools import (
     OPENING_NOTE,
+    READONLY_TOOLS,
     NativeToolsRejected,
     NativeTurn,
-    ToolCall,
     assistant_message,
-    commands_from_turn,
-    final_answer_from_turn,
+    calls_from_turn,
     tool_message,
     tools_for_role,
 )
-from parser import CommandValidationError, parse_agent_commands
-from protocol import AgentCommand
+from parser import (
+    MAX_BATCH_ACTIONS,
+    CommandValidationError,
+    build_command,
+    parse_model_response,
+    plan_step_for_calls,
+)
+from protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from agent_planner import infer_task_kind
+from agent_planner import asks_for_explanation, infer_task_kind, is_create_goal
 from role_router import has_change_verb, has_no_write_marker
 
 _READ_ONLY_ACTIONS = {
@@ -94,13 +101,14 @@ _RECOVERY_ATTEMPTS_REQUIRED = 2
 # not be done ends truthfully instead of in forced busywork.
 _HONEST_EXIT_HINT = (
     "If the work cannot or should not be done (target missing, premise false, "
-    "user denied the change, environment blocks it), finish with final_answer or "
-    'report_to_user using "outcome": "incomplete" and say why.'
+    "user denied the change, environment blocks it), end your turn again with a "
+    "response that has no tool call and says plainly what was not done and why; "
+    "it is recorded as not done."
 )
 _HONEST_EXIT_HINT_RU = (
     "Если работу нельзя или не нужно выполнять (цели нет, предпосылка ложна, "
-    "пользователь отклонил правку, среда не даёт), заверши final_answer или "
-    'report_to_user с "outcome": "incomplete" и объясни причину.'
+    "пользователь отклонил правку, среда не даёт), закончи ход ещё раз ответом "
+    "без вызовов и прямо скажи, что не сделано и почему; ход запишется как незавершённый."
 )
 
 
@@ -141,7 +149,16 @@ def _emit_action_result(
     notify = getattr(self._ui, "print_action_result", None)
     if notify is None:
         return
-    notify(build_action_result(step, command.action.type, command.action.args, feedback))
+    notify(
+        build_action_result(
+            step,
+            command.action.type,
+            command.action.args,
+            feedback,
+            call_id=command.call_id,
+            batch_id=command.batch_id,
+        )
+    )
 
 
 _BLOCKER_LABELS = {
@@ -151,6 +168,9 @@ _BLOCKER_LABELS = {
     "plan_incomplete": ("план не завершён", "plan not finished"),
     "artifacts_missing": ("не хватает файлов", "required files missing"),
     "unverified": ("ждёт проверки правок", "changes not verified"),
+    "no_changes": ("файлы не изменены", "no file changed"),
+    "errors_present": ("есть неустранённые ошибки", "unresolved errors"),
+    "no_activity": ("ничего не прочитано и не изменено", "nothing read or changed"),
 }
 
 
@@ -211,43 +231,16 @@ def _first_blocker_label(self) -> str:
     return ""
 
 
-def _note_thought(self, thought: str) -> None:
-    """Give the live panel the latest action's thought.
+def _note_response_text(self, text: str) -> None:
+    """Give the live panel the words of the latest response.
 
-    It is the thinking column's fallback for providers that stream no
+    They are the thinking column's fallback for providers that stream no
     reasoning. Optional channel, skipped by UIs without ``set_last_thought``.
     """
     notify = getattr(self._ui, "set_last_thought", None)
     if notify is not None:
-        notify(thought)
+        notify(text)
 
-
-def _run_pipeline_dwell(self, user_goal: str, step: int) -> None:
-    """Prefetch the next step's action call while holding the current one on screen.
-
-    Off-loads only the pure LLM call for ``step + 1`` and then sleeps a short,
-    latency-matched dwell so the user reads the current step while the next is
-    prepared — the perceived-latency pipeline. Fast direct providers (OpenAI,
-    Anthropic, DeepSeek) skip it entirely: strictly sequential, clean speed.
-    Also off in verbose mode and whenever request pacing is disabled (tests,
-    ``api_request_interval=0``) — see ``agent_model._pipeline_allowed``.
-    """
-    from agent_model import (
-        _launch_action_prefetch,
-        _pipeline_allowed,
-        _pipeline_dwell_seconds,
-    )
-
-    if not _pipeline_allowed(self):
-        return
-    next_step = step + 1
-    if next_step > self._state.step_budget:
-        return
-    if self._state.plan_info is None or self._build_early_stop_message(next_step):
-        return
-    next_prompt = self._build_runtime_prompt(user_goal, next_step)
-    _launch_action_prefetch(self, next_prompt)
-    time.sleep(_pipeline_dwell_seconds(self))
 
 # Read-only inspections still permitted while a corrective action is required.
 _CORRECTIVE_READ_BUDGET = 3
@@ -484,10 +477,7 @@ def finalize_run(
     primary_error: BaseException | None,
 ) -> None:
     """Attempt every lifecycle cleanup without replacing a primary failure."""
-    from agent_model import _join_pending_prefetch
-
     cleanup_steps: list[tuple[str, Any]] = [
-        ("join pending prefetch", lambda: _join_pending_prefetch(self)),
         ("seal run status", lambda: seal_run_status(self)),
         ("stop live UI", self._ui.stop_live),
         ("persist run log", lambda: self._persist_logs(user_goal)),
@@ -587,13 +577,15 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 self._state.native_tools = _native_tools_for_run(self)
             self._current_step = step
             loop_pre = time.monotonic()
+            turn: NativeTurn | None = None
             try:
                 if self._state.native_tools:
                     turn = _call_native_turn(self, user_goal, step)
+                    response = ModelResponse(text=turn.content.strip(), calls=calls_from_turn(turn))
                 else:
                     prompt = self._build_runtime_prompt(user_goal, step)
-                    _note_run_context(self, action="generating JSON")
-                    raw_text = self._call_action_model(prompt)
+                    _note_run_context(self, action="waiting for the model")
+                    response = parse_model_response(self._call_action_model(prompt))
             except RunCancelled:
                 # Cancelled mid-generation: the stream was closed and no action
                 # ran, so exit through the same safe-stop finalization as a
@@ -612,48 +604,13 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 step += 1
                 continue
 
-            if self._state.native_tools:
-                outcome, step = _run_native_turn(self, user_goal, step, turn)
-                if outcome.finished:
-                    final_message = outcome.final_message
-                    report_rendered = outcome.report_rendered
-                    task_completed = True
-                    break
-                self._save_checkpoint(user_goal, step - 1)
-                continue
-
-            try:
-                commands = parse_agent_commands(raw_text)
-            except CommandValidationError as error:
-                self._register_parse_error(
-                    step,
-                    raw_text,
-                    redact_text(str(error)),
-                )
-                self._ui.update_live(
-                    user_message="clarifying step format and continuing",
-                    status="fixing response format",
-                    step=step,
-                    progress=self._state.progress,
-                    plan_step="format correction",
-                    is_error=True,
-                )
-                step += 1
-                continue
-
-            outcome, step = _run_action_batch(self, user_goal, step, commands)
+            outcome, step = _run_turn(self, user_goal, step, response, turn)
             if outcome.finished:
                 final_message = outcome.final_message
                 report_rendered = outcome.report_rendered
                 task_completed = True
                 break
             self._save_checkpoint(user_goal, step - 1)
-
-            # Only pipeline off a clean, successful step: after an error the
-            # model tier and pending instruction are volatile, so predicting the
-            # next prompt is unreliable (a mismatch just wastes the prefetch).
-            if outcome.proceed:
-                _run_pipeline_dwell(self, user_goal, step - 1)
 
         if not final_message:
             final_message = self._build_limit_reached_message()
@@ -673,9 +630,20 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         )
 
     if not self.config.verbose and not report_rendered:
-        self._ui.print_final(final_message, self._state.user_messages)
+        self._ui.print_final(
+            final_message, self._state.user_messages, outcome=_final_outcome(self, task_completed)
+        )
 
     return final_message
+
+
+def _final_outcome(self, task_completed: bool) -> str:
+    """"done" only for a run that finished and passed its completion gates."""
+    state = self._state
+    refused = any(log.get("status") == "safety_refusal" for log in state.step_logs)
+    if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not refused:
+        return "done"
+    return "incomplete"
 
 
 def _stop_by_user(self) -> str:
@@ -725,9 +693,9 @@ def _native_tools_for_run(self) -> bool:
 
 
 def _leave_native_tools(self, error: Exception) -> None:
-    """Continue the run on the JSON protocol after the provider refused tools.
+    """Continue the run on the text protocol after the provider refused tools.
 
-    The runtime prompt the JSON path builds already carries the recent results,
+    The runtime prompt the text path builds already carries the recent results,
     so the switch loses no work — only the conversation.
     """
     from agent_model import forget_native_tools
@@ -736,9 +704,9 @@ def _leave_native_tools(self, error: Exception) -> None:
     self._state.native_tools = False
     self._state.native_messages = []
     self._ui.print_error(
-        "Провайдер отказался от вызова инструментов; этот прогон продолжается на JSON-протоколе."
+        "Провайдер отказался от вызова инструментов; этот прогон продолжается на текстовом протоколе."
         if self._state.response_language == "ru"
-        else "The provider refused tool calls; this run continues with the JSON protocol."
+        else "The provider refused tool calls; this run continues with the text protocol."
     )
     self._ui.debug_print(f"[native tools] {redact_text(str(error))}")
 
@@ -788,63 +756,287 @@ def _note_unchanged_run(state: RunState) -> None:
     )
 
 
-def _run_native_turn(self, user_goal: str, step: int, turn: NativeTurn) -> tuple[_ActionOutcome, int]:
-    """Run one native turn's calls and answer every one of them in the conversation."""
-    self._state.native_messages.append(assistant_message(turn))
-    if not turn.tool_calls and not turn.content.strip():
-        self._state.consecutive_errors += 1
-        self._record_error("The model returned neither a tool call nor text.")
-        # A fact, not a nudge: "or finish with final_answer" was once taken
-        # literally, and a progress line went out as the final answer.
-        self._state.pending_instruction = (
-            "Your last response reached the runtime empty: no text and no tool call. "
-            "If you made a call, it was lost on the way and did not run."
-        )
-        return _BLOCKED, step + 1
-    if not turn.tool_calls:
-        return _run_action_batch(self, user_goal, step, final_answer_from_turn(turn))
-    try:
-        commands = commands_from_turn(turn, files_changed=bool(self._state.files_changed))
-    except CommandValidationError as error:
-        self._state.parse_errors += 1
-        self._state.consecutive_errors += 1
-        self._record_error(redact_text(str(error)))
-        for call in turn.tool_calls:
-            self._state.native_messages.append(tool_message(call.call_id, f"Not executed: {error}"))
-        return _BLOCKED, step + 1
-    return _run_native_batch(self, user_goal, step, commands, turn.tool_calls)
-
-
-def _run_native_batch(
-    self, user_goal: str, step: int, commands: list[AgentCommand], calls: list[ToolCall]
+def _run_turn(
+    self, user_goal: str, step: int, response: ModelResponse, turn: NativeTurn | None
 ) -> tuple[_ActionOutcome, int]:
-    """Like _run_action_batch, but every call gets its answer in the conversation.
+    """Run one model response: its calls, or the end of the turn when it has none.
 
-    An API rejects a turn whose calls are not all answered, so the ones that
-    never ran are answered too, with why.
+    ``turn`` is the native response the calls came from; every one of its calls
+    is answered in the conversation, in call order, because an API rejects a
+    turn with an unanswered call.
     """
-    _note_thought(self, commands[0].thought)
-    outcome = _BLOCKED
-    answered = 0
-    for index, (command, call) in enumerate(zip(commands, calls)):
-        if index and step > self._state.step_budget:
-            break
+    if turn is not None:
+        self._state.native_messages.append(assistant_message(turn))
+    if not response.calls:
+        if not response.text:
+            return _register_empty_response(self), step + 1
+        return _finish_turn(self, user_goal, step, response.text), step + 1
+    if response.text:
+        _note_response_text(self, response.text)
+        self._record_user_message(response.text)
+    planned = _plan_calls(self, response, uuid.uuid4().hex[:12])
+    # A silent response still leaves a trace of what it set out to do.
+    _keep_step_summary(self, step, response.text or _calls_note(planned))
+    outcome, next_step, answers = _run_calls(self, user_goal, step, planned)
+    if turn is not None:
+        for item, answer in zip(planned, answers):
+            self._state.native_messages.append(tool_message(item.request.call_id, answer))
+    # A response whose calls all failed to parse ran nothing, but it still
+    # costs a step: otherwise a model repeating a broken call never meets
+    # the budget.
+    return outcome, max(next_step, step + 1)
+
+
+def _register_empty_response(self) -> _ActionOutcome:
+    self._state.consecutive_errors += 1
+    self._record_error("The model returned neither a tool call nor text.")
+    # A fact, not a nudge: "or finish with final_answer" was once taken
+    # literally, and a progress line went out as the final answer.
+    self._state.pending_instruction = (
+        "Your last response reached the runtime empty: no text and no tool call. "
+        "If you made a call, it was lost on the way and did not run."
+    )
+    return _BLOCKED
+
+
+def _finish_turn(self, user_goal: str, step: int, text: str) -> _ActionOutcome:
+    """A response without calls ends the turn: its text is the answer, through the finish gates."""
+    command = AgentCommand(
+        plan_step="done",
+        action=Action(
+            type="final_answer",
+            args={"message": text},
+            description=call_label("final_answer", {}, self._state.response_language or "en"),
+        ),
+        batch_id=uuid.uuid4().hex[:12],
+    )
+    return _run_one_action(self, user_goal, step, command)
+
+
+def _run_final_answer(self, user_goal: str, step: int, command: AgentCommand) -> _ActionOutcome:
+    """An end of the turn, through every guard and the finish gates.
+
+    The first end the runtime refuses sends the model the reasons. An end
+    after that, while the completion blockers still hold, is its answer to
+    them: accepted, but as "not done", with one line from the core saying why.
+    A run can then never claim what its evidence does not show, and can never
+    be trapped between a refused finish and nothing left to do.
+    """
+    if self._state.finish_refusals and not _is_incomplete_finish(command):
+        self._refresh_completion_requirements(force_enforcement=True)
+        if self._state.completion_blockers:
+            message = str(command.action.args["message"]) + _incomplete_note(self)
+            command.action.args.update({"message": message, "outcome": "incomplete"})
+    outcome = (
+        _finish_with_final_answer(self, step, command)
+        if _prepare_action(self, user_goal, step, command)
+        else _BLOCKED
+    )
+    if not outcome.finished:
+        self._state.finish_refusals += 1
+    return outcome
+
+
+def _incomplete_note(self) -> str:
+    """The core's own line under an answer accepted as not done."""
+    ru = self._state.response_language == "ru"
+    labels = [
+        _BLOCKER_LABELS[kind][0 if ru else 1]
+        for kind in dict.fromkeys(self._state.completion_blocker_kinds)
+        if kind in _BLOCKER_LABELS
+    ]
+    reason = "; ".join(labels) or ("проверки завершения не пройдены" if ru else "completion checks did not pass")
+    if ru:
+        return f"\n\n_Kvist: задача не отмечена как выполненная ({reason})._"
+    return f"\n\n_Kvist: the task is not marked as done ({reason})._"
+
+
+def _calls_note(planned: list[_PlannedCall]) -> str:
+    return " · ".join(
+        item.command.action.description if item.command is not None else item.request.name or "?"
+        for item in planned
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class _PlannedCall:
+    """A call of the response: the command to run, or why it cannot run."""
+
+    request: ToolCallRequest
+    command: AgentCommand | None
+    error: str = ""
+
+    @property
+    def readonly(self) -> bool:
+        return self.request.name in READONLY_TOOLS
+
+
+# Read-only calls of one response that may run at the same time.
+MAX_PARALLEL_CALLS = 4
+_NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already ended the task."
+_NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
+_NOT_RUN_BUDGET = "Not executed: the step budget ran out."
+_SKIPPED_AFTER_FAILED_WRITE = SKIPPED_ERROR
+_SKIPPED_LABELS = ("пропущено: предыдущая запись упала", "skipped: an earlier write failed")
+
+
+def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCall]:
+    kept = response.calls[:MAX_BATCH_ACTIONS]
+    plan_step = plan_step_for_calls([call.name for call in kept], bool(self._state.files_changed))
+    language = self._state.response_language or "en"
+    planned: list[_PlannedCall] = []
+    for number, request in enumerate(response.calls, start=1):
+        if number > MAX_BATCH_ACTIONS:
+            planned.append(_PlannedCall(request, None, (
+                f"Not executed: a response holds at most {MAX_BATCH_ACTIONS} tool calls; "
+                "send this one again in your next response if you still need it."
+            )))
+            continue
+        try:
+            command = build_command(
+                request, text=response.text, batch_id=batch_id, plan_step=plan_step, language=language
+            )
+        except CommandValidationError as error:
+            reason = redact_text(str(error))
+            if not request.error:
+                reason = f"Tool call {number} ({request.name}) was not run: {reason}"
+            planned.append(_PlannedCall(request, None, reason))
+            continue
+        planned.append(_PlannedCall(request, command))
+    return planned
+
+
+def _run_calls(
+    self, user_goal: str, step: int, planned: list[_PlannedCall]
+) -> tuple[_ActionOutcome, int, list[str]]:
+    """Run a response's calls in call order and answer every one of them.
+
+    Consecutive read-only calls run as one group, in parallel; a writing call
+    runs alone. Every call is its own step, so step logs, checkpoints, the
+    pending-action record and the step budget keep their meaning. A failed
+    read costs only itself. A failed or refused write stops the writes after
+    it — a later write may rest on it — but not the reads.
+    """
+    answers: list[str] = []
+    not_run: list[str] = []
+    outcome = _ActionOutcome()
+    write_failed = False
+    refusal = next(
+        (item for item in planned if item.command is not None and item.command.action.type == "refuse"),
+        None,
+    )
+    index = 0
+    while index < len(planned):
+        item = planned[index]
+        if outcome.finished or (refusal is not None and item is not refusal):
+            answers.append(_NOT_RUN_AFTER_FINISH if outcome.finished else _NOT_RUN_BESIDE_REFUSAL)
+            index += 1
+            continue
+        if item.command is None:
+            _register_unreadable_call(self, item.error)
+            answers.append(item.error)
+            not_run.append(item.error)
+            write_failed = write_failed or not item.readonly
+            index += 1
+            continue
+        if item.readonly:
+            group = _readonly_run(planned, index)
+            step, group_answers, group_not_run = _run_readonly_group(
+                self, user_goal, step, group, first_in_response=index == 0
+            )
+            answers.extend(group_answers)
+            not_run.extend(group_not_run)
+            index += len(group)
+            continue
+        index += 1
+        if step > self._state.step_budget and index > 1:
+            answers.append(_NOT_RUN_BUDGET)
+            not_run.append(f"{item.command.action.description}: {_NOT_RUN_BUDGET}")
+            continue
+        if write_failed:
+            _show_skipped_call(self, step, item.command)
+            step += 1
+            answers.append(_SKIPPED_AFTER_FAILED_WRITE)
+            not_run.append(f"{item.command.action.description}: {_SKIPPED_AFTER_FAILED_WRITE}")
+            continue
         serial = getattr(self, "_result_serial", 0)
-        outcome = _run_one_action(self, user_goal, step, command)
+        result = _run_one_action(self, user_goal, step, item.command)
         step += 1
-        answered += 1
-        self._state.native_messages.append(tool_message(call.call_id, _native_call_answer(self, serial, outcome)))
-        if outcome.finished or not outcome.proceed:
+        answer = _call_answer(self, serial, result)
+        answers.append(answer)
+        if result.finished:
+            outcome = result
+        elif not result.proceed:
+            write_failed = True
+            if getattr(self, "_result_serial", 0) == serial:
+                not_run.append(f"{item.command.action.description}: {answer}")
+    _note_calls_not_run(self, not_run)
+    return outcome, step, answers
+
+
+def _readonly_run(planned: list[_PlannedCall], start: int) -> list[_PlannedCall]:
+    """The read-only calls that follow each other from ``start``, at most a response's worth."""
+    group: list[_PlannedCall] = []
+    for item in planned[start:]:
+        if item.command is None or not item.readonly:
             break
-    for call in calls[answered:]:
-        self._state.native_messages.append(
-            tool_message(call.call_id, "Not executed: an earlier call in this response did not succeed.")
-        )
-    return outcome, step
+        group.append(item)
+    return group
 
 
-def _native_call_answer(self, serial: int, outcome: _ActionOutcome) -> str:
-    """The executed action's result, or the reason the runtime did not run it."""
+def _run_readonly_group(
+    self, user_goal: str, step: int, group: list[_PlannedCall], *, first_in_response: bool
+) -> tuple[int, list[str], list[str]]:
+    """Guards in call order, the executor in parallel, results registered in call order.
+
+    Only the executor call leaves the main thread: every guard and every
+    change to the run state stays where it was, so a group behaves like the
+    same reads made one by one, just sooner.
+    """
+    answers: list[str] = [""] * len(group)
+    not_run: list[str] = []
+    ready: list[tuple[int, int, int]] = []  # (position, step, result serial)
+    for position, item in enumerate(group):
+        command = item.command
+        assert command is not None
+        if step > self._state.step_budget and (position or not first_in_response):
+            answers[position] = _NOT_RUN_BUDGET
+            not_run.append(f"{command.action.description}: {_NOT_RUN_BUDGET}")
+            continue
+        serial = getattr(self, "_result_serial", 0)
+        if _prepare_action(self, user_goal, step, command):
+            ready.append((position, step, serial))
+        else:
+            answers[position] = _call_answer(self, serial, _BLOCKED)
+            if getattr(self, "_result_serial", 0) == serial:
+                not_run.append(f"{command.action.description}: {answers[position]}")
+        step += 1
+    feedbacks = _execute_in_parallel(self, [group[position].command for position, _step, _serial in ready])
+    for (position, call_step, serial), feedback in zip(ready, feedbacks):
+        result = _finish_action(self, call_step, group[position].command, feedback)
+        answers[position] = _call_answer(self, serial, result)
+    return step, answers, not_run
+
+
+def _execute_in_parallel(self, commands: list[AgentCommand]) -> list[dict[str, Any]]:
+    """Executor results in the order of ``commands``, whatever order they finish in."""
+    if len(commands) < 2:
+        return [self._execute_command(command) for command in commands]
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_CALLS, thread_name_prefix="kvist-read") as pool:
+        return list(pool.map(self._execute_command, commands))
+
+
+def _register_unreadable_call(self, error: str) -> None:
+    """A call the model wrote but the runtime could not read counts as a format error."""
+    self._state.parse_errors += 1
+    self._state.consecutive_errors += 1
+    self._record_error(error)
+    self._state.step_logs.append({"status": "call_format_error", "error": error})
+    self._ui.debug_print(f"Tool call format error: {error}")
+
+
+def _call_answer(self, serial: int, outcome: _ActionOutcome) -> str:
+    """The executed call's result, or the reason the runtime did not run it."""
     if outcome.finished:
         return "Accepted."
     if getattr(self, "_result_serial", 0) != serial:
@@ -854,51 +1046,55 @@ def _native_call_answer(self, serial: int, outcome: _ActionOutcome) -> str:
     return f"Not executed: {reason}"
 
 
-def _run_action_batch(
-    self, user_goal: str, step: int, commands: list[AgentCommand]
-) -> tuple[_ActionOutcome, int]:
-    """Run one response's actions in order; return the last outcome and the next step.
-
-    Every action is its own step, so step logs, checkpoints, the pending-action
-    record and the step budget keep meaning exactly what they did before
-    batching — only the number of model calls goes down.
-    """
-    _note_thought(self, commands[0].thought)
-    outcome = _BLOCKED
-    for index, command in enumerate(commands):
-        if index and step > self._state.step_budget:
-            _note_skipped_actions(self, commands[index:])
-            return outcome, step
-        outcome = _run_one_action(self, user_goal, step, command)
-        step += 1
-        if outcome.finished:
-            return outcome, step
-        if not outcome.proceed:
-            _note_skipped_actions(self, commands[index + 1 :])
-            return outcome, step
-    return outcome, step
-
-
-def _note_skipped_actions(self, skipped: list[AgentCommand]) -> None:
-    """Tell the model which actions of its batch never ran."""
-    if not skipped:
-        return
-    names = ", ".join(command.action.type for command in skipped)
-    note = (
-        f"The batch stopped early: {len(skipped)} later action(s) were NOT executed ({names}). "
-        "Decide the next actions from the results above; do not assume the skipped ones ran."
-    )
-    self._state.pending_instruction = f"{self._state.pending_instruction} {note}".strip()
-    self._push_unique(self._state.recent_events, note, self.config.summary_recent_events)
+def _show_skipped_call(self, step: int, command: AgentCommand) -> None:
+    """A write the response asked for but the runtime did not run, shown in its place."""
+    self._ui.print_step_header(step, command, 0.0)
+    feedback = {
+        "ok": False,
+        "action_type": command.action.type,
+        "error": _SKIPPED_AFTER_FAILED_WRITE,
+    }
+    _emit_action_result(self, step, command, feedback)
     self._state.step_logs.append(
-        {
-            "status": "batch_actions_skipped",
-            "skipped": [
-                {"type": command.action.type, "args": command.action.args}
-                for command in skipped
-            ],
-        }
+        {"step": step, "status": "skipped_after_failed_write", "command": _command_log(command)}
     )
+    self._ui.update_live(
+        user_message=f"{command.action.description}: {_SKIPPED_LABELS[0 if self._state.response_language == 'ru' else 1]}",
+        status="call skipped",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+
+
+def _note_calls_not_run(self, not_run: list[str]) -> None:
+    """Tell a text-mode model which of its calls did not run, and why.
+
+    A native model reads it in each call's answer. A text-mode model sees
+    results only through the next prompt, where a call that never ran has no
+    result, and a later successful call clears the refusal it left behind.
+    """
+    if not not_run:
+        return
+    self._state.step_logs.append({"status": "calls_not_run", "reasons": not_run})
+    if self._state.native_tools:
+        return
+    pending = self._state.pending_instruction
+    fresh = [reason for reason in not_run if reason not in pending]
+    if fresh:
+        note = "Not every call of your last response ran: " + " ".join(fresh)
+        self._state.pending_instruction = f"{pending} {note}".strip()
+
+
+def _command_log(command: AgentCommand) -> dict[str, Any]:
+    return {
+        "plan_step": command.plan_step,
+        "text": command.text,
+        "call_id": command.call_id,
+        "batch_id": command.batch_id,
+        "action": {"type": command.action.type, "args": command.action.args},
+    }
 
 
 def _run_one_action(
@@ -912,20 +1108,36 @@ def _run_one_action(
     if command.action.type == "refuse":
         return _stop_for_safety_refusal(self, step, command)
 
-    if _reject_wrong_language(self, step, command):
+    if command.action.type == "final_answer":
+        return _run_final_answer(self, user_goal, step, command)
+
+    if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
 
-    self._record_user_message(command.user_message)
+    if command.action.type == "report_to_user":
+        return _finish_with_report(self, user_goal, step, command)
+    return _execute_action(self, user_goal, step, command)
+
+
+def _prepare_action(self, user_goal: str, step: int, command: AgentCommand) -> bool:
+    """Every guard that runs before an action, and its header on screen.
+
+    False when a guard turned the action away; the reason is already in
+    pending_instruction or in a registered error result.
+    """
+    self._current_step = step
+    if _reject_wrong_language(self, step, command):
+        return False
 
     if _reject_before_execution(self, step, command):
-        return _BLOCKED
+        return False
 
     self._ui.print_step_header(
         step, command, getattr(self, "_last_reasoning_seconds", 0.0)
     )
 
     if _reject_exhausted_web_budget(self, user_goal, step, command):
-        return _BLOCKED
+        return False
 
     _note_run_context(
         self,
@@ -935,18 +1147,13 @@ def _run_one_action(
         **_plan_position(self),
     )
     self._ui.update_live(
-        user_message=command.user_message,
+        user_message=command.action.description,
         status="executing action",
         step=step,
         progress=self._state.progress,
         plan_step=command.plan_step,
     )
-
-    if command.action.type == "final_answer":
-        return _finish_with_final_answer(self, step, command)
-    if command.action.type == "report_to_user":
-        return _finish_with_report(self, user_goal, step, command)
-    return _execute_action(self, user_goal, step, command)
+    return True
 
 
 def _stop_for_safety_refusal(self, step: int, command: AgentCommand) -> _ActionOutcome:
@@ -1019,19 +1226,11 @@ def _reject_missing_followup(self, step: int, command: AgentCommand) -> bool:
             "blocked_count": blocked_count,
             "reason": followup_error,
             "required_next_actions": self._state.required_next_actions,
-            "command": {
-                "thought": command.thought,
-                "plan_step": command.plan_step,
-                "user_message": command.user_message,
-                "action": {
-                    "type": command.action.type,
-                    "args": command.action.args,
-                },
-            },
+            "command": _command_log(command),
         }
     )
     self._ui.update_live(
-        user_message=command.user_message,
+        user_message=command.action.description,
         status="corrective action required",
         step=step,
         progress=self._state.progress,
@@ -1047,7 +1246,7 @@ def _reject_repeated_action(self, step: int, command: AgentCommand) -> bool:
     if self._state.create_goal and not self._state.files_changed:
         self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
     self._ui.update_live(
-        user_message=command.user_message,
+        user_message=command.action.description,
         status="looking for another working step",
         step=step,
         progress=self._state.progress,
@@ -1068,7 +1267,7 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
         feedback = {
             "ok": False,
             "action_type": command.action.type,
-            "error": "Task is already complete. Do not write report artifacts. Use final_answer or report_to_user instead.",
+            "error": "Task is already complete. Do not write report artifacts. Give your final answer: a response with no tool call.",
         }
         live_status = "completion enforced"
         live_message = "Task is complete, requiring final_answer"
@@ -1076,7 +1275,7 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
         feedback = {
             "ok": False,
             "action_type": command.action.type,
-            "error": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report through final_answer or report_to_user only at the end.",
+            "error": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report in your final answer (a response with no tool call) only at the end.",
         }
         live_status = "report artifact blocked"
         live_message = "Report artifact blocked; continue the actual task"
@@ -1098,7 +1297,7 @@ def _reject_read_only_violation(self, step: int, command: AgentCommand) -> bool:
     feedback = {
         "ok": False,
         "action_type": command.action.type,
-        "error": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then final_answer or report_to_user.",
+        "error": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then give your final answer (a response with no tool call).",
     }
     self._register_feedback(step, command, feedback)
     self._ui.update_live(
@@ -1129,7 +1328,7 @@ def _reject_exhausted_web_budget(
     self._register_feedback(step, command, feedback)
     _emit_action_result(self, step, command, feedback)
     self._ui.update_live(
-        user_message=command.user_message,
+        user_message=command.action.description,
         status=live_status,
         step=step,
         progress=self._state.progress,
@@ -1163,15 +1362,7 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
                 "step": step,
                 "status": "blocked_final_answer",
                 "reason": error_text,
-                "command": {
-                    "thought": command.thought,
-                    "plan_step": command.plan_step,
-                    "user_message": command.user_message,
-                    "action": {
-                        "type": command.action.type,
-                        "args": command.action.args,
-                    },
-                },
+                "command": _command_log(command),
             }
         )
         self._ui.update_live(
@@ -1281,7 +1472,7 @@ def _execute_action(
         self._save_checkpoint(user_goal, step, pending_action=pending_action)
     watch_output = getattr(self._ui, "print_action_output", None)
     if watch_output is not None and command.action.type == "run_shell":
-        self.executor.set_output_sink(functools.partial(watch_output, step))
+        self.executor.set_output_sink(functools.partial(watch_output, step, call_id=command.call_id))
     try:
         feedback = self._execute_command(command)
     finally:
@@ -1289,11 +1480,25 @@ def _execute_action(
         if pending_action is not None:
             self.executor.end_action_transaction()
             self._anchored_artifacts = None
+    outcome = _finish_action(self, step, command, feedback)
+    # A side effect is on disk the moment it runs, so its checkpoint cannot
+    # wait. A read has nothing to recover — resume simply reads again — and is
+    # saved once with the rest of its batch (run_loop): each durable write
+    # costs up to a second on a spinning disk, several per action.
+    if pending_action is not None:
+        self._save_checkpoint(user_goal, step)
+    return outcome
+
+
+def _finish_action(
+    self, step: int, command: AgentCommand, feedback: dict[str, Any]
+) -> _ActionOutcome:
+    """Everything that follows an executed action, on the main thread."""
+    self._current_step = step
     self._register_feedback(step, command, feedback)
     _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
 
-    _keep_step_summary(self, step, command)
 
     # Only the model may declare the task done, and it may still want to
     # verify, so readiness is a hint rather than a gate.
@@ -1312,27 +1517,17 @@ def _execute_action(
         self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
 
     self._ui.update_live(
-        user_message=command.user_message,
+        user_message=command.action.description,
         status="continuing" if ok else "error received",
         step=step,
         progress=self._state.progress,
         plan_step=command.plan_step,
         is_error=not ok,
     )
-
-    # A side effect is on disk the moment it runs, so its checkpoint cannot
-    # wait. A read has nothing to recover — resume simply reads again — and is
-    # saved once with the rest of its batch (run_loop): each durable write
-    # costs up to a second on a spinning disk, several per action.
-    if pending_action is not None:
-        self._save_checkpoint(user_goal, step)
     return _ActionOutcome(proceed=ok)
 
 
 def reset_run_state(self) -> None:
-    from agent_model import _join_pending_prefetch
-
-    _join_pending_prefetch(self)
     self._state = RunState()
 
 
@@ -1405,7 +1600,7 @@ def command_language_error(self, command: AgentCommand) -> str | None:
     if not _matches_response_language(message, language):
         language_name = "Russian" if language == "ru" else "English"
         return (
-            f"Field final_answer.args.message is not written in {language_name} "
+            f"Your final answer is not written in {language_name} "
             f"(response_language: {language})."
         )
     return None
@@ -1424,24 +1619,16 @@ def register_language_error(
     language_name = "Russian" if language == "ru" else "English"
     self._state.pending_instruction = (
         f"{error_text} The previous step was rejected and was not executed. "
-        f"Retry the same intended step, but write final_answer.args.message in "
+        f"Retry the same intended step, but write your final answer in "
         f"{language_name} (response_language: {language}). "
-        "JSON action keys and action types stay English."
+        "Tool names and argument keys stay English."
     )
     self._state.step_logs.append(
         {
             "step": step,
             "status": "language_error",
             "error": error_text,
-            "command": {
-                "thought": command.thought,
-                "plan_step": command.plan_step,
-                "user_message": command.user_message,
-                "action": {
-                    "type": command.action.type,
-                    "args": command.action.args,
-                },
-            },
+            "command": _command_log(command),
         }
     )
     self._ui.debug_print(f"\n[Step {step}] Language error: {error_text}")
@@ -1479,15 +1666,13 @@ def feedback_error_for_model(self, feedback: dict[str, Any]) -> str:
     return self._normalize_error_for_model(str(raw))
 
 
-def _keep_step_summary(self, step: int, command: AgentCommand) -> None:
-    """Carry the model's own note into every later prompt.
+def _keep_step_summary(self, step: int, note: str) -> None:
+    """Carry the model's own words into every later prompt.
 
-    Nothing else the model concludes outlives its call: neither its reasoning
-    nor its thought is shown again. Kept only on every fifth step, a batch
-    whose actions skipped that number dropped the note, and a whole run could
-    end with none — its diagnosis re-derived, at full price, on every call.
+    Nothing else the model concludes outlives its call: its reasoning is not
+    shown again. A response's text is kept once, whether or not its calls ran:
+    words that announce a finding before a refused edit still hold the finding.
     """
-    note = command.step_summary
     summaries = self._state.rolling_summaries
     if not note or (summaries and summaries[max(summaries)] == note):
         return
@@ -1515,25 +1700,6 @@ def _keep_result_in_view(self, signature: str, detail: str) -> None:
     limit = self.config.detailed_feedback_limit
     del signatures[:-limit]
     del details[:-limit]
-
-
-def register_parse_error(self, step: int, raw_text: str, error_text: str) -> None:
-    self._state.parse_errors += 1
-    self._state.consecutive_errors += 1
-    message = "Invalid model response."
-    self._record_error(message)
-    self._state.pending_instruction = (
-        "The previous response was invalid JSON. "
-        "Return exactly one JSON object matching the schema."
-    )
-    self._state.step_logs.append(
-        {
-            "step": step,
-            "status": "parse_error",
-            "error": error_text,
-        }
-    )
-    self._ui.debug_print(f"\n[Step {step}] Format error: {error_text}")
 
 
 def register_feedback(
@@ -1603,7 +1769,7 @@ def register_feedback(
                 "is not found on this system. This IS the answer — the service unit "
                 "does not exist. Do NOT run grep, list-unit-files, is-active, "
                 "or any other systemctl command. Do NOT repeat status. "
-                "Give final_answer or report_to_user with an honest message: "
+                "Give your final answer with an honest message: "
                 f"'Service {service_name} not found: the systemd unit does not exist on this system.'"
             )
         elif (
@@ -1654,15 +1820,7 @@ def register_feedback(
             "step": step,
             "status": "ok" if ok else "error",
             "progress": self._state.progress,
-            "command": {
-                "thought": command.thought,
-                "plan_step": command.plan_step,
-                "user_message": command.user_message,
-                "action": {
-                    "type": command.action.type,
-                    "args": command.action.args,
-                },
-            },
+            "command": _command_log(command),
             "feedback": feedback,
         }
     )
@@ -2037,17 +2195,24 @@ def feedback_to_detail(self, command: AgentCommand, feedback: dict[str, Any]) ->
     serialized = json.dumps(payload, ensure_ascii=False, indent=2)
     serialized = self._truncate_for_prompt(serialized, self.config.prompt_result_char_limit)
 
-    if isinstance(raw_data, dict) and raw_data.get("untrusted"):
-        # JSON encoding leaves "</UNTRUSTED_TOOL_OUTPUT>" intact inside a
-        # string, so a fetched page could otherwise close its own block and
-        # continue as if it were the system prompt.
-        return (
-            f'<UNTRUSTED_TOOL_OUTPUT source="{command.action.type}">\n'
-            f"{UNTRUSTED_CONTENT_NOTICE}\n"
-            f"{defang_prompt_boundary_tags(serialized)}\n"
-            "</UNTRUSTED_TOOL_OUTPUT>"
-        )
-    return serialized
+    # Every result is its own block, named by the call it answers, so a batch's
+    # results stay apart. JSON encoding leaves "</UNTRUSTED_TOOL_OUTPUT>" intact
+    # inside a string, so a fetched page could otherwise close its own block
+    # and continue as if it were the system prompt.
+    notice = f"{UNTRUSTED_CONTENT_NOTICE}\n" if isinstance(raw_data, dict) and raw_data.get("untrusted") else ""
+    call_id = _CALL_ID_UNSAFE_RE.sub("", command.call_id)
+    call_attribute = f' call_id="{call_id}"' if call_id else ""
+    return (
+        f'<UNTRUSTED_TOOL_OUTPUT source="{command.action.type}"{call_attribute}>\n'
+        f"{notice}"
+        f"{defang_prompt_boundary_tags(serialized)}\n"
+        "</UNTRUSTED_TOOL_OUTPUT>"
+    )
+
+
+# A provider's call id is echoed into the block's opening tag; anything that
+# could end the attribute is dropped.
+_CALL_ID_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.:-]")
 
 
 def _replace_empty_terminal_streams_for_model(value: Any) -> Any:
@@ -2205,14 +2370,7 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
             self._state.step_logs.append(
                 {
                     "status": "repeat_blocked",
-                    "command": {
-                        "plan_step": command.plan_step,
-                        "user_message": command.user_message,
-                        "action": {
-                            "type": command.action.type,
-                            "args": command.action.args,
-                        },
-                    },
+                    "command": _command_log(command),
                 }
             )
             self._ui.debug_print(f"DevOps repeat blocked: {command_text}")
@@ -2232,14 +2390,7 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
         self._state.step_logs.append(
             {
                 "status": "repeat_blocked",
-                "command": {
-                    "plan_step": command.plan_step,
-                    "user_message": command.user_message,
-                    "action": {
-                        "type": command.action.type,
-                        "args": command.action.args,
-                    },
-                },
+                "command": _command_log(command),
             }
         )
         self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
@@ -2267,14 +2418,7 @@ def is_repeat_blocked(self, command: AgentCommand) -> bool:
                     {
                         "status": "repeat_write_target_blocked",
                         "path": path,
-                        "command": {
-                            "plan_step": command.plan_step,
-                            "user_message": command.user_message,
-                            "action": {
-                                "type": command.action.type,
-                                "args": command.action.args,
-                            },
-                        },
+                        "command": _command_log(command),
                     }
                 )
                 self._ui.debug_print(f"Repeat write target blocked: {path}")
@@ -2311,7 +2455,7 @@ def action_signature(self, command: AgentCommand) -> str:
 
 def record_user_message(self, message: str) -> None:
     clean = message.strip()
-    # A batch shares one user_message across its actions; it is still one message.
+    # A response's words are recorded once, however many calls it makes.
     if not clean or self._state.user_messages[-1:] == [clean]:
         return
     self._state.user_messages.append(clean)
@@ -2395,8 +2539,8 @@ def _collect_matching_plan_items(
 
 def _build_plan_evidence_text(command: AgentCommand, data: dict[str, Any], touched_paths: set[str]) -> str:
     parts = [
-        command.thought,
-        command.user_message,
+        command.text,
+        command.action.description,
         command.plan_step,
         str(command.action.type),
         " ".join(sorted(touched_paths)),
@@ -2726,18 +2870,7 @@ def _token_match(word: str, text: str) -> bool:
     return bool(re.search(pattern, text))
 
 
-def _is_create_goal(user_goal: str) -> bool:
-    lowered = user_goal.casefold()
-    markers = (
-        "create ",
-        "build ",
-        "generate ",
-        "scaffold",
-        "bootstrap",
-        "создай",
-        "сгенерируй",
-    )
-    return any(marker in lowered for marker in markers)
+_is_create_goal = is_create_goal
 
 
 # The router owns the change-verb vocabulary; the run loop reads the same list
@@ -2801,6 +2934,9 @@ def _resolve_report_goal(self, user_goal: str) -> bool:
     task_kind = getattr(plan, "task_kind", "") if plan is not None else ""
     if task_kind in {"report", "action"}:
         return task_kind == "report"
+    # A change that also asks for an explanation still owes the explanation.
+    if task_kind == "change":
+        return asks_for_explanation(user_goal)
     return _is_report_goal(user_goal)
 
 
@@ -2853,12 +2989,12 @@ def build_report_failure_message(self) -> str:
 def _build_report_substance_instruction(language: str) -> str:
     if language == "ru":
         return (
-            "Ответь по сути на вопрос пользователя в final_answer.args.message: "
+            "Ответь по сути на вопрос пользователя в финальном ответе: "
             "приведи конкретные находки и рекомендации со ссылками на прочитанные "
             "файлы. Шаблонные фразы вроде «все проверки пройдены» запрещены."
         )
     return (
-        "Answer the user's question in final_answer.args.message: give concrete "
+        "Answer the user's question in your final answer: give concrete "
         "findings and recommendations that reference the files you read. Template "
         "phrases like 'all checks passed' are forbidden."
     )
@@ -2866,7 +3002,7 @@ def _build_report_substance_instruction(language: str) -> str:
 
 def _build_create_guidance(language: str) -> str:
     return (
-        "This is a CREATE task. Do not loop on inspect and do not use final_answer or report_to_user without changes. "
+        "This is a CREATE task. Do not loop on inspect and do not end the turn without changes. "
         "Choose a path inside the workspace and move to write_file or append_file, then verify with facts."
     )
 
@@ -2890,8 +3026,8 @@ def _build_missing_implementation_error(language: str) -> str:
 
 def _build_completion_hint(self) -> str:
     hint = (
-        "The task looks complete. If nothing is left to verify, finish with "
-        "final_answer or report_to_user."
+        "The task looks complete. If nothing is left to verify, give your final "
+        "answer: a response with no tool call."
     )
     if self._state.report_goal:
         hint += " " + _build_report_substance_instruction(self._state.task_language)
@@ -3234,14 +3370,21 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
     ru = st.task_language == "ru"
     out: list[tuple[str, str]] = []
 
+    # The planner's word that the result is a change to files is not second-
+    # guessed: whatever the last call did, nothing changed means not done.
+    # The keyword guesses keep their exceptions for read-only and verify-only
+    # runs, since they can mistake a question for an edit.
+    change_by_plan = _plan_expects_changes(self)
     change_task = (
-        st.create_goal
+        change_by_plan
+        or st.create_goal
         or st.modify_goal
         or bool(st.required_artifacts)
         or _plan_requires_file_changes(self)
     )
     verify_only_done = st.verify_only_goal and bool(st.verification_evidence)
-    if change_task and not st.read_only_goal and not verify_only_done and not st.files_changed:
+    guessed_change_open = change_task and not st.read_only_goal and not verify_only_done
+    if not st.files_changed and (change_by_plan or guessed_change_open):
         out.append((
             "no_changes",
             "Completion blocked: this task changes files but files_changed is empty. "
@@ -3354,6 +3497,11 @@ def update_recovery_tracking(self, command: AgentCommand, ok: bool, error_text: 
         self._state.recovery_pending = False
 
 
+def _plan_expects_changes(self) -> bool:
+    plan_info = self._state.plan_info
+    return plan_info is not None and plan_info.task_kind == "change"
+
+
 def _plan_requires_file_changes(self) -> bool:
     plan_info = self._state.plan_info
     if not plan_info or not plan_info.plan:
@@ -3450,9 +3598,10 @@ def _build_completion_blocker_instruction(language: str, blockers: list[str], ac
     action_text = ", ".join(actions) or "none"
     blocker_text = _join_blockers(blockers, with_hint=False)
     return (
-        f'final_answer and report_to_user with "outcome": "done" are forbidden. Blockers: {blocker_text} '
+        f"Ending the turn as done is not accepted yet. Blockers: {blocker_text} "
         f"Next, either take a corrective action using one of: {action_text}; "
-        'or, if the work cannot or should not be done, finish with "outcome": "incomplete" and say why.'
+        "or, if the work cannot or should not be done, end the turn again without a tool call "
+        "and say plainly what was not done and why."
     )
 
 
@@ -3471,9 +3620,10 @@ def _build_strict_next_action_instruction(
     first_artifact = missing_artifacts[0] if missing_artifacts else ""
     message = (
         f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
-        "Do not use inspect/read/list_tree/find/search/final_answer/report_to_user on the next step. "
+        "Do not use inspect/read/list_tree/find/search on the next step, and do not end the turn yet. "
         "For a CREATE task, switch directly to changing files inside the workspace. "
-        'The one exception: if the work cannot or should not be done, finish with "outcome": "incomplete" and say why.'
+        "The one exception: if the work cannot or should not be done, end the turn without a tool call "
+        "and say plainly what was not done and why."
     )
     if first_artifact:
         message += f" Start with artifact: {first_artifact}."

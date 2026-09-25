@@ -83,6 +83,7 @@ button:disabled { opacity: .45; cursor: default; }
 .note.debug { font-family: var(--vscode-editor-font-family); font-size: .85em; }
 
 /* Work log: one rail, a node per step. The rail is real structure, because the steps are a sequence. */
+.in-batch { margin-left: 12px; padding-left: 8px; border-left: 1px dashed color-mix(in srgb, var(--vscode-foreground) 22%, transparent); }
 .work { position: relative; padding: 4px 0 4px 24px; color: var(--muted); font-size: .95em; }
 .work::before { content: ""; position: absolute; left: 7px; top: 0; bottom: 0; width: 1px; background: color-mix(in srgb, var(--vscode-foreground) 28%, transparent); }
 .work:not(.work + .work)::before { top: 12px; }

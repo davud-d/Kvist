@@ -57,7 +57,7 @@ not verify is marked as a guess.
 The opening line, before the first action: the question you set out to answer.
 "First I want to know where the timeout value actually comes from."
 
-The user_message field during work carries the thought, not the action. Not
+Your text during work, when you write one, carries the thought, not the action. Not
 "Reading config.py", but "Checking where the timeout comes from". Not "Editing
 parser.py", but "Looks like the initialization order". One short phrase, the
 line of reasoning, not a lecture.

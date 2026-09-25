@@ -84,7 +84,7 @@ def test_runtime_prompt_has_no_english_only_directive(agent_factory):
 
 def test_runtime_prompt_keeps_protocol_english(agent_factory):
     prompt = _build_prompt(agent_factory, "ru")
-    assert "JSON action keys, action types, and tool schemas are always English." in prompt
+    assert "Tool names, argument keys, and tool schemas are always English." in prompt
 
 
 def test_runtime_prompt_does_not_require_template_phrase(agent_factory):

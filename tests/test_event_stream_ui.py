@@ -139,16 +139,31 @@ def test_print_final_redacts_secret():
     assert "[REDACTED]" in event.message
 
 
-def test_step_header_redacts_secret_in_thought_and_args():
+def test_step_header_redacts_secret_in_text_and_args():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)
     synthetic = "sk-proj-" + "u" * 24
-    command = make_command("run_shell", {"command": f"deploy --token {synthetic}"})
-    command.thought = f"using api_key={synthetic}"
+    command = make_command("run_shell", {"command": f"deploy --token {synthetic}"}, text=f"using api_key={synthetic}")
     ui.print_step_header(3, command)
     (event,) = ch.drain()
-    assert synthetic not in event.thought
+    assert event.thought == ""
+    assert event.user_message and synthetic not in event.user_message
     assert synthetic not in str(event.action_args)
+
+
+def test_a_batch_says_its_words_once_on_its_first_step():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    first = make_command("read_file", {"path": "a.py"}, text="Читаю оба файла")
+    second = make_command("read_file", {"path": "b.py"}, text="Читаю оба файла")
+    first.batch_id = second.batch_id = "batch_1"
+    next_batch = make_command("read_file", {"path": "c.py"}, text="Теперь третий")
+    next_batch.batch_id = "batch_2"
+
+    for step, command in enumerate((first, second, next_batch), start=1):
+        ui.print_step_header(step, command)
+
+    assert [event.user_message for event in ch.drain()] == ["Читаю оба файла", "", "Теперь третий"]
 
 
 def test_live_markdown_stream_sequence():

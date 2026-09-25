@@ -29,8 +29,10 @@ def test_infer_task_kind_catches_verbless_report_phrases():
     ):
         assert infer_task_kind(goal) == "report", goal
 
-    assert infer_task_kind("создай hello.py") == "action"
-    assert infer_task_kind("исправь баг в main.py") == "action"
+    assert infer_task_kind("создай hello.py") == "change"
+    assert infer_task_kind("исправь баг в main.py") == "change"
+    assert infer_task_kind("исправь баг и объясни, что было не так") == "change"
+    assert infer_task_kind("прогони тесты") == "action"
 
 
 def test_create_plan_reads_task_kind_from_planner(agent_factory):
@@ -45,6 +47,16 @@ def test_create_plan_reads_task_kind_from_planner(agent_factory):
     plan = agent._create_plan("объясни и почини")
 
     assert plan.task_kind == "action"
+
+
+def test_create_plan_accepts_the_change_kind(agent_factory):
+    agent = agent_factory()
+    agent._call_model = lambda **kwargs: (
+        '{"goal":"G","complexity":"simple","task_kind":"change",'
+        '"plan":["edit"],"success_criteria":["done"],"risks":[]}'
+    )
+
+    assert agent._create_plan("поправь таймаут").task_kind == "change"
 
 
 def test_create_plan_infers_task_kind_when_planner_omits_it(agent_factory):

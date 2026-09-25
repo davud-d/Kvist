@@ -61,6 +61,7 @@ py-modules = [
     "banner",
     "banner_frames",
     "bug_report",
+    "call_labels",
     "change_journal",
     "command_policy",
     "commit_message",

@@ -341,3 +341,18 @@ def test_usage_event_defaults_context_to_zero():
 
     assert payload["context_tokens"] == 0
     assert payload["context_limit"] == 0
+
+
+def test_v2_call_fields_are_additive():
+    from frontend_protocol import ActionOutputEvent, ActionResultEvent, FinalEvent, StepEvent
+
+    step = StepEvent(1, "inspect", "", "Читаю", "read_file", {"path": "a"}, 0.0, "читает a", "call_1", "b1").to_dict()
+    assert step["thought"] == "" and step["user_message"] == "Читаю"
+    assert (step["call_id"], step["batch_id"]) == ("call_1", "b1")
+
+    result = ActionResultEvent(1, "read_file", True, "Read 1 line", call_id="call_1", batch_id="b1").to_dict()
+    assert (result["call_id"], result["batch_id"]) == ("call_1", "b1")
+    assert ActionOutputEvent(2, "out", "call_2").to_dict()["call_id"] == "call_2"
+
+    assert FinalEvent("ok", []).to_dict()["outcome"] == "done"
+    assert FinalEvent("not yet", [], "incomplete").to_dict()["outcome"] == "incomplete"

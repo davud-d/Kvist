@@ -64,7 +64,7 @@ do not go into the report unless someone asked.
 The opening line, before the first action: which boundary you look at first.
 "First, who owns loading the config and who reaches into it."
 
-The user_message field during work: place and direction. "Looking at who calls
+Your text during work, when you write one: place and direction. "Looking at who calls
 this module". "Routing it through the repository layer".
 
 == TWO FORKS ==
