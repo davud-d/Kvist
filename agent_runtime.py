@@ -774,8 +774,9 @@ def _run_turn(
     if response.text:
         _note_response_text(self, response.text)
         self._record_user_message(response.text)
-        _keep_step_summary(self, step, response.text)
     planned = _plan_calls(self, response, uuid.uuid4().hex[:12])
+    # A silent response still leaves a trace of what it set out to do.
+    _keep_step_summary(self, step, response.text or _calls_note(planned))
     outcome, next_step, answers = _run_calls(self, user_goal, step, planned)
     if turn is not None:
         for item, answer in zip(planned, answers):
@@ -848,6 +849,13 @@ def _incomplete_note(self) -> str:
     if ru:
         return f"\n\n_Kvist: задача не отмечена как выполненная ({reason})._"
     return f"\n\n_Kvist: the task is not marked as done ({reason})._"
+
+
+def _calls_note(planned: list[_PlannedCall]) -> str:
+    return " · ".join(
+        item.command.action.description if item.command is not None else item.request.name or "?"
+        for item in planned
+    )
 
 
 @dataclass(slots=True, frozen=True)

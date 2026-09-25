@@ -2455,3 +2455,20 @@ def test_the_words_of_a_response_whose_calls_were_all_refused_are_kept(agent_fac
     agent._run_loop("Посмотри, почему растёт счётчик", start_step=1)
 
     assert "Нашёл причину: счётчик не сбрасывается." in agent._state.rolling_summaries.values()
+
+
+def test_a_response_of_only_calls_leaves_their_labels_as_the_step_note(agent_factory):
+    agent = agent_factory(max_steps=3)
+    agent._state.plan_info = make_plan()
+    agent._state.response_language = "ru"
+    responses = iter([
+        _v2("", _tool("read_file", path="a.py"), _tool("search_code", query="role", path="src/")),
+        "Готово.",
+    ])
+    agent._call_action_model = lambda prompt: next(responses)
+    agent.executor.execute = lambda command: ExecutionResult(True, command.action.type, {"content": "", "results": []})
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert agent._state.rolling_summaries[1] == 'читает a.py · ищет "role" в src/'
+    assert agent._state.user_messages == []
