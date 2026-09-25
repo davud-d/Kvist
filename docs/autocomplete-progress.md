@@ -40,13 +40,29 @@
   не нашёл багов, не трогал запрещённые файлы (core/docs), не роутит
   completion через долгоживущий core-процесс.
 
-## В работе
-
-- [ ] JetBrains-агент работает в своём git worktree: проверка EP для
-  inline-completion под платформу 2025.3, `KvistCompletionClient.kt`,
-  provider, `plugin.xml`.
+- [x] JetBrains готов и проверен, слит в эту ветку (merge commit после
+  `a677a7c`): реальный extension point платформы 2025.3 —
+  `com.intellij.codeInsight.inline.completion.DebouncedInlineCompletionProvider`
+  (найден и подтверждён по декомпилированным `.class` из реально
+  скачанного SDK, не по памяти) — debounce и отмена-при-новом-запросе
+  берутся у платформы бесплатно, руками написан только мост
+  coroutine-cancellation → `ProgressIndicator.cancel()` →
+  `destroyProcess()` в `KvistCompletionClient.kt` (таймаут 4с, не 120с как
+  у commit-message), LRU-кэш по SHA-256 хвоста префикса/головы суффикса,
+  тумблер on/off через `PropertiesComponent`
+  (`KvistCompletionSettings.kt` + `ToggleInlineCompletionAction.kt` в меню
+  Tools), новая запись `<inline.completion.provider>` в `plugin.xml`.
+  Я сам (не со слов агента) прогнал `./gradlew compileKotlin --rerun-tasks`
+  (реальная компиляция, не из кэша) и `./gradlew build` — оба зелёные
+  против настоящего SDK 2025.3. Прочитал весь код построчно: не нашёл
+  багов, не трогал запрещённые файлы, не роутит completion через
+  `KvistCoreProcess`, cancellation корректно ре-бросает
+  `CancellationException` (не глушит).
 
 ## Осталось
 
-- [ ] Строгая проверка JetBrains-плагина (дифф, компиляция, соответствие
-  контракту) и слияние его ветки в `claude/wonderful-shannon-egazos`.
+- [ ] Ничего блокирующего не осталось. Оба плагина реализованы, проверены
+  и слиты в `claude/wonderful-shannon-egazos`. Не проверено ни одним из
+  агентов и мной: живой запуск в реальной IDE (нет Extension
+  Host/`runIde` в этом окружении) — честно отмечено как неподтверждённое
+  во всех отчётах, а не выдано за проверенное.
