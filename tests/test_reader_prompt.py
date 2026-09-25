@@ -102,6 +102,7 @@ def test_reader_prompt_stays_within_token_budget():
     # → 2700 for the emission paragraphs in section 2: the JSON object is the
     # only channel out, so the format is nothing to recall at the end of a long
     # reasoning pass, and an answer worked out in thinking was written nowhere.
-    # → 2900 for the v2 contract: the <tool_call> block, when to speak, which
-    # calls run together, and how an end of the turn is checked.
-    assert tokens <= 2900, f"reader prompt is {tokens} tokens (budget 2900)"
+    # The v2 contract (the <tool_call> block, when to speak, which calls run
+    # together, how an end of the turn is checked) fit into the same budget by
+    # saying each rule once.
+    assert tokens <= 2700, f"reader prompt is {tokens} tokens (budget 2700)"
