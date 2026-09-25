@@ -33,7 +33,7 @@ export interface InputRequest {
 }
 
 export type CoreEvent =
-  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; planning?: boolean }
+  | { type: "hello"; protocol_version: number; provider?: string; models?: Record<string, string>; role?: string; approval_mode?: string; session?: string; has_checkpoint?: boolean; effort?: string; planning?: boolean; kvist_version?: string }
   | { type: "live_start" }
   | { type: "live_stop" }
   | { type: "status"; user_message: string; status: string; step: number; progress: number; plan_step: string; is_error: boolean }
