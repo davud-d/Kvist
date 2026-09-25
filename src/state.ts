@@ -82,7 +82,7 @@ export interface State {
   command: string | null
   // The last `/effort` result; the core does not announce it in `hello`.
   effort: string
-  info: { provider: string; model: string; role: string; session: string; routedRole?: string }
+  info: { provider: string; model: string; role: string; session: string; routedRole?: string; kvistVersion?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
   startedAt: number | null
@@ -358,6 +358,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
         model,
         role: event.role ?? state.info.role,
         session: event.session ?? "",
+        kvistVersion: event.kvist_version ?? state.info.kvistVersion,
       }
       // Any earlier routed role belonged to a core that is gone.
       const first = state.items.length === 0

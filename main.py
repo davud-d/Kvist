@@ -9,9 +9,17 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from version import kvist_version
+
 
 def _build_cli_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Local AI agent")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=kvist_version(),
+        help="Print the version and exit.",
+    )
     parser.add_argument(
         "--workspace",
         help=(

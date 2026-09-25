@@ -25,7 +25,15 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('prompts', 'prompts'), ('themes', 'themes'), ('assets', 'assets'), *_ui_datas],
+    datas=[
+        ('prompts', 'prompts'),
+        ('themes', 'themes'),
+        ('assets', 'assets'),
+        # version.py's pyproject.toml fallback (no installed distribution
+        # metadata exists inside a frozen build either).
+        ('pyproject.toml', '.'),
+        *_ui_datas,
+    ],
     hiddenimports=local_hiddenimports,
     hookspath=[],
     hooksconfig={},

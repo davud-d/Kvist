@@ -1,0 +1,97 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kvist"
+version = "0.1.0b1"
+description = "Local, terminal-based coding agent"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.40.0",
+    "python-dotenv==1.0.1",
+    "rich==14.1.0",
+    "tiktoken",
+    "freeflow-llm==0.1.3",
+    "anthropic>=0.30.0",
+    "prompt_toolkit>=3.0",
+    "distro",
+    "pywin32; sys_platform == 'win32'",
+]
+
+[project.scripts]
+kvist = "main:main"
+
+[tool.setuptools]
+# The one real package directory the app imports (providers/), alongside the
+# flat top-level modules listed in py-modules below. setuptools has no
+# automatic "find" for py-modules (only for package directories), so the
+# module list is explicit — it mirrors kvist.spec's local_hiddenimports,
+# minus the dev-only entry scripts that one also excludes (run_task,
+# package_script).
+packages = ["providers"]
+py-modules = [
+    "action_result",
+    "agent",
+    "agent_context",
+    "agent_logging",
+    "agent_model",
+    "agent_planner",
+    "agent_runtime",
+    "agent_state",
+    "agent_web",
+    "anymodel_onboarding",
+    "api_settings",
+    "approvals",
+    "banner",
+    "banner_frames",
+    "bug_report",
+    "change_journal",
+    "command_policy",
+    "commit_message",
+    "config_info",
+    "context_budget",
+    "context_utils",
+    "custom_provider",
+    "deps",
+    "durable_json",
+    "env_utils",
+    "event_session",
+    "event_stdio",
+    "event_stream_ui",
+    "executor",
+    "frontend_protocol",
+    "frontends",
+    "interactive_screen",
+    "language_policy",
+    "language_utils",
+    "llm_clients",
+    "main",
+    "native_tools",
+    "parser",
+    "performance_logger",
+    "permission_policy",
+    "process_tree",
+    "protocol",
+    "reasoning_effort",
+    "redaction",
+    "render_throttle",
+    "role_router",
+    "sandbox",
+    "secret_paths",
+    "session_events",
+    "session_store",
+    "session_titler",
+    "slash_commands",
+    "splash",
+    "system_context",
+    "terminal",
+    "terminal_banner",
+    "terminal_image",
+    "theme",
+    "ui",
+    "user_config",
+    "version",
+]

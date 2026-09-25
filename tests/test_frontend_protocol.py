@@ -313,6 +313,13 @@ def test_hello_event_carries_optional_session_state():
     assert "has_checkpoint" not in HelloEvent().to_dict()
 
 
+def test_hello_event_carries_optional_kvist_version():
+    payload = HelloEvent(kvist_version="0.1.0b1").to_dict()
+    assert payload["kvist_version"] == "0.1.0b1"
+    # Additive: unset is omitted, so an old frontend sees no new field.
+    assert "kvist_version" not in HelloEvent().to_dict()
+
+
 def test_usage_event_separates_spend_from_context_size():
     payload = UsageEvent(
         input_tokens=9000,

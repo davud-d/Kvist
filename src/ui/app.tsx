@@ -37,12 +37,13 @@ function ModeLine({ model, role, effort }: { model: string; role: string; effort
   )
 }
 
-function Footer({ running, armed, usage }: { running: boolean; armed: boolean; usage: { context: number; limit: number } }) {
+function Footer({ running, armed, usage, version }: { running: boolean; armed: boolean; usage: { context: number; limit: number }; version?: string }) {
   const context = contextLabel(usage.context, usage.limit)
   return (
     <Box justifyContent="space-between" paddingX={2}>
       {armed ? <Text color={color.warn}>esc again to interrupt</Text> : running ? <Text color={color.dim}>esc interrupt</Text> : <Text> </Text>}
       <Text>
+        {version ? <Text color={color.dim}>v{version}   </Text> : null}
         {context ? <Text color={color.dim}>{context}   </Text> : null}
         <Text>/</Text>
         <Text color={color.dim}> commands</Text>
@@ -250,7 +251,7 @@ export function App(props: AppProps) {
           onSubmit={submit}
         />
       )}
-      <Footer running={state.running} armed={stopArmedAt > 0} usage={state.usage} />
+      <Footer running={state.running} armed={stopArmedAt > 0} usage={state.usage} version={state.info.kvistVersion} />
     </>
   )
 }

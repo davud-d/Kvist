@@ -36,6 +36,31 @@ def test_cli_help_exits_before_terminal_and_provider_initialization(tmp_path):
     assert completed.stderr == ""
 
 
+def test_cli_version_exits_before_terminal_and_provider_initialization(tmp_path):
+    from version import kvist_version
+
+    root = Path(__file__).resolve().parents[1]
+    environment = os.environ.copy()
+    environment["HOME"] = str(tmp_path)
+    environment.pop("FORCE_COLOR", None)
+    environment["NO_COLOR"] = "1"
+    environment["PYTHON_COLORS"] = "0"
+
+    completed = subprocess.run(
+        [sys.executable, str(root / "main.py"), "--version"],
+        cwd=root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=8,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == kvist_version()
+    assert completed.stderr == ""
+
+
 def test_resolve_workspace_path_creates_directory_and_rejects_file(tmp_path):
     workspace = main.resolve_workspace_path(str(tmp_path / "new"))
     assert workspace.is_dir()

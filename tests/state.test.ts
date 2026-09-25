@@ -16,8 +16,13 @@ const hello: CoreEvent = { type: "hello", protocol_version: 1, provider: "p", mo
 
 test("hello fills the header info and prints the banner once", () => {
   const state = feed(hello, hello)
-  assert.deepEqual(state.info, { provider: "p", model: "m", role: "coder", session: "s" })
+  assert.deepEqual(state.info, { provider: "p", model: "m", role: "coder", session: "s", kvistVersion: undefined })
   assert.equal(state.items.filter((item) => item.kind === "banner").length, 1)
+})
+
+test("hello carries the running kvist's version into state.info", () => {
+  const state = feed({ ...hello, kvist_version: "0.1.0b1" })
+  assert.equal(state.info.kvistVersion, "0.1.0b1")
 })
 
 test("a streamed reply is committed once and the live block is cleared", () => {
