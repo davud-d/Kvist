@@ -1648,7 +1648,9 @@ def test_whatever_the_executor_read_reaches_the_model(agent_factory, tmp_path, s
     """
     agent = agent_factory()
     body = "\n".join(f"line {index}" for index in range(size // 8))[:size]
-    (tmp_path / "f.py").write_text(body, encoding="utf-8")
+    # newline="\n": the executor returns the file bytes verbatim, so the
+    # text-mode \r\n a Windows write would translate to could never match.
+    (tmp_path / "f.py").write_text(body, encoding="utf-8", newline="\n")
 
     command = make_command("read_file", {"path": "f.py"})
     feedback = agent._execute_command(command)
@@ -2055,8 +2057,11 @@ def test_removed_security_checks_reads_only_deleted_lines_from_the_journal(agent
 
     agent = agent_factory(max_steps=1)
     workspace = Path(agent.executor.workspace)
+    # newline="\n": _replace_in_file matches against the bytes it reads back.
     (workspace / "ci.yml").write_text(
-        "steps:\n  - run: pip-audit -r requirements.txt\n  - run: pytest\n", encoding="utf-8"
+        "steps:\n  - run: pip-audit -r requirements.txt\n  - run: pytest\n",
+        encoding="utf-8",
+        newline="\n",
     )
     agent.executor._replace_in_file("ci.yml", "  - run: pip-audit -r requirements.txt\n", "")
     agent.executor._write_file("notes.txt", "we should add bandit later\n")
@@ -2069,7 +2074,9 @@ def test_final_answer_is_held_once_when_the_run_deleted_a_security_check(agent_f
 
     agent = agent_factory(max_steps=1)
     workspace = Path(agent.executor.workspace)
-    (workspace / "ci.yml").write_text("- run: trivy fs .\n- run: pytest\n", encoding="utf-8")
+    (workspace / "ci.yml").write_text(
+        "- run: trivy fs .\n- run: pytest\n", encoding="utf-8", newline="\n"
+    )
     agent.executor._replace_in_file("ci.yml", "- run: trivy fs .\n", "")
     agent._state.verification_evidence = ["read_file: ci.yml"]
     agent._state.files_changed = ["ci.yml"]

@@ -12,7 +12,7 @@ import session_events
 from executor import ExecutionResult
 from session_events import JOURNAL_SUFFIX, SessionJournal
 from session_store import run_session_op
-from tests.conftest import FakeLLMClient
+from tests.conftest import FakeLLMClient, requires_posix
 
 
 def _journal_file(agent, session: str | None = None) -> Path:
@@ -568,6 +568,7 @@ def test_an_unusable_journal_never_stops_a_turn(agent_factory, monkeypatch):
     assert target.read_text(encoding="utf-8") == ""
 
 
+@requires_posix
 def test_journal_file_is_private_to_the_owner(agent_factory, monkeypatch):
     agent = _chat_agent(agent_factory, monkeypatch, "answer")
     agent.run("work", routed_role="chat")

@@ -25,6 +25,22 @@ requires_posix = pytest.mark.skipif(
 )
 
 
+class AllowAllApprovals:
+    """An approval gate that always says yes, for a test that is not about approvals.
+
+    On Windows a path's mode bits cannot say "only an admin writes this", so
+    no executable reaches trusted-system status and every allowlisted command
+    stops at the executable-origin approval gate — which raises instead of
+    answering when stdin is not a TTY.
+    """
+
+    def confirm_command(self, command: list[str], reason: str) -> bool:
+        return True
+
+    def confirm(self, title: str, body: str, question: str) -> bool:
+        return True
+
+
 class NullUI:
     def start_live(self):
         pass

@@ -368,6 +368,17 @@ def is_already_installed(lib_dir: Path) -> bool:
     return (lib_dir / CORE_NAME).is_file()
 
 
+def _new_temporary(directory: Path, prefix: str) -> Path:
+    """A named temp file whose own descriptor is already closed.
+
+    mkstemp hands back an open descriptor; leaving it open keeps the file
+    locked on Windows, where os.replace/unlink then fail with WinError 32.
+    """
+    descriptor, raw_path = tempfile.mkstemp(prefix=prefix, dir=directory)
+    os.close(descriptor)
+    return Path(raw_path)
+
+
 def make_executable(path: Path) -> None:
     if IS_WINDOWS:
         return
@@ -387,8 +398,8 @@ def install(binary: Path, lib_dir: Path, bin_dir: Path, status: Status | None = 
     bin_dir.mkdir(parents=True, exist_ok=True)
     core_path = lib_dir / CORE_NAME
     wrapper_path = bin_dir / WRAPPER_NAME
-    core_tmp = Path(tempfile.mkstemp(prefix=f".{CORE_NAME}.", dir=lib_dir)[1])
-    wrapper_tmp = Path(tempfile.mkstemp(prefix=f".{WRAPPER_NAME}.", dir=bin_dir)[1])
+    core_tmp = _new_temporary(lib_dir, f".{CORE_NAME}.")
+    wrapper_tmp = _new_temporary(bin_dir, f".{WRAPPER_NAME}.")
     try:
         show_step(status, STEPS["copy_binary"])
         shutil.copy2(binary, core_tmp)

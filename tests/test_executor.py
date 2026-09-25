@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import requires_posix
+from tests.conftest import AllowAllApprovals, requires_posix
 
 import executor as executor_module
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError, SafeExecutor
@@ -417,14 +417,19 @@ def test_hardlink_containment_fails_closed_when_workspace_cannot_be_scanned(
 
 def test_absolute_paths_inside_the_workspace_run_in_relative_form(tmp_path):
     (tmp_path / "sub").mkdir()
-    (tmp_path / "sub" / "marker.txt").write_text("x", encoding="utf-8")
-    executor = SafeExecutor(tmp_path)
+    (tmp_path / "sub" / "marker").mkdir()
+    # The gate only matters on Windows, where no executable is trusted: every
+    # allowlisted command stops at the origin-approval gate off a TTY.
+    executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     workspace = str(executor.workspace)
+    # "ls" is not in the Windows allowlist, and Windows' own "dir" is a cmd
+    # builtin whose cmd.exe is never trusted there; "tree" lists directories.
+    listing = ["tree", f"{workspace}/sub"] if os.name == "nt" else ["ls", f"{workspace}/sub"]
 
-    result = executor._run_shell(["ls", f"{workspace}/sub"], cwd=workspace)
+    result = executor._run_shell(listing, cwd=workspace)
 
     assert result.ok, result.data
-    assert "marker.txt" in result.data["stdout"]
+    assert "marker" in result.data["stdout"]
     assert f'"{workspace}/sub" -> "sub"' in result.data["path_note"]
 
 
@@ -850,7 +855,10 @@ def test_a_file_just_under_the_cap_is_returned_whole_and_unmarked(tmp_path):
 
 
 def test_git_diff_outside_a_repo_shows_only_what_kvist_changed(tmp_path):
-    executor = SafeExecutor(tmp_path)
+    # The subject is the journal diff, not the HITL prompt, so the gate is
+    # answered here: on Windows git.exe's origin never reaches trusted-system
+    # status and every command would stop at approval off a TTY.
+    executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     (tmp_path / "pricing.py").write_text("def tax():\n    return 1\n", encoding="utf-8")
     executor._replace_in_file("pricing.py", "return 1", "return 2")
     executor._write_file("new.py", "x = 1\n")

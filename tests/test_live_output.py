@@ -4,9 +4,16 @@ from __future__ import annotations
 import sys
 import time
 
+import pytest
+
 from event_stream_ui import EventStreamUI
 from frontend_protocol import ActionOutputEvent, ActionResultEvent, FrontendChannel
 from process_tree import run_supervised
+
+preexec_unsupported_on_windows = pytest.mark.xfail(
+    sys.platform == "win32",
+    reason="preexec_fn not supported on windows, see executor",
+)
 
 
 def _run(script: str, sink, tmp_path):
@@ -23,6 +30,7 @@ def _run(script: str, sink, tmp_path):
     )
 
 
+@preexec_unsupported_on_windows
 def test_output_is_delivered_while_the_command_runs(tmp_path):
     seen: list[tuple[float, str]] = []
     started = time.monotonic()
@@ -38,6 +46,7 @@ def test_output_is_delivered_while_the_command_runs(tmp_path):
     assert result.stdout == b"first\nsecond\n"
 
 
+@preexec_unsupported_on_windows
 def test_stderr_is_observed_and_multibyte_text_survives_a_split(tmp_path):
     seen: list[str] = []
     _run(
@@ -53,6 +62,7 @@ def test_stderr_is_observed_and_multibyte_text_survives_a_split(tmp_path):
     assert "�" not in joined
 
 
+@preexec_unsupported_on_windows
 def test_a_failing_observer_does_not_stop_the_command(tmp_path):
     calls: list[str] = []
 

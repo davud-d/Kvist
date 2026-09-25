@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import requires_posix
+
 INSTALLER_DIR = Path(__file__).resolve().parent.parent / "installer"
 if str(INSTALLER_DIR) not in sys.path:
     sys.path.insert(0, str(INSTALLER_DIR))
@@ -169,6 +171,11 @@ def test_failed_core_install_is_cleaned_up(tmp_path, monkeypatch):
     assert not (tmp_path / "bin" / install.WRAPPER_NAME).exists()
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason='the adversarial directory name uses " and shell metacharacters that are '
+    "illegal in Windows file names; the quoting under test is the Unix wrapper's",
+)
 def test_unix_wrapper_escapes_adversarial_core_path(tmp_path):
     binary = tmp_path / "core"
     binary.write_bytes(b"binary")
@@ -180,6 +187,7 @@ def test_unix_wrapper_escapes_adversarial_core_path(tmp_path):
     assert not (tmp_path / "PWNED").exists()
 
 
+@requires_posix
 def test_binary_and_wrapper_are_not_group_or_world_writable(tmp_path):
     binary = tmp_path / "kvist"
     binary.write_bytes(b"binary")
@@ -273,6 +281,7 @@ def test_linux_gui_failure_does_not_destroy_previous_payload(tmp_path, monkeypat
     assert (old / "old.txt").read_text() == "keep"
 
 
+@requires_posix
 def test_linux_gui_keeps_appimage_after_successful_install(tmp_path, monkeypatch):
     payload = tmp_path / "Kvist-1.2.0.AppImage"
     payload.write_bytes(b"appimage")
