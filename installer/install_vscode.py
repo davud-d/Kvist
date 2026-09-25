@@ -221,10 +221,14 @@ def install_into_all(editors: list[tuple[str, str]], vsix_path: Path, status: St
         try:
             run_logged(_editor_command(command, "--install-extension", str(vsix_path), "--force"))
         except InstallCommandError as exc:
-            show_step(status, STEPS["install_failed"].format(label=label))
-            warn(f"could not install into {label}: {exc}")
-            failures.append(f"{label}: {exc}")
-            continue
+            # Retry without --force for older VS Code versions (pre-1.40) that don't support it
+            try:
+                run_logged(_editor_command(command, "--install-extension", str(vsix_path)))
+            except InstallCommandError as retry_exc:
+                show_step(status, STEPS["install_failed"].format(label=label))
+                warn(f"could not install into {label}: {retry_exc}")
+                failures.append(f"{label}: {retry_exc}")
+                continue
         show_step(status, STEPS["installed_into"].format(label=label))
     return failures
 
