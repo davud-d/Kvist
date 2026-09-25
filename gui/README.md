@@ -49,6 +49,11 @@ The build runs PyInstaller and embeds the resulting Kvist binary into the
 Electron application. Build separately on Linux and Windows for native
 packages.
 
+`package.json` sets `"workspaces": []` so electron-builder treats this
+directory as its own workspace root. Without it, electron-builder walks up the
+directory tree looking for a workspace root and lands on an unrelated monorepo
+above this repository, then fails its Node module collection.
+
 ## Keyboard
 
 - `Enter`: submit

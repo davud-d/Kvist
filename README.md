@@ -378,6 +378,10 @@ Run `npm test` for GUI tests. `npm run dist` builds native Linux (`AppImage`,
 `deb`) or Windows (`nsis`) packages; build separately on each target OS. See
 [`gui/README.md`](gui/README.md) for packaging details.
 
+`gui/package.json` sets `"workspaces": []` so electron-builder treats it as its
+own workspace root instead of walking up to an unrelated monorepo and failing
+the build.
+
 ## VS Code Extension
 
 The VS Code extension starts Kvist in an integrated terminal for the opened

@@ -367,6 +367,10 @@ npm start -- --workspace /path/to/project
 на Linux (`AppImage`, `deb`) и Windows (`nsis`). Подробности — в
 [`gui/README.md`](gui/README.md).
 
+В `gui/package.json` задано `"workspaces": []`, чтобы electron-builder считал
+каталог `gui/` собственным корнем workspace и не поднимался выше к постороннему
+монорепо, ломая сборку.
+
 ## Плагин JetBrains
 
 Плагин запускает Kvist во вкладке терминала IDE (Tools > Run Kvist или кнопка
