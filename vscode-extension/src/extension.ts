@@ -2,17 +2,21 @@ import * as vscode from 'vscode';
 import { KvistLauncher } from './launcher';
 import { CommitMessageGenerator } from './commitMessage';
 import { KvistChatView } from './chatView';
+import { KvistInlineCompletionProvider } from './completionProvider';
 
 export function activate(context: vscode.ExtensionContext) {
     const launcher = new KvistLauncher(context);
     const commitMessageGenerator = new CommitMessageGenerator(context);
     const chat = new KvistChatView(context);
+    const inlineCompletionProvider = new KvistInlineCompletionProvider(context);
 
     context.subscriptions.push(
         chat,
         vscode.window.registerWebviewViewProvider(KvistChatView.viewType, chat, {
             webviewOptions: { retainContextWhenHidden: true }
         }),
+        inlineCompletionProvider,
+        vscode.languages.registerInlineCompletionItemProvider({ scheme: 'file' }, inlineCompletionProvider),
         vscode.commands.registerCommand('kvist.focus', () => vscode.commands.executeCommand(`${KvistChatView.viewType}.focus`)),
         vscode.commands.registerCommand('kvist.newSession', () => chat.invoke({ type: 'invoke', name: 'new', args: [] })),
         vscode.commands.registerCommand('kvist.settings', () => chat.invoke({ type: 'showSettings' })),
