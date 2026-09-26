@@ -1,8 +1,8 @@
 import { Box, Text, useInput, usePaste, useWindowSize } from "ink"
 import { useReducer, useRef, type ReactNode } from "react"
 
-import { NAME_WIDTH, resolveEnter, suggest, visibleSuggestionCount, windowStart } from "../commands.js"
-import { applyKey, emptyEditor, insert, type Editor } from "../editor.js"
+import { NAME_WIDTH, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
+import { applyKey, emptyEditor, insert, windowLine, type Editor } from "../editor.js"
 import { color } from "./theme.js"
 
 interface Props {
@@ -15,11 +15,12 @@ interface Props {
   onSubmit: (text: string) => void
 }
 
-export function Line({ editor, mask, active }: { editor: Editor; mask: boolean; active: boolean }) {
-  const shown = mask ? "•".repeat(editor.text.length) : editor.text
-  const before = shown.slice(0, editor.cursor)
-  const at = shown.slice(editor.cursor, editor.cursor + 1)
-  const after = shown.slice(editor.cursor + 1)
+// The box prefix and the frame's borders and padding leave columns - 6 cells
+// for the line; `maxRows` bounds how much of a long line it may take.
+export function Line({ editor, mask, active, maxRows = 1 }: { editor: Editor; mask: boolean; active: boolean; maxRows?: number }) {
+  const { columns } = useWindowSize()
+  const shown = mask ? { text: "•".repeat(editor.text.length), cursor: editor.cursor } : editor
+  const { before, at, after } = windowLine(shown, Math.max(8, columns - 6) * maxRows)
   return (
     <Text>
       {before}
@@ -47,6 +48,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
 
   const { rows } = useWindowSize()
   const visible = visibleSuggestionCount(rows)
+  const boxRows = visibleBoxRows(rows)
 
   const { editor, pick } = model.current
   const options = mask ? [] : suggest(editor.text)
@@ -98,9 +100,9 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
       <Box borderStyle="round" borderColor={active ? color.accent : color.faint} paddingX={1}>
         <Text color={active ? color.accent : color.faint}>❯ </Text>
         {editor.text || !placeholder ? (
-          <Line editor={editor} mask={mask} active={active} />
+          <Line editor={editor} mask={mask} active={active} maxRows={boxRows} />
         ) : (
-          <Text>
+          <Text wrap="truncate-end">
             {active ? <Text inverse> </Text> : null}
             <Text color={color.faint}>{placeholder}</Text>
           </Text>
@@ -115,7 +117,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
         </Text>
       ))}
       {options.length > visible ? (
-        <Text color={color.faint}>  {chosen + 1}/{options.length} · ↑↓ select · tab complete</Text>
+        <Text color={color.faint} wrap="truncate-end">  {chosen + 1}/{options.length} · ↑↓ select · tab complete</Text>
       ) : null}
     </Box>
   )

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleSuggestionCount, windowStart } from "../src/commands.js"
-import { applyKey, emptyEditor, insert } from "../src/editor.js"
+import { MAX_BOX_ROWS, MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../src/commands.js"
+import { applyKey, emptyEditor, insert, windowLine } from "../src/editor.js"
 import { parseBlocks } from "../src/ui/markdown.js"
 
 test("typing inserts at the cursor and accented letters are fine", () => {
@@ -36,6 +36,10 @@ test("a pasted newline becomes a space because a goal is one stdin line", () => 
   assert.equal(insert(emptyEditor, "a\nb").text, "a b")
   assert.equal(insert(emptyEditor, "a\rb\r\nc").text, "a b c")
   assert.equal(insert(emptyEditor, "a\x1bb\x00").text, "ab")
+  // A tab is counted as zero cells by the layout but printed at a terminal tab
+  // stop, so keeping it makes the frame wider than Ink's erase assumes.
+  assert.equal(insert(emptyEditor, "a\tb").text, "a b")
+  assert.equal(insert(emptyEditor, "a\t\tb").text, "a  b")
 })
 
 test("slash suggestions filter by prefix and stop once an argument starts", () => {
@@ -78,6 +82,44 @@ test("the suggestion list shrinks on a short terminal so its live frame never re
   // Never collapses to zero, however small the window.
   assert.equal(visibleSuggestionCount(1), 1)
   assert.equal(visibleSuggestionCount(5), 1)
+})
+
+test("box rows and suggestions share a budget that keeps the frame under the terminal height", () => {
+  // The live frame is the input box (its content rows plus two borders), the
+  // caption, the suggestions, their counter and the footer.
+  const frame = (rows: number) => visibleBoxRows(rows) + visibleSuggestionCount(rows) + 5
+  for (let rows = 8; rows <= 60; rows++) {
+    assert.ok(frame(rows) <= rows - 1, `rows=${rows}: live frame ${frame(rows)} must stay under the terminal height`)
+  }
+  assert.equal(visibleBoxRows(60), MAX_BOX_ROWS)
+  assert.equal(visibleBoxRows(8), 1)
+  // Below the eight rows the minimum frame needs, the floors stop it growing further.
+  assert.equal(frame(5), frame(8))
+})
+
+test("windowLine shows the whole line while it fits and keeps the cursor in view once it does not", () => {
+  assert.deepEqual(windowLine({ text: "abc", cursor: 1 }, 10), { before: "a", at: "b", after: "c" })
+  // An empty line still reports the (absent) character at the cursor.
+  assert.deepEqual(windowLine(emptyEditor, 10), { before: "", at: "", after: "" })
+
+  const long = { text: "0123456789", cursor: 8 }
+  const cut = windowLine(long, 6)
+  assert.equal(cut.at, "8")
+  assert.ok(cut.before.endsWith("7"), `cursor stays visible: ${JSON.stringify(cut)}`)
+  assert.ok(cut.before.startsWith("…"), `a clipped head is marked: ${JSON.stringify(cut)}`)
+  assert.equal(cut.after, "9")
+
+  // A cursor near the start keeps the tail instead, and marks its cut.
+  const tail = windowLine({ text: "abcdefghij", cursor: 1 }, 6)
+  assert.deepEqual(tail, { before: "a", at: "b", after: "c…" })
+
+  // The budget is display cells, so a double-width character takes two.
+  const wide = windowLine({ text: "你好世界", cursor: 0 }, 4)
+  assert.equal(wide.at, "你")
+  assert.ok(wide.before.length === 0 && wide.after.endsWith("…"), JSON.stringify(wide))
+
+  // A cursor at the end shows no character at the cursor.
+  assert.equal(windowLine({ text: "abcdefgh", cursor: 8 }, 6).at, "")
 })
 
 test("Enter runs the highlighted command, or completes one that needs an argument", () => {

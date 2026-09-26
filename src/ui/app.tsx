@@ -39,10 +39,11 @@ function ModeLine({ model, role, effort }: { model: string; role: string; effort
 
 function Footer({ running, armed, usage, version }: { running: boolean; armed: boolean; usage: { context: number; limit: number }; version?: string }) {
   const context = contextLabel(usage.context, usage.limit)
+  // One row on any width: a wrapped footer is an unbudgeted row in the live frame.
   return (
     <Box justifyContent="space-between" paddingX={2}>
-      {armed ? <Text color={color.warn}>esc again to interrupt</Text> : running ? <Text color={color.dim}>esc interrupt</Text> : <Text> </Text>}
-      <Text>
+      {armed ? <Text color={color.warn} wrap="truncate-end">esc again to interrupt</Text> : running ? <Text color={color.dim} wrap="truncate-end">esc interrupt</Text> : <Text> </Text>}
+      <Text wrap="truncate-end">
         {version ? <Text color={color.dim}>v{version}   </Text> : null}
         {context ? <Text color={color.dim}>{context}   </Text> : null}
         <Text>/</Text>

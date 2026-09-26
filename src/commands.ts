@@ -90,21 +90,28 @@ export function windowStart(count: number, selected: number, size: number): numb
   return Math.min(Math.max(0, selected - size + 1), count - size)
 }
 
-// The bordered input box (3 lines), its caption line, the footer below it and
-// the counter line the suggestion list adds once it is capped are always on
-// screen alongside the suggestions themselves. Ink redraws this whole live
-// region in place by moving the cursor up by the *previous* frame's height;
-// once that height reaches the terminal's row count, some of it has already
-// scrolled off, so the next redraw can't erase it and Ink falls back to a
-// full-screen clear (which also wipes scrollback) that keeps repeating on
-// later frames even as the content shrinks back down. The extra margin keeps
-// the frame safely under the row count rather than flush with it.
+// The bordered input box (2 borders around its content), its caption line, the
+// footer below it and the counter line the suggestion list adds once it is
+// capped are always on screen alongside the suggestions themselves. Ink
+// redraws this whole live region in place by moving the cursor up by the
+// *previous* frame's height; once that height reaches the terminal's row
+// count, some of it has already scrolled off, so the next redraw can't erase
+// it and Ink falls back to a full-screen clear (which also wipes scrollback)
+// that keeps repeating on later frames even as the content shrinks back down.
+// Both things that grow the frame are capped against the row count so it stays
+// safely under it rather than flush with it: how many suggestions are listed,
+// and how many rows of a pasted line the box shows.
 export const MAX_VISIBLE_SUGGESTIONS = 6
-const RESERVED_ROWS = 6
+export const MAX_BOX_ROWS = 4
+const CHROME_ROWS = 5
 const SAFETY_MARGIN = 2
 
 export function visibleSuggestionCount(rows: number): number {
-  return Math.max(1, Math.min(MAX_VISIBLE_SUGGESTIONS, rows - RESERVED_ROWS - SAFETY_MARGIN))
+  return Math.max(1, Math.min(MAX_VISIBLE_SUGGESTIONS, rows - CHROME_ROWS - SAFETY_MARGIN - 1))
+}
+
+export function visibleBoxRows(rows: number): number {
+  return Math.max(1, Math.min(MAX_BOX_ROWS, rows - CHROME_ROWS - SAFETY_MARGIN - visibleSuggestionCount(rows)))
 }
 
 export type EnterAction = { kind: "submit"; text: string } | { kind: "fill"; text: string }
