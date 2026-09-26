@@ -11,7 +11,7 @@ def run():
     executor = SafeExecutor(workspace=workspace)
     agent, config, warnings = build_agent(
         executor=executor,
-        max_steps=50,
+        max_steps=150,
         persist_logs=True,
         verbose=True,
         language_hint="ru"

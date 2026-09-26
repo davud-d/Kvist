@@ -46,7 +46,7 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         models_override,
         ui,
     ):
-        assert max_steps == 50
+        assert max_steps == 150
         assert persist_logs is False
         assert verbose is False
         assert provider_override == "omniroute"

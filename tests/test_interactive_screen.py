@@ -728,7 +728,7 @@ def test_ask_choice_returns_the_selected_value(screen_runtime):
     def worker() -> None:
         answer.append(
             screen.ask_choice(
-                "Продолжить?", [("more", "ещё 50 шагов"), ("stop", "завершить")]
+                "Продолжить?", [("more", "ещё 150 шагов"), ("stop", "завершить")]
             )
         )
 
@@ -736,7 +736,7 @@ def test_ask_choice_returns_the_selected_value(screen_runtime):
     thread.start()
     try:
         _wait_until(screen._has_choice)
-        _wait_until(lambda: "ещё 50 шагов" in _rendered_text(screen_runtime))
+        _wait_until(lambda: "ещё 150 шагов" in _rendered_text(screen_runtime))
 
         screen._move_choice(1)
         assert screen._choice["index"] == 1
@@ -751,14 +751,14 @@ def test_ask_choice_returns_the_selected_value(screen_runtime):
 def test_choice_renders_under_the_banner(screen_runtime):
     screen = screen_runtime.screen
     thread = threading.Thread(
-        target=lambda: screen.ask_choice("Продолжить?", [("more", "ещё 50 шагов")])
+        target=lambda: screen.ask_choice("Продолжить?", [("more", "ещё 150 шагов")])
     )
     thread.start()
     try:
-        _wait_until(lambda: "ещё 50 шагов" in _rendered_text(screen_runtime))
+        _wait_until(lambda: "ещё 150 шагов" in _rendered_text(screen_runtime))
         lines = _rendered_lines(screen_runtime)
         banner_close = next(i for i, line in enumerate(lines) if line.startswith("╰"))
-        question = next(i for i, line in enumerate(lines) if "ещё 50 шагов" in line)
+        question = next(i for i, line in enumerate(lines) if "ещё 150 шагов" in line)
         assert question > banner_close
     finally:
         screen._close_choice(None)

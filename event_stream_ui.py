@@ -329,6 +329,19 @@ class EventStreamUI:
         )
         return resp.value
 
+    def ask_choice(self, title: str, options: list[tuple[str, str]]) -> str | None:
+        """Ask a short runtime choice through the frontend's standard dialog.
+
+        The step-budget prompt uses ``(value, label)`` pairs, while the shared
+        IDE dialog speaks the same structured ``choice`` request as the other
+        frontend wizards. Keeping this adapter here lets VS Code and JetBrains
+        render the prompt without each implementing a second dialog.
+        """
+        return self.choose_option(
+            title,
+            [{"value": value, "label": label} for value, label in options],
+        )
+
     def prompt_text(
         self,
         title: str,

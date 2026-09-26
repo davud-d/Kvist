@@ -8,7 +8,7 @@ def test_agent_config_and_run_state_defaults_are_isolated():
     second = RunState()
     first.files_read.append("a.py")
 
-    assert AgentConfig().max_steps == 20
+    assert AgentConfig().max_steps == 150
     assert second.files_read == []
     assert first.current_agent_role == "coder"
 

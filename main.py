@@ -3859,7 +3859,7 @@ def main() -> None:
         if exit_code is not None:
             raise SystemExit(exit_code)
 
-    max_steps = int(os.getenv("AGENT_MAX_STEPS", "50"))
+    max_steps = int(os.getenv("AGENT_MAX_STEPS", "150"))
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
     slash_command_auto_suggest.set_verbose(verbose)

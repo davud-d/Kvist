@@ -381,7 +381,7 @@ is the final answer, not a tool call. The `_plan_step_is_non_blocking_after_prog
 escape hatch does not cover it — that one needs `files_changed` or
 `verification_evidence`, which a read-only analysis run never has.
 
-### Step budget (`AGENT_MAX_STEPS`, default 50)
+### Step budget (`AGENT_MAX_STEPS`, default 150)
 `run_loop` counts against `RunState.step_budget`, seeded from `config.max_steps`.
 Exhausting it is **not** a silent stop: `_extend_step_budget` asks through the UI's
 optional `ask_choice` channel ("keep going, N more" / "finish with a report") and

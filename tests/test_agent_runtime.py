@@ -1585,6 +1585,44 @@ def test_answering_continue_extends_the_budget(agent_factory):
     assert agent._state.step_budget == 6
 
 
+@pytest.mark.parametrize(
+    ("language", "expected_title", "expected_options"),
+    [
+        (
+            "ru",
+            "Пройдено 3 шагов, задача не завершена.",
+            ["продолжить, ещё 3", "завершить отчётом"],
+        ),
+        (
+            "en",
+            "3 steps used, the task is not finished.",
+            ["keep going, 3 more", "finish with a report"],
+        ),
+    ],
+)
+def test_budget_question_uses_the_response_language(
+    agent_factory, language, expected_title, expected_options
+):
+    agent = agent_factory(max_steps=3)
+    _endless_reader(agent)
+    agent._state.response_language = language
+    asked: list[tuple[str, list[tuple[str, str]]]] = []
+
+    def ask_choice(title, options):
+        asked.append((title, options))
+        return "finish"
+
+    agent._ui.ask_choice = ask_choice
+    agent._run_loop("Посмотри файлы", start_step=1)
+
+    assert asked == [
+        (
+            expected_title,
+            [("continue", expected_options[0]), ("finish", expected_options[1])],
+        )
+    ]
+
+
 def test_answering_finish_stops_exactly_like_the_old_limit(agent_factory):
     agent = agent_factory(max_steps=3)
     calls = _endless_reader(agent)

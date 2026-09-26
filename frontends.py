@@ -25,7 +25,7 @@ Launcher = Callable[[EventSession], None]
 def make_session(
     workspace: str,
     *,
-    max_steps: int = 50,
+    max_steps: int = 150,
     persist_logs: bool = False,
     verbose: bool = False,
     language_hint: str | None = None,
@@ -73,7 +73,7 @@ def run_frontend(
     name: str,
     workspace: str,
     *,
-    max_steps: int = 50,
+    max_steps: int = 150,
     persist_logs: bool = False,
     verbose: bool = False,
     language_hint: str | None = None,

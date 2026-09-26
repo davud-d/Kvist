@@ -265,6 +265,33 @@ def test_choose_option_blocking_roundtrip():
     assert result["value"] == "openai"
 
 
+def test_ask_choice_blocking_roundtrip_uses_the_shared_choice_dialog():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    result: dict[str, object] = {}
+
+    def worker():
+        result["value"] = ui.ask_choice(
+            "Пройден лимит шагов",
+            [("continue", "продолжить, ещё 150"), ("finish", "завершить")],
+        )
+
+    t = threading.Thread(target=worker)
+    t.start()
+    event = ch.get(timeout=1)
+    assert isinstance(event, InputRequestEvent)
+    assert event.kind == "choice"
+    assert event.title == "Пройден лимит шагов"
+    assert event.options == [
+        {"value": "continue", "label": "продолжить, ещё 150"},
+        {"value": "finish", "label": "завершить"},
+    ]
+    ch.respond(event.request_id, value="continue")
+    t.join(timeout=1)
+    assert not t.is_alive()
+    assert result["value"] == "continue"
+
+
 def test_prompt_text_blocking_roundtrip():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)

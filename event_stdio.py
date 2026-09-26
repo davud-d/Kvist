@@ -539,7 +539,7 @@ def launch(
                 sys.stdin = null_input
                 agent, _config, _warnings = build_agent_fn(
                     executor,
-                    max_steps=50,
+                    max_steps=150,
                     persist_logs=False,
                     verbose=False,
                     provider_override=provider_override,
@@ -605,7 +605,7 @@ def launch_multi(
                 sys.stdin = null_input
                 agent, _config, _warnings = build_agent_fn(
                     executor,
-                    max_steps=50,
+                    max_steps=150,
                     persist_logs=False,
                     verbose=False,
                     skip_planning=skip_planning,
