@@ -48,12 +48,18 @@ def test_openai_folds_max_into_xhigh_and_false_into_minimal():
     assert reasoning_request_kwargs("openai", "high") == {"reasoning_effort": "high"}
 
 
-def test_deepseek_disables_thinking_for_false_and_raises_low_to_high():
+def test_deepseek_disables_thinking_and_maps_supported_effort_levels():
     assert reasoning_request_kwargs("deepseek", "false") == {
         "extra_body": {"thinking": {"type": "disabled"}}
     }
-    assert reasoning_request_kwargs("deepseek", "low") == {"reasoning_effort": "high"}
-    assert reasoning_request_kwargs("deepseek", "max") == {"reasoning_effort": "max"}
+    assert reasoning_request_kwargs("deepseek", "low") == {
+        "reasoning_effort": "low",
+        "extra_body": {"thinking": {"type": "enabled"}},
+    }
+    assert reasoning_request_kwargs("deepseek", "max") == {
+        "reasoning_effort": "max",
+        "extra_body": {"thinking": {"type": "enabled"}},
+    }
 
 
 def test_openrouter_uses_nested_reasoning_effort():

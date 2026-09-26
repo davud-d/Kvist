@@ -91,10 +91,10 @@ _OPENROUTER_SCALE: dict[str, str] = {
     "max": "max",
 }
 
-# DeepSeek V4: only "high" and "max" are distinct; low/medium/xhigh are raised to
-# "high" server-side. "false" is not an effort value — it disables thinking mode.
+# DeepSeek V4 accepts low/high/max.  Kvist's intermediate levels are folded to
+# the nearest supported value; "false" is represented by disabling thinking.
 _DEEPSEEK_SCALE: dict[str, str] = {
-    "low": "high",
+    "low": "low",
     "medium": "high",
     "high": "high",
     "xhigh": "high",
@@ -184,7 +184,15 @@ def reasoning_request_kwargs(provider: str, level: str) -> dict[str, Any]:
     if normalized_provider == DEEPSEEK_PROVIDER:
         if normalized_level == "false":
             return {"extra_body": {"thinking": {"type": "disabled"}}}
-        return {"reasoning_effort": _DEEPSEEK_SCALE[normalized_level]}
+        # DeepSeek's OpenAI-compatible Chat Completions endpoint expects the
+        # thinking toggle alongside the effort control.  V4 defaults to
+        # thinking today, but making it explicit keeps the request valid across
+        # gateways and prevents ``reasoning_effort`` from being treated as an
+        # unsupported standalone parameter.
+        return {
+            "reasoning_effort": _DEEPSEEK_SCALE[normalized_level],
+            "extra_body": {"thinking": {"type": "enabled"}},
+        }
 
     # openai, omniroute, and custom OpenAI-protocol providers.
     if normalized_provider in (OPENAI_PROVIDER, OMNIROUTE_PROVIDER) or is_custom_provider(
@@ -318,9 +326,11 @@ def effort_advisory(provider: str, level: str) -> str | None:
             return "DeepSeek: 'false' turns thinking mode off."
         if normalized_level == "max":
             return "DeepSeek: 'max' is the deepest level."
+        if normalized_level == "low":
+            return None
         return (
-            f"DeepSeek: '{normalized_level}' is raised to 'high' server-side — "
-            "only 'false', 'high' and 'max' are actually distinct."
+            f"DeepSeek: '{normalized_level}' is mapped to 'high' server-side — "
+            "the API supports 'low', 'high' and 'max'."
         )
 
     if normalized_provider == OPENROUTER_PROVIDER:
