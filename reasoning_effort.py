@@ -25,6 +25,7 @@ they need to touch other request fields (temperature, ``max_tokens``) while
 doing it.
 """
 
+import re
 from typing import Any
 
 from llm_clients import (
@@ -120,6 +121,43 @@ _ANTHROPIC_BUDGET: dict[str, int] = {
     "xhigh": 16000,
     "max": 24000,
 }
+
+# Claude 4.6+ and Claude 5 use adaptive thinking.  They support the effort
+# control, but reject the legacy ``thinking: {type: "enabled"}`` block with a
+# 400 even though the selected effort itself is valid.  Keep the model check
+# here, close to the provider translation, so aliases and dated model ids are
+# handled consistently by every Anthropic-compatible caller.
+_ANTHROPIC_ADAPTIVE_MODEL_RE = re.compile(
+    r"(?:claude[-/])?(?:sonnet[-/]4[-/]6|sonnet[-/]5(?:[-/]|$)|"
+    r"opus[-/]4[-/]([6-8])|opus[-/]5(?:[-/]\d+)?(?:[-/]|$)|"
+    r"(?:fable|mythos)[-/]5(?:[-/]|$))",
+    re.IGNORECASE,
+)
+
+
+def anthropic_uses_adaptive_thinking(model: str) -> bool:
+    """Return whether an Anthropic model requires adaptive thinking syntax."""
+    model_id = str(model or "").strip().rsplit("/", 1)[-1]
+    return bool(_ANTHROPIC_ADAPTIVE_MODEL_RE.search(model_id))
+
+
+def anthropic_request_config(model: str, level: str) -> dict[str, Any]:
+    """Build Anthropic thinking/effort fields for a model and Kvist level.
+
+    New Claude models expose effort through ``output_config`` and only accept
+    adaptive thinking. Older models continue to use a bounded enabled block.
+    """
+    normalized = normalize_effort(level)
+    if anthropic_uses_adaptive_thinking(model):
+        # Modern Claude models do not expose a thinking-off effort. Treat the
+        # Kvist ``false`` level as the lowest supported effort, matching the
+        # legacy translation and avoiding a request that the API rejects.
+        effort = "low" if normalized == "false" else normalized
+        return {
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": effort},
+        }
+    return {"thinking": anthropic_thinking_config(normalized)}
 
 
 def _custom_protocol(provider: str) -> str:
@@ -244,6 +282,17 @@ def strip_reasoning_kwargs(request_kwargs: dict[str, Any]) -> dict[str, Any]:
             cleaned["extra_body"] = pruned
         else:
             cleaned.pop("extra_body", None)
+    # Anthropic's modern effort control lives under output_config.  Remove
+    # only its effort member on a fallback so unrelated output settings remain
+    # intact for a provider that rejected just the reasoning control.
+    output_config = cleaned.get("output_config")
+    if isinstance(output_config, dict) and "effort" in output_config:
+        output_config = dict(output_config)
+        output_config.pop("effort", None)
+        if output_config:
+            cleaned["output_config"] = output_config
+        else:
+            cleaned.pop("output_config", None)
     return cleaned
 
 
@@ -317,8 +366,9 @@ def effort_advisory(provider: str, level: str) -> str | None:
                 "plain text instead of emitting it, which costs a discarded step."
             )
         return (
-            f"Anthropic: '{normalized_level}' sets an extended-thinking token "
-            "budget; temperature is not applied while thinking is on."
+            f"Anthropic: '{normalized_level}' sets the model's reasoning effort. "
+            "Modern Claude uses adaptive thinking; older models use a thinking "
+            "token budget, and temperature is omitted while it is active."
         )
 
     if normalized_provider == DEEPSEEK_PROVIDER:

@@ -11,7 +11,9 @@ from tests.conftest import FakeLLMClient
 from reasoning_effort import (
     DEFAULT_EFFORT,
     EFFORT_LEVELS,
+    anthropic_request_config,
     anthropic_thinking_config,
+    anthropic_uses_adaptive_thinking,
     effort_advisory,
     is_reasoning_error,
     merge_reasoning_kwargs,
@@ -193,7 +195,7 @@ def test_anthropic_wrapper_enables_thinking_and_drops_temperature():
     client._client = _fake_anthropic(record)
 
     client.chat.completions.create(
-        model="claude-sonnet-4-6",
+        model="claude-sonnet-4-5-20250929",
         messages=[{"role": "user", "content": "hi"}],
         temperature=0.1,
         max_tokens=1024,
@@ -205,6 +207,30 @@ def test_anthropic_wrapper_enables_thinking_and_drops_temperature():
     assert record["max_tokens"] > record["thinking"]["budget_tokens"]
 
 
+def test_modern_anthropic_models_receive_adaptive_effort_config():
+    assert anthropic_uses_adaptive_thinking("cc/claude-sonnet-5")
+    assert not anthropic_uses_adaptive_thinking("claude-sonnet-4-5-20250929")
+    assert anthropic_request_config("claude-sonnet-5", "medium") == {
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": "medium"},
+    }
+
+
+def test_anthropic_wrapper_sends_effort_for_sonnet_5():
+    client = AnthropicCompatibleClient(api_key="test-key")
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+    client.chat.completions.create(
+        model="claude-sonnet-5",
+        messages=[{"role": "user", "content": "hi"}],
+        temperature=0.1,
+        reasoning_effort="medium",
+    )
+    assert record["thinking"] == {"type": "adaptive"}
+    assert record["output_config"] == {"effort": "medium"}
+    assert "temperature" not in record
+
+
 def test_anthropic_wrapper_drops_temperature_when_effort_is_false():
     # "false" now leaves thinking on at its lowest budget, and extended thinking
     # rejects a non-default temperature — so the knob costs temperature too.
@@ -213,7 +239,7 @@ def test_anthropic_wrapper_drops_temperature_when_effort_is_false():
     client._client = _fake_anthropic(record)
 
     client.chat.completions.create(
-        model="claude-sonnet-4-6",
+        model="claude-sonnet-4-5-20250929",
         messages=[{"role": "user", "content": "hi"}],
         temperature=0.1,
         reasoning_effort="false",

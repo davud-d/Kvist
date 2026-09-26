@@ -1740,14 +1740,24 @@ class _AnthropicCompletionsNamespace:
         if system:
             request_kwargs["system"] = system
 
-        thinking = _anthropic_thinking_from_effort(kwargs.get("reasoning_effort"))
-        if thinking is not None:
-            # Extended thinking rejects a non-default temperature / top_p and
-            # requires max_tokens to exceed the thinking budget.
-            request_kwargs["thinking"] = thinking
-            budget = int(thinking["budget_tokens"])
-            if request_kwargs["max_tokens"] <= budget:
-                request_kwargs["max_tokens"] = budget + 4096
+        effort = kwargs.get("reasoning_effort")
+        if effort:
+            from reasoning_effort import anthropic_request_config
+
+            controls = anthropic_request_config(model, str(effort))
+            thinking = controls.get("thinking")
+            if thinking is not None:
+                request_kwargs["thinking"] = thinking
+            output_config = controls.get("output_config")
+            if output_config is not None:
+                request_kwargs["output_config"] = output_config
+            # Legacy extended thinking rejects a non-default temperature / top_p
+            # and requires max_tokens to exceed the thinking budget. Adaptive
+            # thinking uses output_config.effort and has no budget_tokens cap.
+            if thinking and thinking.get("type") == "enabled":
+                budget = int(thinking["budget_tokens"])
+                if request_kwargs["max_tokens"] <= budget:
+                    request_kwargs["max_tokens"] = budget + 4096
         else:
             if "temperature" in kwargs:
                 request_kwargs["temperature"] = float(kwargs["temperature"])
