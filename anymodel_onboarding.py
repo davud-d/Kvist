@@ -29,7 +29,7 @@ from providers.anymodel_pricing import (
 from ui import AgentUI
 from user_config import set_provider_secret
 
-ANYMODEL_REGISTER_URL = "https://anymodel.org/register"
+ANYMODEL_REGISTER_URL = "https://anymodel.org/app/register"
 ANYMODEL_API_KEY_KEY = "anymodel_api_key"
 
 _OAUTH_FLAG_ENV = "AGENT_ANYMODEL_OAUTH"

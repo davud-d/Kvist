@@ -184,7 +184,7 @@ python installer\install.py; if ($?) { echo "Install OK" } else { echo "error in
   Enter — открыть регистрацию в браузере (email + пароль)
   Esc   — выбрать другого провайдера
 
-https://anymodel.org/register
+https://anymodel.org/app/register
 ```
 
 `Enter` открывает страницу регистрации в браузере и просит вставить ключ

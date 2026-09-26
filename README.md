@@ -182,7 +182,7 @@ away with no prompts. Otherwise the first launch offers a dedicated screen:
   Enter — открыть регистрацию в браузере (email + пароль)
   Esc   — выбрать другого провайдера
 
-https://anymodel.org/register
+https://anymodel.org/app/register
 ```
 
 `Enter` opens the registration page in your browser and asks you to paste the
