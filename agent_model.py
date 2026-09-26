@@ -44,6 +44,7 @@ from llm_clients import (
     ANTHROPIC_PROVIDER,
     DEEPSEEK_PROVIDER,
     OPENROUTER_PROVIDER,
+    MANUAL_MODEL_PROVIDERS,
 )
 from agent_state import RunCancelled
 from native_tools import (
@@ -1261,8 +1262,14 @@ def _warn_reasoning_unsupported(self, error: Exception | None, key: tuple[str, s
         f"Provider rejected reasoning effort '{level}' — retrying this request "
         "without it. Pick a level the provider supports with /effort."
     )
+    # Manual-tier endpoints are arbitrary OpenAI-compatible gateways.  They
+    # often reject the optional reasoning parameter even when the underlying
+    # model can reason; dropping it is capability negotiation, not a run error.
+    # Keep the diagnostic in debug logs without painting the whole run red.
     printer = getattr(self._ui, "print_error", None)
-    if callable(printer):
+    if self.config.provider not in MANUAL_MODEL_PROVIDERS and not is_custom_provider(
+        self.config.provider
+    ) and callable(printer):
         printer(message)
     if error is not None:
         self._ui.debug_print(f"[reasoning] dropped after: {redact_text(str(error))}")

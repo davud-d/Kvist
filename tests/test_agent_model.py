@@ -696,3 +696,22 @@ def test_json_mode_warning_prints_once_per_run_not_once_per_step():
     agent._state = RunState()
     agent_model._create_json_completion(agent, model, [{"role": "user", "content": "3"}])
     assert len(warnings) == 2, "a new run must warn again"
+
+
+def test_manual_provider_reasoning_rejection_is_debug_only():
+    """Optional effort controls must not surface as a red run error on gateways."""
+    import agent_model
+
+    warnings: list[str] = []
+    debug: list[str] = []
+    agent = SimpleNamespace(
+        config=SimpleNamespace(provider="anymodel", reasoning_effort="max"),
+        _ui=SimpleNamespace(print_error=warnings.append, debug_print=debug.append),
+    )
+
+    agent_model._warn_reasoning_unsupported(
+        agent, RuntimeError("Unsupported parameter: reasoning_effort"), ("anymodel", "mimo")
+    )
+
+    assert warnings == []
+    assert debug
