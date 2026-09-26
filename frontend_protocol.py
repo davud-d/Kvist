@@ -68,6 +68,21 @@ class HelloEvent:
 
 
 @dataclass(slots=True)
+class ManifestEvent:
+    """UI-facing catalogue of roles, providers, effort levels, etc.
+
+    Sent once right after the hello so a frontend can populate its pickers from
+    the core rather than hardcoding its own copies.  The payload is built by
+    ``core_manifest.build_manifest``.
+    """
+
+    manifest: dict
+    type: ClassVar[str] = "manifest"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, **self.manifest}
+
+@dataclass(slots=True)
 class LiveStartEvent:
     type: ClassVar[str] = "live_start"
 

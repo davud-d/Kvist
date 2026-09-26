@@ -27,6 +27,15 @@ from redaction import redact_text, redact_value
 _VALID_ROLES = frozenset({"coder", "devops", "chat", "reader"})
 _DEFAULT_ROLE = "chat"
 
+# Display metadata for each role, owned here as the role source of truth.
+# Frontends read these through core_manifest rather than hardcoding their own.
+ROLE_DESCRIPTIONS: dict[str, str] = {
+    "coder": "Code editing and development",
+    "devops": "DevOps and system administration",
+    "chat": "Conversational chat",
+    "reader": "Read-only analysis and review",
+}
+
 # Explicit "do not modify" phrasing. When present, the request is read-only no
 # matter what the router or the model would otherwise pick — this is the hard
 # guarantee (a tool-level gate, not a prompt line) that an inspection task

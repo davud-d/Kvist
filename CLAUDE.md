@@ -453,6 +453,8 @@ streaming answer is clipped to the viewport there and committed whole on
 `serve_session_multi` writes after every turn — a chat reply has no `final`, so the
 stream alone cannot say the turn is over.
 
+A `manifest` event (`ManifestEvent`, built by `core_manifest.build_manifest`) is emitted right after `hello` so frontends can populate pickers (roles, effort levels, providers, models, action types, slash commands, api settings, styles, themes) from the core instead of hardcoding their own copies.
+
 Two more additive events feed the tool cards and the role label: `action_result`
 (built by `action_result.build_action_result` and emitted from
 `agent_runtime._execute_action`, not from `register_feedback`, which also runs for

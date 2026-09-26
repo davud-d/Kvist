@@ -83,6 +83,13 @@ def pump(
     """
     out_stream.write(json.dumps((hello_event or HelloEvent()).to_dict()) + "\n")
     out_stream.flush()
+    # Manifest: the full catalogue of roles, providers, effort levels, etc.
+    # Sent once so frontends can populate pickers from the core.
+    from core_manifest import build_manifest
+    from frontend_protocol import ManifestEvent
+    manifest_event = ManifestEvent(manifest=build_manifest())
+    out_stream.write(json.dumps(manifest_event.to_dict()) + "\n")
+    out_stream.flush()
 
     reader = threading.Thread(
         target=_read_responses,
@@ -106,14 +113,14 @@ def build_session_hello(
     ``has_checkpoint`` describe the state at connection time and cannot race a
     worker that clears the checkpoint (e.g. a fast ``--resume`` run).
     """
+    from llm_clients import MODEL_ROLES
     config = agent.config
     skip_planning = getattr(config, "skip_planning", None)
     return HelloEvent(
         provider=config.provider,
         models={
-            "fast": config.fast_model,
-            "smart": config.smart_model,
-            "planner": config.planner_model,
+            role: getattr(config, f"{role}_model", "")
+            for role in MODEL_ROLES
         },
         role=routed_role or "auto",
         approval_mode=approval_mode,
