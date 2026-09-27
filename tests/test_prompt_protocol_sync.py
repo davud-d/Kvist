@@ -32,7 +32,7 @@ def _extract_allowed_actions_block(prompt_text: str) -> set[str]:
     return {item.strip() for item in line.split(",") if item.strip()}
 
 
-@pytest.mark.parametrize("role", ["coder", "devops"])
+@pytest.mark.parametrize("role", ["coder", "devops", "universal"])
 def test_prompt_action_list_matches_parser(role):
     """The allowed-actions list in role prompts must mirror parser.ALLOWED_ACTIONS."""
     prompt_text = _load_role_prompt(role)
@@ -45,19 +45,19 @@ def test_prompt_action_list_matches_parser(role):
     )
 
 
-@pytest.mark.parametrize("role", ["coder", "devops", "reader"])
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
 def test_prompt_says_a_response_without_calls_ends_the_turn(role):
     assert "A response with no tool call ends your turn" in _load_role_prompt(role)
 
 
-@pytest.mark.parametrize("role", ["coder", "devops", "reader"])
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
 def test_prompt_no_longer_asks_for_thought_or_user_message(role):
     prompt_text = _load_role_prompt(role)
     for gone in ('"thought"', "user_message", "140 chars", "step_summary", "plan_step"):
         assert gone not in prompt_text, gone
 
 
-@pytest.mark.parametrize("role", ["coder", "devops"])
+@pytest.mark.parametrize("role", ["coder", "devops", "universal"])
 def test_prompt_tool_call_examples_pass_the_parser(role):
     """Every <tool_call> example in a role prompt must pass the runtime's own validation."""
     examples = _example_calls(_load_role_prompt(role))
@@ -68,14 +68,14 @@ def test_prompt_tool_call_examples_pass_the_parser(role):
         assert command.action.type in ALLOWED_ACTIONS - _LEGACY_FINISHES
 
 
-@pytest.mark.parametrize("role", ["coder", "devops"])
+@pytest.mark.parametrize("role", ["coder", "devops", "universal"])
 def test_prompt_marks_web_content_untrusted(role):
     """Role prompts must teach that web content is data, not instructions."""
     prompt_text = _load_role_prompt(role)
     assert "UNTRUSTED" in prompt_text
 
 
-@pytest.mark.parametrize("role", ["coder", "devops", "reader"])
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
 def test_every_shell_example_names_its_purpose(role):
     """The person sees run_shell's purpose in place of the argv."""
     import json

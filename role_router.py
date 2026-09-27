@@ -2,16 +2,24 @@
 """Semantic LLM-based router for determining agent role.
 
 Uses fast_model (cheap model, e.g. gpt-4o-mini) to classify
-the user request into one of the roles: coder, devops, chat.
+the user request into one of the roles: coder, devops, reader, chat, universal.
 
 Priority (first-match-wins):
   1. explicit read-only    (no-write marker → reader, beats topic)
   2. direct devops action  (deterministic regex)
   3. direct coder action   (deterministic regex)
   4. direct chat question  (deterministic regex)
-  5. LLM router            (fast_model call)
+  5. LLM router            (fast_model call; may return "universal" for an
+                            ambiguous/mixed request)
   6. keyword fallback      (LLM error → lightweight keyword match)
-  7. default               ("chat")
+  7. default               ("universal")
+
+"universal" is the fallback for everything the rules above and the LLM
+router could not confidently place in one of the other four roles: low
+confidence in task_kind, a mixed "explain and fix" request, a conversational
+message that also touches code. It has the full tool set (see
+prompts/system/universal_prompt.txt) and decides for itself, per request,
+whether to just answer or to act.
 
 Fallback: keyword-based classification if LLM is unavailable.
 """
@@ -24,8 +32,8 @@ from typing import Any
 
 from redaction import redact_text, redact_value
 
-_VALID_ROLES = frozenset({"coder", "devops", "chat", "reader"})
-_DEFAULT_ROLE = "chat"
+_VALID_ROLES = frozenset({"coder", "devops", "chat", "reader", "universal"})
+_DEFAULT_ROLE = "universal"
 
 # Display metadata for each role, owned here as the role source of truth.
 # Frontends read these through core_manifest rather than hardcoding their own.
@@ -34,6 +42,7 @@ ROLE_DESCRIPTIONS: dict[str, str] = {
     "devops": "DevOps and system administration",
     "chat": "Conversational chat",
     "reader": "Read-only analysis and review",
+    "universal": "Chat with the full tool set, decided per request",
 }
 
 # Explicit "do not modify" phrasing. When present, the request is read-only no
@@ -303,6 +312,17 @@ _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
     ("check\\s.*(?:git|status|diff)", "git check"),
 )
 
+_MIXED_EXPLAIN_AND_CHANGE_PATTERNS: tuple[tuple[str, str], ...] = (
+    # "explain X and fix it" mixes a chat verb with a coder verb in one
+    # request; committing it to either single-tool role answers only half
+    # of it. This is the deterministic case of the router_rules "mixed
+    # request" trigger for "universal" — checked before the plain devops/
+    # coder rules below so a mixed phrasing never gets short-circuited into
+    # one of them by its coder-flavoured half alone.
+    ("(?:объясни|расскажи|разбери)\\b.{0,80}?\\bи\\s+(?:почини|исправь|поправь|пофикси|переделай|перепиши)\\b", "explain+fix"),
+    ("\\b(?:explain|walk me through)\\b.{0,80}?\\band\\s+(?:fix|correct|patch|update|rewrite)\\b", "explain+fix"),
+)
+
 _DIRECT_CHAT_PATTERNS: tuple[tuple[str, str], ...] = (
     # No bare "почему"/"why is" or "привет" here on purpose: a greeting is
     # zero-content filler that opens messages of every kind, and a bare "why"
@@ -366,6 +386,10 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
     # prompt/toolset — that would only add input tokens on every step.
     if has_no_write_marker(user_goal):
         return ("reader", "explicit read-only", "no_write_marker")
+
+    for pattern, label in _MIXED_EXPLAIN_AND_CHANGE_PATTERNS:
+        if re.search(pattern, lowered):
+            return ("universal", label, pattern)
 
     for pattern, label in _DIRECT_DEVOPS_PATTERNS:
         if re.search(pattern, lowered):

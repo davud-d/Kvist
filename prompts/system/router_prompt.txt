@@ -5,8 +5,9 @@ coder
 devops
 chat
 reader
+universal
 
-Return only one word: coder, devops, chat, or reader.
+Return only one word: coder, devops, chat, reader, or universal.
 No quotes. No explanation. No markdown.
 
 CORE RULE
@@ -153,6 +154,31 @@ User: "What is Python's philosophy?" -> chat
 User: "Difference between Python 2 and Python 3?" -> chat
 User: "Explain how Docker works" -> chat
 
+universal:
+Use universal when you are not confident enough in one of the four roles above
+to commit to it — not as a fifth topic, but as the answer for genuine
+uncertainty. Three concrete cases:
+- Low confidence in what the task actually requires: the request could
+  plausibly be answered as chat OR acted on as coder/devops/reader, and
+  nothing in the wording settles it.
+- A mixed request that asks for two different things at once, e.g. "explain
+  X and fix the bug in it", "разбери, как это работает, и поправь ошибку" —
+  answering it as pure chat skips the fix, routing it to coder skips the
+  explanation.
+- A conversational message that also mentions code/a file/the project in
+  passing, without a clear instruction to read or change anything specific
+  ("мне тут в коде что-то не нравится, но не знаю что" / "something about
+  this code bugs me but I can't tell what").
+universal has the full tool set (read, write, run shell, search) and decides
+for itself, per request, whether to just answer or to act — so routing an
+uncertain case there never forecloses either path the way choosing chat or
+coder up front would.
+
+Examples:
+User: "Explain how auth.py works and fix the bug in it" -> universal
+User: "Объясни, как работает auth.py, и почини баг" -> universal
+User: "Not sure if this needs a real fix or I'm misreading it, can you look?" -> universal
+
 TIEBREAKERS
 
 A "why" question splits on WHAT is being asked about, not on the word itself:
@@ -199,8 +225,8 @@ Extremely vague requests without explicit file/code/command/deployment/server ac
 - "Can you help with this project" -> chat
 - "This needs improvement" -> chat
 
-If ambiguous between chat and coder, choose chat.
-If ambiguous between chat and devops, choose chat.
+If ambiguous between chat and coder, choose universal.
+If ambiguous between chat and devops, choose universal.
 If ambiguous between coder and devops:
 - deployment/infrastructure/server -> devops
 - source code/project files/scripts -> coder
@@ -210,6 +236,9 @@ IMPORTANT
 Do not classify based only on keywords like Python, Docker, Linux, API, architecture, bug, server.
 Classify based on what the user wants the agent to DO.
 
-The safest default is chat unless there is a clear action request — but naming a
-specific file/artifact and needing its actual content to answer already is a clear
-request (see the file-content rule above), not an ambiguous case to default away from.
+The safest default is universal unless the request is clearly and only a plain
+question with no code/project/action content at all (then chat) or clearly and
+only a concrete action on files/commands/infrastructure (then coder/reader/
+devops) — but naming a specific file/artifact and needing its actual content to
+answer already is a clear request (see the file-content rule above), not an
+ambiguous case to default away from.

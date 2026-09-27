@@ -98,6 +98,7 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "devops": "devops_prompt.txt",
     "reader": "reader_prompt.txt",
     "chat": "chat_prompt.txt",
+    "universal": "universal_prompt.txt",
     "report": "report_prompt.txt",
     "commit": "commit_prompt.txt",
     "complete": "complete_prompt.txt",

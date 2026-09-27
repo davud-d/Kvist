@@ -15,7 +15,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "new", route: "core", hint: "Start a new session (the current one is kept)" },
   { name: "session", route: "core", hint: "Pick a session, or /session <name> to switch" },
   { name: "rename", route: "core", hint: "Set the active session's title by hand", needsArgument: true },
-  { name: "role", route: "core", hint: "Agent role: auto, coder, reader, devops, chat" },
+  { name: "role", route: "core", hint: "Agent role: auto, coder, reader, devops, chat, universal" },
   { name: "effort", route: "core", hint: "Reasoning effort: false … max" },
   { name: "plan", route: "core", hint: "Toggle the planning stage (on | off)" },
   { name: "models", route: "core", hint: "Pick the fast, smart and planner models" },

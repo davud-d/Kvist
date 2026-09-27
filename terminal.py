@@ -722,7 +722,7 @@ class TerminalExecutor:
         # Own the mutable argv so callers cannot race our checks by retaining
         # and mutating their list from another thread.
         command = list(command)
-        role = role if role in {"coder", "devops", "chat"} else "coder"
+        role = role if role in {"coder", "devops", "chat", "universal"} else "coder"
         self._refresh_policy()
 
         # Project deny has first precedence and is itself non-approvable.

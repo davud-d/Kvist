@@ -60,7 +60,7 @@ function normalizeRunOptions(options = {}) {
   if (modelValues.some(Boolean) && !modelValues.every(Boolean)) {
     throw new Error("Set all three model roles, or leave all of them empty.")
   }
-  if (!new Set(["auto", "coder", "devops", "chat"]).has(role)) {
+  if (!new Set(["auto", "coder", "devops", "chat", "universal"]).has(role)) {
     throw new Error("Unsupported Kvist role.")
   }
   if (!new Set(["ask", "deny"]).has(approvalMode)) {
