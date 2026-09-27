@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" role="img" aria-label="Kvist">
+  <!-- 16x16 reduction of installer/assets/icon.svg: chevron + cursor bar, in
+       currentColor so it works in a list of any colour. Zed's agent_servers
+       takes no icon field today; this is for a future registry listing. -->
+  <path d="M4.5 4.5 L8.5 8 L4.5 11.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="10.2" y="10.6" width="3.6" height="1.4" rx="0.7" fill="currentColor"/>
+</svg>

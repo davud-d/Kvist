@@ -1,0 +1,48 @@
+// Zed: register Kvist as an external agent over ACP.
+//
+// Paste the "agent_servers" member into ~/.config/zed/settings.json
+// (macOS and Linux without a custom XDG_CONFIG_HOME). Zed's settings are
+// JSONC, so this comment and any others you already have survive.
+//
+// `python installer/install_zed.py` writes exactly this for you, and points
+// `command` at the binary install_cli.py actually installed.
+//
+// Zed re-reads this file on its own; there is no restart and no reload.
+{
+  "agent_servers": {
+    "Kvist": {
+      // "custom" is the documented kind for an agent you run yourself.
+      "type": "custom",
+
+      // The standalone binary, NOT the `kvist` wrapper script: the wrapper
+      // forces `--workspace "$PWD"`, which fights the workspace ACP hands over
+      // in session/new, and Windows cannot exec a shell script.
+      // Linux:   ~/.local/share/kvist/kvist-core
+      // Windows: %LOCALAPPDATA%\Kvist\kvist-core.exe
+      "command": "/home/you/.local/share/kvist/kvist-core",
+
+      // --acp speaks JSON-RPC on stdin/stdout. Other flags still work:
+      //   --login   set up provider credentials in a terminal, then exit
+      //             (secrets never travel over the ACP connection)
+      "args": ["--acp"],
+
+      // Zed launches this command as `<login shell> -c '<command> <args>'`,
+      // with no --no-config, and your shell startup runs before the agent can
+      // do anything about it. Anything that startup prints -- a greeting, a
+      // prompt tool, fastfetch -- lands on stdout ahead of the first JSON-RPC
+      // frame and Zed rejects the stream as invalid UTF-8 ("response to
+      // `initialize` never received"). Pointing XDG_CONFIG_HOME at a directory
+      // of its own makes that shell load no startup of yours at all. Keep this
+      // line even if your own startup is quiet today.
+      // Cost: tools the agent spawns also stop reading ~/.config/<tool>/config.
+      // The agent keeps its own settings in ~/.kvist/, outside XDG.
+      // Agent behaviour flags go here too, never in Zed's own settings:
+      //   AGENT_SANDBOX_MODE, AGENT_SANDBOX_NET, AGENT_MAX_STEPS,
+      //   AGENT_MAX_CONTEXT_TOKENS, AGENT_LLM_PROVIDER, ...
+      // Provider keys do NOT: put them in ~/.kvist/config.json via `--login`.
+      "env": {
+        "XDG_CONFIG_HOME": "/home/you/.local/share/kvist/acp-pristine-config"
+      }
+    }
+  }
+}
