@@ -305,11 +305,13 @@ def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
     """Count workspace names that share one ``(st_dev, st_ino)`` regular inode.
 
     A caller compares the result with ``st_nlink`` to prove that every name of
-    a multiply-linked file lives inside the workspace.  ``.kvist`` and
-    dependency directories are not descended into, exactly as the mask walk
-    does, so an alias hidden there is simply not counted and containment stays
-    unproven.  Symlinks are skipped (they hold no inode alias) which also
-    bounds the walk.
+    a multiply-linked file lives inside the workspace.  The whole workspace tree
+    is descended into, dependency directories (``.git``, ``node_modules``,
+    ``.venv``) included: a name there is still a workspace name the sandbox
+    already binds, so it proves containment instead of importing foreign bytes.
+    Only ``.kvist`` is skipped -- it is masked with a tmpfs, so an alias hidden
+    there is not counted and containment stays unproven.  Symlinks are skipped
+    (they hold no inode alias) which also bounds the walk.
     """
     try:
         root = workspace.resolve(strict=True)
@@ -340,7 +342,7 @@ def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
             if stat.S_ISLNK(info.st_mode):
                 continue
             if stat.S_ISDIR(info.st_mode):
-                if entry.name not in _MASKED_DIR_NAMES and entry.name not in _SKIPPED_DEPENDENCY_DIRS:
+                if entry.name not in _MASKED_DIR_NAMES:
                     stack.append(entry)
                 continue
             if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == key:

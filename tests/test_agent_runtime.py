@@ -1820,7 +1820,9 @@ def test_run_loop_executes_a_whole_batch_from_one_model_call(agent_factory):
     agent._run_loop("Investigate files", start_step=1)
 
     assert len(model_calls) == 1
-    assert executed == ["a", "b", "c"]
+    # Read-only calls in one batch run in parallel, so only membership is
+    # ordered; each call's result is registered back in call order (below).
+    assert sorted(executed) == ["a", "b", "c"]
     assert [log["step"] for log in agent._state.step_logs if log.get("status") == "ok"] == [1, 2, 3]
 
 
@@ -1841,7 +1843,7 @@ def test_run_loop_a_failed_read_does_not_stop_the_batch(agent_factory):
 
     agent._run_loop("Investigate files", start_step=1)
 
-    assert executed == ["a", "b", "c"]
+    assert sorted(executed) == ["a", "b", "c"]
     assert [log["status"] for log in agent._state.step_logs if "step" in log] == ["ok", "error", "ok"]
 
 
