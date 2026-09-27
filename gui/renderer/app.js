@@ -113,6 +113,7 @@ const ROLE_HINTS = {
   auto: "Kvist inspects each request and routes it to Coder, DevOps, or Chat.",
   coder: "Reads and edits code, then verifies. Best for implementing changes.",
   devops: "Shell-first: builds, tests, git, and environment or system tasks.",
+  reader: "Read-only: inspects and reports, never writes files or runs commands.",
   chat: "Plain conversation — answers and explains, no file edits or shell.",
 }
 
@@ -1917,13 +1918,14 @@ function populateGlobalSettings() {
   providerPanel.innerHTML = ""
 
   const providerSection = createElement("div", "settings-block")
-  const providerLabel = createElement("label", "field")
-  providerLabel.innerHTML = `<span>Active Provider</span>`
+  const providerLabelElem = createElement("label", "field")
+  providerLabelElem.innerHTML = `<span>Active Provider</span>`
 
   const providerSelectGlobal = createElement("select", "")
   providerSelectGlobal.id = "globalProviderSelect"
   const savedId = configInfo?.saved_provider || ""
-  const savedSuffix = savedId ? ` · ${providerLabel(savedId)}` : ""
+  const savedLabel = providerLabel(savedId)
+  const savedSuffix = savedId ? ` · ${savedLabel}` : ""
   providerSelectGlobal.append(new Option(`Saved default${savedSuffix}`, ""))
 
   const builtin = configInfo?.providers || []
@@ -1942,8 +1944,8 @@ function populateGlobalSettings() {
     providerSelectGlobal.append(group)
   }
 
-  providerLabel.append(providerSelectGlobal)
-  providerSection.append(providerLabel)
+  providerLabelElem.append(providerSelectGlobal)
+  providerSection.append(providerLabelElem)
 
   const providerInfo = createElement("div", "provider-detail")
   providerInfo.id = "globalProviderDetail"

@@ -112,6 +112,43 @@ button {
   flex-direction: column;
 }
 
+.gear-button {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  z-index: 15;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background-element);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.gear-button svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.gear-button:hover,
+.gear-button:focus-visible {
+  color: var(--primary);
+  background: var(--background-hover);
+  border-color: var(--border-active);
+}
+
+.gear-button:active {
+  transform: scale(0.94);
+}
+
 .sidebar {
   width: 264px;
   min-width: 224px;
@@ -411,41 +448,6 @@ button {
 
 .footer-version {
   flex: 0 0 auto;
-}
-
-.gear-button {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: all 140ms ease;
-}
-
-.gear-button svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.gear-button:hover,
-.gear-button:focus-visible {
-  color: var(--primary);
-  background: var(--background-hover);
-}
-
-.gear-button:active {
-  transform: scale(0.96);
 }
 
 .token-speed {
