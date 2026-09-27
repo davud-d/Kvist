@@ -53,6 +53,7 @@ packages = [
 py-modules = [
     "acp_events",
     "acp_frontend",
+    "acp_stdio",
     "action_result",
     "agent",
     "agent_context",

@@ -305,6 +305,18 @@ function registerIpc() {
     return runJournalOp("revert")
   })
 
+  ipcMain.handle("kvist:get-api-settings", () => runConfigOp("get-api-settings", null))
+
+  ipcMain.handle("kvist:update-api-settings", async (_event, payload) => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runConfigOp("update-api-settings", payload)
+  })
+
+  ipcMain.handle("kvist:full-reset", async () => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runConfigOp("full-reset", null)
+  })
+
   ipcMain.handle("kvist:delete-session", async (_event, payload) => {
     if (runner) throw new Error("Finish or interrupt the current task first.")
     const resolved = rememberWorkspace(payload?.workspace || workspace)

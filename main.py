@@ -138,6 +138,9 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "set-provider",
             "list-models",
             "open-registration",
+            "get-api-settings",
+            "update-api-settings",
+            "full-reset",
         ),
         help="Run one headless config operation, print JSON, exit (no LLM call).",
     )
@@ -456,6 +459,7 @@ from api_settings import (
     ApiSetting,
     active_env_override,
     apply_api_settings,
+    coerce_value,
     default_api_settings,
     dynamic_model_loading_enabled,
     format_value,
@@ -3802,6 +3806,45 @@ def main() -> None:
                 payload = _run_list_models_op(raw)
             elif args.config_op == "open-registration":
                 payload = _run_open_registration_op(raw)
+            elif args.config_op == "get-api-settings":
+                values = load_api_settings()
+                settings_list = []
+                for setting in API_SETTINGS:
+                    entry = {
+                        "key": setting.key,
+                        "label": setting.label,
+                        "description": setting.description,
+                        "kind": setting.kind,
+                        "default": setting.default,
+                        "value": values[setting.key],
+                        "unit": setting.unit,
+                    }
+                    if setting.minimum:
+                        entry["minimum"] = setting.minimum
+                    if setting.maximum:
+                        entry["maximum"] = setting.maximum
+                    if setting.zero_label:
+                        entry["zero_label"] = setting.zero_label
+                    if setting.env_var:
+                        entry["env_var"] = setting.env_var
+                        env_val = os.environ.get(setting.env_var)
+                        if env_val is not None:
+                            entry["env_override"] = env_val
+                    settings_list.append(entry)
+                payload = {"ok": True, "settings": settings_list}
+            elif args.config_op == "update-api-settings":
+                if not isinstance(raw, dict):
+                    raise ValueError("Expected a JSON object with setting keys and values.")
+                values = load_api_settings()
+                for setting in API_SETTINGS:
+                    if setting.key in raw:
+                        values[setting.key] = coerce_value(setting, raw[setting.key])
+                store_api_settings(values)
+                payload = {"ok": True}
+            elif args.config_op == "full-reset":
+                from user_config import reset_user_config
+                reset_user_config()
+                payload = {"ok": True}
             else:
                 if args.config_op == "add-custom-provider":
                     name, provider_config = normalize_custom_provider_payload(raw)

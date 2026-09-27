@@ -1894,6 +1894,200 @@ function installCursorGlow() {
   window.addEventListener("blur", () => glow.classList.remove("is-active"))
 }
 
+// ── API settings dialog ──────────────────────────────────────────────────
+
+async function openApiSettingsDialog() {
+  hideGlobalSettings()
+  setActivity("Loading API settings…", { busy: true })
+  let settings
+  try {
+    const result = await window.kvist.getApiSettings()
+    settings = result.settings
+  } catch (error) {
+    addError(error.message)
+    setActivity("Could not load API settings", { error: true })
+    return
+  }
+  setActivity("Ready")
+
+  const backdrop = document.getElementById("apiSettingsBackdrop")
+  const body = document.getElementById("apiSettingsBody")
+  const errorEl = document.getElementById("apiSettingsError")
+  body.replaceChildren()
+  errorEl.textContent = ""
+
+  const inputs = {}
+
+  for (const setting of settings) {
+    const row = createElement("div", "api-setting-row")
+    const header = createElement("div", "api-setting-header")
+    const label = createElement("div", "api-setting-label", setting.label)
+    const desc = createElement("div", "api-setting-desc", setting.description)
+    header.append(label, desc)
+    row.append(header)
+
+    if (setting.kind === "bool") {
+      const toggle = createElement("button", "api-toggle")
+      toggle.type = "button"
+      toggle.role = "switch"
+      toggle.ariaChecked = String(setting.value === true)
+      toggle.classList.toggle("is-on", setting.value === true)
+      const knob = createElement("span", "api-toggle-knob")
+      toggle.append(knob)
+      toggle.addEventListener("click", () => {
+        const on = toggle.ariaChecked !== "true"
+        toggle.ariaChecked = String(on)
+        toggle.classList.toggle("is-on", on)
+        inputs[setting.key] = on
+      })
+      inputs[setting.key] = setting.value
+      row.append(toggle)
+    } else {
+      const input = createElement("input", "api-setting-input")
+      input.type = "number"
+      if (setting.kind === "float") input.step = "0.1"
+      else input.step = "1"
+      if (setting.minimum) input.min = String(setting.minimum)
+      if (setting.maximum) input.max = String(setting.maximum)
+      // Show the current value, or empty for the zero-as-mode case
+      if (setting.zero_label && setting.value === setting.default && setting.default === 0) {
+        input.placeholder = setting.zero_label
+      } else if (setting.zero_label) {
+        input.placeholder = setting.zero_label
+        input.value = setting.value === 0 ? "" : String(setting.value)
+      } else {
+        input.value = String(setting.value)
+      }
+      const suffix = createElement("span", "api-setting-unit", setting.unit || "")
+      const inputRow = createElement("div", "api-setting-input-row")
+      inputRow.append(input, suffix)
+      row.append(inputRow)
+
+      inputs[setting.key] = setting.value
+      input.addEventListener("input", () => {
+        const raw = input.value.trim()
+        if (raw === "" && setting.zero_label) inputs[setting.key] = 0
+        else if (raw === "") inputs[setting.key] = setting.default
+        else if (setting.kind === "float") inputs[setting.key] = parseFloat(raw)
+        else inputs[setting.key] = parseInt(raw, 10)
+      })
+
+      if (setting.env_override !== undefined) {
+        const envNote = createElement("div", "api-setting-env-note",
+          `Overridden by ${setting.env_var || "env"} = ${setting.env_override}`)
+        row.append(envNote)
+      }
+    }
+
+    body.append(row)
+  }
+
+  backdrop.classList.remove("is-hidden")
+  body.querySelector("input")?.focus()
+
+  const saveBtn = document.getElementById("apiSettingsSave")
+  const cancelBtn = document.getElementById("apiSettingsCancel")
+  const closeBtn = document.getElementById("apiSettingsClose")
+
+  const cleanup = () => {
+    backdrop.classList.add("is-hidden")
+    if (!promptInput.disabled) promptInput.focus()
+    saveBtn.replaceWith(saveBtn.cloneNode(true))
+    cancelBtn.replaceWith(cancelBtn.cloneNode(true))
+    closeBtn.replaceWith(closeBtn.cloneNode(true))
+  }
+
+  saveBtn.addEventListener("click", async () => {
+    errorEl.textContent = "Saving…"
+    try {
+      await window.kvist.updateApiSettings(inputs)
+      errorEl.textContent = ""
+      cleanup()
+      setActivity("API settings saved")
+    } catch (error) {
+      errorEl.textContent = error.message
+    }
+  }, { once: true })
+  cancelBtn.addEventListener("click", cleanup, { once: true })
+  closeBtn.addEventListener("click", cleanup, { once: true })
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) cleanup()
+  })
+  backdrop.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return
+    event.preventDefault()
+    event.stopPropagation()
+    cleanup()
+  })
+}
+
+function confirmFullReset() {
+  if (running) return
+  hideGlobalSettings()
+  showConfirm(
+    "Reset everything",
+    "This wipes ~/.kvist/config.json entirely: every saved API key, custom "
+      + "provider, model selection and preference. It cannot be undone.",
+    "Continue",
+    () => {
+      // Step 2: Final confirmation modal with checkbox and 'Reset' input verification
+      infoTitle.textContent = "Final confirmation"
+      infoBody.textContent = "Are you absolutely sure? All provider settings, API keys and custom providers will be erased permanently."
+      infoBody.classList.remove("is-mono")
+
+      const box = createElement("div", "reset-confirm-box")
+
+      const checkLabel = createElement("label", "reset-confirm-checkbox-label")
+      const checkbox = document.createElement("input")
+      checkbox.type = "checkbox"
+      checkLabel.append(checkbox, document.createTextNode("I understand the consequences"))
+
+      const inputWrap = createElement("div", "reset-confirm-input-wrapper")
+      const inputLabel = createElement("div", "reset-confirm-input-label", 'Type "Reset" to confirm:')
+      const textInput = document.createElement("input")
+      textInput.type = "text"
+      textInput.className = "reset-confirm-input"
+      textInput.placeholder = "Reset"
+      inputWrap.append(inputLabel, textInput)
+
+      box.append(checkLabel, inputWrap)
+      infoBody.append(box)
+
+      const cancelBtn = actionButton("Cancel", "", hideInfo)
+      const wipeBtn = actionButton("Wipe everything", "danger-button", async () => {
+        hideInfo()
+        setActivity("Resetting…", { busy: true })
+        try {
+          await window.kvist.fullReset()
+          configInfoStale = true
+          runOptions = normalizedRunOptions()
+          localStorage.removeItem(CONFIG_STORAGE_KEY)
+          updateConfigChips()
+          setActivity("Full reset complete")
+        } catch (error) {
+          addError(error.message)
+          setActivity("Could not reset", { error: true })
+        }
+      })
+
+      wipeBtn.disabled = true
+
+      function updateWipeState() {
+        const checked = checkbox.checked
+        const textValue = textInput.value.trim()
+        wipeBtn.disabled = !(checked && textValue.toLowerCase() === "reset")
+      }
+
+      checkbox.addEventListener("change", updateWipeState)
+      textInput.addEventListener("input", updateWipeState)
+
+      infoActions.replaceChildren(cancelBtn, wipeBtn)
+      infoBackdrop.classList.remove("is-hidden")
+      textInput.focus()
+    },
+  )
+}
+
 // ── Global settings panel ────────────────────────────────────────────────
 
 function showGlobalSettings() {
@@ -2073,7 +2267,63 @@ function populateGlobalSettings() {
   // Advanced panel
   const advancedPanel = document.querySelector("#settingsPanelAdvanced .settings-panel-body")
   advancedPanel.innerHTML = ""
-  advancedPanel.append(createElement("p", "", "Additional settings will appear here."))
+
+  // ── Requests section ──
+  const requestsSection = createElement("div", "settings-block")
+  const requestsRow = createElement("div", "advanced-row")
+  const requestsText = createElement("div", "advanced-row-text")
+  requestsText.append(
+    createElement("div", "advanced-row-title", "Requests"),
+    createElement("div", "advanced-row-hint", "Pacing, timeouts, context window"),
+  )
+  const requestsBtn = createElement("button", "advanced-btn")
+  requestsBtn.textContent = "Open"
+  requestsBtn.type = "button"
+  requestsBtn.addEventListener("click", () => openApiSettingsDialog())
+  requestsRow.append(requestsText, requestsBtn)
+  requestsSection.append(requestsRow)
+
+  // ── Changes section ──
+  const changesRow = createElement("div", "advanced-row")
+  const changesText = createElement("div", "advanced-row-text")
+  changesText.append(
+    createElement("div", "advanced-row-title", "Changes"),
+    createElement("div", "advanced-row-hint", "Files the agent changed"),
+  )
+  const changesActions = createElement("div", "advanced-row-actions")
+  const showChangesBtn = createElement("button", "advanced-btn")
+  showChangesBtn.textContent = "Show"
+  showChangesBtn.type = "button"
+  showChangesBtn.addEventListener("click", () => {
+    hideGlobalSettings()
+    void showChanges()
+  })
+  const revertBtn = createElement("button", "advanced-btn")
+  revertBtn.textContent = "Revert"
+  revertBtn.type = "button"
+  revertBtn.addEventListener("click", () => {
+    hideGlobalSettings()
+    confirmRevert()
+  })
+  changesActions.append(showChangesBtn, revertBtn)
+  changesRow.append(changesText, changesActions)
+  requestsSection.append(changesRow)
+
+  // ── Reset section ──
+  const resetRow = createElement("div", "advanced-row")
+  const resetText = createElement("div", "advanced-row-text")
+  resetText.append(
+    createElement("div", "advanced-row-title", "Reset everything"),
+    createElement("div", "advanced-row-hint", "Erases every saved provider and API key"),
+  )
+  const resetBtn = createElement("button", "advanced-btn is-danger")
+  resetBtn.textContent = "Reset"
+  resetBtn.type = "button"
+  resetBtn.addEventListener("click", () => confirmFullReset())
+  resetRow.append(resetText, resetBtn)
+  requestsSection.append(resetRow)
+
+  advancedPanel.append(requestsSection)
 
   // Populate with current values
   if (runOptions.provider && optionExists(runOptions.provider)) {

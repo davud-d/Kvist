@@ -309,6 +309,27 @@
       </div>
     </div>
 
+    <div id="apiSettingsBackdrop" class="overlay is-hidden" role="presentation">
+      <div class="api-settings-dialog" role="dialog" aria-modal="true" aria-label="API Settings">
+        <div class="settings-header">
+          <div>
+            <div class="settings-title">API Settings</div>
+            <div class="settings-subtitle">Pacing, timeouts, context window</div>
+          </div>
+          <button id="apiSettingsClose" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="apiSettingsBody" class="api-settings-body">
+          <!-- Populated by JS -->
+        </div>
+        <div class="settings-actions">
+          <span id="apiSettingsError" class="settings-error"></span>
+          <span class="settings-spacer"></span>
+          <button id="apiSettingsCancel" type="button">Cancel</button>
+          <button id="apiSettingsSave" class="settings-save" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
     <div id="customProviderBackdrop" class="overlay is-hidden" role="presentation">
       <form id="customProviderForm" class="settings-panel" role="dialog" aria-modal="true" aria-label="Add custom provider">
         <div class="settings-header">
