@@ -312,6 +312,17 @@ _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
     ("check\\s.*(?:git|status|diff)", "git check"),
 )
 
+_MIXED_EXPLAIN_AND_CHANGE_PATTERNS: tuple[tuple[str, str], ...] = (
+    # "explain X and fix it" mixes a chat verb with a coder verb in one
+    # request; committing it to either single-tool role answers only half
+    # of it. This is the deterministic case of the router_rules "mixed
+    # request" trigger for "universal" — checked before the plain devops/
+    # coder rules below so a mixed phrasing never gets short-circuited into
+    # one of them by its coder-flavoured half alone.
+    ("(?:объясни|расскажи|разбери)\\b.{0,80}?\\bи\\s+(?:почини|исправь|поправь|пофикси|переделай|перепиши)\\b", "explain+fix"),
+    ("\\b(?:explain|walk me through)\\b.{0,80}?\\band\\s+(?:fix|correct|patch|update|rewrite)\\b", "explain+fix"),
+)
+
 _DIRECT_CHAT_PATTERNS: tuple[tuple[str, str], ...] = (
     # No bare "почему"/"why is" or "привет" here on purpose: a greeting is
     # zero-content filler that opens messages of every kind, and a bare "why"
@@ -375,6 +386,10 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
     # prompt/toolset — that would only add input tokens on every step.
     if has_no_write_marker(user_goal):
         return ("reader", "explicit read-only", "no_write_marker")
+
+    for pattern, label in _MIXED_EXPLAIN_AND_CHANGE_PATTERNS:
+        if re.search(pattern, lowered):
+            return ("universal", label, pattern)
 
     for pattern, label in _DIRECT_DEVOPS_PATTERNS:
         if re.search(pattern, lowered):
