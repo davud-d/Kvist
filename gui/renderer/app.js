@@ -115,6 +115,7 @@ const ROLE_HINTS = {
   devops: "Shell-first: builds, tests, git, and environment or system tasks.",
   reader: "Read-only: inspects and reports, never writes files or runs commands.",
   chat: "Plain conversation — answers and explains, no file edits or shell.",
+  universal: "Chat with the full tool set: answers, or reads/edits/runs as the request needs.",
 }
 
 const APPROVAL_HINTS = {
@@ -170,7 +171,7 @@ function freshRunStats() {
 }
 
 function normalizedRunOptions(value = {}) {
-  const role = new Set(["auto", "coder", "devops", "chat"]).has(value.role)
+  const role = new Set(["auto", "coder", "devops", "chat", "universal"]).has(value.role)
     ? value.role
     : "auto"
   const approvalMode = new Set(["ask", "deny"]).has(value.approvalMode)
@@ -2240,6 +2241,7 @@ function populateGlobalSettings() {
     <option value="devops">DevOps</option>
     <option value="reader">Reader</option>
     <option value="chat">Chat</option>
+    <option value="universal">Universal</option>
   `
   roleField.append(roleSelectGlobal)
   const roleHintGlobal = createElement("small", "field-hint")

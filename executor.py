@@ -306,7 +306,7 @@ class SafeExecutor:
         self-downgrade command risk by claiming a more privileged role.
         """
         normalized = (role or "").strip().lower()
-        self.active_role = normalized if normalized in {"coder", "devops", "chat"} else "coder"
+        self.active_role = normalized if normalized in {"coder", "devops", "chat", "universal"} else "coder"
 
     def set_active_session(self, session: str) -> None:
         """Record the active named session for change-journal attribution."""

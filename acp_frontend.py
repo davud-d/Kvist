@@ -59,7 +59,7 @@ CONFIG_STYLE_AGENTS = "style_agents"
 CONFIG_STYLE_CHAT = "style_chat"
 CONFIG_ADVANCED = "advanced"
 
-ROLE_CHOICES = ("auto", "coder", "reader", "devops", "chat")
+ROLE_CHOICES = ("auto", "coder", "reader", "devops", "chat", "universal")
 EFFORT_CHOICES = ("false", "low", "medium", "high", "xhigh", "max")
 
 # Advanced settings menu options (open terminal dialogs)

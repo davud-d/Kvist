@@ -5,7 +5,7 @@ import type { ConfigInfo } from "../src/messages"
 import { post } from "./host"
 import { Icon } from "./icons"
 
-const ROLES = ["auto", "coder", "reader", "devops", "chat"]
+const ROLES = ["auto", "coder", "reader", "devops", "chat", "universal"]
 const EFFORT_LABELS: Record<string, string> = { false: "off", low: "low", medium: "med", high: "high", xhigh: "xhigh", max: "max" }
 
 // The two variables that have their own controls; everything else is a free-form list.
