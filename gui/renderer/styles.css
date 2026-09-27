@@ -1567,14 +1567,15 @@ kbd {
 /* ── Global settings panel (Hermes-style) ──────────────────────────────── */
 
 .global-settings-shell {
-  width: min(1080px, 92vw);
-  max-height: 88vh;
+  width: min(1140px, 94vw);
+  max-height: 90vh;
   display: flex;
   background: var(--background-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 12px;
   overflow: hidden;
   position: relative;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
 }
 
 .settings-sidebar {
@@ -1584,14 +1585,15 @@ kbd {
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 24px 0;
+  padding: 28px 0;
 }
 
 .settings-sidebar-header {
-  padding: 0 20px 18px;
-  font-size: 18px;
-  font-weight: 500;
+  padding: 0 20px 20px;
+  font-size: 19px;
+  font-weight: 600;
   color: var(--text);
+  letter-spacing: -0.01em;
 }
 
 .settings-nav {
@@ -1603,26 +1605,28 @@ kbd {
 
 .settings-nav-item {
   width: 100%;
-  padding: 10px 12px;
+  padding: 11px 14px;
   text-align: left;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: 7px;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 120ms ease;
-  font-size: 13px;
+  transition: all 140ms ease;
+  font-size: 13.5px;
+  font-weight: 450;
 }
 
 .settings-nav-item:hover {
-  background: var(--background-hover);
+  background: var(--background-element);
   color: var(--text);
 }
 
 .settings-nav-item.is-active {
   background: var(--background-element);
   color: var(--primary);
-  font-weight: 500;
+  font-weight: 550;
+  box-shadow: inset 0 0 0 1px rgba(67, 211, 255, 0.15);
 }
 
 .settings-content-area {
@@ -1635,12 +1639,30 @@ kbd {
 
 .settings-close-button {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 20px;
+  right: 20px;
   z-index: 10;
-  width: 36px;
-  height: 36px;
-  font-size: 24px;
+  width: 32px;
+  height: 32px;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.settings-close-button:hover {
+  background: var(--background-hover);
+  color: var(--text);
+}
+
+.settings-close-button:active {
+  transform: scale(0.94);
 }
 
 .settings-content-panel {
@@ -1648,7 +1670,7 @@ kbd {
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
-  padding: 28px 32px 32px;
+  padding: 32px 40px 40px;
   scrollbar-color: var(--border) transparent;
   scrollbar-width: thin;
 }
@@ -1662,28 +1684,105 @@ kbd {
 }
 
 .settings-panel-header h2 {
-  margin: 0 0 6px;
-  font-size: 20px;
-  font-weight: 500;
+  margin: 0 0 8px;
+  font-size: 22px;
+  font-weight: 600;
   color: var(--text);
+  letter-spacing: -0.02em;
 }
 
 .settings-panel-subtitle {
   margin: 0;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--text-muted);
+  line-height: 1.5;
 }
 
 .settings-panel-body {
   flex: 1 1 auto;
 }
 
+.settings-panel-body .settings-block {
+  margin-bottom: 24px;
+}
+
 .settings-panel-body .field {
   margin-bottom: 16px;
 }
 
+.settings-panel-body .field > span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-panel-body select,
+.settings-panel-body input[type="text"] {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--background-element);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  transition: all 120ms ease;
+}
+
+.settings-panel-body select:hover,
+.settings-panel-body input[type="text"]:hover {
+  border-color: var(--border-active);
+}
+
+.settings-panel-body select:focus,
+.settings-panel-body input[type="text"]:focus {
+  outline: none;
+  border-color: var(--primary);
+  background: var(--background-hover);
+}
+
 .settings-panel-body .field-grid {
-  margin-top: 12px;
+  display: grid;
+  gap: 16px;
+  margin-top: 0;
+}
+
+.settings-panel-body .field-grid.two {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.settings-panel-body .field-grid.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.settings-panel-body .field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.settings-panel-body .provider-detail {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.settings-panel-body .detail-line {
+  padding: 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings-panel-body .detail-line.is-ok {
+  color: var(--success);
+}
+
+.settings-panel-body .detail-line.is-warn {
+  color: var(--warning);
 }
 
 @media (max-width: 900px) {
