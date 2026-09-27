@@ -70,7 +70,10 @@ def _make_client(role: str = "chat", should_raise: bool = False,
 def test_keyword_route_identifies_chat_and_devops():
     assert route_role("explain how this works") == "chat"
     assert route_role("deploy docker compose service") == "devops"
-    assert route_role("change a function") == "chat"
+    # No named file, no chat keyword, no action verb the coder list knows —
+    # this is the genuinely-unmatched catch-all, which is exactly what
+    # "universal" (the current _DEFAULT_ROLE) exists for.
+    assert route_role("change a function") == "universal"
 
 
 def test_route_role_with_llm_parses_noisy_response(monkeypatch):
@@ -600,12 +603,14 @@ class TestKeywordFallbackOrder:
         # so an ordinary conceptual sentence that merely mentions one of them
         # (no create/write/fix/... verb) fell to coder by accident — exactly
         # the "classify by topic, not action" mistake router_prompt.txt warns
-        # against. Live-observed: "Why do people usually name their config
-        # file .env instead of settings.ini?" -> coder via bare "file".
+        # against. Neither sentence names a project file or a chat keyword,
+        # so they land on the catch-all default ("universal") rather than on
+        # "coder" — that is the fix this test guards, "coder" is what must
+        # never happen here again.
         assert route_role(
             "Why do people usually name their config file .env instead of settings.ini?"
-        ) == "chat"
-        assert route_role("What's a good testing strategy for async code?") == "chat"
+        ) == "universal"
+        assert route_role("What's a good testing strategy for async code?") == "universal"
 
 
 class TestMainPathDoesNotRouteTwice:
@@ -1046,7 +1051,10 @@ def test_plain_no_write_request_is_read_only(goal):
     [
         ("Add a function apply_discount(price, percent) to pricing.py", "coder"),
         ("Update the timeout in settings.py to 30", "coder"),
-        ("How do I add authentication to Flask?", "chat"),
+        # No project file named ("Flask" is a library, not a path) and no
+        # chat keyword matched by _CHAT_KEYWORDS — the genuine catch-all,
+        # which is "universal", not a guessed "chat".
+        ("How do I add authentication to Flask?", "universal"),
         ("Explain how to update a dependency in package.json", "chat"),
     ],
 )
@@ -1073,8 +1081,11 @@ def test_edit_of_a_named_file_is_routed_before_the_llm_can_call_it_chat():
     [
         ("Look through auth.py and find any real bug in how the admin role is checked.", "reader"),
         ("Найди в auth.py реальную ошибку в проверке роли администратора.", "reader"),
-        ("Why do people say e.g. that Flask is small?", "chat"),
-        ("What does example.com resolve to?", "chat"),
+        # Neither names a project file nor hits a _CHAT_KEYWORDS entry — the
+        # catch-all default ("universal"), not a guessed "chat"; the point of
+        # this test (a named file must never fall to chat) is unaffected.
+        ("Why do people say e.g. that Flask is small?", "universal"),
+        ("What does example.com resolve to?", "universal"),
     ],
 )
 def test_keyword_fallback_sends_a_named_file_to_reader_never_to_chat(goal, role):
@@ -1142,7 +1153,10 @@ def test_a_bare_do_not_touch_is_still_read_only():
         ("Очисти проект: убери всё лишнее, что можно пересобрать. src/config не трогай.", "coder"),
         ("Clean everything up. Leave src/config alone.", "coder"),
         ("Explain how src/config is loaded", "chat"),
-        ("delete https://example.com/x", "chat"),
+        # No path pattern and no change verb reaches the directory-action
+        # check, no chat keyword matches either — the catch-all default
+        # ("universal"), not a guessed "chat".
+        ("delete https://example.com/x", "universal"),
     ],
 )
 def test_keyword_fallback_treats_a_change_verb_on_a_directory_as_an_action(goal, role):

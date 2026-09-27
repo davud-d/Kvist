@@ -1466,7 +1466,7 @@ def render_startup_banner(
     if history:
         console.print("[dim]── Previous in this session ──[/dim]")
         for entry in history[-3:]:
-            role_color = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
+            role_color = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan", "universal": "blue"}.get(entry.get("role", ""), "white")
             history_line = Text("  ")
             history_line.append(
                 sanitize_display_text(str(entry.get("role", "?"))),
@@ -1479,7 +1479,7 @@ def render_startup_banner(
 
     saved_role = get_saved_role()
     if saved_role and saved_role != "auto":
-        role_colors = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}
+        role_colors = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan", "universal": "blue"}
         role_color = role_colors.get(saved_role, "white")
         console.print(
             _display_text(
@@ -1740,7 +1740,7 @@ def choose_session(agent, verbose: bool, ui: AgentUI | None = None) -> str | Non
         if history:
             console.print("[dim]── Session context ──[/dim]")
             for entry in history[-3:]:
-                role_color = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}.get(entry.get("role", ""), "white")
+                role_color = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan", "universal": "blue"}.get(entry.get("role", ""), "white")
                 history_line = Text("  ")
                 history_line.append(
                     sanitize_display_text(str(entry.get("role", "?"))),
@@ -1789,6 +1789,11 @@ def choose_role(
             "value": "chat",
             "label": "Chat",
             "description": "Questions, explanations, advice, brainstorming, discussions",
+        },
+        {
+            "value": "universal",
+            "label": "Universal",
+            "description": "Chat with the full tool set: answers, or reads/edits/runs as the request needs",
         },
     ]
 
@@ -3028,7 +3033,7 @@ def configure_manual_provider_models_interactively(
 # EventStreamUI so every dialog becomes an input_request. A handler reports what
 # changed through CommandResult.effects; it never prints to the frontend.
 
-_ROLE_CHOICES = ("auto", "coder", "reader", "devops", "chat")
+_ROLE_CHOICES = ("auto", "coder", "reader", "devops", "chat", "universal")
 
 
 def _bi(en: str, ru: str) -> str:
@@ -4998,7 +5003,7 @@ Support:
                     decision = None
                 if decision is not None:
                     detected_role = decision.role
-            role_colors = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan"}
+            role_colors = {"coder": "green", "reader": "yellow", "devops": "magenta", "chat": "cyan", "universal": "blue"}
             role_color = role_colors.get(detected_role, "white")
             source_tag = f" ({decision.source})" if decision else ""
             # Show "(manual)" when user has overridden automatic detection

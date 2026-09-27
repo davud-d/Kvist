@@ -2,16 +2,24 @@
 """Semantic LLM-based router for determining agent role.
 
 Uses fast_model (cheap model, e.g. gpt-4o-mini) to classify
-the user request into one of the roles: coder, devops, chat.
+the user request into one of the roles: coder, devops, reader, chat, universal.
 
 Priority (first-match-wins):
   1. explicit read-only    (no-write marker → reader, beats topic)
   2. direct devops action  (deterministic regex)
   3. direct coder action   (deterministic regex)
   4. direct chat question  (deterministic regex)
-  5. LLM router            (fast_model call)
+  5. LLM router            (fast_model call; may return "universal" for an
+                            ambiguous/mixed request)
   6. keyword fallback      (LLM error → lightweight keyword match)
-  7. default               ("chat")
+  7. default               ("universal")
+
+"universal" is the fallback for everything the rules above and the LLM
+router could not confidently place in one of the other four roles: low
+confidence in task_kind, a mixed "explain and fix" request, a conversational
+message that also touches code. It has the full tool set (see
+prompts/system/universal_prompt.txt) and decides for itself, per request,
+whether to just answer or to act.
 
 Fallback: keyword-based classification if LLM is unavailable.
 """
@@ -24,8 +32,8 @@ from typing import Any
 
 from redaction import redact_text, redact_value
 
-_VALID_ROLES = frozenset({"coder", "devops", "chat", "reader"})
-_DEFAULT_ROLE = "chat"
+_VALID_ROLES = frozenset({"coder", "devops", "chat", "reader", "universal"})
+_DEFAULT_ROLE = "universal"
 
 # Display metadata for each role, owned here as the role source of truth.
 # Frontends read these through core_manifest rather than hardcoding their own.
@@ -34,6 +42,7 @@ ROLE_DESCRIPTIONS: dict[str, str] = {
     "devops": "DevOps and system administration",
     "chat": "Conversational chat",
     "reader": "Read-only analysis and review",
+    "universal": "Chat with the full tool set, decided per request",
 }
 
 # Explicit "do not modify" phrasing. When present, the request is read-only no
