@@ -125,6 +125,11 @@
               title="Model output speed, estimated from streamed text (chars ÷ 4)"
             ></span>
             <span class="footer-version">Kvist GUI 1.2.0</span>
+            <button id="settingsGearButton" class="icon-button gear-button" type="button" title="Settings" aria-label="Settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12.22 2l1.4 3.12c.47.17.92.38 1.35.63l3.21-.82.78 1.35-2.24 2.49c.09.48.13.98.13 1.48s-.04 1-.13 1.48l2.24 2.49-.78 1.35-3.21-.82c-.43.25-.88.46-1.35.63L12.22 22h-1.56l-1.4-3.12c-.47-.17-.92-.38-1.35-.63l-3.21.82-.78-1.35 2.24-2.49c-.09-.48-.13-.98-.13-1.48s.04-1 .13-1.48l-2.24-2.49.78-1.35 3.21.82c.43-.25.88-.46 1.35-.63L10.66 2h1.56z M11.5 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z" />
+              </svg>
+            </button>
           </div>
         </footer>
       </div>
@@ -245,6 +250,63 @@
           <button class="settings-save" type="submit">Apply</button>
         </div>
       </form>
+    </div>
+
+    <div id="globalSettingsBackdrop" class="overlay is-hidden" role="presentation">
+      <div class="global-settings-shell" role="dialog" aria-modal="true" aria-label="Settings">
+        <aside class="settings-sidebar">
+          <div class="settings-sidebar-header">Settings</div>
+          <nav class="settings-nav">
+            <button type="button" class="settings-nav-item is-active" data-panel="provider">Provider</button>
+            <button type="button" class="settings-nav-item" data-panel="models">Models</button>
+            <button type="button" class="settings-nav-item" data-panel="role">Role & Style</button>
+            <button type="button" class="settings-nav-item" data-panel="advanced">Advanced</button>
+          </nav>
+        </aside>
+        <div class="settings-content-area">
+          <button id="globalSettingsClose" class="icon-button settings-close-button" type="button" aria-label="Close">×</button>
+
+          <div id="settingsPanelProvider" class="settings-content-panel is-active">
+            <div class="settings-panel-header">
+              <h2>Provider</h2>
+              <p class="settings-panel-subtitle">Choose the LLM provider for this workspace</p>
+            </div>
+            <div class="settings-panel-body">
+              <!-- Provider content will be populated by JS -->
+            </div>
+          </div>
+
+          <div id="settingsPanelModels" class="settings-content-panel">
+            <div class="settings-panel-header">
+              <h2>Models</h2>
+              <p class="settings-panel-subtitle">Override default models for each role</p>
+            </div>
+            <div class="settings-panel-body">
+              <!-- Models content will be populated by JS -->
+            </div>
+          </div>
+
+          <div id="settingsPanelRole" class="settings-content-panel">
+            <div class="settings-panel-header">
+              <h2>Role & Style</h2>
+              <p class="settings-panel-subtitle">Agent behavior and working style</p>
+            </div>
+            <div class="settings-panel-body">
+              <!-- Role content will be populated by JS -->
+            </div>
+          </div>
+
+          <div id="settingsPanelAdvanced" class="settings-content-panel">
+            <div class="settings-panel-header">
+              <h2>Advanced</h2>
+              <p class="settings-panel-subtitle">Additional configuration</p>
+            </div>
+            <div class="settings-panel-body">
+              <!-- Advanced content will be populated by JS -->
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div id="customProviderBackdrop" class="overlay is-hidden" role="presentation">

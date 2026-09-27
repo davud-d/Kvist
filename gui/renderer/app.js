@@ -28,6 +28,9 @@ const settingsClose = document.querySelector("#settingsClose")
 const settingsCancel = document.querySelector("#settingsCancel")
 const settingsReset = document.querySelector("#settingsReset")
 const settingsError = document.querySelector("#settingsError")
+const globalSettingsBackdrop = document.querySelector("#globalSettingsBackdrop")
+const globalSettingsClose = document.querySelector("#globalSettingsClose")
+const settingsGearButton = document.querySelector("#settingsGearButton")
 const providerSelect = document.querySelector("#providerSelect")
 const customProviderInput = document.querySelector("#customProviderInput")
 const roleSelect = document.querySelector("#roleSelect")
@@ -126,6 +129,7 @@ let lastAssistantText = ""
 let interruptDeadline = 0
 let runtimeConfig = null
 let configInfo = null
+let configInfoStale = true
 let navigationProjects = []
 let activeSessionName = ""
 const expandedProjects = new Set()
@@ -817,18 +821,21 @@ function populateSettings() {
 async function showSettings() {
   if (running) return
   hidePalette()
+  await ensureFreshConfigInfo()
   settingsBackdrop.classList.remove("is-hidden")
   populateSettings()
   providerSelect.focus()
-  if (configInfo) return
+}
+
+async function ensureFreshConfigInfo() {
+  if (!configInfoStale && configInfo) return
   setProviderStatus("Loading…", "neutral")
   try {
     configInfo = await window.kvist.configInfo()
+    configInfoStale = false
   } catch (error) {
     settingsError.textContent = `Could not read saved configuration: ${error.message}`
-    return
   }
-  if (!settingsBackdrop.classList.contains("is-hidden")) populateSettings()
 }
 
 function hideSettings() {
@@ -918,6 +925,7 @@ async function submitCustomProvider() {
     return
   }
   configInfo = result.info
+  configInfoStale = false
   renderProviderOptions()
   if (optionExists(result.provider_id)) providerSelect.value = result.provider_id
   customProviderInput.value = ""
@@ -977,6 +985,7 @@ function saveSettings() {
   })
   localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(runOptions))
   runtimeConfig = null
+  configInfoStale = true
   updateConfigChips()
   return true
 }
@@ -1763,6 +1772,7 @@ settingsCancel.addEventListener("click", hideSettings)
 settingsReset.addEventListener("click", () => {
   runOptions = normalizedRunOptions()
   runtimeConfig = null
+  configInfoStale = true
   localStorage.removeItem(CONFIG_STORAGE_KEY)
   populateSettings()
   updateConfigChips()
@@ -1882,6 +1892,230 @@ function installCursorGlow() {
   document.addEventListener("mouseleave", () => glow.classList.remove("is-active"))
   window.addEventListener("blur", () => glow.classList.remove("is-active"))
 }
+
+// ── Global settings panel ────────────────────────────────────────────────
+
+function showGlobalSettings() {
+  if (running) return
+  hidePalette()
+  void ensureFreshConfigInfo().then(() => {
+    globalSettingsBackdrop.classList.remove("is-hidden")
+    populateGlobalSettings()
+  })
+}
+
+function hideGlobalSettings() {
+  globalSettingsBackdrop.classList.add("is-hidden")
+  if (!promptInput.disabled) promptInput.focus()
+}
+
+function populateGlobalSettings() {
+  if (!configInfo) return
+
+  // Provider panel
+  const providerPanel = document.querySelector("#settingsPanelProvider .settings-panel-body")
+  providerPanel.innerHTML = ""
+
+  const providerSection = createElement("div", "settings-block")
+  const providerLabel = createElement("label", "field")
+  providerLabel.innerHTML = `<span>Active Provider</span>`
+
+  const providerSelectGlobal = createElement("select", "")
+  providerSelectGlobal.id = "globalProviderSelect"
+  const savedId = configInfo?.saved_provider || ""
+  const savedSuffix = savedId ? ` · ${providerLabel(savedId)}` : ""
+  providerSelectGlobal.append(new Option(`Saved default${savedSuffix}`, ""))
+
+  const builtin = configInfo?.providers || []
+  if (builtin.length) {
+    const group = document.createElement("optgroup")
+    group.label = "Providers"
+    for (const entry of builtin) group.append(new Option(providerOptionText(entry), entry.id))
+    providerSelectGlobal.append(group)
+  }
+
+  const custom = configInfo?.custom_providers || []
+  if (custom.length) {
+    const group = document.createElement("optgroup")
+    group.label = "Custom providers"
+    for (const entry of custom) group.append(new Option(providerOptionText(entry), entry.id))
+    providerSelectGlobal.append(group)
+  }
+
+  providerLabel.append(providerSelectGlobal)
+  providerSection.append(providerLabel)
+
+  const providerInfo = createElement("div", "provider-detail")
+  providerInfo.id = "globalProviderDetail"
+  providerSection.append(providerInfo)
+
+  providerPanel.append(providerSection)
+
+  // Models panel
+  const modelsPanel = document.querySelector("#settingsPanelModels .settings-panel-body")
+  modelsPanel.innerHTML = ""
+
+  const modelsSection = createElement("div", "settings-block")
+  const modelsGrid = createElement("div", "field-grid three")
+
+  for (const role of MODEL_ROLES) {
+    const field = createElement("label", "field")
+    field.innerHTML = `<span>${role.charAt(0).toUpperCase() + role.slice(1)}</span>`
+    const input = createElement("input")
+    input.id = `globalModel${role.charAt(0).toUpperCase() + role.slice(1)}`
+    input.autocomplete = "off"
+    field.append(input)
+    const hint = createElement("small", "field-hint")
+    hint.id = `globalModel${role.charAt(0).toUpperCase() + role.slice(1)}Hint`
+    field.append(hint)
+    modelsGrid.append(field)
+  }
+
+  modelsSection.append(modelsGrid)
+  modelsPanel.append(modelsSection)
+
+  // Role panel
+  const rolePanel = document.querySelector("#settingsPanelRole .settings-panel-body")
+  rolePanel.innerHTML = ""
+
+  const roleSection = createElement("div", "settings-block")
+  const roleGrid = createElement("div", "field-grid two")
+
+  const roleField = createElement("label", "field")
+  roleField.innerHTML = `<span>Role</span>`
+  const roleSelectGlobal = createElement("select")
+  roleSelectGlobal.id = "globalRoleSelect"
+  roleSelectGlobal.innerHTML = `
+    <option value="auto">Auto (route each request)</option>
+    <option value="coder">Coder</option>
+    <option value="devops">DevOps</option>
+    <option value="reader">Reader</option>
+    <option value="chat">Chat</option>
+  `
+  roleField.append(roleSelectGlobal)
+  const roleHintGlobal = createElement("small", "field-hint")
+  roleHintGlobal.id = "globalRoleHint"
+  roleField.append(roleHintGlobal)
+  roleGrid.append(roleField)
+
+  const approvalField = createElement("label", "field")
+  approvalField.innerHTML = `<span>Dangerous commands</span>`
+  const approvalSelectGlobal = createElement("select")
+  approvalSelectGlobal.id = "globalApprovalSelect"
+  approvalSelectGlobal.innerHTML = `
+    <option value="ask">Ask every time</option>
+    <option value="deny">Always deny</option>
+  `
+  approvalField.append(approvalSelectGlobal)
+  const approvalHintGlobal = createElement("small", "field-hint")
+  approvalHintGlobal.id = "globalApprovalHint"
+  approvalField.append(approvalHintGlobal)
+  roleGrid.append(approvalField)
+
+  roleSection.append(roleGrid)
+  rolePanel.append(roleSection)
+
+  // Advanced panel
+  const advancedPanel = document.querySelector("#settingsPanelAdvanced .settings-panel-body")
+  advancedPanel.innerHTML = ""
+  advancedPanel.append(createElement("p", "", "Additional settings will appear here."))
+
+  // Populate with current values
+  if (runOptions.provider && optionExists(runOptions.provider)) {
+    providerSelectGlobal.value = runOptions.provider
+  }
+
+  const globalRoleSelect = document.getElementById("globalRoleSelect")
+  const globalApprovalSelect = document.getElementById("globalApprovalSelect")
+  if (globalRoleSelect) globalRoleSelect.value = runOptions.role
+  if (globalApprovalSelect) globalApprovalSelect.value = runOptions.approvalMode
+
+  // Update hints
+  const globalRoleHint = document.getElementById("globalRoleHint")
+  const globalApprovalHint = document.getElementById("globalApprovalHint")
+  if (globalRoleHint) globalRoleHint.textContent = ROLE_HINTS[runOptions.role] || ""
+  if (globalApprovalHint) globalApprovalHint.textContent = APPROVAL_HINTS[runOptions.approvalMode] || ""
+
+  // Set up event listeners
+  providerSelectGlobal.addEventListener("change", () => {
+    updateGlobalProviderDetail()
+  })
+
+  if (globalRoleSelect) {
+    globalRoleSelect.addEventListener("change", () => {
+      const hint = document.getElementById("globalRoleHint")
+      if (hint) hint.textContent = ROLE_HINTS[globalRoleSelect.value] || ""
+    })
+  }
+
+  if (globalApprovalSelect) {
+    globalApprovalSelect.addEventListener("change", () => {
+      const hint = document.getElementById("globalApprovalHint")
+      if (hint) hint.textContent = APPROVAL_HINTS[globalApprovalSelect.value] || ""
+    })
+  }
+
+  updateGlobalProviderDetail()
+}
+
+function updateGlobalProviderDetail() {
+  const providerSelectGlobal = document.getElementById("globalProviderSelect")
+  const detailContainer = document.getElementById("globalProviderDetail")
+  if (!providerSelectGlobal || !detailContainer) return
+
+  const id = providerSelectGlobal.value
+  const summary = providerSummary(id)
+  detailContainer.replaceChildren()
+
+  if (!summary) return
+
+  if (summary.has_credentials) {
+    detailContainer.append(detailLine("✓ API key ready", "ok"))
+  } else {
+    detailContainer.append(detailLine(`Missing ${summary.missing_keys.join(", ") || "credentials"}`, "warn"))
+  }
+
+  if (summary.base_url) {
+    detailContainer.append(detailLine(`Endpoint: ${summary.base_url}`))
+  }
+
+  detailContainer.append(detailLine(`Defaults: ${summariseModels(summary.defaults)}`))
+}
+
+function switchSettingsPanel(panelName) {
+  const navItems = document.querySelectorAll(".settings-nav-item")
+  const panels = document.querySelectorAll(".settings-content-panel")
+  navItems.forEach(item => {
+    item.classList.toggle("is-active", item.dataset.panel === panelName)
+  })
+  panels.forEach(panel => {
+    const expected = `settingsPanel${panelName.charAt(0).toUpperCase()}${panelName.slice(1)}`
+    panel.classList.toggle("is-active", panel.id === expected)
+  })
+}
+
+globalSettingsClose.addEventListener("click", hideGlobalSettings)
+globalSettingsBackdrop.addEventListener("click", (event) => {
+  if (event.target === globalSettingsBackdrop) hideGlobalSettings()
+})
+globalSettingsBackdrop.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return
+  event.preventDefault()
+  event.stopPropagation()
+  hideGlobalSettings()
+})
+
+document.querySelectorAll(".settings-nav-item").forEach(item => {
+  item.addEventListener("click", () => switchSettingsPanel(item.dataset.panel))
+})
+
+settingsGearButton.addEventListener("click", showGlobalSettings)
+
+// Mark config as stale when window regains focus (user may have changed
+// provider/models in terminal)
+window.addEventListener("focus", () => {
+  configInfoStale = true
+})
 
 withSessionSplash(() => window.kvist.bootstrap()).then((state) => {
   updateNavigation(state)
