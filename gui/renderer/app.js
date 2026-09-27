@@ -1957,23 +1957,77 @@ function populateGlobalSettings() {
   const modelsPanel = document.querySelector("#settingsPanelModels .settings-panel-body")
   modelsPanel.innerHTML = ""
 
-  const modelsSection = createElement("div", "settings-block")
-  const modelsGrid = createElement("div", "field-grid three")
+  const providerSelectGlobal = document.getElementById("globalProviderSelect")
+  const currentProviderId = providerSelectGlobal ? providerSelectGlobal.value : runOptions.provider
+  const currentSummary = providerSummary(currentProviderId || configInfo?.saved_provider)
 
-  for (const role of MODEL_ROLES) {
-    const field = createElement("label", "field")
-    field.innerHTML = `<span>${role.charAt(0).toUpperCase() + role.slice(1)}</span>`
-    const input = createElement("input")
-    input.id = `globalModel${role.charAt(0).toUpperCase() + role.slice(1)}`
-    input.autocomplete = "off"
-    field.append(input)
-    const hint = createElement("small", "field-hint")
-    hint.id = `globalModel${role.charAt(0).toUpperCase() + role.slice(1)}Hint`
-    field.append(hint)
-    modelsGrid.append(field)
+  const modelsSection = createElement("div", "settings-block")
+
+  // Show model options if provider has them, otherwise text inputs
+  const hasOptions = currentSummary?.options?.length > 0
+  const requiresManual = currentSummary?.requires_manual_models
+
+  if (hasOptions) {
+    // Use dropdowns for providers with model catalogs
+    const modelsGrid = createElement("div", "field-grid three")
+
+    for (const role of MODEL_ROLES) {
+      const field = createElement("label", "field")
+      field.innerHTML = `<span>${role.charAt(0).toUpperCase() + role.slice(1)}</span>`
+
+      const select = createElement("select")
+      select.id = `globalModel${role.charAt(0).toUpperCase() + role.slice(1)}`
+
+      // Add empty option for "use provider default"
+      select.append(new Option("Provider default", ""))
+
+      // Add all available models
+      for (const option of currentSummary.options) {
+        select.append(new Option(option.label || option.value, option.value))
+      }
+
+      // Set current value
+      const currentValue = runOptions.models[role] || currentSummary?.saved_models?.[role] || ""
+      if (currentValue) select.value = currentValue
+
+      field.append(select)
+
+      const hint = createElement("small", "field-hint")
+      const defaultModel = currentSummary?.defaults?.[role]
+      if (defaultModel) {
+        hint.textContent = `Default: ${defaultModel}`
+      }
+      field.append(hint)
+
+      modelsGrid.append(field)
+    }
+
+    modelsSection.append(modelsGrid)
+  } else {
+    // Text inputs for custom/OmniRoute/OpenRouter
+    const modelsGrid = createElement("div", "field-grid three")
+
+    for (const role of MODEL_ROLES) {
+      const field = createElement("label", "field")
+      field.innerHTML = `<span>${role.charAt(0).toUpperCase() + role.slice(1)}</span>`
+      const input = createElement("input")
+      input.type = "text"
+      input.id = `globalModel${role.charAt(0).toUpperCase() + role.slice(1)}`
+      input.autocomplete = "off"
+      input.value = runOptions.models[role] || ""
+      input.placeholder = requiresManual ? "Required" : "Optional"
+      field.append(input)
+      const hint = createElement("small", "field-hint")
+      if (requiresManual) {
+        hint.textContent = "This provider requires manual model entry"
+      }
+      field.append(hint)
+      modelsGrid.append(field)
+    }
+
+    modelsSection.append(modelsGrid)
   }
 
-  modelsSection.append(modelsGrid)
   modelsPanel.append(modelsSection)
 
   // Role panel
@@ -2041,6 +2095,16 @@ function populateGlobalSettings() {
   // Set up event listeners
   providerSelectGlobal.addEventListener("change", () => {
     updateGlobalProviderDetail()
+    // Re-render Models panel with new provider's options
+    const modelsNavItem = document.querySelector(".settings-nav-item[data-panel='models']")
+    if (modelsNavItem) {
+      const currentPanel = document.querySelector(".settings-content-panel.is-active")
+      const isModelsActive = currentPanel && currentPanel.id === "settingsPanelModels"
+      populateGlobalSettings()
+      if (isModelsActive) {
+        switchSettingsPanel("models")
+      }
+    }
   })
 
   if (globalRoleSelect) {

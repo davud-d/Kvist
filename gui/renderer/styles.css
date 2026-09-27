@@ -1567,8 +1567,8 @@ kbd {
 /* ── Global settings panel (Hermes-style) ──────────────────────────────── */
 
 .global-settings-shell {
-  width: min(1140px, 94vw);
-  max-height: 90vh;
+  width: min(1200px, 96vw);
+  max-height: 92vh;
   display: flex;
   background: var(--background-panel);
   border: 1px solid var(--border);
@@ -1680,7 +1680,7 @@ kbd {
 }
 
 .settings-panel-header {
-  margin-bottom: 24px;
+  margin-bottom: 28px;
 }
 
 .settings-panel-header h2 {
@@ -1728,6 +1728,17 @@ kbd {
   color: var(--text);
   font-size: 13px;
   transition: all 120ms ease;
+}
+
+.settings-panel-body select {
+  padding-right: 32px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%237d929f' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
 }
 
 .settings-panel-body select:hover,
