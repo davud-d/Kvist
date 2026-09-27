@@ -1957,7 +1957,6 @@ function populateGlobalSettings() {
   const modelsPanel = document.querySelector("#settingsPanelModels .settings-panel-body")
   modelsPanel.innerHTML = ""
 
-  const providerSelectGlobal = document.getElementById("globalProviderSelect")
   const currentProviderId = providerSelectGlobal ? providerSelectGlobal.value : runOptions.provider
   const currentSummary = providerSummary(currentProviderId || configInfo?.saved_provider)
 
@@ -2125,11 +2124,11 @@ function populateGlobalSettings() {
 }
 
 function updateGlobalProviderDetail() {
-  const providerSelectGlobal = document.getElementById("globalProviderSelect")
+  const providerSelectElem = document.getElementById("globalProviderSelect")
   const detailContainer = document.getElementById("globalProviderDetail")
-  if (!providerSelectGlobal || !detailContainer) return
+  if (!providerSelectElem || !detailContainer) return
 
-  const id = providerSelectGlobal.value
+  const id = providerSelectElem.value
   const summary = providerSummary(id)
   detailContainer.replaceChildren()
 

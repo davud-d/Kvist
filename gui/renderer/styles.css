@@ -129,6 +129,8 @@ button {
   color: var(--text-muted);
   cursor: pointer;
   transition: all 140ms ease;
+  opacity: 1;
+  visibility: visible;
 }
 
 .gear-button svg {
