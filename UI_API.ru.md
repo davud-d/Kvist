@@ -77,6 +77,13 @@ kvist --workspace /path/to/project                       # терминальн�
   stdout (§8a).
 - `--commit-message` → сообщение коммита по набору изменений из stdin, JSON в
   stdout (§8b).
+- `--acp` → Agent Client Protocol по stdin/stdout, для хостов вроде Zed (§8d).
+  Рабочая папка приходит с `session/new`, поэтому `--workspace` не используется.
+  `--login` действителен только с ним: настроить ключи провайдера в этом
+  терминале и завершиться. Это не поток событий NDJSON и `PROTOCOL_VERSION` тут
+  не участвует: это JSON-RPC-участник, а что он умеет и чего не умеет для
+  конкретного хоста, записано в
+  [`zed-acp/README.ru.md`](zed-acp/README.ru.md).
 
 (В разработке, без собранного бинаря:
 `.venv/bin/python main.py --workspace … --frontend stdio`.)
@@ -547,6 +554,33 @@ kvist --commit-message < payload.json
 `session` говорит фронтенду, какая беседа теперь активна. Как и обычный ход, он
 не принимает `command`, пока идёт.
 
+## 8d. Agent Client Protocol (`--acp`)
+
+`kvist --acp` — второй транспорт того же ядра: участник JSON-RPC 2.0, говорящий
+по [Agent Client Protocol](https://agentclientprotocol.com/) в stdin/stdout, для
+хостов, у которых ACP уже реализован. Собирается и описан он под Zed.
+
+**Ни одно правило NDJSON-контракта выше в этом режиме не действует.** Здесь нет
+`hello`, нет `PROTOCOL_VERSION` и нет `TurnEvent`: типы на проводе приходят из
+схемы ACP (`session/new`, `session/prompt`, `session/update`, …). `--workspace`
+тоже не используется — рабочая папка приходит с `session/new`, а идентификатор
+сессии — стабильная функция этой папки и имени сессии, поэтому он переживает
+перезапуск. `--login` принимается только вместе с `--acp`: настроить ключи
+провайдера в запускающем терминале и завершиться. **Секреты через соединение ACP
+не передаются**: ACP запрещает собирать чувствительные данные в form-режиме,
+поэтому отсутствующий ключ не запрашивается по проводу, а в ответ идёт название
+команды, которую нужно выполнить.
+
+Реализовано это поверх того же `LocalAgent` / `SafeExecutor` / хранилища сессий,
+что и любой другой фронтенд. Собственные файлы режима — `acp_frontend.py`
+(участник) и `acp_events.py` (события Kvist → обновления ACP); сведение
+накопленных снимков Kvist к дописываемым дельтам ACP живёт во втором.
+
+Возможности заявляются только там, где путь работает до конца: ни NES, ни
+MCP-серверов, ни аудио- и image-промптов. Что конкретный хост может и чего не
+может показать, записано по каждой возможности в
+[`zed-acp/README.ru.md`](zed-acp/README.ru.md) ([EN](zed-acp/README.md)).
+
 ## 9. Универсальный диспетчер фронтендов (`frontends.py`)
 
 Все не-терминальные фронтенды имеют одинаковую склейку (`FrontendChannel` →
@@ -658,6 +692,8 @@ Electron просто спавнит бинарь `kvist`.
 Протокол событий: `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
 `event_stdio.py`, `frontends.py`.
 Headless-сессии: `session_store.py` (за `--session-op`).
+Участник ACP (§8d): `acp_frontend.py`, `acp_events.py`.
 Тесты: `tests/test_frontend_protocol.py`, `tests/test_event_stream_ui.py`,
 `tests/test_event_session.py`, `tests/test_frontends.py`,
-`tests/test_session_store.py`.
+`tests/test_session_store.py`, `tests/test_acp_frontend.py`,
+`tests/test_acp_events.py`.

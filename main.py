@@ -146,6 +146,20 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="JSON payload for --config-op. Omit to read it from stdin (used so "
         "an API key never lands in argv).",
     )
+    parser.add_argument(
+        "--acp",
+        action="store_true",
+        help="Serve the Agent Client Protocol over stdio (for Zed and other "
+        "ACP hosts). The working directory comes from session/new; "
+        "--workspace is not used.",
+    )
+    parser.add_argument(
+        "--login",
+        action="store_true",
+        help="With --acp: configure provider credentials from the terminal and "
+        "exit. This is the ACP terminal-auth flow; secrets never travel over "
+        "the ACP connection.",
+    )
     return parser
 
 
@@ -3644,7 +3658,64 @@ def _stdio_revert(ctx: CommandContext) -> CommandResult:
     )
 
 
+def _stdio_commit_message(ctx: CommandContext) -> CommandResult:
+    """Draft a commit message from the workspace's tracked changes.
+
+    Describes what would be committed; it never stages, commits, or pushes.
+    Untracked files are outside a ``git diff`` and are not described.
+    """
+    import json as _json
+
+    from commit_message import (
+        CommitMessageError,
+        drop_protected_files,
+        generate_commit_message,
+        split_unified_diff,
+    )
+    from protocol import Action, AgentCommand
+
+    executor = ctx.session.agent.executor
+    result = executor.execute(
+        AgentCommand(
+            plan_step="inspect",
+            action=Action(type="git_diff", args={"ref": "HEAD"}),
+        )
+    )
+    data = result.data or {}
+    if not result.ok or not data.get("git_available", False):
+        detail = str(data.get("stderr") or "").strip()
+        return CommandResult(
+            False,
+            _bi(
+                "Cannot read the workspace diff" + (f": {detail}" if detail else "."),
+                "Не удалось получить diff рабочей области"
+                + (f": {detail}" if detail else "."),
+            ),
+        )
+
+    files = drop_protected_files(split_unified_diff(str(data.get("stdout") or "")))
+    if not files:
+        return CommandResult(
+            False,
+            _bi(
+                "Nothing to describe: no changed tracked files.",
+                "Описывать нечего: нет изменённых отслеживаемых файлов.",
+            ),
+        )
+    try:
+        message = generate_commit_message(
+            _json.dumps(
+                {"files": [{"path": f.path, "patch": f.patch} for f in files]},
+                ensure_ascii=False,
+            )
+        )
+    except CommitMessageError as error:
+        return CommandResult(False, sanitize_display_text(str(error)))
+    return CommandResult(True, message, {"files": [f.path for f in files]})
+
+
 STDIO_COMMANDS: dict[str, CommandHandler] = {
+    "commit-message": _stdio_commit_message,
     "role": _stdio_role,
     "effort": _stdio_effort,
     "plan": _stdio_plan,
@@ -3673,6 +3744,20 @@ def main() -> None:
         else _build_cli_parser().parse_args()
     )
     args.role = resolve_startup_role(args.role)
+
+    if args.login and not args.acp:
+        print("--login only makes sense with --acp.", file=sys.stderr)
+        raise SystemExit(2)
+
+    if args.acp:
+        # ACP owns the working directory (it arrives with session/new), so this
+        # path must not resolve or create a default workspace. stdout from here
+        # on is the JSON-RPC stream; nothing may print to it.
+        from acp_frontend import run_acp, run_login
+
+        if args.login:
+            raise SystemExit(run_login())
+        raise SystemExit(run_acp())
 
     if args.config_info:
         import json as _json

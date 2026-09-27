@@ -186,8 +186,12 @@ class EventSession:
                     yield remaining
                 return
 
-    def respond(self, request_id: str, *, value=None, approved=None) -> None:
-        self._channel.respond(request_id, value=value, approved=approved)
+    def respond(
+        self, request_id: str, *, value=None, approved=None, remember: bool = False
+    ) -> None:
+        self._channel.respond(
+            request_id, value=value, approved=approved, remember=remember
+        )
 
     def cancel(self) -> None:
         """Ask the active run to stop at its next safe point.

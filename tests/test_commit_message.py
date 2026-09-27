@@ -290,3 +290,58 @@ def test_cli_reports_failure_as_json(monkeypatch, capsys):
         main._run_commit_message_op()
     assert exit_info.value.code == 1
     assert json.loads(capsys.readouterr().out) == {"ok": False, "error": "Nothing to describe"}
+
+
+# --- Splitting a workspace diff ----------------------------------------------
+
+
+def test_split_unified_diff_returns_one_patch_per_file():
+    diff = (
+        "diff --git a/src/app.py b/src/app.py\n"
+        "index 111..222 100644\n"
+        "--- a/src/app.py\n"
+        "+++ b/src/app.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+        "diff --git a/README.md b/README.md\n"
+        "index 333..444 100644\n"
+        "--- a/README.md\n"
+        "+++ b/README.md\n"
+        "@@ -1 +1 @@\n"
+        "-a\n"
+        "+b\n"
+    )
+
+    files = commit_message.split_unified_diff(diff)
+
+    assert [item.path for item in files] == ["src/app.py", "README.md"]
+    assert files[0].patch.endswith("+new")
+    assert files[1].patch.endswith("+b")
+
+
+def test_split_unified_diff_of_an_empty_diff_is_empty():
+    assert commit_message.split_unified_diff("") == []
+    assert commit_message.split_unified_diff("\n") == []
+
+
+def test_split_keeps_a_secret_file_separable_so_the_filter_can_drop_it():
+    """A one-blob diff would carry `.env` past `drop_protected_files`."""
+    diff = (
+        "diff --git a/.env b/.env\n"
+        "--- a/.env\n"
+        "+++ b/.env\n"
+        "@@ -1 +1 @@\n"
+        "-KEY=old\n"
+        "+KEY=new\n"
+        "diff --git a/app.py b/app.py\n"
+        "--- a/app.py\n"
+        "+++ b/app.py\n"
+        "@@ -1 +1 @@\n"
+        "-x\n"
+        "+y\n"
+    )
+
+    kept = commit_message.drop_protected_files(commit_message.split_unified_diff(diff))
+
+    assert [item.path for item in kept] == ["app.py"]

@@ -37,11 +37,16 @@ _SECRET_SUFFIXES: tuple[str, ...] = (
 # do not carve them out here.
 _ENV_RE = re.compile(r"^\.env(?:\..*)?$", re.IGNORECASE)
 
-# ``.kvist`` is masked wholesale (tmpfs) and never descended into.  Everything
-# else is walked: a secret can hide anywhere, and — critically — a hardlink is a
-# second name for a secret's inode, so we must discover every path that shares a
-# secret inode, including inside .git / node_modules.
+# ``.kvist`` is masked wholesale (tmpfs) and never descended into.  Dependency
+# trees (node_modules, venv, .venv, .git) are also skipped: they contain
+# thousands of files whose extensions happen to match secret patterns (.pem CA
+# bundles, .key type definitions) but hold no actual user secrets, and
+# enumerating them all would exceed the bwrap argument limit.
 _MASKED_DIR_NAMES: frozenset[str] = frozenset({".kvist"})
+_SKIPPED_DEPENDENCY_DIRS: frozenset[str] = frozenset({
+    "node_modules", ".venv", "venv", ".git",
+    ".venv-build",  # Kvist's own multi-Python build venv
+})
 
 # A secret-named symlink must never be skipped: its lexical name is what makes
 # it protected, regardless of what it resolves to.  Chains are bounded so a
@@ -255,6 +260,8 @@ def enumerate_secret_targets(workspace: Path) -> tuple[list[Path], list[Path]]:
             if stat.S_ISDIR(info.st_mode):
                 if not in_secret and name in _MASKED_DIR_NAMES:
                     continue
+                if not in_secret and name in _SKIPPED_DEPENDENCY_DIRS:
+                    continue
                 if not in_secret and is_secret_dir_name(name):
                     secret_dirs.append(entry)
                     visited_dir_inodes.add((info.st_dev, info.st_ino))
@@ -298,10 +305,11 @@ def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
     """Count workspace names that share one ``(st_dev, st_ino)`` regular inode.
 
     A caller compares the result with ``st_nlink`` to prove that every name of
-    a multiply-linked file lives inside the workspace.  ``.kvist`` is not
-    descended into, exactly as the mask walk does, so an alias hidden there is
-    simply not counted and containment stays unproven.  Symlinks are skipped
-    (they hold no inode alias) which also bounds the walk.
+    a multiply-linked file lives inside the workspace.  ``.kvist`` and
+    dependency directories are not descended into, exactly as the mask walk
+    does, so an alias hidden there is simply not counted and containment stays
+    unproven.  Symlinks are skipped (they hold no inode alias) which also
+    bounds the walk.
     """
     try:
         root = workspace.resolve(strict=True)
@@ -332,7 +340,7 @@ def count_workspace_inode_aliases(workspace: Path, key: tuple[int, int]) -> int:
             if stat.S_ISLNK(info.st_mode):
                 continue
             if stat.S_ISDIR(info.st_mode):
-                if entry.name not in _MASKED_DIR_NAMES:
+                if entry.name not in _MASKED_DIR_NAMES and entry.name not in _SKIPPED_DEPENDENCY_DIRS:
                     stack.append(entry)
                 continue
             if stat.S_ISREG(info.st_mode) and (info.st_dev, info.st_ino) == key:

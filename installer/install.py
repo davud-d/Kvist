@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 """Pick what to install and watch it happen.
 
-This is the front door: it offers the four installers (`install_cli.py`,
-`install_jetbrains.py`, `install_vscode.py`, `install_gui.py`) as an arrow-key
-list, all selected by default, and runs the ones you keep.
+This is the front door: it offers the five installers (`install_cli.py`,
+`install_jetbrains.py`, `install_vscode.py`, `install_gui.py`, `install_zed.py`)
+as an arrow-key list, all selected by default, and runs the ones you keep.
 
     python installer/install.py             # pick with the arrow keys
     python installer/install.py --all       # everything, no questions
@@ -12,8 +12,10 @@ list, all selected by default, and runs the ones you keep.
 
 Quietly, the chosen installers run at once as background processes and a live
 panel shows what each one is doing; each writes its own log, and a failed one
-prints the tail of its output. With --verbose there is no panel: they run one
-after another with their output going straight to the terminal.
+prints the tail of its output. A component that names its dependencies waits
+for them: `install_zed.py` registers the binary `install_cli.py` installs, so
+it stays queued until the CLI is through. With --verbose there is no panel:
+they run one after another with their output going straight to the terminal.
 
 Each installer keeps its own flags (--build, --uninstall, --plugin-zip, --vsix, ...).
 Run it directly when you need those.
@@ -53,6 +55,10 @@ class Component:
     key: str
     label: str
     script: str
+    # Keys of other components that must finish before this one starts. A
+    # component that writes a path another installer creates has to wait for it,
+    # or a parallel run would race for the file.
+    after: tuple[str, ...] = ()
 
 
 COMPONENTS = (
@@ -60,6 +66,7 @@ COMPONENTS = (
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),
     Component("vscode", "VS Code extension", "install_vscode.py"),
     Component("gui", "GUI application", "install_gui.py"),
+    Component("zed", "Zed agent registration", "install_zed.py", after=("cli",)),
 )
 
 # How much of a failed component's output is shown afterwards. It already went
@@ -93,12 +100,38 @@ class Progress:
 
 # --------------------------------------------------------------------- running
 
-def _run_component(component: Component, progress: Progress) -> None:
+# The two states a component reaches and never leaves.
+_TERMINAL_STATES = ("done", "failed")
+
+
+def _await_dependencies(component: Component, progresses: dict[str, Progress]) -> None:
+    """Block until the installers this one needs have finished.
+
+    A component that only writes a path another installer creates stays queued
+    until that one is through, so a parallel run cannot race for the file.
+    A dependency that was not chosen at all does not block: the component checks
+    its own input and reports it missing itself.
+    """
+    if not component.after:
+        return
+    while True:
+        waiting = [
+            key
+            for key in component.after
+            if key in progresses and progresses[key].state not in _TERMINAL_STATES
+        ]
+        if not waiting:
+            return
+        time.sleep(0.1)
+
+
+def _run_component(component: Component, progress: Progress, progresses: dict[str, Progress]) -> None:
     """Run one installer to completion, tracking its latest line of output.
 
     stderr is folded into stdout so a single reader drains the child: that is
     both deadlock-free and the order the output was actually produced in.
     """
+    _await_dependencies(component, progresses)
     command = [sys.executable, str(INSTALLER_DIR / component.script)]
     progress.started_at = time.monotonic()
     progress.state = "running"
@@ -135,7 +168,9 @@ def _install_in_background(chosen: list[Component]) -> dict[str, Progress]:
     """
     progresses = {component.key: Progress() for component in chosen}
     threads = [
-        threading.Thread(target=_run_component, args=(component, progresses[component.key]))
+        threading.Thread(
+            target=_run_component, args=(component, progresses[component.key], progresses)
+        )
         for component in chosen
     ]
     for thread in threads:
@@ -156,7 +191,10 @@ def _install_one_by_one(chosen: list[Component]) -> dict[str, Progress]:
     to run one at a time to stay readable.
     """
     progresses: dict[str, Progress] = {}
-    for component in chosen:
+    # COMPONENTS lists every component after the ones it depends on, so this is
+    # dependency order for a list assembled in any other way too.
+    rank = {component.key: index for index, component in enumerate(COMPONENTS)}
+    for component in sorted(chosen, key=lambda item: rank[item.key]):
         print(f"\n=== {component.label} ===", flush=True)
         progress = Progress(state="running", started_at=time.monotonic())
         progresses[component.key] = progress

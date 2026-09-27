@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import pkgutil
 
 # Bundle every first-party top-level module so the build never silently drops a
 # source file that is reached only via a dynamic/lazy import. New files added to
@@ -14,6 +15,26 @@ local_hiddenimports = sorted(
     and name != _ENTRY_SCRIPT
     and name[:-3] not in _NON_APP_MODULES
 )
+
+
+def _acp_hiddenimports():
+    """Every submodule of the ACP SDK, so `kvist --acp` cannot ship without it.
+
+    `acp_frontend` imports the SDK from a nested package (`acp.agent.*`) that
+    the static analysis reaches, but a frozen binary with a silently missing
+    SDK would make `--acp` fail at handshake time instead of at build time.
+    """
+    try:
+        import acp
+    except ImportError:
+        return []
+    return sorted(
+        module.name
+        for module in pkgutil.walk_packages(acp.__path__, prefix='acp.')
+    )
+
+
+local_hiddenimports = sorted(set(local_hiddenimports) | set(_acp_hiddenimports()))
 
 # The Ink terminal UI is one self-contained file made by `npm run build`; it is
 # optional because building it needs Node.js. Without it the binary still works

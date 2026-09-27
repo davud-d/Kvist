@@ -19,6 +19,11 @@ dependencies = [
     "prompt_toolkit>=3.0",
     "distro",
     "pywin32; sys_platform == 'win32'",
+    # ACP (kvist --acp). The upper bound exists because acp_frontend patches the
+    # SDK router to add the stable but unrouted `session/delete`; that patch has
+    # been verified against 0.12.x only. A 0.13 that routes it natively just
+    # needs the bound relaxed (the patch is a no-op then).
+    "agent-client-protocol>=0.12.1,<0.13",
 ]
 
 [project.scripts]
@@ -46,6 +51,8 @@ packages = [
     "dist-ui",
 ]
 py-modules = [
+    "acp_events",
+    "acp_frontend",
     "action_result",
     "agent",
     "agent_context",

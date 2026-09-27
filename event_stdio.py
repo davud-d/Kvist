@@ -56,6 +56,7 @@ def _read_responses(session: EventSession, in_reader) -> None:
                 response.request_id,
                 value=response.value,
                 approved=response.approved,
+                remember=response.remember,
             )
     finally:
         session.close()
@@ -288,6 +289,7 @@ def _read_multi(
                     response.request_id,
                     value=response.value,
                     approved=response.approved,
+                    remember=response.remember,
                 )
                 continue
             if data is not None and data.get("type") == "command":
@@ -432,6 +434,18 @@ def _guarded(handler: CommandHandler, context: CommandContext) -> CommandResult:
         # in a command_result, or the frontend would wait for one forever.
         detail = str(exc).strip() or type(exc).__name__
         return CommandResult(False, f"Command failed: {detail}")
+
+
+def run_command_handler(handler: CommandHandler, context: CommandContext) -> CommandResult:
+    """Run one in-process slash-command handler with the stdio failure contract.
+
+    Public so a non-stdio transport (ACP) reuses ``STDIO_COMMANDS`` unchanged
+    instead of importing ``_guarded`` or copying its error handling. The
+    handler's dialogs are ordinary input requests on ``context.session``'s
+    channel, and the return value is the same ``CommandResult`` the stdio
+    transport would have written as ``command_result``.
+    """
+    return _guarded(handler, context)
 
 
 def serve_session_multi(

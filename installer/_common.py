@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Shared helpers for the Kvist installers (CLI, JetBrains plugin, VS Code extension, GUI)."""
+"""Shared helpers for the Kvist installers (CLI, JetBrains plugin, VS Code extension, GUI, Zed)."""
 
 from __future__ import annotations
 

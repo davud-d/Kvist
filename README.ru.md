@@ -49,8 +49,8 @@ workspace за раз: читает и редактирует файлы про�
 разработки и инфраструктуры, проверяет результат и хранит возобновляемые
 именованные сессии.
 
-Основной интерфейс — терминал. Также есть Electron GUI, плагины для JetBrains и
-VS Code, а для сторонних frontend-ов — версионируемый NDJSON-протокол.
+Основной интерфейс — терминал. Также есть Electron GUI, интеграции с JetBrains,
+VS Code и Zed, а для сторонних frontend-ов — версионируемый NDJSON-протокол.
 
 ## Превью
 
@@ -103,10 +103,14 @@ Electron frontend использует тот же runtime и NDJSON-прото�
 - API key и модели хотя бы одного поддерживаемого провайдера;
 - TTY для интерактивной настройки и подтверждений.
 
-CLI проверяется на Linux и Windows. macOS остаётся экспериментальной. IDE-плагины
+CLI проверяется на Linux и Windows. macOS остаётся экспериментальной. IDE-интеграции
 поддерживают Linux и Windows: JetBrains-плагин нацелен на IntelliJ Platform
 2025.3, а расширение VS Code — на VS Code 1.85+. Оба запускают Kvist для
-открытого проекта и умеют писать сообщения коммитов из source-control UI.
+открытого проекта и умеют писать сообщения коммитов из source-control UI. Zed
+запускает Kvist как внешний ACP-агент — это запись в настройках, а не плагин, —
+и получает тот же цикл агента, сессии, подтверждения и `/commit-message`;
+чего он получить не может, написано в
+[`zed-acp/README.ru.md`](zed-acp/README.ru.md).
 
 Встроенные провайдеры: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute и
 FreeFlow LLM (beta). Дополнительно через `/provider` можно добавить совместимый
@@ -216,7 +220,32 @@ curl -H "Authorization: Bearer $ANYMODEL_API_KEY" https://anymodel.org/v1/models
 .venv/bin/python installer/install_jetbrains.py   # ставит плагин во все найденные JetBrains IDE
 .venv/bin/python installer/install_vscode.py      # ставит расширение в VS Code / Insiders / VSCodium
 .venv/bin/python installer/install_gui.py         # ставит GUI и ярлык / пункт меню приложений
+.venv/bin/python installer/install_zed.py         # регистрирует kvist-core как ACP-агент Zed
 ```
+
+### Zed
+
+Zed связывается с кодящими агентами через
+[Agent Client Protocol](https://agentclientprotocol.com/), поэтому Kvist не
+поставляет туда расширение: агенты-расширения в Zed объявлены устаревшими, и
+`extension.toml` в этом репозитории нет. Сначала запустите установщик CLI, затем:
+
+```bash
+.venv/bin/python installer/install_cli.py         # кладёт kvist-core на диск
+.venv/bin/python installer/install_zed.py         # пишет одну запись agent_servers
+```
+
+Эта запись указывает Zed на `kvist-core --acp`. Zed перечитывает настройки сам,
+поэтому перезапуск не нужен. Вручную всё сводится к:
+
+```bash
+/path/to/kvist-core --acp
+```
+
+Какой паритет есть у этого с интеграциями для VS Code и JetBrains — и перечень
+того, для чего в Zed нет публичного API (например, строчное дополнение), —
+в [`zed-acp/README.ru.md`](zed-acp/README.ru.md)
+([EN](zed-acp/README.md)).
 
 Расширение VS Code собирается в `.vsix` из `vscode-extension/`:
 
@@ -423,6 +452,31 @@ cd vscode-extension
 можно установить через `code --install-extension <file>.vsix` или Extensions >
 Install from VSIX. Подробности — в [`vscode-extension/README.md`](vscode-extension/README.md).
 
+## Zed
+
+Zed запускает Kvist как внешнего агента по Agent Client Protocol: процесс агента
+— это `kvist-core --acp`, говорящий JSON-RPC по stdin/stdout. Расширения Zed
+здесь нет и `extension.toml` тоже: агенты-расширения в Zed объявлены
+устаревшими, а публичный способ добавить агента — запись в настройках.
+
+```bash
+.venv/bin/python installer/install_cli.py
+.venv/bin/python installer/install_zed.py
+```
+
+`install_zed.py` пишет одну запись `agent_servers` в JSONC-файл настроек Zed,
+сохраняя все ваши комментарии, и отказывается регистрировать неустановленный
+бинарник. `--uninstall` удаляет ровно эту запись. Агент получает тот же цикл
+действий, песочницу, сессии, подтверждения и `/commit-message`, что и терминал;
+роль, глубина рассуждений и планирование передаются как Session Config Options
+ACP, а всё остальное (провайдер, модели, стиль, режим песочницы) остаётся в
+`~/.kvist/config.json` и переменных `AGENT_*`.
+
+Чего для Zed нет публичного API — строчного дополнения как ghost text, боковой
+панели Kvist, кнопки коммита в source-control UI — перечислено вместе с
+официальными источниками в [`zed-acp/README.ru.md`](zed-acp/README.ru.md)
+([EN](zed-acp/README.md)).
+
 ## Конфигурация и границы
 
 Глобальные настройки находятся в `~/.kvist/config.json`. Поддерживаемые
@@ -466,4 +520,6 @@ workspace и запросы подтверждения.
 - [`gui/README.md`](gui/README.md) — разработка и packaging Electron GUI;
 - [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md) — IntelliJ-плагин;
 - [`vscode-extension/README.md`](vscode-extension/README.md) — расширение VS Code;
+- [`zed-acp/README.ru.md`](zed-acp/README.ru.md) — внешний агент Zed ([EN](zed-acp/README.md));
+- [`installer/README.ru.md`](installer/README.ru.md) — установщики ([EN](installer/README.md));
 - [`LICENSE`](LICENSE) — лицензия MIT.

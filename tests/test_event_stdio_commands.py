@@ -535,7 +535,7 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "plan", "verbose", "style", "session", "new", "rename", "models",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
-        "strime", "revert", "bug",
+        "strime", "revert", "bug", "commit-message",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)

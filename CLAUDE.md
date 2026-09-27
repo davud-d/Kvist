@@ -515,6 +515,49 @@ sees `post`/`onMessage`. `KvistChatHost.kt` is a port of `chatView.ts` and
 `src/messages.ts` needs a handler on both sides. Without JCEF the tool window falls
 back to the terminal launcher.
 
+### Zed / ACP frontend (`acp_frontend.py`, `acp_events.py`, `zed-acp/`)
+Zed reaches coding agents over the **Agent Client Protocol**, so this is an
+external agent registration and not an extension: there is no `extension.toml`
+here, and Zed deprecated extension-provided agents in v1.5.0. `kvist --acp`
+speaks JSON-RPC 2.0 on stdin/stdout as an ACP peer (`agent-client-protocol` SDK);
+it is **not** an NDJSON event stream and ignores `PROTOCOL_VERSION`. The
+workspace arrives with `session/new`, so `--workspace` is unused — a session id
+is `k1_` + a hash of `cwd` + session name, stable across restarts. `--login`
+(valid only with `--acp`) configures provider credentials in the launching
+terminal and exits; **no secret ever travels over the ACP connection**, because
+ACP forbids eliciting sensitive data in form mode — a missing key is reported
+with the command to run, never asked for on the wire.
+
+It reuses `LocalAgent` / `EventSession` / `FrontendChannel` / `EventStreamUI` /
+`EventApprovalGate` and is one runtime per ACP session. `acp_events.AcpEventTranslator`
+reconciles Kvist's cumulative snapshots (`stream_chunk`, `reasoning_chunk`,
+`action_output`) against ACP's append-only deltas by keeping the last snapshot per
+`stream_id`/`call_id` and emitting only the new suffix; a snapshot that no longer
+extends the previous one is an upstream buffer reset and is emitted whole.
+Capabilities are declared only where the path works end to end — **no NES, no MCP,
+no image or audio prompts** (`PromptCapabilities(image=False, audio=False)`).
+
+**Never design the ACP/Zed surface from memory.** Re-check the official docs
+before changing it (`zed-acp/README.md` carries the re-checked source list).
+Locked facts: Zed's `agent_servers` entry is `{"type": "custom", "command",
+"args", "env"}` under `~/.config/zed/settings.json` on macOS and Linux without a
+custom `XDG_CONFIG_HOME`; the Windows location is **not** documented, so
+`install_zed.py` discovers and refuses to invent one. `edit_predictions.provider`
+accepts only `zed | copilot | mercury | codestral | ollama |
+open_ai_compatible_api | none` — there is no external-agent value, so inline
+completion cannot be supplied and must never be claimed. Divergences from the
+VS Code/JetBrains feature set are recorded per capability in
+[`zed-acp/README.md`](zed-acp/README.md) / [`zed-acp/README.ru.md`](zed-acp/README.ru.md);
+do not call the integration a full copy while anything on the "impossible" list
+stands.
+
+`installer/install_zed.py` writes exactly one `agent_servers` member through
+`installer/jsonc_settings.py` — character-range surgery on a JSONC document, so
+the user's comments, key order and line endings survive — and it never builds or
+copies the binary (that is `install_cli.py`'s job; a missing `kvist-core` is a
+loud refusal). It is registered in `installer/install.py` with `after=("cli",)`,
+which is what keeps a parallel `--all` run from racing for that binary.
+
 ### Role routing (`role_router.py`)
 Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins
 priority: an explicit no-write marker → `reader` (beats topic) → deterministic regex

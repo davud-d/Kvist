@@ -136,6 +136,37 @@ def drop_protected_files(files: list[FilePatch]) -> list[FilePatch]:
     ]
 
 
+_DIFF_FILE_RE = re.compile(r"^diff --git a/(?P<a>.+?) b/(?P<b>.+)$")
+
+
+def split_unified_diff(diff_text: str) -> list[FilePatch]:
+    """Split a unified diff into one :class:`FilePatch` per changed file.
+
+    Per-file splitting is what lets :func:`drop_protected_files` remove a
+    secret before it reaches the model: a whole-repo diff as one blob would
+    carry ``.env`` content past that check.
+
+    :param diff_text: ``git diff`` output, possibly empty.
+    :returns: one entry per file section, in diff order.
+    """
+    files: list[FilePatch] = []
+    current_path: str | None = None
+    current_lines: list[str] = []
+    for line in diff_text.splitlines():
+        header = _DIFF_FILE_RE.match(line)
+        if header is not None:
+            if current_path is not None:
+                files.append(FilePatch(path=current_path, patch="\n".join(current_lines)))
+            current_path = header.group("b")
+            current_lines = [line]
+            continue
+        if current_path is not None:
+            current_lines.append(line)
+    if current_path is not None:
+        files.append(FilePatch(path=current_path, patch="\n".join(current_lines)))
+    return files
+
+
 def _cut_to_tokens(text: str, max_tokens: int, encoding: Any) -> str:
     if encoding is None:
         return text[: max_tokens * 4]

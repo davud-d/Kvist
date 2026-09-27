@@ -261,6 +261,7 @@ def test_front_door_includes_vscode_component():
         ("jetbrains", "install_jetbrains.py"),
         ("vscode", "install_vscode.py"),
         ("gui", "install_gui.py"),
+        ("zed", "install_zed.py"),
     ]
 
 

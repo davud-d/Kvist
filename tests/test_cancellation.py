@@ -250,8 +250,8 @@ class _SpySession:
     def cancel(self):
         self.cancelled += 1
 
-    def respond(self, request_id, *, value=None, approved=None):
-        self.responded.append((request_id, value, approved))
+    def respond(self, request_id, *, value=None, approved=None, remember=False):
+        self.responded.append((request_id, value, approved, remember))
 
     def close(self):
         self.closed += 1
@@ -284,7 +284,22 @@ def test_read_responses_parses_legacy_input_response():
 
     event_stdio._read_responses(session, iter(lines))
 
-    assert session.responded == [("r1", "hi", None), ("r2", None, True)]
+    assert session.responded == [("r1", "hi", None, False), ("r2", None, True, False)]
+
+
+def test_read_responses_forwards_remember():
+    """`remember` must reach the session, or "don't ask again" is silently lost.
+
+    The ACP transport earns `allow_always` only when Kvist handed the request a
+    saveable pattern; if the transport's reply is dropped on the way to
+    ``EventSession.respond``, the approval works but the rule is never saved.
+    """
+    session = _SpySession()
+    lines = [json.dumps({"request_id": "r1", "approved": True, "remember": True}) + "\n"]
+
+    event_stdio._read_responses(session, iter(lines))
+
+    assert session.responded == [("r1", None, True, True)]
     assert session.cancelled == 0
     assert session.closed == 1
 

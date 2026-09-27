@@ -581,12 +581,16 @@ class FrontendChannel:
             return InputResponse(request_id, value=None, approved=None)
         return waiter.response
 
-    def respond(self, request_id: str, *, value=None, approved=None) -> None:
+    def respond(
+        self, request_id: str, *, value=None, approved=None, remember: bool = False
+    ) -> None:
         with self._lock:
             waiter = self._waiters.get(request_id)
             if waiter is None:
                 return
-            waiter.response = InputResponse(request_id, value=value, approved=approved)
+            waiter.response = InputResponse(
+                request_id, value=value, approved=approved, remember=remember
+            )
             waiter.event.set()
 
     def close(self) -> None:

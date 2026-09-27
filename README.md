@@ -48,8 +48,8 @@ Kvist is a supervised local coding agent. It works in one project workspace at
 a time, reads and edits project files, runs development or infrastructure
 commands, verifies the result, and keeps resumable named sessions.
 
-It is a terminal application first, with an Electron GUI, JetBrains and VS Code
-plugins, and a versioned NDJSON frontend protocol for other clients.
+It is a terminal application first, with an Electron GUI, JetBrains, VS Code and
+Zed integrations, and a versioned NDJSON frontend protocol for other clients.
 
 ## Preview
 
@@ -104,10 +104,13 @@ and not a complete security boundary: review the diff and command output.
 - a TTY for the interactive terminal configuration and approval prompts.
 
 The CLI is tested on Linux and Windows. macOS is experimental. The optional IDE
-plugins support Linux and Windows: the JetBrains plugin targets IntelliJ Platform
-2025.3, and the VS Code extension targets VS Code 1.85+. Both launch Kvist for
-the opened project and can write commit messages from the IDE's source-control
-UI.
+integrations support Linux and Windows: the JetBrains plugin targets IntelliJ
+Platform 2025.3, and the VS Code extension targets VS Code 1.85+. Both launch
+Kvist for the opened project and can write commit messages from the IDE's
+source-control UI. Zed runs Kvist as an external ACP agent — that is a settings
+entry, not a plugin — and gets the same agent loop, sessions, confirmations and
+`/commit-message`; what it cannot get is written down in
+[`zed-acp/README.md`](zed-acp/README.md).
 
 Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
 FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
@@ -215,7 +218,31 @@ Windows:
 .venv/bin/python installer/install_jetbrains.py   # install the plugin into every JetBrains IDE found
 .venv/bin/python installer/install_vscode.py      # install the extension into VS Code / Insiders / VSCodium
 .venv/bin/python installer/install_gui.py         # install the GUI app + launcher/desktop shortcut
+.venv/bin/python installer/install_zed.py         # register kvist-core as a Zed ACP agent
 ```
+
+### Zed
+
+Zed reaches coding agents over the
+[Agent Client Protocol](https://agentclientprotocol.com/), so Kvist ships no
+extension there — extension-provided agents are deprecated in Zed and there is
+no `extension.toml` in this repository. Run the CLI installer first, then:
+
+```bash
+.venv/bin/python installer/install_cli.py         # puts kvist-core on disk
+.venv/bin/python installer/install_zed.py         # writes one agent_servers entry
+```
+
+That entry points Zed at `kvist-core --acp`. Zed re-reads its settings on its
+own, so there is no restart. By hand, the whole thing is:
+
+```bash
+/path/to/kvist-core --acp
+```
+
+The parity this has with the VS Code and JetBrains integrations — and the list
+of things Zed has no public API for, such as inline completion — is in
+[`zed-acp/README.md`](zed-acp/README.md) ([RU](zed-acp/README.ru.md)).
 
 The VS Code extension is packaged as a `.vsix` from `vscode-extension/`:
 
@@ -403,6 +430,30 @@ Command Prompt. The package is written to `vscode-extension/.build/vsix/` and ca
 be installed with `code --install-extension <file>.vsix` or through Extensions >
 Install from VSIX. Details are in [`vscode-extension/README.md`](vscode-extension/README.md).
 
+## Zed
+
+Zed runs Kvist as an external agent over the Agent Client Protocol: the agent
+process is `kvist-core --acp`, speaking JSON-RPC on stdin/stdout. There is no
+Zed extension and no `extension.toml` — Zed deprecated extension-provided
+agents and the public way to add an agent is a settings entry.
+
+```bash
+.venv/bin/python installer/install_cli.py
+.venv/bin/python installer/install_zed.py
+```
+
+`install_zed.py` writes one `agent_servers` member into Zed's JSONC settings
+file, keeping every comment the user has, and refuses to register a binary that
+is not installed yet. `--uninstall` removes exactly that entry. The agent gets
+the same action loop, sandbox, sessions, confirmations and `/commit-message` as
+the terminal; role, reasoning effort and planning are ACP Session Config
+Options, and everything else (provider, models, style, sandbox mode) stays in
+`~/.kvist/config.json` and the `AGENT_*` variables.
+
+What Zed has no public API for — inline completion as ghost text, a Kvist side
+panel, a commit button in the source-control UI — is listed with the official
+sources in [`zed-acp/README.md`](zed-acp/README.md) ([RU](zed-acp/README.ru.md)).
+
 ## Configuration and boundaries
 
 Global settings live in `~/.kvist/config.json`. Runtime environment variables
@@ -477,4 +528,6 @@ exists.
 - [`gui/README.md`](gui/README.md) — Electron development and packaging;
 - [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md) — IntelliJ plugin;
 - [`vscode-extension/README.md`](vscode-extension/README.md) — VS Code extension;
+- [`zed-acp/README.md`](zed-acp/README.md) — Zed external agent ([RU](zed-acp/README.ru.md));
+- [`installer/README.md`](installer/README.md) — installers ([RU](installer/README.ru.md));
 - [`LICENSE`](LICENSE) — MIT license.

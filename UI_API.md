@@ -93,6 +93,12 @@ one of `auto`, `coder`, `devops`, or `chat`. `--approval-mode` is `ask` or
 - `--session-op …` → one headless session lifecycle operation, JSON out (§8a).
 - `--commit-message` → a commit message for a change payload on stdin, JSON
   out (§8b).
+- `--acp` → the Agent Client Protocol on stdin/stdout, for hosts such as Zed
+  (§8c). The workspace arrives with `session/new`, so `--workspace` is not used.
+  `--login` is valid only with it: configure provider credentials in that
+  terminal and exit. This mode is not an NDJSON event stream and does not use
+  `PROTOCOL_VERSION`; it is a JSON-RPC peer, and what it can and cannot do for
+  a given host is recorded in [`zed-acp/README.md`](zed-acp/README.md).
 
 (During development, without the built binary, use
 `.venv/bin/python main.py --workspace … --frontend stdio`.)
@@ -556,6 +562,34 @@ There is **no `command_result`** for a resumed turn; `turn_end` ends it, and
 `session` tells the frontend which conversation is now active. Like any turn it
 takes no `command` while it runs.
 
+## 8d. The Agent Client Protocol (`--acp`)
+
+`kvist --acp` is a second transport for the same core: a JSON-RPC 2.0 peer
+speaking the [Agent Client Protocol](https://agentclientprotocol.com/) on
+stdin/stdout, for hosts that already implement ACP — Zed is the one this is
+built and documented against.
+
+**None of the NDJSON contract above applies to this mode.** There is no `hello`,
+no `PROTOCOL_VERSION`, and no `TurnEvent`: the wire types come from the ACP
+schema (`session/new`, `session/prompt`, `session/update`, …). `--workspace` is
+not used either — the working directory arrives with `session/new`, and a
+session id is a stable function of that directory plus the session name, so an
+id survives a restart. `--login` is accepted only with `--acp`: it configures
+provider credentials in the launching terminal and exits. **Secrets never
+travel over the ACP connection** — ACP forbids eliciting sensitive data in form
+mode, so a missing key is reported with the command to run, never prompted for
+on the wire.
+
+What the mode implements is the same `LocalAgent` / `SafeExecutor` / session
+store as every other frontend. Its own source files are `acp_frontend.py` (the
+peer) and `acp_events.py` (Kvist events → ACP updates); the mapping from Kvist's
+cumulative snapshots to ACP's append-only deltas lives in the latter.
+
+Capabilities are declared only where the path works end to end — no NES, no MCP
+servers, no image or audio prompts. What a given host can and cannot expose is
+recorded per capability in [`zed-acp/README.md`](zed-acp/README.md)
+([RU](zed-acp/README.ru.md)).
+
 ## 9. Universal frontend dispatch (`frontends.py`)
 
 All non-terminal frontends share the same wiring (`FrontendChannel` →
@@ -667,6 +701,8 @@ Core seam: `ui.py`, `approvals.py`, `terminal_banner.py`.
 Event protocol: `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`,
 `event_stdio.py`, `frontends.py`.
 Headless sessions: `session_store.py` (behind `--session-op`).
+ACP peer (§8d): `acp_frontend.py`, `acp_events.py`.
 Tests: `tests/test_frontend_protocol.py`, `tests/test_event_stream_ui.py`,
 `tests/test_event_session.py`, `tests/test_frontends.py`,
-`tests/test_session_store.py`.
+`tests/test_session_store.py`, `tests/test_acp_frontend.py`,
+`tests/test_acp_events.py`.
