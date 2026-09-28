@@ -121,16 +121,8 @@ class EventStreamUI:
             )
         )
 
-    def print_plan(self, plan_info: Any) -> None:
-        self._channel.emit(
-            PlanEvent(
-                plan_info.goal,
-                plan_info.complexity,
-                list(plan_info.plan),
-                list(plan_info.success_criteria),
-                list(plan_info.risks),
-            )
-        )
+    def print_plan(self, markdown: str) -> None:
+        self._channel.emit(PlanEvent(redact_text(markdown)))
 
     def print_step_header(
         self, step: int, command: Any, reasoning_seconds: float = 0.0

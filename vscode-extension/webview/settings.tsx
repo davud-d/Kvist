@@ -31,7 +31,6 @@ interface Props {
   provider: string
   role: string
   effort: string
-  planning: boolean | null
   environment: Record<string, string> | null
   busy: boolean
   run: (name: string, args?: string[]) => void
@@ -126,7 +125,7 @@ function Environment({ environment, busy, apply }: { environment: Record<string,
   )
 }
 
-export function Settings({ config, provider, role, effort, planning, environment, busy, run, applyEnvironment, close }: Props) {
+export function Settings({ config, provider, role, effort, environment, busy, run, applyEnvironment, close }: Props) {
   useEffect(() => {
     post({ type: "getConfig" })
     post({ type: "getEnvironment" })
@@ -146,7 +145,7 @@ export function Settings({ config, provider, role, effort, planning, environment
         <Row title={current?.label ?? (provider || "Not set")} hint={current && !current.has_credentials ? "API key is missing" : undefined}>
           <button class="btn" disabled={busy} onClick={() => run("provider")}>Change</button>
         </Row>
-        <Row title="Models" hint="Fast, smart and planner">
+        <Row title="Models" hint="Fast and smart">
           <button class="btn" disabled={busy} onClick={() => run("models")}>Choose</button>
         </Row>
         <Row title="API key">
@@ -162,11 +161,6 @@ export function Settings({ config, provider, role, effort, planning, environment
 
       <div class="group-title">Agent</div>
       <div class="group">
-        <Row title="Planning" hint="Plan the task before acting">
-          <button class="switch" role="switch" aria-checked={planning === true} disabled={busy || planning === null} onClick={() => run("plan", [String(!planning)])}>
-            <span class="knob" />
-          </button>
-        </Row>
         <div class="row stack">
           <div class="row-title">Role</div>
           <Segmented options={ROLES} value={role} disabled={busy} pick={(value) => run("role", [value])} />

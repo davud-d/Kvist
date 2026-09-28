@@ -51,7 +51,7 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
   const autoOpened = useRef(false)
   const provider = providers.find((item) => item.id === providerId)
   // A router/gateway provider has no default model list; the id typed or picked here is
-  // used for all three roles (fast/smart/planner), tuneable per role later from Settings.
+  // used for both roles (fast/smart), tuneable per role later from Settings.
   const needsModel = provider?.requires_manual_models === true
   const canRegister = providerId === REGISTERABLE_PROVIDER
   const models = modelList.provider === providerId ? modelList : null

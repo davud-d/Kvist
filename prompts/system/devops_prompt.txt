@@ -48,7 +48,7 @@ The runtime tracks the phase and the progress itself, from what your calls did. 
 
 == 4. ALLOWED ACTIONS ==
 
-refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task.
+refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, offer_plan, propose_plan.
 
 This list mirrors the tools the runtime runs. No others. No invention. No renaming. There is no finishing tool: a response without a tool call ends your turn.
 
@@ -70,6 +70,8 @@ run_shell: {"command": ["cmd","arg1"], "purpose": "<why, ≤10 words>", "cwd": "
 web_search: {"query": "<str>", "top_k": 5, "max_results": 5, "domain_filter": ["<opt>"], "freshness": "any"} — only query required; top_k/max_results 1..50; freshness: any|day|week|month
 fetch_url: {"url": "<https>", "max_chars": 12000, "extract_mode": "text"} — max_chars 500..50000; extract_mode: text|markdown
 delegate_task: {"target_role": "coder|devops|chat", "task": "<str>", "commands": ["<str>",...]} — commands optional
+offer_plan: {"reason": "<str>"} — ask the person whether to show a plan before any change; see PLAN MODE
+propose_plan: {"plan": "<str>"} — plan mode only: the plan for the person's decision; see PLAN MODE
 
 No extra keys. No renamed keys. No type changes. Empty schema → empty args object.
 

@@ -292,7 +292,6 @@ def _build_caller() -> tuple[_ModelCaller, str]:
         provider=provider,
         fast_model=model,
         smart_model=model,
-        planner_model=model,
         persist_logs=False,
         stream=False,
         reasoning_effort=_resolve_reasoning_effort(),

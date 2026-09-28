@@ -97,11 +97,8 @@ function itemText(item: Item): string {
       return ""
     case "user":
       return `**You:** ${item.text}`
-    case "plan": {
-      const lines = [`**Plan** (${item.complexity})`, ...item.steps.map((step, i) => `${i + 1}. ${step}`)]
-      if (item.risks.length > 0) lines.push(`Risks: ${item.risks.join("; ")}`)
-      return lines.join("\n")
-    }
+    case "plan":
+      return `**${item.russian ? "Предложенный план" : "Proposed plan"}**\n\n${item.markdown}`
     case "step":
       return `${verbOf(item.action)}${item.target ? ` ${item.target}` : ""} (no result)`
     case "tool":
@@ -118,6 +115,8 @@ function itemText(item: Item): string {
       return item.text.trim()
     case "note":
       return item.tone === "debug" ? "" : item.text
+    case "done":
+      return ""
   }
 }
 

@@ -47,7 +47,7 @@ def _step(action_type: str, args: dict, plan_step: str = "edit") -> dict:
 
 
 def _coder_agent(agent_factory):
-    agent = agent_factory(skip_planning=True, max_steps=10)
+    agent = agent_factory(max_steps=10)
     real_execute = agent.executor.execute
 
     def execute(command):

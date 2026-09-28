@@ -94,7 +94,7 @@ test("a later, unrelated step is unaffected by an earlier reasoning_commit once 
   const state = feed(
     { type: "reasoning_start", stream_id: "a" },
     { type: "reasoning_commit", stream_id: "a", duration_seconds: 3 },
-    { type: "plan", goal: "g", complexity: "simple", plan: [], success_criteria: [], risks: [] },
+    { type: "plan", markdown: "**Goal**\n- one change" },
     stepEvent("write_file", { path: "a.py" }, { thought: "Independent step", user_message: "" }),
   )
   assert.deepEqual(state.items.map((i) => i.kind), ["thought", "plan", "thought"])
@@ -431,7 +431,7 @@ test("a failed command is a red note with the core's message", () => {
 test("models and session effects reach the header; warnings become notes", () => {
   const next = feed(
     hello,
-    cmdResult({ name: "models", message: `Models updated. / ${TR}`, effects: { provider: "q", models: { fast: "f", smart: "s", planner: "p" }, warnings: [`Careful / ${TR}`] } }),
+    cmdResult({ name: "models", message: `Models updated. / ${TR}`, effects: { provider: "q", models: { fast: "f", smart: "s" }, warnings: [`Careful / ${TR}`] } }),
     cmdResult({ name: "session", message: `Switched to session b. / ${TR}`, effects: { session: "b", changed: true } }),
   )
   assert.equal(next.info.provider, "q")
@@ -633,4 +633,13 @@ test("thinking time shows once per response, not on every call of it", () => {
     result(2, "run_shell", { call_id: "c2" }),
   )
   assert.deepEqual(state.items.map((i) => i.kind), ["thought", "tool", "tool"])
+})
+
+test("a plan event becomes a card that keeps the Markdown and the language of the request", () => {
+  const plan = (text: string) => {
+    const asked = reduce(initialState(), { type: "submit", text })
+    return reduce(asked, { type: "event", event: { type: "plan", markdown: "**Цель**" } }).items.at(-1)
+  }
+  assert.deepEqual({ ...plan("rename the module"), id: 0 }, { id: 0, kind: "plan", markdown: "**Цель**", russian: false })
+  assert.equal(plan("переименуй модуль")?.kind === "plan" && (plan("переименуй модуль") as { russian: boolean }).russian, true)
 })

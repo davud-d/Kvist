@@ -6,7 +6,7 @@ import re
 import textwrap
 from typing import Any
 
-from agent_state import is_unplanned
+from agent_state import PLAN_APPROVED, PLAN_PLANNING
 from language_policy import response_language_name
 from redaction import defang_prompt_boundary_tags
 from system_context import current_time_context
@@ -29,10 +29,8 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Step:": 0,
     "Task language:": 0,
     "User task:": 0,
-    "Plan goal:": 0,
-    "Plan:": 2,
-    "Completed plan steps:": 2,
-    "Success criteria:": 2,
+    "Plan mode:": 0,
+    "Approved plan:": 0,
     "Allowed next actions now:": 0,
     "Known dependency versions:": 3,
     "USER-FACING LANGUAGE:": 0,
@@ -125,10 +123,6 @@ _RUNTIME_TEXT = {
         "step": "Step",
         "task_language": "Task language",
         "user_task": "User task",
-        "plan_goal": "Plan goal",
-        "plan": "Plan",
-        "completed_steps": "Completed plan steps",
-        "success_criteria": "Success criteria",
         "allowed_next_actions": "Allowed next actions now",
         "dependency_versions": "Known dependency versions",
         "web_facts": "Short external facts",
@@ -160,24 +154,21 @@ _RUNTIME_TEXT = {
 }
 
 
-def _plan_block(plan_info: Any, text: dict[str, str]) -> str:
-    """The plan and its success criteria, or nothing when no plan was made.
-
-    The stand-in plan of an unplanned run only restates the task in generic
-    words, and every line of it is one more thing the model reasons about.
-    """
-    if is_unplanned(plan_info):
-        return ""
-    plan_text = "\n".join(f"{index + 1}. {item}" for index, item in enumerate(plan_info.plan))
-    success_text = "\n".join(f"- {item}" for item in plan_info.success_criteria)
-    return f"{text['plan']}:\n{plan_text}\n\n{text['success_criteria']}:\n{success_text}\n\n"
-
-
-def _completed_plan_steps_block(state: Any, text: dict[str, str]) -> str:
-    if is_unplanned(state.plan_info):
-        return ""
-    completed = ", ".join(sorted(state.completed_plan_steps)) or text["none"]
-    return f"{text['completed_steps']}: {completed}\n\n"
+def _plan_mode_block(state: Any) -> str:
+    """What plan mode currently means for the run, or nothing outside it."""
+    if state.plan_phase == PLAN_PLANNING:
+        return (
+            "Plan mode:\n"
+            "The person asked for a plan before any change. Files stay read-only until "
+            "your plan is accepted: explore with read-only calls, then call propose_plan.\n\n"
+        )
+    if state.plan_phase == PLAN_APPROVED and state.approved_plan:
+        return (
+            f"Approved plan:\n{state.approved_plan}\n\n"
+            "The person accepted this plan. Carry it out; when the facts show a step "
+            "cannot work, say so in your text and adjust instead of following it blindly.\n\n"
+        )
+    return ""
 
 
 def _required_next_actions_block(state: Any, text: dict[str, str]) -> str:
@@ -217,6 +208,13 @@ def _read_files_out_of_view(state: Any) -> list[str]:
     return [path for path in state.files_read[-8:] if path not in in_view]
 
 
+_PLAN_OUTCOME_STATUS = {
+    "declined": "the person declined a plan for this turn and asked to start right away",
+    "not_accepted": "the person did not accept the plan this turn ended with; nothing was changed",
+    "approved": "the person approved a plan for this turn",
+}
+
+
 def render_session_history(history: Any, *, include_outputs: bool) -> str:
     """Render earlier turns of this session as one trimmable prompt section.
 
@@ -243,6 +241,9 @@ def render_session_history(history: Any, *, include_outputs: bool) -> str:
                 "  status: the user stopped this turn before it finished; "
                 "its remaining work was not done"
             )
+        plan_status = _PLAN_OUTCOME_STATUS.get(str(entry.get("plan_outcome", "")))
+        if plan_status:
+            lines.append(f"  status: {plan_status}")
         result = str(entry.get("result", "")).strip()
         if result:
             lines.append("  agent answered:")
@@ -270,7 +271,6 @@ def _indent_turn_text(text: str) -> str:
 
 
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
-    assert self._state.plan_info is not None
     text = _RUNTIME_TEXT["en"]
     response_language = (
         self._state.response_language
@@ -281,7 +281,6 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     # ── static prefix (computed once per run, cached) ──────────
     cached_prefix = self._state.cached_static_prompt
     if not cached_prefix:
-        plan_block = _plan_block(self._state.plan_info, text)
         dependency_versions = self._format_dependency_versions_for_prompt("en")
         current_time = current_time_context()["current_time"]
         system_lines = [
@@ -310,8 +309,6 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             f"{text['task_language']}: {response_language_name(response_language)}\n\n"
             f"{text['user_task']}:\n{user_goal}\n\n"
         )
-        if self._state.plan_info.goal.strip() != user_goal.strip():
-            cached_prefix += f"{text['plan_goal']}:\n{self._state.plan_info.goal}\n\n"
         language_block = (
             "USER-FACING LANGUAGE:\n"
             "- Tool names, argument keys, and tool schemas are always English.\n"
@@ -326,7 +323,6 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
                 "Example for a read task: \"В `hello.txt`:\\n\\nHello\"\n"
             )
         cached_suffix = (
-            f"{plan_block}"
             f"{text['dependency_versions']}:\n{dependency_versions}\n\n"
             f"{language_block}\n"
             f"{text['error_instruction']}\n\n"
@@ -376,7 +372,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
 
     dynamic = (
         f"{text['step']}: {step}\n\n"
-        f"{_completed_plan_steps_block(self._state, text)}"
+        f"{_plan_mode_block(self._state)}"
         f"{_required_next_actions_block(self._state, text)}"
         f"{text['web_facts']}:\n{web_facts}\n\n"
         f"{text['step_summaries']}:\n{rolling_summaries_text}\n\n"
@@ -445,12 +441,6 @@ def truncate_for_prompt(self, text: str, limit: int) -> str:
 
 def build_summary(self, language: str = "en") -> str:
     parts = []
-
-    if self._state.plan_info and not is_unplanned(self._state.plan_info):
-        parts.append(
-            f"Completed plan steps: {self._effective_completed_plan_steps()}"
-            f"/{len(self._state.plan_info.plan)}"
-        )
 
     if self._state.run_status == "blocked" or self._state.completion_blockers:
         parts.append(f"Status: blocked ({self._state.progress}% done)")

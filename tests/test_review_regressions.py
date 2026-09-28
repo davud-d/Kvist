@@ -247,7 +247,7 @@ from pathlib import Path
 from agent import LocalAgent
 from agent_state import AgentConfig
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient, NullUI, make_plan
+from tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
 agent = LocalAgent(FakeLLMClient(), SafeExecutor(ws),
@@ -278,7 +278,6 @@ agent._save_checkpoint = crashing_save
 
 agent._state.current_agent_role = "coder"
 agent.executor.set_active_role("coder")
-agent._state.plan_info = make_plan()
 agent._run_loop("append hello to out.txt", start_step=1)
 print("NO_CRASH")
 '''

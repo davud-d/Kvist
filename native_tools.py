@@ -140,6 +140,16 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         },
         ("target_role", "task"),
     ),
+    "offer_plan": ToolSpec(
+        "Ask the person whether to show a plan before any change. Shown to them with your reason.",
+        {"reason": {"type": "string", "description": "One or two sentences, in the person's language: why a plan helps here."}},
+        ("reason",),
+    ),
+    "propose_plan": ToolSpec(
+        "Show the person your plan for their decision. Only in plan mode, after exploring read-only.",
+        {"plan": {"type": "string", "description": "Short Markdown: goal, key changes, how you will verify, assumptions."}},
+        ("plan",),
+    ),
 }
 
 READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.readonly)

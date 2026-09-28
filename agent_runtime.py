@@ -52,7 +52,7 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
     return None
 
 from action_result import SKIPPED_ERROR, build_action_result
-from agent_state import RunCancelled, RunState, is_unplanned
+from agent_state import PLAN_PLANNING, RunCancelled, RunState
 from executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from call_labels import call_label
 from native_tools import (
@@ -74,8 +74,9 @@ from parser import (
 )
 from protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from agent_planner import asks_for_explanation, infer_task_kind, is_create_goal
+import plan_mode
 from role_router import has_change_verb, has_no_write_marker
+from task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -83,11 +84,15 @@ _READ_ONLY_ACTIONS = {
 }
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
+# Beyond the file reads, what plan mode still allows: it asks the person and
+# looks things up, and never changes the workspace.
+_PLANNING_EXTRA_ACTIONS = {
+    "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "refuse",
+}
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
-# Floor per declared phase, used only when there is no plan to count completed
-# steps against (planning disabled). "done" is absent: 100 belongs to the
-# terminal action, not to a phase label.
+# Progress floor per phase the core derives from a response's calls. "done" is
+# absent: 100 belongs to the terminal action, not to a phase label.
 _PLAN_STEP_BANDS = {"inspect": 15, "plan": 30, "edit": 55, "verify": 85}
 
 _FINISH_ACTIONS = {"final_answer", "report_to_user"}
@@ -165,7 +170,6 @@ _BLOCKER_LABELS = {
     "destructive": ("массовое удаление — нужна сверка", "mass deletion — needs review"),
     "not_created": ("файл ещё не создан", "file not created yet"),
     "not_modified": ("правки ещё не внесены", "no changes made yet"),
-    "plan_incomplete": ("план не завершён", "plan not finished"),
     "artifacts_missing": ("не хватает файлов", "required files missing"),
     "unverified": ("ждёт проверки правок", "changes not verified"),
     "no_changes": ("файлы не изменены", "no file changed"),
@@ -199,18 +203,13 @@ def _extend_step_budget(self) -> bool:
     return True
 
 
-def _plan_position(self) -> dict[str, Any]:
+def _run_position(self) -> dict[str, Any]:
     """Measured facts the live panel shows in place of a declared percentage.
 
-    Position in the plan, the plan step still being worked on, why completion
-    is being withheld, and how close the run is to the stagnation limit.
+    Why completion is being withheld, how close the run is to the stagnation
+    limit, and the step budget.
     """
-    plan = self._state.plan_info.plan if self._state.plan_info else []
-    remaining = _remaining_plan_steps(self)
     return {
-        "plan_done": len(plan) - len(remaining),
-        "plan_total": len(plan),
-        "plan_current": remaining[0] if remaining else "",
         "blocker": _first_blocker_label(self),
         "stall": self._state.stagnation_count,
         "stall_limit": self.config.stagnation_limit,
@@ -302,37 +301,7 @@ _UNSAFE_SQLITE_STATEMENT_RE = re.compile(
 )
 
 _ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
-# "check if/whether X" is a question about existing state, answered by reading;
-# a bare "check" stays a verification step that only a change can precede.
-_PLAN_INSPECT_RE = re.compile(r"inspect|read|review|analy|check (?:if|whether)|find|tree|search|провер|прочит|просмотр|найти|структур|поиск")
-_PLAN_DELEGATE_RE = re.compile(r"delegat|hand ?off|hand (?:it |the \w+ )?over|делегир|передат")
-# "Заменить a - b на a + b" once matched none of these, so a completed
-# replace_in_file never closed its plan step and every report was refused as
-# "plan not complete" until the model rewrote the same file to please it.
-_PLAN_EDIT_RE = re.compile(
-    r"create|write|build|implement|integrat|develop|design|enhanc|fix|edit|change|add|setup|configure|scaffold"
-    r"|replac|renam|rewrit|refactor|patch|modif|updat|remov|delet"
-    # Narrow Russian stems: "правк" also matches "справка", "удал" also
-    # "удалённый сервер" — and this pattern also decides whether a task must
-    # change files at all.
-    r"|созда|запис|измен|обнов|добав|исправ|замен|переимен|перепис|поправ|почин|удали|удаля|убра|убер"
-)
-_PLAN_VERIFY_RE = re.compile(r"verify|check|test|run|compile|import|syntax|launch|провер|запуст|компил|синтакс|импорт")
-_PLAN_REPORT_RE = re.compile(r"report|summary|summari|document|final|отчет|отчёт|сводк|резюм|итог|вывест|отображ|показ|результат|представ|вывод")
 _VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|python(?:3)?\s+\S+\.py(?:\s|$)|uv\s+run|node\s+--check")
-_SEMANTIC_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
-_PLAN_STRUCTURE_INSPECT_RE = re.compile(r"structure|directory|workspace|tree|структур|директор|дерев|корне")
-_PLAN_EXISTS_RE = re.compile(r"^(if\s+.+\s+exists\b|если\s+.+\s+существ)")
-_PLAN_NOT_EXISTS_RE = re.compile(r"^(if\s+.+\s+(does not exist|is missing)\b|если\s+.+\s+не\s+существ)")
-
-_PLAN_STOPWORDS = {
-    "with", "from", "into", "over", "under", "about", "this", "that", "then", "than",
-}
-
-_HIGH_SIGNAL_TERMS = {
-    "crm", "ux", "ui", "api", "sdk", "sql", "db", "bot",
-    "telegr", "telegram", "admin", "payme", "reply",
-}
 
 _SYSTEMD_UNIT_NOT_FOUND_RE = re.compile(
     r"Unit\s+\S+\.service\s+could\s+not\s+be\s+found",
@@ -362,7 +331,7 @@ def _build_report_context(
         "files_changed": state.files_changed,
         "files_read": state.files_read,
         "commands_run": [e for e in state.recent_events[-20:] if "run_shell" in e or "executed" in e],
-        "plan_steps": state.plan_info.plan if state.plan_info else [],
+        "approved_plan": state.approved_plan,
         "errors": state.error_history[-5:] if state.error_history else [],
     }
     safe_context = redact_value(context)
@@ -546,12 +515,12 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.modify_goal = modify_goal
     self._state.read_only_goal = read_only_goal
     self._state.verify_only_goal = verify_only_goal
-    self._state.report_goal = _resolve_report_goal(self, user_goal)
+    self._state.report_goal = _is_report_goal(user_goal)
     # "check if main.py exists" names a file it must not be required to create.
     if not self._state.required_artifacts and not (read_only_goal or verify_only_goal):
         self._state.required_artifacts = _anchor_artifacts(
             Path(self.executor.workspace),
-            _extract_required_artifacts(user_goal, self._state.plan_info),
+            _extract_required_artifacts(user_goal),
         )
     self._refresh_completion_requirements()
     self._state.step_budget = max(self._state.step_budget, self.config.max_steps)
@@ -715,9 +684,9 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     from agent_model import _load_role_prompt, build_role_system_prompt, call_native_action_model
 
     state = self._state
+    role = state.current_agent_role
+    state.native_tool_defs = plan_mode.tools_for_phase(tools_for_role(_load_role_prompt(role)), self)
     if not state.native_messages:
-        role = state.current_agent_role
-        state.native_tool_defs = tools_for_role(_load_role_prompt(role))
         state.native_messages = [
             {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},
             {"role": "user", "content": self._build_runtime_prompt(user_goal, step) + OPENING_NOTE},
@@ -744,7 +713,7 @@ def _note_unchanged_run(state: RunState) -> None:
     is a fact about its own work, not an order: what it means is the
     model's to weigh. A read-only task is expected to only read, so it gets none.
     """
-    if state.files_changed or not (state.modify_goal or state.create_goal):
+    if state.files_changed or state.plan_phase == PLAN_PLANNING or not (state.modify_goal or state.create_goal):
         return
     calls = sum(1 for message in state.native_messages if message.get("role") == "tool")
     mark = calls // _UNCHANGED_NOTE_EVERY
@@ -801,6 +770,12 @@ def _register_empty_response(self) -> _ActionOutcome:
 
 def _finish_turn(self, user_goal: str, step: int, text: str) -> _ActionOutcome:
     """A response without calls ends the turn: its text is the answer, through the finish gates."""
+    if self._state.plan_phase == PLAN_PLANNING:
+        self._state.pending_instruction = (
+            "Plan mode is on, so the turn ends with propose_plan: it is how the person sees "
+            "your plan and answers the questions in it. Put open questions in the plan."
+        )
+        return _BLOCKED
     command = AgentCommand(
         plan_step="done",
         action=Action(
@@ -1116,7 +1091,22 @@ def _run_one_action(
 
     if command.action.type == "report_to_user":
         return _finish_with_report(self, user_goal, step, command)
+    if command.action.type in plan_mode.PLAN_ACTIONS:
+        return _run_plan_action(self, step, command)
     return _execute_action(self, user_goal, step, command)
+
+
+def _run_plan_action(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    """offer_plan / propose_plan: a dialog with the person instead of an executor call."""
+    run = plan_mode.offer_plan if command.action.type == "offer_plan" else plan_mode.propose_plan
+    result = run(self, command)
+    outcome = _finish_action(self, step, command, result.feedback)
+    if result.instruction:
+        self._state.pending_instruction = result.instruction
+    if result.ended:
+        plan = str(command.action.args["plan"]).strip()
+        return _ActionOutcome(finished=True, final_message=plan_mode.ended_message(self._state, plan))
+    return outcome
 
 
 def _prepare_action(self, user_goal: str, step: int, command: AgentCommand) -> bool:
@@ -1144,7 +1134,7 @@ def _prepare_action(self, user_goal: str, step: int, command: AgentCommand) -> b
         action=command.action.description or command.action.type,
         files_changed=len(self._state.files_changed),
         model_tier=self._state.selected_action_role or "fast",
-        **_plan_position(self),
+        **_run_position(self),
     )
     self._ui.update_live(
         user_message=command.action.description,
@@ -1195,6 +1185,7 @@ def _reject_before_execution(self, step: int, command: AgentCommand) -> bool:
         or _reject_repeated_action(self, step, command)
         or _reject_report_artifact(self, step, command)
         or _reject_read_only_violation(self, step, command)
+        or _reject_plan_misuse(self, step, command)
     )
 
 
@@ -1291,13 +1282,38 @@ def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
     return True
 
 
+def _reject_plan_misuse(self, step: int, command: AgentCommand) -> bool:
+    if command.action.type not in plan_mode.PLAN_ACTIONS:
+        return False
+    reason = plan_mode.rejection_reason(self, command)
+    if not reason:
+        return False
+    self._register_feedback(step, command, {"ok": False, "action_type": command.action.type, "error": reason})
+    self._ui.update_live(
+        user_message=command.action.description,
+        status="plan action refused",
+        step=step,
+        progress=self._state.progress,
+        plan_step=command.plan_step,
+        is_error=True,
+    )
+    return True
+
+
 def _reject_read_only_violation(self, step: int, command: AgentCommand) -> bool:
     if not self._is_read_only_violation(command):
         return False
+    if self._state.plan_phase == PLAN_PLANNING:
+        error = (
+            "Plan mode: files stay read-only until the person accepts your plan. Explore with "
+            "read-only calls, then call propose_plan."
+        )
+    else:
+        error = "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then give your final answer (a response with no tool call)."
     feedback = {
         "ok": False,
         "action_type": command.action.type,
-        "error": "This is a read-only/verify task. File modifications are not allowed. Use read-only actions (read_file, find_files, list_dir, git_status) and then give your final answer (a response with no tool call).",
+        "error": error,
     }
     self._register_feedback(step, command, feedback)
     self._ui.update_live(
@@ -1513,6 +1529,7 @@ def _finish_action(
         and ok
         and command.action.type in _READ_ONLY_ACTIONS
         and self._state.read_only_streak >= 2
+        and self._state.plan_phase != PLAN_PLANNING
     ):
         self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
 
@@ -1762,8 +1779,6 @@ def register_feedback(
                 f"systemctl_status: {service_name} not found",
                 limit=12,
             )
-            # Mark related plan inspection steps as completed
-            self._update_completed_plan_steps(command, feedback.get("data", {}))
             self._state.pending_instruction = (
                 f"TERMINAL CONDITION: systemctl reports that {service_name} service "
                 "is not found on this system. This IS the answer — the service unit "
@@ -1940,7 +1955,6 @@ def update_state_from_success(
 ) -> None:
     action_type = command.action.type
     data = feedback.get("data", {})
-    self._update_completed_plan_steps(command, data)
 
     if action_type == "read_file":
         path = str(data.get("path", "")).strip()
@@ -2054,11 +2068,10 @@ def update_state_from_success(
 def update_progress(self, command: AgentCommand, ok: bool) -> None:
     """Advance progress from evidence only, never from a model-declared number.
 
-    Completed plan steps are the real measure; the plan_step band is the
-    fallback for runs with planning turned off, where there is no plan to
-    count against. Both are monotonic, so progress never walks backwards.
+    The phase of the response's calls sets a floor; progress is monotonic, so
+    it never walks backwards.
     """
-    target_progress = max(self._state.progress, self._plan_progress())
+    target_progress = self._state.progress
 
     if ok:
         target_progress = max(target_progress, _PLAN_STEP_BANDS.get(command.plan_step, 0))
@@ -2069,9 +2082,6 @@ def update_progress(self, command: AgentCommand, ok: bool) -> None:
 
 def register_final_answer(self, step: int, message: str) -> None:
     incomplete = self._state.finished_incomplete
-    if not incomplete:
-        for item in _report_plan_steps(self):
-            self._state.completed_plan_steps.add(item)
     self._refresh_completion_requirements()
     self._state.progress = _blocked_progress(self) if incomplete else 100
     self._state.run_status = "blocked" if incomplete else "completed"
@@ -2096,13 +2106,6 @@ def register_safety_refusal(self, step: int, reason: str) -> None:
         }
     )
     self._ui.debug_print(f"Result: safety refusal at step {step}: {reason}")
-
-
-def plan_progress(self) -> int:
-    if not self._state.plan_info or not self._state.plan_info.plan:
-        return self._state.progress
-    total = len(self._state.plan_info.plan)
-    return round(_effective_completed_plan_steps(self) / total * 100)
 
 
 def record_error(self, error_text: str) -> None:
@@ -2478,135 +2481,6 @@ def push_bounded(self, items: list[str], value: str, limit: int) -> None:
     del items[:-limit]
 
 
-def update_completed_plan_steps(self, command: AgentCommand, data: dict[str, Any]) -> None:
-    plan_info = self._state.plan_info
-    if not plan_info:
-        return
-
-    touched_paths = {
-        str(data.get("path", "")).strip(),
-        str(command.action.args.get("path", "")).strip(),
-    }
-    touched_paths = {path for path in touched_paths if path}
-
-    matched_items = _collect_matching_plan_items(
-        command,
-        data,
-        plan_info.plan,
-        self._state.completed_plan_steps,
-        touched_paths,
-        self._state.files_changed,
-    )
-    for item in matched_items:
-        self._state.completed_plan_steps.add(item)
-
-
-def _collect_matching_plan_items(
-    command: AgentCommand,
-    data: dict[str, Any],
-    plan_items: list[str],
-    completed_items: set[str],
-    touched_paths: set[str],
-    files_changed: list[str],
-) -> list[str]:
-    evidence_text = _build_plan_evidence_text(command, data, touched_paths)
-    semantic_matches: list[str] = []
-    fallback_match: str | None = None
-
-    for item in plan_items:
-        if item in completed_items:
-            continue
-        normalized = item.casefold()
-        action_match = _plan_item_matches_action(normalized, command.action.type, files_changed)
-        if any(path.casefold() in normalized for path in touched_paths):
-            semantic_matches.append(item)
-            continue
-        if _plan_item_matches_paths(normalized, touched_paths):
-            semantic_matches.append(item)
-            continue
-        if action_match and _plan_item_semantically_matches(normalized, evidence_text):
-            semantic_matches.append(item)
-            continue
-        if action_match:
-            fallback_match = item
-            if command.action.type not in _WRITE_ACTIONS:
-                break
-
-    if semantic_matches:
-        return semantic_matches
-    return [fallback_match] if fallback_match else []
-
-
-def _build_plan_evidence_text(command: AgentCommand, data: dict[str, Any], touched_paths: set[str]) -> str:
-    parts = [
-        command.text,
-        command.action.description,
-        command.plan_step,
-        str(command.action.type),
-        " ".join(sorted(touched_paths)),
-    ]
-
-    for key in ("path", "query", "pattern", "url"):
-        value = command.action.args.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value)
-
-    for key in ("content", "new_text", "old_text"):
-        value = command.action.args.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value[:4000])
-
-    for key in ("path", "query", "pattern", "url", "content", "title"):
-        value = data.get(key)
-        if isinstance(value, str) and value.strip():
-            parts.append(value[:4000])
-
-    return "\n".join(part for part in parts if part)
-
-
-def _plan_item_semantically_matches(item: str, evidence_text: str) -> bool:
-    if not evidence_text.strip():
-        return False
-
-    item_terms = _extract_semantic_terms(item)
-    if not item_terms:
-        return False
-
-    evidence_terms = _extract_semantic_terms(evidence_text)
-    if not evidence_terms:
-        return False
-
-    matched = item_terms & evidence_terms
-    if len(matched) >= 2:
-        return True
-    return bool(matched & _HIGH_SIGNAL_TERMS)
-
-
-def _extract_semantic_terms(text: str) -> set[str]:
-    terms: set[str] = set()
-    for raw_token in _SEMANTIC_TOKEN_RE.findall(text):
-        lowered = raw_token.casefold()
-        if lowered in _PLAN_STOPWORDS:
-            continue
-        normalized = _normalize_semantic_token(lowered)
-        if not normalized:
-            continue
-        terms.add(normalized)
-    return terms
-
-
-def _normalize_semantic_token(token: str) -> str:
-    if token in {"ux", "ui", "crm", "api", "sdk", "sql", "db"}:
-        return token
-    if len(token) <= 2:
-        return ""
-    if len(token) >= 9:
-        return token[:6]
-    if len(token) >= 6:
-        return token[:5]
-    return token
-
-
 def _diff_change_counts(diff_text: str) -> tuple[int, int]:
     """Count removed and added content lines in a unified diff.
 
@@ -2740,6 +2614,7 @@ def refresh_completion_requirements(self, force_enforcement: bool = False) -> No
         self._state.create_goal
         and not self._state.files_changed
         and self._state.read_only_streak >= 2
+        and self._state.plan_phase != PLAN_PLANNING
     ):
         self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
         return
@@ -2772,6 +2647,8 @@ def register_blocked_action(self, command: AgentCommand) -> int:
 def required_followup_error(self, command: AgentCommand) -> str | None:
     required_actions = set(self._state.required_next_actions)
     if not required_actions or command.action.type in required_actions:
+        return None
+    if command.action.type in plan_mode.PLAN_ACTIONS:
         return None
     if command.action.type in _FINISH_ACTIONS and _is_incomplete_finish(command):
         return None
@@ -2810,7 +2687,9 @@ def _is_report_artifact_blocked(self, command: AgentCommand) -> bool:
 
 
 def _is_read_only_violation(self, command: AgentCommand) -> bool:
-    """Block write actions on a run the user or the role made read-only."""
+    """Block write actions on a run the user, the role or plan mode made read-only."""
+    if self._state.plan_phase == PLAN_PLANNING:
+        return not _allowed_while_planning(command)
     if not self._state.read_only_goal:
         return False
 
@@ -2832,6 +2711,16 @@ def _is_read_only_violation(self, command: AgentCommand) -> bool:
         return not _is_safe_read_only_shell_command(command_parts)
 
     return False
+
+
+def _allowed_while_planning(command: AgentCommand) -> bool:
+    action_type = command.action.type
+    if action_type == "run_shell":
+        return _is_safe_read_only_shell_command(command.action.args.get("command", []))
+    return (
+        action_type in _READ_ONLY_ACTIONS
+        or action_type in _PLANNING_EXTRA_ACTIONS
+    )
 
 
 def set_required_next_actions(self, actions: set[str] | list[str], message: str) -> None:
@@ -2922,27 +2811,17 @@ def _is_verify_only_goal(user_goal: str) -> bool:
     return any(_token_match(marker, lowered) for marker in en_token_markers)
 
 
-def _resolve_report_goal(self, user_goal: str) -> bool:
-    """A report task expects a substantive spoken answer, not just a mutation.
-
-    The planner already classifies task intent, so its ``task_kind`` is the
-    source of truth. The keyword heuristic (``_is_report_goal``) is used only
-    when the planner produced no usable classification (e.g. the planner call
-    failed), so intent detection is not duplicated in two live code paths.
-    """
-    plan = self._state.plan_info
-    task_kind = getattr(plan, "task_kind", "") if plan is not None else ""
-    if task_kind in {"report", "action"}:
-        return task_kind == "report"
+def _is_report_goal(user_goal: str) -> bool:
+    """A report task expects a substantive spoken answer, not just a mutation."""
+    task_kind = infer_task_kind(user_goal)
     # A change that also asks for an explanation still owes the explanation.
     if task_kind == "change":
         return asks_for_explanation(user_goal)
-    return _is_report_goal(user_goal)
+    return task_kind == "report"
 
 
-def _is_report_goal(user_goal: str) -> bool:
-    """Fallback keyword heuristic for 'report vs action'. See _resolve_report_goal."""
-    return infer_task_kind(user_goal) == "report"
+def _expects_file_changes(self) -> bool:
+    return infer_task_kind(self._state.user_goal) == "change"
 
 
 def _is_substantive_answer(message: str) -> bool:
@@ -3034,8 +2913,7 @@ def _build_completion_hint(self) -> str:
     return hint
 
 
-def _extract_required_artifacts(user_goal: str, plan_info: Any) -> list[str]:
-    # Requirement: only from user_goal, not from plan_info.plan
+def _extract_required_artifacts(user_goal: str) -> list[str]:
     candidates: list[str] = []
     
     # Extensions to consider as artifacts
@@ -3288,13 +3166,6 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
             "final_answer", "report_to_user",
         })
     missing = _missing_required_artifacts(self)
-    remaining_plan_steps = _remaining_plan_steps(self)
-    actionable_remaining_plan_steps = [
-        item for item in remaining_plan_steps
-        if not _PLAN_REPORT_RE.search(item.casefold())
-        and not _plan_step_is_non_blocking_after_progress(self, item)
-        and not _plan_step_is_unreachable_by_any_action(item)
-    ]
     verify_only_complete = (
         self._state.verify_only_goal
         and not self._state.files_changed
@@ -3310,26 +3181,6 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
         kinds.append("not_modified")
         blockers.append(_build_missing_implementation_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
-
-    if (
-        not verify_only_complete
-        and not self._state.read_only_goal
-        and not self._state.files_changed
-        and _plan_requires_file_changes(self)
-    ):
-        kinds.append("not_modified")
-        blockers.append(_build_missing_implementation_error(self._state.task_language))
-        required_actions.update(_WRITE_ACTIONS)
-
-    if actionable_remaining_plan_steps and not verify_only_complete:
-        kinds.append("plan_incomplete")
-        blockers.append(_build_incomplete_plan_error(self._state.task_language, actionable_remaining_plan_steps))
-        if all(_PLAN_VERIFY_RE.search(item.casefold()) for item in actionable_remaining_plan_steps):
-            required_actions.update(_VERIFY_ONLY_ACTIONS)
-        elif _plan_requires_file_changes(self):
-            required_actions.update(_WRITE_ACTIONS)
-        # else: info-gathering / devops task — don't force write actions,
-        # let the agent continue with whatever actions are appropriate
 
     if missing and not (self._state.read_only_goal and not self._state.files_changed):
         kinds.append("artifacts_missing")
@@ -3361,31 +3212,25 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
 
 
 def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
-    """Blockers that hold regardless of plan-step accounting.
-
-    Loose plan-step matching can mark every step complete on a run that read
-    and changed nothing, which silences every plan-based blocker. These checks
-    look only at hard evidence (files touched, recorded errors, denials).
-    """
+    """Blockers that look only at hard evidence (files touched, recorded errors, denials)."""
     st = self._state
     ru = st.task_language == "ru"
     out: list[tuple[str, str]] = []
 
-    # The planner's word that the result is a change to files is not second-
-    # guessed: whatever the last call did, nothing changed means not done.
-    # The keyword guesses keep their exceptions for read-only and verify-only
+    # A request whose result is a change to files is not second-guessed:
+    # whatever the last call did, nothing changed means not done. The other
+    # keyword guesses keep their exceptions for read-only and verify-only
     # runs, since they can mistake a question for an edit.
-    change_by_plan = _plan_expects_changes(self)
+    change_by_intent = _expects_file_changes(self)
     change_task = (
-        change_by_plan
+        change_by_intent
         or st.create_goal
         or st.modify_goal
         or bool(st.required_artifacts)
-        or _plan_requires_file_changes(self)
     )
     verify_only_done = st.verify_only_goal and bool(st.verification_evidence)
     guessed_change_open = change_task and not st.read_only_goal and not verify_only_done
-    if not st.files_changed and (change_by_plan or guessed_change_open):
+    if not st.files_changed and (change_by_intent or guessed_change_open):
         out.append((
             "no_changes",
             "Completion blocked: this task changes files but files_changed is empty. "
@@ -3427,31 +3272,8 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
     return out
 
 
-def _effective_completed_plan_steps(self) -> int:
-    """Completed plan steps that survive scrutiny.
-
-    On a clean run this is the raw matched count. On a blocked run the loose
-    matcher is not trusted: without a file change or verification evidence
-    nothing is closed, and the count can never exceed (total - remaining).
-    """
-    plan_info = self._state.plan_info
-    if not plan_info or not plan_info.plan or is_unplanned(plan_info):
-        return 0
-    total = len(plan_info.plan)
-    done = len(self._state.completed_plan_steps & set(plan_info.plan))
-    if not self._state.completion_blockers:
-        return max(0, min(done, total))
-    if not self._state.files_changed and not self._state.verification_evidence:
-        return 0
-    remaining = len(_remaining_plan_steps(self))
-    return max(0, min(done, total - remaining))
-
-
 def _blocked_progress(self) -> int:
-    plan_info = self._state.plan_info
-    if not plan_info or not plan_info.plan:
-        return min(self._state.progress, 99)
-    return round(_effective_completed_plan_steps(self) / len(plan_info.plan) * 100)
+    return min(self._state.progress, 99)
 
 
 def seal_run_status(self) -> None:
@@ -3498,84 +3320,10 @@ def update_recovery_tracking(self, command: AgentCommand, ok: bool, error_text: 
         self._state.recovery_pending = False
 
 
-def _plan_expects_changes(self) -> bool:
-    plan_info = self._state.plan_info
-    return plan_info is not None and plan_info.task_kind == "change"
-
-
-def _plan_requires_file_changes(self) -> bool:
-    plan_info = self._state.plan_info
-    if not plan_info or not plan_info.plan:
-        return self._state.create_goal
-    return any(_PLAN_EDIT_RE.search(item.casefold()) for item in plan_info.plan)
-
-
-def _remaining_plan_steps(self) -> list[str]:
-    plan_info = self._state.plan_info
-    if not plan_info:
-        return []
-    return [
-        item for item in plan_info.plan
-        if item not in self._state.completed_plan_steps
-        and not _plan_step_resolved_by_alternative_branch(self, item)
-    ]
-
-
-def _report_plan_steps(self) -> list[str]:
-    return [
-        item for item in _remaining_plan_steps(self)
-        if _PLAN_REPORT_RE.search(item.casefold())
-    ]
-
-
-def _plan_item_matches_action(item: str, action_type: str, files_changed: list[str]) -> bool:
-    if action_type in _WRITE_ACTIONS:
-        return bool(_PLAN_EDIT_RE.search(item))
-    if action_type in {"read_file", "read_multiple_files", "list_dir", "list_tree", "find_files", "search_code", "web_search", "fetch_url"}:
-        if files_changed and _PLAN_VERIFY_RE.search(item):
-            return True
-        return bool(_PLAN_INSPECT_RE.search(item))
-    if action_type in {"git_status", "git_diff", "run_shell"}:
-        # run_shell is the universal devops action — matches inspect, edit, or verify steps
-        return True
-    if action_type == "delegate_task":
-        return bool(_PLAN_DELEGATE_RE.search(item))
-    return False
-
-
-def _plan_item_matches_paths(item: str, touched_paths: set[str]) -> bool:
-    for path in touched_paths:
-        lowered = path.casefold()
-        parts = [part for part in lowered.split("/") if part]
-        if lowered.startswith("handlers/") and "handlers/" in item:
-            return True
-        if lowered.startswith("keyboards/") and "keyboards/" in item:
-            return True
-        if lowered.startswith("db/") and "db/" in item:
-            return True
-        if lowered == "main.py" and "main.py" in item:
-            return True
-        if len(parts) >= 2:
-            parent = parts[0] + "/"
-            if parent in item:
-                return True
-    return False
-
-
 def _build_missing_artifacts_error(language: str, missing: list[str]) -> str:
     joined = ", ".join(missing[:8])
     return (
         f"Task cannot finish as done: the task names these workspace files and they do not exist yet: {joined}. "
-        f"{_HONEST_EXIT_HINT}"
-    )
-
-
-def _build_incomplete_plan_error(language: str, remaining_steps: list[str]) -> str:
-    preview = "; ".join(remaining_steps[:3])
-    if len(remaining_steps) > 3:
-        preview += f"; {len(remaining_steps) - 3} more"
-    return (
-        f"Task cannot finish as done: the execution plan is not complete yet. Remaining: {preview}. "
         f"{_HONEST_EXIT_HINT}"
     )
 
@@ -3654,67 +3402,6 @@ def _build_git_fallback_instruction(language: str) -> str:
         "Git is unavailable or the repo is not initialized. Do not fail the task: "
         "switch to list_tree, read_file, find_files, or run_shell to verify structure, syntax, and execution."
     )
-
-
-def _plan_step_resolved_by_alternative_branch(self, item: str) -> bool:
-    normalized = item.casefold().strip()
-    if not normalized:
-        return False
-
-    completed = {step.casefold().strip() for step in self._state.completed_plan_steps}
-    if not completed:
-        return False
-
-    if _PLAN_EXISTS_RE.match(normalized):
-        return any(_PLAN_NOT_EXISTS_RE.match(step) for step in completed)
-    if _PLAN_NOT_EXISTS_RE.match(normalized):
-        return any(_PLAN_EXISTS_RE.match(step) for step in completed)
-    return False
-
-
-def _plan_step_is_unreachable_by_any_action(item: str) -> bool:
-    """Whether no action in the protocol could ever mark *item* complete.
-
-    Plan steps are matched to actions by vocabulary. A planner writing an
-    analysis task produces judgement steps — "Оценить инсталляторы по
-    критериям", "Сопоставить документацию с кодом" — that name no inspect,
-    edit, verify or report verb, so nothing the agent can do will ever complete
-    them. Left blocking, they deadlock the run: completion stays forbidden
-    forever while the model is told the plan is unfinished, so it keeps
-    inspecting and re-reads the same files until the step budget dies.
-
-    Such a step is not skipped work; its deliverable *is* the final answer. It
-    simply cannot be a gate. Every gate that a real action could satisfy is
-    untouched.
-    """
-    normalized = item.casefold().strip()
-    if not normalized:
-        return False
-    return not any(
-        pattern.search(normalized)
-        for pattern in (_PLAN_INSPECT_RE, _PLAN_EDIT_RE, _PLAN_VERIFY_RE, _PLAN_REPORT_RE)
-    )
-
-
-def _plan_step_is_non_blocking_after_progress(self, item: str) -> bool:
-    normalized = item.casefold().strip()
-    if not normalized:
-        return False
-
-    has_meaningful_progress = bool(self._state.files_changed or self._state.verification_evidence)
-    if not has_meaningful_progress:
-        return False
-
-    is_structure_inspect = (
-        bool(_PLAN_STRUCTURE_INSPECT_RE.search(normalized))
-        and not _PLAN_EDIT_RE.search(normalized)
-    )
-    is_inspect_only = (
-        bool(_PLAN_INSPECT_RE.search(normalized))
-        and not _PLAN_EDIT_RE.search(normalized)
-        and not _PLAN_VERIFY_RE.search(normalized)
-    )
-    return is_structure_inspect or is_inspect_only
 
 
 def _looks_like_report_artifact_path(path: str) -> bool:

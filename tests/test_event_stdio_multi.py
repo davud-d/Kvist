@@ -24,7 +24,6 @@ class _FakeConfig:
     provider = "openai"
     fast_model = "f"
     smart_model = "s"
-    planner_model = "p"
 
 
 class _ScriptedReader:

@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 
 from agent_runtime import _is_report_goal, _is_substantive_answer
-from agent_state import PlanInfo
-from tests.conftest import make_plan
 
 
 # ── BUG-1: read content survives into session history ───────────────────────
@@ -126,15 +124,14 @@ def test_previous_answer_reaches_the_next_role_whole(agent_factory):
     """A reader found junk mid-answer, the user said "yes, delete it", and the
     coder denied ever seeing it: the answer was stored as its first 200
     characters and the action prompt did not render it at all."""
-    from agent_planner import session_context
+    from agent_context import render_session_history
 
     agent = agent_factory()
     agent._add_to_session_history("что за проект?", "reader", _LONG_READER_ANSWER)
-    agent._state.plan_info = make_plan()
 
     assert agent._session_history[-1]["result"] == _LONG_READER_ANSWER
     assert _FINDING in agent._build_runtime_prompt("да, удаляй", 1)
-    assert _FINDING in session_context(agent)
+    assert _FINDING in render_session_history(agent._session_history, include_outputs=False)
 
 
 def test_chat_turn_sees_the_previous_agent_answer(agent_factory, monkeypatch):
@@ -154,7 +151,6 @@ def test_chat_turn_sees_the_previous_agent_answer(agent_factory, monkeypatch):
 
 def test_budget_drops_the_oldest_turns_first(agent_factory):
     agent = agent_factory(max_context_tokens=1_500)
-    agent._state.plan_info = make_plan()
     agent._session_history = [
         {"goal": "old task", "role": "coder",
          "result": "old answer line\n" * 3_000 + "OLD_TAIL"},
@@ -211,30 +207,8 @@ def test_is_report_goal_detects_substantive_requests():
     assert _is_report_goal("explain what this config does")
     assert not _is_report_goal("проверь есть ли файл config.txt")
     assert not _is_report_goal("создай hello.py")
-
-
-def test_resolve_report_goal_prefers_planner_flag(agent_factory):
-    from agent_runtime import _resolve_report_goal
-
-    agent = agent_factory()
-    agent._state.plan_info = make_plan()
-
-    # Planner says action even though the goal reads report-ish -> planner wins.
-    agent._state.plan_info.task_kind = "action"
-    assert _resolve_report_goal(agent, "объясни, что не так") is False
-
-    # Planner says report even for a create-looking goal -> planner wins.
-    agent._state.plan_info.task_kind = "report"
-    assert _resolve_report_goal(agent, "создай hello.py") is True
-
-
-def test_resolve_report_goal_falls_back_to_heuristic_without_plan(agent_factory):
-    from agent_runtime import _resolve_report_goal
-
-    agent = agent_factory()
-    agent._state.plan_info = None
-    assert _resolve_report_goal(agent, "что не так с этим конфигом") is True
-    assert _resolve_report_goal(agent, "создай hello.py") is False
+    # A change that also asks for an explanation still owes the explanation.
+    assert _is_report_goal("исправь баг и объясни, что было не так")
 
 
 def test_is_substantive_answer_rejects_stub():
@@ -253,14 +227,6 @@ def test_run_loop_report_task_lets_model_answer_instead_of_stub(agent_factory):
     synthetic 'all checks passed' stub."""
     agent = agent_factory(max_steps=5)
     (agent.executor.workspace / "config.txt").write_text("gaps_in = 5\n", encoding="utf-8")
-    agent._state.plan_info = PlanInfo(
-        goal="Прочитать config и дать рекомендации",
-        complexity="simple",
-        plan=["inspect config", "report findings"],
-        success_criteria=["config is read", "recommendations are given"],
-        risks=[],
-        task_kind="report",
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"
@@ -306,7 +272,6 @@ def test_run_loop_report_task_lets_model_answer_instead_of_stub(agent_factory):
 
 def test_final_answer_style_only_injected_when_finalization_imminent(agent_factory):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.response_language = "ru"
 
     agent._state.completion_ready = False
@@ -321,7 +286,6 @@ def test_final_answer_style_only_injected_when_finalization_imminent(agent_facto
 
 def test_final_answer_style_injected_when_terminal_action_required(agent_factory):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.response_language = "ru"
     agent._state.completion_ready = False
     agent._state.required_next_actions = ["final_answer", "report_to_user"]
@@ -333,14 +297,6 @@ def test_final_answer_style_injected_when_terminal_action_required(agent_factory
 def test_run_loop_report_task_stub_answer_is_retried_then_failed_honestly(agent_factory):
     agent = agent_factory(max_steps=6)
     (agent.executor.workspace / "config.txt").write_text("gaps_in = 5\n", encoding="utf-8")
-    agent._state.plan_info = PlanInfo(
-        goal="Прочитать config и дать рекомендации",
-        complexity="simple",
-        plan=["inspect config", "report findings"],
-        success_criteria=["config is read", "recommendations are given"],
-        risks=[],
-        task_kind="report",
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"

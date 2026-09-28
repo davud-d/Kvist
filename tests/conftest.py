@@ -10,7 +10,7 @@ import pytest
 from rich.text import Text
 
 from agent import LocalAgent
-from agent_state import AgentConfig, PlanInfo
+from agent_state import AgentConfig
 from executor import SafeExecutor
 from protocol import Action, AgentCommand
 from terminal import (
@@ -260,13 +260,3 @@ def commands_from_response(text: str, language: str = "en") -> list[AgentCommand
 
 def make_command(action_type: str, args: dict, plan_step: str = "inspect", text: str = "") -> AgentCommand:
     return AgentCommand(plan_step=plan_step, action=Action(type=action_type, args=args), text=text)
-
-
-def make_plan() -> PlanInfo:
-    return PlanInfo(
-        goal="Test goal",
-        complexity="simple",
-        plan=["inspect files", "edit implementation", "verify result", "final summary"],
-        success_criteria=["changes are applied", "verification is recorded"],
-        risks=["test risk"],
-    )

@@ -15,12 +15,10 @@ import pytest
 import event_stdio
 from agent_state import RunCancelled
 from frontend_protocol import is_cancel_message
-from tests.conftest import make_plan
 
 
 def _prepare_loop_agent(agent_factory, **overrides):
     agent = agent_factory(max_steps=6, **overrides)
-    agent._state.plan_info = make_plan()
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "en"
@@ -212,7 +210,7 @@ def test_request_cancel_and_reset_toggle_flag(agent_factory):
 
 
 def test_run_clears_a_stale_cancel_before_the_loop(agent_factory):
-    agent = agent_factory(skip_planning=True)
+    agent = agent_factory()
     agent.request_cancel()
     assert agent._cancel_event.is_set()
     seen = {}
@@ -308,7 +306,7 @@ def test_read_responses_forwards_remember():
 
 
 def test_stop_inside_the_loop_is_recorded_for_later_turns(agent_factory):
-    agent = agent_factory(skip_planning=True)
+    agent = agent_factory()
 
     def stop(prompt):
         raise KeyboardInterrupt
@@ -323,13 +321,13 @@ def test_stop_inside_the_loop_is_recorded_for_later_turns(agent_factory):
     assert entry["stopped_by_user"] is True
 
 
-def test_stop_during_planning_ends_the_turn_and_is_recorded(agent_factory):
+def test_stop_before_the_loop_ends_the_turn_and_is_recorded(agent_factory):
     agent = agent_factory()
 
-    def stop_planning(goal):
+    def stop_setup():
         raise KeyboardInterrupt
 
-    agent._create_plan = stop_planning
+    agent._select_action_model_for_run = stop_setup
     agent._run_loop = lambda goal, start_step: pytest.fail("loop must not start")
 
     result = agent.run("refactor the parser", routed_role="coder")
@@ -339,7 +337,7 @@ def test_stop_during_planning_ends_the_turn_and_is_recorded(agent_factory):
 
 
 def test_a_finished_turn_is_not_marked_as_stopped(agent_factory):
-    agent = agent_factory(skip_planning=True)
+    agent = agent_factory()
     agent._run_loop = lambda goal, start_step: "done"
 
     agent.run("refactor the parser", routed_role="coder")
@@ -348,14 +346,13 @@ def test_a_finished_turn_is_not_marked_as_stopped(agent_factory):
 
 
 def test_every_history_reader_tells_the_model_about_the_stop(agent_factory):
-    from agent_planner import session_context
+    from agent_context import render_session_history
 
     agent = agent_factory()
     agent._session_history = [
         {"goal": "refactor the parser", "role": "coder", "result": "x",
          "stopped_by_user": True},
     ]
-    agent._state.plan_info = make_plan()
 
-    assert "stopped this turn" in session_context(agent)
+    assert "stopped this turn" in render_session_history(agent._session_history, include_outputs=False)
     assert "stopped this turn" in agent._build_runtime_prompt("carry on", 1)

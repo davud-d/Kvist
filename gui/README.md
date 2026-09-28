@@ -21,8 +21,8 @@ In development the app uses `../.venv/bin/python ../main.py`. Set
 
 Click the role, model, or approval chips below the prompt to configure the next
 run. Provider and model overrides travel as explicit stdio CLI arguments. Kvist
-has separate fast, smart, and planner models, so either set all three or keep all
-three empty to use the saved configuration. Approval mode supports `ask` and the
+has separate fast and smart models, so either set both or keep both empty to use
+the saved configuration. Approval mode supports `ask` and the
 fail-closed `deny`; unsafe automatic approval is intentionally unavailable.
 
 The sidebar contains only operations backed by Kvist's session lifecycle API.

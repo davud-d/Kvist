@@ -46,10 +46,10 @@ def test_empty_slash_lists_every_canonical_command_with_description():
 
 def test_completion_filters_case_insensitively():
     assert _completion_rows("/m") == [
-        ("/models", "Select fast, smart and planner models")
+        ("/models", "Select fast and smart models")
     ]
     assert _completion_rows("/M") == [
-        ("/models", "Select fast, smart and planner models")
+        ("/models", "Select fast and smart models")
     ]
     assert _completion_rows("/ver") == [
         ("/verbose", "Enable or disable verbose runtime output")
@@ -117,28 +117,6 @@ def test_verbose_inline_suggestion_tracks_current_state():
     )
     assert suggestion is not None
     assert suggestion.text == "<false>"
-
-
-def test_plan_inline_suggestion_tracks_current_state():
-    # plan_enabled=True means the planning stage is on; the suggestion offers to
-    # turn it off (<false>). Disabled offers to turn it back on (<true>).
-    suggester = SlashCommandAutoSuggest(plan_enabled=True)
-    buffer = Buffer()
-
-    suggestion = suggester.get_suggestion(
-        buffer,
-        Document(text="/plan", cursor_position=len("/plan")),
-    )
-    assert suggestion is not None
-    assert suggestion.text == " <false>"
-
-    suggester.set_plan(False)
-    suggestion = suggester.get_suggestion(
-        buffer,
-        Document(text="/plan ", cursor_position=len("/plan ")),
-    )
-    assert suggestion is not None
-    assert suggestion.text == "<true>"
 
 
 def test_tab_accepts_verbose_inline_suggestion_with_angle_brackets():
@@ -226,30 +204,6 @@ def test_verbose_command_parser_accepts_toggle_and_bracketed_values():
     assert main.parse_verbose_value("/verbose maybe", current=False) is None
 
 
-def test_plan_command_parser_accepts_toggle_and_bracketed_values():
-    # The value is "planning enabled": /plan false skips the planning stage.
-    assert main.parse_plan_value("/plan", current=True) is False
-    assert main.parse_plan_value("/plan", current=False) is True
-    assert main.parse_plan_value("/plan <true>", current=False) is True
-    assert main.parse_plan_value("/plan false", current=True) is False
-    assert main.parse_plan_value("/plan maybe", current=False) is None
-
-
-def test_apply_plan_mode_inverts_into_skip_planning():
-    agent = SimpleNamespace(config=SimpleNamespace(skip_planning=None))
-
-    try:
-        main.apply_plan_mode(agent, True)
-        assert agent.config.skip_planning is False
-        assert main.slash_command_auto_suggest.plan_enabled is True
-
-        main.apply_plan_mode(agent, False)
-        assert agent.config.skip_planning is True
-        assert main.slash_command_auto_suggest.plan_enabled is False
-    finally:
-        main.slash_command_auto_suggest.set_plan(True)
-
-
 def test_strime_command_parser_accepts_toggle_and_bracketed_values():
     assert main.parse_strime_value("/strime", current=False) is True
     assert main.parse_strime_value("/strime", current=True) is False
@@ -283,7 +237,7 @@ def test_apply_strime_mode_persists_and_updates_active_custom_provider(monkeypat
         "protocol": "openai",
         "base_url": "http://localhost:8000/v1",
         "api_key": "",
-        "models": {"fast": "local", "smart": "local", "planner": "local"},
+        "models": {"fast": "local", "smart": "local"},
         "streaming": False,
     }
     monkeypatch.setattr(

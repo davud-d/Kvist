@@ -63,13 +63,6 @@ from agent_model import (
     trim_prompt_to_token_limit,
     trim_chat_messages_to_token_limit,
 )
-from agent_planner import (
-    create_plan,
-    fallback_plan,
-    is_complex_goal,
-    no_plan_info,
-    parse_json_dict,
-)
 from agent_runtime import (
     action_signature,
     build_cancellation_message,
@@ -86,7 +79,6 @@ from agent_runtime import (
     finalize_run,
     is_repeat_blocked,
     normalize_error_for_model,
-    plan_progress,
     refresh_completion_requirements,
     push_bounded,
     push_unique,
@@ -104,12 +96,10 @@ from agent_runtime import (
     run_loop,
     seal_run_status,
     set_required_next_actions,
-    update_completed_plan_steps,
     update_progress,
     update_recovery_tracking,
     update_state_from_success,
     update_verification_evidence,
-    _effective_completed_plan_steps,
     _is_report_artifact_blocked,
     _is_read_only_violation,
 )
@@ -314,6 +304,8 @@ class LocalAgent:
         }
         if outputs:
             entry["outputs"] = outputs
+        if self._state.plan_outcome:
+            entry["plan_outcome"] = self._state.plan_outcome
         if stopped_by_user:
             entry["stopped_by_user"] = True
             self._journal.mark_stopped()
@@ -487,10 +479,11 @@ class LocalAgent:
             self._journal.end_turn()
 
     def _run_turn(self, user_goal: str, routed_role: str | None) -> str:
-        # Cleared before routing/planning so a cancel requested during a
-        # previous turn never aborts this one's setup.
+        # Cleared before routing so a cancel requested during a previous turn
+        # never aborts this one's setup.
         self._reset_cancel()
         self._reset_run_state()
+        self._state.user_goal = user_goal
         self._state.task_language = detect_request_language(user_goal)
         # User-facing response language is resolved by the runtime layer
         # before any model call; the JSON protocol itself stays English.
@@ -531,25 +524,19 @@ class LocalAgent:
             return result
 
         # ── Standard path (coder / devops): single run_loop ──────
-        # Run identity: durably activate this run BEFORE any planner/tool call.
+        # Run identity: durably activate this run BEFORE any model/tool call.
         # begin_run atomically replaces any prior resumable checkpoint with a
-        # NEW phase="planning" record, so a crash during planning leaves NEW
-        # recoverable (re-plannable, no side effect yet) and OLD unreachable —
-        # never a window where neither exists.
+        # NEW phase="starting" record, so a crash before the first step leaves
+        # NEW recoverable (no side effect yet) and OLD unreachable — never a
+        # window where neither exists.
         self._run_id = uuid.uuid4().hex
         self._pending_action = None
         self._begin_run(user_goal, self._run_id)
         try:
-            self._state.plan_info = (
-                self._no_plan_info(user_goal)
-                if self.config.skip_planning
-                else self._create_plan(user_goal)
-            )
             if not self._state.selected_action_model:
                 self._select_action_model_for_run()
             self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
             self._ui.print_sandbox_notice(self.executor.sandbox_note)
-            self._ui.print_plan(self._state.plan_info)
         except KeyboardInterrupt:
             return self._report_stop_before_loop(user_goal)
         result = self._run_loop(user_goal, start_step=1)
@@ -565,7 +552,7 @@ class LocalAgent:
         )
 
     def _report_stop_before_loop(self, user_goal: str) -> str:
-        """End a turn the user stopped while it was still being planned.
+        """End a turn the user stopped before its first step.
 
         Nothing ran yet, but the turn is still recorded: the next request may
         well be "carry on", and it has to know this one was cut short.
@@ -627,19 +614,9 @@ class LocalAgent:
         self._ui.debug_print(
             f"Execution model restored: tier={self._state.selected_action_role}, model={self._state.selected_action_model}"
         )
-        # A run interrupted during planning has no durable plan and made no
-        # external side effect: re-plan NEW and start fresh from step 1 rather
-        # than reviving the superseded run or forgetting NEW.
-        if resumed_phase == "planning" or self._state.plan_info is None:
-            try:
-                self._state.plan_info = (
-                    self._no_plan_info(user_goal)
-                    if self.config.skip_planning
-                    else self._create_plan(user_goal)
-                )
-                self._ui.print_plan(self._state.plan_info)
-            except KeyboardInterrupt:
-                return self._report_stop_before_loop(user_goal)
+        # A run interrupted before its first step made no external side
+        # effect: start NEW from step 1 rather than reviving the superseded run.
+        if resumed_phase == "starting":
             start_step = 1
         result = self._run_loop(user_goal, start_step=start_step)
         self._record_run_turn(user_goal, result)
@@ -785,12 +762,6 @@ class LocalAgent:
     _run_loop = run_loop
     _finalize_run = finalize_run
 
-    _create_plan = create_plan
-    _fallback_plan = fallback_plan
-    _no_plan_info = no_plan_info
-    _is_complex_goal = is_complex_goal
-    _parse_json_dict = parse_json_dict
-
     _build_runtime_prompt = build_runtime_prompt
     _format_dependency_versions_for_prompt = format_dependency_versions_for_prompt
     _format_web_facts_for_prompt = format_web_facts_for_prompt
@@ -821,8 +792,6 @@ class LocalAgent:
     _update_progress = update_progress
     _register_final_answer = register_final_answer
     _register_safety_refusal = register_safety_refusal
-    _plan_progress = plan_progress
-    _effective_completed_plan_steps = _effective_completed_plan_steps
     _seal_run_status = seal_run_status
     _update_recovery_tracking = update_recovery_tracking
     _refresh_completion_requirements = refresh_completion_requirements
@@ -841,7 +810,6 @@ class LocalAgent:
     _required_followup_error = required_followup_error
     _register_blocked_action = register_blocked_action
     _set_required_next_actions = set_required_next_actions
-    _update_completed_plan_steps = update_completed_plan_steps
     _push_unique = push_unique
     _push_bounded = push_bounded
     _update_verification_evidence = update_verification_evidence

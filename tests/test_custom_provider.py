@@ -19,7 +19,7 @@ def _payload(**overrides):
         "base_url": "https://api.example.com/v1",
         "api_key": "sk-x",
         "streaming": False,
-        "models": {"fast": "m", "smart": "m", "planner": "m"},
+        "models": {"fast": "m", "smart": "m"},
     }
     base.update(overrides)
     return base
@@ -30,7 +30,7 @@ def test_normalizes_a_full_payload():
     assert name == "my-llama"
     assert config["protocol"] == "openai"
     assert config["base_url"] == "https://api.example.com/v1"
-    assert config["models"] == {"fast": "m", "smart": "m", "planner": "m"}
+    assert config["models"] == {"fast": "m", "smart": "m"}
     assert config["streaming"] is False
 
 
@@ -70,7 +70,7 @@ def test_rejects_empty_base_url():
 
 def test_rejects_missing_model_role():
     with pytest.raises(CustomProviderError):
-        normalize_custom_provider_payload(_payload(models={"fast": "m", "smart": "m"}))
+        normalize_custom_provider_payload(_payload(models={"fast": "m"}))
 
 
 def test_rejects_non_object_payload():

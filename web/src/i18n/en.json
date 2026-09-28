@@ -138,8 +138,8 @@
         "text": "OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute and FreeFlow, or any OpenAI-compatible or Anthropic-compatible endpoint you add from /provider. Streaming and JSON mode are per-provider facts, not one assumption applied to all of them."
       },
       {
-        "term": "Three model tiers per run",
-        "text": "fast, smart and planner. A run starts on fast and escalates to smart on a complex task, a parse error, repeated errors or stagnation — unless you pinned a model yourself."
+        "term": "Two model tiers per run",
+        "text": "fast and smart. A run starts on fast and escalates to smart on a complex task, a parse error, repeated errors or stagnation — unless you pinned a model yourself."
       },
       {
         "term": "Six levels of reasoning effort",
@@ -228,8 +228,8 @@
       },
       {
         "id": "models",
-        "term": "Three models, three jobs",
-        "text": "fast carries routing, planning, chat and the simple steps; smart takes complex work and error recovery; planner builds the plan. /models sets all three, together or one at a time. Providers with a fixed catalogue offer a list; ones with dynamic ids — a local gateway, for instance — take the id you type.",
+        "term": "Two models, two jobs",
+        "text": "fast carries routing, chat and the simple steps; smart takes complex work and error recovery. /models sets both, together or one at a time. Providers with a fixed catalogue offer a list; ones with dynamic ids — a local gateway, for instance — take the id you type.",
         "short": "Models",
         "n": "03",
         "group": "setup"
@@ -246,7 +246,7 @@
         "id": "commands",
         "n": "05",
         "term": "Every command in one place",
-        "text": "Typing / opens completion; /commands prints the whole list with what each one does. Seventeen commands cover providers, models, roles, effort, sessions, the change journal and the two toggles for planning and verbose output.",
+        "text": "Typing / opens completion; /commands prints the whole list with what each one does. Sixteen commands cover providers, models, roles, effort, sessions, the change journal and the verbose-output toggle.",
         "short": "Commands",
         "group": "driving"
       },
@@ -276,8 +276,8 @@
       },
       {
         "id": "toggles",
-        "term": "Two switches",
-        "text": "/plan turns the separate planning call off, so the agent starts acting immediately instead of drawing up steps first — cheaper and blunter. /verbose turns on the diagnostic output. Both are saved globally and say what they did, so you are never guessing which state you are in.",
+        "term": "A diagnostic switch",
+        "text": "/verbose turns on the diagnostic output. It says what it did, so you are never guessing which state you are in.",
         "short": "Switches",
         "n": "09",
         "group": "driving"

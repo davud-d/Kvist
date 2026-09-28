@@ -19,7 +19,6 @@ const { values } = parseArgs({
     provider: { type: "string" },
     "fast-model": { type: "string" },
     "smart-model": { type: "string" },
-    "planner-model": { type: "string" },
     "approval-mode": { type: "string", default: "ask" },
     skin: { type: "string", default: "ink" },
   },
@@ -40,8 +39,8 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 const workspace = path.resolve(values.workspace ?? process.cwd())
 const command = resolveCoreCommand()
 const models =
-  values["fast-model"] && values["smart-model"] && values["planner-model"]
-    ? { fast: values["fast-model"], smart: values["smart-model"], planner: values["planner-model"] }
+  values["fast-model"] && values["smart-model"]
+    ? { fast: values["fast-model"], smart: values["smart-model"] }
     : undefined
 
 // A launch always opens its own session (UI_API.md §8a).

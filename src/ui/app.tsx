@@ -22,7 +22,7 @@ export interface AppProps {
   command: CoreCommand
   workspace: string
   provider?: string
-  models?: { fast: string; smart: string; planner: string }
+  models?: { fast: string; smart: string }
   role: string
   approvalMode: string
   skin: Skin

@@ -50,11 +50,7 @@ function begin(goal) {
   emit({ type: "live_start" })
   emit({
     type: "plan",
-    goal,
-    complexity: "medium",
-    plan: ["Inspect the repository", "Apply the change", "Run tests"],
-    success_criteria: ["Tests pass"],
-    risks: ["Keep the Python core unchanged"],
+    markdown: `**Goal:** ${goal}\n\n- Inspect the repository\n- Apply the change\n- Run tests`,
   })
   emit({
     type: "status",

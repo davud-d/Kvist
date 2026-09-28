@@ -14,7 +14,6 @@ import json
 
 import pytest
 
-from agent_state import PlanInfo
 from executor import ExecutorError, SafeExecutor
 from protocol import Action, AgentCommand
 
@@ -43,21 +42,6 @@ def _write_source(workspace, lines: int = 381) -> str:
     text = _source(lines)
     (workspace / "main.py").write_text(text, encoding="utf-8")
     return text
-
-
-def _fix_plan() -> PlanInfo:
-    return PlanInfo(
-        goal="Исправить смену раскладки после вставки текста",
-        complexity="complex",
-        plan=[
-            "найти код вставки текста",
-            "прочитать найденный файл",
-            "внести минимальную правку",
-            "проверить результат",
-        ],
-        success_criteria=["раскладка не меняется после вставки"],
-        risks=[],
-    )
 
 
 def _command(action_type: str, args: dict, plan_step: str = "edit") -> AgentCommand:
@@ -165,7 +149,6 @@ def test_read_file_allowed_during_corrective_block(agent_factory):
     read. That contradiction is what produced the blind overwrite.
     """
     agent = agent_factory()
-    agent._state.plan_info = _fix_plan()
     agent._set_required_next_actions(
         {"write_file", "append_file", "replace_in_file"},
         "this looks like a FIX task but no files were changed",
@@ -219,7 +202,6 @@ def test_blocked_action_does_not_consume_repeat_budget(agent_factory):
     """run_001 steps 14-16: verification reads were refused as repeats,
     because the three refusals at steps 6-8 had already spent the budget."""
     agent = agent_factory()
-    agent._state.plan_info = _fix_plan()
 
     read_cmd = _command("read_file", {"path": "main.py"}, plan_step="inspect")
     signature = agent._action_signature(read_cmd)
@@ -242,7 +224,6 @@ def test_blocked_action_bookkeeping_is_wired_into_the_loop(agent_factory):
     lands in the corrective branch on every step instead of being executed.
     """
     agent = agent_factory(max_steps=3)
-    agent._state.plan_info = _fix_plan()
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._set_required_next_actions({"write_file"}, "make a change first")
@@ -280,7 +261,6 @@ def test_fragment_not_found_unlocks_read(agent_factory):
     """run_001 step 6 raised this error and the recovery path never fired,
     because the runtime compared against a punctuated variant."""
     agent = agent_factory()
-    agent._state.plan_info = _fix_plan()
 
     cmd = _command("replace_in_file", {
         "path": "main.py",
@@ -301,7 +281,6 @@ def test_fragment_not_found_unlocks_read(agent_factory):
 def test_mass_deletion_diff_is_not_verification(agent_factory):
     """The `@@ -1,381 +1,31 @@` from run_001 step 17 was recorded as proof."""
     agent = agent_factory()
-    agent._state.plan_info = _fix_plan()
     agent._state.modify_goal = True
     agent._push_unique(agent._state.files_changed, "main.py")
     agent._push_unique(agent._state.pending_verification_paths, "main.py")
@@ -354,7 +333,6 @@ def test_clean_diff_clears_destructive_flag(agent_factory):
 def test_destructive_block_permits_honest_report(agent_factory):
     """Leaving only mutation allowed here would repeat the original trap."""
     agent = agent_factory()
-    agent._state.plan_info = _fix_plan()
     agent._state.destructive_diff = "git_diff shows 381 lines removed and 31 added."
     agent._refresh_completion_requirements(force_enforcement=True)
 
@@ -373,7 +351,6 @@ def test_run_001_replay_never_destroys_main_py(agent_factory):
     """
     agent = agent_factory(max_steps=20)
     original = _write_source(agent.executor.workspace)
-    agent._state.plan_info = _fix_plan()
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
 

@@ -6,7 +6,6 @@ import json
 import pytest
 
 from action_result import MAX_OUTPUT_CHARS, build_action_result
-from agent_state import PlanInfo
 from event_stream_ui import EventStreamUI
 from executor import ExecutionResult
 from frontend_protocol import ActionResultEvent, FrontendChannel, RouteEvent
@@ -254,13 +253,6 @@ def test_append_to_a_file_without_trailing_newline_starts_on_its_last_line(agent
 
 
 def _script_loop(agent, responses):
-    agent._state.plan_info = PlanInfo(
-        goal="Edit files",
-        complexity="simple",
-        plan=["edit files", "final report"],
-        success_criteria=["files edited"],
-        risks=[],
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     queue = list(responses)

@@ -68,9 +68,9 @@ configured in-repo.
 - API keys + selected provider/models live in `~/.kvist/config.json` (Windows:
   `C:\Users\<USER>\.kvist\config.json`). On first run the agent prompts for the
   key the active provider needs and writes it there. Managed by `user_config.py`.
-  Also persists the global `role_selection`, `planning_enabled` (the `/plan`
-  toggle; default true) and `reasoning_effort` (the `/effort` level on the Kvist
-  scale `false|low|medium|high|xhigh|max`, default `medium`) preferences.
+  Also persists the global `role_selection` and `reasoning_effort` (the
+  `/effort` level on the Kvist scale `false|low|medium|high|xhigh|max`, default
+  `medium`) preferences.
 - The `/settings-api` dialog's knobs live in the same file under `api_settings`,
   owned by `api_settings.py` (the table and its validation) with `user_config`
   only storing them: request interval, request timeout, retry count, retry
@@ -144,7 +144,7 @@ configured in-repo.
   Reconcilable file writes carry pre/intended digests; non-reconcilable side
   effects (`run_shell`, `delegate_task`) carry only identity and are never
   replayed. A new `run()` stamps a `run_id` and durably supersedes the prior
-  checkpoint before planning, so `/resume` cannot revive a superseded run. On
+  checkpoint before its first step, so `/resume` cannot revive a superseded run. On
   `/resume`, `agent._reconcile_pending_action` uses
   `change_journal.classify_pending_write` — which separates provenance
   (`agent_committed`, proven via promoted `last_digest`) from intent
@@ -153,8 +153,8 @@ configured in-repo.
   (re-arms verification), and stops safely (ambiguous) rather than guessing.
   `/revert` overwrites only content whose `last_digest` proves agent authorship.
   A `run()` also durably activates the new run via `agent_logging.begin_run`
-  (phase=`planning` checkpoint) before planning, so a crash during planning
-  re-plans NEW rather than losing it or reviving OLD. Journal identity is
+  (phase=`starting` checkpoint) before the first step, so a crash before it
+  restarts NEW from step 1 rather than losing it or reviving OLD. Journal identity is
   transaction-bound: `record_baseline`/`promote_baseline` carry `run_id`+
   `action_id` (set on the executor by `run_loop` via `begin_action_transaction`),
   and promotion is compare-and-promote on `(digest, run_id, action_id)`. A
@@ -170,10 +170,8 @@ configured in-repo.
   (`secret_paths.count_workspace_inode_aliases`); `journal_path_violation` is the
   lexical pre-gate (`..`, `.kvist` case-insensitively, secret paths).
 - Behavior overrides via env vars (see README "Knobs worth knowing"): `AGENT_LLM_PROVIDER`,
-  `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`, `AGENT_PLANNER_MODEL`, `AGENT_MAX_STEPS`,
+  `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`, `AGENT_MAX_STEPS`,
   `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`,
-  `AGENT_SKIP_PLANNING` (1 skips the planner LLM round-trip at startup; overrides
-  the persisted `planning_enabled` preference — runtime-toggled by `/plan`),
   `AGENT_REASONING_EFFORT` (`false|low|medium|high|xhigh|max`; overrides the
   persisted `reasoning_effort` preference — runtime-toggled by `/effort`),
   `AGENT_MAX_CONTEXT_TOKENS` (overrides the per-model prompt budget derived in
@@ -212,7 +210,7 @@ configured in-repo.
   prompts carry the matching rule (`PROJECT INSTRUCTIONS` in coder/devops,
   folded into the untrusted-data section in reader, `PROJECT INSTRUCTIONS` in
   chat) and the top-of-prompt JAILBREAK RESISTANCE directive names
-  `<PROJECT_INSTRUCTIONS>` as a source that can never lift it. Planner, router,
+  `<PROJECT_INSTRUCTIONS>` as a source that can never lift it. Router,
   report and commit prompts are deliberately untouched.
 - IDE commit messages: `main.py --commit-message` (`commit_message.py`) reads
   `{"files": [{"path", "patch"}], "recent_subjects": [...]}` on stdin as UTF-8
@@ -241,13 +239,13 @@ into a list of `AgentCommand`s (`protocol.py`) sharing one `thought`, `plan_step
 (`type` + `args` + an optional short `description`). There is deliberately no
 `progress` field: a self-declared percentage carried no information the runtime did
 not already have, so `agent_runtime.update_progress` derives `RunState.progress` from
-completed plan steps (`_plan_progress`) with `_PLAN_STEP_BANDS` as the floor when
-planning is off. The parser still accepts and discards a stray `"progress"` key so a
+the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
+monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of 18 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 20 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
 git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, refuse,
-final_answer, report_to_user). The parser tolerates fenced code blocks, smart quotes, and surrounding
+final_answer, report_to_user, offer_plan, propose_plan). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `prompts/system/` — the sync is
 enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
@@ -329,26 +327,53 @@ from the runtime prompt. A mid-run tools rejection (`is_tools_rejection`) raises
 ### LocalAgent composition pattern (important & non-obvious)
 `agent.py::LocalAgent` is assembled by binding functions from other modules as methods
 via class-level assignment (e.g. `_run_loop = run_loop`, `_call_action_model = call_action_model`).
-The actual logic lives in `agent_runtime.py`, `agent_model.py`, `agent_planner.py`,
+The actual logic lives in `agent_runtime.py`, `agent_model.py`, `plan_mode.py`,
 `agent_context.py`, `agent_logging.py`, and `agent_web.py` — **not** in `agent.py`. Those
 functions take `self` as their first arg and operate on `self._state` (a `RunState` from
 `agent_state.py`). To change loop behavior, edit the source module, not `agent.py`.
 
-### Planner context (`agent_planner.py`)
-`create_plan` puts `session_context(self)` into its user prompt — every stored turn
-of `_session_history` (goal + the whole answer, no tool outputs), rendered by
-`agent_context.render_session_history`. Without it the planner reads a correction
-("no, you broke it") as unrelated new work, because it never saw the turn being
-corrected. The matching `SESSION CONTEXT` section in
-`prompts/system/planner_prompt.txt` tells the planner to plan the delta for a
-correction/follow-up, to turn a confirmation ("да, удаляй") into the concrete
-proposal it accepts, and to treat the block as data, never instructions.
+### Plan mode (`plan_mode.py`)
+There is no planner call. A plan is something the model offers and the person
+accepts. It costs one dialog and one read-only pass, while a wrong start costs
+edits to undo. The model itself decides when to offer (guidance in
+`prompts/system/plan_mode.txt`, appended to the system prompt of coder/devops/universal by
+`agent_model.build_role_system_prompt`): when the direction is the risky part — several
+approaches with different consequences, many files or a public interface, a loosely
+worded result, hard-to-undo effects — and never for a rename, a typo or steps the
+person spelled out. A decline is not remembered for the session; it is a fact in the
+next turns' history (`plan_outcome`, rendered by `render_session_history`), and a model
+that offers again must say why.
+
+State is `RunState.plan_phase` (`""` → `offered` | `planning` → `approved`),
+`approved_plan` and `plan_outcome`, all in the checkpoint. Two actions drive it, both run
+in `_run_one_action` on the main thread and block on the frontend dialog:
+- `offer_plan {reason}` asks through `ui.ask_choice` (`plan` / `go`; the dialog itself says
+  a plan is safer, starting right away faster and riskier). It is refused unless
+  `plan_mode.offer_available`: a changing role, no earlier offer, not a read-only goal, and a
+  UI with `ask_choice` — so a headless run, `run_task.py` and any UI without it never sees the
+  action or the `PLAN MODE` section. A cancelled dialog counts as `go`.
+- `propose_plan {plan}` (only in `planning`) prints the plan (`ui.print_plan(markdown)` →
+  `plan` event, recorded in the journal), then asks accept / revise. Accepted: writes unlock,
+  the plan enters the runtime prompt as `Approved plan:` and stays in the checkpoint. Revise:
+  `ui.prompt_text` asks what to change and the person's words become
+  `pending_instruction`, which is the *user* channel — the tool result is wrapped as untrusted
+  data, and their feedback is not — after which the model proposes again. A cancelled dialog,
+  empty text or no interactive UI ends the turn on the plan (`ended_message`,
+  `plan_outcome="not_accepted"`), so a plan is never silently executed.
+
+While `planning`, the same barrier as the reader role applies
+(`_is_read_only_violation`, whitelist `_allowed_while_planning`: reads, git status/diff, web,
+safe read-only shell; no writes, no `delegate_task`). The executor has no reader role, so
+this loop check is the only enforcement. The create-goal "write now" nudges and
+`_note_unchanged_run` are off in this phase, a response without calls is not accepted as
+the end (the turn ends with `propose_plan`), and native tool definitions are narrowed per
+turn by `plan_mode.tools_for_phase`. Tests: `tests/test_plan_mode.py`.
 
 **Session history is never cut by hand; the model's budget cuts it.**
 `_add_to_session_history` stores the turn's answer whole (it was once
 `result[:200]`: a reader's finding in the middle of a long answer was lost, and
-the coder asked to "delete that junk" denied ever seeing it). The action loop and
-the planner share `render_session_history`: its own section,
+the coder asked to "delete that junk" denied ever seeing it). The action loop
+renders it with `render_session_history`: its own section,
 `SESSION_HISTORY_HEADER` at priority 1 (it used to fold into
 `System environment:` at priority 0, so it was never trimmed), turns newest first
 because `_truncate_section_text` keeps a section's head — the oldest turns are
@@ -372,30 +397,14 @@ the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
   committed block can never re-render differently) and hands the settled part to
   `InteractiveScreen.flush_stream`, which appends it to the transcript while re-arming
   the slot with the tail. Only the block still being written lives in the slot.
-- **coder / reader / devops** build a plan (`agent_planner.py`) then enter `run_loop` (`agent_runtime.py`),
-  which calls the action model, parses, executes via `SafeExecutor`, registers feedback,
+- **coder / reader / devops** enter `run_loop` (`agent_runtime.py`) directly: there is no
+  planning call, a plan is the model's own offer (see Plan mode). The loop
+  calls the action model, parses, executes via `SafeExecutor`, registers feedback,
   tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
   consecutive errors, repeated-action blocking, write-required-on-create-tasks).
-
-**`_PLAN_EDIT_RE` must know every way a planner says "edit".** "Заменить a - b на
-a + b" matched none of its stems, so a finished `replace_in_file` never closed its
-step and every report was refused as "plan not complete" — the model then rewrote
-the same file to satisfy the tracker. The same pattern decides whether a task must
-change files at all, so a new stem must not match reading words ("правк" is inside
-"справка", "удал" inside "удалённый").
-
-**A plan step no action can satisfy must never gate completion.** Plan steps are
-matched to actions by vocabulary (`_PLAN_INSPECT_RE` / `_PLAN_EDIT_RE` /
-`_PLAN_VERIFY_RE` / `_PLAN_REPORT_RE`). A planner given an analysis task writes
-judgement steps — "Оценить … по критериям", "Сопоставить документацию с кодом" —
-that match none of the four, so nothing in the protocol can ever mark them
-complete. While they count as remaining work the run deadlocks: completion stays
-forbidden while the model is told the plan is unfinished, so it keeps inspecting
-and re-reads the same files until the step budget dies. `_plan_step_is_unreachable_by_any_action`
-drops exactly that class from `actionable_remaining_plan_steps`; its deliverable
-is the final answer, not a tool call. The `_plan_step_is_non_blocking_after_progress`
-escape hatch does not cover it — that one needs `files_changed` or
-`verification_evidence`, which a read-only analysis run never has.
+  What a request expects (`change` / `report` / `action`) and whether it starts on the
+  smart model are keyword guesses in `task_intent.py` (`infer_task_kind`, `is_complex_goal`);
+  they add or relax completion accounting and never block a write by themselves.
 
 ### Step budget (`AGENT_MAX_STEPS`, default 150)
 `run_loop` counts against `RunState.step_budget`, seeded from `config.max_steps`.
@@ -418,7 +427,7 @@ around its whole loop, so the turn's answer becomes `build_cancellation_message`
 ("Работа агента остановлена вами…") and the `finally` still seals the session,
 checkpoint and logs; `main.py`'s `except KeyboardInterrupt` around `agent.run` is only the
 last-resort net for a stop that lands before `run()` owns the turn (`run_stopped_text`). Only a
-stop at the *idle* prompt still exits with 130. A stop during planning is handled in
+stop at the *idle* prompt still exits with 130. A stop before the first step is handled in
 `run()` itself (`_report_stop_before_loop`). A stopped chat reply shows "Ответ
 остановлен вами." and — unlike before — **stays in the chat history**: the user
 message is answered by whatever arrived plus a "[Ответ остановлен пользователем…]"
@@ -426,9 +435,9 @@ note (`_stopped_chat_reply`), so the transcript alternates correctly.
 
 **A stop is context, not just UI.** Every stop path sets `RunState.stopped_by_user`
 (chat passes it directly) and `_add_to_session_history` writes
-`stopped_by_user: true` into the entry. All three readers of session history render it —
-the planner's `session_context` and the action loop's session-history section (both
-`agent_context.render_session_history`), and the chat preamble — so "продолжай" after a stop is understood as
+`stopped_by_user: true` into the entry. Both readers of session history render it —
+the action loop's session-history section (`agent_context.render_session_history`) and
+the chat preamble — so "продолжай" after a stop is understood as
 unfinished work rather than a completed task.
 
 **Escape needs two presses; Ctrl+C needs one.** The first Escape only arms the stop
@@ -780,7 +789,7 @@ is `step_summary` (kept on any step, `_keep_step_summary`) — reasoning and
 
 **The prompt carries no standing governance.** Completion blockers, progress,
 required/missing artifacts, "completion status", a compressed restatement of the
-other sections, and the stand-in plan of an unplanned run are not rendered: the
+other sections are not rendered: the
 model spent its reasoning reconciling them with the task (one "required artifact"
 sent it to read a 938-line bundle, twice). The gates themselves are unchanged and
 act when a finish is attempted — `_finish_with_final_answer` and
@@ -795,11 +804,13 @@ trimmed at *that* section's priority. `tests/test_agent_context.py` asserts
 every rendered header is a known key.
 
 ### Model tiers (`agent_model.py`)
-Three roles per provider: **fast**, **smart**, **planner**. A run uses fast by default
-and escalates to smart on complexity="complex", parse errors, consecutive errors, or
-stagnation — unless the user explicitly pinned a model. Role system prompts are loaded
-and cached from `prompts/system/` — eight files:
-`{chat,coder,commit,devops,planner,reader,report,router}_prompt.txt`.
+Two models per provider: **fast** and **smart** (`llm_clients.MODEL_ROLES`; a `planner`
+key in an older `~/.kvist/config.json` is ignored). A run uses fast by default
+and escalates to smart when `task_intent.is_complex_goal` flags the request, or on parse
+errors, consecutive errors, or stagnation — unless the user explicitly pinned a model.
+Role system prompts are loaded and cached from `prompts/system/`:
+`{chat,coder,commit,complete,devops,reader,report,router,universal}_prompt.txt`, plus
+`constitution.txt`, `native_tools.txt` and `plan_mode.txt`.
 
 User-selectable styles live apart, in `prompts/styles/{agents,chat}/<slug>.txt`
 (`agents` covers coder/reader/devops, `chat` the chat role). **One session, one
@@ -807,18 +818,14 @@ style**: the choice is stamped into the session document when the session starts
 (`agent_logging.session_styles`, restored by `restore_session_document` *before*
 its empty-document exit) and every read inside that session resolves it through
 `agent_model._session_style_name`, never through the global preference. Without
-that, a plan built on step 0 and the steps that follow it could come from
-different beliefs — a paranoid plan executed by a minimalist that no longer
-believes in the pre-check step it was handed. `/style` writes the global
+that, step 0 and the steps that follow it could come from different beliefs — a
+paranoid opening executed by a minimalist that no longer believes in the pre-check
+it was handed. `/style` writes the global
 preference and calls `agent.adopt_session_style`: an untouched session adopts the
 new choice (nothing came out of the old one yet), a session that already holds
 work keeps its stamp and the change starts with the next session. The selected
 *file* is still re-read per call, so editing that file lands on the next step.
-The planner gets the same `agents` style through `agent_model.planner_style_context`,
-wrapped in a preamble that says the beliefs address the executor, not the planner;
-the matching bound is the `EXECUTOR WORKING STYLE` section of `planner_prompt.txt`
-(it shapes steps, success criteria and risks, never the schema, the step limit,
-or how much work is taken on). The reporter (`report_prompt.txt`) does not see the
+The reporter (`report_prompt.txt`) does not see the
 style.
 
 ### Reasoning effort (`reasoning_effort.py`)
@@ -833,7 +840,7 @@ FreeFlow wrapper clients receive a neutral `reasoning_effort` marker they
 translate themselves — Anthropic to a `thinking.budget_tokens` block (dropping
 `temperature`/`top_p`, bumping `max_tokens`), FreeFlow forwarding it only to Groq
 gpt-oss models. Injection happens in exactly two places: `_create_json_completion`
-(action loop + planner, via `merge_reasoning_kwargs`) and the chat path in
+(action loop, via `merge_reasoning_kwargs`) and the chat path in
 `agent.py`; `role_router` is left alone. `_create_completion_with_reasoning_fallback`
 wraps the call: on a provider error that looks like a reasoning rejection
 (`is_reasoning_error`) it strips the reasoning kwargs, retries once, and prints a
@@ -1044,7 +1051,7 @@ built on it fails to match rather than corrupting the file.
 - Dataclasses use `slots=True`. State mutation flows through `RunState`.
 - User-facing strings are bilingual EN/RU; routing and prompts handle both languages.
 - Tests use fakes from `tests/conftest.py` (`FakeLLMClient`, `NullUI`, `agent_factory`,
-  `make_command`, `make_plan`) — no network. Mirror this when adding tests; gate any real
+  `make_command`) — no network. Mirror this when adding tests; gate any real
   LLM calls behind the `live_llm` marker.
 
 ## Code generation rules

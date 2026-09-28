@@ -112,7 +112,7 @@ def test_build_agent_wires_manual_tier_provider(tmp_path, monkeypatch):
     # defaults, so an already-saved model set must flow straight through.
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "qwen")
     monkeypatch.setattr(
-        main, "get_saved_models", lambda provider: {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"}
+        main, "get_saved_models", lambda provider: {"fast": "qwen-flash", "smart": "qwen-max"}
     )
     monkeypatch.setattr(main, "ensure_provider_credentials", lambda **kwargs: {"qwen_api_key": "key"})
     monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: ([], None))
@@ -191,7 +191,7 @@ def test_build_agent_confirms_base_url_on_first_time_manual_provider_setup(tmp_p
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "mistral")
     monkeypatch.setattr(
         main, "get_saved_models",
-        lambda provider: {"fast": "mistral-small", "smart": "mistral-large", "planner": "mistral-large"},
+        lambda provider: {"fast": "mistral-small", "smart": "mistral-large"},
     )
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
@@ -245,7 +245,7 @@ def test_build_agent_races_regional_endpoints_authenticated_and_suggests_the_fas
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "xiaomi-tokenplan")
     monkeypatch.setattr(
         main, "get_saved_models",
-        lambda provider: {"fast": "mimo-v2.5", "smart": "mimo-v2.5", "planner": "mimo-v2.5"},
+        lambda provider: {"fast": "mimo-v2.5", "smart": "mimo-v2.5"},
     )
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
@@ -304,7 +304,7 @@ def test_build_agent_raises_clearly_when_key_rejected_in_every_region(tmp_path, 
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "qwen")
     monkeypatch.setattr(
         main, "get_saved_models",
-        lambda provider: {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"},
+        lambda provider: {"fast": "qwen-flash", "smart": "qwen-max"},
     )
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
@@ -338,7 +338,7 @@ def test_build_agent_raises_clearly_when_no_region_responds(tmp_path, monkeypatc
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "qwen")
     monkeypatch.setattr(
         main, "get_saved_models",
-        lambda provider: {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"},
+        lambda provider: {"fast": "qwen-flash", "smart": "qwen-max"},
     )
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main, "load_available_credentials", lambda keys: {})
@@ -372,7 +372,7 @@ def test_build_agent_skips_base_url_prompt_when_provider_already_configured(tmp_
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "xiaomi-tokenplan")
     monkeypatch.setattr(
         main, "get_saved_models",
-        lambda provider: {"fast": "mimo-v2.5", "smart": "mimo-v2.5", "planner": "mimo-v2.5"},
+        lambda provider: {"fast": "mimo-v2.5", "smart": "mimo-v2.5"},
     )
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main, "load_available_credentials", lambda keys: {"xiaomi_tokenplan_api_key": "already-set"})
@@ -433,10 +433,10 @@ def test_configure_manual_provider_models_interactively_offers_live_pick(monkeyp
             return "qwen-max"
 
     result = main.configure_manual_provider_models_interactively(
-        FakeUI(), current_models={"fast": "", "smart": "", "planner": ""}, provider="qwen"
+        FakeUI(), current_models={"fast": "", "smart": ""}, provider="qwen"
     )
 
-    assert result == {"fast": "qwen-max", "smart": "qwen-max", "planner": "qwen-max"}
+    assert result == {"fast": "qwen-max", "smart": "qwen-max"}
     assert "pick" in seen_menus[0]
 
 
@@ -453,10 +453,10 @@ def test_configure_manual_provider_models_interactively_falls_back_to_text_entry
             return "custom-model-id"
 
     result = main.configure_manual_provider_models_interactively(
-        FakeUI(), current_models={"fast": "", "smart": "", "planner": ""}, provider="qwen"
+        FakeUI(), current_models={"fast": "", "smart": ""}, provider="qwen"
     )
 
-    assert result == {"fast": "custom-model-id", "smart": "custom-model-id", "planner": "custom-model-id"}
+    assert result == {"fast": "custom-model-id", "smart": "custom-model-id"}
 
 
 def test_build_agent_rejects_omniroute_with_no_models(tmp_path, monkeypatch):
@@ -506,7 +506,6 @@ def test_startup_banner_renders_dynamic_values_as_literal_safe_text(
         provider="openai",
         fast_model="model [bold]literal[/bold]",
         smart_model="smart",
-        planner_model="planner",
     )
 
     main.render_startup_banner(agent, config, 5, False, ["warn [red]\x08"])

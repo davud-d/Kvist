@@ -7,9 +7,8 @@ import pytest
 import agent_model
 import agent_runtime
 from agent import LocalAgent
-from agent_state import PlanInfo
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient, NullUI, make_plan
+from tests.conftest import FakeLLMClient, NullUI
 
 
 @pytest.mark.parametrize(
@@ -32,12 +31,18 @@ def test_error_sanitizer_redacts_credential_forms(message):
 
 
 def test_select_action_model_prefers_smart_for_complex_or_error(agent_factory):
-    agent = agent_factory(fast_model="fast", smart_model="smart")
-    agent._state.plan_info = PlanInfo("g", "complex", ["x"], ["y"], [])
-    assert agent._select_action_model_for_run() == "smart"
+    complex_run = agent_factory(fast_model="fast", smart_model="smart")
+    complex_run._state.user_goal = "refactor the whole project"
+    assert complex_run._select_action_model_for_run() == "smart"
 
-    agent._state.selected_action_role = "fast"
-    assert agent._select_action_model_for_run() == "fast"
+    simple_run = agent_factory(fast_model="fast", smart_model="smart")
+    simple_run._state.user_goal = "rename x"
+    assert simple_run._select_action_model_for_run() == "fast"
+
+    failing_run = agent_factory(fast_model="fast", smart_model="smart")
+    failing_run._state.user_goal = "rename x"
+    failing_run._state.consecutive_errors = 1
+    assert failing_run._select_action_model_for_run() == "smart"
 
 
 def test_count_tokens_falls_back_without_encoding(agent_factory):
@@ -429,7 +434,6 @@ def test_trimmed_prompt_actually_fits_the_budget(agent_factory, shape, budget):
     almost three times over budget — measured as fitting, refused by the API.
     """
     agent = agent_factory(max_context_tokens=budget)
-    agent._state.plan_info = make_plan()
     agent._state.recent_result_details = [
         "Detailed recent action data:\n" + _CONTENT_SHAPES[shape] * 3_000
     ]
@@ -446,7 +450,6 @@ def test_trimming_keeps_the_sections_the_model_cannot_work_without(agent_factory
     """Fitting the budget by discarding the task would be a useless kind of
     correct."""
     agent = agent_factory(max_context_tokens=2_000)
-    agent._state.plan_info = make_plan()
     agent._state.recent_result_details = ["Detailed recent action data:\n" + "x=1\n" * 20_000]
     agent._state.pending_instruction = "Your finish was not accepted as done. REASON_MARKER"
 
@@ -460,7 +463,6 @@ def test_an_untrimmed_prompt_is_returned_untouched(agent_factory):
     """A prompt inside the budget must not be marked as trimmed — the marker is
     how a reader tells a whole prompt from a cut one."""
     agent = agent_factory(max_context_tokens=500_000)
-    agent._state.plan_info = make_plan()
 
     prompt = agent._build_runtime_prompt("small task", 1)
     trimmed = agent._trim_prompt_to_token_limit("system", prompt)

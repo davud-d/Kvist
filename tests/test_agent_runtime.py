@@ -6,8 +6,7 @@ from pathlib import Path
 import pytest
 
 from executor import ExecutionResult
-from agent_state import PlanInfo
-from tests.conftest import make_command, make_plan
+from tests.conftest import make_command
 
 
 def test_execute_command_wraps_executor_success_and_error(agent_factory):
@@ -42,7 +41,6 @@ def test_execute_command_redacts_tool_output_before_model_feedback(agent_factory
 
 def test_runtime_feedback_updates_read_write_web_and_verification_state(agent_factory):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
 
     agent._register_feedback(1, make_command("read_file", {"path": "ui.py"}), {"ok": True, "data": {"path": "ui.py"}})
     assert agent._state.files_read == ["ui.py"]
@@ -130,7 +128,6 @@ def test_prompt_names_reads_whose_content_left_the_prompt(agent_factory):
 
 def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
     agent = agent_factory(max_steps=10)
-    agent._state.plan_info = make_plan()
     agent._state.selected_action_model = "mock"
     for name in ("a.py", "b.py", "c.py"):
         (agent.executor.workspace / name).write_text("x = 1\n", encoding="utf-8")
@@ -159,37 +156,10 @@ def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
     assert saves[:4] == [False, True, False, False]
 
 
-@pytest.mark.parametrize(
-    "step",
-    [
-        "Заменить операцию вычитания на сложение внутри add",
-        "Переименовать функцию load в read",
-        "Поправить таймаут в client.py",
-        "Replace the subtraction with addition",
-        "Rename load to read",
-    ],
-)
-def test_a_write_closes_an_edit_step_however_it_is_worded(agent_factory, step):
-    from agent_runtime import _plan_item_matches_action
-
-    assert _plan_item_matches_action(step.casefold(), "replace_in_file", ["calc.py"])
-
-
-@pytest.mark.parametrize(
-    "step",
-    ["Прочитать справку по API", "Подключиться к удалённому серверу", "Verify correctness of the output"],
-)
-def test_reading_steps_are_not_mistaken_for_edits(step):
-    from agent_runtime import _PLAN_EDIT_RE
-
-    assert not _PLAN_EDIT_RE.search(step.casefold())
-
-
 def test_refused_finish_tells_the_model_why(agent_factory):
     from agent_runtime import _finish_with_final_answer
 
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = make_plan()
     agent._state.modify_goal = True
 
     outcome = _finish_with_final_answer(agent, 3, make_command("final_answer", {"message": "done"}, "done"))
@@ -200,12 +170,7 @@ def test_refused_finish_tells_the_model_why(agent_factory):
 
 
 def test_prompt_carries_no_standing_governance(agent_factory):
-    from agent_state import NO_PLAN_STEP
-
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = PlanInfo(
-        goal="почини инсталлятор", complexity="complex", plan=[NO_PLAN_STEP], success_criteria=["x"], risks=[]
-    )
     agent._state.modify_goal = True
     agent._state.required_artifacts = ["src/billing.py"]
     agent._refresh_completion_requirements()
@@ -213,29 +178,28 @@ def test_prompt_carries_no_standing_governance(agent_factory):
     prompt = agent._build_runtime_prompt("почини инсталлятор", 3)
 
     for gone in ("Completion blockers", "Current progress", "Required artifacts", "Compressed state",
-                 "Completion status", "Forbidden next actions", "Plan goal", NO_PLAN_STEP[:40]):
+                 "Completion status", "Forbidden next actions", "Plan goal", "Success criteria"):
         assert gone not in prompt
 
 
-def test_unplanned_run_takes_progress_from_its_phase_not_the_stand_in_plan(agent_factory):
-    from agent_state import NO_PLAN_STEP
-
+def test_progress_comes_from_the_phase_of_the_calls_and_never_walks_back(agent_factory):
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = PlanInfo(
-        goal="fix it", complexity="complex", plan=[NO_PLAN_STEP], success_criteria=[], risks=[]
-    )
-    agent._state.completed_plan_steps.add(NO_PLAN_STEP)
 
     agent._update_progress(make_command("read_file", {"path": "a.py"}, plan_step="inspect"), True)
-
-    assert agent._plan_progress() == 0
     assert agent._state.progress == 15
-    assert "Completed plan steps" not in agent._build_summary()
+
+    agent._update_progress(make_command("replace_in_file", {"path": "a.py"}, plan_step="edit"), True)
+    assert agent._state.progress == 55
+
+    agent._update_progress(make_command("read_file", {"path": "a.py"}, plan_step="inspect"), True)
+    assert agent._state.progress == 55
+
+    agent._update_progress(make_command("run_shell", {"command": ["true"]}, plan_step="verify"), False)
+    assert agent._state.progress == 55
 
 
 def test_completion_requirements_and_final_answer(agent_factory):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.create_goal = True
 
     agent._refresh_completion_requirements(force_enforcement=True)
@@ -249,7 +213,6 @@ def test_completion_requirements_and_final_answer(agent_factory):
 
     agent._state.files_changed = ["app.py"]
     agent._state.verification_evidence = ["run_shell: python -m pytest"]
-    agent._state.completed_plan_steps = set(make_plan().plan)
     agent._refresh_completion_requirements()
     assert agent._state.completion_blockers == []
 
@@ -277,13 +240,6 @@ def test_runtime_helpers_format_feedback_and_bounded_lists(agent_factory):
 def test_run_loop_create_task_finishes_only_on_the_models_final_answer(agent_factory):
     agent = agent_factory(max_steps=4)
     agent._state.response_language = "ru"
-    agent._state.plan_info = PlanInfo(
-        goal="Создать hello.py",
-        complexity="simple",
-        plan=["create hello.py", "verify hello.py", "final report"],
-        success_criteria=["hello.py exists", "hello.py is verified"],
-        risks=[],
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
 
@@ -346,13 +302,6 @@ def test_run_loop_create_task_finishes_only_on_the_models_final_answer(agent_fac
 def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_factory):
     agent = agent_factory(max_steps=5)
     agent._state.response_language = "ru"
-    agent._state.plan_info = PlanInfo(
-        goal="Создать hello.py",
-        complexity="simple",
-        plan=["create hello.py", "verify hello.py", "final report"],
-        success_criteria=["hello.py exists", "hello.py is verified"],
-        risks=[],
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
 
@@ -438,13 +387,6 @@ def test_run_loop_preserves_checkpoint_when_step_limit_interrupts_work(
     agent_factory,
 ):
     agent = agent_factory(max_steps=5)
-    agent._state.plan_info = PlanInfo(
-        goal="Investigate files",
-        complexity="simple",
-        plan=["inspect files", "summarize findings"],
-        success_criteria=["findings are reported"],
-        risks=[],
-    )
     responses = iter(_read_responses(5))
     agent._call_action_model = lambda prompt: json.dumps(next(responses))
     agent._execute_command = lambda command: {
@@ -464,13 +406,6 @@ def test_run_loop_preserves_checkpoint_when_step_limit_interrupts_work(
 
 def test_run_loop_records_blocked_action_breadcrumb(agent_factory):
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = PlanInfo(
-        goal="Build the thing",
-        complexity="simple",
-        plan=["write the file"],
-        success_criteria=["file exists"],
-        risks=[],
-    )
     agent._state.create_goal = True
     # keep_explicit_restriction needs both set so the loop-start refresh
     # preserves required_next_actions instead of clearing it.
@@ -495,13 +430,6 @@ def test_run_loop_records_blocked_action_breadcrumb(agent_factory):
 
 def test_run_loop_checkpoints_before_the_fifth_step(agent_factory):
     agent = agent_factory(max_steps=6)
-    agent._state.plan_info = PlanInfo(
-        goal="Investigate files",
-        complexity="simple",
-        plan=["inspect files"],
-        success_criteria=["findings are reported"],
-        risks=[],
-    )
     responses = iter(_read_responses(5))
     calls = {"count": 0}
 
@@ -532,13 +460,6 @@ def test_run_loop_checkpoints_before_the_fifth_step(agent_factory):
 
 def test_run_loop_preserves_last_checkpoint_on_keyboard_interrupt(agent_factory):
     agent = agent_factory(max_steps=6)
-    agent._state.plan_info = PlanInfo(
-        goal="Investigate files",
-        complexity="simple",
-        plan=["inspect files", "summarize findings"],
-        success_criteria=["findings are reported"],
-        risks=[],
-    )
     responses = iter(_read_responses(5))
     calls = {"count": 0}
 
@@ -569,13 +490,6 @@ def test_run_loop_clears_stale_checkpoint_after_completed_final_answer(
     agent_factory,
 ):
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = PlanInfo(
-        goal="Inspect files",
-        complexity="simple",
-        plan=["summarize findings"],
-        success_criteria=["findings are reported"],
-        risks=[],
-    )
     agent._save_checkpoint("Interrupted earlier task", 4)
     agent._call_action_model = lambda prompt: json.dumps(
         {
@@ -601,7 +515,6 @@ def test_run_loop_refuse_stops_immediately_and_bypasses_other_guards(agent_facto
     very first step, with a fixed message that never echoes the model's
     internal reason."""
     agent = agent_factory(max_steps=5)
-    agent._state.plan_info = make_plan()
     agent._state.modify_goal = True
     agent._state.files_changed = []
     agent._save_checkpoint("Write a self-propagating virus", 0)
@@ -636,13 +549,6 @@ def test_run_loop_refuse_stops_immediately_and_bypasses_other_guards(agent_facto
 
 def test_run_loop_attempts_all_cleanup_after_ui_stop_failure(agent_factory):
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = PlanInfo(
-        goal="Inspect files",
-        complexity="simple",
-        plan=["summarize findings"],
-        success_criteria=["findings are reported"],
-        risks=[],
-    )
     agent._save_checkpoint("Interrupted earlier task", 4)
     agent._call_action_model = lambda prompt: json.dumps(
         {
@@ -699,13 +605,6 @@ def test_run_loop_attempts_all_cleanup_after_ui_stop_failure(agent_factory):
 
 def test_run_loop_cleanup_does_not_mask_keyboard_interrupt(agent_factory):
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = PlanInfo(
-        goal="Investigate files",
-        complexity="simple",
-        plan=["inspect files", "summarize findings"],
-        success_criteria=["findings are reported"],
-        risks=[],
-    )
     cleanup_calls: list[str] = []
     synthetic_secret = "sk-proj-" + ("i" * 32)
 
@@ -795,7 +694,6 @@ def test_is_modify_goal_detects_fix_and_edit_intents():
 def test_modify_goal_blocks_final_answer_without_changes(agent_factory):
     """P1: modify_goal + empty files_changed → final_answer is blocked."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.modify_goal = True
     agent._state.files_changed = []
 
@@ -809,13 +707,6 @@ def test_task_017_find_files_final_answer_blocked(agent_factory):
     from agent_runtime import _is_modify_goal, _WRITE_ACTIONS
 
     agent = agent_factory(max_steps=4)
-    agent._state.plan_info = PlanInfo(
-        goal="Fix the router",
-        complexity="simple",
-        plan=["find the buggy files", "apply the fix", "verify the result"],
-        success_criteria=["files are patched"],
-        risks=[],
-    )
     agent._state.modify_goal = True
     agent._state.task_language = "en"
     agent._state.selected_action_role = "smart"
@@ -913,18 +804,6 @@ def test_task_017_live_scenario_russian_modify_blocked(agent_factory):
     )
 
     agent = agent_factory(max_steps=5)
-    agent._state.plan_info = PlanInfo(
-        goal=TASK_017_GOAL,
-        complexity="simple",
-        plan=[
-            "review relevant files and structure",
-            "make minimal precise changes",
-            "verify result and errors",
-            "summarize the completed task",
-        ],
-        success_criteria=["empty_list.py is patched", "verification passes"],
-        risks=[],
-    )
     agent._state.task_language = "ru"
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
@@ -1074,7 +953,6 @@ def test_task_017_live_scenario_russian_modify_blocked(agent_factory):
 def test_security_policy_violations_tracked(agent_factory):
     """P2: .env errors are recorded in security_policy_violations list."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
 
     cmd = make_command("read_file", {"path": ".env"})
     feedback = {
@@ -1092,7 +970,6 @@ def test_security_policy_violations_tracked(agent_factory):
 def test_security_policy_shell_env_blocked(agent_factory):
     """P2: Shell commands accessing .env are blocked."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
 
     cmd = make_command("run_shell", {"command": ["cat", ".env"]})
     feedback = {
@@ -1111,7 +988,6 @@ def test_security_policy_shell_env_blocked(agent_factory):
 def test_pending_verification_paths_added_after_write(agent_factory):
     """P3: After write_file, the path is added to pending_verification_paths."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
 
     cmd = make_command("write_file", {"path": "hello.py", "content": "print(1)"}, plan_step="edit")
     feedback = {"ok": True, "action_type": "write_file", "data": {"path": "hello.py"}}
@@ -1124,7 +1000,6 @@ def test_pending_verification_paths_added_after_write(agent_factory):
 def test_verification_clears_pending_paths(agent_factory):
     """P3: git_diff and run_shell (pytest) clear pending_verification_paths; git_status does NOT."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.files_changed = ["hello.py"]
     agent._state.pending_verification_paths = ["hello.py"]
 
@@ -1143,7 +1018,6 @@ def test_verification_clears_pending_paths(agent_factory):
 def test_run_shell_pytest_clears_pending_paths(agent_factory):
     """P3: run_shell with pytest clears pending_verification_paths."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.files_changed = ["hello.py"]
     agent._state.pending_verification_paths = ["hello.py"]
 
@@ -1159,11 +1033,9 @@ def test_run_shell_pytest_clears_pending_paths(agent_factory):
 def test_pending_verification_blocks_final_answer(agent_factory):
     """P3: final_answer is blocked when pending_verification_paths is not empty."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.create_goal = True
     agent._state.files_changed = ["app.py"]
     agent._state.pending_verification_paths = ["app.py"]
-    agent._state.completed_plan_steps = set(make_plan().plan)
 
     agent._refresh_completion_requirements()
     assert agent._state.completion_blockers
@@ -1198,7 +1070,6 @@ def test_devops_run_shell_parsed_and_executed(agent_factory):
     assert all(isinstance(x, str) for x in command.action.args["command"])
 
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
 
@@ -1389,7 +1260,6 @@ def test_devops_systemctl_dangerous_blocked_by_terminal(agent_factory):
 def test_devops_blocked_command_produces_honest_feedback(agent_factory):
     """When run_shell is blocked, feedback is an honest error, not a silent success."""
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.current_agent_role = "devops"
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
@@ -1434,7 +1304,6 @@ def test_devops_status_nginx_no_parse_error(agent_factory):
     assert all(isinstance(x, str) for x in command.action.args["command"])
 
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.current_agent_role = "devops"
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
@@ -1461,7 +1330,6 @@ def test_devops_systemctl_nonzero_exit_includes_stderr_in_error(agent_factory):
     from executor import ExecutionResult
 
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.current_agent_role = "devops"
 
     # Simulate systemctl returning "Unit nginx.service could not be found."
@@ -1489,7 +1357,6 @@ def test_devops_systemctl_nonzero_exit_includes_stderr_in_error(agent_factory):
 def test_run_loop_feeds_the_response_text_to_the_live_panel(agent_factory):
     # The thinking column's fallback for providers that stream no reasoning.
     agent = agent_factory(max_steps=1)
-    agent._state.plan_info = make_plan()
     shown: list[str] = []
     agent._ui.set_last_thought = shown.append
     agent._call_action_model = lambda prompt: _v2("Сначала смотрю корень", _tool("list_dir", path="."))
@@ -1510,7 +1377,7 @@ def test_unverified_blocker_names_the_cheapest_accepted_action(agent_factory):
 
 def test_unverified_write_surfaces_a_blocker_label(agent_factory):
     """The panel needs a short reason; the blocker text itself is model-facing."""
-    from agent_runtime import _plan_position
+    from agent_runtime import _run_position
 
     agent = agent_factory()
     agent._state.response_language = "ru"
@@ -1518,34 +1385,27 @@ def test_unverified_write_surfaces_a_blocker_label(agent_factory):
     agent._refresh_completion_requirements()
 
     assert "unverified" in agent._state.completion_blocker_kinds
-    assert _plan_position(agent)["blocker"] == "ждёт проверки правок"
+    assert _run_position(agent)["blocker"] == "ждёт проверки правок"
 
     agent._state.response_language = "en"
-    assert _plan_position(agent)["blocker"] == "changes not verified"
+    assert _run_position(agent)["blocker"] == "changes not verified"
 
 
 def test_no_blocker_label_once_the_change_is_verified(agent_factory):
-    from agent_runtime import _plan_position
+    from agent_runtime import _run_position
 
     agent = agent_factory()
     agent._state.files_changed = ["main.py"]
     agent._state.verification_evidence = ["git_diff: main.py"]
     agent._refresh_completion_requirements()
 
-    assert _plan_position(agent)["blocker"] == ""
+    assert _run_position(agent)["blocker"] == ""
 
 
 # ── step budget ──────────────────────────────────────────────────────────────
 
 def _endless_reader(agent):
     """An action model that never finishes, so only the budget can stop it."""
-    agent._state.plan_info = PlanInfo(
-        goal="Посмотреть файлы",
-        complexity="simple",
-        plan=["осмотреть содержимое", "показать результат"],
-        success_criteria=["список получен"],
-        risks=[],
-    )
     calls = {"value": 0}
 
     def fake_call_action_model(prompt: str) -> str:
@@ -1708,7 +1568,6 @@ def test_a_file_read_stays_in_context_across_later_steps(agent_factory, tmp_path
     get it back except by reading the file again.
     """
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     (tmp_path / "target.py").write_text("MARKER_ONLY_IN_THIS_FILE = 1\n", encoding="utf-8")
 
     read = make_command("read_file", {"path": "target.py"})
@@ -1726,33 +1585,12 @@ def test_a_file_read_stays_in_context_across_later_steps(agent_factory, tmp_path
     )
 
 
-def test_an_analysis_plan_can_actually_finish(agent_factory, tmp_path):
+def test_a_read_only_analysis_run_can_finish(agent_factory, tmp_path):
     """Reproduces the deadlock from run_012: a read-only analysis task that
-    read every file it needed and still could not finish.
-
-    Plan steps are matched to actions by vocabulary. A planner asked to
-    evaluate something writes judgement steps that name no inspect, edit,
-    verify or report verb, so no action can ever mark them complete. While they
-    gate completion the run is unfinishable: the model is told the plan is
-    incomplete, keeps inspecting, and re-reads the same files until the step
-    budget runs out.
-    """
+    read every file it needed and still could not finish. Nothing but hard
+    evidence may hold such a run back."""
     agent = agent_factory()
     agent._state.read_only_goal = True
-    agent._state.plan_info = PlanInfo(
-        goal="Оценить инсталляторы",
-        complexity="complex",
-        plan=[
-            "Найти папку installer и составить список файлов внутри неё",
-            "Прочитать документацию внутри папки installer",
-            "Оценить инсталляторы по критериям: корректность, обработка ошибок, идемпотентность",
-            "Сопоставить заявленное в документации с тем, что реально делают инсталляторы",
-            "Сформировать итоговый отчёт с рекомендациями",
-        ],
-        success_criteria=["Отчёт содержит конкретные замечания"],
-        risks=[],
-        task_kind="report",
-    )
     (tmp_path / "installer").mkdir()
     (tmp_path / "installer" / "README.md").write_text("docs\n", encoding="utf-8")
 
@@ -1763,26 +1601,7 @@ def test_an_analysis_plan_can_actually_finish(agent_factory, tmp_path):
 
     agent._refresh_completion_requirements()
 
-    assert "plan_incomplete" not in agent._state.completion_blocker_kinds, (
-        "judgement steps no action can satisfy are still gating completion: "
-        f"{agent._state.completion_blockers}"
-    )
-
-
-def test_a_step_a_real_action_could_satisfy_still_gates_completion(agent_factory):
-    """The deadlock fix must not become a way to skip actual work."""
-    agent = agent_factory()
-    agent._state.plan_info = PlanInfo(
-        goal="Починить баг",
-        complexity="simple",
-        plan=["Прочитать модуль", "Исправить обработку ошибок в модуле"],
-        success_criteria=["Правка применена"],
-        risks=[],
-    )
-
-    agent._refresh_completion_requirements()
-
-    assert "plan_incomplete" in agent._state.completion_blocker_kinds
+    assert agent._state.completion_blockers == []
 
 
 def _batch_response(actions: list[dict]) -> str:
@@ -1810,7 +1629,6 @@ def _v2(text: str, *calls: str) -> str:
 
 def test_run_loop_executes_a_whole_batch_from_one_model_call(agent_factory):
     agent = agent_factory(max_steps=3)
-    agent._state.plan_info = make_plan()
     model_calls = []
     executed = []
 
@@ -1836,7 +1654,6 @@ def test_run_loop_executes_a_whole_batch_from_one_model_call(agent_factory):
 
 def test_run_loop_a_failed_read_does_not_stop_the_batch(agent_factory):
     agent = agent_factory(max_steps=3)
-    agent._state.plan_info = make_plan()
     executed = []
 
     def fake_execute(command):
@@ -1857,7 +1674,6 @@ def test_run_loop_a_failed_read_does_not_stop_the_batch(agent_factory):
 
 def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_factory):
     agent = agent_factory(max_steps=5)
-    agent._state.plan_info = make_plan()
     prompts = []
     executed = []
     responses = iter(
@@ -1897,7 +1713,6 @@ def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_
 
 def test_run_loop_shows_each_call_label_in_the_live_panel(agent_factory):
     agent = agent_factory(max_steps=2)
-    agent._state.plan_info = make_plan()
     agent._state.response_language = "ru"
     shown_actions = []
     agent._ui.set_run_context = lambda **facts: shown_actions.append(facts.get("action"))
@@ -1911,7 +1726,6 @@ def test_run_loop_shows_each_call_label_in_the_live_panel(agent_factory):
 
 def test_run_loop_records_a_batch_user_message_once(agent_factory):
     agent = agent_factory(max_steps=2)
-    agent._state.plan_info = make_plan()
     agent._call_action_model = lambda prompt: _batch_response([_list_dir("a"), _list_dir("b")])
     agent.executor.execute = lambda command: ExecutionResult(True, "list_dir", {"entries": []})
 
@@ -1967,13 +1781,6 @@ def test_keyword_heuristics_cannot_block_writes_on_a_coder_run(agent_factory):
     agent = agent_factory(max_steps=2)
     agent._state.current_agent_role = "coder"
     agent.executor.set_active_role("coder")
-    agent._state.plan_info = PlanInfo(
-        goal=goal,
-        complexity="simple",
-        plan=["rename the function", "run the tests"],
-        success_criteria=["get_usr is gone"],
-        risks=[],
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"
@@ -2013,15 +1820,6 @@ def test_feedback_line_for_a_commandless_handoff_says_nothing_ran(agent_factory)
 
     assert "recorded only" in line
     assert "nothing was executed" in line
-
-
-def test_handoff_and_check_if_steps_are_matched_by_the_actions_that_do_them():
-    from agent_runtime import _plan_item_matches_action
-
-    assert _plan_item_matches_action("delegate the fix to coder if below 12", "delegate_task", [])
-    assert _plan_item_matches_action("check if the default is at least 12 characters", "read_file", [])
-    assert not _plan_item_matches_action("check that the tests pass", "read_file", [])
-    assert not _plan_item_matches_action("update the default length", "delegate_task", [])
 
 
 def test_empty_data_cells_finds_blank_csv_fields_and_ignores_other_files():
@@ -2107,7 +1905,7 @@ def test_paths_outside_the_workspace_are_never_required_artifacts():
         "Не трогай /etc/hosts. Почини src/billing.py."
     )
 
-    assert _extract_required_artifacts(goal, None) == ["src/billing.py"]
+    assert _extract_required_artifacts(goal) == ["src/billing.py"]
 
 
 def test_removed_security_checks_reads_only_deleted_lines_from_the_journal(agent_factory):
@@ -2190,7 +1988,6 @@ def test_artifact_search_reruns_only_after_an_action_that_can_create_files(agent
 
     agent = agent_factory()
     workspace = Path(agent.executor.workspace)
-    agent._state.plan_info = make_plan()
     agent._state.required_artifacts = ["04_intro.md"]
     assert _missing_required_artifacts(agent) == ["04_intro.md"]
 
@@ -2231,7 +2028,6 @@ def test_a_temp_name_in_a_rename_chain_is_not_left_awaiting_verification(agent_f
 
 def test_reading_changed_files_in_one_batch_clears_their_verification(agent_factory):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.files_changed = ["a.md", "b.md", "c.md"]
     agent._state.pending_verification_paths = ["a.md", "b.md", "c.md"]
 
@@ -2256,12 +2052,7 @@ def test_a_file_the_goal_asks_to_delete_is_not_a_missing_required_artifact(agent
 
 
 def test_run_loop_a_response_without_calls_ends_the_turn_with_its_text(agent_factory):
-    from agent_state import NO_PLAN_STEP
-
     agent = agent_factory(max_steps=5)
-    agent._state.plan_info = PlanInfo(
-        goal="answer", complexity="simple", plan=[NO_PLAN_STEP], success_criteria=[], risks=[]
-    )
     agent._state.response_language = "ru"
     prompts = []
     responses = iter([
@@ -2310,7 +2101,6 @@ def _concurrency_probe(delays: dict[str, float]):
 
 def test_parallel_reads_return_results_in_call_order_not_finish_order(agent_factory):
     agent = agent_factory(max_steps=4)
-    agent._state.plan_info = make_plan()
     # Wide gaps keep the finish order certain on a slow CI runner.
     execute, probe = _concurrency_probe({"slow.py": 0.6, "mid.py": 0.35, "fast.py": 0.1})
     agent.executor.execute = execute
@@ -2339,7 +2129,6 @@ def test_parallel_reads_return_results_in_call_order_not_finish_order(agent_fact
 
 def test_no_more_than_four_reads_run_at_once(agent_factory):
     agent = agent_factory(max_steps=8)
-    agent._state.plan_info = make_plan()
     execute, probe = _concurrency_probe({})
     agent.executor.execute = execute
     agent._call_action_model = lambda prompt: _v2(
@@ -2354,7 +2143,6 @@ def test_no_more_than_four_reads_run_at_once(agent_factory):
 
 def test_no_more_than_eight_calls_run_per_response(agent_factory):
     agent = agent_factory(max_steps=12)
-    agent._state.plan_info = make_plan()
     prompts = []
     executed = []
     responses = iter([
@@ -2381,7 +2169,6 @@ def test_no_more_than_eight_calls_run_per_response(agent_factory):
 
 def test_a_read_after_a_write_in_the_same_response_sees_the_write(agent_factory):
     agent = agent_factory(max_steps=4)
-    agent._state.plan_info = make_plan()
     agent._call_action_model = lambda prompt: _v2(
         "",
         _tool("write_file", path="new.txt", content="fresh"),
@@ -2397,7 +2184,6 @@ def test_a_read_after_a_write_in_the_same_response_sees_the_write(agent_factory)
 
 def test_shell_never_runs_in_parallel_with_reads(agent_factory):
     agent = agent_factory(max_steps=4)
-    agent._state.plan_info = make_plan()
     order = []
 
     def fake_execute(command):
@@ -2425,8 +2211,6 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
     from types import SimpleNamespace
 
     import agent_model
-    from agent_state import NO_PLAN_STEP
-
     def call(call_id, name, **args):
         return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(args)))
 
@@ -2449,7 +2233,6 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
     agent_model._NATIVE_TOOL_SUPPORT.clear()
     agent = agent_factory(max_steps=12, stream=False)
     agent.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-    agent._state.plan_info = PlanInfo(goal="read", complexity="simple", plan=[NO_PLAN_STEP], success_criteria=[], risks=[])
     execute, _probe = _concurrency_probe({"f0.py": 0.3})
     agent.executor.execute = execute
 
@@ -2466,7 +2249,6 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
 
 def test_call_events_carry_call_and_batch_ids(agent_factory):
     agent = agent_factory(max_steps=3)
-    agent._state.plan_info = make_plan()
     headers = []
     results = []
     agent._ui.print_step_header = lambda step, command, seconds=0.0: headers.append(command)
@@ -2485,7 +2267,6 @@ def test_call_events_carry_call_and_batch_ids(agent_factory):
 
 def test_final_event_says_whether_the_run_is_done(agent_factory):
     agent = agent_factory(max_steps=2)
-    agent._state.plan_info = make_plan()
     finals = []
     agent._ui.print_final = lambda message, user_messages=None, outcome="done": finals.append(outcome)
     agent._call_action_model = lambda prompt: _batch_response([_list_dir("a")])
@@ -2498,7 +2279,6 @@ def test_final_event_says_whether_the_run_is_done(agent_factory):
 
 def test_the_words_of_a_response_whose_calls_were_all_refused_are_kept(agent_factory):
     agent = agent_factory(max_steps=3)
-    agent._state.plan_info = make_plan()
     agent._state.read_only_goal = True
     agent._state.current_agent_role = "reader"
     responses = iter([
@@ -2514,7 +2294,6 @@ def test_the_words_of_a_response_whose_calls_were_all_refused_are_kept(agent_fac
 
 def test_a_response_of_only_calls_leaves_their_labels_as_the_step_note(agent_factory):
     agent = agent_factory(max_steps=3)
-    agent._state.plan_info = make_plan()
     agent._state.response_language = "ru"
     responses = iter([
         _v2("", _tool("read_file", path="a.py"), _tool("search_code", query="role", path="src/")),

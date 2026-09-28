@@ -131,7 +131,6 @@ def _agent_lines(agent, *, frontend: str, routed_role: str | None) -> list[str]:
         f"Model (smart): {config.smart_model}",
         f"Role: {routed_role or 'auto'}",
         f"Effort: {config.reasoning_effort}",
-        f"Planning: {'off' if config.skip_planning else 'on'}",
         f"Session: {agent.current_session}",
     ]
 

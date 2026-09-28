@@ -16,7 +16,7 @@ export interface CoreOptions {
   role: string
   approvalMode: string
   provider?: string
-  models?: { fast: string; smart: string; planner: string }
+  models?: { fast: string; smart: string }
   env?: Record<string, string>
 }
 
@@ -48,7 +48,6 @@ function coreArgs(options: CoreOptions): string[] {
     args.push(
       "--fast-model", options.models.fast,
       "--smart-model", options.models.smart,
-      "--planner-model", options.models.planner,
     )
   }
   args.push("--role", options.role, "--approval-mode", options.approvalMode)

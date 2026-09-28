@@ -498,7 +498,6 @@ def _banner_fields(config) -> list[tuple[str, str]]:
         ("Provider:", sanitize_display_text(provider_label(config.provider))),
         ("Fast:", sanitize_display_text(str(config.fast_model))),
         ("Smart:", sanitize_display_text(str(config.smart_model))),
-        ("Planner:", sanitize_display_text(str(config.planner_model))),
         ("Role:", sanitize_display_text(get_saved_role() or "auto")),
         ("Effort:", sanitize_display_text(str(getattr(config, "reasoning_effort", "medium")))),
         ("Commands:", "/commands"),

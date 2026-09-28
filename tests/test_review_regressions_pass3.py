@@ -117,7 +117,7 @@ from pathlib import Path
 from agent import LocalAgent
 from agent_state import AgentConfig
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient, NullUI, make_plan
+from tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
 counter = ws / "counter.txt"
@@ -151,7 +151,6 @@ agent._execute_command = side_effecting_execute
 
 agent._state.current_agent_role = "coder"
 agent.executor.set_active_role("coder")
-agent._state.plan_info = make_plan()
 agent._run_loop("run the command", start_step=2)
 print("NO_CRASH")
 '''
@@ -204,7 +203,7 @@ from pathlib import Path
 from agent import LocalAgent
 from agent_state import AgentConfig
 from executor import SafeExecutor
-from tests.conftest import FakeLLMClient, NullUI, make_plan
+from tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
 first_action = sys.argv[2]
@@ -216,18 +215,18 @@ agent.new_session("work")
 agent._run_id = "old-run"
 agent._save_checkpoint("OLD TASK — do the old thing", 5)
 
-# Start a NEW task; die during planning, before any tool action / checkpoint.
+# Start a NEW task; die during setup, before any tool action / checkpoint.
 class Boom(Exception): pass
-def exploding_plan(goal):
-    raise Boom("process died during planning")
-agent._create_plan = exploding_plan
+def exploding_setup():
+    raise Boom("process died before the first step")
+agent._select_action_model_for_run = exploding_setup
 
 try:
     agent.run("NEW TASK — " + first_action, routed_role="coder")
 except Boom:
     pass
-# Emulate process death during planning. Report the on-disk checkpoint: it must
-# durably represent NEW (phase=planning), never OLD and never nothing.
+# Emulate process death before the first step. Report the on-disk checkpoint: it
+# must durably represent NEW (phase=starting), never OLD and never nothing.
 data = agent._peek_checkpoint()
 print(json.dumps({"goal": data and data.get("goal")}))
 '''
@@ -243,27 +242,26 @@ def _run2(ws, first_action):
 
 
 @pytest.mark.parametrize("first_action", ["read_file", "run_shell"])
-def test_new_run_durably_supersedes_old_before_planning(tmp_path, first_action):
+def test_new_run_durably_supersedes_old_before_its_first_step(tmp_path, first_action):
     crashed = _run2(tmp_path, first_action)
     assert crashed.returncode == 0, crashed.stdout + crashed.stderr
     payload = json.loads(crashed.stdout.strip().splitlines()[-1])
-    # NEW was durably activated before planning; OLD is gone but NEW is NOT
-    # lost — the durable truth is the NEW run, recoverable by replanning.
+    # NEW was durably activated before its first step; OLD is gone but NEW is NOT
+    # lost — the durable truth is the NEW run, recoverable by restarting it.
     assert payload["goal"] is not None
     assert payload["goal"].startswith("NEW TASK")
     assert "OLD TASK" not in payload["goal"]
 
-    # A fresh process resumes NEW (re-plans) and never revives OLD.
+    # A fresh process resumes NEW (from step 1) and never revives OLD.
     resume_script = (
         "import json,sys\n"
         "from pathlib import Path\n"
         "from agent import LocalAgent\n"
         "from agent_state import AgentConfig\n"
         "from executor import SafeExecutor\n"
-        "from tests.conftest import FakeLLMClient, NullUI, make_plan\n"
+        "from tests.conftest import FakeLLMClient, NullUI\n"
         "a=LocalAgent(FakeLLMClient(), SafeExecutor(Path(sys.argv[1])),"
         "AgentConfig(persist_logs=False, api_request_interval=0, max_steps=2), ui=NullUI())\n"
-        "a._create_plan=lambda g: make_plan()\n"
         "a._call_action_model=lambda p: json.dumps({'thought':'t','plan_step':'done',"
         "'progress':100,'user_message':'m','action':{'type':'final_answer','args':{'message':'done'}}})\n"
         "res=a.resume()\n"
@@ -276,7 +274,7 @@ def test_new_run_durably_supersedes_old_before_planning(tmp_path, first_action):
                              cwd=Path(__file__).parents[1], env=env,
                              capture_output=True, text=True, timeout=40)
     payload = json.loads(resumed.stdout.strip().splitlines()[-1])
-    assert payload["result_none"] is False  # NEW resumed/replanned, not "nothing"
+    assert payload["result_none"] is False  # NEW resumed, not "nothing"
     assert payload["resumed_goal"].startswith("NEW TASK")  # OLD never returned
 
 

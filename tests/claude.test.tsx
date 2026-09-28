@@ -68,6 +68,16 @@ test("a final_answer call prints no line of its own, and a code block has no fra
   assert.doesNotMatch(out, /[╭╰│]|\bsh\b/)
 })
 
+test("a proposed plan is a call with its Markdown under ⎿, labelled in the request's language", () => {
+  const markdown = "**Goal**\n\n- split `agent.py`\n- keep the tests green"
+  const english = frame(createElement(ClaudeItemView, { item: item({ kind: "plan", markdown, russian: false }), showDebug: false }))
+  assert.match(english, /● Proposed plan/)
+  assert.match(english, /⎿ {2}Goal/)
+  assert.match(english, /split agent\.py/)
+  const russian = frame(createElement(ClaudeItemView, { item: item({ kind: "plan", markdown, russian: true }), showDebug: false }))
+  assert.match(russian, /● Предложенный план/)
+})
+
 test("a read is a Name(target) call with its summary under ⎿", () => {
   const out = frame(createElement(ClaudeItemView, { item: tool("read_file", { path: "a.py" }), showDebug: false }))
   assert.match(out, /● Read\(a\.py\)/)

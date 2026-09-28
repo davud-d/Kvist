@@ -93,6 +93,11 @@ Kvist routes a request to one of five roles:
 - `chat` — answers questions and discusses architecture without touching files;
 - `auto` — selects a role from the request (the default).
 
+On a task where the direction is the risky part, the agent offers to show a
+plan first: it explores the project read-only, proposes a short plan, and
+changes files only after you accept it. If you decline, it asks what to change
+and proposes again. Small edits skip the offer.
+
 Every run has a human-in-the-loop approval gate. File writes and risky commands
 are visible and may require confirmation. This is a supervised tool, not an IDE
 and not a complete security boundary: review the diff and command output.
@@ -288,7 +293,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/help`, `/commands` | Show help or the complete command list |
 | `/provider` | Select or configure a provider |
 | `/change-api` | Replace the current provider key (`/change_api` and `/apikey` also work) |
-| `/models` | Select `fast`, `smart`, and `planner` models |
+| `/models` | Select `fast` and `smart` models |
 | `/settings-api` | Tune request pacing, timeout, retries, the context window, dynamic model loading, response cache and model fallbacks (`/api` also works, saved globally) |
 | `/role` | Select `auto`, `coder`, `reader`, `devops`, or `chat` |
 | `/effort` | Set reasoning effort: `false`, `low`, `medium`, `high`, `xhigh`, `max` (saved globally) |
@@ -298,13 +303,11 @@ Type `/` to open command completion. The most useful commands are:
 | `/changes` | Show agent changes recorded in this workspace |
 | `/revert` | Restore recorded agent changes when safe |
 | `/verbose` | Toggle diagnostic output |
-| `/plan` | Toggle the separate planning call (saved globally) |
 | `/tui` | Choose the terminal interface (Ink, Claude-style or classic); the choice is saved globally. In the Node UIs it opens a picker and switches at once; in the classic terminal `/tui on` / `/tui claude` / `/tui off` select explicitly |
 | `/strime` | Toggle streaming for a custom provider |
 | `/bye` | Save and exit (`/exit` and `/quit` are aliases) |
 
-Multiline input: `Alt+Enter` or `Esc+Enter`. The planning stage is enabled by
-default; `AGENT_SKIP_PLANNING=1` overrides the saved preference for a launch.
+Multiline input: `Alt+Enter` or `Esc+Enter`.
 
 Reasoning effort defaults to `medium` and is translated per provider (some
 levels collapse — e.g. DeepSeek treats `low`/`medium` as `high`; Gemini ignores
@@ -359,7 +362,7 @@ instead and says why. The installer (`installer/install_cli.py`) builds that fil
 when npm is available and packs it into the `kvist` binary; the binary then needs
 Node.js 22+ on `PATH` at run time.
 Every slash command works there. `/help`, `/clear`, `/debug` and `/quit` run in the
-UI; the rest — `/role`, `/effort`, `/plan`, `/verbose`, `/style`, `/models`,
+UI; the rest — `/role`, `/effort`, `/verbose`, `/style`, `/models`,
 `/session`, `/new`, `/changes`, `/provider`, `/change-api`, `/settings-api`,
 `/strime`, `/del-provider`, `/full-reset`, `/revert` and `/resume` — are run by the
 core itself, with their dialogs (searchable lists, masked secrets, confirmations)
@@ -402,8 +405,8 @@ echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
 .venv/bin/python main.py --workspace /path/to/project --journal-op revert
 ```
 
-Per-run stdio overrides include `--provider`, all three model flags
-(`--fast-model`, `--smart-model`, `--planner-model`), `--role`, and
+Per-run stdio overrides include `--provider`, both model flags
+(`--fast-model`, `--smart-model`), `--role`, and
 `--approval-mode ask|deny`. Model overrides are supplied as a complete set.
 `--resume` resumes the active checkpoint without reading a goal line.
 
@@ -463,7 +466,7 @@ agents and the public way to add an agent is a settings entry.
 file, keeping every comment the user has, and refuses to register a binary that
 is not installed yet. `--uninstall` removes exactly that entry. The agent gets
 the same action loop, sandbox, sessions, confirmations and `/commit-message` as
-the terminal; role, reasoning effort and planning are ACP Session Config
+the terminal; role and reasoning effort are ACP Session Config
 Options, and everything else (provider, models, style, sandbox mode) stays in
 `~/.kvist/config.json` and the `AGENT_*` variables.
 
@@ -475,8 +478,8 @@ sources in [`zed-acp/README.md`](zed-acp/README.md) ([RU](zed-acp/README.ru.md))
 
 Global settings live in `~/.kvist/config.json`. Runtime environment variables
 include `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`,
-`AGENT_PLANNER_MODEL`, `AGENT_VERBOSE`, `AGENT_MAX_STEPS`,
-`AGENT_PERSIST_LOGS`, `AGENT_SKIP_PLANNING`, `AGENT_REASONING_EFFORT`,
+`AGENT_VERBOSE`, `AGENT_MAX_STEPS`,
+`AGENT_PERSIST_LOGS`, `AGENT_REASONING_EFFORT`,
 `AGENT_MAX_CONTEXT_TOKENS`, `AGENT_NATIVE_TOOLS`, `AGENT_SANDBOX_MODE`, and
 `AGENT_SANDBOX_NET`.
 Prefer `/provider`, `/models`, `/role`, and `/effort` for interactive

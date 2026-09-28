@@ -101,8 +101,7 @@ jobs:
 
       # The wheel must carry every data file the code reads by a path relative
       # to __file__ at runtime (prompts/, themes/, assets/, dist-ui/) — a
-      # missing one fails silently until first use, sometimes as late as
-      # `kvist --version` (see agent_planner.py's import-time prompt read).
+      # missing one fails silently until first use.
       # This step catches a py-modules/package-data regression that
       # `pnpm run test`/`pytest` never would, because both run against the
       # source tree, never the installed distribution.

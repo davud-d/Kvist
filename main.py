@@ -59,7 +59,6 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider", help="Provider override for the stdio frontend.")
     parser.add_argument("--fast-model", help="Fast model override for the stdio frontend.")
     parser.add_argument("--smart-model", help="Smart model override for the stdio frontend.")
-    parser.add_argument("--planner-model", help="Planner model override for the stdio frontend.")
     parser.add_argument(
         "--role",
         choices=("auto", "coder", "reader", "devops", "chat", "universal"),
@@ -440,8 +439,6 @@ from user_config import (
     get_saved_frontend,
     save_frontend,
     save_role_selection,
-    get_saved_planning_enabled,
-    save_planning_enabled,
     get_saved_reasoning_effort,
     save_reasoning_effort,
     get_saved_title_model,
@@ -497,9 +494,8 @@ slash_command_auto_suggest = SlashCommandAutoSuggest(
 )
 
 _ROLE_HINTS = {
-    "fast": "Used for routing, planning, chat, and simple steps — pick something quick and cheap.",
+    "fast": "Used for routing, chat, and simple steps — pick something quick and cheap.",
     "smart": "Used for complex coder/devops steps and error recovery — pick your most capable model.",
-    "planner": "Saved alongside fast/smart; usually fine to match the Smart model.",
 }
 
 
@@ -695,29 +691,6 @@ def parse_verbose_value(raw: str, current: bool) -> bool | None:
     return None
 
 
-def parse_plan_value(raw: str, current: bool) -> bool | None:
-    """Parse /plan, accepting true/false with optional angle brackets.
-
-    ``current`` and the return value are "planning enabled": ``/plan true``
-    keeps the planning stage, ``/plan false`` skips it. A bare ``/plan`` flips.
-    """
-
-    parts = raw.strip().split(maxsplit=1)
-    if not parts or parts[0].casefold() != "/plan":
-        return None
-    if len(parts) == 1:
-        return not current
-
-    value = parts[1].strip().casefold()
-    if value.startswith("<") and value.endswith(">"):
-        value = value[1:-1].strip()
-    if value == "true":
-        return True
-    if value == "false":
-        return False
-    return None
-
-
 def parse_tui_choice(raw: str, current: str) -> str | None:
     """Parse the classic terminal's ``/tui`` into the frontend to save, or None for bad usage.
 
@@ -803,11 +776,10 @@ def launch_tui(args: argparse.Namespace) -> int | None:
     ]
     if args.provider:
         command += ["--provider", args.provider]
-    if args.fast_model and args.smart_model and args.planner_model:
+    if args.fast_model and args.smart_model:
         command += [
             "--fast-model", args.fast_model,
             "--smart-model", args.smart_model,
-            "--planner-model", args.planner_model,
         ]
     import tempfile
 
@@ -859,15 +831,6 @@ def parse_strime_value(raw: str, current: bool) -> bool | None:
     return None
 
 
-def resolve_planning_enabled() -> bool:
-    """Startup planning-stage flag: AGENT_SKIP_PLANNING overrides the saved
-    preference, which defaults to on."""
-    env_skip = os.getenv("AGENT_SKIP_PLANNING")
-    if env_skip is not None:
-        return env_skip not in {"1", "true", "True", "yes", "on"}
-    return get_saved_planning_enabled()
-
-
 def resolve_startup_role(explicit_role: str | None) -> str:
     """Startup role: an explicit --role always wins and is never written back
     to the saved preference (it is a one-run override, like
@@ -891,13 +854,6 @@ def apply_verbose_mode(agent, enabled: bool) -> None:
     if hasattr(agent.client, "_verbose"):
         agent.client._verbose = enabled
     slash_command_auto_suggest.set_verbose(enabled)
-
-
-def apply_plan_mode(agent, planning_enabled: bool) -> None:
-    """Apply a planning-stage change to the active runtime objects."""
-
-    agent.config.skip_planning = not planning_enabled
-    slash_command_auto_suggest.set_plan(planning_enabled)
 
 
 def resolve_reasoning_effort() -> str:
@@ -1106,7 +1062,6 @@ def build_agent(
     models_override: dict[str, str] | None = None,
     language_hint: str | None = None,
     ui: AgentUI | None = None,
-    skip_planning: bool = False,
     interactive_ui: AgentUI | None = None,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
     # ``interactive_ui`` is how an event frontend answers what the terminal
@@ -1274,7 +1229,7 @@ def build_agent(
 
     required_keys = required_secret_keys_for_provider(
         provider,
-        [models["fast"], models["smart"], models["planner"]],
+        [models["fast"], models["smart"]],
     )
 
     def _prompt_secret_via_ui(label: str) -> str:
@@ -1345,12 +1300,10 @@ def build_agent(
         provider=provider,
         fast_model=models["fast"],
         smart_model=models["smart"],
-        planner_model=models["planner"],
         max_steps=max_steps,
         persist_logs=persist_logs,
         stream=provider_supports_streaming(provider),
         verbose=verbose,
-        skip_planning=skip_planning,
         reasoning_effort=resolve_reasoning_effort(),
         title_model=get_saved_title_model() or "",
     )
@@ -1398,11 +1351,6 @@ def print_runtime_banner(config: AgentConfig, max_steps: int, verbose: bool, war
     line.append(
         f"Smart model: {sanitize_display_text(config.smart_model)}",
         style="bold yellow",
-    )
-    line.append(" | ")
-    line.append(
-        f"Planner model: {sanitize_display_text(config.planner_model)}",
-        style="blue",
     )
     line.append(
         f" | Max steps: {max_steps} | Effort: {config.reasoning_effort}"
@@ -1631,7 +1579,7 @@ def change_provider_api_key(
         return True
 
     keys_to_update = required_secret_keys_for_provider(
-        provider, [config.fast_model, config.smart_model, config.planner_model]
+        provider, [config.fast_model, config.smart_model]
     )
     if not keys_to_update:
         return False
@@ -2206,7 +2154,6 @@ def choose_models(
     role_labels = {
         "fast": "Fast model",
         "smart": "Smart model",
-        "planner": "Planner model",
     }
     selected = dict(current_models)
     original = dict(current_models)
@@ -2234,7 +2181,6 @@ def select_models_interactively(
     current_models = {
         "fast": config.fast_model,
         "smart": config.smart_model,
-        "planner": config.planner_model,
     }
     if ui is None:
         ui = TerminalBannerUI(console=console, verbose=verbose)
@@ -2452,7 +2398,7 @@ def configure_custom_provider_interactively(ui: AgentUI, verbose: bool) -> str |
     label = label.strip() or default_label
 
     # ── Step 6: Models ────────────────────────────────────────────────
-    role_labels = {"fast": "Fast", "smart": "Smart", "planner": "Planner"}
+    role_labels = {"fast": "Fast", "smart": "Smart"}
     console.print()
     action = ui.choose_option(
         title="Model configuration:",
@@ -2585,7 +2531,7 @@ def configure_custom_provider_models_interactively(
     current_models: dict[str, str],
 ) -> dict[str, str] | None:
     """Interactive model configuration for an existing custom provider."""
-    role_labels = {"fast": "Fast", "smart": "Smart", "planner": "Planner"}
+    role_labels = {"fast": "Fast", "smart": "Smart"}
 
     console.print()
     console.print("[bold cyan]Custom Provider — Model Configuration[/bold cyan]")
@@ -2687,7 +2633,6 @@ def configure_openrouter_models_interactively(
     role_labels = {
         "fast": "Fast",
         "smart": "Smart",
-        "planner": "Planner",
     }
     console.print()
     console.print("[bold]Current models:[/bold]")
@@ -2822,7 +2767,6 @@ def configure_omniroute_models_interactively(
     role_labels = {
         "fast": "Fast",
         "smart": "Smart",
-        "planner": "Planner",
     }
     console.print()
     console.print("[bold]Current models:[/bold]")
@@ -2961,7 +2905,7 @@ def configure_manual_provider_models_interactively(
         f"[dim]Enter the exact model id from {provider_display}'s documentation.[/dim]"
     )
 
-    role_labels = {"fast": "Fast", "smart": "Smart", "planner": "Planner"}
+    role_labels = {"fast": "Fast", "smart": "Smart"}
     console.print()
     console.print("[bold]Current models:[/bold]")
     for role in MODEL_ROLES:
@@ -3125,31 +3069,6 @@ def _stdio_effort(ctx: CommandContext) -> CommandResult:
     )
 
 
-def _stdio_plan(ctx: CommandContext) -> CommandResult:
-    agent = ctx.session.agent
-    enabled = parse_plan_value(
-        "/plan " + " ".join(ctx.args), not agent.config.skip_planning
-    )
-    if enabled is None:
-        return CommandResult(False, "Usage: plan [true|false]")
-    apply_plan_mode(agent, enabled)
-    note = ""
-    try:
-        save_planning_enabled(enabled)
-    except RuntimeError as error:
-        note = _save_failure_note(error)
-    return CommandResult(
-        True,
-        (
-            "Planning stage enabled."
-            if enabled
-            else "Planning stage disabled."
-        )
-        + note,
-        {"plan": enabled},
-    )
-
-
 def _stdio_verbose(ctx: CommandContext) -> CommandResult:
     agent = ctx.session.agent
     enabled = parse_verbose_value("/verbose " + " ".join(ctx.args), agent.config.verbose)
@@ -3274,7 +3193,7 @@ def _stdio_models(ctx: CommandContext) -> CommandResult:
     if len(ctx.args) == len(MODEL_ROLES):
         selected = dict(zip(MODEL_ROLES, ctx.args))
     elif ctx.args:
-        return CommandResult(False, "Usage: models [FAST SMART PLANNER]")
+        return CommandResult(False, "Usage: models [FAST SMART]")
     else:
         selected = select_models_interactively(config, config.verbose, ui=ctx.ui)
     if selected is None:
@@ -3313,7 +3232,6 @@ def _stdio_models(ctx: CommandContext) -> CommandResult:
             "models": {
                 "fast": new_config.fast_model,
                 "smart": new_config.smart_model,
-                "planner": new_config.planner_model,
             },
             "warnings": warnings,
         },
@@ -3365,7 +3283,6 @@ def _provider_effects(config: AgentConfig, warnings: list[str]) -> dict:
         "models": {
             "fast": config.fast_model,
             "smart": config.smart_model,
-            "planner": config.planner_model,
         },
         "warnings": warnings,
     }
@@ -3744,7 +3661,6 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "commit-message": _stdio_commit_message,
     "role": _stdio_role,
     "effort": _stdio_effort,
-    "plan": _stdio_plan,
     "verbose": _stdio_verbose,
     "style": _stdio_style,
     "session": _stdio_session,
@@ -3936,10 +3852,10 @@ def main() -> None:
     if args.frontend == "stdio-multi":
         from event_stdio import launch_multi
 
-        model_values = (args.fast_model, args.smart_model, args.planner_model)
+        model_values = (args.fast_model, args.smart_model)
         if any(model_values) and not all(model_values):
             print(
-                "Model overrides require --fast-model, --smart-model, and --planner-model together.",
+                "Model overrides require --fast-model and --smart-model together.",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -3947,7 +3863,6 @@ def main() -> None:
             {
                 "fast": args.fast_model,
                 "smart": args.smart_model,
-                "planner": args.planner_model,
             }
             if all(model_values)
             else None
@@ -3961,7 +3876,6 @@ def main() -> None:
                 routed_role=None if args.role == "auto" else args.role,
                 approval_mode=args.approval_mode,
                 commands=STDIO_COMMANDS,
-                skip_planning=not resolve_planning_enabled(),
             )
         except RuntimeError as error:
             print(sanitize_display_text(str(error)), file=sys.stderr)
@@ -3972,10 +3886,10 @@ def main() -> None:
         from event_stdio import launch
 
         goal = "" if args.resume else sys.stdin.readline().strip()
-        model_values = (args.fast_model, args.smart_model, args.planner_model)
+        model_values = (args.fast_model, args.smart_model)
         if any(model_values) and not all(model_values):
             print(
-                "Model overrides require --fast-model, --smart-model, and --planner-model together.",
+                "Model overrides require --fast-model and --smart-model together.",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -3983,7 +3897,6 @@ def main() -> None:
             {
                 "fast": args.fast_model,
                 "smart": args.smart_model,
-                "planner": args.planner_model,
             }
             if all(model_values)
             else None
@@ -4013,10 +3926,6 @@ def main() -> None:
     persist_logs = os.getenv("AGENT_PERSIST_LOGS", "1") not in {"0", "false", "False"}
     verbose = os.getenv("AGENT_VERBOSE", "0") in {"1", "true", "True", "yes", "on"}
     slash_command_auto_suggest.set_verbose(verbose)
-    # Persisted preference is the default; AGENT_SKIP_PLANNING overrides if set.
-    planning_enabled = resolve_planning_enabled()
-    skip_planning = not planning_enabled
-    slash_command_auto_suggest.set_plan(planning_enabled)
     session_language = detect_request_language(os.getenv("LANG", ""), fallback="en")
 
     try:
@@ -4030,7 +3939,6 @@ def main() -> None:
             max_steps=max_steps,
             persist_logs=persist_logs,
             verbose=verbose,
-            skip_planning=skip_planning,
             language_hint=session_language,
         )
     except (RuntimeError, ValueError) as error:
@@ -4191,45 +4099,6 @@ def main() -> None:
 
             if (
                 user_goal
-                and user_goal.split(maxsplit=1)[0].casefold() == "/plan"
-            ):
-                planning_enabled = parse_plan_value(
-                    user_goal, not agent.config.skip_planning
-                )
-                if planning_enabled is None:
-                    console.print(
-                        "[yellow]Usage: /plan <true> or /plan <false>[/yellow]"
-                    )
-                    continue
-
-                skip_planning = not planning_enabled
-                apply_plan_mode(agent, planning_enabled)
-                try:
-                    save_planning_enabled(planning_enabled)
-                except RuntimeError as error:
-                    console.print(
-                        _display_text(
-                            "Planning preference not saved: "
-                            f"{sanitize_display_text(str(error))}",
-                            "yellow",
-                        )
-                    )
-                if planning_enabled:
-                    console.print(
-                        _display_text("Planning stage enabled.", "green")
-                    )
-                else:
-                    console.print(
-                        _display_text(
-                            "Planning stage disabled — the agent starts acting "
-                            "immediately, without an upfront plan.",
-                            "green",
-                        )
-                    )
-                continue
-
-            if (
-                user_goal
                 and user_goal.split(maxsplit=1)[0].casefold() == "/strime"
             ):
                 if not is_custom_provider(config.provider):
@@ -4310,7 +4179,6 @@ def main() -> None:
                             max_steps=max_steps,
                             persist_logs=persist_logs,
                             verbose=verbose,
-                            skip_planning=skip_planning,
                             language_hint=session_language,
                         )
                     except Exception as error:
@@ -4368,7 +4236,6 @@ def main() -> None:
                                 max_steps=max_steps,
                                 persist_logs=persist_logs,
                                 verbose=verbose,
-                                skip_planning=skip_planning,
                                 provider_override=selected_provider,
                                 language_hint=session_language,
                             )
@@ -4429,7 +4296,6 @@ def main() -> None:
                             max_steps=max_steps,
                             persist_logs=persist_logs,
                             verbose=verbose,
-                            skip_planning=skip_planning,
                             provider_override=config.provider,
                             language_hint=session_language,
                         )
@@ -4517,7 +4383,6 @@ def main() -> None:
                                     max_steps=max_steps,
                                     persist_logs=persist_logs,
                                     verbose=verbose,
-                                    skip_planning=skip_planning,
                                     provider_override=config.provider,
                                     models_override=selected_models,
                                     language_hint=session_language,
@@ -4708,11 +4573,11 @@ def main() -> None:
                 console.print(
                     Panel(
                         "[bold red]This wipes ~/.kvist/config.json entirely: every saved "
-                        "API key, custom provider, model selection, and role/style/effort/"
-                        "planning preference. It cannot be undone.[/bold red]\n"
+                        "API key, custom provider, model selection, and role/style/effort "
+                        "preference. It cannot be undone.[/bold red]\n"
                         "[bold red]Это полностью очистит ~/.kvist/config.json: все "
                         "сохранённые API-ключи, кастомные провайдеры, выбор моделей и "
-                        "настройки роли/стиля/effort/планирования. Отменить нельзя.[/bold red]",
+                        "настройки роли/стиля/effort. Отменить нельзя.[/bold red]",
                         title="/full-reset",
                         border_style="red",
                     )
@@ -4778,7 +4643,6 @@ def main() -> None:
                             max_steps=max_steps,
                             persist_logs=persist_logs,
                             verbose=verbose,
-                            skip_planning=skip_planning,
                             language_hint=session_language,
                         )
                     except Exception as error:

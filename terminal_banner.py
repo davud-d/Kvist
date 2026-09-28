@@ -499,25 +499,20 @@ class TerminalBannerUI:
             update.reasoning = reasoning
             yield update
 
-    def print_plan(self, plan_info: Any) -> None:
-        if self._plain and not self.verbose:
-            print(f"[plan] {sanitize_display_text(str(plan_info.goal))}")
+    def print_plan(self, markdown: str) -> None:
+        if self._plain:
+            print(f"[plan]\n{sanitize_display_text(markdown)}")
             return
-
-        if not self.verbose:
-            return
-
-        print("\n[Plan]")
-        print(f"Goal: {sanitize_display_text(str(plan_info.goal))}")
-        print(f"Complexity: {sanitize_display_text(str(plan_info.complexity))}")
-
-        for index, item in enumerate(plan_info.plan, start=1):
-            print(f"{index}. {sanitize_display_text(str(item))}")
-
-        if plan_info.success_criteria:
-            print("Success criteria:")
-            for item in plan_info.success_criteria:
-                print(f"- {sanitize_display_text(str(item))}")
+        self.console.print(
+            Panel(
+                self.render_user_markdown(markdown),
+                title="Proposed plan",
+                title_align="left",
+                border_style="bright_cyan",
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+        )
 
     def print_step_header(
         self, step: int, command: Any, reasoning_seconds: float = 0.0

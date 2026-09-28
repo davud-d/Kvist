@@ -20,7 +20,6 @@ def _fields(model: str = SHORT_MODEL) -> list[tuple[str, str]]:
         ("Provider:", "OpenAI"),
         ("Fast:", model),
         ("Smart:", model),
-        ("Planner:", model),
         ("Role:", "auto"),
         ("Commands:", "/commands"),
     ]
@@ -101,12 +100,10 @@ def test_short_content_produces_a_narrower_banner(monkeypatch):
     short_config = AgentConfig(
         fast_model="x",
         smart_model="x",
-        planner_model="x",
     )
     long_config = AgentConfig(
         fast_model=LONG_MODEL,
         smart_model=LONG_MODEL,
-        planner_model=LONG_MODEL,
     )
 
     short_text = _plain_text(

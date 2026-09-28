@@ -130,11 +130,11 @@ test("a command with a dialog: input_request, answer, command_result, no turn_en
   await core.stop()
 })
 
-test("models asks three times, the first list long enough to scroll", async () => {
+test("models asks twice, the first list long enough to scroll", async () => {
   const core = await started()
-  const { result, requests } = await runCommand(core, "models", [], ["model-40", "beta", "gamma"])
-  assert.deepEqual(requests.map((r) => r.options?.length), [45, 3, 3])
-  assert.deepEqual(result.effects?.models, { fast: "model-40", smart: "beta", planner: "gamma" })
+  const { result, requests } = await runCommand(core, "models", [], ["model-40", "beta"])
+  assert.deepEqual(requests.map((r) => r.options?.length), [45, 3])
+  assert.deepEqual(result.effects?.models, { fast: "model-40", smart: "beta" })
   await core.stop()
 })
 

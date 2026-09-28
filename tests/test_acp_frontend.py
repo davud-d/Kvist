@@ -48,10 +48,9 @@ def configured_provider(monkeypatch):
 class FakeConfig:
     """The AgentConfig fields the transport reads for the config options."""
 
-    def __init__(self, role="coder", effort="medium", planning=True, verbose=False) -> None:
+    def __init__(self, role="coder", effort="medium", verbose=False) -> None:
         self.role_selection = role
         self.reasoning_effort = effort
-        self.skip_planning = not planning
         self.verbose = verbose
 
 
@@ -703,11 +702,10 @@ def test_slash_commands_are_picked_out_of_prompt_text():
 # --- Config options -----------------------------------------------------------
 
 
-def test_config_options_cover_role_effort_and_planning():
+def test_config_options_cover_role_effort_and_verbose():
     options = build_config_options(
         role="coder",
         effort="high",
-        planning=True,
         verbose=False,
         style_agents="senior-dev",
         style_chat="concise",
@@ -717,7 +715,7 @@ def test_config_options_cover_role_effort_and_planning():
     option_ids = [option.id for option in options]
     assert "role" in option_ids
     assert "effort" in option_ids
-    assert "planning" in option_ids
+    assert "planning" not in option_ids
     assert "verbose" in option_ids
     assert "style_agents" in option_ids
     assert "style_chat" in option_ids
@@ -725,30 +723,24 @@ def test_config_options_cover_role_effort_and_planning():
 
     role_option = next(opt for opt in options if opt.id == "role")
     effort_option = next(opt for opt in options if opt.id == "effort")
-    planning_option = next(opt for opt in options if opt.id == "planning")
     verbose_option = next(opt for opt in options if opt.id == "verbose")
 
     assert role_option.category == "mode"
     assert effort_option.category == "thought_level"
-    assert planning_option.type == "boolean"
     assert verbose_option.type == "boolean"
 
 
-def test_planning_degrades_to_a_select_without_boolean_support():
+def test_verbose_degrades_to_a_select_without_boolean_support():
     options = build_config_options(
         role="coder",
         effort="high",
-        planning=False,
         verbose=True,
         style_agents="senior-dev",
         style_chat="concise",
         allow_boolean=False,
     )
 
-    planning = next(opt for opt in options if opt.id == "planning")
     verbose = next(opt for opt in options if opt.id == "verbose")
-    assert planning.type == "select"
-    assert planning.current_value == "false"
     assert verbose.type == "select"
     assert verbose.current_value == "true"
 
@@ -757,7 +749,6 @@ def test_unknown_role_or_effort_falls_back_to_a_real_choice():
     options = build_config_options(
         role="nonsense",
         effort="nonsense",
-        planning=True,
         verbose=False,
         style_agents="senior-dev",
         style_chat="concise",
@@ -822,7 +813,6 @@ def test_set_config_option_never_carries_credentials():
     options = build_config_options(
         role="auto",
         effort="medium",
-        planning=True,
         verbose=False,
         style_agents="senior-dev",
         style_chat="concise",
@@ -841,7 +831,6 @@ def test_advanced_menu_offers_terminal_dialogs():
     options = build_config_options(
         role="auto",
         effort="medium",
-        planning=True,
         verbose=False,
         style_agents="senior-dev",
         style_chat="concise",
@@ -1031,6 +1020,75 @@ def test_choice_elicitation_round_trips_through_the_client():
 
     assert answered["value"] == "coder"
     assert answered["approved"] is True
+
+
+_PLAN_OPTIONS = [
+    {"value": "plan", "label": "Plan first (safer)"},
+    {"value": "start", "label": "Start right away (faster, riskier)"},
+]
+
+
+def test_choice_form_titles_every_option_with_its_label():
+    class AcceptingClient:
+        async def create_elicitation(self, message, mode, **kwargs):
+            titled = mode.requested_schema.properties["value"].one_of
+            assert [(item.const, item.title) for item in titled] == [
+                ("plan", "Plan first (safer)"),
+                ("start", "Start right away (faster, riskier)"),
+            ]
+            return schema.AcceptElicitationResponse(content={"value": "start"}, action="accept")
+
+    capabilities = schema.ClientCapabilities(
+        elicitation=schema.ElicitationCapabilities(form={})
+    )
+    bridge = AcpInputBridge(AcceptingClient(), "s1", capabilities)
+    pending = bridge.describe(_request(kind="choice", title="Plan first?", options=_PLAN_OPTIONS))
+    answered = {}
+
+    run(bridge.handle(pending, lambda **kw: answered.update(kw)))
+
+    assert answered["value"] == "start"
+
+
+def test_a_two_option_choice_without_form_support_becomes_permission_buttons():
+    client = RecordingClient([schema.AllowedOutcome(outcome="selected", option_id="start")])
+    bridge = AcpInputBridge(client, "s1", schema.ClientCapabilities())
+    pending = bridge.describe(_request(kind="choice", title="Plan first?", options=_PLAN_OPTIONS))
+    answered = {}
+
+    run(bridge.handle(pending, lambda **kw: answered.update(kw)))
+
+    _session, tool_call, options = client.calls[0]
+    assert tool_call.title == "Plan first?"
+    assert [(item.option_id, item.name, item.kind) for item in options] == [
+        ("plan", "Plan first (safer)", "allow_once"),
+        ("start", "Start right away (faster, riskier)", "reject_once"),
+    ]
+    assert answered == {"value": "start", "approved": True}
+
+
+def test_a_cancelled_permission_choice_gives_no_answer():
+    client = RecordingClient([schema.DeniedOutcome(outcome="cancelled")])
+    bridge = AcpInputBridge(client, "s1", None)
+    pending = bridge.describe(_request(kind="choice", title="Plan first?", options=_PLAN_OPTIONS))
+    answered = {}
+
+    run(bridge.handle(pending, lambda **kw: answered.update(kw)))
+
+    assert answered == {"value": None, "approved": False}
+
+
+def test_a_longer_choice_without_form_support_is_still_refused():
+    client = RecordingClient([])
+    bridge = AcpInputBridge(client, "s1", None)
+    options = [{"value": name, "label": name} for name in ("a", "b", "c")]
+    pending = bridge.describe(_request(kind="choice", title="Pick", options=options))
+    answered = {}
+
+    run(bridge.handle(pending, lambda **kw: answered.update(kw)))
+
+    assert client.calls == []
+    assert answered["approved"] is False
 
 
 def test_a_declined_elicitation_refuses_the_request():

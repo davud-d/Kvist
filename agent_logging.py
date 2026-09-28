@@ -5,7 +5,6 @@ import re
 import time
 from typing import Any
 
-from agent_state import PlanInfo
 from durable_json import (
     JsonStorageCorruptError,
     JsonStorageError,
@@ -404,18 +403,18 @@ def delete_session(self, name: str) -> bool:
 
 
 def begin_run(self, user_goal: str, run_id: str) -> None:
-    """Durably activate a NEW run before planning starts.
+    """Durably activate a NEW run before its first step.
 
-    Writes a ``phase="planning"`` checkpoint that atomically replaces any prior
-    resumable checkpoint in a single durable write — so a crash during planning
-    leaves NEW (re-plannable, no external side effect yet) recoverable and OLD
-    unreachable, never a window where neither exists.
+    Writes a ``phase="starting"`` checkpoint that atomically replaces any prior
+    resumable checkpoint in a single durable write — so a crash before the
+    first step leaves NEW (restartable, no external side effect yet)
+    recoverable and OLD unreachable, never a window where neither exists.
     """
     session = getattr(self, "current_session", "default")
     checkpoint = {
         "goal": user_goal,
         "run_id": run_id,
-        "phase": "planning",
+        "phase": "starting",
         "step": 0,
         "pending_action": None,
     }
@@ -656,13 +655,8 @@ def persist_logs(self, user_goal: str) -> None:
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
         "selected_action_model": self._state.selected_action_model,
-        "plan": {
-            "goal": self._state.plan_info.goal if self._state.plan_info else "",
-            "complexity": self._state.plan_info.complexity if self._state.plan_info else "",
-            "steps": self._state.plan_info.plan if self._state.plan_info else [],
-            "success_criteria": self._state.plan_info.success_criteria if self._state.plan_info else [],
-            "risks": self._state.plan_info.risks if self._state.plan_info else [],
-        },
+        "plan_phase": self._state.plan_phase,
+        "approved_plan": self._state.approved_plan,
         "status": self._state.run_status,
         "progress": self._state.progress,
         "summary": self._state.summary,
@@ -718,10 +712,12 @@ def save_checkpoint(
         # reconciled against a different run's pending action.
         "run_id": getattr(self, "_run_id", None),
         # Lifecycle phase: an executing checkpoint carries real step state; a
-        # "planning" checkpoint (written by begin_run) represents an accepted
-        # run whose plan is not yet built, so resume re-plans rather than
-        # reviving an older run.
+        # "starting" checkpoint (written by begin_run) represents an accepted
+        # run that has not taken a step, so resume starts it from step 1 rather
+        # than reviving an older run.
         "phase": "executing",
+        "plan_phase": self._state.plan_phase,
+        "approved_plan": self._state.approved_plan,
         # A mutating action that is about to run is recorded here BEFORE it
         # executes, so a crash in the mutation window is reconciled on resume
         # instead of blindly replayed. Cleared (None) on the post-action save.
@@ -751,7 +747,6 @@ def save_checkpoint(
         "error_history": self._state.error_history,
         "error_patterns": self._state.error_patterns,
         "seen_actions": self._state.seen_actions,
-        "completed_plan_steps": list(self._state.completed_plan_steps),
         "run_status": self._state.run_status,
         "hard_denial_rules": self._state.hard_denial_rules,
         "recovery_signatures": list(self._state.recovery_signatures),
@@ -778,14 +773,6 @@ def save_checkpoint(
             for step_num, text in self._state.rolling_summaries.items()
         },
     }
-    if self._state.plan_info:
-        checkpoint["plan_info"] = {
-            "goal": self._state.plan_info.goal,
-            "complexity": self._state.plan_info.complexity,
-            "plan": self._state.plan_info.plan,
-            "success_criteria": self._state.plan_info.success_criteria,
-            "risks": self._state.plan_info.risks,
-        }
     _write_json_object(
         state_path,
         _session_document(self, checkpoint=checkpoint),
@@ -823,16 +810,8 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._run_id = data.get("run_id")
     self._resumed_phase = data.get("phase", "executing")
 
-    plan_data = data.get("plan_info")
-    if isinstance(plan_data, dict):
-        self._state.plan_info = PlanInfo(
-            goal=plan_data.get("goal", ""),
-            complexity=plan_data.get("complexity", "simple"),
-            plan=plan_data.get("plan", []),
-            success_criteria=plan_data.get("success_criteria", []),
-            risks=plan_data.get("risks", []),
-        )
-
+    self._state.plan_phase = str(data.get("plan_phase") or "")
+    self._state.approved_plan = str(data.get("approved_plan") or "")
     self._state.progress = data.get("progress", 0)
     self._state.current_agent_role = str(data.get("current_agent_role") or "coder")
     self._state.task_language = str(data.get("task_language") or "")
@@ -860,7 +839,6 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.error_history = data.get("error_history", [])
     self._state.error_patterns = data.get("error_patterns", {})
     self._state.seen_actions = data.get("seen_actions", {})
-    self._state.completed_plan_steps = set(data.get("completed_plan_steps", []))
     self._state.run_status = str(data.get("run_status") or "in_progress")
     self._state.hard_denial_rules = data.get("hard_denial_rules", [])
     self._state.recovery_signatures = set(data.get("recovery_signatures", []))

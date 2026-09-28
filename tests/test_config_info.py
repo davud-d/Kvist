@@ -82,12 +82,11 @@ def test_build_config_info_includes_custom_providers(isolated_config):
                     "models": {
                         "fast": "deepseek-v4-pro",
                         "smart": "deepseek-v4-pro",
-                        "planner": "deepseek-v4-pro",
                     },
                 },
                 "keyless": {
                     "base_url": "https://api.example.com/v1",
-                    "models": {"fast": "m", "smart": "m", "planner": "m"},
+                    "models": {"fast": "m", "smart": "m"},
                 },
             },
         }

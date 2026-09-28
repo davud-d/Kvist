@@ -46,7 +46,9 @@ from llm_clients import (
     OPENROUTER_PROVIDER,
     MANUAL_MODEL_PROVIDERS,
 )
+import plan_mode
 from agent_state import RunCancelled
+from task_intent import is_complex_goal
 from native_tools import (
     NativeToolsRejected,
     NativeTurn,
@@ -92,6 +94,7 @@ _PROMPT_CACHE: dict[str, str] = {}
 
 # Not a role, so it can never collide with a _ROLE_PROMPT_FILES key.
 _CONSTITUTION_KEY = "\x00constitution"
+_PLAN_MODE_KEY = "\x00plan_mode"
 
 _ROLE_PROMPT_FILES: dict[str, str] = {
     "coder": "coder_prompt.txt",
@@ -371,28 +374,11 @@ def _style_context(self, role: str) -> str:
     return f"## RESPONSE STYLE\n\n{prompt}"
 
 
-def planner_style_context(self) -> str:
-    """The working style, framed for the planner instead of the executor.
-
-    A style file speaks to the agent that will do the work ("you leave it",
-    "you fix it"), so handing it over unframed makes the planner answer in
-    character instead of planning. The preamble says whose beliefs these are and
-    what they are allowed to change; `planner_prompt.txt` carries the matching
-    bound after the block.
-    """
-    prompt = _read_style_prompt(self, "agents")
-    if not prompt:
-        return ""
-    return (
-        "## EXECUTOR WORKING STYLE\n\n"
-        "The run you are planning will be carried out by an agent that holds "
-        "the beliefs below. They address that agent, not you: you never act "
-        "them out and never answer in their voice. Plan the run this agent will "
-        "actually perform — which steps it takes, what it treats as finished, "
-        "what it refuses to do — so the plan and the executor do not pull in "
-        "different directions.\n\n"
-        f"{prompt}"
-    )
+def _load_plan_mode_section() -> str:
+    """The PLAN MODE guidance shared by every role that changes files."""
+    if _PLAN_MODE_KEY not in _PROMPT_CACHE:
+        _PROMPT_CACHE[_PLAN_MODE_KEY] = (_PROMPT_DIR / "plan_mode.txt").read_text(encoding="utf-8").strip()
+    return _PROMPT_CACHE[_PLAN_MODE_KEY]
 
 
 def _load_constitution() -> str:
@@ -430,6 +416,8 @@ def build_role_system_prompt(self, role: str, *, native_tools: bool = False) -> 
     if native_tools:
         role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())
     base = f"{_load_constitution()}\n\n{role_prompt}"
+    if plan_mode.offer_available(self) or self._state.plan_phase:
+        base = f"{base}\n\n{_load_plan_mode_section()}"
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"
@@ -865,7 +853,7 @@ def select_action_model_for_run(self) -> str:
     return selected_model
 
 
-# Call kinds whose prompt *is* the run's conversation context. A plan, report
+# Call kinds whose prompt *is* the run's conversation context. A report
 # or router call sends its own one-off prompt, so it must never be mistaken for
 # how full the conversation has grown.
 _CONTEXT_USAGE_KINDS = frozenset({"step", "chat"})
@@ -1700,9 +1688,7 @@ def _truncate_section_text(text: str, target_tokens: int, count_tokens) -> str:
 
 
 def prefer_smart_model(self) -> bool:
-    if not self._state.plan_info:
-        return True
-    if self._state.plan_info.complexity == "complex":
+    if is_complex_goal(self._state.user_goal):
         return True
     if self._state.consecutive_errors > 0:
         return True

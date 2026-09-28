@@ -116,11 +116,8 @@ pre.output {
 .work:not(.quiet):not(.live) { animation: rise .3s var(--ease) 260ms both; }
 
 .plan { padding: 10px 12px; border-radius: var(--r-md); background: var(--raise); box-shadow: inset 0 0 0 1px var(--line); }
-.plan-head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 4px; }
-.badge { font-weight: 400; font-size: .85em; padding: 1px 8px; border-radius: 999px; color: var(--muted); box-shadow: inset 0 0 0 1px var(--line-strong); }
-.plan ol { margin: 0; padding-left: 20px; line-height: 1.6; }
+.plan-head { font-weight: 600; margin-bottom: 4px; }
 .plan li::marker { color: var(--kv); font-weight: 600; }
-.risks { margin-top: 6px; font-size: .92em; color: var(--vscode-editorWarning-foreground); }
 
 .markdown { line-height: 1.6; word-break: break-word; }
 .markdown > :first-child { margin-top: 0; }
@@ -303,10 +300,6 @@ body.vscode-light .cursor-glow { mix-blend-mode: normal; background: radial-grad
 .segmented button { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border-radius: 8px; color: var(--muted); transition: background .2s var(--ease), color .2s; }
 .segmented button:hover:not(:disabled) { color: var(--vscode-foreground); }
 .segmented button.on { color: var(--kv-ink); background: var(--kv); font-weight: 600; }
-.switch { position: relative; width: 36px; height: 20px; border-radius: 999px; background: var(--line-strong); transition: background .2s var(--ease); }
-.switch[aria-checked="true"] { background: var(--kv); }
-.knob { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .2s var(--ease); box-shadow: 0 1px 2px rgba(0, 0, 0, .35); }
-.switch[aria-checked="true"] .knob { transform: translateX(16px); }
 
 @media (prefers-reduced-motion: reduce) {
   .cursor-glow { display: none; }

@@ -220,7 +220,7 @@
               <span class="block-title">Models</span>
               <span class="block-note">Leave a field empty to use the provider default</span>
             </div>
-            <div class="field-grid three">
+            <div class="field-grid two">
               <label class="field">
                 <span>Fast</span>
                 <input id="fastModelInput" list="modelSuggestions" autocomplete="off" />
@@ -231,17 +231,12 @@
                 <input id="smartModelInput" list="modelSuggestions" autocomplete="off" />
                 <small id="smartHint" class="field-hint"></small>
               </label>
-              <label class="field">
-                <span>Planner</span>
-                <input id="plannerModelInput" list="modelSuggestions" autocomplete="off" />
-                <small id="plannerHint" class="field-hint"></small>
-              </label>
             </div>
             <datalist id="modelSuggestions"></datalist>
           </section>
 
           <div id="settingsError" class="settings-error" aria-live="polite"></div>
-          <div class="settings-note">Set all three model fields, or leave all empty. Missing provider credentials still fail closed.</div>
+          <div class="settings-note">Set both model fields, or leave both empty. Missing provider credentials still fail closed.</div>
         </div>
 
         <div class="settings-actions">
@@ -403,7 +398,7 @@
               <input id="cpOneModel" type="checkbox" checked />
               <span>Use one model ID for all roles</span>
             </label>
-            <div class="field-grid three">
+            <div class="field-grid two">
               <label class="field">
                 <span>Fast</span>
                 <input id="cpModelFast" autocomplete="off" />
@@ -412,10 +407,6 @@
               <label class="field">
                 <span>Smart</span>
                 <input id="cpModelSmart" autocomplete="off" />
-              </label>
-              <label class="field">
-                <span>Planner</span>
-                <input id="cpModelPlanner" autocomplete="off" />
               </label>
             </div>
           </section>

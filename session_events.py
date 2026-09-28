@@ -496,9 +496,9 @@ class JournalingUI:
         # the journal (turn-scoped and inactive by then), only forwarded live.
         self._forward("print_session_title", session, title)
 
-    def print_plan(self, plan_info: Any) -> None:
-        self._events.print_plan(plan_info)
-        self._ui.print_plan(plan_info)
+    def print_plan(self, markdown: str) -> None:
+        self._events.print_plan(markdown)
+        self._ui.print_plan(markdown)
 
     def print_step_header(self, step: int, command: Any, reasoning_seconds: float = 0.0) -> None:
         self._events.print_step_header(step, command, reasoning_seconds)

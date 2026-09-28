@@ -60,13 +60,7 @@ def _all_sample_events():
             "step",
         ),
         (
-            PlanEvent(
-                goal="do it",
-                complexity="simple",
-                plan=["a", "b"],
-                success_criteria=["works"],
-                risks=["none"],
-            ),
+            PlanEvent(markdown="**Goal**\n- do it"),
             "plan",
         ),
         (SandboxNoticeEvent(note="degraded"), "sandbox_notice"),
@@ -180,14 +174,14 @@ def test_hello_event_carries_protocol_version():
 def test_hello_event_carries_optional_runtime_configuration():
     assert HelloEvent(
         provider="omniroute",
-        models={"fast": "f", "smart": "s", "planner": "p"},
+        models={"fast": "f", "smart": "s"},
         role="devops",
         approval_mode="deny",
     ).to_dict() == {
         "type": "hello",
         "protocol_version": 1,
         "provider": "omniroute",
-        "models": {"fast": "f", "smart": "s", "planner": "p"},
+        "models": {"fast": "f", "smart": "s"},
         "role": "devops",
         "approval_mode": "deny",
     }

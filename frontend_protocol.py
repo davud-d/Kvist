@@ -29,10 +29,9 @@ class HelloEvent:
     # separate --session-op mode, not this stream.
     session: str | None = None
     has_checkpoint: bool | None = None
-    # stdio-multi extras: the current reasoning-effort level, whether the
-    # planning stage is on, and the command names the core can execute.
+    # stdio-multi extras: the current reasoning-effort level and the command
+    # names the core can execute.
     effort: str | None = None
-    planning: bool | None = None
     commands: list[str] | None = None
     # The running kvist's own version (version.kvist_version()), for a
     # frontend footer or a bug report — never part of the handshake check.
@@ -58,8 +57,6 @@ class HelloEvent:
             payload["has_checkpoint"] = self.has_checkpoint
         if self.effort is not None:
             payload["effort"] = self.effort
-        if self.planning is not None:
-            payload["planning"] = self.planning
         if self.commands is not None:
             payload["commands"] = self.commands
         if self.kvist_version is not None:
@@ -156,22 +153,13 @@ class StepEvent:
 
 @dataclass(slots=True)
 class PlanEvent:
-    goal: str
-    complexity: str
-    plan: list[str]
-    success_criteria: list[str]
-    risks: list[str]
+    """The plan the model proposes for the person's decision (plan mode)."""
+
+    markdown: str
     type: ClassVar[str] = "plan"
 
     def to_dict(self) -> dict:
-        return {
-            "type": self.type,
-            "goal": self.goal,
-            "complexity": self.complexity,
-            "plan": self.plan,
-            "success_criteria": self.success_criteria,
-            "risks": self.risks,
-        }
+        return {"type": self.type, "markdown": self.markdown}
 
 
 @dataclass(slots=True)

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 
-from agent_state import PlanInfo
 from role_router import (
     RoleRouteResult,
     has_no_write_marker,
@@ -66,13 +65,6 @@ def test_run_loop_reader_role_blocks_file_writes(agent_factory):
     agent = agent_factory(max_steps=3)
     agent._state.current_agent_role = "reader"
     agent.executor.set_active_role("reader")
-    agent._state.plan_info = PlanInfo(
-        goal="Прочитать конфиг и дать рекомендации",
-        complexity="simple",
-        plan=["inspect config", "report findings"],
-        success_criteria=["config is read"],
-        risks=[],
-    )
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"

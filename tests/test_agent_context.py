@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from tests.conftest import make_plan
-
 
 def test_build_runtime_prompt_includes_state_sections(agent_factory, monkeypatch):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.system_os = "Linux"
     agent._state.system_shell = "bash"
     agent._state.files_read = ["ui.py"]
@@ -22,8 +19,6 @@ def test_build_runtime_prompt_includes_state_sections(agent_factory, monkeypatch
 
 def test_context_formatting_compaction_and_summary(agent_factory):
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
-    agent._state.completed_plan_steps = {"inspect files"}
     agent._state.files_changed = ["app.py"]
     agent._state.web_facts = ["fact"]
 
@@ -36,7 +31,6 @@ def test_context_formatting_compaction_and_summary(agent_factory):
     assert compact["items"][-1].startswith("[TRUNCATED_LIST")
     assert compact["deep"]["a"]["b"]["c"] == "[TRUNCATED_DEPTH]"
     summary = agent._build_summary()
-    assert "Completed plan steps: 1/4" in summary
     assert "Changed: app.py" in summary
 
 
@@ -51,7 +45,6 @@ def test_every_rendered_section_header_is_known_to_the_trimmer(agent_factory, mo
     from agent_context import SECTION_PRIORITIES, split_prompt_into_sections
 
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.completion_ready = True  # also renders "Final answer style:"
     monkeypatch.setattr(
         "agent_context.current_time_context",
@@ -75,7 +68,6 @@ def test_file_contents_survive_budget_pressure(agent_factory):
     what made the model re-read files it had already been given.
     """
     agent = agent_factory(max_context_tokens=1_500)
-    agent._state.plan_info = make_plan()
     agent._state.recent_result_details = [
         "Detailed recent action data:\nMARKER_FROM_THE_FILE\n" + "body line\n" * 4_000
     ]

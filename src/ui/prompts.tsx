@@ -67,13 +67,23 @@ function useDialogState<T>(initial: () => T) {
   }
 }
 
+// A title can be several sentences (the agent's reason for offering a plan), so it wraps
+// instead of being cut; the margin absorbs the two cells Ink adds to a wrapping Text that shrinks.
+function Title({ color: tone, children }: { color?: string; children: string }) {
+  return (
+    <Box flexShrink={1} marginRight={2}>
+      <Text bold color={tone}>{children}</Text>
+    </Box>
+  )
+}
+
 function Frame({ title, tone, footer, counter = "", children }: { title: string; tone: string; footer: string; counter?: string; children: ReactNode }) {
   // Claude Code's dialogs hang from a single rule instead of a full frame.
   if (currentSkin() === "claude") {
     return (
       <Box flexDirection="column" borderStyle="single" borderColor={color.select} borderLeft={false} borderRight={false} borderBottom={false} paddingX={1}>
         <Box justifyContent="space-between">
-          <Text bold color={color.select} wrap="truncate-end">{title}</Text>
+          <Title color={color.select}>{title}</Title>
           <Text color={color.dim}>{counter}</Text>
         </Box>
         {children}
@@ -86,7 +96,7 @@ function Frame({ title, tone, footer, counter = "", children }: { title: string;
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1}>
       <Box justifyContent="space-between">
-        <Text bold wrap="truncate-end">{title}</Text>
+        <Title>{title}</Title>
         <Text color={color.dim}>esc</Text>
       </Box>
       {children}
@@ -121,7 +131,8 @@ function Intro({ request }: { request: InputRequest }) {
 
 function introRows(request: InputRequest): number {
   const body = request.body ? Math.min(request.body.split("\n").length, BODY_LINES + 1) + 1 : 0
-  return body + (request.help_text ? request.help_text.split("\n").length : 0)
+  const extraTitleRows = Math.floor(request.title.length / 80)
+  return body + extraTitleRows + (request.help_text ? request.help_text.split("\n").length : 0)
 }
 
 // Approval for dangerous commands and file overwrites: a numbered list

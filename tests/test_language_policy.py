@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from tests.conftest import make_command, make_plan
+from tests.conftest import make_command
 
 from language_policy import (
     detect_response_language,
@@ -59,7 +59,6 @@ def test_response_language_name():
 
 def _build_prompt(agent_factory, language: str) -> str:
     agent = agent_factory()
-    agent._state.plan_info = make_plan()
     agent._state.response_language = language
     return agent._build_runtime_prompt("создай hello.txt", step=1)
 

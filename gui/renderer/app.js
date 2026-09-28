@@ -37,7 +37,6 @@ const roleSelect = document.querySelector("#roleSelect")
 const approvalModeSelect = document.querySelector("#approvalModeSelect")
 const fastModelInput = document.querySelector("#fastModelInput")
 const smartModelInput = document.querySelector("#smartModelInput")
-const plannerModelInput = document.querySelector("#plannerModelInput")
 const customProviderField = document.querySelector("#customProviderField")
 const providerStatus = document.querySelector("#providerStatus")
 const providerDetail = document.querySelector("#providerDetail")
@@ -63,7 +62,6 @@ const cpFields = {
   oneModel: document.querySelector("#cpOneModel"),
   fast: document.querySelector("#cpModelFast"),
   smart: document.querySelector("#cpModelSmart"),
-  planner: document.querySelector("#cpModelPlanner"),
   fastHint: document.querySelector("#cpModelFastHint"),
 }
 const paletteFilter = document.querySelector("#paletteFilter")
@@ -79,12 +77,10 @@ const modelSuggestions = document.querySelector("#modelSuggestions")
 const modelInputs = {
   fast: fastModelInput,
   smart: smartModelInput,
-  planner: plannerModelInput,
 }
 const modelHints = {
   fast: document.querySelector("#fastHint"),
   smart: document.querySelector("#smartHint"),
-  planner: document.querySelector("#plannerHint"),
 }
 const roleButton = document.querySelector("#roleButton")
 const modelButton = document.querySelector("#modelButton")
@@ -98,7 +94,7 @@ const metricThinking = document.querySelector("#metricThinking")
 const metricElapsed = document.querySelector("#metricElapsed")
 
 const CONFIG_STORAGE_KEY = "kvist.run-options.v1"
-const MODEL_ROLES = ["fast", "smart", "planner"]
+const MODEL_ROLES = ["fast", "smart"]
 
 const BUILTIN_PROVIDER_LABELS = {
   openai: "OpenAI",
@@ -184,7 +180,6 @@ function normalizedRunOptions(value = {}) {
     models: {
       fast: typeof value.models?.fast === "string" ? value.models.fast.trim() : "",
       smart: typeof value.models?.smart === "string" ? value.models.smart.trim() : "",
-      planner: typeof value.models?.planner === "string" ? value.models.planner.trim() : "",
     },
   }
 }
@@ -220,7 +215,6 @@ function updateConfigChips() {
     `Provider: ${provider}`,
     `Fast: ${models.fast || "saved"}`,
     `Smart: ${models.smart || "saved"}`,
-    `Planner: ${models.planner || "saved"}`,
   ].join("\n")
 }
 
@@ -856,10 +850,8 @@ function syncCustomProviderForm() {
   const openai = cpFields.protocol.value === "openai"
   cpFields.addV1Field.hidden = !openai
   const one = cpFields.oneModel.checked
-  for (const role of ["smart", "planner"]) {
-    cpFields[role].disabled = one
-    cpFields[role].closest(".field").hidden = one
-  }
+  cpFields.smart.disabled = one
+  cpFields.smart.closest(".field").hidden = one
   cpFields.fastHint.textContent = one ? "Used for every role" : ""
 }
 
@@ -963,7 +955,6 @@ function resolvedModels() {
   return {
     fast: pick("fast", fastModelInput.value.trim()),
     smart: pick("smart", smartModelInput.value.trim()),
-    planner: pick("planner", plannerModelInput.value.trim()),
   }
 }
 
@@ -971,7 +962,7 @@ function saveSettings() {
   const models = resolvedModels()
   const modelValues = Object.values(models)
   if (modelValues.some(Boolean) && !modelValues.every(Boolean)) {
-    settingsError.textContent = "Fill all three model fields, or clear all three."
+    settingsError.textContent = "Fill both model fields, or clear both."
     return false
   }
   const customProvider = customProviderInput.value.trim()
@@ -1162,19 +1153,9 @@ function addPlan(event) {
   enterConversation()
   const details = createElement("details", "message plan-card")
   details.open = true
-  const summary = createElement(
-    "summary",
-    "",
-    `Plan · ${event.complexity || "task"} · ${(event.plan || []).length} steps`,
-  )
-  const content = createElement("div", "plan-content")
-  if (event.goal) content.append(createElement("div", "", event.goal))
-  const list = createElement("ol")
-  for (const item of event.plan || []) list.append(createElement("li", "", item))
-  content.append(list)
-  if (event.risks?.length) {
-    content.append(createElement("div", "", `Risks: ${event.risks.join(" · ")}`))
-  }
+  const summary = createElement("summary", "", "Proposed plan")
+  const content = createElement("div", "plan-content markdown")
+  renderMarkdown(content, event.markdown || "")
   details.append(summary, content)
   messages.append(details)
   scrollToBottom()
@@ -2163,7 +2144,7 @@ function populateGlobalSettings() {
 
   if (hasOptions) {
     // Use dropdowns for providers with model catalogs
-    const modelsGrid = createElement("div", "field-grid three")
+    const modelsGrid = createElement("div", "field-grid two")
 
     for (const role of MODEL_ROLES) {
       const field = createElement("label", "field")
@@ -2199,7 +2180,7 @@ function populateGlobalSettings() {
     modelsSection.append(modelsGrid)
   } else {
     // Text inputs for custom/OmniRoute/OpenRouter
-    const modelsGrid = createElement("div", "field-grid three")
+    const modelsGrid = createElement("div", "field-grid two")
 
     for (const role of MODEL_ROLES) {
       const field = createElement("label", "field")

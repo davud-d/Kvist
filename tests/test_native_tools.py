@@ -8,7 +8,6 @@ from typing import get_args
 import pytest
 
 import agent_model
-from agent_state import NO_PLAN_STEP, PlanInfo
 from native_tools import (
     ACTION_TOOLS,
     ELIDED_OUTPUT,
@@ -61,9 +60,6 @@ def _fresh_probe_cache(monkeypatch):
 def _native_agent(agent_factory, turns: list):
     agent = agent_factory(max_steps=10, stream=False)
     agent.client = ScriptedClient(turns)
-    agent._state.plan_info = PlanInfo(
-        goal="fix it", complexity="simple", plan=[NO_PLAN_STEP], success_criteria=[], risks=[]
-    )
     agent._state.response_language = "en"
     return agent
 

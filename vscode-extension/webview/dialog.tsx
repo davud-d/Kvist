@@ -10,13 +10,22 @@ function matches(option: InputOption, query: string): boolean {
   return haystack.includes(query.toLowerCase())
 }
 
+// A short list (the agent's "plan first or start right away?") reads as buttons; the
+// filter box only earns its row on a long catalog such as the model list.
+const FILTER_FROM = 7
+
 function ChoiceDialog({ request, answer }: { request: InputRequest; answer: Answer }) {
   const [query, setQuery] = useState("")
   const [selected, setSelected] = useState(0)
   const options = (request.options ?? []).filter((option) => matches(option, query))
+  const filterable = (request.options?.length ?? 0) >= FILTER_FROM
   const active = useRef<HTMLDivElement>(null)
+  const list = useRef<HTMLDivElement>(null)
 
   useEffect(() => active.current?.scrollIntoView({ block: "nearest" }), [selected, query])
+  useEffect(() => {
+    if (!filterable) list.current?.focus()
+  }, [filterable])
 
   function onKey(event: KeyboardEvent): void {
     if (event.key === "ArrowDown") setSelected(Math.min(selected + 1, options.length - 1))
@@ -28,18 +37,20 @@ function ChoiceDialog({ request, answer }: { request: InputRequest; answer: Answ
 
   return (
     <>
-      <input
-        class="field"
-        autofocus
-        placeholder="Type to filter"
-        value={query}
-        onInput={(event) => {
-          setQuery((event.target as HTMLInputElement).value)
-          setSelected(0)
-        }}
-        onKeyDown={onKey}
-      />
-      <div class="options">
+      {filterable ? (
+        <input
+          class="field"
+          autofocus
+          placeholder="Type to filter"
+          value={query}
+          onInput={(event) => {
+            setQuery((event.target as HTMLInputElement).value)
+            setSelected(0)
+          }}
+          onKeyDown={onKey}
+        />
+      ) : null}
+      <div class="options" ref={list} tabIndex={filterable ? undefined : 0} onKeyDown={filterable ? undefined : onKey}>
         {options.map((option, i) => (
           <div
             key={option.value}

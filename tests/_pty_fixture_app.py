@@ -57,19 +57,16 @@ def _build_offline_agent(
     models_override=None,
     language_hint=None,
     ui=None,
-    skip_planning=False,
 ):
     _ = provider_override, models_override, language_hint, ui
     config = AgentConfig(
         provider="openai",
         fast_model="offline-fast",
         smart_model="offline-smart",
-        planner_model="offline-planner",
         max_steps=max_steps,
         persist_logs=persist_logs,
         stream=False,
         verbose=verbose,
-        skip_planning=skip_planning,
     )
     console = Console()
     ui = TerminalBannerUI(console=console, verbose=verbose)

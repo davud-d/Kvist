@@ -8,7 +8,8 @@ export type Tone = "info" | "warn" | "error" | "debug"
 export type Item =
   | { id: number; kind: "banner" }
   | { id: number; kind: "user"; text: string }
-  | { id: number; kind: "plan"; complexity: string; steps: string[]; risks: string[] }
+  // The plan the model proposes before editing; `russian` picks the card's label, like `done`.
+  | { id: number; kind: "plan"; markdown: string; russian: boolean }
   // batchIndex: the call's place in its model response (0 = the first call), so a UI can
   // show the calls of one response as a group.
   | { id: number; kind: "step"; step: number; planStep: string; action: string; target: string; note: string; batchIndex: number }
@@ -403,7 +404,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
         status: { text: event.user_message || event.status, step: event.step, planStep: event.plan_step, error: event.is_error },
       }
     case "plan":
-      return push(state, (id) => ({ id, kind: "plan", complexity: event.complexity, steps: event.plan, risks: event.risks }))
+      return push(state, (id) => ({ id, kind: "plan", markdown: event.markdown, russian: requestIsRussian(state) }))
     case "route":
       return event.role ? { ...state, info: { ...state.info, routedRole: event.role } } : state
     case "step": {
@@ -533,17 +534,21 @@ function restore(state: State, events: JournalEvent[], now: number, banner: bool
 
 const CYRILLIC = /\p{Script=Cyrillic}/u
 
+function requestIsRussian(state: State): boolean {
+  const request = state.items.findLast((item) => item.kind === "user")
+  return request?.kind === "user" && CYRILLIC.test(request.text)
+}
+
 // A turn that ran live ends with its closing line; `before` still knows when it began.
 function closeTurn(before: State, after: State, at: number): State {
   if (before.startedAt === null) return after
-  const request = before.items.findLast((item) => item.kind === "user")
   return push(after, (id) => ({
     id,
     kind: "done",
     seconds: Math.max(0, (at - before.startedAt!) / 1000),
     at,
     role: before.info.routedRole ?? before.info.role,
-    russian: request?.kind === "user" && CYRILLIC.test(request.text),
+    russian: requestIsRussian(before),
     seed: before.startedAt!,
     interrupted: before.interrupted,
   }))

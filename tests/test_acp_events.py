@@ -255,11 +255,17 @@ def test_action_types_map_to_acp_kinds(action_type, kind):
 # --- Metadata ----------------------------------------------------------------
 
 
-def test_plan_renders_every_step(translator):
-    updates = translator.translate(event("plan", plan=["Read the code", "Fix it"]))
+def test_proposed_plan_goes_out_as_message_text(translator):
+    updates = translator.translate(event("plan", markdown="- Read the code\n- Fix it"))
 
-    assert [u.kind for u in updates] == ["plan"]
-    assert [entry.content for entry in updates[0].update.entries] == ["Read the code", "Fix it"]
+    assert [u.kind for u in updates] == ["agent_message_chunk"]
+    assert texts_of(updates) == ["**Proposed plan**\n\n- Read the code\n- Fix it\n\n"]
+
+
+def test_proposed_plan_heading_follows_the_language_of_the_plan(translator):
+    updates = translator.translate(event("plan", markdown="- Прочитать код"))
+
+    assert texts_of(updates)[0].startswith("**Предложенный план**")
 
 
 def test_session_title_becomes_session_info_update(translator):

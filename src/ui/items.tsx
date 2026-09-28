@@ -49,11 +49,10 @@ function Step({ item }: { item: Extract<Item, { kind: "step" }> }) {
 function Plan({ item }: { item: Extract<Item, { kind: "plan" }> }) {
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Text color={color.dim}>◇ plan{item.complexity ? ` · ${item.complexity}` : ""}</Text>
-      {item.steps.map((step, i) => (
-        <Text key={i} color={color.dim} wrap="truncate-end">  {i + 1}. {clip(step, 100)}</Text>
-      ))}
-      {item.risks.length ? <Text color={color.faint} wrap="truncate-end">  risks: {clip(item.risks.join("; "), 100)}</Text> : null}
+      <Text color={color.thought}>{item.russian ? "◇ предложенный план" : "◇ proposed plan"}</Text>
+      <Box borderStyle={BAR} borderColor={color.thought} borderTop={false} borderBottom={false} borderRight={false} paddingLeft={1}>
+        <Markdown text={item.markdown} />
+      </Box>
     </Box>
   )
 }

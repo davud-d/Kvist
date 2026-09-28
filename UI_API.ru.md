@@ -111,8 +111,8 @@ kvist --workspace /path/to/project                       # терминальн�
 **Живой статус / рассуждения (fire-and-forget):**
 `start_live()`, `stop_live()`,
 `update_live(user_message, status, step, progress=0, plan_step="working", is_error=False)`
-(`progress` вычисляется рантаймом из выполненных шагов плана и `plan_step`; модель его не сообщает),
-`print_plan(plan_info)`, `print_step_header(step, command)`, `debug_print(message)`.
+(`progress` вычисляется рантаймом по фазе вызовов ответа; модель его не сообщает),
+`print_plan(markdown)` (план, который предлагает модель, до вопроса «принять?»), `print_step_header(step, command)`, `debug_print(message)`.
 
 **Ответы:**
 `print_final(final_message, user_messages=None)`, `print_user_markdown(message)`,
@@ -160,7 +160,7 @@ fail-closed).
 
 | `type` | Поля | Смысл |
 |---|---|---|
-| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, planning:bool, commands:string[]` | handshake и эффективная конфигурация прогона; всегда первым. `effort` (уровень reasoning), `planning` (этап планирования включён) и `commands` (имена, которые принимает `command`, включая `resume`) отправляет `--frontend stdio-multi`. |
+| `hello` | `protocol_version:int`; опционально `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake и эффективная конфигурация прогона; всегда первым. `effort` (уровень reasoning) и `commands` (имена, которые принимает `command`, включая `resume`) отправляет `--frontend stdio-multi`. |
 | `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object, themes:object` | Каталог метаданных ядра, формируемый `core_manifest.build_manifest`; отправляется сразу после `hello`, чтобы фронтенды динамически наполняли пикеры без хардкода. |
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу; во время вызова `user_message` — подпись вызова, которую строит ядро («читает src/x.py») |
@@ -168,7 +168,7 @@ fail-closed).
 | `action_result` | `step:int, action_type:str, ok:bool, summary:str, output:str, exit_code:int\|null, path:str\|null, first_line:int\|null, call_id:str, batch_id:str` | итог одного выполненного действия (сопоставляйте с шагом по `call_id` или по `step`). Читающие вызовы одного ответа выполняются параллельно, поэтому несколько `step` могут прийти раньше своих результатов; результаты всё равно приходят в порядке вызовов. Пишущий вызов, пропущенный из-за упавшей записи в том же ответе, приходит с `ok:false` и сводкой «Skipped: an earlier write failed». `summary` — одна короткая строка («Wrote 3 lines», «Command exited with code 0», «2 matches»). `output` — вывод команды после редакции секретов (`run_shell`, `git_status`, `git_diff`, `delegate_task`) или текст ошибки неудачного действия; ограничен 4000 символами: сохраняются начало и конец, между ними маркер `[... N characters omitted ...]`. `exit_code` задан только у `run_shell` (`null`, если команда отклонена или упала по таймауту). `path` и `first_line` заданы для `write_file`/`append_file`/`replace_in_file`: `first_line` — 1-based строка получившегося файла, с которой начинается записанный текст (`1` для `write_file`, первая строка дописанного текста для `append_file`, первое заменённое вхождение для `replace_in_file`), чтобы можно было нумеровать строки диффа; у неудачной записи `null`. Не отправляется для `final_answer`/`report_to_user`/`refuse` и для действий, отклонённых защитой рантайма до выполнения (повтор, read-only, корректирующее действие); отказ по лимиту web_search/URL приходит как `ok:false`. |
 | `action_output` | `step:int, output:str, call_id:str` | живой вывод выполняющейся команды `run_shell`: приходит, пока она работает, и до её `action_result`. `output` — **снапшот** последнего вывода (не больше 4000 символов, редакция секретов применена ко всему целиком), а не дельта, поэтому заменяйте показанное. События идут не чаще раза в ~120 мс, и последнее не теряется. Это только предпросмотр: полный ограниченный вывод по-прежнему приходит в `action_result`, который завершает живой вывод этого `step`. Команда, которая ничего не печатает, не шлёт ничего. |
 | `route` | `role:str, source:str` | роль, под которой фактически идёт ход; отправляется один раз за ход, до плана или ответа. `role` — `coder`, `reader`, `devops` или `chat`. `source` — `explicit` (роль передал вызывающий), `direct` / `llm` / `keyword_fallback` / `default` (как решил роутер) или `resume` (голое «продолжай» после остановленного прогона унаследовало роль того прогона). |
-| `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | план задачи |
+| `plan` | `markdown:str` | план, который модель предлагает на решение человеку (режим плана); короткий Markdown |
 | `sandbox_notice` | `note:str` | одноразовое уведомление о песочнице |
 | `stream_start` | `stream_id:str` | начало стримингового ответа |
 | `stream_chunk` | `stream_id:str, text:str` | текущий кумулятивный текст ответа (**снапшот**, не дельта) |
@@ -178,7 +178,7 @@ fail-closed).
 | `reasoning_commit` | `stream_id:str, duration_seconds:number` | раздумья закончились (сейчас пойдёт ответ); несёт длительность |
 | `message` | `markdown:str` | не-стримовое Markdown-сообщение |
 | `final` | `message:str, user_messages:string[], outcome:str` | финальный ответ прогона (терминальное событие). `outcome` — `"done"`, если прогон закончился и прошёл проверки завершения, иначе `"incomplete"` (честное «не сделано», остановка, бюджет шагов, отказ). |
-| `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | расход токенов одного завершённого вызова модели. `input_tokens`/`output_tokens` — это **траты**: их суммируют по прогону. `context_tokens` — **размер именно этого промпта**, то есть самого диалога, поэтому его надо *заменять*, а не суммировать (0 у вызовов, не несущих диалог, например `kind` `plan` или `report` — тогда сохраняйте прошлое значение). Контекст пересылается на каждом шаге, поэтому сумма трат уходит далеко вперёд от `context_tokens`: показ суммы под словом «токены» читается как гигантский диалог, которого нет. `context_limit` — бюджет, до которого ядро подрезает промпт. |
+| `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | расход токенов одного завершённого вызова модели. `input_tokens`/`output_tokens` — это **траты**: их суммируют по прогону. `context_tokens` — **размер именно этого промпта**, то есть самого диалога, поэтому его надо *заменять*, а не суммировать (0 у вызовов, не несущих диалог, например `kind` `report` — тогда сохраняйте прошлое значение). Контекст пересылается на каждом шаге, поэтому сумма трат уходит далеко вперёд от `context_tokens`: показ суммы под словом «токены» читается как гигантский диалог, которого нет. `context_limit` — бюджет, до которого ядро подрезает промпт. |
 | `debug` | `message:str` | verbose-диагностика |
 | `error` | `message:str` | строка ошибки (эмитится и если прогон бросил исключение) |
 | `turn_end` | — | только `--frontend stdio-multi`: ход завершён (после `final`, `error` или chat-ответа, у которого нет `final`); процесс остаётся жить для следующей цели |
@@ -235,6 +235,28 @@ fail-closed).
 **Редакция и секреты:** исходящие текстовые поля редактируются от секретов до попадания
 в поток. Значение `secret` **никогда не эмитится наружу** — оно приходит только
 входящим как ваш `value`. Не логируйте secret-ответы.
+
+**Режим плана.** Перед изменениями модель может предложить план, и делает это через
+описанные выше диалоги, а не отдельным запросом:
+
+1. `input_request` `choice` — предложение. `title` — причина от модели плюс строка о том,
+   что сначала план — безопаснее, а сразу делать — быстрее, но рискованнее; два
+   варианта `options` со значениями `plan` и `go`. Отмена считается как `go`.
+2. Событие `plan` `{"markdown": str}` — предложенный план (короткий Markdown).
+   Покажите его карточкой *до* следующего запроса; он же записывается в журнал сессии.
+3. `input_request` `choice` с заголовком «Принять этот план?» — значения `accept` и
+   `revise`. На `revise` ядро присылает запрос `text` («Что изменить в плане?»);
+   ответ уходит модели, она предлагает новый план (ещё одно событие `plan` и ещё один
+   `choice`). Отмена любого диалога или пустой текст завершают ход на самом плане:
+   сообщение `final` — план с пометкой «не принят», изменений нет.
+
+Ядро спрашивает только через интерактивные фронтенды: фронтенд без `ask_choice`
+(headless, `run_task.py`) предложения не получает, а модели не сообщается, что
+режим плана существует. По ACP диалоги `choice` из двух вариантов приходят кнопками
+разрешения; ACP-клиент без form elicitation отклоняет вопрос `text`, поэтому там
+отклонённый план завершает ход на самом плане. Авторам
+фронтендов достаточно отрисовать карточку `plan` и обычные диалоги `choice` и
+`text`; длинный `title` должен переноситься, а не обрезаться.
 
 ---
 
@@ -522,13 +544,12 @@ kvist --commit-message < payload.json
 |---|---|---|
 | `role` | `[auto\|coder\|reader\|devops\|chat]` | `{"role": str}` — это же роль, с которой отправляются все следующие цели; сохраняется как глобальная настройка |
 | `effort` | `[false\|low\|medium\|high\|xhigh\|max]` | `{"effort": str, "advisory": str}` — `advisory` объясняет, как уровень ложится на активного провайдера (может быть пустым) |
-| `plan` | `[true\|false]` (без аргумента — переключить) | `{"plan": bool}` — сохраняется |
 | `verbose` | `[true\|false]` (без аргумента — переключить) | `{"verbose": bool}` — только для этого процесса |
 | `style` | `[chat\|agents ИМЯ]` | `{"style": {"type": str, "name": str, "applied_to_session": bool}}` — `false` значит, что текущая сессия сохраняет свой стиль до следующей сессии |
 | `session` | `[switch ИМЯ]`, `[new [ИМЯ]]`, `[delete ИМЯ]`; без аргументов — выбор из списка | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |
 | `new` | `[ИМЯ]` | как у `session` |
 | `rename` | `ИМЯ` (обязателен; несколько аргументов склеиваются пробелом) | `{"session": str, "title": str}` — задаёт название активной сессии вручную; с этого момента блокирует фоновую генерацию названия для неё (§8a) |
-| `models` | `[FAST SMART PLANNER]`; без аргументов — выбор для активного провайдера | `{"provider": str, "models": {"fast","smart","planner"}, "warnings": string[]}` — агент пересобран с этими моделями, модели сохранены |
+| `models` | `[FAST SMART]`; без аргументов — выбор для активного провайдера | `{"provider": str, "models": {"fast","smart"}, "warnings": string[]}` — агент пересобран с этими моделями, модели сохранены |
 | `changes` | — | `{}`; отчёт лежит в `message` |
 | `provider` | `[PROVIDER_ID]`; без аргумента — выбор из списка (с «+ Create custom provider…») | `{"provider": str, "models": {…}, "warnings": string[], "changed": bool}`; при `changed:false` (тот же провайдер) только `provider` и `changed`. Агент пересобран, выбор сохранён. Сборка может открыть ещё диалоги: `text` (базовый URL), `secret` (API-ключ), `choice`/`text` (модели). |
 | `change-api` | — | `{"provider", "models", "warnings", "key_saved": true}`. По одному диалогу `secret` на каждый ключ активного провайдера (пустой ответ оставляет ключ; все пустые = `{"cancelled": true}`). Если пересборка затем упала: `ok:false`, `{"key_saved": true, "restart_required": true}` |

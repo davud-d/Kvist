@@ -45,6 +45,12 @@ test("turnSlice returns nothing for an id that is not present", () => {
   assert.deepEqual(turnSlice([user("x")], 999), [])
 })
 
+test("turnToText keeps a proposed plan as its own Markdown under a labelled heading", () => {
+  const plan = (russian: boolean): Item => ({ id: id(), kind: "plan", markdown: "- rename `a`\n- run the tests", russian })
+  assert.equal(turnToText([plan(false)]), "**Proposed plan**\n\n- rename `a`\n- run the tests")
+  assert.match(turnToText([plan(true)]), /^\*\*Предложенный план\*\*/)
+})
+
 test("answerToText is just the trimmed answer text", () => {
   assert.equal(answerToText({ id: 1, kind: "answer", text: "  Done.  \n", done: true }), "Done.")
 })

@@ -22,18 +22,6 @@ def test_load_and_save_user_config(tmp_path):
     assert user_config.load_user_config(tmp_path / "missing.json") == {}
 
 
-def test_planning_enabled_defaults_true_and_round_trips(tmp_path):
-    path = tmp_path / "config.json"
-    assert user_config.get_saved_planning_enabled(path) is True
-
-    user_config.save_planning_enabled(False, path)
-    assert user_config.get_saved_planning_enabled(path) is False
-    assert json.loads(path.read_text(encoding="utf-8"))["planning_enabled"] is False
-
-    user_config.save_planning_enabled(True, path)
-    assert user_config.get_saved_planning_enabled(path) is True
-
-
 def test_frontend_preference_round_trips_without_clobbering_settings(tmp_path):
     path = tmp_path / "config.json"
     assert user_config.get_saved_frontend(path) == "terminal"
@@ -174,7 +162,8 @@ def test_api_key_and_provider_model_persistence(tmp_path, monkeypatch):
     assert user_config.get_saved_provider(path) == "freeflow"
 
     user_config.save_models_for_provider("freeflow", {"fast": " f ", "smart": "", "planner": "p"}, path)
-    assert user_config.get_saved_models("freeflow", path) == {"fast": "f", "planner": "p"}
+    # A "planner" model saved by an older build is ignored, not an error.
+    assert user_config.get_saved_models("freeflow", path) == {"fast": "f"}
 
     monkeypatch.setenv("OPENAI_API_KEY", "env-key")
     assert user_config.load_available_credentials(("openai_api_key",), tmp_path / "empty.json") == {"openai_api_key": "env-key"}
@@ -424,7 +413,7 @@ def test_save_and_load_custom_provider(tmp_path):
             "label": "My Llama",
             "base_url": "http://localhost:8080/v1",
             "api_key": "sk-test-123",
-            "models": {"fast": "llama-4", "smart": "llama-4-pro", "planner": "llama-4-pro"},
+            "models": {"fast": "llama-4", "smart": "llama-4-pro"},
         },
         path,
     )
@@ -438,7 +427,6 @@ def test_save_and_load_custom_provider(tmp_path):
     assert info["api_key"] == "sk-test-123"
     assert info["models"]["fast"] == "llama-4"
     assert info["models"]["smart"] == "llama-4-pro"
-    assert info["models"]["planner"] == "llama-4-pro"
 
     # Get by name
     single = user_config.get_custom_provider_by_name("my-llama", path)
@@ -555,4 +543,3 @@ def test_custom_provider_models_persistence(tmp_path):
     info = user_config.get_custom_provider_by_name("local-gpt", path)
     assert info["models"]["fast"] == "gpt-4"
     assert info["models"]["smart"] == "gpt-4-turbo"
-    assert "planner" not in info["models"]  # wasn't set

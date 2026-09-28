@@ -10,7 +10,6 @@ import pytest
 
 import agent_logging
 from agent_logging import get_state_path
-from tests.conftest import make_plan
 
 
 def test_sanitize_for_log_redacts_secrets_and_truncates(agent_factory):
@@ -42,7 +41,6 @@ def test_session_path_rejects_path_traversal(agent_factory):
 @pytest.mark.offline_smoke
 def test_checkpoint_roundtrip_and_clear(agent_factory):
     agent = agent_factory(persist_logs=True)
-    agent._state.plan_info = make_plan()
     agent._state.progress = 42
     agent._state.files_read = ["ui.py"]
     agent._state.recent_result_details = ["read ui.py: 120 lines", "ran pytest: ok"]
@@ -53,6 +51,8 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
     agent._state.last_progress = 40
     agent._state.last_web_query = "python fsync durability"
     agent._state.last_web_thought = "check durable write"
+    agent._state.plan_phase = "approved"
+    agent._state.approved_plan = "Goal: fix the parser"
     agent._session_history = [{"goal": "earlier", "role": "chat", "result": "done"}]
     agent._chat_history = [
         {"role": "system", "content": "prompt"},
@@ -65,7 +65,8 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
 
     assert result == ("goal", 3)
     assert agent._state.progress == 42
-    assert agent._state.plan_info.goal == "Test goal"
+    assert agent._state.plan_phase == "approved"
+    assert agent._state.approved_plan == "Goal: fix the parser"
     assert agent._state.recent_result_details == [
         "read ui.py: 120 lines",
         "ran pytest: ok",
@@ -223,7 +224,6 @@ def test_load_checkpoint_supports_legacy_flat_session_file(agent_factory):
 
 def test_persist_logs_writes_sanitized_run_payload(agent_factory):
     agent = agent_factory(persist_logs=True)
-    agent._state.plan_info = make_plan()
     synthetic = "sk-proj-" + "a" * 24
     agent._state.step_logs = [{"secret": synthetic}]
     agent._state.error_history = [f"Authorization: Bearer {synthetic}"]
@@ -291,7 +291,6 @@ def test_reading_legacy_session_scrubs_primary_and_recovery_copy(agent_factory):
 
 def test_concurrent_run_log_allocation_never_overwrites(agent_factory):
     agent = agent_factory(persist_logs=True)
-    agent._state.plan_info = make_plan()
     start = threading.Barrier(8)
     errors: list[BaseException] = []
 

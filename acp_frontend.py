@@ -53,7 +53,6 @@ AGENT_NAME = "kvist"
 # English even though the labels are localized.
 CONFIG_ROLE = "role"
 CONFIG_EFFORT = "effort"
-CONFIG_PLAN = "planning"
 CONFIG_VERBOSE = "verbose"
 CONFIG_STYLE_AGENTS = "style_agents"
 CONFIG_STYLE_CHAT = "style_chat"
@@ -260,7 +259,51 @@ class AcpInputBridge:
         if pending.kind in ("choice", "text") and self.supports_form:
             await self._handle_form(pending, respond)
             return
+        if pending.kind == "choice" and len(pending.options or []) == 2:
+            await self._handle_two_way_choice(pending, respond)
+            return
         respond(value=None, approved=False)
+
+    async def _handle_two_way_choice(
+        self, pending: _PendingInput, respond: Callable[..., None]
+    ) -> None:
+        """Ask a two-option question as permission buttons.
+
+        A client with no form elicitation can still show permission options, and
+        the questions with exactly two answers ("plan first or start right
+        away", "accept the plan or not", "keep going or finish") read as one
+        affirmative and one negative button. The first option is the affirmative.
+        """
+        client = self._client
+        options = [item for item in (pending.options or []) if isinstance(item, dict)]
+        if client is None or len(options) != 2:
+            respond(value=None, approved=False)
+            return
+        values = [str(item.get("value", "")) for item in options]
+        permission_options = [
+            schema.PermissionOption(
+                option_id=values[0],
+                name=str(options[0].get("label") or values[0]),
+                kind="allow_once",
+            ),
+            schema.PermissionOption(
+                option_id=values[1],
+                name=str(options[1].get("label") or values[1]),
+                kind="reject_once",
+            ),
+        ]
+        try:
+            response = await client.request_permission(
+                self._session_id, self._tool_call_for(pending), permission_options
+            )
+        except Exception:
+            respond(value=None, approved=False)
+            return
+        outcome = getattr(response, "outcome", None)
+        if not isinstance(outcome, schema.AllowedOutcome) or outcome.option_id not in values:
+            respond(value=None, approved=False)
+            return
+        respond(value=outcome.option_id, approved=True)
 
     async def _handle_confirm(
         self, pending: _PendingInput, respond: Callable[..., None]
@@ -373,19 +416,29 @@ class AcpInputBridge:
         self, pending: _PendingInput, field_name: str
     ) -> schema.ElicitationSchema:
         if pending.kind == "choice":
-            names = [
-                str(option["value"])
+            entries = [
+                option
                 for option in (pending.options or [])
                 if isinstance(option, dict) and option.get("value") is not None
             ]
+            names = [str(option["value"]) for option in entries]
             default = names[0] if names else None
+            # `enum` shows raw values; `one_of` carries a title per value, which a
+            # question like "Plan first (safer)" needs to be readable.
+            titled = [
+                schema.EnumOption(
+                    const=str(option["value"]),
+                    title=str(option.get("label") or option["value"]),
+                )
+                for option in entries
+            ]
             return schema.ElicitationSchema(
                 type="object",
                 properties={
                     field_name: schema.ElicitationStringPropertySchema(
                         type="string",
                         title=pending.title,
-                        enum=names or None,
+                        one_of=titled or None,
                         default=default,
                     )
                 },
@@ -877,19 +930,6 @@ class KvistAcpAgent:
                     {"config_id": config_id, "value": str(value)}
                 )
             await self._apply_command(session, "effort", [choice])
-        elif config_id == CONFIG_PLAN:
-            choice = (
-                "true"
-                if value is True
-                else "false"
-                if value is False
-                else str(value).casefold()
-            )
-            if choice not in ("true", "false"):
-                raise RequestError.invalid_params(
-                    {"config_id": config_id, "value": str(value)}
-                )
-            await self._apply_command(session, "plan", [choice])
         elif config_id == CONFIG_VERBOSE:
             choice = (
                 "true"
@@ -1027,7 +1067,6 @@ class KvistAcpAgent:
         return build_config_options(
             role=self._current_role(session),
             effort=self._current_effort(session),
-            planning=self._current_planning(session),
             verbose=self._current_verbose(session),
             style_agents=self._current_style(session, "agents"),
             style_chat=self._current_style(session, "chat"),
@@ -1061,9 +1100,6 @@ class KvistAcpAgent:
     def _current_effort(self, session: KvistAcpSession) -> str:
         configured = getattr(session.agent.config, "reasoning_effort", None)
         return str(configured or "medium").casefold()
-
-    def _current_planning(self, session: KvistAcpSession) -> bool:
-        return not bool(getattr(session.agent.config, "skip_planning", False))
 
     def _current_verbose(self, session: KvistAcpSession) -> bool:
         return bool(getattr(session.agent.config, "verbose", False))
@@ -1388,7 +1424,6 @@ def build_config_options(
     *,
     role: str,
     effort: str,
-    planning: bool,
     verbose: bool,
     style_agents: str,
     style_chat: str,
@@ -1397,13 +1432,12 @@ def build_config_options(
     """Render Kvist's session knobs as ACP Session Config Options.
 
     Categories come from the protocol's reserved set: ``mode`` for the role,
-    ``thought_level`` for reasoning effort. Planning and verbose are booleans
-    when the client advertised ``session.configOptions.boolean``; otherwise they
-    degrade to two-value selects for older clients.
+    ``thought_level`` for reasoning effort. Verbose is a boolean when the client
+    advertised ``session.configOptions.boolean``; otherwise it degrades to a
+    two-value select for older clients.
 
     :param role: the active role id.
     :param effort: the active reasoning-effort id.
-    :param planning: whether the planning stage is on.
     :param verbose: whether verbose logging is on.
     :param style_agents: the active agent style name.
     :param style_chat: the active chat style name.
@@ -1470,15 +1504,6 @@ def build_config_options(
     if allow_boolean:
         options.append(
             schema.SessionConfigOptionBoolean(
-                id=CONFIG_PLAN,
-                name="Planning stage",
-                description="Ask the planner for a plan before acting",
-                type="boolean",
-                current_value=bool(planning),
-            )
-        )
-        options.append(
-            schema.SessionConfigOptionBoolean(
                 id=CONFIG_VERBOSE,
                 name="Verbose logs",
                 description="Show detailed step execution logs",
@@ -1487,19 +1512,6 @@ def build_config_options(
             )
         )
     else:
-        options.append(
-            schema.SessionConfigOptionSelect(
-                id=CONFIG_PLAN,
-                name="Planning stage",
-                description="Ask the planner for a plan before acting",
-                type="select",
-                current_value="true" if planning else "false",
-                options=[
-                    schema.SessionConfigSelectOption(value="true", name="On"),
-                    schema.SessionConfigSelectOption(value="false", name="Off"),
-                ],
-            )
-        )
         options.append(
             schema.SessionConfigOptionSelect(
                 id=CONFIG_VERBOSE,

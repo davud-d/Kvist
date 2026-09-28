@@ -356,20 +356,6 @@ def test_effort_rejects_an_unknown_level(home, agent_factory):
     assert result.ok is False
 
 
-def test_plan_toggles_and_takes_an_explicit_value(home, agent_factory):
-    agent = agent_factory()
-    result, _, _ = _run_handler("plan", agent)
-    assert result.effects == {"plan": False}
-    assert agent.config.skip_planning is True
-    assert _saved("planning_enabled") is False
-
-    result, _, _ = _run_handler("plan", agent, args=["true"])
-    assert result.effects == {"plan": True}
-    assert agent.config.skip_planning is False
-
-    assert _run_handler("plan", agent, args=["maybe"])[0].ok is False
-
-
 def test_verbose_toggles_the_runtime_flag_only(home, agent_factory):
     agent = agent_factory()
     result, _, _ = _run_handler("verbose", agent, args=["true"])
@@ -473,18 +459,17 @@ def test_models_wizard_rebuilds_the_agent_and_persists(home, agent_factory, monk
         calls.append({"provider": provider_override, "models": models_override})
         replacement.config.fast_model = models_override["fast"]
         replacement.config.smart_model = models_override["smart"]
-        replacement.config.planner_model = models_override["planner"]
         return replacement, replacement.config, ["a warning"]
 
     result, requests, ctx = _run_handler(
-        "models", agent, answers=["gpt-5.4-mini", "gpt-5.4", "gpt-5.4"], rebuild=rebuild
+        "models", agent, answers=["gpt-5.4-mini", "gpt-5.4"], rebuild=rebuild
     )
 
-    assert len(requests) == 3
+    assert len(requests) == 2
     assert calls == [
         {
             "provider": "openai",
-            "models": {"fast": "gpt-5.4-mini", "smart": "gpt-5.4", "planner": "gpt-5.4"},
+            "models": {"fast": "gpt-5.4-mini", "smart": "gpt-5.4"},
         }
     ]
     assert result.ok
@@ -533,7 +518,7 @@ def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
 
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
-        "role", "effort", "plan", "verbose", "style", "session", "new", "rename", "models",
+        "role", "effort", "verbose", "style", "session", "new", "rename", "models",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
         "strime", "revert", "bug", "commit-message",
     }
@@ -682,7 +667,7 @@ def _custom_agent(agent_factory, **overrides):
 
     save_custom_provider(
         "gw",
-        {"label": "Gw", "base_url": "http://x/v1", "api_key": "k", "models": {"fast": "m", "smart": "m", "planner": "m"}},
+        {"label": "Gw", "base_url": "http://x/v1", "api_key": "k", "models": {"fast": "m", "smart": "m"}},
     )
     return agent_factory(provider="custom:gw", **overrides)
 
@@ -949,58 +934,13 @@ def test_a_command_during_a_resumed_turn_is_refused():
 # --- hello and startup -------------------------------------------------------
 
 
-def test_hello_carries_effort_planning_and_the_command_names():
+def test_hello_carries_effort_and_the_command_names():
     agent, reader, out, thread = _serve({"ping": lambda ctx: CommandResult(True, "pong")})
     hello = out.wait_for(lambda e: e["type"] == "hello")
     assert hello["effort"] == "medium"
-    assert hello["planning"] is True
+    assert "planning" not in hello
     assert hello["commands"] == ["ping", "resume"]
     _finish(reader, thread)
-
-
-def test_hello_planning_is_false_when_the_agent_skips_planning():
-    from event_stdio import build_session_hello
-
-    agent = _Agent()
-    agent.config.skip_planning = True
-    assert build_session_hello(agent, commands=["x"]).to_dict()["planning"] is False
-
-
-def test_planning_preference_and_env_override_the_startup_flag(home, monkeypatch):
-    from user_config import save_planning_enabled
-
-    monkeypatch.delenv("AGENT_SKIP_PLANNING", raising=False)
-    assert main.resolve_planning_enabled() is True
-    save_planning_enabled(False)
-    assert main.resolve_planning_enabled() is False
-    monkeypatch.setenv("AGENT_SKIP_PLANNING", "0")
-    assert main.resolve_planning_enabled() is True
-    monkeypatch.setenv("AGENT_SKIP_PLANNING", "1")
-    assert main.resolve_planning_enabled() is False
-
-
-def test_launch_multi_builds_the_agent_with_the_given_planning_flag(home, tmp_path):
-    seen: dict = {}
-
-    def fake_build(executor, **kwargs):
-        seen.update(kwargs)
-        agent = _Agent()
-        agent.config.skip_planning = kwargs["skip_planning"]
-        return agent, agent.config, []
-
-    reader = _ScriptedReader()
-    reader.eof()
-    out = _Collector()
-    event_stdio.launch_multi(
-        str(tmp_path),
-        fake_build,
-        in_stream=reader,
-        out_stream=out,
-        provider_override="openai",
-        skip_planning=True,
-    )
-    assert seen["skip_planning"] is True
-    assert out.events()[0]["planning"] is False
 
 
 class _ScriptedUI:

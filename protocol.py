@@ -24,6 +24,8 @@ ActionType = Literal[
     "fetch_url",
     "delegate_task",
     "report_to_user",
+    "offer_plan",
+    "propose_plan",
 ]
 
 # run_shell timeout bounds shared by the parser and the terminal. The widest

@@ -32,7 +32,6 @@ USER_CONFIG_KEYS = (USER_CONFIG_KEY, LEGACY_USER_CONFIG_KEY)
 LLM_PROVIDER_KEY = "llm_provider"
 LLM_MODELS_KEY = "llm_models"
 ROLE_SELECTION_KEY = "role_selection"
-PLANNING_ENABLED_KEY = "planning_enabled"
 REASONING_EFFORT_KEY = "reasoning_effort"
 TITLE_MODEL_KEY = "title_model"
 API_SETTINGS_KEY = "api_settings"
@@ -242,7 +241,7 @@ def get_saved_models(
     if not isinstance(provider_models, dict):
         return {}
     resolved: dict[str, str] = {}
-    for key in ("fast", "smart", "planner"):
+    for key in ("fast", "smart"):
         value = provider_models.get(key)
         if isinstance(value, str) and value.strip():
             resolved[key] = value.strip()
@@ -322,25 +321,6 @@ def save_role_selection(role: str, config_path: Path | None = None) -> None:
         return payload
 
     _update_user_config(save_role, config_path)
-
-
-def get_saved_planning_enabled(config_path: Path | None = None) -> bool:
-    """Whether the planning stage is enabled. Defaults to True (plan on)."""
-    payload = load_user_config(config_path)
-    value = payload.get(PLANNING_ENABLED_KEY)
-    if isinstance(value, bool):
-        return value
-    return True
-
-
-def save_planning_enabled(enabled: bool, config_path: Path | None = None) -> None:
-    """Persist the planning-stage preference for future sessions."""
-
-    def save_planning(payload: dict[str, object]) -> dict[str, object]:
-        payload[PLANNING_ENABLED_KEY] = bool(enabled)
-        return payload
-
-    _update_user_config(save_planning, config_path)
 
 
 def get_saved_reasoning_effort(config_path: Path | None = None) -> str:
@@ -799,7 +779,7 @@ def _normalize_provider_models(models: object) -> dict[str, str]:
     if not isinstance(models, dict):
         return {}
     result: dict[str, str] = {}
-    for role in ("fast", "smart", "planner"):
+    for role in ("fast", "smart"):
         value = models.get(role)
         if isinstance(value, str) and value.strip():
             result[role] = value.strip()

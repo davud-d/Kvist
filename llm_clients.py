@@ -415,7 +415,7 @@ def race_base_urls(
 
 CUSTOM_PROVIDER_PREFIX = "custom:"
 CUSTOM_PROVIDER_PLACEHOLDER = "custom"
-MODEL_ROLES = ("fast", "smart", "planner")
+MODEL_ROLES = ("fast", "smart")
 
 # Default models per provider.
 _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
@@ -425,25 +425,21 @@ _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
         # against $0.75/$4.50) and on the 1.05M window instead of 400k.
         "fast": "gpt-5.6-luna",
         "smart": "gpt-5.6-luna",
-        "planner": "gpt-5.6-luna",
     },
     FREEFLOW_PROVIDER: {
         # Default all roles to Gemini 3.8 Flash - Google's newest stable Flash.
         "fast": "gemini-3.8-flash",
         "smart": "gemini-3.8-flash",
-        "planner": "gemini-3.8-flash",
     },
     ANTHROPIC_PROVIDER: {
-        # Claude models — fast tier uses Haiku, smart/planner use Sonnet.
+        # Claude models — fast tier uses Haiku, smart uses Sonnet.
         "fast": "claude-haiku-4-5",
         "smart": "claude-sonnet-5",
-        "planner": "claude-sonnet-5",
     },
     DEEPSEEK_PROVIDER: {
-        # DeepSeek models — fast tier uses Flash, smart/planner use Pro.
+        # DeepSeek models — fast tier uses Flash, smart uses Pro.
         "fast": "deepseek-flash",
         "smart": "deepseek-v4-pro",
-        "planner": "deepseek-v4-pro",
     },
 }
 
@@ -451,7 +447,6 @@ _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
 _MODEL_ENV_KEYS = {
     "fast": "AGENT_FAST_MODEL",
     "smart": "AGENT_SMART_MODEL",
-    "planner": "AGENT_PLANNER_MODEL",
 }
 
 # Model options presented to the user when selecting models.
@@ -661,7 +656,6 @@ _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
 _OPENAI_ROLE_FALLBACKS: dict[str, tuple[str, ...]] = {
     "fast": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5-mini"),
     "smart": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5-mini"),
-    "planner": ("gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.4-mini", "gpt-5-mini"),
 }
 
 # Generic OpenAI fallback chain (used when role-specific fallbacks are unavailable).

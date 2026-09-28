@@ -154,3 +154,18 @@ test("confirm denies by default: Enter and Esc deny, y approves", async () => {
     assert.deepEqual(answers, [expected], `key ${JSON.stringify(key)}`)
   }
 })
+
+test("a long choice title wraps onto more lines instead of being cut", () => {
+  const reason = "This change touches the session format and three frontends, so it is safer to agree on the approach before any file is edited."
+  const { frame } = mount({
+    title: reason,
+    options: [
+      { value: "plan", label: "Plan first (safer)", description: "" },
+      { value: "start", label: "Start right away (faster, riskier)", description: "" },
+    ],
+  })
+  const out = frame().replace(/\s+/g, " ")
+  assert.match(out, /approach before any file is edited\./)
+  assert.match(out, /Plan first \(safer\)/)
+  assert.match(out, /Start right away/)
+})

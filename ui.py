@@ -40,8 +40,8 @@ class AgentUI(Protocol):
         """Update the current public status/progress of the run."""
         ...
 
-    def print_plan(self, plan_info: Any) -> None:
-        """Surface the planned goal / steps / success criteria."""
+    def print_plan(self, markdown: str) -> None:
+        """Show the plan the model proposes, before the person is asked to accept it."""
         ...
 
     def print_step_header(

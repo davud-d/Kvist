@@ -116,7 +116,6 @@ def build_session_hello(
     """
     from llm_clients import MODEL_ROLES
     config = agent.config
-    skip_planning = getattr(config, "skip_planning", None)
     return HelloEvent(
         provider=config.provider,
         models={
@@ -128,7 +127,6 @@ def build_session_hello(
         session=agent.current_session,
         has_checkpoint=agent._peek_checkpoint() is not None,
         effort=getattr(config, "reasoning_effort", None),
-        planning=None if skip_planning is None else not skip_planning,
         commands=commands,
         kvist_version=kvist_version(),
     )
@@ -591,7 +589,6 @@ def launch_multi(
     routed_role: str | None = None,
     approval_mode: str = "ask",
     commands: dict[str, CommandHandler] | None = None,
-    skip_planning: bool = False,
 ) -> None:
     """Run the real Kvist core behind the multi-turn stdio frontend boundary.
 
@@ -629,7 +626,6 @@ def launch_multi(
                     max_steps=150,
                     persist_logs=False,
                     verbose=False,
-                    skip_planning=skip_planning,
                     provider_override=provider_override,
                     models_override=models_override,
                     ui=ui,
@@ -654,7 +650,6 @@ def launch_multi(
                         max_steps=current.max_steps,
                         persist_logs=current.persist_logs,
                         verbose=current.verbose,
-                        skip_planning=current.skip_planning,
                         provider_override=provider_override,
                         models_override=models_override,
                         ui=ui,

@@ -9,7 +9,6 @@ actual edit is still refused.
 from __future__ import annotations
 
 from agent_runtime import _evidence_completion_blockers
-from agent_state import PlanInfo
 
 
 def test_universal_plain_conversation_ends_the_turn_without_any_tool_call(agent_factory):
@@ -28,13 +27,10 @@ def test_universal_plain_conversation_ends_the_turn_without_any_tool_call(agent_
     # non-streaming call, such as the native-tools "ping" probe).
     agent.client.content = reply
     agent.client.stream_chunks = [reply]
-    # task_kind="action": a greeting is not a "report" (which would demand an
-    # 80+ character substantive answer, see agent_runtime._is_substantive_answer)
-    # nor a "change" (which would demand a file edit) — it is a short status
-    # exchange, exactly like the "action" kind's own definition.
-    agent._create_plan = lambda goal: PlanInfo(
-        goal, "simple", [], [], [], task_kind="action"
-    )
+    # A greeting is neither a "report" (which would demand an 80+ character
+    # substantive answer, see agent_runtime._is_substantive_answer) nor a
+    # "change" (which would demand a file edit): task_intent reads it as a
+    # short status exchange.
 
     result = agent.run("Привет, как дела?", routed_role="universal")
 

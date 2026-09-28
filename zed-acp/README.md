@@ -81,7 +81,8 @@ Identical behaviour, whatever the host renders it with:
 | Session identity | Session ids are stable and derivable (`workspace` + session name), so an id from yesterday still loads after a restart. Nothing is a throwaway UUID. |
 | Session lifecycle | New, list, load, resume, delete, close. A resumed run continues the conversation it belongs to. |
 | Slash commands | The same registry and the same handlers as the terminal and the TUI, including `/commit-message`. |
-| Role, reasoning effort, planning | The same knobs and the same effect on the run. |
+| Role, reasoning effort | The same knobs and the same effect on the run. |
+| Plan before editing | The agent may offer "plan first or start right away"; the proposed plan arrives as a message, and accepting or rejecting it is a two-button question. |
 | Commit messages | `/commit-message` describes the workspace diff. It never stages, commits or pushes. |
 | Secrets | Provider keys are entered in a terminal (`kvist --login`) and stored in `~/.kvist/config.json`. ACP form elicitation is forbidden for sensitive data, so no key is ever asked for, logged, or written to session history over this protocol. |
 
@@ -93,12 +94,13 @@ Same capability, delivered through ACP and drawn by Zed rather than by Kvist:
 | --- | --- |
 | Streaming chat reply | `session/update` text deltas |
 | Reasoning / thought display | ACP thought chunks (Zed chooses how to show them) |
-| Plan and tool-call cards | ACP tool calls with `ToolKind` and `ToolCallLocation` |
+| Proposed plan | A message with the plan's Markdown (ACP's plan update is a status list and cannot hold free text) |
+| Tool-call cards | ACP tool calls with `ToolKind` and `ToolCallLocation` |
 | Live shell output | Tool-call output updates; cumulative snapshots are reconciled into deltas |
-| Confirmations, choices, free-text questions | `session/request_permission` and elicitation |
+| Confirmations, choices, free-text questions | `session/request_permission` and elicitation. A choice with exactly two answers (plan first or not, accept the plan or not) is shown as permission buttons when the client has no form elicitation; a longer choice or a free-text question needs form elicitation and is otherwise refused. |
 | Open a terminal on Kvist | `/terminal`: ACP `client.create_terminal` when the client offers it, otherwise the exact command line to run yourself |
 | Open a file from a result | `ToolCallLocation` paths that Zed can jump to |
-| Role / effort / planning / verbose pickers | ACP Session Config Options: `role` (`mode` category), `effort` (`thought_level` category), `planning` and `verbose` (boolean or select on older clients) |
+| Role / effort / verbose pickers | ACP Session Config Options: `role` (`mode` category), `effort` (`thought_level` category) and `verbose` (boolean or select on older clients) |
 | Agent and chat style selection | ACP Session Config Options: `style_agents` and `style_chat` (select with available styles from `prompts/styles/`) |
 | Model, provider, API settings | Session Config Option `advanced` (menu "⚙️ Advanced") opens a terminal with dialogs `/models`, `/provider`, `/settings-api`, custom provider creation |
 

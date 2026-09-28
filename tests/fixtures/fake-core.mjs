@@ -265,10 +265,6 @@ const handlers = {
     if (value === null || value === undefined) return cancelled("effort")
     finish("effort", true, `Reasoning effort set to: ${value} / ${TR}`, { effort: value, advisory: "Maps to the provider's high tier." })
   },
-  async plan(args) {
-    const enabled = args[0] ? args[0] !== "false" && args[0] !== "off" : false
-    finish("plan", true, enabled ? `Planning stage enabled. / ${TR}` : `Planning stage disabled. / ${TR}`, { plan: enabled })
-  },
   async verbose(args) {
     const enabled = args[0] !== "false" && args[0] !== "off"
     finish("verbose", true, enabled ? `Verbose mode enabled. / ${TR}` : `Verbose mode disabled. / ${TR}`, { verbose: enabled })
@@ -278,9 +274,7 @@ const handlers = {
     if (fast == null) return cancelled("models")
     const smart = (await ask({ title: "Smart model", options: SMALL_LIST, current_value: "beta" })).value
     if (smart == null) return cancelled("models")
-    const planner = (await ask({ title: "Planner model", options: SMALL_LIST, current_value: "gamma" })).value
-    if (planner == null) return cancelled("models")
-    finish("models", true, `Models updated. / ${TR}`, { provider: "fake", models: { fast, smart, planner }, warnings: [`Model beta is slow. / ${TR}`] })
+    finish("models", true, `Models updated. / ${TR}`, { provider: "fake", models: { fast, smart }, warnings: [`Model beta is slow. / ${TR}`] })
   },
   async session(args) {
     if (args.length) return finish("session", true, `Switched to session ${args[1] ?? args[0]}. / ${TR}`, { session: args[1] ?? args[0], sessions: ["chat-fake", "old"], has_checkpoint: false, changed: true })

@@ -76,12 +76,11 @@ kvist --workspace /path/to/project --frontend stdio \
   --provider omniroute \
   --fast-model ds-web/deepseek-v4-flash \
   --smart-model ds-web/deepseek-v4-pro \
-  --planner-model anthropic/claude-sonnet-4.6 \
   --role devops \
   --approval-mode ask
 ```
 
-Model overrides are atomic: supply all three model flags or none. `--role` is
+Model overrides are atomic: supply both model flags or neither. `--role` is
 one of `auto`, `coder`, `devops`, or `chat`. `--approval-mode` is `ask` or
 `deny`; there is deliberately no unsafe `allow-all` mode.
 
@@ -126,8 +125,8 @@ A structural `typing.Protocol` (no subclassing needed). Methods, grouped:
 **Live status / reasoning (fire-and-forget):**
 `start_live()`, `stop_live()`,
 `update_live(user_message, status, step, progress=0, plan_step="working", is_error=False)`
-(`progress` is derived by the runtime from completed plan steps and `plan_step`; the model never reports one),
-`print_plan(plan_info)`, `print_step_header(step, command)`, `debug_print(message)`.
+(`progress` is derived by the runtime from the phase of the response's calls; the model never reports one),
+`print_plan(markdown)` (the plan the model proposes, before the person is asked to accept it), `print_step_header(step, command)`, `debug_print(message)`.
 
 **Responses:**
 `print_final(final_message, user_messages=None)`, `print_user_markdown(message)`,
@@ -174,7 +173,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, planning:bool, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level), `planning` (planning stage on) and `commands` (the names `command` accepts, `resume` included) are sent by `--frontend stdio-multi`. |
+| `hello` | `protocol_version:int`; optional `provider:str, models:object, role:str, approval_mode:str, session:str, has_checkpoint:bool, effort:str, commands:string[]` | handshake and effective run configuration; always first. `effort` (the reasoning-effort level) and `commands` (the names `command` accepts, `resume` included) are sent by `--frontend stdio-multi`. |
 | `manifest` | `roles:object[], effort_levels:object[], providers:object[], model_roles:string[], default_models:object, action_types:string[], slash_commands:object[], api_settings:object[], styles:object, themes:object` | UI-facing metadata catalog built by `core_manifest.build_manifest`; sent once after `hello` so frontends can populate pickers dynamically without hardcoding. |
 | `live_start` / `live_stop` | — | live status begins / ends |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | per-step progress; during a call `user_message` is the call's label built by the core ("reads src/x.py") |
@@ -182,7 +181,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `action_result` | `step:int, action_type:str, ok:bool, summary:str, output:str, exit_code:int\|null, path:str\|null, first_line:int\|null, call_id:str, batch_id:str` | the outcome of one executed action (match it to its `step` by `call_id`, or by `step`). Read-only calls of one response run in parallel, so several `step` events can arrive before their results; the results still arrive in call order. A writing call skipped because an earlier write of the same response failed gets `ok:false` and the summary "Skipped: an earlier write failed". `summary` is one short line ("Wrote 3 lines", "Command exited with code 0", "2 matches"). `output` is the redacted command output (`run_shell`, `git_status`, `git_diff`, `delegate_task`) or the error text of a failed action; it is capped at 4000 characters, keeping the head and the tail with an `[... N characters omitted ...]` marker between them. `exit_code` is set for `run_shell` only (`null` when denied or timed out). `path` and `first_line` are set for `write_file`/`append_file`/`replace_in_file`: `first_line` is the 1-based line of the resulting file where the written text starts (`1` for `write_file`, the first line of the appended text for `append_file`, the first replaced occurrence for `replace_in_file`) so a diff can be numbered; it is `null` for a failed write. Not sent for `final_answer`/`report_to_user`/`refuse`, nor for actions a runtime guard rejected before they ran (repeat, read-only or corrective-action blocks); a web-search/URL budget refusal is sent as `ok:false`. |
 | `action_output` | `step:int, output:str, call_id:str` | live output of a running `run_shell` command, sent while it runs and before its `action_result`. `output` is a **snapshot** of the most recent output (at most 4000 characters, redacted as a whole), not a delta, so replace what you show. Events come at most about every 120 ms, and the last one is never dropped. It is a preview only: the complete, capped output still arrives with the `action_result`, which ends the live output for that `step`. A command that prints nothing sends none. |
 | `route` | `role:str, source:str` | the role the turn actually runs under, sent once per turn before the plan or reply. `role` is `coder`, `reader`, `devops` or `chat`. `source` is `explicit` (the caller passed the role), `direct` / `llm` / `keyword_fallback` / `default` (how the router decided) or `resume` (a bare "continue" after a stopped run inherited that run's role). |
-| `plan` | `goal:str, complexity:str, plan:string[], success_criteria:string[], risks:string[]` | the task plan |
+| `plan` | `markdown:str` | the plan the model proposes for the person's decision (plan mode); short Markdown |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
 | `stream_start` | `stream_id:str` | a streaming response begins |
 | `stream_chunk` | `stream_id:str, text:str` | current cumulative answer text (a **snapshot**, not a delta) |
@@ -192,7 +191,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `reasoning_commit` | `stream_id:str, duration_seconds:number` | thinking ended (the answer is about to stream); carries how long it took |
 | `message` | `markdown:str` | a non-streamed Markdown message |
 | `final` | `message:str, user_messages:string[], outcome:str` | the run's final answer (terminal event). `outcome` is `"done"` when the run finished and passed its completion checks, `"incomplete"` otherwise (an honest "not done", a stop, the step budget, a refusal). |
-| `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | token usage of one completed model call. `input_tokens`/`output_tokens` are **spend**: sum them over the run. `context_tokens` is the **size of that one prompt** — the conversation itself — so *replace* the previous value instead of summing (it is 0 for calls that do not carry the conversation, e.g. `kind` `plan` or `report`: keep the last known size). Because every step resends the context, the summed spend runs far ahead of `context_tokens` — showing the sum as "tokens" reads as a huge conversation that does not exist. `context_limit` is the budget the core trims a prompt to. |
+| `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | token usage of one completed model call. `input_tokens`/`output_tokens` are **spend**: sum them over the run. `context_tokens` is the **size of that one prompt** — the conversation itself — so *replace* the previous value instead of summing (it is 0 for calls that do not carry the conversation, e.g. `kind` `report`: keep the last known size). Because every step resends the context, the summed spend runs far ahead of `context_tokens` — showing the sum as "tokens" reads as a huge conversation that does not exist. `context_limit` is the budget the core trims a prompt to. |
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
 | `turn_end` | — | `--frontend stdio-multi` only: the turn ended (after `final`, `error`, or a chat reply that has no `final`); the process stays up for the next goal |
@@ -253,6 +252,29 @@ Inbound request / response:
 the stream. A `secret` value is **never emitted outbound** — it travels only inbound
 as your `value`. Do not log secret responses.
 
+**Plan mode.** The model may offer a plan before it changes anything, and it does
+so through the dialogs above, never through a dedicated request:
+
+1. `input_request` `choice` — the offer. `title` is the model's reason plus one
+   line saying a plan first is safer and starting right away is faster but riskier;
+   the two `options` have the values `plan` and `go`. Cancelling counts as `go`.
+2. `plan` event `{"markdown": str}` — the proposed plan (short Markdown). Show it
+   as a card *before* the next request; it is also recorded in the session journal.
+3. `input_request` `choice` titled "Accept this plan?" — values `accept` and
+   `revise`. On `revise` the core sends a `text` request ("What should change in
+   the plan?"); the answer goes to the model, which proposes a new plan (another
+   `plan` event and another `choice`). Cancelling either dialog, or an empty
+   text, ends the turn on the plan: the `final` message is the plan plus "not
+   accepted" and nothing was changed.
+
+The core asks only through interactive frontends: a frontend without `ask_choice`
+(headless, `run_task.py`) never receives the offer, and the model is not told plan
+mode exists. Over ACP the two-option `choice` dialogs are permission buttons; an
+ACP client without form elicitation refuses the `text` question, so a refused
+plan there ends the turn on the plan. Frontend
+authors need nothing beyond rendering the `plan` card and the ordinary `choice`
+and `text` dialogs; a long `title` must wrap instead of being cut.
+
 ---
 
 ## 8. The stdio-JSON transport (`--frontend stdio`)
@@ -276,7 +298,7 @@ The cross-process, cross-language boundary. Rules:
 
 ```
 <<< do the thing
->>> {"type": "hello", "protocol_version": 1, "provider": "omniroute", "models": {"fast": "ds-web/deepseek-v4-flash", "smart": "ds-web/deepseek-v4-pro", "planner": "anthropic/claude-sonnet-4.6"}, "role": "devops", "approval_mode": "ask", "session": "default", "has_checkpoint": false}
+>>> {"type": "hello", "protocol_version": 1, "provider": "omniroute", "models": {"fast": "ds-web/deepseek-v4-flash", "smart": "ds-web/deepseek-v4-pro"}, "role": "devops", "approval_mode": "ask", "session": "default", "has_checkpoint": false}
 >>> {"type": "status", "user_message": "Choosing provider", "status": "working", "step": 1, "progress": 10, "plan_step": "inspect", "is_error": false}
 >>> {"type": "input_request", "request_id": "b7dca6b0…", "kind": "choice", "title": "Pick provider", "body": "", "options": [{"value": "openai", "label": "OpenAI"}, {"value": "freeflow", "label": "FreeFlow"}], "current_value": "", "help_text": ""}
 <<< {"request_id": "b7dca6b0…", "value": "freeflow"}
@@ -530,13 +552,12 @@ counts as yes, anything else (`false`, no answer, EOF) does nothing.
 |---|---|---|
 | `role` | `[auto\|coder\|reader\|devops\|chat]` | `{"role": str}` — also the role every following goal is submitted with; saved as the global preference |
 | `effort` | `[false\|low\|medium\|high\|xhigh\|max]` | `{"effort": str, "advisory": str}` — `advisory` is how the level maps onto the active provider (may be empty) |
-| `plan` | `[true\|false]` (none = toggle) | `{"plan": bool}` — saved |
 | `verbose` | `[true\|false]` (none = toggle) | `{"verbose": bool}` — this process only |
 | `style` | `[chat\|agents NAME]` | `{"style": {"type": str, "name": str, "applied_to_session": bool}}` — `false` means the running session keeps its style until the next session |
 | `session` | `[switch NAME]`, `[new [NAME]]`, `[delete NAME]`; none = the picker | `{"session": str, "sessions": string[], "has_checkpoint": bool, "changed": bool}` |
 | `new` | `[NAME]` | as `session` |
 | `rename` | `NAME` (required; multiple args are joined with spaces) | `{"session": str, "title": str}` — sets the active session's title by hand; blocks background title generation for it from now on (§8a) |
-| `models` | `[FAST SMART PLANNER]`; none = the picker for the active provider | `{"provider": str, "models": {"fast","smart","planner"}, "warnings": string[]}` — the agent was rebuilt with these models and they are saved |
+| `models` | `[FAST SMART]`; none = the picker for the active provider | `{"provider": str, "models": {"fast","smart"}, "warnings": string[]}` — the agent was rebuilt with these models and they are saved |
 | `changes` | — | `{}`; the report is the `message` |
 | `provider` | `[PROVIDER_ID]`; none = the picker (with "+ Create custom provider…") | `{"provider": str, "models": {…}, "warnings": string[], "changed": bool}`; `changed:false` (same provider) carries only `provider` and `changed`. The agent was rebuilt and the choice saved. Building may open more dialogs: `text` (base URL), `secret` (API key), `choice`/`text` (models). |
 | `change-api` | — | `{"provider", "models", "warnings", "key_saved": true}`. One `secret` dialog per key the active provider needs (an empty answer keeps that key; all empty = `{"cancelled": true}`). If the rebuild then fails: `ok:false`, `{"key_saved": true, "restart_required": true}` |

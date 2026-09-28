@@ -20,7 +20,6 @@ class AgentConfig:
     provider: str = "openai"
     fast_model: str = "gpt-5-mini"
     smart_model: str = "gpt-5-mini"
-    planner_model: str = "gpt-5-mini"
     # Model used for background session-title generation (session_titler.py).
     # Empty means "derive": the fast tier is already the cheapest configured
     # model for the active provider, so it is the default rather than a
@@ -62,10 +61,6 @@ class AgentConfig:
     runtime_model_fallbacks_enabled: bool = False
     stream: bool = True
     verbose: bool = False
-    # When true, the LLM planning round-trip is skipped: the run starts the
-    # action loop immediately with a minimal self-orient plan. Trades the
-    # planner's guidance for a faster time-to-first-action.
-    skip_planning: bool = False
     api_request_interval: float = 5.0
     # True when the interval above is the user's own choice (/settings-api), so
     # it outranks the per-provider pacing table in agent_model — a number the
@@ -74,38 +69,9 @@ class AgentConfig:
     api_timeout: float = 60.0
 
 
-@dataclass(slots=True)
-class PlanInfo:
-    goal: str
-    complexity: str
-    plan: list[str]
-    success_criteria: list[str]
-    risks: list[str]
-    # "change" when the requested result is a change to files (it cannot be
-    # done while files_changed is empty), "report" when the user expects a
-    # substantive spoken answer/analysis, "action" for commands to run and
-    # checks with a short status. Classified by the planner (which already
-    # reads task intent); a keyword heuristic is the fallback only.
-    task_kind: str = "action"
-
-
-NO_PLAN_STEP = (
-    "No plan was generated for this task (planning skipped). "
-    "Orient yourself first: inspect the files/state you need, "
-    "then act directly toward the task. Orientation ends as soon as "
-    "you can name the file, line or command the task turns on — it is "
-    "not a phase to fill, and every step spent widening it is a step "
-    "not spent on the task itself."
-)
-
-
-def is_unplanned(plan_info: PlanInfo | None) -> bool:
-    """True for the stand-in plan of a run with planning turned off.
-
-    Its one step is closed by the first read, so counting it as the plan made
-    such a run report 99% from step 1 while nothing had been done.
-    """
-    return plan_info is not None and plan_info.plan == [NO_PLAN_STEP]
+PLAN_OFFERED = "offered"
+PLAN_PLANNING = "planning"
+PLAN_APPROVED = "approved"
 
 
 @dataclass(slots=True)
@@ -134,7 +100,16 @@ class RunState:
     # Such a task must end with the model's own final_answer, never with the
     # synthetic auto-completion stub.
     report_goal: bool = False
-    plan_info: PlanInfo | None = None
+    # Plan mode (plan_mode.py). "" until the model offers a plan, then
+    # "offered" (the person declined it; work continues), "planning" (read-only
+    # exploration until propose_plan is accepted) or "approved".
+    plan_phase: str = ""
+    # The accepted plan, kept whole: it is model-visible input, so it is also
+    # in the checkpoint and the prompt.
+    approved_plan: str = ""
+    # How plan mode ended for this turn ("declined", "not_accepted",
+    # "approved", or ""); recorded in session history for the next turn.
+    plan_outcome: str = ""
     selected_action_role: str = ""
     selected_action_model: str = ""
     progress: int = 0
@@ -210,7 +185,6 @@ class RunState:
     corrective_read_budget: int = 0
     # Set when git_diff reveals a mass deletion. Blocks completion.
     destructive_diff: str = ""
-    completed_plan_steps: set[str] = field(default_factory=set)
     stalled_reasons: list[str] = field(default_factory=list)
     step_logs: list[dict[str, Any]] = field(default_factory=list)
     user_messages: list[str] = field(default_factory=list)

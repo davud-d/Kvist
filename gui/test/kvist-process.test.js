@@ -83,24 +83,22 @@ test("passes provider, model, role, and fail-closed approval overrides", () => {
     models: {
       fast: "ds-web/deepseek-v4-flash",
       smart: "ds-web/deepseek-v4-pro",
-      planner: "anthropic/claude-sonnet-4.6",
     },
   })
 
-  assert.deepEqual(args.slice(-12), [
+  assert.deepEqual(args.slice(-10), [
     "--provider", "omniroute",
     "--fast-model", "ds-web/deepseek-v4-flash",
     "--smart-model", "ds-web/deepseek-v4-pro",
-    "--planner-model", "anthropic/claude-sonnet-4.6",
     "--role", "devops",
     "--approval-mode", "deny",
   ])
 })
 
-test("requires either zero or three model overrides", () => {
+test("requires either zero or both model overrides", () => {
   assert.throws(
     () => normalizeRunOptions({ models: { fast: "one" } }),
-    /all three model roles/,
+    /both model roles/,
   )
 })
 

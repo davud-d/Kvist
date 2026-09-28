@@ -163,10 +163,13 @@ def test_action_model_system_prompt_carries_the_workspace_file(tmp_path):
     class Agent:
         config = SimpleNamespace(fast_model="fast", smart_model="smart")
         executor = SimpleNamespace(workspace=tmp_path)
+        _ui = SimpleNamespace()
         _state = SimpleNamespace(
             current_agent_role="coder",
             selected_action_model="",
             selected_action_role="",
+            plan_phase="",
+            read_only_goal=False,
         )
 
         def _select_action_model_for_run(self):

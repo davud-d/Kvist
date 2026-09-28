@@ -62,7 +62,7 @@ def test_fallback_candidates_and_required_backends():
 def test_validate_model_selection_reports_missing_roles_and_backends():
     issues = llm_clients.validate_model_selection(
         "freeflow",
-        {"fast": "gemini-3.1-pro-preview", "smart": "", "planner": "qwen-3-32b"},
+        {"fast": "qwen-3-32b", "smart": ""},
         {"gemini_api_key": "key"},
     )
 
@@ -157,11 +157,10 @@ def test_omniroute_resolve_models_no_defaults(monkeypatch):
     # With saved models
     models, warnings = llm_clients.resolve_models_for_provider(
         "omniroute",
-        {"fast": "kr/claude-haiku-4.5", "smart": "kr/claude-sonnet-4.5", "planner": "kr/claude-sonnet-4.5"},
+        {"fast": "kr/claude-haiku-4.5", "smart": "kr/claude-sonnet-4.5"},
     )
     assert models["fast"] == "kr/claude-haiku-4.5"
     assert models["smart"] == "kr/claude-sonnet-4.5"
-    assert models["planner"] == "kr/claude-sonnet-4.5"
     assert warnings == []
 
     # With invalid model
@@ -271,11 +270,10 @@ def test_openrouter_resolve_models_no_defaults(monkeypatch):
     # With saved models
     models, warnings = llm_clients.resolve_models_for_provider(
         "openrouter",
-        {"fast": "anthropic/claude-haiku-4-5", "smart": "anthropic/claude-sonnet-4-6", "planner": "anthropic/claude-sonnet-4-6"},
+        {"fast": "anthropic/claude-haiku-4-5", "smart": "anthropic/claude-sonnet-4-6"},
     )
     assert models["fast"] == "anthropic/claude-haiku-4-5"
     assert models["smart"] == "anthropic/claude-sonnet-4-6"
-    assert models["planner"] == "anthropic/claude-sonnet-4-6"
     assert warnings == []
 
     # With env override
@@ -393,7 +391,7 @@ def test_custom_provider_resolve_models():
     # With saved models
     models, warnings = llm_clients.resolve_models_for_provider(
         "custom:my-llama",
-        {"fast": "llama-4", "smart": "llama-4-pro", "planner": "llama-4-pro"},
+        {"fast": "llama-4", "smart": "llama-4-pro"},
     )
     assert models["fast"] == "llama-4"
     assert models["smart"] == "llama-4-pro"
@@ -448,7 +446,6 @@ def test_anthropic_model_defaults():
     models, warnings = llm_clients.resolve_models_for_provider("anthropic", {})
     assert models["fast"] == "claude-haiku-4-5"
     assert models["smart"] == "claude-sonnet-5"
-    assert models["planner"] == "claude-sonnet-5"
     assert warnings == []
 
 
@@ -496,7 +493,6 @@ def test_deepseek_model_defaults():
     models, warnings = llm_clients.resolve_models_for_provider("deepseek", {})
     assert models["fast"] == "deepseek-flash"
     assert models["smart"] == "deepseek-v4-pro"
-    assert models["planner"] == "deepseek-v4-pro"
     assert warnings == []
 
 
@@ -838,9 +834,9 @@ def test_manual_provider_resolve_models_no_defaults(monkeypatch):
     assert warnings == []
 
     models, warnings = llm_clients.resolve_models_for_provider(
-        "qwen", {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"}
+        "qwen", {"fast": "qwen-flash", "smart": "qwen-max"}
     )
-    assert models == {"fast": "qwen-flash", "smart": "qwen-max", "planner": "qwen-max"}
+    assert models == {"fast": "qwen-flash", "smart": "qwen-max"}
     assert warnings == []
 
 

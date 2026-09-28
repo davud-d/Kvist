@@ -27,7 +27,6 @@ export function App() {
   const [view, setView] = useState<"chat" | "settings">("chat")
   const [config, setConfig] = useState<ConfigInfo | null>(null)
   const [sessions, setSessions] = useState<SessionInfo | null>(null)
-  const [planning, setPlanning] = useState<boolean | null>(null)
   const [helloEffort, setHelloEffort] = useState("")
   const [text, setText] = useState("")
   const [selected, setSelected] = useState(0)
@@ -96,14 +95,10 @@ export function App() {
           if (core.type === "step" && core.action_type === "run_shell") shellStarts.current.set(core.step, now)
           if (core.type === "action_output") setLiveOutput({ step: core.step, text: core.output })
           if (core.type === "action_result") setLiveOutput(null)
-          if (core.type === "hello") {
-            setPlanning(core.planning ?? null)
-            setHelloEffort(core.effort ?? "")
-          }
+          if (core.type === "hello") setHelloEffort(core.effort ?? "")
           let freshSession = false
           if (core.type === "command_result") {
             const effects = core.effects ?? {}
-            if (typeof effects.plan === "boolean") setPlanning(effects.plan)
             freshSession = core.ok && (core.name === "new" || core.name === "session") && effects.changed !== false && !effects.cancelled
             if (freshSession) post({ type: "getSessions" })
             // Switching to an existing session redraws it; a new one has nothing to show.
@@ -279,7 +274,6 @@ export function App() {
           provider={state.info.provider}
           role={state.info.role || "auto"}
           effort={effort}
-          planning={planning}
           environment={environment}
           busy={busy}
           run={runCommand}

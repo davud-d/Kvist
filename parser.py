@@ -36,6 +36,8 @@ ALLOWED_ACTIONS = {
     "fetch_url",
     "delegate_task",
     "report_to_user",
+    "offer_plan",
+    "propose_plan",
 }
 
 MAX_BATCH_ACTIONS = 8
@@ -123,6 +125,8 @@ def plan_step_for_calls(names: list[str], files_changed: bool) -> str:
     kinds = set(names)
     if kinds & FINISHING_ACTIONS:
         return "done"
+    if kinds & {"offer_plan", "propose_plan"}:
+        return "plan"
     if kinds & _WRITE_ACTIONS:
         return "edit"
     if "run_shell" in kinds and files_changed:
@@ -331,6 +335,16 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
                 raise CommandValidationError(
                     "'commands' must contain only non-empty strings"
                 )
+
+    elif action_type == "offer_plan":
+        require_keys(args, {"reason"})
+        require_only_allowed_keys(args, {"reason"})
+        require_str(args, "reason")
+
+    elif action_type == "propose_plan":
+        require_keys(args, {"plan"})
+        require_only_allowed_keys(args, {"plan"})
+        require_str(args, "plan")
 
     elif action_type == "report_to_user":
         require_keys(args, {"summary", "result"})

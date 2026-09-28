@@ -24,7 +24,7 @@ from frontend_protocol import (
     StreamCommitEvent,
     StreamStartEvent,
 )
-from tests.conftest import make_command, make_plan
+from tests.conftest import make_command
 
 
 def test_live_start_stop_events():
@@ -50,17 +50,15 @@ def test_update_live_emits_status():
     assert event.is_error is True
 
 
-def test_print_plan_emits_plan_event():
+def test_print_plan_emits_plan_event_with_the_redacted_markdown():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)
-    plan = make_plan()
-    ui.print_plan(plan)
+    ui.print_plan("**Goal**\n- rename `a` to `b`\n- token sk-proj-" + "q" * 24)
     (event,) = ch.drain()
     assert isinstance(event, PlanEvent)
-    assert event.goal == plan.goal
-    assert event.plan == list(plan.plan)
-    assert event.success_criteria == list(plan.success_criteria)
-    assert event.risks == list(plan.risks)
+    assert event.markdown.startswith("**Goal**\n- rename `a` to `b`")
+    assert "q" * 24 not in event.markdown
+    assert event.to_dict() == {"type": "plan", "markdown": event.markdown}
 
 
 def test_print_step_header_emits_step_event():

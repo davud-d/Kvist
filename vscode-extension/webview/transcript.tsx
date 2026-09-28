@@ -531,12 +531,8 @@ export function TranscriptItem({ item, uid, settled, items }: { item: Item; uid:
     case "plan":
       return (
         <div class="plan">
-          <div class="plan-head">
-            <span>Plan</span>
-            <span class="badge">{item.complexity}</span>
-          </div>
-          <ol>{item.steps.map((step, i) => <li key={i}>{step}</li>)}</ol>
-          {item.risks.length > 0 ? <div class="risks">Risks: {item.risks.join("; ")}</div> : null}
+          <div class="plan-head">{item.russian ? "Предложенный план" : "Proposed plan"}</div>
+          <Markdown text={item.markdown} />
         </div>
       )
     case "step":

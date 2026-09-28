@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_state import PlanInfo
 from tests.conftest import FakeLLMClient
 
 
@@ -246,11 +245,10 @@ def test_chat_recovers_for_the_next_request_after_cancellation(
 
 
 @pytest.mark.offline_smoke
-def test_local_agent_run_coder_path_builds_plan_and_runtime(agent_factory, monkeypatch):
+def test_local_agent_run_coder_path_starts_the_loop_and_detects_dependencies(agent_factory, monkeypatch):
     agent = agent_factory()
     calls = {}
 
-    agent._create_plan = lambda goal: PlanInfo(goal, "simple", ["inspect"], ["done"], [])
     def fake_run_loop(goal, start_step):
         calls["args"] = (goal, start_step)
         return "finished"
@@ -262,7 +260,6 @@ def test_local_agent_run_coder_path_builds_plan_and_runtime(agent_factory, monke
 
     assert result == "finished"
     assert calls["args"] == ("edit file", 1)
-    assert agent._state.plan_info.plan == ["inspect"]
     assert agent._state.dependency_versions == {"pytest": "==8"}
 
 

@@ -54,11 +54,10 @@ function normalizeRunOptions(options = {}) {
   const models = {
     fast: String(options.models?.fast || "").trim(),
     smart: String(options.models?.smart || "").trim(),
-    planner: String(options.models?.planner || "").trim(),
   }
   const modelValues = Object.values(models)
   if (modelValues.some(Boolean) && !modelValues.every(Boolean)) {
-    throw new Error("Set all three model roles, or leave all of them empty.")
+    throw new Error("Set both model roles, or leave both empty.")
   }
   if (!new Set(["auto", "coder", "devops", "chat", "universal"]).has(role)) {
     throw new Error("Unsupported Kvist role.")
@@ -109,7 +108,6 @@ class KvistProcess extends EventEmitter {
       args.push(
         "--fast-model", runOptions.models.fast,
         "--smart-model", runOptions.models.smart,
-        "--planner-model", runOptions.models.planner,
       )
     }
     args.push("--role", runOptions.role, "--approval-mode", runOptions.approvalMode)

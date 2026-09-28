@@ -116,17 +116,15 @@ def _semantic_state(agent):
     return {
         "files_changed": sorted(s.files_changed),
         "pending_verification_paths": sorted(s.pending_verification_paths),
-        "completed_plan_steps": sorted(s.completed_plan_steps),
         "progress": s.progress,
     }
 
 
 def test_committed_reconciliation_matches_normal_success_state(agent_factory):
-    from tests.conftest import make_plan, make_command
+    from tests.conftest import make_command
 
     # --- Normal uninterrupted successful write ---
     normal = agent_factory()
-    normal._state.plan_info = make_plan()
     normal._state.create_goal = True
     (normal.executor.workspace / "feature.py").write_text("", encoding="utf-8")
     cmd = make_command("write_file", {"path": "feature.py", "content": "code\n"},
@@ -141,7 +139,6 @@ def test_committed_reconciliation_matches_normal_success_state(agent_factory):
     # --- Same write, but crash before post-action checkpoint, then reconcile ---
     from change_journal import content_digest, record_baseline, promote_baseline
     recov = agent_factory()
-    recov._state.plan_info = make_plan()
     recov._state.create_goal = True
     ws = recov.executor.workspace
     record_baseline(ws, relative_path="feature.py", existed=False, content=None,
@@ -154,7 +151,6 @@ def test_committed_reconciliation_matches_normal_success_state(agent_factory):
         "path": "feature.py", "pre_digest": None, "intended_digest": content_digest("code\n"),
     })
     recov._load_checkpoint()
-    recov._state.plan_info = make_plan()  # plan restored as in a real resume
     recov._state.create_goal = True
     assert recov._reconcile_pending_action(recov._pending_action) == 2
     recovered_state = _semantic_state(recov)
@@ -171,17 +167,17 @@ def test_begin_run_persists_new_run_and_supersedes_old(agent_factory):
     agent._run_id = "old"
     agent._save_checkpoint("OLD TASK", 5)
 
-    # Durable NEW activation (what run() does before planning).
+    # Durable NEW activation (what run() does before its first step).
     agent._run_id = "new"
     agent._begin_run("NEW TASK", "new")
 
     ck = agent._peek_checkpoint()
     assert ck is not None and ck["goal"] == "NEW TASK"  # NEW durable, OLD gone
-    # A reload sees phase=planning so resume will re-plan rather than revive OLD.
+    # A reload sees phase=starting so resume starts NEW from step 1 rather than reviving OLD.
     fresh = agent_factory()
     assert fresh.current_session == "work"
     fresh._load_checkpoint()
-    assert fresh._resumed_phase == "planning"
+    assert fresh._resumed_phase == "starting"
     assert fresh._run_id == "new"
 
 

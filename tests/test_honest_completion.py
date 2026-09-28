@@ -8,17 +8,8 @@ import json
 
 import pytest
 
-from agent_state import PlanInfo
 from parser import CommandValidationError, validate_action_args
 from tests.conftest import make_command
-
-_FIX_PLAN = PlanInfo(
-    goal="Fix the bug in src/payment.py",
-    complexity="simple",
-    plan=["inspect src/payment.py", "edit src/payment.py", "verify the fix"],
-    success_criteria=["bug fixed"],
-    risks=[],
-)
 
 _SYNTHETIC_SUCCESS = (
     "all checks passed",
@@ -50,18 +41,8 @@ def _script(agent, responses: list[dict]) -> list[str]:
     return prompts
 
 
-_CREATE_PLAN = PlanInfo(
-    goal="Create hello.py",
-    complexity="simple",
-    plan=["create hello.py", "verify hello.py", "final report"],
-    success_criteria=["hello.py exists"],
-    risks=[],
-)
-
-
-def _planned_agent(agent_factory, plan: PlanInfo, **overrides):
+def _planned_agent(agent_factory, **overrides):
     agent = agent_factory(**overrides)
-    agent._state.plan_info = plan
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.task_language = "en"
@@ -70,7 +51,7 @@ def _planned_agent(agent_factory, plan: PlanInfo, **overrides):
 
 
 def _fix_agent(agent_factory, **overrides):
-    return _planned_agent(agent_factory, _FIX_PLAN, **overrides)
+    return _planned_agent(agent_factory, **overrides)
 
 
 def test_parser_accepts_finish_outcome_and_rejects_unknown_values():
@@ -188,12 +169,7 @@ def _scripted(agent, responses: list[str]) -> list[str]:
 
 
 def test_a_change_task_is_never_done_with_no_file_changed_even_after_a_good_last_call(agent_factory):
-    plan = PlanInfo(
-        goal="Поправь таймаут в client.py", complexity="simple",
-        plan=["прочитать client.py", "поправить таймаут"], success_criteria=["таймаут 15"], risks=[],
-        task_kind="change",
-    )
-    agent = _planned_agent(agent_factory, plan, max_steps=8)
+    agent = _planned_agent(agent_factory, max_steps=8)
     agent._state.response_language = "ru"
     workspace = agent.executor.workspace
     (workspace / "client.py").write_text("TIMEOUT = 5\n", encoding="utf-8")
@@ -224,12 +200,7 @@ def test_a_change_task_is_never_done_with_no_file_changed_even_after_a_good_last
 
 
 def test_a_question_is_answered_as_done_after_a_failed_read(agent_factory):
-    plan = PlanInfo(
-        goal="Какой таймаут в client.py?", complexity="simple",
-        plan=["прочитать client.py", "ответить"], success_criteria=["ответ дан"], risks=[],
-        task_kind="report",
-    )
-    agent = _planned_agent(agent_factory, plan, max_steps=6)
+    agent = _planned_agent(agent_factory, max_steps=6)
     agent._state.response_language = "ru"
     (agent.executor.workspace / "client.py").write_text("TIMEOUT = 5\n", encoding="utf-8")
     prompts = _scripted(agent, [
@@ -270,7 +241,7 @@ def test_incomplete_finish_passes_the_required_action_gate(agent_factory):
 
 
 def test_verification_still_runs_after_the_task_looks_complete(agent_factory):
-    agent = _planned_agent(agent_factory, _CREATE_PLAN, max_steps=8)
+    agent = _planned_agent(agent_factory, max_steps=8)
     executed: list[str] = []
     real_execute = agent._execute_command
 
@@ -319,7 +290,7 @@ def test_verification_still_runs_after_the_task_looks_complete(agent_factory):
     ],
 )
 def test_runtime_never_synthesizes_a_success_answer(agent_factory, goal, responses):
-    agent = _planned_agent(agent_factory, _CREATE_PLAN, max_steps=3)
+    agent = _planned_agent(agent_factory, max_steps=3)
     (agent.executor.workspace / "hello.py").write_text("print('hi')\n", encoding="utf-8")
     _script(agent, responses)
 

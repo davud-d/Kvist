@@ -53,7 +53,6 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         assert models_override == {
             "fast": "fast-id",
             "smart": "smart-id",
-            "planner": "planner-id",
         }
         config = AgentConfig(
             persist_logs=False,
@@ -79,19 +78,17 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         models_override={
             "fast": "fast-id",
             "smart": "smart-id",
-            "planner": "planner-id",
         },
         routed_role="chat",
         approval_mode="deny",
     )
 
     events = [json.loads(line) for line in output.getvalue().splitlines()]
-    # effort and planning mirror the saved user preferences, so only their
-    # shape is stable across machines.
+    # effort mirrors the saved user preference, so only its shape is stable
+    # across machines.
     from version import kvist_version
 
     assert events[0].pop("effort") in {"false", "low", "medium", "high", "xhigh", "max"}
-    assert isinstance(events[0].pop("planning"), bool)
     assert events[0].pop("kvist_version") == kvist_version()
     assert events[0] == {
         "type": "hello",
@@ -100,7 +97,6 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
         "models": {
             "fast": "gpt-5-mini",
             "smart": "gpt-5-mini",
-            "planner": "gpt-5-mini",
         },
         "role": "chat",
         "approval_mode": "deny",

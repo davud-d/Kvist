@@ -112,7 +112,6 @@ def screen_runtime(monkeypatch):
         config = AgentConfig(
             fast_model="old-fast",
             smart_model="old-smart",
-            planner_model="old-planner",
         )
         screen = InteractiveScreen(session, config)
         screen.start()
@@ -248,7 +247,6 @@ def test_config_replacement_clears_long_model_tail(screen_runtime):
         AgentConfig(
             fast_model=long_model,
             smart_model=long_model,
-            planner_model=long_model,
         )
     )
     _wait_until(lambda: "claude-sonnet-4.5" in _rendered_text(screen_runtime))
@@ -256,7 +254,6 @@ def test_config_replacement_clears_long_model_tail(screen_runtime):
     replacement = AgentConfig(
         fast_model="x",
         smart_model="x",
-        planner_model="x",
     )
     screen_runtime.screen.set_config(replacement)
     _wait_until(lambda: "Fast:     [x]" in _rendered_text(screen_runtime))
@@ -264,7 +261,6 @@ def test_config_replacement_clears_long_model_tail(screen_runtime):
 
     assert "claude-sonnet-4.5" not in text
     assert "Smart:    [x]" in text
-    assert "Planner:  [x]" in text
 
 
 def test_stream_slot_commits_once_beside_pinned_status(screen_runtime):

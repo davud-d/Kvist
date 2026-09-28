@@ -17,11 +17,16 @@ client already has.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from acp import helpers, schema
+
+# Picks the heading language of a proposed plan from the plan text itself; the
+# translator is not told the turn's response language.
+_CYRILLIC = re.compile(r"[Ѐ-ӿ]")
 
 # ACP ToolKind values. Kvist's ActionType set is larger than ACP's, so several
 # actions share a kind; the action name still travels in the tool call title.
@@ -87,7 +92,6 @@ class AcpEventTranslator:
     _outputs: dict[str, _StreamState] = field(default_factory=dict)
     _tools: set[str] = field(default_factory=set)
     _committed_bodies: set[str] = field(default_factory=set)
-    _plan_entries: list[tuple[str, str]] = field(default_factory=list)
     _usage: dict[str, int] = field(default_factory=lambda: {"input": 0, "output": 0, "total": 0})
     _stopped_by_user: bool = False
     _hit_step_budget: bool = False
@@ -105,7 +109,6 @@ class AcpEventTranslator:
         self._outputs.clear()
         self._tools.clear()
         self._committed_bodies.clear()
-        self._plan_entries.clear()
         self._usage = {"input": 0, "output": 0, "total": 0}
         self._stopped_by_user = False
         self._hit_step_budget = False
@@ -230,14 +233,11 @@ class AcpEventTranslator:
     # Plans -----------------------------------------------------------------
 
     def _on_plan(self, event: Any) -> list[AcpUpdate]:
-        self._plan_entries = [(str(step), "pending") for step in event.plan]
-        return [AcpUpdate("plan", helpers.update_plan(self._plan_entries_rendered()))]
-
-    def _plan_entries_rendered(self) -> list[schema.PlanEntry]:
-        return [
-            helpers.plan_entry(content, priority="medium", status=status)  # type: ignore[arg-type]
-            for content, status in self._plan_entries
-        ]
+        # ACP's plan update is a list of status entries; the proposed plan is free
+        # Markdown, so it goes out as message text, which every client renders.
+        title = "Предложенный план" if _CYRILLIC.search(event.markdown) else "Proposed plan"
+        text = f"**{title}**\n\n{event.markdown}\n\n"
+        return [AcpUpdate("agent_message_chunk", helpers.update_agent_message(self._text(text)))]
 
     def _on_step(self, event: Any) -> list[AcpUpdate]:
         call_id = self._tool_call_id(event)

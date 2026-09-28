@@ -261,10 +261,9 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
       )
     case "plan":
       return (
-        <Call tone={color.text} name="Plan" target={item.complexity}>
+        <Call tone={color.text} name={item.russian ? "Предложенный план" : "Proposed plan"} target="">
           <Result>
-            {item.steps.map((step, i) => <Text key={i} wrap="truncate-end">☐ {i + 1}. {clip(step, 100)}</Text>)}
-            {item.risks.length ? <Text color={color.dim} wrap="truncate-end">Risks: {clip(item.risks.join("; "), 100)}</Text> : null}
+            <Markdown text={item.markdown} />
           </Result>
         </Call>
       )

@@ -89,8 +89,6 @@ def test_main_dispatches_stdio_run_overrides(monkeypatch, tmp_path):
             "fast-id",
             "--smart-model",
             "smart-id",
-            "--planner-model",
-            "planner-id",
             "--role",
             "devops",
             "--approval-mode",
@@ -110,7 +108,6 @@ def test_main_dispatches_stdio_run_overrides(monkeypatch, tmp_path):
             "models_override": {
                 "fast": "fast-id",
                 "smart": "smart-id",
-                "planner": "planner-id",
             },
             "routed_role": "devops",
             "approval_mode": "deny",
