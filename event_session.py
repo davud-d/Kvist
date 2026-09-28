@@ -11,6 +11,7 @@ fail-closed when the channel is closed.
 from __future__ import annotations
 
 import shlex
+import sys
 import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -79,19 +80,12 @@ class EventApprovalGate:
         """Append the pattern to project allow rules."""
         if not self._workspace:
             return
-        from permission_policy import POLICY_RELATIVE_PATH, load_policy, store_policy
+        from permission_policy import append_allow_rule
         try:
-            policy = load_policy(self._workspace)
-            if pattern not in policy.allow:
-                updated = policy.__class__(
-                    allow=policy.allow + (pattern,),
-                    deny=policy.deny,
-                    ask=policy.ask,
-                )
-                store_policy(self._workspace, updated)
-        except Exception:
-            # Saving the rule is best-effort; approval went through regardless.
-            pass
+            append_allow_rule(self._workspace, pattern)
+        except (OSError, ValueError) as error:
+            # Best-effort: the approval itself already went through.
+            print(f"Failed to save allow rule: {error}", file=sys.stderr)
 
 
 class EventSession:

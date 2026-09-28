@@ -1500,6 +1500,14 @@ def test_run_loop_feeds_the_response_text_to_the_live_panel(agent_factory):
     assert shown == ["Сначала смотрю корень"]
 
 
+def test_unverified_blocker_names_the_cheapest_accepted_action(agent_factory):
+    agent = agent_factory()
+    agent._state.files_changed = ["main.py"]
+    agent._refresh_completion_requirements()
+
+    assert any("read_file on a file you changed" in text for text in agent._state.completion_blockers)
+
+
 def test_unverified_write_surfaces_a_blocker_label(agent_factory):
     """The panel needs a short reason; the blocker text itself is model-facing."""
     from agent_runtime import _plan_position

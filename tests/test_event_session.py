@@ -13,6 +13,7 @@ from agent_state import AgentConfig
 from event_session import EventApprovalGate, EventSession
 from event_stream_ui import EventStreamUI
 from executor import SafeExecutor
+from permission_policy import load_policy
 from frontend_protocol import (
     ErrorEvent,
     FinalEvent,
@@ -143,6 +144,27 @@ def test_event_approval_gate_approves_and_fails_closed():
     channel.close()
     worker2.join(timeout=2.0)
     assert denied["value"] is False
+
+
+def test_event_approval_gate_remember_saves_allow_rule(tmp_path):
+    channel = FrontendChannel()
+    gate = EventApprovalGate(channel, workspace=tmp_path)
+    approved: dict[str, bool] = {}
+
+    def confirm() -> None:
+        approved["value"] = gate.confirm_command(["node", "tools/check.js"], "needs approval")
+
+    worker = threading.Thread(target=confirm, daemon=True)
+    worker.start()
+    request = channel.get(timeout=2.0)
+    assert isinstance(request, InputRequestEvent)
+    channel.respond(request.request_id, approved=True, remember=True)
+    worker.join(timeout=2.0)
+
+    assert approved["value"] is True
+    policy, note = load_policy(tmp_path)
+    assert note == ""
+    assert policy.allow == ("node tools/check.js",)
 
 
 def test_event_approval_gate_deny_mode_never_prompts():

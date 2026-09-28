@@ -3347,7 +3347,8 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
         blockers.append(
             f"Task cannot finish: verification required for recently changed files: {joined}. "
             "Use git_diff, read_file, search_code, or run_shell (pytest/py_compile) to verify. "
-            "git_status alone is NOT sufficient."
+            "git_status alone is NOT sufficient. "
+            f"{_CHEAPEST_VERIFICATION_HINT}"
         )
         required_actions.update(_VERIFY_ONLY_ACTIONS)
 
@@ -3579,8 +3580,19 @@ def _build_incomplete_plan_error(language: str, remaining_steps: list[str]) -> s
     )
 
 
+# A weak model given only "verification is required" keeps editing or
+# re-finishing; naming the cheapest accepted action ends that circling.
+_CHEAPEST_VERIFICATION_HINT = (
+    "The lightest action that counts: read_file on a file you changed "
+    "(or git_diff). One such call is enough; then finish."
+)
+
+
 def _build_missing_verification_error(language: str) -> str:
-    return "Task cannot finish without verification of the changes: structure, syntax, import, or run evidence is required."
+    return (
+        "Task cannot finish without verification of the changes: structure, syntax, "
+        f"import, or run evidence is required. {_CHEAPEST_VERIFICATION_HINT}"
+    )
 
 
 def _join_blockers(blockers: list[str], with_hint: bool = True) -> str:
