@@ -110,7 +110,7 @@ const BUILTIN_PROVIDER_LABELS = {
 }
 
 const ROLE_HINTS = {
-  auto: "Kvist inspects each request and routes it to Coder, DevOps, or Chat.",
+  auto: "Kvist inspects each request and routes it to Coder, DevOps, Chat, or Universal.",
   coder: "Reads and edits code, then verifies. Best for implementing changes.",
   devops: "Shell-first: builds, tests, git, and environment or system tasks.",
   reader: "Read-only: inspects and reports, never writes files or runs commands.",
