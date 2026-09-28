@@ -13,8 +13,6 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.slow
-
 if os.name != "nt":
     import fcntl
     import pty
@@ -22,6 +20,7 @@ if os.name != "nt":
 
 
 pytestmark = [
+    pytest.mark.slow,
     pytest.mark.ui_e2e,
     pytest.mark.skipif(os.name == "nt", reason="stdlib PTY harness is POSIX-only"),
 ]
