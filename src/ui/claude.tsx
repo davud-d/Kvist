@@ -7,7 +7,7 @@ import { diffLines, toLines } from "../diff.js"
 import { clip, clipLines, contextLabel, formatSeconds, lastLines, outputLines } from "../format.js"
 import { actionTarget, type ActionResult, type ExploreCounts, type Item, type State } from "../state.js"
 import { ViewContext } from "./context.js"
-import { LARGE_LOGO_MIN_COLUMNS, LOGO_COLORS, LOGO_WIDTH, logoRows, type LogoSize } from "./logo.js"
+import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.js"
 import { Markdown } from "./markdown.js"
 import { color } from "./theme.js"
 import { tipFor } from "./tips.js"
@@ -72,31 +72,18 @@ export function exploreLine(counts: ExploreCounts, shells = 0): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-function Logo({ size }: { size: LogoSize }) {
-  return (
-    <Box flexDirection="column" flexShrink={0} marginRight={2}>
-      {logoRows(size).map((row, i) => (
-        <Text key={i}>
-          <Text color={LOGO_COLORS.shade}>{row.shade}</Text>
-          <Text color={LOGO_COLORS.main}>{row.main}</Text>
-        </Text>
-      ))}
-    </Box>
-  )
-}
-
 function Banner() {
   const { info, effort, workspace } = useContext(ViewContext)
   const reasoning = effort && effort !== "false" ? ` with ${effort} effort` : ""
   const detail = [`${info.model}${reasoning}`.trim(), info.provider].filter(Boolean).join(" · ")
-  const { columns } = useWindowSize()
-  const size: LogoSize = columns >= LARGE_LOGO_MIN_COLUMNS ? "large" : "compact"
   return (
     <Box marginTop={1} marginBottom={1}>
-      <Logo size={size} />
-      <Rest taken={LOGO_WIDTH[size] + 2}>
-        {/* The three text rows sit in the middle of the tall mark. */}
-        {size === "large" ? <Box height={2} /> : null}
+      <Box flexShrink={0} marginRight={2}>
+        <Mascot />
+      </Box>
+      <Rest taken={MASCOT_COLUMNS + 2}>
+        {/* The three text rows sit in the middle of the squirrel. */}
+        <Box height={Math.max(0, Math.floor((MASCOT_ROWS - 3) / 2))} />
         <Text wrap="truncate-end">
           <Text bold>Kvist</Text>
           {info.kvistVersion ? <Text color={color.dim}> v{info.kvistVersion}</Text> : null}
@@ -508,6 +495,8 @@ export function ClaudeScreen({ items, showDebug, followKey, live, spinner, hint 
   const shown = Math.min(scroll, max)
   const page = Math.max(1, Math.floor(view.height / 2))
   const { pointer, expanded } = useContext(ViewContext)
+  // Whatever moved the text may have moved the mascot, and a picture does not move by itself.
+  useEffect(() => syncMascotImage(pointer))
   const entries = useMemo(() => (expanded ? items.map((item): Entry => ({ key: item.id, item })) : collapse(items)), [items, expanded])
   // The wheel sends "toward newer" as a positive number of lines.
   const scrollBy = useRef((_lines: number) => {})
@@ -560,14 +549,14 @@ export function ClaudeScreen({ items, showDebug, followKey, live, spinner, hint 
 }
 
 // Under the input: what the keys do now on the left, what is running on the right.
-export function ClaudeFooter({ running, armed, usage, model, role, toast = "", exitWarning = false }: { running: boolean; armed: boolean; usage: State["usage"]; model: string; role: string; toast?: string; exitWarning?: boolean }) {
+export function ClaudeFooter({ running, armed, usage, model, role, toast = "", exitWarning = null }: { running: boolean; armed: boolean; usage: State["usage"]; model: string; role: string; toast?: string; exitWarning?: "C" | "D" | null }) {
   const context = contextLabel(usage.context, usage.limit)
   const mode = [model, role].filter(Boolean).join(" · ")
   return (
     <Box justifyContent="space-between" paddingX={2}>
       {armed ? <Text color={color.warn} wrap="truncate-end">esc again to interrupt</Text> : toast ? <Text color={color.ok} wrap="truncate-end">{toast}</Text> : <Text color={color.dim} wrap="truncate-end">{running ? "esc to interrupt" : "/ for commands"}</Text>}
       {exitWarning ? (
-        <Text color={color.warn} wrap="truncate-end">Press Ctrl+C again to exit and stop the agent</Text>
+        <Text color={color.warn} wrap="truncate-end">Press Ctrl+{exitWarning} again to exit and stop the agent</Text>
       ) : (
         <Text color={color.dim} wrap="truncate-end">{[context, mode].filter(Boolean).join("  ")}</Text>
       )}

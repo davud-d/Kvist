@@ -5,6 +5,8 @@ import { parseArgs } from "node:util"
 
 import { resolveCoreCommand } from "./core.js"
 import { farewellText } from "./farewell.js"
+import { kittyGraphics } from "./kitty.js"
+import { probeTerminal } from "./probe.js"
 import { Pointer } from "./pointer.js"
 import { sessionOp } from "./session.js"
 import { App } from "./ui/app.js"
@@ -49,7 +51,10 @@ if (!launched.ok) console.error(`session launch failed: ${launched.error ?? "unk
 // The claude skin takes the whole screen and the mouse (see pointer.ts); the ink
 // skin keeps the terminal's scrollback and native selection.
 const fullscreen = skin === "claude"
-const pointer = fullscreen ? new Pointer(process.stdin, process.stdout) : null
+// kitty's protocol is recognised from the environment; Sixel has to be asked for, before Ink owns the input.
+const probe = fullscreen && !kittyGraphics(process.env) ? await probeTerminal(process.stdin, process.stdout) : null
+const pictures = kittyGraphics(process.env) ? "kitty" : probe?.sixel ? "sixel" : null
+const pointer = fullscreen ? new Pointer(process.stdin, process.stdout, { pictures, cell: probe?.cell ?? null }) : null
 let lastSession = ""
 
 const app = render(

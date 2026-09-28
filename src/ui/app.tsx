@@ -83,9 +83,10 @@ export function App(props: AppProps) {
   const [state, dispatch] = useReducer(reduce, undefined, () => initialState(initialEffort()))
   const [history, setHistory] = useState<string[]>([])
   const [stopArmedAt, setStopArmedAt] = useState(0)
-  // A first Ctrl+C at the idle prompt only warns; the ref lets a second press in the same key chunk see it.
-  const [exitWarning, setExitWarning] = useState(false)
-  const exitArmed = useRef(false)
+  // A first Ctrl+C or Ctrl+D at the idle prompt only warns, naming the key; the ref lets a second press
+  // in the same key chunk see it. Only the same key confirms.
+  const [exitWarning, setExitWarning] = useState<"C" | "D" | null>(null)
+  const exitArmed = useRef<"C" | "D" | null>(null)
   const [toast, setToast] = useState("")
   // Ctrl+O in the fullscreen skin: commands with their output instead of a one-line summary.
   const [expanded, setExpanded] = useState(false)
@@ -246,21 +247,23 @@ export function App(props: AppProps) {
     core.current?.cancel()
   }
 
+  // The fullscreen skin asks for a second press, as Claude Code does, so a stray one costs nothing.
+  const askToExit = (letter: "C" | "D") => {
+    if (props.skin !== "claude" || exitArmed.current === letter) return void quit()
+    exitArmed.current = letter
+    setExitWarning(letter)
+  }
+
   useInput((input, key) => {
     const current = stateRef.current
-    if (input === "d" && key.ctrl && !current.running && !current.pending) return void quit()
+    if (input === "d" && key.ctrl && !current.running && !current.pending) return askToExit("D")
     if (input === "o" && key.ctrl && props.skin === "claude") return setExpanded((on) => !on)
     if (key.ctrl && input === "c") {
       // A command is not a turn: there is nothing to cancel in the core, and
       // quitting would take the whole process down with it.
       if (current.command) return current.pending ? answer(null) : undefined
       if (current.running) return stop()
-      // The fullscreen skin asks for a second press, as Claude Code does, so a stray one costs nothing.
-      if (props.skin === "claude" && !exitArmed.current) {
-        exitArmed.current = true
-        return setExitWarning(true)
-      }
-      return void quit()
+      return askToExit("C")
     }
     if (key.escape && stateRef.current.running && !stateRef.current.pending) {
       const now = Date.now()
@@ -281,8 +284,8 @@ export function App(props: AppProps) {
   useEffect(() => {
     if (!exitWarning) return
     const timer = setTimeout(() => {
-      exitArmed.current = false
-      setExitWarning(false)
+      exitArmed.current = null
+      setExitWarning(null)
     }, EXIT_WARNING_MS)
     return () => clearTimeout(timer)
   }, [exitWarning])

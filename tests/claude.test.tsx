@@ -215,9 +215,15 @@ test("a first Ctrl+C is answered with a warning where the model and context usua
   const usage = { input: 0, output: 0, context: 12_300, limit: 200_000 }
   const idle = frame(createElement(ClaudeFooter, { running: false, armed: false, usage, model: "sonnet", role: "coder", }))
   assert.match(idle, /\/ for commands\s+12\.3K/)
-  const warned = frame(createElement(ClaudeFooter, { running: false, armed: false, usage, model: "sonnet", role: "coder", exitWarning: true }))
+  const warned = frame(createElement(ClaudeFooter, { running: false, armed: false, usage, model: "sonnet", role: "coder", exitWarning: "C" as const }))
   assert.match(warned, /\/ for commands\s+Press Ctrl\+C again to exit and stop the agent/)
   assert.doesNotMatch(warned, /sonnet/)
+})
+
+test("the warning names the key that was pressed, Ctrl+D as well as Ctrl+C", () => {
+  const usage = { input: 0, output: 0, context: 0, limit: 0 }
+  const warned = frame(createElement(ClaudeFooter, { running: false, armed: false, usage, model: "m", role: "r", exitWarning: "D" as const }))
+  assert.match(warned, /Press Ctrl\+D again to exit and stop the agent/)
 })
 
 test("a running turn shows a verb, the elapsed time, what the core reports, and the stop hint", () => {

@@ -4,6 +4,7 @@ import { test } from "node:test"
 
 import type { ClipboardResult } from "../src/clipboard.js"
 import { Pointer, extractMouse, splitFrame } from "../src/pointer.js"
+import { MASCOT_PNGS } from "../src/ui/mascot-images.js"
 
 const press = (col: number, row: number) => `\x1b[<0;${col + 1};${row + 1}M`
 const move = (col: number, row: number) => `\x1b[<32;${col + 1};${row + 1}M`
@@ -29,7 +30,7 @@ function screenOf(written: unknown[], rows = 3): string[] {
   return screen
 }
 
-function setup(now = () => 0) {
+function setup(now = () => 0, pictures: "kitty" | "sixel" | null = null) {
   const input = new Readable({ read() {} })
   input.setEncoding("utf8")
   const written: unknown[] = []
@@ -38,6 +39,7 @@ function setup(now = () => 0) {
   const pointer = new Pointer(input as unknown as NodeJS.ReadStream, output as unknown as NodeJS.WriteStream, {
     copy: (text): ClipboardResult => (copies.push(text), { method: "osc52", chars: text.length }),
     now,
+    pictures,
   })
   const feed = (data: string) => input.push(data)
   const read = () => pointer.stdin.read() as string | null
@@ -167,4 +169,110 @@ test("page keys leave a selection alone", () => {
   feed("\x1b[5~")
   assert.equal(read(), "\x1b[5~")
   assert.equal(written.length, before)
+})
+
+const PICTURE = { png: "QUJD", key: "0", row: 1, col: 2, columns: 16, rows: 8 }
+const placements = (written: unknown[]) => written.filter((chunk) => String(chunk).includes("\x1b_Ga=T"))
+const deletions = (written: unknown[]) => written.filter((chunk) => String(chunk).includes("\x1b_Ga=d"))
+
+test("a picture waits for the first frame, then is drawn once and not again while it is unchanged", () => {
+  const { pointer, paint, written } = setup(() => 0, "kitty")
+  pointer.showImage(PICTURE)
+  assert.equal(placements(written).length, 0)
+  paint()
+  assert.equal(placements(written).length, 1)
+  assert.match(String(placements(written)[0]), /^\x1b\[2;3H\x1b_Ga=T,f=100,i=1,p=1,c=16,r=8/)
+  paint(["hello world", "SECOND ROW", "third"])
+  pointer.showImage({ ...PICTURE })
+  assert.equal(placements(written).length, 1, "text changing around it does not resend it")
+})
+
+test("a new frame or a new place sends the picture again, and null takes it away", () => {
+  const { pointer, paint, written } = setup(() => 0, "kitty")
+  paint()
+  pointer.showImage(PICTURE)
+  pointer.showImage({ ...PICTURE, key: "1" })
+  pointer.showImage({ ...PICTURE, key: "1", row: 0 })
+  assert.equal(placements(written).length, 3)
+  pointer.showImage(null)
+  assert.equal(deletions(written).length, 1)
+  pointer.showImage(null)
+  assert.equal(deletions(written).length, 1, "nothing to remove twice")
+})
+
+test("clearing the screen loses the picture, so the next frame draws it again", () => {
+  const { pointer, paint, written } = setup(() => 0, "kitty")
+  paint()
+  pointer.showImage(PICTURE)
+  pointer.stdout.write("\x1b[2J\x1b[H")
+  paint()
+  assert.equal(placements(written).length, 2)
+})
+
+test("a terminal without pictures is never sent one", () => {
+  const { pointer, paint, written } = setup(() => 0)
+  paint()
+  pointer.showImage(PICTURE)
+  pointer.stop()
+  assert.equal(placements(written).length + deletions(written).length, 0)
+})
+
+const SIXEL_PICTURE = { png: MASCOT_PNGS[5]!, key: "5", row: 0, col: 1, columns: 4, rows: 2 }
+const sixels = (written: unknown[]) => written.map(String).filter((chunk) => chunk.includes("\x1bP0;1;0q"))
+
+test("Sixel: a picture is sized for the cells it covers, drawn where they are, and not sent again unchanged", () => {
+  const { pointer, paint, written } = setup(() => 0, "sixel")
+  pointer.showImage(SIXEL_PICTURE)
+  assert.equal(sixels(written).length, 0, "nothing before the first frame")
+  paint()
+  assert.equal(sixels(written).length, 1)
+  // 4 columns x 2 rows of the assumed 8x16-pixel cell: 32 x 32 pixels, at row 1, column 2.
+  assert.match(sixels(written)[0]!, /^\x1b\[1;2H\x1bP0;1;0q"1;1;32;32#/)
+  paint(["hello world", "SECOND ROW", "third"])
+  pointer.showImage({ ...SIXEL_PICTURE })
+  assert.equal(sixels(written).length, 1)
+})
+
+test("Sixel: the size of a cell the terminal reported is used", () => {
+  const input = new Readable({ read() {} })
+  const written: unknown[] = []
+  const output = { rows: 3, columns: 20, isTTY: true, write: (chunk: unknown) => (written.push(chunk), true) }
+  const pointer = new Pointer(input as unknown as NodeJS.ReadStream, output as unknown as NodeJS.WriteStream, { pictures: "sixel", cell: { width: 10, height: 20 } })
+  pointer.stdout.write(frameChunk())
+  pointer.showImage(SIXEL_PICTURE)
+  assert.match(sixels(written)[0]!, /"1;1;40;40#/)
+})
+
+test("Sixel: a picture that goes away is erased by writing the rows under it again", () => {
+  const { pointer, paint, written } = setup(() => 0, "sixel")
+  paint()
+  pointer.showImage(SIXEL_PICTURE)
+  const before = written.length
+  pointer.showImage(null)
+  const erase = written.slice(before).map(String).join("")
+  assert.match(erase, /\x1b\[1;1Hhello world/)
+  assert.match(erase, /\x1b\[2;1Hsecond row/)
+  assert.doesNotMatch(erase, /\x1b_G/, "no kitty deletion is sent")
+  pointer.showImage(SIXEL_PICTURE)
+  assert.equal(sixels(written).length, 2, "and it can be shown again")
+})
+
+test("Sixel: moving the picture erases the old cells before drawing at the new ones", () => {
+  const { pointer, paint, written } = setup(() => 0, "sixel")
+  paint()
+  pointer.showImage(SIXEL_PICTURE)
+  const before = written.length
+  pointer.showImage({ ...SIXEL_PICTURE, row: 1 })
+  const chunks = written.slice(before).map(String)
+  assert.match(chunks[0]!, /\x1b\[1;1Hhello world/)
+  assert.match(chunks.at(-1)!, /^\x1b\[2;2H\x1bP0;1;0q/)
+})
+
+test("a screen clear forgets a Sixel picture too, so the next frame draws it again", () => {
+  const { pointer, paint, written } = setup(() => 0, "sixel")
+  paint()
+  pointer.showImage(SIXEL_PICTURE)
+  pointer.stdout.write("\x1b[2J\x1b[H")
+  paint()
+  assert.equal(sixels(written).length, 2)
 })

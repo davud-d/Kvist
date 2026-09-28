@@ -11,7 +11,10 @@
 // update, which shows as flicker at the pace a spinner and a stream update it, so only
 // the rows that changed are written, in place.
 import { copyToClipboard, type ClipboardResult } from "./clipboard.js"
+import { deleteImage, placeImage } from "./kitty.js"
 import { disableMouse, enableMouse } from "./mouse.js"
+import { decodePalettePng, type Indexed } from "./png.js"
+import { encodeSixel } from "./sixel.js"
 import { cellsOf, cellAt, highlight, lineAt, order, selectedText, wordAt, type Point, type Selection } from "./screen.js"
 
 const REPORT = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/g
@@ -60,7 +63,28 @@ type Copied = (result: ClipboardResult) => void
 export interface PointerOptions {
   copy?: (text: string) => ClipboardResult
   now?: () => number
+  // How the terminal draws pictures, if it does: see showImage.
+  pictures?: "kitty" | "sixel" | null
+  // Size of a cell in pixels, which Sixel needs to make a picture fit its cells.
+  cell?: { width: number; height: number } | null
 }
+
+// A cell of this size is assumed when the terminal does not say. A picture made for it is never
+// larger than the cells it is meant for, whichever terminal font is in use, so it cannot spill over text.
+const ASSUMED_CELL = { width: 8, height: 16 }
+
+// A picture to keep over a rectangle of cells. `key` names what is shown (the frame), so an
+// unchanged picture at an unchanged place is not sent again.
+export interface ShownImage {
+  png: string
+  key: string
+  row: number
+  col: number
+  columns: number
+  rows: number
+}
+
+const IMAGE_ID = 1
 
 // A view of `target` that answers some properties itself and hands the rest,
 // bound to the real stream, through.
@@ -88,6 +112,16 @@ export class Pointer {
   private moved = false
   private clicks = 0
   private lastPress: { at: number; row: number; col: number } | null = null
+  private image: ShownImage | null = null
+  // What is on the terminal now, as "key@row,col,columns,rows", or null for nothing.
+  private imageDrawn: string | null = null
+  readonly pictures: "kitty" | "sixel" | null
+  readonly images: boolean
+  private readonly cell: { width: number; height: number }
+  // Sixel only: the rows a picture covers, and its decoded frames and encoded strings.
+  private sixelRows: { row: number; rows: number } | null = null
+  private readonly decoded = new Map<string, Indexed>()
+  private readonly encoded = new Map<string, string>()
   private readonly wheelListeners = new Set<Wheel>()
   private readonly copiedListeners = new Set<Copied>()
   private readonly copy: (text: string) => ClipboardResult
@@ -96,6 +130,9 @@ export class Pointer {
   constructor(private readonly input: NodeJS.ReadStream, private readonly output: NodeJS.WriteStream, options: PointerOptions = {}) {
     this.copy = options.copy ?? copyToClipboard
     this.now = options.now ?? Date.now
+    this.pictures = options.pictures ?? null
+    this.images = this.pictures !== null
+    this.cell = options.cell ?? ASSUMED_CELL
     this.stdin = view(input, { read: (size?: number) => this.read(size) })
     this.stdout = view(output, { write: (chunk: unknown, ...rest: unknown[]) => this.write(chunk, rest) })
   }
@@ -106,6 +143,60 @@ export class Pointer {
 
   stop(): void {
     disableMouse()
+    this.showImage(null)
+  }
+
+  // Keeps `image` over its cells until told otherwise. A kitty picture belongs to the terminal's
+  // graphics layer, above the text, so the cells under it must be left blank; it stays where it was
+  // put when the text around it changes, so the caller moves or removes it with the layout. A Sixel
+  // picture is part of the cells, and text written over them erases it.
+  showImage(image: ShownImage | null): void {
+    if (!this.images) return
+    this.image = image
+    // Nothing is on screen before the first frame; the frame will bring the picture.
+    if (this.painted) this.drawImage()
+  }
+
+  private drawImage(): void {
+    const wanted = this.image ? `${this.image.key}@${this.image.row},${this.image.col},${this.image.columns},${this.image.rows}` : null
+    if (wanted === this.imageDrawn) return
+    this.imageDrawn = wanted
+    if (this.pictures === "sixel") return this.drawSixel()
+    if (!this.image) {
+      this.output.write(deleteImage(IMAGE_ID))
+      return
+    }
+    const { png, row, col, columns, rows } = this.image
+    this.output.write(placeImage(png, { id: IMAGE_ID, row, col, columns, rows }))
+  }
+
+  private sixelOf(image: ShownImage): string {
+    const width = image.columns * this.cell.width
+    const height = image.rows * this.cell.height
+    const key = `${image.key}@${width}x${height}`
+    let text = this.encoded.get(key)
+    if (text === undefined) {
+      let decoded = this.decoded.get(image.key)
+      if (!decoded) {
+        decoded = decodePalettePng(image.png)
+        this.decoded.set(image.key, decoded)
+      }
+      text = encodeSixel(decoded, width, height)
+      this.encoded.set(key, text)
+    }
+    return text
+  }
+
+  private drawSixel(): void {
+    const before = this.sixelRows
+    this.sixelRows = this.image ? { row: this.image.row, rows: this.image.rows } : null
+    // A picture that moved or went away leaves its old cells behind: writing text over them is the only eraser.
+    if (before && (!this.image || before.row !== this.image.row)) {
+      const painted = this.painted
+      for (let row = before.row; painted && row < Math.min(before.row + before.rows, painted.length); row++) painted[row] = "\0"
+      this.paint(false)
+    }
+    if (this.image) this.output.write(`\x1b[${this.image.row + 1};${this.image.col + 1}H${this.sixelOf(this.image)}`)
   }
 
   // Scroll requests from the wheel: negative moves toward older content.
@@ -140,7 +231,11 @@ export class Pointer {
         this.paint()
         return true
       }
-      if (CLEARS.test(chunk)) this.painted = null
+      if (CLEARS.test(chunk)) {
+        this.painted = null
+        this.imageDrawn = null
+        this.sixelRows = null
+      }
     }
     return (this.output.write as (...args: unknown[]) => boolean)(chunk, ...rest)
   }
@@ -148,7 +243,7 @@ export class Pointer {
   // Writes the rows of the current frame that differ from what the terminal shows, each at its
   // own position and closed with a reset and an erase-to-end-of-line. A first frame, a resize or
   // a cleared screen writes every row.
-  private paint(): void {
+  private paint(withImage = true): void {
     if (!this.frame) return
     const lines = this.selection ? highlight(this.frame.lines, this.selection) : this.frame.lines
     const columns = this.output.columns ?? 0
@@ -157,9 +252,16 @@ export class Pointer {
     lines.forEach((line, row) => {
       if (everything || this.painted?.[row] !== line) out += `\x1b[${row + 1};1H${line}\x1b[0m\x1b[K`
     })
-    this.painted = lines
+    // A copy: a Sixel eraser marks rows of it for repainting, and the frame's own rows must stay as they are.
+    this.painted = [...lines]
     this.paintedColumns = columns
     if (out) this.output.write(out)
+    // Clearing the screen took the picture with it.
+    if (everything) {
+      this.imageDrawn = null
+      this.sixelRows = null
+    }
+    if (withImage) this.drawImage()
   }
 
   private select(selection: Selection | null): void {

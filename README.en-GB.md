@@ -346,6 +346,12 @@ terminal's scrollback is not available there, so the app scrolls itself
 to select, double-click for a word, triple-click for a line; the selection is
 copied on release. Hold `Shift` while dragging to use the terminal's own selection.
 
+The squirrel of the welcome block is drawn as real pictures where the terminal can: kitty's graphics
+protocol (kitty, Ghostty, Konsole) or Sixel (Windows Terminal 1.22+, WezTerm, mintty, foot, iTerm2 and
+others; Kvist asks the terminal at start). Everywhere else it is block characters: octants (twice as
+sharp) in Windows Terminal, whose Cascadia Code font has them, and quadrants in every other terminal.
+`KVIST_GLYPHS=octants` or `quadrants` overrides that guess, for a Windows Terminal with another font.
+
 `--frontend terminal` or `--no-banner` overrides the saved choice for one launch.
 The Ink UI needs a provider configured in the classic terminal first; without
 Node.js, the built file, a provider or a TTY, Kvist starts the classic terminal
