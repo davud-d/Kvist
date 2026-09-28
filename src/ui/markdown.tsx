@@ -1,7 +1,7 @@
 import { Box, Text } from "ink"
 import type { ReactNode } from "react"
 
-import { color } from "./theme.js"
+import { color, currentSkin } from "./theme.js"
 
 const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(\*[^*\s][^*\n]*\*)/g
 
@@ -72,6 +72,14 @@ function collapseBlanks(blocks: Block[]): Block[] {
 function BlockView({ block }: { block: Block }) {
   switch (block.kind) {
     case "code":
+      // Claude Code sets a code block off by colour alone, with no frame or language label.
+      if (currentSkin() === "claude") {
+        return (
+          <Box flexDirection="column" paddingLeft={2}>
+            {block.lines.map((line, i) => <Text key={i} color={color.code}>{line || " "}</Text>)}
+          </Box>
+        )
+      }
       return (
         <Box flexDirection="column" borderStyle="round" borderColor={color.faint} paddingX={1}>
           {block.lang ? <Text color={color.dim}>{block.lang}</Text> : null}

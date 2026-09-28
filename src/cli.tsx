@@ -4,8 +4,11 @@ import path from "node:path"
 import { parseArgs } from "node:util"
 
 import { resolveCoreCommand } from "./core.js"
+import { farewellText } from "./farewell.js"
+import { Pointer } from "./pointer.js"
 import { sessionOp } from "./session.js"
 import { App } from "./ui/app.js"
+import { SKINS, applySkin } from "./ui/theme.js"
 
 const { values } = parseArgs({
   options: {
@@ -16,8 +19,16 @@ const { values } = parseArgs({
     "smart-model": { type: "string" },
     "planner-model": { type: "string" },
     "approval-mode": { type: "string", default: "ask" },
+    skin: { type: "string", default: "ink" },
   },
 })
+
+const skin = SKINS.find((name) => name === values.skin)
+if (!skin) {
+  console.error(`Unknown skin '${values.skin}'; expected one of: ${SKINS.join(", ")}.`)
+  process.exit(2)
+}
+applySkin(skin)
 
 if (!process.stdin.isTTY || !process.stdout.isTTY) {
   console.error("kvist-tui needs an interactive terminal.")
@@ -35,6 +46,12 @@ const models =
 const launched = await sessionOp(command, workspace, "launch")
 if (!launched.ok) console.error(`session launch failed: ${launched.error ?? "unknown error"}`)
 
+// The claude skin takes the whole screen and the mouse (see pointer.ts); the ink
+// skin keeps the terminal's scrollback and native selection.
+const fullscreen = skin === "claude"
+const pointer = fullscreen ? new Pointer(process.stdin, process.stdout) : null
+let lastSession = ""
+
 const app = render(
   <App
     command={command}
@@ -43,9 +60,24 @@ const app = render(
     models={models}
     role={values.role ?? "auto"}
     approvalMode={values["approval-mode"] ?? "ask"}
+    skin={skin}
+    pointer={pointer}
+    onSession={(name) => (lastSession = name)}
   />,
-  { exitOnCtrlC: false },
+  pointer
+    ? { exitOnCtrlC: false, alternateScreen: true, stdin: pointer.stdin, stdout: pointer.stdout }
+    : { exitOnCtrlC: false },
 )
+pointer?.start()
 await app.waitUntilExit()
+pointer?.stop()
+if (fullscreen) {
+  // The alternate screen is gone; leave a way back. A session nothing happened in has
+  // nothing to come back to: the core reports an empty journal and no checkpoint for it.
+  const listed = lastSession ? await sessionOp(command, workspace, "list") : null
+  const used = listed?.session_items?.find((item) => item.name === lastSession)
+  const resumable = used && (used.journal_bytes > 0 || used.has_checkpoint) ? lastSession : null
+  process.stdout.write(farewellText(resumable, process.stdout.columns ?? 80))
+}
 // exitCode is set by /tui so the launcher can tell a switch from a normal quit.
 process.exit()

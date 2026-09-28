@@ -20,6 +20,11 @@ test("hello fills the header info and prints the banner once", () => {
   assert.equal(state.items.filter((item) => item.kind === "banner").length, 1)
 })
 
+test("hello announces the reasoning effort, and a hello without one keeps the known level", () => {
+  assert.equal(feed({ ...hello, effort: "high" }).effort, "high")
+  assert.equal(reduce(reduce(initialState("low"), { type: "event", event: hello }), { type: "event", event: hello }).effort, "low")
+})
+
 test("hello carries the running kvist's version into state.info", () => {
   const state = feed({ ...hello, kvist_version: "0.1.0b1" })
   assert.equal(state.info.kvistVersion, "0.1.0b1")
@@ -114,6 +119,69 @@ test("usage sums spend but replaces context size, and keeps it on a zero", () =>
   assert.equal(state.usage.output, 3)
   assert.equal(state.usage.context, 800)
   assert.equal(state.usage.limit, 9000)
+})
+
+test("/new empties the feed under a fresh welcome block and restarts the context", () => {
+  let state = feed(hello, { type: "usage", input_tokens: 1, output_tokens: 1, context_tokens: 500, context_limit: 1000, model: "m", kind: "action", step: 1 })
+  state = reduce(state, { type: "submit", text: "old task", now: 1 })
+  state = reduce(state, { type: "event", event: { type: "turn_end" } })
+  const after = reduce(state, { type: "event", event: { type: "command_result", name: "new", ok: true, message: "Session chat-2 created.", effects: { session: "chat-2", changed: true } } })
+  assert.deepEqual(after.items.map((i) => i.kind), ["banner", "note"])
+  assert.equal(after.info.session, "chat-2")
+  assert.equal(after.usage.context, 0)
+  assert.equal(after.epoch, state.epoch + 1)
+})
+
+test("a command that changed no session leaves the feed alone", () => {
+  const state = reduce(feed(hello), { type: "submit", text: "task", now: 1 })
+  const after = reduce(state, { type: "event", event: { type: "command_result", name: "session", ok: true, message: "Active session: s", effects: { session: "s", changed: false } } })
+  assert.deepEqual(after.items.map((i) => i.kind), ["banner", "user", "note"])
+})
+
+test("a restored session feed can start with the welcome block", () => {
+  const restored = reduce(feed(hello), { type: "restore", events: [{ type: "user", text: "asked" }, { type: "turn_end" }], now: 1, banner: true })
+  assert.deepEqual(restored.items.map((i) => i.kind), ["banner", "user"])
+})
+
+test("a live turn ends with a closing line that knows its length, role and language", () => {
+  let state = reduce(feed(hello), { type: "submit", text: "привет", now: 10_000 })
+  state = reduce(state, { type: "event", event: { type: "route", role: "chat" }, now: 10_500 })
+  state = reduce(state, { type: "event", event: { type: "final", message: "Здравствуйте", user_messages: [], outcome: "done" }, now: 12_000 })
+  state = reduce(state, { type: "event", event: { type: "turn_end" }, now: 14_500 })
+  const done = state.items.at(-1)
+  assert.ok(done?.kind === "done")
+  assert.deepEqual({ seconds: done.seconds, at: done.at, role: done.role, russian: done.russian, seed: done.seed, interrupted: done.interrupted }, { seconds: 4.5, at: 14_500, role: "chat", russian: true, seed: 10_000, interrupted: false })
+})
+
+test("a turn the person stopped says so, a command or a replayed journal gets no closing line", () => {
+  let state = reduce(feed(hello), { type: "submit", text: "fix", now: 0 })
+  state = reduce(state, { type: "interrupt" })
+  state = reduce(state, { type: "event", event: { type: "turn_end" }, now: 2000 })
+  const done = state.items.at(-1)
+  assert.ok(done?.kind === "done" && done.interrupted)
+  assert.equal(state.interrupted, false)
+  const command = reduce(feed(hello), { type: "event", event: { type: "turn_end" }, now: 2000 })
+  assert.ok(!command.items.some((item) => item.kind === "done"))
+  const replayed = reduce(feed(hello), { type: "restore", events: [{ type: "user", text: "asked" }, { type: "turn_end" }], now: 1000 })
+  assert.ok(!replayed.items.some((item) => item.kind === "done"))
+})
+
+test("a turn counts its own output tokens and remembers the thought that just ended", () => {
+  let state = feed(hello, { type: "usage", input_tokens: 1, output_tokens: 500, context_tokens: 10, context_limit: 100, model: "m", kind: "action", step: 1 })
+  state = reduce(state, { type: "submit", text: "go", now: 1000 })
+  assert.equal(state.turnStartOutput, 500)
+  state = reduce(state, { type: "event", event: { type: "usage", input_tokens: 1, output_tokens: 300, context_tokens: 10, context_limit: 100, model: "m", kind: "action", step: 1 }, now: 2000 })
+  assert.equal(state.usage.output - state.turnStartOutput, 300)
+  state = reduce(state, { type: "event", event: { type: "reasoning_commit", stream_id: "r", duration_seconds: 2 }, now: 3000 })
+  assert.deepEqual(state.thought, { seconds: 2, at: 3000 })
+  state = reduce(state, { type: "event", event: { type: "turn_end" }, now: 4000 })
+  assert.equal(state.thought, null)
+})
+
+test("echo shows a typed command like a request without starting a run", () => {
+  const state = reduce(initialState(), { type: "echo", text: "/help" })
+  assert.deepEqual(state.items.map((i) => (i.kind === "user" ? i.text : i.kind)), ["/help"])
+  assert.equal(state.running, false)
 })
 
 test("a turn runs from submit until turn_end, even without a final", () => {
@@ -369,7 +437,9 @@ test("models and session effects reach the header; warnings become notes", () =>
   assert.equal(next.info.provider, "q")
   assert.equal(next.info.model, "f")
   assert.equal(next.info.session, "b")
-  assert.deepEqual(notes(next), ["info:Models updated.", "warn:Careful", "info:Switched to session b."])
+  // Switching sessions empties the feed, so the notes of the models command went with it.
+  assert.deepEqual(notes(next), ["info:Switched to session b."])
+  assert.deepEqual(notes(feed(hello, cmdResult({ name: "models", message: "Models updated.", effects: { warnings: ["Careful"] } }))), ["info:Models updated.", "warn:Careful"])
 })
 
 test("a /changes report is shown as it is and cut when long", () => {

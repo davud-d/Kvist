@@ -2,17 +2,21 @@ import { Box, Static, Text, useApp, useInput } from "ink"
 import { writeFileSync } from "node:fs"
 import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
-import { CLASSIC_COMMAND, COMMANDS, CURRENT_FRONTEND, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, parseSlash, routeOf, sessionArgs } from "../commands.js"
+import { CLASSIC_COMMAND, COMMANDS, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs } from "../commands.js"
 import { copyToClipboard } from "../clipboard.js"
 import { KvistCore, type CoreCommand } from "../core.js"
+import type { Pointer } from "../pointer.js"
 import type { CoreEvent } from "../protocol.js"
-import { contextLabel } from "../format.js"
+import { contextLabel, englishOnly } from "../format.js"
+import { sessionHistory } from "../session.js"
 import { answerFromEnd, initialState, reduce } from "../state.js"
+import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./claude.js"
+import { ViewContext } from "./context.js"
 import { InputBox } from "./input.js"
 import { ItemView } from "./items.js"
 import { Live } from "./live.js"
 import { Prompt } from "./prompts.js"
-import { color } from "./theme.js"
+import { color, type Skin } from "./theme.js"
 
 export interface AppProps {
   command: CoreCommand
@@ -21,9 +25,17 @@ export interface AppProps {
   models?: { fast: string; smart: string; planner: string }
   role: string
   approvalMode: string
+  skin: Skin
+  // Set for the fullscreen skin, which owns the mouse.
+  pointer: Pointer | null
+  // Told the session that is on screen, so the launcher can point back to it on exit.
+  onSession?: (name: string) => void
 }
 
 const STOP_CONFIRM_MS = 3000
+// How long the "press Ctrl+C again" warning stays, and so how long a second press counts.
+const EXIT_WARNING_MS = 2000
+const TOAST_MS = 2500
 const SWITCH_CODE = 64
 
 // Build is the only mode there is; the label is here so the line already has
@@ -71,6 +83,12 @@ export function App(props: AppProps) {
   const [state, dispatch] = useReducer(reduce, undefined, () => initialState(initialEffort()))
   const [history, setHistory] = useState<string[]>([])
   const [stopArmedAt, setStopArmedAt] = useState(0)
+  // A first Ctrl+C at the idle prompt only warns; the ref lets a second press in the same key chunk see it.
+  const [exitWarning, setExitWarning] = useState(false)
+  const exitArmed = useRef(false)
+  const [toast, setToast] = useState("")
+  // Ctrl+O in the fullscreen skin: commands with their output instead of a one-line summary.
+  const [expanded, setExpanded] = useState(false)
   const core = useRef<KvistCore | null>(null)
   const stateRef = useRef(state)
   stateRef.current = state
@@ -80,7 +98,20 @@ export function App(props: AppProps) {
   useEffect(() => {
     const instance = new KvistCore(props.command)
     core.current = instance
-    instance.on("event", (event: CoreEvent) => dispatch({ type: "event", event }))
+    // Switching to a session that already has a feed: the reducer has emptied the screen,
+    // and the session's own journal fills it back in.
+    const redrawSession = async (event: Extract<CoreEvent, { type: "command_result" }>) => {
+      const name = event.effects?.session
+      if (!event.ok || event.effects?.changed !== true || event.name === "new" || typeof name !== "string") return
+      const history = await sessionHistory(props.command, props.workspace, name)
+      if (!history.ok || history.events.length === 0 || stateRef.current.running) return
+      dispatch({ type: "restore", events: history.events, banner: true })
+      dispatch({ type: "note", tone: "info", text: englishOnly(event.message) })
+    }
+    instance.on("event", (event: CoreEvent) => {
+      dispatch({ type: "event", event })
+      if (event.type === "command_result") void redrawSession(event)
+    })
     instance.on("diagnostic", (text: string) => dispatch({ type: "event", event: { type: "debug", message: text.trim() } }))
     instance.on("fault", (error: Error) => note(error.message, "error"))
     instance.on("exit", ({ code, expected }: { code: number | null; expected: boolean }) => dispatch({ type: "core_exit", expected, code }))
@@ -118,7 +149,8 @@ export function App(props: AppProps) {
       case "quit":
         return void quit()
       case "clear":
-        process.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+        // The fullscreen skin redraws the whole screen from state.
+        if (props.skin !== "claude") process.stdout.write("\x1b[2J\x1b[3J\x1b[H")
         return dispatch({ type: "clear" })
       case "debug":
         return dispatch({ type: "toggle_debug" })
@@ -141,14 +173,14 @@ export function App(props: AppProps) {
             body: "",
             help_text: "The choice is saved and used from the next launch.",
             options: FRONTENDS.map(({ value, label, description }) => ({ value, label, description })),
-            current_value: CURRENT_FRONTEND,
+            current_value: frontendOf(props.skin),
           },
         })
     }
-  }, [note, quit])
+  }, [note, quit, props.skin])
 
   const switchFrontend = useCallback((value: string) => {
-    if (value === CURRENT_FRONTEND) return
+    if (value === frontendOf(props.skin)) return
     const target = process.env.KVIST_SWITCH_FILE
     if (!target) return note("Switching needs Kvist to be started through main.py.", "warn")
     try {
@@ -159,7 +191,7 @@ export function App(props: AppProps) {
     // The launcher reads the file, saves the preference and starts that interface.
     process.exitCode = SWITCH_CODE
     void quit()
-  }, [note, quit])
+  }, [note, quit, props.skin])
 
   const runCommand = useCallback((text: string) => {
     const parsed = parseSlash(text)
@@ -181,14 +213,18 @@ export function App(props: AppProps) {
     const text = raw.trim()
     if (!text) return
     setHistory((old) => [...old, text])
-    if (text.startsWith("/")) return void runCommand(text)
+    if (text.startsWith("/")) {
+      // The reply of a command hangs off its echo, as in Claude Code.
+      if (props.skin === "claude") dispatch({ type: "echo", text })
+      return void runCommand(text)
+    }
     try {
       core.current?.send(text)
       dispatch({ type: "submit", text })
     } catch (error) {
       note(error instanceof Error ? error.message : String(error), "error")
     }
-  }, [runCommand, note])
+  }, [runCommand, note, props.skin])
 
   const answer = useCallback((value: boolean | string | null | { approved: boolean; remember: boolean }) => {
     const request = stateRef.current.pending
@@ -205,21 +241,32 @@ export function App(props: AppProps) {
     dispatch({ type: "answered" })
   }, [switchFrontend])
 
+  const stop = () => {
+    dispatch({ type: "interrupt" })
+    core.current?.cancel()
+  }
+
   useInput((input, key) => {
     const current = stateRef.current
     if (input === "d" && key.ctrl && !current.running && !current.pending) return void quit()
+    if (input === "o" && key.ctrl && props.skin === "claude") return setExpanded((on) => !on)
     if (key.ctrl && input === "c") {
       // A command is not a turn: there is nothing to cancel in the core, and
       // quitting would take the whole process down with it.
       if (current.command) return current.pending ? answer(null) : undefined
-      if (current.running) return core.current?.cancel()
+      if (current.running) return stop()
+      // The fullscreen skin asks for a second press, as Claude Code does, so a stray one costs nothing.
+      if (props.skin === "claude" && !exitArmed.current) {
+        exitArmed.current = true
+        return setExitWarning(true)
+      }
       return void quit()
     }
     if (key.escape && stateRef.current.running && !stateRef.current.pending) {
       const now = Date.now()
       if (now - stopArmedAt < STOP_CONFIRM_MS) {
         setStopArmedAt(0)
-        return core.current?.cancel()
+        return stop()
       }
       setStopArmedAt(now)
     }
@@ -231,8 +278,74 @@ export function App(props: AppProps) {
     return () => clearTimeout(timer)
   }, [stopArmedAt])
 
+  useEffect(() => {
+    if (!exitWarning) return
+    const timer = setTimeout(() => {
+      exitArmed.current = false
+      setExitWarning(false)
+    }, EXIT_WARNING_MS)
+    return () => clearTimeout(timer)
+  }, [exitWarning])
+
+  useEffect(() => {
+    if (!props.pointer) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const off = props.pointer.onCopied(({ chars }) => {
+      setToast(`copied ${chars} character${chars === 1 ? "" : "s"}`)
+      clearTimeout(timer)
+      timer = setTimeout(() => setToast(""), TOAST_MS)
+    })
+    return () => {
+      off()
+      clearTimeout(timer)
+    }
+  }, [props.pointer])
+
+  useEffect(() => {
+    if (state.info.session) props.onSession?.(state.info.session)
+  }, [state.info.session, props])
+
+  const claude = props.skin === "claude"
+  // The role the router picked belongs to the turn that is running; between turns the footer
+  // shows the configured one again (usually "auto").
+  const configuredRole = state.info.role || props.role
+  const role = state.running ? (state.info.routedRole ?? configuredRole) : configuredRole
+  const armed = stopArmedAt > 0
+  const view = { workspace: props.workspace, info: state.info, effort: state.effort, pointer: props.pointer, expanded }
+
+  const input = state.pending ? (
+    <Prompt key={state.pending.request_id} request={state.pending} onAnswer={answer} />
+  ) : (
+    <InputBox
+      active={!state.running && !state.command}
+      history={history}
+      placeholder={state.command ? `running /${state.command}…` : state.running ? "working…" : "Ask Kvist, or / for commands"}
+      caption={claude
+        ? <ClaudeFooter running={state.running} armed={armed} usage={state.usage} model={state.info.model} role={role} toast={toast} exitWarning={exitWarning} />
+        : <ModeLine model={state.info.model} role={role} effort={state.effort} />}
+      onSubmit={submit}
+    />
+  )
+
+  if (claude) {
+    return (
+      <ViewContext.Provider value={view}>
+        <ClaudeScreen
+          items={state.items}
+          showDebug={state.showDebug}
+          followKey={history.length}
+          live={<ClaudeLiveBody state={state} />}
+          spinner={<ClaudeSpinner state={state} />}
+          hint={state.pending ? null : <ClaudeEffort effort={state.effort} />}
+        >
+          {input}
+        </ClaudeScreen>
+      </ViewContext.Provider>
+    )
+  }
+
   return (
-    <>
+    <ViewContext.Provider value={view}>
       <Static key={state.epoch} items={state.items}>
         {(item) => (
           <Box key={item.id} flexDirection="column">
@@ -241,18 +354,8 @@ export function App(props: AppProps) {
         )}
       </Static>
       <Live state={state} />
-      {state.pending ? (
-        <Prompt key={state.pending.request_id} request={state.pending} onAnswer={answer} />
-      ) : (
-        <InputBox
-          active={!state.running && !state.command}
-          history={history}
-          placeholder={state.command ? `running /${state.command}…` : state.running ? "working…" : "Ask Kvist, or / for commands"}
-          caption={<ModeLine model={state.info.model} role={state.info.routedRole ?? (state.info.role || props.role)} effort={state.effort} />}
-          onSubmit={submit}
-        />
-      )}
-      <Footer running={state.running} armed={stopArmedAt > 0} usage={state.usage} version={state.info.kvistVersion} />
-    </>
+      {input}
+      <Footer running={state.running} armed={armed} usage={state.usage} version={state.info.kvistVersion} />
+    </ViewContext.Provider>
   )
 }

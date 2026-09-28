@@ -2,8 +2,10 @@
 // terminal keeps the mode after we exit, which would take away text
 // selection from the user's shell, so every way out turns it off.
 
-const ON = "\x1b[?1000h\x1b[?1006h"
-const OFF = "\x1b[?1000l\x1b[?1006l"
+const CLICKS = "\x1b[?1000h\x1b[?1006h"
+// Also reports the pointer moving with a button held: what a drag selection needs.
+const CLICKS_AND_DRAGS = "\x1b[?1002h\x1b[?1006h"
+const OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1006l"
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const
 
 let out: NodeJS.WriteStream | null = null
@@ -23,10 +25,10 @@ function onSignal(signal: NodeJS.Signals): void {
   process.kill(process.pid, signal)
 }
 
-export function enableMouse(stream: NodeJS.WriteStream): void {
+export function enableMouse(stream: NodeJS.WriteStream, drags = false): void {
   if (out || !stream.isTTY) return
   out = stream
-  stream.write(ON)
+  stream.write(drags ? CLICKS_AND_DRAGS : CLICKS)
   process.on("exit", release)
   for (const signal of SIGNALS) process.on(signal, onSignal)
 }

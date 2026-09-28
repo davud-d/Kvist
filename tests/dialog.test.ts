@@ -157,9 +157,10 @@ test("/session: a bare name means switch, explicit verbs pass through", () => {
 })
 
 test("/tui offers every interface, the running one is among them, and the values are what the launcher saves", async () => {
-  const { CURRENT_FRONTEND, FRONTENDS } = await import("../src/commands.js")
-  const values = FRONTENDS.map((f) => f.value)
-  assert.ok(values.includes(CURRENT_FRONTEND))
-  assert.deepEqual(values, ["tui", "terminal"])
+  const { FRONTENDS, frontendOf } = await import("../src/commands.js")
+  const values: string[] = FRONTENDS.map((f) => f.value)
+  assert.ok(values.includes(frontendOf("ink")))
+  assert.ok(values.includes(frontendOf("claude")))
+  assert.deepEqual(values, ["tui", "claude", "terminal"])
   assert.equal(new Set(values).size, values.length)
 })

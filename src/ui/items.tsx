@@ -94,6 +94,8 @@ export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }
           <Markdown text={item.text} />
         </Box>
       )
+    case "done":
+      return null
     case "note":
       if (item.tone === "debug" && !showDebug) return null
       return (

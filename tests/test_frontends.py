@@ -25,6 +25,13 @@ def test_cli_parser_accepts_frontend_flag():
     assert main._build_cli_parser().parse_args(["--frontend", "tui"]).frontend == "tui"
 
 
+def test_cli_parser_accepts_every_role_the_core_can_run():
+    # The Node frontends pass the saved /role back as --role, so a role the
+    # parser rejects would kill the core at startup.
+    for role in ("auto", "coder", "reader", "devops", "chat", "universal"):
+        assert main._build_cli_parser().parse_args(["--role", role]).role == role
+
+
 def test_cli_parser_role_defaults_to_none_for_saved_preference_resolution():
     default = main._build_cli_parser().parse_args(["--workspace", "x"])
     assert default.role is None  # resolved from the saved /role preference in main()
@@ -254,6 +261,55 @@ def test_tui_switch_reads_the_chosen_interface_and_hands_over(monkeypatch, tmp_p
     assert main.launch_tui(_tui_args()) is None  # None = classic terminal starts
     assert saved == ["terminal"]
     assert calls == []
+
+
+def test_launch_tui_passes_the_skin_of_the_chosen_frontend(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    calls = _make_tty(monkeypatch, entry)
+    main.launch_tui(_tui_args())
+    assert calls[-1][0][calls[-1][0].index("--skin") + 1] == "ink"
+    main.launch_tui(_tui_args(frontend="claude"))
+    assert calls[-1][0][calls[-1][0].index("--skin") + 1] == "claude"
+
+
+def test_tui_switch_between_node_interfaces_relaunches_with_the_new_skin(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    calls = _make_tty(monkeypatch, entry)
+    launches = []
+
+    def choose_claude_then_quit(command, env):
+        launches.append(command)
+        if len(launches) == 1:
+            Path(env["KVIST_SWITCH_FILE"]).write_text("claude\n", encoding="utf-8")
+            return main._TUI_SWITCH_CODE
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", choose_claude_then_quit)
+    assert main.launch_tui(_tui_args()) == 0
+    assert saved == ["claude"]
+    assert [command[command.index("--skin") + 1] for command in launches] == ["ink", "claude"]
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("raw", "current", "expected"),
+    [
+        ("/tui", "terminal", "tui"),
+        ("/tui", "tui", "terminal"),
+        ("/tui", "claude", "terminal"),
+        ("/tui on", "terminal", "tui"),
+        ("/tui <claude>", "terminal", "claude"),
+        ("/tui off", "claude", "terminal"),
+        ("/tui hologram", "terminal", None),
+        ("/tui on off", "terminal", None),
+    ],
+)
+def test_classic_tui_command_picks_the_frontend_to_save(raw, current, expected):
+    assert main.parse_tui_choice(raw, current) == expected
 
 
 def test_tui_switch_without_a_usable_choice_still_falls_back(monkeypatch, tmp_path, capsys):

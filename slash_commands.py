@@ -50,7 +50,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("effort", "Set the model's reasoning effort level"),
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("style", "Select a style for chat/agent responses"),
-    SlashCommand("tui", "Choose the Ink terminal UI or the classic one for the next launch"),
+    SlashCommand("tui", "Choose the Ink, Claude-style or classic terminal UI for the next launch"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
     SlashCommand("plan", "Enable or disable the planning stage"),

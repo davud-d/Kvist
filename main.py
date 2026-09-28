@@ -45,11 +45,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
-        choices=("terminal", "tui", "stdio", "stdio-multi"),
+        choices=("terminal", "tui", "claude", "stdio", "stdio-multi"),
         default=None,
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
-            "the Node/Ink terminal UI (src/), 'terminal' for the classic UI, "
+            "the Node/Ink terminal UI (src/), 'claude' for the same app drawn "
+            "like Claude Code, 'terminal' for the classic UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
             "per stdin line."
@@ -61,7 +62,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--planner-model", help="Planner model override for the stdio frontend.")
     parser.add_argument(
         "--role",
-        choices=("auto", "coder", "reader", "devops", "chat"),
+        choices=("auto", "coder", "reader", "devops", "chat", "universal"),
         default=None,
         help=(
             "Agent role override for the stdio frontend. Defaults to the "
@@ -717,17 +718,24 @@ def parse_plan_value(raw: str, current: bool) -> bool | None:
     return None
 
 
-def parse_tui_value(raw: str, current: bool) -> bool | None:
+def parse_tui_choice(raw: str, current: str) -> str | None:
+    """Parse the classic terminal's ``/tui`` into the frontend to save, or None for bad usage.
+
+    A bare ``/tui`` toggles between the classic terminal and the Ink one
+    (``current`` when that is already an Ink interface).
+    """
     parts = raw.split()
     if not parts or parts[0].casefold() != "/tui" or len(parts) > 2:
         return None
     if len(parts) == 1:
-        return not current
+        return "terminal" if current in TUI_FRONTENDS else "tui"
     value = parts[1].strip("<>").casefold()
-    if value in {"true", "on", "1"}:
-        return True
-    if value in {"false", "off", "0"}:
-        return False
+    if value in {"true", "on", "1", "tui"}:
+        return "tui"
+    if value == "claude":
+        return "claude"
+    if value in {"false", "off", "0", "terminal"}:
+        return "terminal"
     return None
 
 
@@ -739,6 +747,13 @@ _TUI_ENTRY = _APP_ROOT / "dist-ui" / "kvist-tui.mjs"
 # one travels in the file named by KVIST_SWITCH_FILE, so the code stays the same
 # however many interfaces there are.
 _TUI_SWITCH_CODE = 64
+# The saved/--frontend values that run the Node app; the value picks its skin.
+TUI_FRONTENDS = ("tui", "claude")
+_TUI_SAVED_NOTICE = {
+    "tui": "The Ink terminal UI will open on the next launch.",
+    "claude": "The Claude-style terminal UI will open on the next launch.",
+    "terminal": "The classic terminal will open on the next launch.",
+}
 
 
 def launch_tui(args: argparse.Namespace) -> int | None:
@@ -784,6 +799,7 @@ def launch_tui(args: argparse.Namespace) -> int | None:
         "--workspace", str(workspace),
         "--role", args.role,
         "--approval-mode", args.approval_mode,
+        "--skin", "claude" if (args.frontend or get_saved_frontend()) == "claude" else "ink",
     ]
     if args.provider:
         command += ["--provider", args.provider]
@@ -804,13 +820,13 @@ def launch_tui(args: argparse.Namespace) -> int | None:
             return 130
         if code != _TUI_SWITCH_CODE:
             return code
-        return _switch_frontend(switch_file)
+        return _switch_frontend(switch_file, args)
 
 
-def _switch_frontend(switch_file: Path) -> int | None:
-    """Apply the interface the Ink app asked for; None hands over to the classic terminal."""
+def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
+    """Apply the interface the Node app asked for and start it; None hands over to the classic terminal."""
     try:
-        chosen = switch_file.read_text(encoding="utf-8").strip()
+        chosen = switch_file.read_text(encoding="utf-8").strip().casefold()
     except OSError:
         return None
     try:
@@ -818,9 +834,10 @@ def _switch_frontend(switch_file: Path) -> int | None:
     except ValueError:
         print(f"Unknown interface '{chosen}'; using the classic terminal.", file=sys.stderr)
         return None
-    # Only the classic terminal can take over from here; another interface
-    # would be launched here once it exists.
-    return None
+    if chosen not in TUI_FRONTENDS:
+        return None
+    args.frontend = chosen
+    return launch_tui(args)
 
 
 def parse_strime_value(raw: str, current: bool) -> bool | None:
@@ -3987,7 +4004,7 @@ def main() -> None:
             raise SystemExit(2) from error
         return
 
-    if (args.frontend or get_saved_frontend()) == "tui" and not args.no_banner:
+    if (args.frontend or get_saved_frontend()) in TUI_FRONTENDS and not args.no_banner:
         exit_code = launch_tui(args)
         if exit_code is not None:
             raise SystemExit(exit_code)
@@ -4120,21 +4137,16 @@ def main() -> None:
                 break
 
             if user_goal.split(maxsplit=1)[0].casefold() == "/tui":
-                selected_tui = parse_tui_value(user_goal, get_saved_frontend() == "tui")
+                selected_tui = parse_tui_choice(user_goal, get_saved_frontend())
                 if selected_tui is None:
-                    console.print("[yellow]Usage: /tui [true|false|on|off][/yellow]")
+                    console.print("[yellow]Usage: /tui [on|off|claude][/yellow]")
                     continue
                 try:
-                    save_frontend("tui" if selected_tui else "terminal")
+                    save_frontend(selected_tui)
                 except RuntimeError as error:
                     console.print(_display_text(f"Could not save the UI preference: {error}", "yellow"))
                     continue
-                console.print(_display_text(
-                    "The Ink terminal UI will open on the next launch."
-                    if selected_tui
-                    else "The classic terminal will open on the next launch.",
-                    "green",
-                ))
+                console.print(_display_text(_TUI_SAVED_NOTICE[selected_tui], "green"))
                 continue
 
             if user_goal.lower() == "/resume":

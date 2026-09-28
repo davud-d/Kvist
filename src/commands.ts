@@ -1,3 +1,5 @@
+import type { Skin } from "./ui/theme.js"
+
 // Where a command runs: here in the UI, in the core process over the
 // `command` message (UI_API.md §8c), or only in the classic terminal.
 export type Route = "local" | "core" | "classic"
@@ -44,11 +46,15 @@ export const EFFORTS = ["false", "low", "medium", "high", "xhigh", "max"] as con
 // The terminal interfaces a user can switch between; add one here and to the
 // launcher (main.py) when a new one exists. `value` is what the launcher saves.
 export const FRONTENDS = [
-  { value: "tui", label: "Ink terminal", description: "This interface" },
+  { value: "tui", label: "Ink terminal", description: "Panels and a boxed input" },
+  { value: "claude", label: "Claude-style terminal", description: "The Claude Code look: ● calls, ⎿ results, ruled input" },
   { value: "terminal", label: "Classic terminal", description: "The original prompt_toolkit interface" },
 ] as const
 
-export const CURRENT_FRONTEND = "tui"
+// The saved `frontend` value of the interface a skin belongs to.
+export function frontendOf(skin: Skin): string {
+  return skin === "claude" ? "claude" : "tui"
+}
 
 export const FRONTEND_REQUEST_ID = "local:frontend"
 

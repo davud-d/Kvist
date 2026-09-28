@@ -299,7 +299,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/revert` | Restore recorded agent changes when safe |
 | `/verbose` | Toggle diagnostic output |
 | `/plan` | Toggle the separate planning call (saved globally) |
-| `/tui` | Choose the terminal interface (Ink or classic); the choice is saved globally. In the Ink UI it opens a picker and switches at once; in the classic terminal `/tui on` / `/tui off` select explicitly |
+| `/tui` | Choose the terminal interface (Ink, Claude-style or classic); the choice is saved globally. In the Node UIs it opens a picker and switches at once; in the classic terminal `/tui on` / `/tui claude` / `/tui off` select explicitly |
 | `/strime` | Toggle streaming for a custom provider |
 | `/bye` | Save and exit (`/exit` and `/quit` are aliases) |
 
@@ -333,7 +333,18 @@ terminal scrollback, so native scrolling and copying work. Build it once:
 ```bash
 npm install && npm run build   # one self-contained file: dist-ui/kvist-tui.mjs
 .venv/bin/python main.py --frontend tui   # or: /tui, saved as `frontend`
+.venv/bin/python main.py --frontend claude   # the same app drawn like Claude Code
 ```
+
+The Claude-style UI is a second skin of the same app, not another process: `●`
+calls with `⎿` results, a `✻` spinner line with the elapsed time, the input
+between two rules, and the Kvist mark in the welcome block. Like Claude Code's
+fullscreen mode it uses the alternate screen: the welcome block is the top of the
+window, the input stays at the bottom and the command list opens above it. The
+terminal's scrollback is not available there, so the app scrolls itself
+(`PgUp`/`PgDn`, `Ctrl+Home`/`Ctrl+End`, the mouse wheel) and owns the mouse: drag
+to select, double-click for a word, triple-click for a line; the selection is
+copied on release. Hold `Shift` while dragging to use the terminal's own selection.
 
 `--frontend terminal` or `--no-banner` overrides the saved choice for one launch.
 The Ink UI needs a provider configured in the classic terminal first; without

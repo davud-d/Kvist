@@ -17,7 +17,7 @@ import { diffLines } from "../diff.js"
 import { emptyEditor } from "../editor.js"
 import type { InputRequest } from "../protocol.js"
 import { Line } from "./input.js"
-import { color } from "./theme.js"
+import { color, currentSkin } from "./theme.js"
 import {
   ARM_MS,
   ROWS_AFTER_LIST,
@@ -68,6 +68,21 @@ function useDialogState<T>(initial: () => T) {
 }
 
 function Frame({ title, tone, footer, counter = "", children }: { title: string; tone: string; footer: string; counter?: string; children: ReactNode }) {
+  // Claude Code's dialogs hang from a single rule instead of a full frame.
+  if (currentSkin() === "claude") {
+    return (
+      <Box flexDirection="column" borderStyle="single" borderColor={color.select} borderLeft={false} borderRight={false} borderBottom={false} paddingX={1}>
+        <Box justifyContent="space-between">
+          <Text bold color={color.select} wrap="truncate-end">{title}</Text>
+          <Text color={color.dim}>{counter}</Text>
+        </Box>
+        {children}
+        <Box marginTop={1}>
+          <Text color={color.dim}>{footer}</Text>
+        </Box>
+      </Box>
+    )
+  }
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={tone} paddingX={1}>
       <Box justifyContent="space-between">
@@ -122,18 +137,22 @@ function Approval({ request, onAnswer }: Props) {
   const waitingCursor = useRef(false)
   const frameBottom = useRef<number | null>(null)
 
+  // The fullscreen skin keeps the mouse for the whole session (pointer.ts) and answers with keys here.
+  const ownMouse = currentSkin() !== "claude"
+
   useEffect(() => {
+    if (!ownMouse) return
     enableMouse(process.stdout)
     return () => disableMouse()
-  }, [])
+  }, [ownMouse])
 
   // Request cursor position after first render to calibrate mouse clicks.
   useEffect(() => {
-    if (cursorRow.current === null) {
+    if (ownMouse && cursorRow.current === null) {
       waitingCursor.current = true
       process.stdout.write("\x1b[6n")
     }
-  }, [])
+  }, [ownMouse])
 
   const apply = (next: ReturnType<typeof stepApproval>) => {
     dialog.set(next.model)
@@ -196,7 +215,7 @@ function Approval({ request, onAnswer }: Props) {
 
   return (
     <Box flexDirection="column">
-      <Box height={1} backgroundColor={color.warn} />
+      {currentSkin() === "claude" ? null : <Box height={1} backgroundColor={color.warn} />}
       <Frame title={title} tone={color.warn} footer="↑↓ / 1 2 3 select · enter confirm · esc deny">
         {subject?.kind === "command" ? (
           <Box flexDirection="column" marginTop={1}>
@@ -230,9 +249,10 @@ function Approval({ request, onAnswer }: Props) {
           {options.map((option, i) => {
             const mark = model.selected === i ? "❯" : " "
             const selected = model.selected === i
+            const claude = currentSkin() === "claude"
             return (
-              <Box key={i} backgroundColor={selected ? color.accent : undefined}>
-                <Text color={selected ? color.onAccent : undefined}>
+              <Box key={i} backgroundColor={selected && !claude ? color.accent : undefined}>
+                <Text color={selected ? (claude ? color.select : color.onAccent) : undefined}>
                   {mark} {i + 1}. {option.label}
                 </Text>
               </Box>
@@ -262,6 +282,14 @@ function Confirm({ request, onAnswer }: Props) {
 }
 
 function Row({ label, description, current, selected, labelWidth }: { label: string; description: string; current: boolean; selected: boolean; labelWidth: number }) {
+  if (currentSkin() === "claude") {
+    return (
+      <Text wrap="truncate-end" color={selected ? color.select : undefined}>
+        {selected ? "❯" : " "} {current ? "✔" : " "} {label.padEnd(labelWidth)}
+        {description ? <Text color={color.dim}>  {description}</Text> : null}
+      </Text>
+    )
+  }
   const dot = current ? "●" : " "
   const text = selected ? color.onAccent : undefined
   const muted = selected ? color.onAccentDim : color.dim

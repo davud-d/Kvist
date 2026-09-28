@@ -17,6 +17,9 @@ export type Item =
   | { id: number; kind: "explored"; counts: ExploreCounts; names: string[] }
   | { id: number; kind: "answer"; text: string; done: boolean }
   | { id: number; kind: "note"; tone: Tone; text: string }
+  // The closing line of a live turn: how long it ran and when it ended. `role`, `russian` and
+  // `seed` (the turn's start) let a view word it; a replayed journal has no such line.
+  | { id: number; kind: "done"; seconds: number; at: number; role: string; russian: boolean; seed: number; interrupted: boolean }
   // The words a model response carries for the person, shown once, before the calls
   // of that response.
   | { id: number; kind: "say"; text: string }
@@ -40,6 +43,8 @@ export interface Inflight {
   args: Record<string, unknown>
   note: string
   batchIndex: number
+  // When the call started, for "Running … · 25s".
+  at: number
 }
 
 // A read-only step that may still fail; its result arrives after it, possibly
@@ -80,12 +85,18 @@ export interface State {
   pending: InputRequest | null
   // The slash command the core is running; the input stays locked meanwhile.
   command: string | null
-  // The last `/effort` result; the core does not announce it in `hello`.
+  // The level `hello` announced, then the last `/effort` result.
   effort: string
   info: { provider: string; model: string; role: string; session: string; routedRole?: string; kvistVersion?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
   startedAt: number | null
+  // The person stopped the running turn; the closing line then says so.
+  interrupted: boolean
+  // The output-token total when this turn began, so the turn's own count is `usage.output` minus this.
+  turnStartOutput: number
+  // The thought that just ended, for the spinner to mention for a moment.
+  thought: { seconds: number; at: number } | null
   // Items up to this id were redrawn from a session's journal rather than seen live, so a UI
   // can skip the entrance effects meant for fresh work.
   settledThrough: number
@@ -97,8 +108,13 @@ export interface State {
 
 export type Action =
   | { type: "event"; event: CoreEvent; now?: number }
-  | { type: "restore"; events: JournalEvent[]; now?: number }
+  // `banner`: start the redrawn feed with the welcome block, as a new session does.
+  | { type: "restore"; events: JournalEvent[]; now?: number; banner?: boolean }
   | { type: "submit"; text: string; now?: number }
+  // A slash command typed by the person, shown like a request but not starting a run.
+  | { type: "echo"; text: string }
+  // The person asked the running turn to stop.
+  | { type: "interrupt" }
   | { type: "command_start"; name: string }
   | { type: "resume_start"; now?: number }
   | { type: "note"; tone: Tone; text: string }
@@ -127,6 +143,9 @@ export function initialState(effort = ""): State {
     usage: { input: 0, output: 0, context: 0, limit: 0 },
     showDebug: false,
     startedAt: null,
+    interrupted: false,
+    turnStartOutput: 0,
+    thought: null,
     settledThrough: 0,
     justReasoned: false,
   }
@@ -333,7 +352,16 @@ function onCommandResult(state: State, event: Extract<CoreEvent, { type: "comman
   const effects = record(event.effects)
   // A cancelled dialog changed nothing, so there is nothing to report.
   if (effects.cancelled === true) return done
-  return commandNotes(applyEffects(done, effects), event)
+  const applied = applyEffects(done, effects)
+  // /new and /session: what is on screen belongs to the session that was left.
+  return commandNotes(effects.changed === true ? beginSession(applied) : applied, event)
+}
+
+// An empty feed under the welcome block, and a context that starts from nothing.
+function beginSession(state: State): State {
+  const cleared = reduce(state, { type: "clear" })
+  const fresh = { ...cleared, usage: { ...cleared.usage, context: 0 } }
+  return push(fresh, (id) => ({ id, kind: "banner" }))
 }
 
 // `justReasoned` must survive only from a reasoning_commit to the single event right
@@ -362,7 +390,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       }
       // Any earlier routed role belonged to a core that is gone.
       const first = state.items.length === 0
-      const next = { ...state, info }
+      const next = { ...state, info, effort: event.effort || state.effort }
       return first ? push(next, (id) => ({ id, kind: "banner" })) : next
     }
     case "live_start":
@@ -410,7 +438,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       }
       // A writing call runs alone, so the read group before it is complete.
       const flushed = flushExploring(next)
-      const call: Inflight = { step: event.step, callId, planStep: event.plan_step, action: event.action_type, args, note: event.action_description ?? "", batchIndex }
+      const call: Inflight = { step: event.step, callId, planStep: event.plan_step, action: event.action_type, args, note: event.action_description ?? "", batchIndex, at: now }
       return { ...flushed, inflight: [...flushed.inflight, call], batch, justReasoned: false }
     }
     case "action_result":
@@ -434,7 +462,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       const result = event.duration_seconds >= 1 || text
         ? push(next, (id) => ({ id, kind: "thought", seconds: event.duration_seconds, text }))
         : next
-      return { ...result, justReasoned: true }
+      return { ...result, justReasoned: true, thought: event.duration_seconds >= 1 ? { seconds: event.duration_seconds, at: now } : null }
     }
     case "message":
       return push(state, (id) => ({ id, kind: "answer", text: event.markdown, done: true }))
@@ -468,7 +496,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
       // the input box disabled forever.
-      return { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, command: null }
+      return { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, interrupted: false, thought: null, command: null }
     default:
       return state
   }
@@ -483,8 +511,8 @@ function noticeText(event: Extract<JournalEvent, { type: "journal_notice" }>): s
 
 // A session redrawn from its journal, through the reducer live events use. Token counts are
 // skipped: they describe the conversation now running, not the one being shown.
-function restore(state: State, events: JournalEvent[], now: number): State {
-  let next = reduce(state, { type: "clear" })
+function restore(state: State, events: JournalEvent[], now: number, banner: boolean): State {
+  let next = banner ? beginSession(state) : reduce(state, { type: "clear" })
   for (const event of events) {
     if (event.type === "usage") continue
     if (event.type === "user") {
@@ -503,21 +531,46 @@ function restore(state: State, events: JournalEvent[], now: number): State {
   return { ...settled, info: { ...settled.info, routedRole: undefined }, settledThrough: settled.nextId - 1 }
 }
 
+const CYRILLIC = /\p{Script=Cyrillic}/u
+
+// A turn that ran live ends with its closing line; `before` still knows when it began.
+function closeTurn(before: State, after: State, at: number): State {
+  if (before.startedAt === null) return after
+  const request = before.items.findLast((item) => item.kind === "user")
+  return push(after, (id) => ({
+    id,
+    kind: "done",
+    seconds: Math.max(0, (at - before.startedAt!) / 1000),
+    at,
+    role: before.info.routedRole ?? before.info.role,
+    russian: request?.kind === "user" && CYRILLIC.test(request.text),
+    seed: before.startedAt!,
+    interrupted: before.interrupted,
+  }))
+}
+
 export function reduce(state: State, action: Action): State {
   switch (action.type) {
-    case "event":
-      return onEvent(state, action.event, action.now ?? Date.now())
+    case "event": {
+      const at = action.now ?? Date.now()
+      const next = onEvent(state, action.event, at)
+      return action.event.type === "turn_end" ? closeTurn(state, next, at) : next
+    }
     case "restore":
-      return restore(state, action.events, action.now ?? Date.now())
+      return restore(state, action.events, action.now ?? Date.now(), action.banner ?? false)
     case "submit":
       return push(
-        { ...state, running: true, startedAt: action.now ?? Date.now(), info: { ...state.info, routedRole: undefined } },
+        { ...state, running: true, startedAt: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null, info: { ...state.info, routedRole: undefined } },
         (id) => ({ id, kind: "user", text: action.text }),
       )
+    case "interrupt":
+      return { ...state, interrupted: true }
+    case "echo":
+      return push(state, (id) => ({ id, kind: "user", text: action.text }))
     case "command_start":
       return { ...state, command: action.name }
     case "resume_start":
-      return { ...state, running: true, startedAt: action.now ?? Date.now() }
+      return { ...state, running: true, startedAt: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null }
     case "note":
       return push(state, (id) => ({ id, kind: "note", tone: action.tone, text: action.text }))
     case "answered":

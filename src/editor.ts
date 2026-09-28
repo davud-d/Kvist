@@ -80,6 +80,13 @@ function wordStart(text: string, cursor: number): number {
   return i
 }
 
+function wordEnd(text: string, cursor: number): number {
+  let i = cursor
+  while (i < text.length && text[i] === " ") i++
+  while (i < text.length && text[i] !== " ") i++
+  return i
+}
+
 // Returns null when the key is not an editing key (the caller may use it).
 export function applyKey(ed: Editor, input: string, key: KeyLike): Editor | null {
   const { text, cursor } = ed
@@ -87,10 +94,14 @@ export function applyKey(ed: Editor, input: string, key: KeyLike): Editor | null
   if (key.rightArrow) return { text, cursor: Math.min(text.length, cursor + 1) }
   if (key.home) return { text, cursor: 0 }
   if (key.end) return { text, cursor: text.length }
-  // Terminals disagree on whether Backspace is "backspace" or "delete".
-  if (key.backspace || key.delete) {
+  if (key.backspace) {
     if (cursor === 0) return ed
     return { text: text.slice(0, cursor - 1) + text.slice(cursor), cursor: cursor - 1 }
+  }
+  // Ink reports the Backspace key as "backspace" and the Delete key (ESC [ 3 ~) as "delete".
+  if (key.delete) {
+    const end = key.ctrl ? wordEnd(text, cursor) : Math.min(text.length, cursor + 1)
+    return { text: text.slice(0, cursor) + text.slice(end), cursor }
   }
   if (key.ctrl) {
     if (input === "a") return { text, cursor: 0 }

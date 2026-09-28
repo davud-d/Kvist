@@ -447,6 +447,79 @@ UI_API.md events; it never reads `.kvist/`. Session ops go through `--session-op
 `launch_tui` returns None — and the classic terminal starts — without a TTY, Node, a
 build (`dist-ui/`; the root `dist/` is PyInstaller's) or a configured provider. Layout: `core.ts` (adapter),
 `state.ts` (pure event reducer, tested), `editor.ts`, `commands.ts`, `ui/*.tsx`.
+**Two skins, one app.** `--frontend claude` (saved `frontend: "claude"`, in
+`main.TUI_FRONTENDS` with `tui`) runs the same bundle with `--skin claude`; `launch_tui`
+derives the skin from the frontend value. `ui/theme.ts` holds both palettes and `applySkin`
+overwrites the shared `color` object once, before the first render, so the shared
+components (markdown, prompts, input) re-theme themselves; structure that differs lives in
+`ui/claude.tsx` (banner with the `ui/logo.ts` mark, `●` calls, `⎿` results, `✻` spinner,
+footer) and a few `currentSkin()` branches in `input.tsx`/`prompts.tsx`/`markdown.tsx`.
+`/tui` is a picker over `commands.FRONTENDS`; choosing another Node skin exits with code 64
+and `_switch_frontend` saves it and relaunches `launch_tui`, so switching skins never passes
+through the classic terminal. Two Ink facts learned the hard way: a bare `Text` beside a
+wrapping block shrinks with the flex row, and a wrapping `Text` in a shrinking column is laid
+out two cells wider than the room left, so the terminal wraps it mid-word — glyphs sit in
+`<Box flexShrink={0}>` (`Mark`) and wrapping blocks get an explicit width (`Rest`). The
+claude skin echoes a typed slash command as a `❯` row (`echo` action) so the `⎿` reply hangs
+off it, and hides the `final_answer`/`report_to_user` step lines.
+**The claude skin is fullscreen, like Claude Code's fullscreen rendering** (researched from
+its docs, code.claude.com/docs/en/fullscreen): `cli.tsx` renders it on the alternate screen
+(`alternateScreen: true`, root `Box height={rows}`), so there is no `<Static>` and no terminal
+scrollback. `ClaudeScreen` puts every item in a clipped viewport (`overflow="hidden"`,
+`flexDirection="column-reverse"` over a growing spacer, so a short transcript sits at the top and
+a tall one ends at the bottom edge with no measurement — following the newest row through a
+measured offset made the view jump by a frame) that fills the window. The live thought
+and the streaming answer are the last children of that transcript, so they grow down from the
+request that started them; the spinner, the suggestions (above the input, as in Claude Code),
+input and footer are pinned below it, at the floor of the window. The spinner word depends on the running role
+(`verbs.spinnerWord`): the joke/maxim list only for agent roles, "Generating a response" for
+chat, "Picking a role" until the router's `route` event arrives. The spinner line reads `(1m 6s · ↓ 8.5k tokens · thinking with high effort)`: tokens are the
+turn's own output (`usage.output - turnStartOutput`, reported after each model call), and
+`thought for 2s` replaces the doing-part for two seconds after a thought ends (`state.thought`).
+Under it goes a `⎿  Tip:` line about a Kvist command (`ui/tips.ts`, a new one every 3 s,
+Russian for a Russian request); the live thought and answer are revealed at a steady pace
+(`useTypewriter`) because the core's stream arrives ~9 times a second and a fast model finishes
+in half a second; above the input, right-aligned, `● high · /effort` (`ClaudeEffort`). Tips name
+real commands and styles — re-read them when commands or `get_style_options` change.
+File edits follow Claude Code's look (`ui/claude-diff.tsx`): a blue `Update(path)` bullet, "Added
+6 lines, removed 2 lines", and numbered rows with a full-width red or green background, code
+coloured by highlight.js (`src/highlight.ts`, the only new dependency; only the languages
+imported there are bundled, chosen by file extension, colours in `ui/syntax.ts`). Successful
+`run_shell` calls and the reads around them fold into one dim line ("Searched for 2 patterns,
+ran 2 shell commands", `collapse` in `claude.tsx`); a failed command is never folded, a command
+in flight shows `Running shell command · 25s…` with its first four lines, and Ctrl+O toggles
+the full commands and their output (`expanded` in `ViewContext`).
+A live turn ends with a dim
+closing line (`done` item, `closeTurn` in `state.ts`, worded by `verbs.doneLine`): a past-tense
+word, the turn's length and the time, e.g. "Measured twice for 9s · done 3:49 PM"; "Stopped
+after 4s" when the person interrupted (`interrupt` action, sent by Esc Esc and Ctrl+C while
+running); replayed journals and commands get none. The footer shows the routed
+role only while a turn runs, and the configured one (usually `auto`) between turns.
+Scrolling is in-app: PageUp/PageDown (half a screen), Ctrl+Home/Ctrl+End, the wheel; a scrolled
+view keeps its place while content grows, and a new request snaps back to the bottom. The mouse
+belongs to the app (`pointer.ts`, SGR modes 1002+1006, which is why the terminal shows an arrow
+instead of an I-beam): `Pointer` stands between Ink and the terminal — it wraps `stdin` to strip
+mouse reports before Ink reads them, and wraps `stdout` to recognise each frame Ink writes (a
+frame is exactly `rows` lines behind an erase prefix) so a drag, double-click (word) or
+triple-click (row) can be hit-tested and painted in inverse video (`screen.ts`, cell-based, wide
+characters and ANSI aware) and copied on release through `clipboard.ts`. Shift+drag still reaches
+the terminal's own selection. A `command_result` whose `effects.changed` is true (`/new`, `/session`) empties the feed under a
+fresh welcome block (`beginSession`, epoch bump, context back to 0); for a switch the app then
+replays that session's journal (`sessionHistory` → `restore` with `banner: true`), unless a turn
+started meanwhile. The welcome mark is 6 rows of double-width blocks from 84 columns up and the
+3-row half-block one below that (`ui/logo.ts`).
+On exit (Ctrl+C or Ctrl+D idle, `/quit`) the alternate screen is gone, so `cli.tsx` prints
+`farewell.ts` on the real screen: the mark, "Kvist agent stopped." and the session to resume —
+the same words as the classic terminal's `render_exit_message`. The resume line appears only if
+`--session-op list` shows that session with a non-empty journal or a checkpoint.
+`Pointer` also paints: Ink erases the whole screen and rewrites it on every update (visible
+flicker at spinner and stream pace), so the tap drops Ink's erase prefix and writes only the rows
+that differ from what it last painted, each at its own position with `ESC[K`; a first frame, a
+resize or a cleared screen writes every row.
+The frame tap depends on Ink's non-incremental `log-update` output
+format; re-check `splitFrame` when upgrading Ink. Not done, and present in Claude Code: click on
+suggestions/dialog options, click to place the cursor, click to expand results, `Ctrl+o`
+transcript mode; the approval dialog keeps keyboard-only input in this skin.
 Output is Ink `<Static>` into the real scrollback plus a small live region, so the
 streaming answer is clipped to the viewport there and committed whole on
 `stream_commit`. A turn ends on the additive `turn_end` event that

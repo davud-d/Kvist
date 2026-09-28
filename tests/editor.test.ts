@@ -12,11 +12,17 @@ test("typing inserts at the cursor and accented letters are fine", () => {
   assert.deepEqual(ed, { text: "na\u00efv!e", cursor: 5 })
 })
 
-test("backspace and delete both erase to the left (terminals disagree)", () => {
+test("backspace erases to the left and delete to the right", () => {
   const ed = { text: "abc", cursor: 3 }
   assert.equal(applyKey(ed, "", { backspace: true })?.text, "ab")
-  assert.equal(applyKey(ed, "", { delete: true })?.text, "ab")
   assert.deepEqual(applyKey(emptyEditor, "", { backspace: true }), emptyEditor)
+  const middle = { text: "abcd", cursor: 1 }
+  assert.deepEqual(applyKey(middle, "", { delete: true }), { text: "acd", cursor: 1 })
+  assert.deepEqual(applyKey(ed, "", { delete: true }), ed)
+})
+
+test("ctrl+delete erases the next word", () => {
+  assert.deepEqual(applyKey({ text: "one two three", cursor: 3 }, "", { delete: true, ctrl: true }), { text: "one three", cursor: 3 })
 })
 
 test("ctrl shortcuts: a e u k w", () => {

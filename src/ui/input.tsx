@@ -3,7 +3,7 @@ import { useReducer, useRef, type ReactNode } from "react"
 
 import { NAME_WIDTH, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
 import { applyKey, emptyEditor, insert, windowLine, type Editor } from "../editor.js"
-import { color } from "./theme.js"
+import { color, currentSkin } from "./theme.js"
 
 interface Props {
   active: boolean
@@ -95,30 +95,63 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
     { isActive: active },
   )
 
+  const claude = currentSkin() === "claude"
+  const line = editor.text || !placeholder ? (
+    <Line editor={editor} mask={mask} active={active} maxRows={boxRows} />
+  ) : (
+    <Text wrap="truncate-end">
+      {active ? <Text inverse> </Text> : null}
+      <Text color={color.faint}>{placeholder}</Text>
+    </Text>
+  )
+
+  const suggestions = (
+    <>
+      {options.slice(first, first + visible).map((command, i) => {
+        const picked = first + i === chosen
+        if (claude) {
+          return (
+            <Text key={command.name} color={picked ? color.select : color.dim} wrap="truncate-end">
+              {"  "}/{command.name.padEnd(NAME_WIDTH)}  {command.hint}
+            </Text>
+          )
+        }
+        return (
+          <Text key={command.name} color={picked ? color.accent : command.route === "classic" ? color.faint : color.dim} wrap="truncate-end">
+            {"  "}
+            {picked ? "▸" : " "} /{command.name.padEnd(NAME_WIDTH)}
+            <Text color={color.faint}> {command.hint}</Text>
+          </Text>
+        )
+      })}
+      {options.length > visible ? (
+        <Text color={color.faint} wrap="truncate-end">  {chosen + 1}/{options.length} · ↑↓ select · tab complete</Text>
+      ) : null}
+    </>
+  )
+
+  // Claude Code lists the commands above the input, which stays where it is.
+  if (claude) {
+    return (
+      <Box flexDirection="column">
+        {suggestions}
+        <Box borderStyle="single" borderColor={color.rule} borderLeft={false} borderRight={false} paddingLeft={1}>
+          <Text color={active ? color.text : color.faint}>❯ </Text>
+          {line}
+        </Box>
+        {caption}
+      </Box>
+    )
+  }
+
   return (
     <Box flexDirection="column">
       <Box borderStyle="round" borderColor={active ? color.accent : color.faint} paddingX={1}>
         <Text color={active ? color.accent : color.faint}>❯ </Text>
-        {editor.text || !placeholder ? (
-          <Line editor={editor} mask={mask} active={active} maxRows={boxRows} />
-        ) : (
-          <Text wrap="truncate-end">
-            {active ? <Text inverse> </Text> : null}
-            <Text color={color.faint}>{placeholder}</Text>
-          </Text>
-        )}
+        {line}
       </Box>
       {caption}
-      {options.slice(first, first + visible).map((command, i) => (
-        <Text key={command.name} color={first + i === chosen ? color.accent : command.route === "classic" ? color.faint : color.dim} wrap="truncate-end">
-          {"  "}
-          {first + i === chosen ? "▸" : " "} /{command.name.padEnd(NAME_WIDTH)}
-          <Text color={color.faint}> {command.hint}</Text>
-        </Text>
-      ))}
-      {options.length > visible ? (
-        <Text color={color.faint} wrap="truncate-end">  {chosen + 1}/{options.length} · ↑↓ select · tab complete</Text>
-      ) : null}
+      {suggestions}
     </Box>
   )
 }

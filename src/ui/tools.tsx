@@ -17,9 +17,9 @@ const SPLIT_MIN_COLUMNS = 100
 const INDENT = 2
 const MARGIN = 3
 
-const str = (value: unknown): string => (typeof value === "string" ? value : "")
+export const str = (value: unknown): string => (typeof value === "string" ? value : "")
 
-function commandLine(args: Record<string, unknown>): string {
+export function commandLine(args: Record<string, unknown>): string {
   const command = args.command
   return Array.isArray(command) ? command.map(String).join(" ") : str(command)
 }
@@ -57,7 +57,7 @@ interface RowProps {
   textColor?: string
 }
 
-function CodeRow({ no, numW, sign, text, width, bg, signColor, textColor }: RowProps) {
+export function CodeRow({ no, numW, sign, text, width, bg, signColor, textColor }: RowProps) {
   const gutter = ` ${no === null ? "" : String(no)}`.padStart(numW + 1).padEnd(numW + 2)
   const mark = sign ? `${sign} ` : ""
   const body = fit(text, width - gutter.length - mark.length)
@@ -80,7 +80,7 @@ function Header({ mark, markColor, label, path }: { mark: string; markColor?: st
   )
 }
 
-function More({ count }: { count: number }) {
+export function More({ count }: { count: number }) {
   return count > 0 ? <Text color={color.faint}>… {count} more lines</Text> : null
 }
 
@@ -157,7 +157,7 @@ function splitCell(row: DiffRow | null, numW: number, width: number) {
   return <CodeRow no={row.newNo} numW={numW} sign="+" signColor={color.ok} text={row.text} width={width} bg={color.addBg} />
 }
 
-function DiffBody({ rows, width, split }: { rows: DiffRow[]; width: number; split: boolean }) {
+export function DiffBody({ rows, width, split }: { rows: DiffRow[]; width: number; split: boolean }) {
   const numW = numberWidth(rows)
   if (!split) {
     const shown = rows.slice(0, DIFF_ROWS)
