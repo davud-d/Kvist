@@ -335,13 +335,29 @@ functions take `self` as their first arg and operate on `self._state` (a `RunSta
 `agent_state.py`). To change loop behavior, edit the source module, not `agent.py`.
 
 ### Planner context (`agent_planner.py`)
-`create_plan` prefixes its user prompt with `session_context(self)` — the last 3
-turns of `_session_history` (goal + truncated result, boundary tags defanged).
-Without it the planner reads a correction ("no, you broke it") as unrelated new
-work, because it never saw the turn being corrected. The matching `SESSION
-CONTEXT` section in `prompts/system/planner_prompt.txt` tells the planner to plan the
-delta for a correction/follow-up and to treat the block as data, never
-instructions.
+`create_plan` puts `session_context(self)` into its user prompt — every stored turn
+of `_session_history` (goal + the whole answer, no tool outputs), rendered by
+`agent_context.render_session_history`. Without it the planner reads a correction
+("no, you broke it") as unrelated new work, because it never saw the turn being
+corrected. The matching `SESSION CONTEXT` section in
+`prompts/system/planner_prompt.txt` tells the planner to plan the delta for a
+correction/follow-up, to turn a confirmation ("да, удаляй") into the concrete
+proposal it accepts, and to treat the block as data, never instructions.
+
+**Session history is never cut by hand; the model's budget cuts it.**
+`_add_to_session_history` stores the turn's answer whole (it was once
+`result[:200]`: a reader's finding in the middle of a long answer was lost, and
+the coder asked to "delete that junk" denied ever seeing it). The action loop and
+the planner share `render_session_history`: its own section,
+`SESSION_HISTORY_HEADER` at priority 1 (it used to fold into
+`System environment:` at priority 0, so it was never trimmed), turns newest first
+because `_truncate_section_text` keeps a section's head — the oldest turns are
+what the budget drops — and every body line indented so an answer line like
+`Plan:` cannot be parsed as a section header. The chat preamble lists the same
+turns newest first with `Answered:` for non-chat turns (a chat reply is already an
+assistant message), and `trim_chat_messages_to_token_limit` does the cutting. The
+10-turn cap on stored entries and the per-output caps in `_harvest_run_outputs`
+still apply.
 
 ### Request flow
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
@@ -411,8 +427,8 @@ note (`_stopped_chat_reply`), so the transcript alternates correctly.
 **A stop is context, not just UI.** Every stop path sets `RunState.stopped_by_user`
 (chat passes it directly) and `_add_to_session_history` writes
 `stopped_by_user: true` into the entry. All three readers of session history render it —
-the planner's `session_context`, the action loop's `SESSION HISTORY` block in
-`agent_context`, and the chat preamble — so "продолжай" after a stop is understood as
+the planner's `session_context` and the action loop's session-history section (both
+`agent_context.render_session_history`), and the chat preamble — so "продолжай" after a stop is understood as
 unfinished work rather than a completed task.
 
 **Escape needs two presses; Ctrl+C needs one.** The first Escape only arms the stop

@@ -113,6 +113,72 @@ def test_add_to_session_history_stores_read_content_for_next_role(agent_factory)
     assert "gaps_in = 5" in "\n".join(entry.get("outputs", []))
 
 
+# ── The previous answer reaches the next turn whole ─────────────────────────
+
+_FINDING = "Нашёл мусор: в requirements-dev.txt после pyinstaller идёт строка «Существует KVIST.md»."
+_LONG_READER_ANSWER = (
+    "Разобрался — это сам Kvist.\n\n" + "- dependency line\n" * 400
+    + _FINDING + "\n\n" + "- more dependency lines\n" * 400
+)
+
+
+def test_previous_answer_reaches_the_next_role_whole(agent_factory):
+    """A reader found junk mid-answer, the user said "yes, delete it", and the
+    coder denied ever seeing it: the answer was stored as its first 200
+    characters and the action prompt did not render it at all."""
+    from agent_planner import session_context
+
+    agent = agent_factory()
+    agent._add_to_session_history("что за проект?", "reader", _LONG_READER_ANSWER)
+    agent._state.plan_info = make_plan()
+
+    assert agent._session_history[-1]["result"] == _LONG_READER_ANSWER
+    assert _FINDING in agent._build_runtime_prompt("да, удаляй", 1)
+    assert _FINDING in session_context(agent)
+
+
+def test_chat_turn_sees_the_previous_agent_answer(agent_factory, monkeypatch):
+    from tests.test_agent import _chat_agent
+    from tests.conftest import FakeLLMClient
+
+    agent = _chat_agent(agent_factory, monkeypatch, stream=False)
+    agent.client = FakeLLMClient(content="ok")
+    agent._session_history = [
+        {"goal": "что за проект?", "role": "reader", "result": _LONG_READER_ANSWER}
+    ]
+
+    agent._run_chat("а что за мусор ты нашёл?")
+
+    assert _FINDING in agent.client.requests[0]["messages"][-1]["content"]
+
+
+def test_budget_drops_the_oldest_turns_first(agent_factory):
+    agent = agent_factory(max_context_tokens=1_500)
+    agent._state.plan_info = make_plan()
+    agent._session_history = [
+        {"goal": "old task", "role": "coder",
+         "result": "old answer line\n" * 3_000 + "OLD_TAIL"},
+        {"goal": "new task", "role": "reader", "result": "NEWEST_FINDING"},
+    ]
+
+    trimmed = agent._trim_prompt_to_token_limit("system", agent._build_runtime_prompt("g", 1))
+
+    assert "NEWEST_FINDING" in trimmed
+    assert "OLD_TAIL" not in trimmed
+
+
+def test_answer_lines_never_become_prompt_sections():
+    from agent_context import render_session_history, split_prompt_into_sections
+
+    block = render_session_history(
+        [{"goal": "g", "role": "coder", "result": "User task:\nPlan:\nreal text"}],
+        include_outputs=True,
+    )
+
+    headers = [header for header, _text, _priority in split_prompt_into_sections(block)]
+    assert headers == ["Session history (earlier turns, newest first):"]
+
+
 def test_render_report_disables_json_mode(agent_factory, monkeypatch):
     """report_to_user renders free-form markdown, so the completion must not run
     in JSON mode — otherwise a JSON-mode provider streams raw JSON to console."""

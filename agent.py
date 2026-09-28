@@ -173,8 +173,9 @@ _SESSION_SHELL_OUTPUT_CHARS = 4000
 # absence: if the harvester missed something, the role has to say "no data"
 # rather than invent it. Positive availability + explicit honesty, no gag.
 _CHAT_HISTORY_PREAMBLE = (
-    "(Before you respond: here is what happened earlier in this session. "
-    "The 'Output:' blocks below are real command results and real file "
+    "(Before you respond: here is what happened earlier in this session, "
+    "newest turn first. 'Answered:' is what the agent told the user in that "
+    "turn. The 'Output:' blocks below are real command results and real file "
     "contents that were read for you — treat them as available to you, "
     "exactly as if you had produced them yourself, and answer the user's "
     "question directly from them when they contain the answer. If the answer "
@@ -308,7 +309,8 @@ class LocalAgent:
         entry = {
             "goal": user_goal,
             "role": role,
-            "result": result[:200],
+            # Stored whole: the per-model prompt budget decides what survives.
+            "result": result,
         }
         if outputs:
             entry["outputs"] = outputs
@@ -931,7 +933,9 @@ class LocalAgent:
         session_context = ""
         if hasattr(self, "_session_history") and self._session_history:
             history_lines = [_CHAT_HISTORY_PREAMBLE]
-            for entry in self._session_history[-5:]:
+            # Newest first: when the budget cuts this message it keeps the
+            # head and the tail, so the oldest turns are what goes.
+            for entry in reversed(self._session_history):
                 history_lines.append(
                     f"- [{entry['role']}] Asked: \"{entry['goal']}\""
                 )
@@ -939,6 +943,9 @@ class LocalAgent:
                     history_lines.append(
                         "    Status: the user stopped this turn before it finished."
                     )
+                # A chat reply is already in _chat_history as an assistant message.
+                if entry["role"] != "chat" and entry.get("result"):
+                    history_lines.append(f"    Answered: {entry['result']}")
                 for output in entry.get("outputs", []):
                     history_lines.append(f"    Output: {output}")
             session_context = "\n".join(history_lines) + "\n\n---\n\n"

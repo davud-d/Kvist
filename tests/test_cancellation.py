@@ -358,4 +358,4 @@ def test_every_history_reader_tells_the_model_about_the_stop(agent_factory):
     agent._state.plan_info = make_plan()
 
     assert "stopped this turn" in session_context(agent)
-    assert "stopped this task" in agent._build_runtime_prompt("carry on", 1)
+    assert "stopped this turn" in agent._build_runtime_prompt("carry on", 1)
