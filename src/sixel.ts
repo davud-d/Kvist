@@ -35,8 +35,10 @@ function runs(columns: Uint8Array): string {
 
 // The picture as one DCS string. P2=1 leaves the pixels no colour is written for as they were, which
 // is what makes the transparent parts show the terminal's background.
-export function encodeSixel(image: Indexed, width: number, height: number): string {
-  const pixels = scaleNearest(image, width, height)
+// Only the pixel rows from `fromRow` up to `toRow` are written, for a picture that is partly out of view.
+export function encodeSixel(image: Indexed, width: number, height: number, fromRow = 0, toRow = height): string {
+  const pixels = scaleNearest(image, width, height).subarray(fromRow * width, toRow * width)
+  height = toRow - fromRow
   const used = new Set<number>()
   const bands: string[] = []
   for (let top = 0; top < height; top += 6) {

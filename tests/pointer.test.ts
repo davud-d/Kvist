@@ -171,9 +171,34 @@ test("page keys leave a selection alone", () => {
   assert.equal(written.length, before)
 })
 
-const PICTURE = { png: "QUJD", key: "0", row: 1, col: 2, columns: 16, rows: 8 }
+const PICTURE = { png: "QUJD", key: "0", row: 1, col: 2, columns: 16, rows: 8, skipTop: 0, skipBottom: 0 }
 const placements = (written: unknown[]) => written.filter((chunk) => String(chunk).includes("\x1b_Ga=T"))
 const deletions = (written: unknown[]) => written.filter((chunk) => String(chunk).includes("\x1b_Ga=d"))
+
+const CUT = { ...PICTURE, row: -2, skipTop: 2 }
+
+test("kitty: a picture partly above the view is drawn from the first visible row, showing the band that is in view", () => {
+  const { pointer, paint, written } = setup(() => 0, "kitty")
+  paint()
+  pointer.showImage({ ...CUT, png: MASCOT_PNGS[5]! })
+  // 8 rows of 256 pixels: 2 rows cut off the top take 64 pixels, 6 rows are left, 192 pixels.
+  assert.match(placements(written)[0] as string, /^\x1b\[1;3H\x1b_Ga=T,f=100,i=1,p=1,c=16,r=6,y=64,h=192,/)
+})
+
+test("kitty: a picture cut at the bottom shows its top band from where it starts", () => {
+  const { pointer, paint, written } = setup(() => 0, "kitty")
+  paint()
+  pointer.showImage({ ...PICTURE, png: MASCOT_PNGS[5]!, row: 0, skipBottom: 3 })
+  assert.match(placements(written)[0] as string, /^\x1b\[1;3H\x1b_Ga=T,f=100,i=1,p=1,c=16,r=5,y=0,h=160,/)
+})
+
+test("kitty: scrolling a cut picture sends it again with the new band", () => {
+  const { pointer, paint, written } = setup(() => 0, "kitty")
+  paint()
+  pointer.showImage({ ...PICTURE, png: MASCOT_PNGS[5]!, row: -1, skipTop: 1 })
+  pointer.showImage({ ...PICTURE, png: MASCOT_PNGS[5]!, row: -2, skipTop: 2 })
+  assert.equal(placements(written).length, 2)
+})
 
 test("a picture waits for the first frame, then is drawn once and not again while it is unchanged", () => {
   const { pointer, paint, written } = setup(() => 0, "kitty")
@@ -217,7 +242,7 @@ test("a terminal without pictures is never sent one", () => {
   assert.equal(placements(written).length + deletions(written).length, 0)
 })
 
-const SIXEL_PICTURE = { png: MASCOT_PNGS[5]!, key: "5", row: 0, col: 1, columns: 4, rows: 2 }
+const SIXEL_PICTURE = { png: MASCOT_PNGS[5]!, key: "5", row: 0, col: 1, columns: 4, rows: 2, skipTop: 0, skipBottom: 0 }
 const sixels = (written: unknown[]) => written.map(String).filter((chunk) => chunk.includes("\x1bP0;1;0q"))
 
 test("Sixel: a picture is sized for the cells it covers, drawn where they are, and not sent again unchanged", () => {
@@ -231,6 +256,14 @@ test("Sixel: a picture is sized for the cells it covers, drawn where they are, a
   paint(["hello world", "SECOND ROW", "third"])
   pointer.showImage({ ...SIXEL_PICTURE })
   assert.equal(sixels(written).length, 1)
+})
+
+test("Sixel: a picture cut at the top is drawn from the first visible row with only the visible pixel rows", () => {
+  const { pointer, paint, written } = setup(() => 0, "sixel")
+  paint()
+  pointer.showImage({ ...SIXEL_PICTURE, row: -1, skipTop: 1 })
+  // 2 rows of 16 pixels, the first cut off: 16 pixel rows, at screen row 0.
+  assert.match(sixels(written)[0]!, /^\x1b\[1;2H\x1bP0;1;0q"1;1;32;16#/)
 })
 
 test("Sixel: the size of a cell the terminal reported is used", () => {

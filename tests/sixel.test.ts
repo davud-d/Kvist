@@ -57,6 +57,17 @@ test("transparent pixels get no colour at all, so the background shows through",
   assert.doesNotMatch(out, /#1/)
 })
 
+test("only the asked pixel rows are written, and the size says so", () => {
+  // Three bands of 6 rows: red, blue, red. Keep the middle one only.
+  const rows = [0, 1, 0]
+  const pixels = rows.flatMap((color) => Array(6 * 2).fill(color))
+  const picture = image(2, 18, pixels, [[255, 0, 0], [0, 0, 255]])
+  const out = encodeSixel(picture, 2, 18, 6, 12)
+  assert.match(out, /"1;1;2;6#/)
+  assert.doesNotMatch(out, /#0;/, "the red of the cut-off bands is not even defined")
+  assert.match(out, /#1;2;0;0;100#1~~\x1b\\$/)
+})
+
 test("a real frame becomes a Sixel string that ends the way one must", () => {
   const out = encodeSixel(decodePalettePng(MASCOT_PNGS[5]!), 128, 128)
   assert.ok(out.startsWith('\x1bP0;1;0q"1;1;128;128#'))

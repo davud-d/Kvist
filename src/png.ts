@@ -42,6 +42,11 @@ function unfilter(raw: Buffer, width: number, height: number): Uint8Array {
   return pixels
 }
 
+// The height in pixels, from the header, without decoding the picture.
+export function pngHeight(base64: string): number {
+  return Buffer.from(base64.slice(0, 44), "base64").readUInt32BE(20)
+}
+
 export function decodePalettePng(base64: string): Indexed {
   const data = Buffer.from(base64, "base64")
   if (!data.subarray(0, 8).equals(SIGNATURE)) throw new Error("not a PNG")

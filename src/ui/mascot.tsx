@@ -5,8 +5,8 @@
 // A terminal that can draw pictures (kitty graphics protocol) is shown the frames as real
 // images instead: the same animation, as small PNGs over the same rectangle of cells, which
 // are left blank then. The picture is in the terminal's graphics layer and does not move
-// with the text, so `syncMascotImage` keeps it over the mascot's cells, or removes it while
-// they are scrolled out of view or partly hidden.
+// with the text, so `syncMascotImage` keeps it over the mascot's cells, cut to the part that is in
+// view while the rest is scrolled off, and removes it once none is left.
 import { Box, Text, measureElement, type DOMElement } from "ink"
 import { useContext, useEffect, useRef, useState } from "react"
 
@@ -68,9 +68,11 @@ export function syncMascotImage(pointer: Pointer | null): void {
   const { x, y, width, height } = measureElement(node)
   const clip = clippingAncestor(node)
   const view = clip ? measureElement(clip) : null
-  const inView = width > 0 && height > 0 && (!view || (y >= view.y && y + height <= view.y + view.height))
-  if (!inView) return pointer.showImage(null)
-  pointer.showImage({ png: MASCOT_PNGS[mascotSlot.frame] ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height })
+  // The rows the clip cuts off take the same part of the picture with them, so it is cut like text.
+  const skipTop = view ? Math.max(0, view.y - y) : 0
+  const skipBottom = view ? Math.max(0, y + height - (view.y + view.height)) : 0
+  if (width <= 0 || skipTop + skipBottom >= height) return pointer.showImage(null)
+  pointer.showImage({ png: MASCOT_PNGS[mascotSlot.frame] ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height, skipTop, skipBottom })
 }
 
 function mascotFrames(): MascotFrames {

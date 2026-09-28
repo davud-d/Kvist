@@ -13,7 +13,7 @@
 import { copyToClipboard, type ClipboardResult } from "./clipboard.js"
 import { deleteImage, placeImage } from "./kitty.js"
 import { disableMouse, enableMouse } from "./mouse.js"
-import { decodePalettePng, type Indexed } from "./png.js"
+import { decodePalettePng, pngHeight, type Indexed } from "./png.js"
 import { encodeSixel } from "./sixel.js"
 import { cellsOf, cellAt, highlight, lineAt, order, selectedText, wordAt, type Point, type Selection } from "./screen.js"
 
@@ -82,6 +82,9 @@ export interface ShownImage {
   col: number
   columns: number
   rows: number
+  // Rows of the picture that are out of view at the top and at the bottom; only the rest is drawn.
+  skipTop: number
+  skipBottom: number
 }
 
 const IMAGE_ID = 1
@@ -158,7 +161,7 @@ export class Pointer {
   }
 
   private drawImage(): void {
-    const wanted = this.image ? `${this.image.key}@${this.image.row},${this.image.col},${this.image.columns},${this.image.rows}` : null
+    const wanted = this.image ? `${this.image.key}@${this.image.row},${this.image.col},${this.image.columns},${this.image.rows},${this.image.skipTop},${this.image.skipBottom}` : null
     if (wanted === this.imageDrawn) return
     this.imageDrawn = wanted
     if (this.pictures === "sixel") return this.drawSixel()
@@ -166,14 +169,19 @@ export class Pointer {
       this.output.write(deleteImage(IMAGE_ID))
       return
     }
-    const { png, row, col, columns, rows } = this.image
-    this.output.write(placeImage(png, { id: IMAGE_ID, row, col, columns, rows }))
+    const { png, row, col, columns, rows, skipTop, skipBottom } = this.image
+    const visible = rows - skipTop - skipBottom
+    const size = visible < rows ? pngHeight(png) : 0
+    const source = visible < rows ? { y: Math.round((skipTop / rows) * size), height: Math.round((visible / rows) * size) } : undefined
+    this.output.write(placeImage(png, { id: IMAGE_ID, row: row + skipTop, col, columns, rows: visible, source }))
   }
 
   private sixelOf(image: ShownImage): string {
     const width = image.columns * this.cell.width
     const height = image.rows * this.cell.height
-    const key = `${image.key}@${width}x${height}`
+    const from = image.skipTop * this.cell.height
+    const to = (image.rows - image.skipBottom) * this.cell.height
+    const key = `${image.key}@${width}x${height}:${from}-${to}`
     let text = this.encoded.get(key)
     if (text === undefined) {
       let decoded = this.decoded.get(image.key)
@@ -181,7 +189,7 @@ export class Pointer {
         decoded = decodePalettePng(image.png)
         this.decoded.set(image.key, decoded)
       }
-      text = encodeSixel(decoded, width, height)
+      text = encodeSixel(decoded, width, height, from, to)
       this.encoded.set(key, text)
     }
     return text
@@ -189,14 +197,15 @@ export class Pointer {
 
   private drawSixel(): void {
     const before = this.sixelRows
-    this.sixelRows = this.image ? { row: this.image.row, rows: this.image.rows } : null
-    // A picture that moved or went away leaves its old cells behind: writing text over them is the only eraser.
-    if (before && (!this.image || before.row !== this.image.row)) {
+    const shown = this.image ? { row: this.image.row + this.image.skipTop, rows: this.image.rows - this.image.skipTop - this.image.skipBottom } : null
+    this.sixelRows = shown
+    // A picture that moved, shrank or went away leaves its old cells behind: writing text over them is the only eraser.
+    if (before && (!shown || before.row !== shown.row || before.rows !== shown.rows)) {
       const painted = this.painted
       for (let row = before.row; painted && row < Math.min(before.row + before.rows, painted.length); row++) painted[row] = "\0"
       this.paint(false)
     }
-    if (this.image) this.output.write(`\x1b[${this.image.row + 1};${this.image.col + 1}H${this.sixelOf(this.image)}`)
+    if (this.image && shown) this.output.write(`\x1b[${shown.row + 1};${this.image.col + 1}H${this.sixelOf(this.image)}`)
   }
 
   // Scroll requests from the wheel: negative moves toward older content.

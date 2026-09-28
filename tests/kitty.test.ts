@@ -31,6 +31,11 @@ test("a small image is one chunk that says it is the last", () => {
   assert.match(out, /^\x1b\[1;1H\x1b_Ga=T,f=100,i=1,p=1,c=2,r=1,C=1,q=2,m=0;QUJD\x1b\\$/)
 })
 
+test("a picture that is partly out of view is placed with the band of it that shows", () => {
+  const out = placeImage("QUJD", { id: 1, row: 0, col: 0, columns: 16, rows: 6, source: { y: 64, height: 192 } })
+  assert.match(out, /a=T,f=100,i=1,p=1,c=16,r=6,y=64,h=192,C=1,q=2,m=0;QUJD/)
+})
+
 test("deleting names the image and frees its data", () => {
   assert.equal(deleteImage(7), "\x1b_Ga=d,d=I,i=7,q=2\x1b\\")
 })

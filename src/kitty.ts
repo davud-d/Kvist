@@ -21,6 +21,9 @@ export interface Placement {
   col: number
   columns: number
   rows: number
+  // A band of the picture to show instead of all of it, in the picture's own pixels, when part of
+  // it is out of view: the terminal scales it to `rows`.
+  source?: { y: number; height: number }
 }
 
 // Shows `png` (base64) at the placement. C=1 leaves the cursor where it was, q=2 keeps the
@@ -29,7 +32,8 @@ export function placeImage(png: string, at: Placement): string {
   const chunks = Array.from({ length: Math.ceil(png.length / CHUNK) }, (_, index) => png.slice(index * CHUNK, (index + 1) * CHUNK))
   const parts = chunks.map((chunk, index) => {
     const more = index < chunks.length - 1 ? 1 : 0
-    const keys = index === 0 ? `a=T,f=100,i=${at.id},p=1,c=${at.columns},r=${at.rows},C=1,q=2,m=${more}` : `m=${more}`
+    const crop = at.source ? `,y=${at.source.y},h=${at.source.height}` : ""
+    const keys = index === 0 ? `a=T,f=100,i=${at.id},p=1,c=${at.columns},r=${at.rows}${crop},C=1,q=2,m=${more}` : `m=${more}`
     return `\x1b_G${keys};${chunk}\x1b\\`
   })
   return `\x1b[${at.row + 1};${at.col + 1}H${parts.join("")}`

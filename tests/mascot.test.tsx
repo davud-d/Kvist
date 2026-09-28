@@ -101,6 +101,20 @@ test("the animation's frames go out as pictures at two a second and the last one
   app.unmount()
 })
 
+test("when the banner is partly above the view the picture is cut like the text, not dropped", async () => {
+  const { written, screen } = pictureScreen()
+  const app = render(screen([banner]))
+  await wait(150)
+  // The viewport is 23 rows and the banner block 10 (a margin, 8 rows of squirrel, a margin); 16 more rows push 3 of them above it.
+  app.rerender(screen([banner, ...notes(16)]))
+  await wait(150)
+  const cut = drawn(written).at(-1)
+  assert.ok(cut, "a picture is on screen")
+  assert.match(cut, /^\x1b\[1;1H\x1b_Ga=T,f=100,i=1,p=1,c=16,r=6,y=64,h=192,/)
+  assert.equal(removed(written).length, 0, "it was never taken away")
+  app.unmount()
+})
+
 test("when the banner scrolls out of view the picture is taken away", async () => {
   const { written, screen } = pictureScreen()
   const app = render(screen([banner]))

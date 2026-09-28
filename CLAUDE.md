@@ -545,8 +545,9 @@ pixels stay the terminal's own); an unknown cell size is taken as 8×16, which n
 cells. A Sixel picture is part of the cells, so a moved or removed one is erased by repainting the
 rows under it, where a kitty picture is deleted by id.
 A picture lives in the terminal's graphics layer and does not move with text, so `ClaudeScreen` re-syncs
-after every render and the picture is removed while the banner is scrolled out of view or partly hidden
-(checked against the nearest `overflow="hidden"` ancestor). `Pointer` sends a picture only when its
+after every render and the picture is cut like the text: the rows the nearest `overflow="hidden"`
+ancestor clips off the top or bottom take the same band of the picture with them (kitty `y=`/`h=` and a
+smaller `r=`, or fewer pixel rows in the Sixel), and it is removed only once none is left. `Pointer` sends a picture only when its
 frame or place changes and again after a screen clear. iTerm2/WezTerm inline images and sixel are not
 supported; those terminals get the cell art.
 On exit (Ctrl+C or Ctrl+D idle, `/quit`) the alternate screen is gone, so `cli.tsx` prints
