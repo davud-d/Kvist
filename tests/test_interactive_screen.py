@@ -241,6 +241,44 @@ def test_history_navigation_and_multiline_submission(screen_runtime):
     assert screen_runtime.session.default_buffer.text == ""
 
 
+def test_large_paste_shows_a_label_and_submits_the_full_text(screen_runtime):
+    pasted = "\n".join(f"line {i}" for i in range(34))
+    screen_runtime.input.send_text("look: \x1b[200~" + pasted + "\x1b[201~")
+    _wait_until(
+        lambda: screen_runtime.session.default_buffer.text
+        == "look: [Pasted text #1 +33 lines]"
+    )
+
+    screen_runtime.input.send_text("\r")
+
+    assert screen_runtime.screen.read_input() == "look: " + pasted
+
+
+def test_pasting_the_same_text_again_shows_it(screen_runtime):
+    pasted = "\n".join(f"line {i}" for i in range(6))
+    for _ in range(2):
+        screen_runtime.input.send_text("\x1b[200~" + pasted + "\x1b[201~")
+        _wait_until(lambda: screen_runtime.session.default_buffer.text != "")
+    _wait_until(lambda: screen_runtime.session.default_buffer.text == pasted)
+
+
+def test_small_paste_stays_in_the_buffer_and_backspace_removes_a_label(
+    screen_runtime,
+):
+    screen_runtime.input.send_text("\x1b[200~a\r\nb\x1b[201~")
+    _wait_until(lambda: screen_runtime.session.default_buffer.text == "a\nb")
+    screen_runtime.session.default_buffer.reset()
+
+    big = "x" * 900
+    screen_runtime.input.send_text("\x1b[200~" + big + "\x1b[201~")
+    _wait_until(
+        lambda: screen_runtime.session.default_buffer.text
+        == "[Pasted text #1 900 chars]"
+    )
+    screen_runtime.input.send_text("\x7f")
+    _wait_until(lambda: screen_runtime.session.default_buffer.text == "")
+
+
 def test_config_replacement_clears_long_model_tail(screen_runtime):
     long_model = "openrouter/anthropic/claude-sonnet-4.5"
     screen_runtime.screen.set_config(

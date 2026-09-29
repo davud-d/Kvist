@@ -4,6 +4,7 @@ import { useReducer, useRef, type ReactNode } from "react"
 
 import { NAME_WIDTH, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
 import { applyKey, emptyEditor, insert, windowLine, type Editor } from "../editor.js"
+import { collapsePaste, emptyPasteStore, expandPastes, findRepeatedLabel, isLargePaste, labelLengthBefore } from "../paste.js"
 import { color, currentSkin } from "./theme.js"
 
 interface Props {
@@ -13,7 +14,8 @@ interface Props {
   mask?: boolean
   // Shown directly under the frame, above the command suggestions.
   caption?: ReactNode
-  onSubmit: (text: string) => void
+  // `shown` is the line as typed, with paste labels; `text` has the pasted text put back.
+  onSubmit: (text: string, shown: string) => void
 }
 
 // The box prefix and the frame's borders and padding leave columns - 6 cells
@@ -41,6 +43,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
   // Several keys can arrive in one stdin chunk and are handled before React
   // re-renders, so the source of truth is a ref, not the render's closure.
   const model = useRef<Model>({ editor: emptyEditor, recall: -1, pick: 0 })
+  const pastes = useRef(emptyPasteStore())
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   const update = (patch: Partial<Model>) => {
     Object.assign(model.current, patch)
@@ -60,7 +63,9 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
 
   const submit = (text: string) => {
     update({ editor: emptyEditor, recall: -1, pick: 0 })
-    onSubmit(text)
+    const expanded = expandPastes(pastes.current, text)
+    pastes.current = emptyPasteStore()
+    onSubmit(expanded, text)
   }
 
   const enter = (text: string, selected: number) => {
@@ -70,7 +75,18 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
     submit(action.text)
   }
 
-  usePaste((text) => change(insert(model.current.editor, text)), { isActive: active })
+  usePaste(
+    (text) => {
+      const current = model.current.editor
+      if (mask || !isLargePaste(text)) return change(insert(current, text))
+      // The same text pasted again replaces its label with the text.
+      const repeated = findRepeatedLabel(pastes.current, current.text, text)
+      if (!repeated) return change(insert(current, collapsePaste(pastes.current, text)))
+      const rest = { text: current.text.slice(0, repeated.start) + current.text.slice(repeated.end), cursor: repeated.start }
+      change(insert(rest, text))
+    },
+    { isActive: active },
+  )
 
   useInput(
     (input, key) => {
@@ -90,6 +106,11 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
         const text = next < 0 ? "" : (history[history.length - 1 - next] ?? "")
         return update({ recall: next, editor: { text, cursor: text.length } })
       }
+      const label = key.backspace ? labelLengthBefore(current.text, current.cursor) : 0
+      if (label) {
+        const start = current.cursor - label
+        return change({ text: current.text.slice(0, start) + current.text.slice(current.cursor), cursor: start })
+      }
       const next = applyKey(current, input, key)
       if (next) change(next)
     },
@@ -105,6 +126,10 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
       <Text color={color.faint}>{placeholder}</Text>
     </Text>
   )
+
+  const pasteHint = !mask && active && /\[Pasted text #\d+ /.test(editor.text) ? (
+    <Text color={color.faint}>  paste again to expand</Text>
+  ) : null
 
   const suggestions = (
     <>
@@ -140,6 +165,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
           <Text color={active ? color.text : color.faint}>❯ </Text>
           {line}
         </Box>
+        {pasteHint}
         {caption}
       </Box>
     )
@@ -151,6 +177,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
         <Text color={active ? color.accent : color.faint}>❯ </Text>
         {line}
       </Box>
+      {pasteHint}
       {caption}
       {suggestions}
     </Box>

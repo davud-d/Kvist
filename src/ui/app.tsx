@@ -210,7 +210,7 @@ export function App(props: AppProps) {
     }
   }, [runLocal, sendCommand, note])
 
-  const submit = useCallback((raw: string) => {
+  const submit = useCallback((raw: string, shown: string = raw) => {
     const text = raw.trim()
     if (!text) return
     setHistory((old) => [...old, text])
@@ -221,7 +221,7 @@ export function App(props: AppProps) {
     }
     try {
       core.current?.send(text)
-      dispatch({ type: "submit", text })
+      dispatch({ type: "submit", text: shown.trim() })
     } catch (error) {
       note(error instanceof Error ? error.message : String(error), "error")
     }

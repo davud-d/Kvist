@@ -55,6 +55,12 @@ from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from rich.console import Console
 
 import banner
+from paste_labels import (
+    PasteStore,
+    is_large_paste,
+    label_length_before,
+    normalize_newlines,
+)
 from redaction import escape_terminal_controls
 from slash_commands import (
     SLASH_COMMAND_MENU_HEIGHT,
@@ -433,6 +439,7 @@ class InteractiveScreen:
 
         self._saved_accept_handler: Any = None
         self._handler_is_installed = False
+        self._pastes = PasteStore()
         self._original_app = session.app
         self._original_layout = session.layout
 
@@ -783,9 +790,9 @@ class InteractiveScreen:
         except RuntimeError:
             loop = None
         if loop is not None and loop.is_running():
-            loop.call_soon(self._input_queue.put, value)
+            loop.call_soon(self._input_queue.put, self._pastes.expand(value))
         else:
-            self._input_queue.put(value)
+            self._input_queue.put(self._pastes.expand(value))
         self.invalidate()
         # Buffer.validate_and_handle appends to history, then resets the
         # buffer when the accept handler returns False.
@@ -1512,6 +1519,41 @@ class InteractiveScreen:
             """
 
             event.current_buffer.insert_text("\n")
+
+        @bindings.add(Keys.BracketedPaste, filter=buffer_focused & ~choosing)
+        def paste(event: Any) -> None:
+            # prompt_toolkit's own handler inserts the text as it is; a large
+            # paste becomes a label that _accept_input expands on submit, and
+            # pasting the same text again replaces that label with the text.
+            current = event.current_buffer
+            if is_large_paste(event.data):
+                repeated = self._pastes.find_repeated_label(current.text, event.data)
+                if repeated is None:
+                    current.insert_text(self._pastes.collapse(event.data))
+                    return
+                start, end = repeated
+                current.cursor_position = start
+                current.delete(count=end - start)
+                current.insert_text(normalize_newlines(event.data))
+                return
+            event.current_buffer.insert_text(normalize_newlines(event.data))
+
+        @bindings.add(
+            Keys.Backspace,
+            filter=buffer_focused
+            & Condition(
+                lambda: label_length_before(
+                    self.session.default_buffer.text,
+                    self.session.default_buffer.cursor_position,
+                )
+                > 0
+            ),
+        )
+        def delete_paste_label(event: Any) -> None:
+            current = event.current_buffer
+            current.delete_before_cursor(
+                count=label_length_before(current.text, current.cursor_position)
+            )
 
         @bindings.add(Keys.ControlC, eager=True)
         @bindings.add("<sigint>", eager=True)
