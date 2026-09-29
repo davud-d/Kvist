@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "types": [],
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "./**/*",
+    "../../../tui/ink/state.ts",
+    "../../../tui/ink/commands.ts",
+    "../../../tui/ink/protocol.ts",
+    "../../../tui/ink/format.ts",
+    "../../../tui/ink/diff.ts"
+  ],
+  "exclude": [
+    "./**/*.test.ts"
+  ]
+}

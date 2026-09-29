@@ -1,0 +1,73 @@
+{
+  "name": "kvist-gui",
+  "version": "1.2.0",
+  "private": true,
+  "workspaces": [],
+  "description": "Electron frontend for the Kvist stdio protocol",
+  "license": "MIT",
+  "homepage": "https://github.com/davud-d/Kvist",
+  "author": {
+    "name": "Davud",
+    "email": "noreply@users.noreply.github.com"
+  },
+  "desktopName": "kvist",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "build:core": "../../../.venv/bin/python -m PyInstaller ../../../kvist.spec --noconfirm --distpath resources/bin --workpath .build/core",
+    "dist:app": "electron-builder",
+    "dist": "npm run build:core && npm run dist:app"
+  },
+  "dependencies": {
+    "marked": "^18.0.9",
+    "sanitize-html": "^2.17.6"
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "dev.davud.kvist",
+    "productName": "Kvist",
+    "electronDist": "node_modules/electron/dist",
+    "asar": true,
+    "files": [
+      "renderer/**/*",
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bin",
+        "to": "bin",
+        "filter": [
+          "kvist",
+          "kvist.exe"
+        ]
+      }
+    ],
+    "linux": {
+      "category": "Development",
+      "maintainer": "Davud <noreply@users.noreply.github.com>",
+      "syncDesktopName": true,
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage",
+        "deb"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    }
+  }
+}

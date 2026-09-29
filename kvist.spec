@@ -3,19 +3,29 @@
 import os
 import pkgutil
 
-# Bundle every first-party top-level module so the build never silently drops a
-# source file that is reached only via a dynamic/lazy import. New files added to
-# the project root are picked up automatically without touching this spec.
-_ENTRY_SCRIPT = 'main.py'
-# make_mascot_frames is a development tool (it needs Pillow and numpy), not part of the app.
-_NON_APP_MODULES = frozenset({'run_task', 'package_script', 'install', 'make_mascot_frames'})
+# Bundle every first-party module so the build never silently drops a source
+# file that is reached only via a dynamic/lazy import; kernel.main itself is
+# run through runpy by the entry script, so static analysis never sees it.
+# New files in these directories are picked up without touching this spec.
+_CLASSIC_DIR = os.path.join(SPECPATH, 'frontends', 'tui', 'classic')
+_ZED_DIR = os.path.join(SPECPATH, 'frontends', 'zed')
+
+
+def _module_names(directory, prefix=''):
+    return [
+        prefix + name[:-3]
+        for name in os.listdir(directory)
+        if name.endswith('.py') and name != '__main__.py'
+    ]
+
+
 local_hiddenimports = sorted(
-    name[:-3]
-    for name in os.listdir(SPECPATH)
-    if name.endswith('.py')
-    and name != _ENTRY_SCRIPT
-    and name[:-3] not in _NON_APP_MODULES
+    _module_names(os.path.join(SPECPATH, 'kernel'), 'kernel.')
+    + _module_names(os.path.join(SPECPATH, 'kernel', 'providers'), 'kernel.providers.')
+    + _module_names(_CLASSIC_DIR)
+    + _module_names(_ZED_DIR)
 )
+local_hiddenimports = [name.removesuffix('.__init__') for name in local_hiddenimports]
 
 
 def _acp_hiddenimports():
@@ -37,20 +47,23 @@ def _acp_hiddenimports():
 
 local_hiddenimports = sorted(set(local_hiddenimports) | set(_acp_hiddenimports()))
 
-# The Ink terminal UI is one self-contained file made by `npm run build`; it is
-# optional because building it needs Node.js. Without it the binary still works
-# and `--frontend tui` falls back to the classic terminal with an explanation.
-_UI_BUNDLE = os.path.join(SPECPATH, 'dist-ui', 'kvist-tui.mjs')
-_ui_datas = [(_UI_BUNDLE, 'dist-ui')] if os.path.isfile(_UI_BUNDLE) else []
+# The Ink terminal UI is one self-contained file made by `npm run build` in
+# frontends/tui/ink; it is optional because building it needs Node.js. Without
+# it the binary still works and `--frontend tui` falls back to the classic
+# terminal with an explanation.
+_UI_BUNDLE = os.path.join(SPECPATH, 'frontends', 'tui', 'ink', 'dist-ui', 'kvist-tui.mjs')
+_ui_datas = [(_UI_BUNDLE, 'frontends/tui/ink/dist-ui')] if os.path.isfile(_UI_BUNDLE) else []
 
+# Data keeps its path relative to the module that reads it: kernel modules
+# unpack under kernel/, the classic terminal's modules at the top level.
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    ['kernel/__main__.py'],
+    pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR],
     binaries=[],
     datas=[
-        ('prompts', 'prompts'),
-        ('themes', 'themes'),
-        ('assets', 'assets'),
+        ('kernel/prompts', 'kernel/prompts'),
+        ('kernel/themes', 'kernel/themes'),
+        ('frontends/tui/classic/assets', 'assets'),
         # version.py's pyproject.toml fallback (no installed distribution
         # metadata exists inside a frozen build either).
         ('pyproject.toml', '.'),
@@ -85,7 +98,7 @@ exe = EXE(
     # "release unlocked lock" RuntimeError before the app's own
     # KeyboardInterrupt handling ever runs. Setting this to True stops the
     # bootloader from re-forwarding, so the child gets exactly one SIGINT,
-    # matching `python main.py` behavior.
+    # matching `python -m kernel` behavior.
     bootloader_ignore_signals=True,
     strip=False,
     upx=True,

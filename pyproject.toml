@@ -27,108 +27,36 @@ dependencies = [
 ]
 
 [project.scripts]
-kvist = "main:main"
+kvist = "kernel.main:main"
 
 [tool.setuptools]
-# Two kinds of thing the app imports: the `providers` package directory, and
-# the flat top-level modules in py-modules below. `packages` also names the
-# data directories the code reads at runtime by path relative to __file__
-# (prompts/, themes/, assets/, dist-ui/) as namespace packages — no
-# __init__.py — so setuptools installs them next to the flat modules in
-# site-packages, at the same relative paths the loaders expect. py-modules is
-# explicit because setuptools has no automatic "find" for top-level modules;
-# it mirrors kvist.spec's local_hiddenimports, minus the dev-only entry
-# scripts that one also excludes (run_task, package_script).
+# The core is the `kernel` package. Everything else here is installed at the
+# same path relative to site-packages as it has relative to the repository,
+# because the code finds it that way: the data directories read by path from
+# __file__ (prompts, themes, the classic terminal's assets, the Ink bundle),
+# and the classic terminal and Zed frontend, whose flat modules kernel/__init__
+# puts on sys.path. Those are namespace packages (no __init__.py); setuptools
+# installs only the files directly inside each listed directory, so tests/
+# subdirectories stay out. kernel/tests/test_pyproject_modules.py checks this list.
 packages = [
-    "providers",
-    "prompts",
-    "prompts.system",
-    "prompts.styles",
-    "prompts.styles.agents",
-    "prompts.styles.chat",
-    "themes",
-    "assets",
-    "dist-ui",
-]
-py-modules = [
-    "acp_events",
-    "acp_frontend",
-    "acp_stdio",
-    "action_result",
-    "agent",
-    "agent_context",
-    "agent_logging",
-    "agent_model",
-    "agent_runtime",
-    "agent_state",
-    "agent_web",
-    "anymodel_onboarding",
-    "api_settings",
-    "approvals",
-    "banner",
-    "banner_frames",
-    "bug_report",
-    "call_labels",
-    "change_journal",
-    "command_policy",
-    "commit_message",
-    "completion",
-    "config_info",
-    "context_budget",
-    "context_utils",
-    "core_manifest",
-    "custom_provider",
-    "deps",
-    "durable_json",
-    "env_utils",
-    "event_session",
-    "event_stdio",
-    "event_stream_ui",
-    "executor",
-    "frontend_protocol",
-    "frontends",
-    "import_resolver",
-    "input_history",
-    "interactive_screen",
-    "language_policy",
-    "language_utils",
-    "llm_clients",
-    "main",
-    "native_tools",
-    "parser",
-    "paste_labels",
-    "performance_logger",
-    "permission_policy",
-    "plan_mode",
-    "process_tree",
-    "prompt_history",
-    "protocol",
-    "reasoning_effort",
-    "redaction",
-    "render_throttle",
-    "role_router",
-    "sandbox",
-    "secret_paths",
-    "session_events",
-    "session_store",
-    "session_titler",
-    "slash_commands",
-    "splash",
-    "system_context",
-    "task_intent",
-    "terminal",
-    "terminal_banner",
-    "terminal_image",
-    "theme",
-    "ui",
-    "user_config",
-    "version",
+    "kernel",
+    "kernel.providers",
+    "kernel.prompts",
+    "kernel.prompts.system",
+    "kernel.prompts.styles",
+    "kernel.prompts.styles.agents",
+    "kernel.prompts.styles.chat",
+    "kernel.themes",
+    "frontends.tui.classic",
+    "frontends.tui.classic.assets",
+    "frontends.tui.ink.dist-ui",
+    "frontends.zed",
 ]
 
 [tool.setuptools.package-data]
-"prompts.system" = ["*.txt"]
-"prompts.styles.agents" = ["*.txt"]
-"prompts.styles.chat" = ["*.txt"]
-themes = ["*.json"]
-assets = ["*.png"]
-"dist-ui" = ["*.mjs"]
+"kernel.prompts.system" = ["*.txt"]
+"kernel.prompts.styles.agents" = ["*.txt"]
+"kernel.prompts.styles.chat" = ["*.txt"]
+"kernel.themes" = ["*.json"]
+"frontends.tui.classic.assets" = ["*.png"]
+"frontends.tui.ink.dist-ui" = ["*.mjs"]

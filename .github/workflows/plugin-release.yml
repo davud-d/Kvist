@@ -93,14 +93,14 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: windows-binary
-          path: jetbrains-plugin/bin/win
+          path: frontends/ide/jetbrains/bin/win
 
       - name: Prepare binaries
         run: |
           set -euo pipefail
-          mkdir -p jetbrains-plugin/bin/linux
-          mv dist/kvist jetbrains-plugin/bin/linux/kvist.bin
-          chmod +x jetbrains-plugin/bin/linux/kvist.bin
+          mkdir -p frontends/ide/jetbrains/bin/linux
+          mv dist/kvist frontends/ide/jetbrains/bin/linux/kvist.bin
+          chmod +x frontends/ide/jetbrains/bin/linux/kvist.bin
 
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
@@ -109,7 +109,7 @@ jobs:
           java-version: "21"
 
       - name: Build plugin zip
-        working-directory: jetbrains-plugin
+        working-directory: frontends/ide/jetbrains
         run: |
           chmod +x gradlew
           ./gradlew clean buildPlugin
@@ -124,4 +124,4 @@ jobs:
             Install the attached `.zip` directly in the JetBrains IDE plugin manager.
           make_latest: true
           prerelease: false
-          files: jetbrains-plugin/build/distributions/*.zip
+          files: frontends/ide/jetbrains/build/distributions/*.zip

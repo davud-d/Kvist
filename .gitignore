@@ -41,18 +41,18 @@ build/
 Thumbs.db
 
 # Build tools
-jetbrains-plugin/build-tools/
-jetbrains-plugin/jdk21.zip
+frontends/ide/jetbrains/build-tools/
+frontends/ide/jetbrains/jdk21.zip
 
 # JetBrains plugin
-jetbrains-plugin/.gradle/
-jetbrains-plugin/.gradle-user-home/
-jetbrains-plugin/.intellijPlatform/
-jetbrains-plugin/.kotlin/
-jetbrains-plugin/build/
-jetbrains-plugin/out/
-jetbrains-plugin/bin/linux/kvist.bin
-jetbrains-plugin/bin/win/kvist.exe
+frontends/ide/jetbrains/.gradle/
+frontends/ide/jetbrains/.gradle-user-home/
+frontends/ide/jetbrains/.intellijPlatform/
+frontends/ide/jetbrains/.kotlin/
+frontends/ide/jetbrains/build/
+frontends/ide/jetbrains/out/
+frontends/ide/jetbrains/bin/linux/kvist.bin
+frontends/ide/jetbrains/bin/win/kvist.exe
 
 # Logs
 *.log
@@ -66,11 +66,11 @@ jetbrains-plugin/bin/win/kvist.exe
 
 # Node / Electron GUI (installed deps and bundled build output)
 node_modules/
-gui/resources/bin/
-gui/.build/
+frontends/gui/electron/resources/bin/
+frontends/gui/electron/.build/
 
 # JetBrains plugin's private core build (kept apart from the CLI's dist/)
-jetbrains-plugin/.build/
+frontends/ide/jetbrains/.build/
 
 # Demo UI (local scratch, not part of the shipped app)
 Demo UI/
@@ -93,8 +93,8 @@ text_gitignore.txt
 workspace
 workspace/
 plan.md
-jetbrains-plugin/bin/linux/*
-jetbrains-plugin/bin/win/*
+frontends/ide/jetbrains/bin/linux/*
+frontends/ide/jetbrains/bin/win/*
 project/
 kernel.xml
 kernel.txt
@@ -106,7 +106,7 @@ SOUL.md
 TOOLS.md
 USER.md
 .openclaw/
-jetbrains-plugin/.claude
+frontends/ide/jetbrains/.claude
 .claude/
 Kvist.zip
 reports/
