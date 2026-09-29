@@ -6,7 +6,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 # kvist.spec leaves out the same dev-only entry scripts.
-_NON_APP_MODULES = {"run_task", "package_script", "install"}
+_NON_APP_MODULES = {"run_task", "package_script", "install", "make_mascot_frames"}
 
 
 def test_pyproject_lists_every_top_level_module():
