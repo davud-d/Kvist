@@ -39,6 +39,7 @@ from agent_logging import (
     save_active_session,
 )
 from durable_json import JsonStorageCorruptError, JsonStorageError
+from input_history import InputHistoryStore
 from session_events import (
     DEFAULT_HISTORY_LIMIT,
     MAX_HISTORY_LIMIT,
@@ -56,6 +57,8 @@ SESSION_OPS = (
     "reset",
     "new",
     "launch",
+    "input-history",
+    "input-history-add",
 )
 
 
@@ -247,10 +250,19 @@ def run_session_op(
     *,
     limit: int | None = None,
     before: int | None = None,
+    text: str | None = None,
 ) -> dict[str, Any]:
-    """Execute one session operation and return its JSON payload."""
+    """Execute one session operation and return its JSON payload.
+
+    ``text`` is the input ``input-history-add`` appends to the workspace's input history.
+    """
     if op not in SESSION_OPS:
         raise ValueError(f"Unknown session operation: {op!r}")
+    if op == "input-history":
+        return {"ok": True, "entries": InputHistoryStore(workspace).entries()}
+    if op == "input-history-add":
+        InputHistoryStore(workspace).add(text or "")
+        return {"ok": True}
     store = SessionStore(workspace)
     if op in ("status", "reset", "new", "launch"):
         payload = getattr(store, op)()

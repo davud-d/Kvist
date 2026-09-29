@@ -91,8 +91,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "switch",
             "delete",
             "reset",
+            "input-history",
+            "input-history-add",
         ),
-        help="Run one headless session operation, print JSON, exit.",
+        help="Run one headless session operation, print JSON, exit "
+        "(input-history-add reads the input from stdin as UTF-8).",
     )
     parser.add_argument(
         "--session-name",
@@ -183,6 +186,11 @@ def _run_session_op(args: argparse.Namespace) -> None:
     from redaction import sanitize_display_text
     from session_store import run_session_op
 
+    text = (
+        sys.stdin.buffer.read().decode("utf-8", errors="replace")
+        if args.session_op == "input-history-add"
+        else None
+    )
     try:
         payload = run_session_op(
             args.workspace,
@@ -190,6 +198,7 @@ def _run_session_op(args: argparse.Namespace) -> None:
             args.session_name,
             limit=args.history_limit,
             before=args.history_before,
+            text=text,
         )
     except (ValueError, JsonStorageError, OSError) as error:
         failure = {
@@ -408,6 +417,7 @@ from custom_provider import (
     normalize_custom_provider_payload,
     validate_provider_name,
 )
+from prompt_history import WorkspaceInputHistory
 from system_context import ensure_workspace_instructions
 from ui import AgentUI
 from terminal_banner import TerminalBannerUI
@@ -3967,7 +3977,11 @@ def main() -> None:
         not args.no_banner
         and banner.banner_available(console.width, console.height)
     ):
-        candidate_screen = InteractiveScreen(_get_session(), config)
+        prompt_session = _get_session()
+        input_history = WorkspaceInputHistory(agent.executor.workspace)
+        prompt_session.history = input_history
+        prompt_session.default_buffer.history = input_history
+        candidate_screen = InteractiveScreen(prompt_session, config)
         try:
             candidate_screen.start()
         except Exception as error:

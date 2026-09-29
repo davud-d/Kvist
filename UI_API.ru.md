@@ -308,6 +308,8 @@ kvist --workspace WS --session-op status
 kvist --workspace WS --session-op list
 kvist --workspace WS --session-op history --session-name feature [--history-limit N] [--history-before SEQ]
 kvist --workspace WS --session-op launch
+kvist --workspace WS --session-op input-history                    # последние 100 вводов проекта: {"ok":true,"entries":[старые, …, новые]}
+echo "text" | kvist --workspace WS --session-op input-history-add  # UTF-8 в stdin
 kvist --workspace WS --session-op new
 kvist --workspace WS --session-op create --session-name feature
 kvist --workspace WS --session-op switch --session-name feature

@@ -19,16 +19,17 @@ export interface SessionHistory {
 }
 
 // Session lifecycle is a one-shot mode of the core; the UI never touches .kvist/.
-function runOp<T extends { ok: boolean; error?: string }>(command: CoreCommand, workspace: string, extra: string[]): Promise<T | { ok: false; error: string }> {
+function runOp<T extends { ok: boolean; error?: string }>(command: CoreCommand, workspace: string, extra: string[], input?: string): Promise<T | { ok: false; error: string }> {
   const args = [...command.prefixArgs, "--workspace", workspace, ...extra]
   return new Promise((resolve) => {
-    execFile(command.command, args, { cwd: workspace, timeout: 20_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
+    const child = execFile(command.command, args, { cwd: workspace, timeout: 20_000, maxBuffer: 64 * 1024 * 1024 }, (error, stdout) => {
       try {
         resolve(JSON.parse(stdout.trim().split("\n").at(-1) ?? "") as T)
       } catch {
         resolve({ ok: false, error: error?.message ?? "Unreadable session-op reply." })
       }
     })
+    if (input !== undefined) child.stdin?.end(input)
   })
 }
 
@@ -49,4 +50,15 @@ export async function sessionHistory(command: CoreCommand, workspace: string, na
     "--session-op", "history", "--session-name", name, "--history-limit", String(HISTORY_LIMIT),
   ])
   return { ok: reply.ok, error: reply.error, events: "events" in reply ? (reply.events ?? []).map((entry) => entry.event) : [] }
+}
+
+// The workspace's last inputs, oldest first, kept by the core across restarts.
+export async function inputHistory(command: CoreCommand, workspace: string): Promise<string[]> {
+  const reply = await runOp<{ ok: boolean; error?: string; entries?: string[] }>(command, workspace, ["--session-op", "input-history"])
+  return "entries" in reply ? (reply.entries ?? []) : []
+}
+
+// The core skips blank, repeated and over-long inputs and keeps the last hundred.
+export function addInputHistory(command: CoreCommand, workspace: string, text: string): Promise<unknown> {
+  return runOp(command, workspace, ["--session-op", "input-history-add"], text)
 }

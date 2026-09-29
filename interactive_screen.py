@@ -1597,15 +1597,42 @@ class InteractiveScreen:
                 )
                 self._input_queue.put("/bye")
 
-        history_mode = buffer_focused & ~has_completions & single_line
+        def recalling() -> bool:
+            buffer = self.session.default_buffer
+            return buffer.working_index < len(buffer.history.get_strings())
+
+        # A recalled command may show the completion menu; Up and Down must
+        # keep walking the history then, or the menu traps the arrow keys.
+        history_mode = (
+            buffer_focused
+            & single_line
+            & (~has_completions | Condition(recalling))
+        )
 
         @bindings.add(Keys.Up, filter=history_mode, eager=True)
         def previous_history(event: Any) -> None:
-            event.current_buffer.history_backward(count=event.arg or 1)
+            """First Up in typed text jumps to its start; the next Up recalls history.
+
+            The typed text stays in prompt_toolkit's working line, so Down
+            walks back to it.
+            """
+            current = event.current_buffer
+            if not recalling() and current.text and current.cursor_position > 0:
+                current.cursor_position = 0
+                return
+            current.history_backward(count=event.arg or 1)
 
         @bindings.add(Keys.Down, filter=history_mode, eager=True)
         def next_history(event: Any) -> None:
-            event.current_buffer.history_forward(count=event.arg or 1)
+            current = event.current_buffer
+            if (
+                not recalling()
+                and current.text
+                and current.cursor_position < len(current.text)
+            ):
+                current.cursor_position = len(current.text)
+                return
+            current.history_forward(count=event.arg or 1)
 
         supplied = self.session.key_bindings
         groups = [load_auto_suggest_bindings()]

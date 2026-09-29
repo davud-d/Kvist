@@ -64,12 +64,14 @@ interface Model {
   editor: Editor
   recall: number
   pick: number
+  // What was typed when history recall began; Down at the newest entry brings it back.
+  draft: string
 }
 
 export function InputBox({ active, history, placeholder, mask = false, caption, onSubmit }: Props) {
   // Several keys can arrive in one stdin chunk and are handled before React
   // re-renders, so the source of truth is a ref, not the render's closure.
-  const model = useRef<Model>({ editor: emptyEditor, recall: -1, pick: 0 })
+  const model = useRef<Model>({ editor: emptyEditor, recall: -1, pick: 0, draft: "" })
   const pastes = useRef(emptyPasteStore())
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   const update = (patch: Partial<Model>) => {
@@ -86,10 +88,11 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
   const chosen = Math.min(pick, Math.max(0, options.length - 1))
   const first = windowStart(options.length, chosen, visible)
 
-  const change = (next: Editor) => update({ editor: next, pick: 0 })
+  // Editing a recalled entry makes it the new text; the next Up starts from the newest entry again.
+  const change = (next: Editor) => update({ editor: next, pick: 0, recall: next.text === model.current.editor.text ? model.current.recall : -1 })
 
   const submit = (text: string) => {
-    update({ editor: emptyEditor, recall: -1, pick: 0 })
+    update({ editor: emptyEditor, recall: -1, pick: 0, draft: "" })
     const expanded = expandPastes(pastes.current, text)
     pastes.current = emptyPasteStore()
     onSubmit(expanded, text)
@@ -129,15 +132,25 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
         const text = `/${shown[selected].name} `
         return change({ text, cursor: text.length })
       }
-      if ((key.upArrow || key.downArrow) && current.text.includes("\n")) {
-        const moved = moveLine(current, key.upArrow ? -1 : 1)
-        return moved ? update({ editor: moved }) : undefined
-      }
       if (key.upArrow || key.downArrow) {
-        if (shown.length) return update({ pick: (selected + (key.upArrow ? -1 : 1) + shown.length) % shown.length })
-        const next = Math.min(history.length - 1, Math.max(-1, recall + (key.upArrow ? 1 : -1)))
-        const text = next < 0 ? "" : (history[history.length - 1 - next] ?? "")
-        return update({ recall: next, editor: { text, cursor: text.length } })
+        const up = key.upArrow
+        // The command menu is for typing a command; a recalled one keeps walking the history.
+        if (shown.length && recall < 0) return update({ pick: (selected + (up ? -1 : 1) + shown.length) % shown.length })
+        if (current.text.includes("\n")) {
+          const moved = moveLine(current, up ? -1 : 1)
+          if (moved) return update({ editor: moved })
+        }
+        // In typed text the first arrow goes to its start or end; only the next one recalls history.
+        if (recall < 0 && current.text) {
+          const edge = up ? 0 : current.text.length
+          if (current.cursor !== edge) return update({ editor: { text: current.text, cursor: edge } })
+          if (!up) return
+        }
+        const next = Math.min(history.length - 1, Math.max(-1, recall + (up ? 1 : -1)))
+        if (next === recall) return
+        const draft = recall < 0 ? current.text : model.current.draft
+        const text = next < 0 ? draft : (history[history.length - 1 - next] ?? "")
+        return update({ recall: next, draft, editor: { text, cursor: text.length } })
       }
       const label = key.backspace ? labelLengthBefore(current.text, current.cursor) : 0
       if (label) {

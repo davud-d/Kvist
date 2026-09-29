@@ -328,6 +328,8 @@ kvist --workspace WS --session-op create --session-name feature
 kvist --workspace WS --session-op switch --session-name feature
 kvist --workspace WS --session-op delete --session-name old-work
 kvist --workspace WS --session-op reset
+kvist --workspace WS --session-op input-history                    # last 100 inputs of the workspace: {"ok":true,"entries":[oldest, …, newest]}
+echo "text" | kvist --workspace WS --session-op input-history-add  # UTF-8 on stdin
 ```
 
 Each invocation prints **one JSON object** on stdout and exits `0` on success

@@ -279,6 +279,44 @@ def test_small_paste_stays_in_the_buffer_and_backspace_removes_a_label(
     _wait_until(lambda: screen_runtime.session.default_buffer.text == "")
 
 
+def _submit_two(screen_runtime, first, second):
+    for value in (first, second):
+        screen_runtime.input.send_text(value + "\r")
+        assert screen_runtime.screen.read_input() == value
+    _wait_until(
+        lambda: len(screen_runtime.session.default_buffer._working_lines) >= 3
+    )
+
+
+def test_up_in_typed_text_jumps_to_start_then_recalls_and_down_restores(
+    screen_runtime,
+):
+    _submit_two(screen_runtime, "older entry", "newer entry")
+    buffer = screen_runtime.session.default_buffer
+
+    screen_runtime.input.send_text("draft")
+    _wait_until(lambda: buffer.text == "draft")
+    screen_runtime.input.send_text("\x1b[A")
+    _wait_until(lambda: buffer.cursor_position == 0)
+    assert buffer.text == "draft"
+
+    screen_runtime.input.send_text("\x1b[A")
+    _wait_until(lambda: buffer.text == "newer entry")
+    screen_runtime.input.send_text("\x1b[B")
+    _wait_until(lambda: buffer.text == "draft")
+    assert buffer.cursor_position == len("draft")
+
+
+def test_up_walks_past_a_recalled_slash_command(screen_runtime):
+    _submit_two(screen_runtime, "plain entry", "/help")
+    buffer = screen_runtime.session.default_buffer
+
+    screen_runtime.input.send_text("\x1b[A")
+    _wait_until(lambda: buffer.text == "/help")
+    screen_runtime.input.send_text("\x1b[A")
+    _wait_until(lambda: buffer.text == "plain entry")
+
+
 def test_config_replacement_clears_long_model_tail(screen_runtime):
     long_model = "openrouter/anthropic/claude-sonnet-4.5"
     screen_runtime.screen.set_config(

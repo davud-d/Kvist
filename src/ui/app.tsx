@@ -8,7 +8,7 @@ import { KvistCore, type CoreCommand } from "../core.js"
 import type { Pointer } from "../pointer.js"
 import type { CoreEvent } from "../protocol.js"
 import { contextLabel, englishOnly } from "../format.js"
-import { sessionHistory } from "../session.js"
+import { addInputHistory, inputHistory, sessionHistory } from "../session.js"
 import { answerFromEnd, initialState, reduce } from "../state.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./claude.js"
 import { ViewContext } from "./context.js"
@@ -95,6 +95,10 @@ export function App(props: AppProps) {
   stateRef.current = state
 
   const note = useCallback((text: string, tone: "info" | "warn" | "error" = "info") => dispatch({ type: "note", tone, text }), [])
+
+  useEffect(() => {
+    void inputHistory(props.command, props.workspace).then((entries) => setHistory((typed) => [...entries, ...typed]))
+  }, [props.command, props.workspace])
 
   useEffect(() => {
     const instance = new KvistCore(props.command)
@@ -214,6 +218,7 @@ export function App(props: AppProps) {
     const text = raw.trim()
     if (!text) return
     setHistory((old) => [...old, text])
+    void addInputHistory(props.command, props.workspace, text)
     if (text.startsWith("/")) {
       // The reply of a command hangs off its echo, as in Claude Code.
       if (props.skin === "claude") dispatch({ type: "echo", text })
@@ -225,7 +230,7 @@ export function App(props: AppProps) {
     } catch (error) {
       note(error instanceof Error ? error.message : String(error), "error")
     }
-  }, [runCommand, note, props.skin])
+  }, [runCommand, note, props.skin, props.command, props.workspace])
 
   const answer = useCallback((value: boolean | string | null | { approved: boolean; remember: boolean }) => {
     const request = stateRef.current.pending
