@@ -1,8 +1,8 @@
 import { useEffect, useReducer, useRef, useState } from "preact/hooks"
 
-import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../src/commands"
-import { contextLabel, formatSeconds, formatTokens } from "../../src/format"
-import { actionTarget, exploreSummary, initialState, lastInflight, reduce } from "../../src/state"
+import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../commands"
+import { contextLabel, formatSeconds, formatTokens } from "../../format"
+import { actionTarget, exploreSummary, initialState, lastInflight, reduce } from "../../state"
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"

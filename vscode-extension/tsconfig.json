@@ -11,6 +11,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*", "../src/core.ts", "../src/session.ts"],
+  "include": ["src/**/*", "../core.ts", "../session.ts"],
   "exclude": ["node_modules", ".vscode-test"]
 }

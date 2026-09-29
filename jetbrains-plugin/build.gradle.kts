@@ -60,7 +60,8 @@ val buildWebview = tasks.register<Exec>("buildWebview") {
     commandLine(npmCommand("run", "build"))
     inputs.dir(vscodeExtensionDir.dir("webview"))
     inputs.dir(vscodeExtensionDir.dir("src"))
-    inputs.dir(layout.projectDirectory.dir("../src"))
+    // The panel also bundles the Ink app's shared modules (state, protocol, commands, …).
+    inputs.files(fileTree(layout.projectDirectory.dir("..")) { include("*.ts") })
     inputs.files(vscodeExtensionDir.file("package.json"), vscodeExtensionDir.file("esbuild.mjs"))
     outputs.files(vscodeExtensionDir.file("out/webview.js"), vscodeExtensionDir.file("out/webview.css"))
 }

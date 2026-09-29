@@ -10,7 +10,7 @@ const host = {
   format: "cjs",
   target: "node20",
   external: ["vscode"],
-  // src/core.ts is shared with the Ink app; its import.meta.url only feeds the
+  // The Ink app's core.ts is bundled here too; its import.meta.url only feeds the
   // source-checkout fallback that the extension never takes.
   logOverride: { "empty-import-meta": "silent" },
   sourcemap: true,

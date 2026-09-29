@@ -16,11 +16,11 @@
   },
   "include": [
     "./**/*",
-    "../../src/state.ts",
-    "../../src/commands.ts",
-    "../../src/protocol.ts",
-    "../../src/format.ts",
-    "../../src/diff.ts"
+    "../../state.ts",
+    "../../commands.ts",
+    "../../protocol.ts",
+    "../../format.ts",
+    "../../diff.ts"
   ],
   "exclude": [
     "./**/*.test.ts"

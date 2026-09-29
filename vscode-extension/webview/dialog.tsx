@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks"
 
-import { approvalOptions, subjectOf } from "../../src/approval"
-import type { InputOption, InputRequest } from "../../src/protocol"
+import { approvalOptions, subjectOf } from "../../approval"
+import type { InputOption, InputRequest } from "../../protocol"
 
 export type Answer = (answer: boolean | string | null, remember?: boolean) => void
 

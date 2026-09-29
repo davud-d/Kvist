@@ -1,4 +1,4 @@
-import type { CoreEvent, JournalEvent } from '../../src/protocol';
+import type { CoreEvent, JournalEvent } from '../../protocol';
 
 export interface ProviderInfo {
     id: string;

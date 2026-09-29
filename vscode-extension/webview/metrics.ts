@@ -1,4 +1,4 @@
-import type { CoreEvent } from "../../src/protocol"
+import type { CoreEvent } from "../../protocol"
 
 export interface TurnMetrics {
   thinking: number

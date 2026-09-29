@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "preact/hooks"
 
-import { diffLines, numberWidth, toLines, type DiffRow } from "../../src/diff"
-import { clipLines, formatSeconds, formatThought, lastLines, outputLines } from "../../src/format"
-import { actionTarget, exploreSummary, type ActionResult, type Item } from "../../src/state"
+import { diffLines, numberWidth, toLines, type DiffRow } from "../../diff"
+import { clipLines, formatSeconds, formatThought, lastLines, outputLines } from "../../format"
+import { actionTarget, exploreSummary, type ActionResult, type Item } from "../../state"
 import { post } from "./host"
 import { Icon } from "./icons"
 import { Markdown } from "./markdown"

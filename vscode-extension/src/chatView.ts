@@ -1,12 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { execFile } from 'child_process';
-import { KvistCore, type CoreCommand } from '../../src/core';
-import { sessionOp } from '../../src/session';
+import { KvistCore, type CoreCommand } from '../../core';
+import { sessionOp } from '../../session';
 import { BinaryResolver } from './binaryResolver';
 import { splitEnvironment } from './environment';
 import { pickWorkspaceFiles } from './filePicker';
-import type { JournalEvent } from '../../src/protocol';
+import type { JournalEvent } from '../../protocol';
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToHost, ToWebview } from './messages';
 
 // The newest events of a session: enough for well over a hundred turns of a typical run.

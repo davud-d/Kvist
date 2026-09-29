@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import type { ActionResult, Item } from "../../src/state"
+import type { ActionResult, Item } from "../../state"
 import { answerToText, turnSlice, turnToText } from "./export"
 
 let nextId = 1

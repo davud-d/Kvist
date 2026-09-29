@@ -1,6 +1,6 @@
 import { useEffect, useState } from "preact/hooks"
 
-import { EFFORTS } from "../../src/commands"
+import { EFFORTS } from "../../commands"
 import type { ConfigInfo } from "../src/messages"
 import { post } from "./host"
 import { Icon } from "./icons"

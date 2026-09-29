@@ -1,6 +1,6 @@
-import { diffLines, toLines } from "../../src/diff"
-import { clipLines, formatThought, outputLines } from "../../src/format"
-import { actionTarget, exploreSummary, type Item } from "../../src/state"
+import { diffLines, toLines } from "../../diff"
+import { clipLines, formatThought, outputLines } from "../../format"
+import { actionTarget, exploreSummary, type Item } from "../../state"
 import { verbOf } from "./verbs"
 
 // Caps mirror what transcript.tsx already shows on screen, so a copied turn never
