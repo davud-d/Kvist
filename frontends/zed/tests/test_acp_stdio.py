@@ -21,6 +21,7 @@ import pytest
 
 from acp_frontend import run_acp
 from acp_stdio import stdio_streams
+from kernel.tests.conftest import requires_posix
 
 INITIALIZE = {
     "jsonrpc": "2.0",
@@ -109,7 +110,7 @@ def _open_stdout(monkeypatch, kind: str, tmp_path):
     return handle, lambda: os.read(read_fd, 65536)
 
 
-@pytest.mark.parametrize("kind", ["regular_file", "fifo", "devnull"])
+@pytest.mark.parametrize("kind", ["regular_file", pytest.param("fifo", marks=requires_posix), "devnull"])
 def test_the_writer_reaches_whatever_stdout_the_client_captured(monkeypatch, tmp_path, kind):
     """A regular file, a FIFO and a character device are all written to."""
     monkeypatch.setattr(sys, "stdin", _stdin_holding(b""))

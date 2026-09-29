@@ -222,10 +222,12 @@ def test_replacing_keeps_the_file_mode(env, lib_dir):
     settings = env / "settings.json"
     settings.write_text('{"a": 1}\n', encoding="utf-8")
     settings.chmod(0o644)
+    # Windows keeps only a read-only flag, so compare with what chmod left.
+    mode = stat.S_IMODE(settings.stat().st_mode)
 
     install_zed.install(settings, "Kvist", str(lib_dir / CORE_NAME))
 
-    assert stat.S_IMODE(settings.stat().st_mode) == 0o644
+    assert stat.S_IMODE(settings.stat().st_mode) == mode
     assert not list(settings.parent.glob("settings.json.*.tmp"))
 
 

@@ -8,6 +8,7 @@ pin the mapping without a client.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -213,7 +214,8 @@ def test_file_locations_are_absolute_inside_the_workspace(translator):
     )
 
     location = updates[0].update.locations[0]
-    assert location.path == "/ws/src/app.py"
+    # ACP locations are native paths, so the separator follows the OS.
+    assert location.path == str(Path("/ws") / "src" / "app.py")
     assert location.line == 7
 
 

@@ -185,7 +185,7 @@ def test_run_executes_safe_command_without_approval(tmp_path, monkeypatch):
     assert "hello" in result.stdout
 
 
-def test_run_survives_entries_created_in_cwd_between_context_builds(tmp_path, monkeypatch):
+def test_run_survives_entries_created_in_cwd_between_context_builds(tmp_path, monkeypatch, trusted_python_name):
     executor = TerminalExecutor(tmp_path)
     original = TerminalExecutor._execute_validated
 
@@ -194,7 +194,7 @@ def test_run_survives_entries_created_in_cwd_between_context_builds(tmp_path, mo
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(TerminalExecutor, "_execute_validated", touch_cwd_then_execute)
-    result = executor.run(["echo", "hello"])
+    result = executor.run([trusted_python_name, "--version"])
 
     assert result.returncode == 0
 

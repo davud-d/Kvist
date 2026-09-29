@@ -1319,7 +1319,8 @@ def _workspace_path(uri: str, workspace: Path) -> str | None:
         relative = resolved.relative_to(workspace.resolve())
     except (OSError, ValueError):
         return None
-    return str(relative)
+    # Forward slashes on every OS, like the executor's paths the model sees.
+    return relative.as_posix()
 
 
 # --- Slash commands ----------------------------------------------------------
