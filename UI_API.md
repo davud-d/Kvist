@@ -522,6 +522,9 @@ the outcome from `command_result`.
 >>> {"type": "command_result", "name": "role", "ok": true, "message": "Role set to: coder / Роль: coder", "effects": {"role": "coder"}}
 ```
 
+**Multi-line goal.** A goal is a plain stdin line; text with line breaks goes as
+`{"type": "goal", "text": str}` (`stdio-multi`), and `text` is queued as the goal.
+
 **Inbound message:** `{"type": "command", "name": str, "args": string[]}`.
 `name` is the slash-command name without the slash (case-insensitive); `args`
 is optional and answers the command's first question up front, so

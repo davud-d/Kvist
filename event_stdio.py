@@ -293,6 +293,14 @@ def _read_multi(
             if data is not None and data.get("type") == "command":
                 _queue_command(session, data, goal_queue, gate)
                 continue
+            if (
+                data is not None
+                and data.get("type") == "goal"
+                and isinstance(data.get("text"), str)
+            ):
+                stripped = data["text"].strip()
+                if not stripped:
+                    continue
             with gate.lock:
                 gate.busy = True
                 goal_queue.put(stripped)

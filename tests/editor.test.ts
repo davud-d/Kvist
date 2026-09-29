@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { MAX_BOX_ROWS, MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../src/commands.js"
-import { applyKey, emptyEditor, insert, windowLine } from "../src/editor.js"
+import { applyKey, emptyEditor, insert, moveLine, windowLine } from "../src/editor.js"
 import { parseBlocks } from "../src/ui/markdown.js"
 
 test("typing inserts at the cursor and accented letters are fine", () => {
@@ -139,4 +139,31 @@ test("Enter runs the highlighted command, or completes one that needs an argumen
   assert.deepEqual(resolveEnter("fix the bug", 0), { kind: "submit", text: "fix the bug" })
   assert.deepEqual(resolveEnter("/role coder", 0), { kind: "submit", text: "/role coder" })
   assert.deepEqual(resolveEnter("/nope", 0), { kind: "submit", text: "/nope" })
+})
+
+test("the goal box keeps pasted line breaks when asked to", () => {
+  assert.equal(insert(emptyEditor, "a\r\nb\tc", true).text, "a\nb c")
+})
+
+test("Alt+Backspace and Ctrl+Backspace delete the previous word, across lines too", () => {
+  const ed = { text: "one two\nthree", cursor: 13 }
+  assert.deepEqual(applyKey(ed, "", { backspace: true, meta: true }), { text: "one two\n", cursor: 8 })
+  assert.deepEqual(applyKey({ text: "one two", cursor: 7 }, "", { backspace: true, ctrl: true }), { text: "one ", cursor: 4 })
+})
+
+test("Home, End and Ctrl+A/E/U/K work on the cursor's line", () => {
+  const ed = { text: "ab\ncdef", cursor: 5 }
+  assert.equal(applyKey(ed, "", { home: true })!.cursor, 3)
+  assert.equal(applyKey(ed, "", { end: true })!.cursor, 7)
+  assert.deepEqual(applyKey(ed, "u", { ctrl: true }), { text: "ab\nef", cursor: 3 })
+  assert.deepEqual(applyKey(ed, "k", { ctrl: true }), { text: "ab\ncd", cursor: 5 })
+})
+
+test("moveLine keeps the column and stops at the first and last line", () => {
+  const ed = { text: "abcd\nx\nefgh", cursor: 3 }
+  const down = moveLine(ed, 1)!
+  assert.equal(down.cursor, 6)
+  assert.equal(moveLine(down, 1)!.cursor, 8)
+  assert.equal(moveLine({ ...ed, cursor: 3 }, -1), null)
+  assert.equal(moveLine({ ...ed, cursor: 12 }, 1), null)
 })

@@ -36,7 +36,7 @@ rl.on("line", (line) => {
     void command(message)
     return
   }
-  void turn(line)
+  void turn(message && message.type === "goal" ? message.text : line)
 })
 
 // One turn or one command at a time, like the real core (UI_API.md §8c).

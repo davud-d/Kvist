@@ -3,7 +3,7 @@ import { useWindowSize } from "./window-size.js"
 import { useReducer, useRef, type ReactNode } from "react"
 
 import { NAME_WIDTH, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
-import { applyKey, emptyEditor, insert, windowLine, type Editor } from "../editor.js"
+import { applyKey, emptyEditor, insert, moveLine, windowLine, type Editor } from "../editor.js"
 import { collapsePaste, emptyPasteStore, expandPastes, findRepeatedLabel, isLargePaste, labelLengthBefore } from "../paste.js"
 import { color, currentSkin } from "./theme.js"
 
@@ -23,13 +23,40 @@ interface Props {
 export function Line({ editor, mask, active, maxRows = 1 }: { editor: Editor; mask: boolean; active: boolean; maxRows?: number }) {
   const { columns } = useWindowSize()
   const shown = mask ? { text: "•".repeat(editor.text.length), cursor: editor.cursor } : editor
-  const { before, at, after } = windowLine(shown, Math.max(8, columns - 6) * maxRows)
+  const cells = Math.max(8, columns - 6)
+  if (shown.text.includes("\n")) return <MultiLine editor={shown} active={active} cells={cells} maxRows={maxRows} />
+  const { before, at, after } = windowLine(shown, cells * maxRows)
   return (
     <Text>
       {before}
       {active ? <Text inverse>{at || " "}</Text> : at}
       {after}
     </Text>
+  )
+}
+
+// One Text per line; only the cursor's line is windowed around the cursor, the others are cut at the box width.
+function MultiLine({ editor, active, cells, maxRows }: { editor: Editor; active: boolean; cells: number; maxRows: number }) {
+  const rows = editor.text.split("\n")
+  const upToCursor = editor.text.slice(0, editor.cursor).split("\n")
+  const row = upToCursor.length - 1
+  const column = upToCursor[row]?.length ?? 0
+  const visible = Math.max(1, maxRows)
+  const first = Math.min(Math.max(0, row - Math.floor(visible / 2)), Math.max(0, rows.length - visible))
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {rows.slice(first, first + visible).map((text, i) => {
+        if (first + i !== row) return <Text key={first + i} wrap="truncate-end">{text || " "}</Text>
+        const { before, at, after } = windowLine({ text, cursor: column }, cells)
+        return (
+          <Text key={first + i}>
+            {before}
+            {active ? <Text inverse>{at || " "}</Text> : at}
+            {after}
+          </Text>
+        )
+      })}
+    </Box>
   )
 }
 
@@ -78,12 +105,12 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
   usePaste(
     (text) => {
       const current = model.current.editor
-      if (mask || !isLargePaste(text)) return change(insert(current, text))
+      if (mask || !isLargePaste(text)) return change(insert(current, text, !mask))
       // The same text pasted again replaces its label with the text.
       const repeated = findRepeatedLabel(pastes.current, current.text, text)
       if (!repeated) return change(insert(current, collapsePaste(pastes.current, text)))
       const rest = { text: current.text.slice(0, repeated.start) + current.text.slice(repeated.end), cursor: repeated.start }
-      change(insert(rest, text))
+      change(insert(rest, text, true))
     },
     { isActive: active },
   )
@@ -93,12 +120,18 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
       const { editor: current, recall, pick: picked } = model.current
       const shown = mask ? [] : suggest(current.text)
       const selected = Math.min(picked, Math.max(0, shown.length - 1))
+      // Shift+Enter needs a terminal that reports it (kitty keyboard protocol); Alt+Enter arrives as ESC CR everywhere.
+      if (key.return && (key.shift || key.meta) && !mask) return change(insert(current, "\n", true))
       if (key.return) return enter(current.text, selected)
       // Keystrokes coalesced by a slow link arrive as "text\r" in one chunk.
-      if (input.length > 1 && /[\r\n]$/.test(input)) return enter(insert(current, input.replace(/[\r\n]+$/, "")).text, selected)
+      if (input.length > 1 && /[\r\n]$/.test(input)) return enter(insert(current, input.replace(/[\r\n]+$/, ""), true).text, selected)
       if (key.tab && shown[selected]) {
         const text = `/${shown[selected].name} `
         return change({ text, cursor: text.length })
+      }
+      if ((key.upArrow || key.downArrow) && current.text.includes("\n")) {
+        const moved = moveLine(current, key.upArrow ? -1 : 1)
+        return moved ? update({ editor: moved }) : undefined
       }
       if (key.upArrow || key.downArrow) {
         if (shown.length) return update({ pick: (selected + (key.upArrow ? -1 : 1) + shown.length) % shown.length })

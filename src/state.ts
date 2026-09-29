@@ -7,7 +7,8 @@ export type Tone = "info" | "warn" | "error" | "debug"
 
 export type Item =
   | { id: number; kind: "banner" }
-  | { id: number; kind: "user"; text: string }
+  // `request` is the full text when `text` shows a paste label; the language of the turn comes from it.
+  | { id: number; kind: "user"; text: string; request?: string }
   // The plan the model proposes before editing; `russian` picks the card's label, like `done`.
   | { id: number; kind: "plan"; markdown: string; russian: boolean }
   // batchIndex: the call's place in its model response (0 = the first call), so a UI can
@@ -111,7 +112,7 @@ export type Action =
   | { type: "event"; event: CoreEvent; now?: number }
   // `banner`: start the redrawn feed with the welcome block, as a new session does.
   | { type: "restore"; events: JournalEvent[]; now?: number; banner?: boolean }
-  | { type: "submit"; text: string; now?: number }
+  | { type: "submit"; text: string; request?: string; now?: number }
   // A slash command typed by the person, shown like a request but not starting a run.
   | { type: "echo"; text: string }
   // The person asked the running turn to stop.
@@ -536,7 +537,7 @@ const CYRILLIC = /\p{Script=Cyrillic}/u
 
 function requestIsRussian(state: State): boolean {
   const request = state.items.findLast((item) => item.kind === "user")
-  return request?.kind === "user" && CYRILLIC.test(request.text)
+  return request?.kind === "user" && CYRILLIC.test(request.request ?? request.text)
 }
 
 // A turn that ran live ends with its closing line; `before` still knows when it began.
@@ -566,7 +567,7 @@ export function reduce(state: State, action: Action): State {
     case "submit":
       return push(
         { ...state, running: true, startedAt: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null, info: { ...state.info, routedRole: undefined } },
-        (id) => ({ id, kind: "user", text: action.text }),
+        (id) => ({ id, kind: "user", text: action.text, request: action.request }),
       )
     case "interrupt":
       return { ...state, interrupted: true }

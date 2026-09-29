@@ -125,13 +125,14 @@ export class KvistCore extends EventEmitter {
     stdin.write(JSON.stringify(payload) + "\n")
   }
 
-  // A goal is one stdin line, so line breaks are flattened.
+  // A goal is one stdin line; one with line breaks travels as a JSON `goal` message so they survive.
   send(goal: string): void {
-    const line = goal.replace(/\r?\n/g, " ").trim()
-    if (!line) return
+    const text = goal.replace(/\r\n?/g, "\n").trim()
+    if (!text) return
+    if (text.includes("\n")) return this.write({ type: "goal", text })
     const stdin = this.child?.stdin
     if (!stdin?.writable) throw new Error("Kvist core is not accepting input.")
-    stdin.write(line + "\n")
+    stdin.write(text + "\n")
   }
 
   // A slash command that runs inside the core (UI_API.md §8c); its dialogs come

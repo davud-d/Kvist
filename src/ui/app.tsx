@@ -221,7 +221,7 @@ export function App(props: AppProps) {
     }
     try {
       core.current?.send(text)
-      dispatch({ type: "submit", text: shown.trim() })
+      dispatch({ type: "submit", text: shown.trim(), request: text })
     } catch (error) {
       note(error instanceof Error ? error.message : String(error), "error")
     }

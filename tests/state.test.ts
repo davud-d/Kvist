@@ -643,3 +643,9 @@ test("a plan event becomes a card that keeps the Markdown and the language of th
   assert.deepEqual({ ...plan("rename the module"), id: 0 }, { id: 0, kind: "plan", markdown: "**Цель**", russian: false })
   assert.equal(plan("переименуй модуль")?.kind === "plan" && (plan("переименуй модуль") as { russian: boolean }).russian, true)
 })
+
+test("a request shown as a paste label takes its language from the pasted text", () => {
+  const asked = reduce(initialState(), { type: "submit", text: "[Pasted text #1 +33 lines]", request: "переименуй модуль" })
+  const plan = reduce(asked, { type: "event", event: { type: "plan", markdown: "x" } }).items.at(-1)
+  assert.equal(plan?.kind === "plan" && plan.russian, true)
+})

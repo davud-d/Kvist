@@ -71,8 +71,8 @@ const app = render(
     onSession={(name) => (lastSession = name)}
   />,
   pointer
-    ? { exitOnCtrlC: false, alternateScreen: true, stdin: pointer.stdin, stdout: pointer.stdout }
-    : { exitOnCtrlC: false },
+    ? { exitOnCtrlC: false, alternateScreen: true, stdin: pointer.stdin, stdout: pointer.stdout, kittyKeyboard: { mode: "auto" } }
+    : { exitOnCtrlC: false, kittyKeyboard: { mode: "auto" } },
 )
 pointer?.start()
 await app.waitUntilExit()

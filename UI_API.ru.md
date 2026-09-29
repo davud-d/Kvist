@@ -513,6 +513,9 @@ kvist --commit-message < payload.json
 >>> {"type": "command_result", "name": "role", "ok": true, "message": "Role set to: coder / Роль: coder", "effects": {"role": "coder"}}
 ```
 
+**Многострочная цель.** Цель — обычная строка stdin; текст с переводами строк
+идёт как `{"type": "goal", "text": str}` (`stdio-multi`), `text` ставится в очередь как цель.
+
 **Входящее сообщение:** `{"type": "command", "name": str, "args": string[]}`.
 `name` — имя слэш-команды без слэша (регистр не важен); `args` необязателен и
 заранее отвечает на первый вопрос команды, так что

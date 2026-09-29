@@ -422,7 +422,7 @@ export function ClaudeSpinner({ state }: { state: State }) {
   // Output tokens of this turn, as far as the core has reported them (it does so after each model call).
   const tokens = Math.max(0, state.usage.output - state.turnStartOutput)
   const detail = [formatSeconds(turnSeconds), tokens > 0 ? `↓ ${tokenCount(tokens)} tokens` : "", doing].filter(Boolean).join(" · ")
-  const text = request?.kind === "user" ? request.text : ""
+  const text = request?.kind === "user" ? (request.request ?? request.text) : ""
   const tip = tipFor(state.startedAt ?? 0, text, turnSeconds)
   return (
     <Spinner

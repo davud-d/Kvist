@@ -150,6 +150,17 @@ def test_two_goals_one_process_two_full_event_sets():
     assert agent.goals == ["goal one", "goal two"]
 
 
+def test_goal_message_carries_line_breaks_to_the_agent():
+    agent, reader, out, thread = _run_multi(_simple_handler)
+
+    reader.push(json.dumps({"type": "goal", "text": "first\nsecond\n"}) + "\n")
+    out.wait_for(lambda e: e["type"] == "final")
+    reader.eof()
+    thread.join(timeout=3.0)
+
+    assert agent.goals == ["first\nsecond"]
+
+
 def test_input_response_reaches_session_in_second_turn():
     def handler(agent, ui, goal):
         if goal == "ask":
