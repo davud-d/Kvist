@@ -87,6 +87,7 @@ class RunState:
     system_project: str = ""
     system_git: str = ""
     system_sandbox: str = ""
+    system_host: str = ""
     user_goal: str = ""
     create_goal: bool = False
     modify_goal: bool = False

@@ -297,6 +297,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             system_lines.append(f"- Project: {self._state.system_project}")
         if self._state.system_git:
             system_lines.append(f"- Git: {self._state.system_git}")
+        if self._state.system_host:
+            system_lines.append(f"- Host: {self._state.system_host}")
         system_block = "\n".join(system_lines) + "\n\n"
         # ── Session history context ─────────────────────────────────
         session_history = render_session_history(

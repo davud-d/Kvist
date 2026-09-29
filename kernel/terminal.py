@@ -69,6 +69,7 @@ from kernel.secret_paths import (
     enumerate_secret_targets,
     secret_mask_digest,
 )
+from kernel.self_info import ancestor_chain, detect_host, self_termination_denial
 
 # ── Global HITL lock ─────────────────────────────────────────────
 # Prevents background TUI rendering while the user is typing y/N.
@@ -671,6 +672,9 @@ class TerminalExecutor:
             and self.sandbox_mode is SandboxMode.WORKSPACE_ONLY
         )
         self._external_tool_paths = _external_tool_paths(self.workspace)
+        # The processes Kvist runs inside, fixed for the life of this process.
+        self.host_chain = ancestor_chain()
+        self.host = detect_host(self.host_chain)
         # Process-tree teardown of detached (setsid) descendants needs either
         # the Bubblewrap PID namespace or a cgroup v2 scope.
         self._cgroup_available = cgroup_supervision_available()
@@ -731,6 +735,9 @@ class TerminalExecutor:
             raise HardDenyError(
                 "Hard security denial: command blocked by the project permission policy (deny rule)"
             )
+        # Before any approval dialog: approving this would cut the turn off
+        # mid-step, so the step goes to the person, never to a yes/no prompt.
+        self._deny_self_termination(command)
 
         work_dir = self._resolve_cwd(cwd)
         if self._sandbox_required_unavailable:
@@ -1185,6 +1192,12 @@ class TerminalExecutor:
                 continue
             executable = canonical_executable_name(segment[0])
             self._require_allowlisted(segment, executable)
+
+    def _deny_self_termination(self, command: list[str]) -> None:
+        for segment in self._split_pipe_segments(command):
+            reason = self_termination_denial(segment, self.host_chain, self.host)
+            if reason:
+                raise HardDenyError(f"Hard security denial: {reason}")
 
     def _split_pipe_segments(self, command: list[str]) -> list[list[str]]:
         segments: list[list[str]] = [[]]

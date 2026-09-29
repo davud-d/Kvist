@@ -131,6 +131,7 @@ from kernel.system_context import (
     current_time_context,
 )
 from kernel.sandbox import sandbox_network_allowed
+from kernel.self_info import ancestor_chain, describe_host, detect_host
 from kernel.session_events import JournalingUI, SessionJournal
 from kernel.session_titler import generate_session_title
 from kernel.ui import AgentUI
@@ -457,6 +458,8 @@ class LocalAgent:
         self._state.system_sandbox = current_sandbox_context(
             self.executor.sandbox_mode, sandbox_network_allowed()
         )
+        chain = ancestor_chain()
+        self._state.system_host = describe_host(chain, detect_host(chain))
 
     def request_cancel(self) -> None:
         """Request that the current action-loop turn stop at the next safe point.
@@ -932,6 +935,13 @@ class LocalAgent:
             f"{self.config.provider}, model = {self.config.fast_model}. "
             f"If the user asks which model you are, answer with this.)\n\n"
         )
+        # Without the host fact a chat reply to "restart the editor" invented
+        # that the conversation would be lost; it is on disk.
+        host_note = (
+            f"(Runtime fact: host = {self._state.system_host})\n\n"
+            if self._state.system_host
+            else ""
+        )
 
         # Snapshot before the turn mutates history: a cancelled or failed turn
         # must not leave a user message that no answer ever replies to.
@@ -955,7 +965,7 @@ class LocalAgent:
         wire_history = self._chat_history[:-1] + [
             {
                 "role": "user",
-                "content": language_note + model_note + session_context + user_goal,
+                "content": language_note + model_note + host_note + session_context + user_goal,
             }
         ]
         wire_history = self._trim_chat_messages_to_token_limit(wire_history)
