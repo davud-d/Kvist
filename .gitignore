@@ -115,7 +115,7 @@ kvist_repomix.md
 CYBER_WALL_REPORT.md
 progress.json
 progress.json.bak-20260919
-tools
+/tools/
 
 # Postman Local View workspace scaffolding
 .postman/
