@@ -1601,40 +1601,45 @@ function hideInfo() {
 }
 
 const PALETTE_COMMANDS = [
-  { id: "new", label: "New chat", hint: "Reset the session and start fresh", keys: "ctrl+n" },
+  { id: "new", label: "New chat", hint: "Reset the session and start fresh", keys: "ctrl+n", actionLabel: "New" },
   {
     id: "resume",
     label: "Resume checkpoint",
     hint: "Continue the latest unfinished task",
     enabled: () => activeCheckpointAvailable(),
+    actionLabel: "Resume",
   },
   {
     id: "settings",
     label: "Provider, models & role",
     hint: "Pick provider, models, role and approvals",
     keys: "ctrl+m",
+    actionLabel: "Configure",
   },
-  { id: "workspace", label: "Open project…", hint: "Switch to another workspace folder" },
-  { id: "changes", label: "Show agent changes", hint: "Diff of every file the agent changed" },
+  { id: "workspace", label: "Open project…", hint: "Switch to another workspace folder", actionLabel: "Open" },
+  { id: "changes", label: "Show agent changes", hint: "Diff of every file the agent changed", actionLabel: "Show" },
   {
     id: "revert",
     label: "Revert agent changes",
     hint: "Restore changed files to their baselines",
     enabled: () => !running,
+    actionLabel: "Revert",
   },
-  { id: "details", label: "Toggle tool details", hint: "Expand or collapse step cards" },
+  { id: "details", label: "Toggle tool details", hint: "Expand or collapse step cards", actionLabel: "Toggle" },
   {
     id: "interrupt",
     label: "Interrupt Kvist",
     hint: "Stop the current run",
     keys: "esc",
     enabled: () => running,
+    actionLabel: "Interrupt",
   },
-  { id: "about", label: "About Kvist", hint: "Shortcuts and build info" },
+  { id: "about", label: "About Kvist", hint: "Shortcuts and build info", actionLabel: "About" },
 ]
 
 async function runCommand(id) {
   hidePalette()
+  hideGlobalSettings()
   if (id === "new") await createNewSession()
   else if (id === "resume") await resumeCheckpoint()
   else if (id === "settings") await showSettings()
@@ -2083,7 +2088,7 @@ function showGlobalSettings() {
 
 function hideGlobalSettings() {
   globalSettingsBackdrop.classList.add("is-hidden")
-  if (!promptInput.disabled) promptInput.focus()
+  settingsGearButton.focus()
 }
 
 function populateGlobalSettings() {
@@ -2251,6 +2256,29 @@ function populateGlobalSettings() {
   const advancedPanel = document.querySelector("#settingsPanelAdvanced .settings-panel-body")
   advancedPanel.innerHTML = ""
 
+  // ── Palette Commands section ──
+  const commandsSection = createElement("div", "settings-block")
+  for (const command of PALETTE_COMMANDS) {
+    const isEnabled = !command.enabled || command.enabled()
+    const row = createElement("div", "advanced-row")
+    const text = createElement("div", "advanced-row-text")
+    const title = createElement("div", "advanced-row-title", command.label)
+    const hintText = command.keys ? `${command.hint} (${command.keys})` : command.hint
+    const hint = createElement("div", "advanced-row-hint", hintText)
+    text.append(title, hint)
+
+    const btn = createElement("button", "advanced-btn")
+    btn.textContent = command.actionLabel || "Run"
+    btn.type = "button"
+    btn.disabled = !isEnabled
+    btn.addEventListener("click", () => {
+      void runCommand(command.id)
+    })
+    row.append(text, btn)
+    commandsSection.append(row)
+  }
+  advancedPanel.append(commandsSection)
+
   // ── Requests section ──
   const requestsSection = createElement("div", "settings-block")
   const requestsRow = createElement("div", "advanced-row")
@@ -2265,32 +2293,6 @@ function populateGlobalSettings() {
   requestsBtn.addEventListener("click", () => openApiSettingsDialog())
   requestsRow.append(requestsText, requestsBtn)
   requestsSection.append(requestsRow)
-
-  // ── Changes section ──
-  const changesRow = createElement("div", "advanced-row")
-  const changesText = createElement("div", "advanced-row-text")
-  changesText.append(
-    createElement("div", "advanced-row-title", "Changes"),
-    createElement("div", "advanced-row-hint", "Files the agent changed"),
-  )
-  const changesActions = createElement("div", "advanced-row-actions")
-  const showChangesBtn = createElement("button", "advanced-btn")
-  showChangesBtn.textContent = "Show"
-  showChangesBtn.type = "button"
-  showChangesBtn.addEventListener("click", () => {
-    hideGlobalSettings()
-    void showChanges()
-  })
-  const revertBtn = createElement("button", "advanced-btn")
-  revertBtn.textContent = "Revert"
-  revertBtn.type = "button"
-  revertBtn.addEventListener("click", () => {
-    hideGlobalSettings()
-    confirmRevert()
-  })
-  changesActions.append(showChangesBtn, revertBtn)
-  changesRow.append(changesText, changesActions)
-  requestsSection.append(changesRow)
 
   // ── Reset section ──
   const resetRow = createElement("div", "advanced-row")
