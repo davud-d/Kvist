@@ -8,8 +8,40 @@ Kvist is a local, terminal-based coding agent that operates on one workspace
 directory at a time. It plans a task, then runs an action/feedback loop where an LLM
 emits one JSON response per step carrying a short batch of actions (read/write files,
 run shell, search web, etc.), the agent executes them through a sandboxed executor,
-feeds the result back, and repeats until completion. There is also a JetBrains plugin (`jetbrains-plugin/`, separate
-Gradle build) that wraps the same Python core.
+feeds the result back, and repeats until completion. Several frontends drive the
+same Python core; each lives in its own directory under `frontends/`.
+
+## Repository layout
+
+```
+kernel/                 the core: Python package `kernel` (run: python -m kernel)
+  prompts/ themes/ providers/   data and subpackages read relative to the modules
+  tests/                pytest suite of the core (conftest.py holds the shared fakes)
+frontends/
+  tui/classic/          classic prompt_toolkit terminal (flat modules: interactive_screen,
+                        terminal_banner, banner, splash, …) + assets/ + tests/
+  tui/ink/              Node/Ink terminal app, skins in ui/skins/{kvist,claude-code}/,
+                        mascot/ (frames + generator), tests/ (npm test)
+  gui/electron/         Electron desktop app
+  ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
+  ide/jetbrains/        IntelliJ plugin (separate Gradle build)
+  zed/                  Zed ACP frontend (acp_frontend, acp_events, acp_stdio) + tests/
+scripts/                installer/ (+ tests/), run_task.py, package_script.py, tests/
+branding/               icons and logos (installer icons, kvist.ico)
+docs/                   UI_API.md (frontend protocol), media/ (README screenshots, video)
+site/                   kvist.site landing page (own build)
+```
+
+The core imports the classic terminal and the Zed frontend by bare module name:
+`kernel/__init__.py` appends `frontends/tui/classic` and `frontends/zed` to
+`sys.path`, and `pytest.ini` does the same for the tests. Every other import of a
+core module is `kernel.<module>` (`from kernel.agent import LocalAgent`,
+`monkeypatch.setattr("kernel.agent_model._load_role_prompt", …)`). The Ink app's
+modules (`state.ts`, `protocol.ts`, `commands.ts`, …) are also imported by the VS
+Code extension and its webview, so a change there is checked from both sides.
+Local, untracked files (`AGENTS.md`, `plan.md`, `progress.json`, `tools/`, …) stay
+at the root; `.gitignore` anchors `tools` to the root because an unanchored rule
+would hide every nested `tools/` directory.
 
 ## Pushing commits (MANDATORY)
 
@@ -40,19 +72,24 @@ Commits go to the backup relay server, never straight to GitHub.
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 
-.venv/bin/python main.py --workspace "<project_path>"  # optional; defaults to Documents/Kvist Workspace
-.venv/bin/python run_task.py "<task prompt>"           # non-interactive single-task entry (hardcodes /tmp/kvist_test)
+.venv/bin/python -m kernel --workspace "<project_path>"  # optional; defaults to Documents/Kvist Workspace
+.venv/bin/python kernel/__main__.py --workspace …        # same, from any cwd (what frontends spawn)
+.venv/bin/python scripts/run_task.py "<task prompt>"     # non-interactive single-task entry (hardcodes /tmp/kvist_test)
 
-.venv/bin/python -m pytest                              # full test suite
-.venv/bin/python -m pytest tests/test_role_router.py    # one file
-.venv/bin/python -m pytest tests/test_parser.py::test_name
+.venv/bin/python -m pytest                              # every Python suite (kernel, classic, zed, scripts)
+.venv/bin/python -m pytest kernel/tests/test_role_router.py    # one file
+.venv/bin/python -m pytest kernel/tests/test_parser.py::test_name
 .venv/bin/python -m pytest -m offline_smoke             # fast credential-free smoke subset
+.venv/bin/python -m pytest -m ""                        # also the slow real-process/PTY tests
 RUN_LIVE_LLM_TESTS=1 .venv/bin/python -m pytest -m live_llm
 .venv/bin/python -m ruff check .                        # static runtime-error lint
-npm install && npm run build                            # Ink terminal UI -> dist-ui/kvist-tui.mjs (one file)
-npm test && npm run typecheck                           # Ink UI tests and types
 
-.venv/bin/python -m PyInstaller kvist.spec  # build the `kvist` binary (bundles prompts/)
+cd frontends/tui/ink && npm install && npm run build    # Ink terminal UI -> frontends/tui/ink/dist-ui/kvist-tui.mjs
+cd frontends/tui/ink && npm test && npm run typecheck   # Ink UI tests and types
+cd frontends/ide/vscode && npm test && npm run typecheck   # VS Code extension + webview (imports Ink modules)
+cd frontends/gui/electron && npm test                   # Electron GUI
+
+.venv/bin/python -m PyInstaller kvist.spec  # build the `kvist` binary (bundles kernel/prompts/)
 
 # Byte-compile the project for syntax checks, excluding generated/agent workspaces.
 # compileall will recurse into .agent-workspace/ and workspace/ dirs if not excluded —
@@ -247,10 +284,10 @@ write_file, append_file, replace_in_file, list_dir, list_tree, find_files, searc
 git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, refuse,
 final_answer, report_to_user, offer_plan, propose_plan). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
-validation, the executor dispatch, and the role prompts in `prompts/system/` — the sync is
-enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
+validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
+enforced by `kernel/tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
 `report_to_user` are terminal actions handled in `run_loop` (never reach the executor);
-`report_to_user` additionally routes through the chat reporter (`prompts/system/report_prompt.txt`).
+`report_to_user` additionally routes through the chat reporter (`kernel/prompts/system/report_prompt.txt`).
 
 **Action batches.** The model sends `"actions": [...]` (any number of read-only calls plus at most `parser.MAX_BATCH_ACTIONS`
 = 8 others); a bare `"action"` object is still accepted for a model prompted from an older
@@ -270,7 +307,7 @@ describes the whole batch; each action's `description` feeds the banner's Action
 (`StepEvent.action_description` for the GUI) — prompts cap it at 16 characters because
 that row holds 17 (`banner.LIVE_METRICS_WIDTH` minus the label). A status message stays on screen at
 least 2.5 s before a newer one replaces it (`terminal_banner._MESSAGE_HOLD_SECONDS`,
-`STATUS_HOLD_MS` in `gui/renderer/app.js`) — a timer on the UI side, never a sleep in
+`STATUS_HOLD_MS` in `frontends/gui/electron/renderer/app.js`) — a timer on the UI side, never a sleep in
 the agent thread, so the hold costs the run no time.
 
 **Native tool calling (`native_tools.py`).** On the first step of a run,
@@ -281,7 +318,7 @@ the agent thread, so the hold costs the run no time.
 conversation in `RunState.native_messages`: the system prompt from
 `build_role_system_prompt(..., native_tools=True)` (the role prompt with its
 RESPONSE FORMAT / ARGS SCHEMAS / EXAMPLES / SELF-CHECK sections swapped for
-`prompts/system/native_tools.txt`), the ordinary runtime prompt as the first user
+`kernel/prompts/system/native_tools.txt`), the ordinary runtime prompt as the first user
 message, then each turn's assistant message (with `reasoning_content` when the
 provider returned it under that name — DeepSeek requires it back), one `tool`
 answer per call, and `pending_instruction` as an "Additional instruction" user
@@ -336,7 +373,7 @@ functions take `self` as their first arg and operate on `self._state` (a `RunSta
 There is no planner call. A plan is something the model offers and the person
 accepts. It costs one dialog and one read-only pass, while a wrong start costs
 edits to undo. The model itself decides when to offer (guidance in
-`prompts/system/plan_mode.txt`, appended to the system prompt of coder/devops/universal by
+`kernel/prompts/system/plan_mode.txt`, appended to the system prompt of coder/devops/universal by
 `agent_model.build_role_system_prompt`): when the direction is the risky part — several
 approaches with different consequences, many files or a public interface, a loosely
 worded result, hard-to-undo effects — and never for a rename, a typo or steps the
@@ -367,7 +404,7 @@ safe read-only shell; no writes, no `delegate_task`). The executor has no reader
 this loop check is the only enforcement. The create-goal "write now" nudges and
 `_note_unchanged_run` are off in this phase, a response without calls is not accepted as
 the end (the turn ends with `propose_plan`), and native tool definitions are narrowed per
-turn by `plan_mode.tools_for_phase`. Tests: `tests/test_plan_mode.py`.
+turn by `plan_mode.tools_for_phase`. Tests: `kernel/tests/test_plan_mode.py`.
 
 **Session history is never cut by hand; the model's budget cuts it.**
 `_add_to_session_history` stores the turn's answer whole (it was once
@@ -462,22 +499,24 @@ that would orphan a build in a session that now survives the stop.
 transport-agnostic mechanism — observed between steps, while consuming an action-loop
 stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
 
-### Ink terminal frontend (root `*.ts`/`ui/`, bundled to `dist-ui/kvist-tui.mjs`)
-A separate Node 22 / TypeScript / Ink app, **not** part of the Python process:
+### Ink terminal frontend (`frontends/tui/ink/`, bundled to `dist-ui/kvist-tui.mjs`)
+A separate Node 22 / TypeScript / Ink app, **not** part of the Python process. Paths in
+this section are relative to `frontends/tui/ink/`.
 `main.py --frontend tui` (or the saved `/tui` preference, `user_config.get_saved_frontend`)
 calls `launch_tui`, which runs `node dist-ui/kvist-tui.mjs` and passes the exact core
-command in `KVIST_CORE_CMD` (JSON argv, so a frozen binary and a source checkout both
-work). The app spawns that core as `--frontend stdio-multi` and speaks only the
-UI_API.md events; it never reads `.kvist/`. Session ops go through `--session-op`.
+command in `KVIST_CORE_CMD` (JSON argv: the frozen binary, or the interpreter plus
+`kernel/__main__.py` from a checkout). The app spawns that core as `--frontend stdio-multi` and speaks only the
+`docs/UI_API.md` events; it never reads `.kvist/`. Session ops go through `--session-op`.
 `launch_tui` returns None — and the classic terminal starts — without a TTY, Node, a
-build (`dist-ui/`; the root `dist/` is PyInstaller's) or a configured provider. Layout: `core.ts` (adapter),
-`state.ts` (pure event reducer, tested), `editor.ts`, `commands.ts`, `ui/*.tsx`.
+build (`dist-ui/`; the repository root's `dist/` is PyInstaller's) or a configured provider. Layout: `core.ts` (adapter),
+`state.ts` (pure event reducer, tested), `editor.ts`, `commands.ts`, `ui/*.tsx` (shared),
+`ui/skins/kvist/` (the default skin's transcript) and `ui/skins/claude-code/`.
 **Two skins, one app.** `--frontend claude` (saved `frontend: "claude"`, in
 `main.TUI_FRONTENDS` with `tui`) runs the same bundle with `--skin claude`; `launch_tui`
 derives the skin from the frontend value. `ui/theme.ts` holds both palettes and `applySkin`
 overwrites the shared `color` object once, before the first render, so the shared
 components (markdown, prompts, input) re-theme themselves; structure that differs lives in
-`ui/claude.tsx` (banner with the `ui/mascot.tsx` squirrel, `●` calls, `⎿` results, `✻` spinner,
+`ui/skins/claude-code/claude.tsx` (banner with the `ui/skins/claude-code/mascot.tsx` squirrel, `●` calls, `⎿` results, `✻` spinner,
 footer) and a few `currentSkin()` branches in `input.tsx`/`prompts.tsx`/`markdown.tsx`.
 `/tui` is a picker over `commands.FRONTENDS`; choosing another Node skin exits with code 64
 and `_switch_frontend` saves it and relaunches `launch_tui`, so switching skins never passes
@@ -501,15 +540,15 @@ input and footer are pinned below it, at the floor of the window. The spinner wo
 chat, "Picking a role" until the router's `route` event arrives. The spinner line reads `(1m 6s · ↓ 8.5k tokens · thinking with high effort)`: tokens are the
 turn's own output (`usage.output - turnStartOutput`, reported after each model call), and
 `thought for 2s` replaces the doing-part for two seconds after a thought ends (`state.thought`).
-Under it goes a `⎿  Tip:` line about a Kvist command (`ui/tips.ts`, a new one every 3 s,
+Under it goes a `⎿  Tip:` line about a Kvist command (`ui/skins/claude-code/tips.ts`, a new one every 3 s,
 Russian for a Russian request); the live thought and answer are revealed at a steady pace
 (`useTypewriter`) because the core's stream arrives ~9 times a second and a fast model finishes
 in half a second; above the input, right-aligned, `● high · /effort` (`ClaudeEffort`). Tips name
 real commands and styles — re-read them when commands or `get_style_options` change.
-File edits follow Claude Code's look (`ui/claude-diff.tsx`): a blue `Update(path)` bullet, "Added
+File edits follow Claude Code's look (`ui/skins/claude-code/claude-diff.tsx`): a blue `Update(path)` bullet, "Added
 6 lines, removed 2 lines", and numbered rows with a full-width red or green background, code
 coloured by highlight.js (`highlight.ts`, the only new dependency; only the languages
-imported there are bundled, chosen by file extension, colours in `ui/syntax.ts`). Successful
+imported there are bundled, chosen by file extension, colours in `ui/skins/claude-code/syntax.ts`). Successful
 `run_shell` calls and the reads around them fold into one dim line ("Searched for 2 patterns,
 ran 2 shell commands", `collapse` in `claude.tsx`); a failed command is never folded, a command
 in flight shows `Running shell command · 25s…` with its first four lines, and Ctrl+O toggles
@@ -531,10 +570,10 @@ characters and ANSI aware) and copied on release through `clipboard.ts`. Shift+d
 the terminal's own selection. A `command_result` whose `effects.changed` is true (`/new`, `/session`) empties the feed under a
 fresh welcome block (`beginSession`, epoch bump, context back to 0); for a switch the app then
 replays that session's journal (`sessionHistory` → `restore` with `banner: true`), unless a turn
-started meanwhile. The welcome mark is the squirrel animation (`ui/mascot.tsx`): 8 rows × 16 columns (3 rows was
+started meanwhile. The welcome mark is the squirrel animation (`ui/skins/claude-code/mascot.tsx`): 8 rows × 16 columns (3 rows was
 unreadable), six frames played once at 2 fps that rest on the last, drawn on a transparent
 background. Its cells (2×2-pixel quadrant blocks) are generated by `make_mascot_frames.py`
-from `preview/animate/frame_*.png` into `ui/mascot-frames.ts` (Pillow and numpy; each pixel takes the
+from `frontends/tui/ink/mascot/frames/frame_*.png` into `ui/skins/claude-code/mascot-frames.ts` (Pillow and numpy; each pixel takes the
 most common colour of its source block, so the eyes stay crisp; `--rows` sets the size). The "KVIST" wordmark of `ui/logo.ts` is now used only by the exit farewell.
 The cell art comes in two sets from the generator: quadrants (2×2 pixels a cell, every font) and octants
 (2×4, Unicode 16, twice as sharp; the 251 patterns that have a character are taken from Python's Unicode
@@ -542,7 +581,7 @@ names, the four single-corner ones have none and are skipped). `mascotGlyphs` pi
 `WT_SESSION` is set (Windows Terminal ships Cascadia Code 2404+), quadrants otherwise; `KVIST_GLYPHS`
 overrides, since a terminal cannot be asked which glyphs its font has.
 On a terminal that draws pictures the same six frames go out as real images: the
-generator also writes `ui/mascot-images.ts` (256 px transparent palette PNGs, base64), `Mascot` leaves
+generator also writes `ui/skins/claude-code/mascot-images.ts` (256 px transparent palette PNGs, base64), `Mascot` leaves
 its cells blank, and `syncMascotImage` asks `Pointer.showImage` to keep the picture over those cells.
 Two protocols: kitty's (kitty, Ghostty, Konsole; recognised from the environment in `kitty.ts`, never
 under tmux) and Sixel (Windows Terminal 1.22+, WezTerm, mintty, foot, iTerm2…). Sixel cannot be told
@@ -625,21 +664,21 @@ creates that file) reads it, validates it through `user_config.save_frontend`, a
 returns `None` so the launcher continues into the classic terminal in the same
 process. The code carries no choice, so a new interface needs only an entry in
 `FRONTENDS` and a launch branch in `_switch_frontend`.
-Tests: `npm test` (the `tests/*.test.ts[x]` files sit beside the Python tests and use `tests/fixtures/fake-core.mjs`, never a real core).
+Tests: `npm test` in `frontends/tui/ink` (the `tests/*.test.ts[x]` files use `tests/fixtures/fake-core.mjs`, never a real core).
 
-### IDE chat panel (`vscode-extension/webview/`, shared with `jetbrains-plugin/`)
+### IDE chat panel (`frontends/ide/vscode/webview/`, shared with `frontends/ide/jetbrains/`)
 One Preact panel serves both IDEs. VS Code hosts it in a webview view
-(`vscode-extension/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
-JCEF tool window (`jetbrains-plugin/.../chat/`): its Gradle build runs the extension's
+(`frontends/ide/vscode/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
+JCEF tool window (`frontends/ide/jetbrains/.../chat/`): its Gradle build runs the extension's
 `npm run build` and packs `out/webview.{js,css}` as resources, never a copy of the
 sources. `webview/host.ts` is the only file that knows the host (`acquireVsCodeApi`
 vs. the `window.kvistHost` bridge built on a `JBCefJSQuery`); the rest of the panel
 sees `post`/`onMessage`. `KvistChatHost.kt` is a port of `chatView.ts` and
-`KvistCoreProcess.kt` of `src/core.ts`, so a new `ToHost`/`ToWebview` message in
-`src/messages.ts` needs a handler on both sides. Without JCEF the tool window falls
+`KvistCoreProcess.kt` of the Ink app's `frontends/tui/ink/core.ts`, so a new
+`ToHost`/`ToWebview` message in `frontends/ide/vscode/src/messages.ts` needs a handler on both sides. Without JCEF the tool window falls
 back to the terminal launcher.
 
-### Zed / ACP frontend (`acp_frontend.py`, `acp_events.py`, `zed-acp/`)
+### Zed / ACP frontend (`acp_frontend.py`, `acp_events.py`, `frontends/zed/`)
 Zed reaches coding agents over the **Agent Client Protocol**, so this is an
 external agent registration and not an extension: there is no `extension.toml`
 here, and Zed deprecated extension-provided agents in v1.5.0. `kvist --acp`
@@ -662,7 +701,7 @@ Capabilities are declared only where the path works end to end — **no NES, no 
 no image or audio prompts** (`PromptCapabilities(image=False, audio=False)`).
 
 **Never design the ACP/Zed surface from memory.** Re-check the official docs
-before changing it (`zed-acp/README.md` carries the re-checked source list).
+before changing it (`frontends/zed/README.md` carries the re-checked source list).
 Locked facts: Zed's `agent_servers` entry is `{"type": "custom", "command",
 "args", "env"}` under `~/.config/zed/settings.json` on macOS and Linux without a
 custom `XDG_CONFIG_HOME`; the Windows location is **not** documented, so
@@ -671,15 +710,15 @@ accepts only `zed | copilot | mercury | codestral | ollama |
 open_ai_compatible_api | none` — there is no external-agent value, so inline
 completion cannot be supplied and must never be claimed. Divergences from the
 VS Code/JetBrains feature set are recorded per capability in
-[`zed-acp/README.md`](zed-acp/README.md) / [`zed-acp/README.ru.md`](zed-acp/README.ru.md);
+[`frontends/zed/README.md`](frontends/zed/README.md) / [`frontends/zed/README.ru.md`](frontends/zed/README.ru.md);
 do not call the integration a full copy while anything on the "impossible" list
 stands.
 
-`installer/install_zed.py` writes exactly one `agent_servers` member through
-`installer/jsonc_settings.py` — character-range surgery on a JSONC document, so
+`scripts/installer/install_zed.py` writes exactly one `agent_servers` member through
+`scripts/installer/jsonc_settings.py` — character-range surgery on a JSONC document, so
 the user's comments, key order and line endings survive — and it never builds or
 copies the binary (that is `install_cli.py`'s job; a missing `kvist-core` is a
-loud refusal). It is registered in `installer/install.py` with `after=("cli",)`,
+loud refusal). It is registered in `scripts/installer/install.py` with `after=("cli",)`,
 which is what keeps a parallel `--all` run from racing for that binary.
 
 ### Role routing (`role_router.py`)
@@ -688,7 +727,7 @@ priority: an explicit no-write marker → `reader` (beats topic) → determinist
 rules (devops → coder → chat, bilingual EN/RU) → LLM router call on `fast_model` →
 keyword fallback → default `chat`. Returns a `RoleRouteResult` (alias `RouteDecision`)
 carrying the chosen role and its `source`. `reader` is a full role with its own prompt
-(`prompts/system/reader_prompt.txt`): it inspects and reports, and its writes are
+(`kernel/prompts/system/reader_prompt.txt`): it inspects and reports, and its writes are
 disabled. `main.py --role` additionally accepts `auto`, which is "let the router decide"
 rather than a fifth role.
 
@@ -800,7 +839,7 @@ while `required_next_actions` actually restricts the next step.
 **Section headers in `agent_context.SECTION_PRIORITIES` must match what
 `build_runtime_prompt` renders, character for character.** A header that does
 not match is not a section at all: its text folds into the section above and is
-trimmed at *that* section's priority. `tests/test_agent_context.py` asserts
+trimmed at *that* section's priority. `kernel/tests/test_agent_context.py` asserts
 every rendered header is a known key.
 
 ### Model tiers (`agent_model.py`)
@@ -808,11 +847,11 @@ Two models per provider: **fast** and **smart** (`llm_clients.MODEL_ROLES`; a `p
 key in an older `~/.kvist/config.json` is ignored). A run uses fast by default
 and escalates to smart when `task_intent.is_complex_goal` flags the request, or on parse
 errors, consecutive errors, or stagnation — unless the user explicitly pinned a model.
-Role system prompts are loaded and cached from `prompts/system/`:
+Role system prompts are loaded and cached from `kernel/prompts/system/`:
 `{chat,coder,commit,complete,devops,reader,report,router,universal}_prompt.txt`, plus
 `constitution.txt`, `native_tools.txt` and `plan_mode.txt`.
 
-User-selectable styles live apart, in `prompts/styles/{agents,chat}/<slug>.txt`
+User-selectable styles live apart, in `kernel/prompts/styles/{agents,chat}/<slug>.txt`
 (`agents` covers coder/reader/devops, `chat` the chat role). **One session, one
 style**: the choice is stamped into the session document when the session starts
 (`agent_logging.session_styles`, restored by `restore_session_document` *before*
@@ -864,11 +903,11 @@ whole turn, but must never strip that field from a turn it keeps.
 ### Provider abstraction (`llm_clients.py`)
 Model catalogs (`_MODEL_DEFAULTS`, `_MODEL_OPTIONS`, the fallback chains,
 `_DEPRECATED_FREEFLOW_MODELS`, `_FREEFLOW_MODEL_ALIASES`) are offline fallbacks
-for when live discovery fails, and `tests/test_llm_clients.py` enforces their
+for when live discovery fails, and `kernel/tests/test_llm_clients.py` enforces their
 coherence: **no alias may resolve to a deprecated or unlisted model** (retiring
 Groq's Llama models broke the `mixtral`/`allam` aliases that pointed at them),
 every default must be offered by its provider, and every fallback chain must
-start at an offered model. `tests/test_context_budget.py` additionally requires
+start at an offered model. `kernel/tests/test_context_budget.py` additionally requires
 every shipped model to have an explicit `MODEL_INPUT_LIMITS` entry — the family
 fallback is for ids discovered at launch, not for the catalog Kvist controls.
 
@@ -1042,7 +1081,7 @@ JSON encoding does not escape that terminator, so the payload is passed through
 `<PROJECT_INSTRUCTIONS>` becomes `[tag removed by Kvist]` and cannot close its own
 block. Trade-off to know when hacking on Kvist *with* Kvist: a file that literally
 contains those tag strings (this repo's own `agent_runtime.py`, `redaction.py`,
-`prompts/system/`) reads back with the marker in place — visible, never silent, and an edit
+`kernel/prompts/system/`) reads back with the marker in place — visible, never silent, and an edit
 built on it fails to match rather than corrupting the file.
 
 ## Conventions
@@ -1050,7 +1089,7 @@ built on it fails to match rather than corrupting the file.
 - All modules start with `# -*- coding: utf-8 -*-` and `from __future__ import annotations`.
 - Dataclasses use `slots=True`. State mutation flows through `RunState`.
 - User-facing strings are bilingual EN/RU; routing and prompts handle both languages.
-- Tests use fakes from `tests/conftest.py` (`FakeLLMClient`, `NullUI`, `agent_factory`,
+- Tests use fakes from `kernel/tests/conftest.py` (`FakeLLMClient`, `NullUI`, `agent_factory`,
   `make_command`) — no network. Mirror this when adding tests; gate any real
   LLM calls behind the `live_llm` marker.
 

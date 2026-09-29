@@ -1,4 +1,4 @@
-# installer/
+# scripts/installer/
 
 Everything that puts Kvist onto a machine. Every script runs on Linux and
 Windows (and, best-effort, macOS).
@@ -15,19 +15,19 @@ Windows (and, best-effort, macOS).
 | `_common.py` | Shared helpers: the quiet log + spinner every installer reports through, safe ZIP extraction, JetBrains IDE discovery. |
 
 ```bash
-python installer/install.py                      # pick with the arrow keys
-python installer/install.py --all                # everything, no questions
-python installer/install.py --cli --gui          # named components, no questions
+python scripts/installer/install.py                      # pick with the arrow keys
+python scripts/installer/install.py --all                # everything, no questions
+python scripts/installer/install.py --cli --gui          # named components, no questions
 
-python installer/install_cli.py                  # or run one on its own
-python installer/install_jetbrains.py            # --build to build the plugin ZIP first
-python installer/install_jetbrains.py --uninstall
-python installer/install_vscode.py               # --build to build the VSIX first
-python installer/install_vscode.py --uninstall
-python installer/install_gui.py                  # --build to run electron-builder first
-python installer/install_gui.py --uninstall
-python installer/install_zed.py                  # needs install_cli.py to have run first
-python installer/install_zed.py --uninstall
+python scripts/installer/install_cli.py                  # or run one on its own
+python scripts/installer/install_jetbrains.py            # --build to build the plugin ZIP first
+python scripts/installer/install_jetbrains.py --uninstall
+python scripts/installer/install_vscode.py               # --build to build the VSIX first
+python scripts/installer/install_vscode.py --uninstall
+python scripts/installer/install_gui.py                  # --build to run electron-builder first
+python scripts/installer/install_gui.py --uninstall
+python scripts/installer/install_zed.py                  # needs install_cli.py to have run first
+python scripts/installer/install_zed.py --uninstall
 ```
 
 ## Output
@@ -103,7 +103,7 @@ refuses to write an entry pointing at a binary that is not there.
 stdout — Zed wraps the command in the login shell, and a startup that prints
 anything makes Zed reject the stream. `install_zed.py` creates that directory
 next to the binary; the mechanism is in
-[`zed-acp/README.md`](../zed-acp/README.md).
+[`frontends/zed/README.md`](../../frontends/zed/README.md).
 
 Zed's settings are JSONC, so the edit replaces exactly the character range of
 that one member (`jsonc_settings.py`). Comments, key order and line endings
@@ -119,19 +119,20 @@ can name and, when none exists, stops and reports them rather than inventing a
 path. Pass `--settings` to point it at the file Zed actually uses.
 
 The parity the Zed integration does and does not have is written down in
-[`zed-acp/README.md`](../zed-acp/README.md).
+[`frontends/zed/README.md`](../../frontends/zed/README.md).
 
-## `assets/`
+## Icons (`branding/`)
 
+The installers read the icons from the repository's `branding/` directory.
 `icon.svg` is the master mark (cyan chevron + cursor bar on a slate rounded
 square). `icon-<n>.png` are flat renders; `kvist.ico` is the multi-resolution
 Windows icon. Regenerate from the SVG with:
 
 ```bash
-cd installer/assets
+cd branding/
 for s in 16 24 32 48 64 128 256 512; do rsvg-convert -w $s -h $s icon.svg -o icon-$s.png; done
 magick icon-256.png -define icon:auto-resize=256,128,64,48,32,16 kvist.ico
 ```
 
-The GUI build copies of these live in `gui/build/` and are wired into
-`gui/package.json` (`build.linux.icon`, `build.win.icon`).
+The GUI build copies of these live in `frontends/gui/electron/build/` and are wired into
+`frontends/gui/electron/package.json` (`build.linux.icon`, `build.win.icon`).

@@ -97,10 +97,10 @@ one of `auto`, `coder`, `devops`, or `chat`. `--approval-mode` is `ask` or
   `--login` is valid only with it: configure provider credentials in that
   terminal and exit. This mode is not an NDJSON event stream and does not use
   `PROTOCOL_VERSION`; it is a JSON-RPC peer, and what it can and cannot do for
-  a given host is recorded in [`zed-acp/README.md`](zed-acp/README.md).
+  a given host is recorded in [`frontends/zed/README.md`](../frontends/zed/README.md).
 
 (During development, without the built binary, use
-`.venv/bin/python main.py --workspace … --frontend stdio`.)
+`.venv/bin/python -m kernel --workspace … --frontend stdio`.)
 
 ---
 
@@ -613,8 +613,8 @@ cumulative snapshots to ACP's append-only deltas lives in the latter.
 
 Capabilities are declared only where the path works end to end — no NES, no MCP
 servers, no image or audio prompts. What a given host can and cannot expose is
-recorded per capability in [`zed-acp/README.md`](zed-acp/README.md)
-([RU](zed-acp/README.ru.md)).
+recorded per capability in [`frontends/zed/README.md`](../frontends/zed/README.md)
+([RU](../frontends/zed/README.ru.md)).
 
 ## 9. Universal frontend dispatch (`frontends.py`)
 
@@ -728,7 +728,7 @@ Event protocol: `frontend_protocol.py`, `event_stream_ui.py`, `event_session.py`
 `event_stdio.py`, `frontends.py`.
 Headless sessions: `session_store.py` (behind `--session-op`).
 ACP peer (§8d): `acp_frontend.py`, `acp_events.py`.
-Tests: `tests/test_frontend_protocol.py`, `tests/test_event_stream_ui.py`,
-`tests/test_event_session.py`, `tests/test_frontends.py`,
-`tests/test_session_store.py`, `tests/test_acp_frontend.py`,
-`tests/test_acp_events.py`.
+Tests: `kernel/tests/test_frontend_protocol.py`, `kernel/tests/test_event_stream_ui.py`,
+`kernel/tests/test_event_session.py`, `kernel/tests/test_frontends.py`,
+`kernel/tests/test_session_store.py`, `frontends/zed/tests/test_acp_frontend.py`,
+`frontends/zed/tests/test_acp_events.py`.

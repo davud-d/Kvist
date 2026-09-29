@@ -1,4 +1,4 @@
-# zed-acp/ — Kvist as a Zed external agent (experimental)
+# frontends/zed/ — Kvist as a Zed external agent (experimental)
 
 ⚠️ **Status: experimental integration with limitations**
 
@@ -22,14 +22,14 @@ Registry instead, and the way to run your own agent is to register it as an
 ## Install and launch
 
 ```bash
-python installer/install_cli.py                  # builds/installs kvist-core first
-python installer/install_zed.py                  # writes one agent_servers member
-python installer/install_zed.py --uninstall      # removes it again
+python scripts/installer/install_cli.py                  # builds/installs kvist-core first
+python scripts/installer/install_zed.py                  # writes one agent_servers member
+python scripts/installer/install_zed.py --uninstall      # removes it again
 ```
 
 `install_zed.py` edits Zed's settings surgically and refuses to write an entry
 pointing at a binary that is not installed yet; see
-[`installer/README.md`](../installer/README.md#how-zed-is-configured). Zed
+[`scripts/installer/README.md`](../../scripts/installer/README.md#how-zed-is-configured). Zed
 re-reads its settings on its own — no restart.
 
 To run the agent by hand instead:

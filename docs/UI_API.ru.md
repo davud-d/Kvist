@@ -83,10 +83,10 @@ kvist --workspace /path/to/project                       # терминальн�
   терминале и завершиться. Это не поток событий NDJSON и `PROTOCOL_VERSION` тут
   не участвует: это JSON-RPC-участник, а что он умеет и чего не умеет для
   конкретного хоста, записано в
-  [`zed-acp/README.ru.md`](zed-acp/README.ru.md).
+  [`frontends/zed/README.ru.md`](../frontends/zed/README.ru.md).
 
 (В разработке, без собранного бинаря:
-`.venv/bin/python main.py --workspace … --frontend stdio`.)
+`.venv/bin/python -m kernel --workspace … --frontend stdio`.)
 
 ---
 
@@ -605,7 +605,7 @@ kvist --commit-message < payload.json
 Возможности заявляются только там, где путь работает до конца: ни NES, ни
 MCP-серверов, ни аудио- и image-промптов. Что конкретный хост может и чего не
 может показать, записано по каждой возможности в
-[`zed-acp/README.ru.md`](zed-acp/README.ru.md) ([EN](zed-acp/README.md)).
+[`frontends/zed/README.ru.md`](../frontends/zed/README.ru.md) ([EN](../frontends/zed/README.md)).
 
 ## 9. Универсальный диспетчер фронтендов (`frontends.py`)
 
@@ -719,7 +719,7 @@ Electron просто спавнит бинарь `kvist`.
 `event_stdio.py`, `frontends.py`.
 Headless-сессии: `session_store.py` (за `--session-op`).
 Участник ACP (§8d): `acp_frontend.py`, `acp_events.py`.
-Тесты: `tests/test_frontend_protocol.py`, `tests/test_event_stream_ui.py`,
-`tests/test_event_session.py`, `tests/test_frontends.py`,
-`tests/test_session_store.py`, `tests/test_acp_frontend.py`,
-`tests/test_acp_events.py`.
+Тесты: `kernel/tests/test_frontend_protocol.py`, `kernel/tests/test_event_stream_ui.py`,
+`kernel/tests/test_event_session.py`, `kernel/tests/test_frontends.py`,
+`kernel/tests/test_session_store.py`, `frontends/zed/tests/test_acp_frontend.py`,
+`frontends/zed/tests/test_acp_events.py`.

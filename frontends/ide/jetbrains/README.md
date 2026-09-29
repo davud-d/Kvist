@@ -4,9 +4,9 @@ IntelliJ Platform plugin for Kvist: a chat tool window with the same panel as th
 
 ## Chat tool window
 
-The **Kvist** tool window (right side) shows the VS Code extension's chat panel in the IDE's embedded browser (JCEF, `JBCefBrowser`). The panel is not copied: the Gradle build runs the extension's own `npm run build` in `../vscode-extension` and packs `out/webview.js`, `out/webview.css` and the logo into the plugin as resources (`buildWebview` and `syncWebview` tasks). So the build needs Node.js 22+ and npm; it runs `npm ci` there when `node_modules/` is missing.
+The **Kvist** tool window (right side) shows the VS Code extension's chat panel in the IDE's embedded browser (JCEF, `JBCefBrowser`). The panel is not copied: the Gradle build runs the extension's own `npm run build` in `../vscode` and packs `out/webview.js`, `out/webview.css` and the logo into the plugin as resources (`buildWebview` and `syncWebview` tasks). So the build needs Node.js 22+ and npm; it runs `npm ci` there when `node_modules/` is missing.
 
-- The page talks to the plugin through one `JBCefJSQuery`. `vscode-extension/webview/host.ts` is the only place in the panel that knows which IDE it runs in.
+- The page talks to the plugin through one `JBCefJSQuery`. `frontends/ide/vscode/webview/host.ts` is the only place in the panel that knows which IDE it runs in.
 - The plugin starts the bundled core as a child process in mode B (`--frontend stdio-multi`, UI_API.md) and passes NDJSON between it and the page. The first event must be `hello` with `protocol_version` 1. Approvals are fail-closed: open requests are denied when the core stops.
 - Title buttons: New Session, Settings, Reload (a new page and a new core, like Reload Window in VS Code; also how an exited core is restarted) and Run Kvist in the terminal.
 - Environment variables for the core (Settings in the panel) are stored in the IDE's application properties in plain text. Keep API keys in the provider settings.
@@ -76,11 +76,11 @@ You also need Python with project dependencies installed and `PyInstaller` avail
 These scripts do the fast path for local packaging:
 
 1. build the Kvist binary for the current OS with `PyInstaller`
-2. copy it into `jetbrains-plugin/bin/...`
+2. copy it into `frontends/ide/jetbrains/bin/...`
 3. refresh the IntelliJ sandbox copy if it already exists
 4. run the Gradle plugin build
 
-Run them from the `jetbrains-plugin/` directory.
+Run them from the `frontends/ide/jetbrains/` directory.
 
 ### Linux
 
@@ -132,7 +132,7 @@ Important:
 
 - build the executable on the target OS itself
 - keep the binary for the other supported OS in `bin/` as well if you want a distributable ZIP
-- run the PyInstaller step from the repository root, not from `jetbrains-plugin/`
+- run the PyInstaller step from the repository root, not from `frontends/ide/jetbrains/`
 
 ### Manual build on Linux
 
@@ -145,23 +145,23 @@ python -m PyInstaller kvist.spec
 2. Copy the result into the plugin directory:
 
 ```bash
-install -Dm755 dist/kvist jetbrains-plugin/bin/linux/kvist.bin
+install -Dm755 dist/kvist frontends/ide/jetbrains/bin/linux/kvist.bin
 ```
 
 3. Make sure the Windows binary is already present:
 
-- `jetbrains-plugin/bin/win/kvist.exe`
+- `frontends/ide/jetbrains/bin/win/kvist.exe`
 
 4. Build the plugin ZIP:
 
 ```bash
-cd jetbrains-plugin
+cd frontends/ide/jetbrains
 ./gradlew clean buildPlugin
 ```
 
 Result:
 
-- `jetbrains-plugin/build/distributions/*.zip`
+- `frontends/ide/jetbrains/build/distributions/*.zip`
 
 ### Manual build on Windows
 
@@ -174,23 +174,23 @@ python -m PyInstaller kvist.spec
 2. Copy the result into the plugin directory:
 
 ```powershell
-Copy-Item dist\kvist.exe jetbrains-plugin\bin\win\kvist.exe -Force
+Copy-Item dist\kvist.exe frontends\ide\jetbrains\bin\win\kvist.exe -Force
 ```
 
 3. Make sure the Linux binary is already present:
 
-- `jetbrains-plugin/bin/linux/kvist.bin`
+- `frontends/ide/jetbrains/bin/linux/kvist.bin`
 
 4. Build the plugin ZIP:
 
 ```powershell
-cd jetbrains-plugin
+cd frontends/ide/jetbrains
 .\gradlew.bat clean buildPlugin
 ```
 
 Result:
 
-- `jetbrains-plugin\build\distributions\*.zip`
+- `frontends\ide\jetbrains\build\distributions\*.zip`
 
 ## Typical workflows
 

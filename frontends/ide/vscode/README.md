@@ -15,7 +15,7 @@ window: the plugin's Gradle build runs `npm run build` here and packs
 knows the host: it calls `acquireVsCodeApi` in VS Code and the `window.kvistHost`
 bridge the JetBrains plugin injects. Keep IDE-specific code out of the other
 webview files, and keep `src/messages.ts` in step with
-`jetbrains-plugin/.../chat/KvistChatHost.kt`, which answers the same messages.
+`frontends/ide/jetbrains/.../chat/KvistChatHost.kt`, which answers the same messages.
 
 ## Usage
 
@@ -59,7 +59,7 @@ TypeScript, and package a VSIX.
 ### Linux
 
 ```bash
-cd vscode-extension
+cd frontends/ide/vscode
 ./build-plugin.sh
 ```
 
@@ -71,7 +71,7 @@ What it updates:
 ### Windows PowerShell
 
 ```powershell
-cd vscode-extension
+cd frontends/ide/vscode
 .\build-plugin.ps1
 ```
 
@@ -83,7 +83,7 @@ What it updates:
 ### Windows Command Prompt
 
 ```bat
-cd vscode-extension
+cd frontends/ide/vscode
 build-plugin.bat
 ```
 

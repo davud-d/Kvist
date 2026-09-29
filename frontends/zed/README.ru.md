@@ -1,4 +1,4 @@
-# zed-acp/ — Kvist как внешний агент Zed (экспериментально)
+# frontends/zed/ — Kvist как внешний агент Zed (экспериментально)
 
 ⚠️ **Статус: экспериментальная интеграция с ограничениями**
 
@@ -22,14 +22,14 @@ Zed объявил агенты-расширения устаревшими ещ
 ## Установка и запуск
 
 ```bash
-python installer/install_cli.py                  # сначала собрать и поставить kvist-core
-python installer/install_zed.py                  # записать одну запись agent_servers
-python installer/install_zed.py --uninstall      # и удалить её обратно
+python scripts/installer/install_cli.py                  # сначала собрать и поставить kvist-core
+python scripts/installer/install_zed.py                  # записать одну запись agent_servers
+python scripts/installer/install_zed.py --uninstall      # и удалить её обратно
 ```
 
 `install_zed.py` точечно правит настройки Zed и отказывается писать запись,
 указывающую на неустановленный бинарник; см.
-[`installer/README.ru.md`](../installer/README.ru.md#как-настраивается-zed).
+[`scripts/installer/README.ru.md`](../../scripts/installer/README.ru.md#как-настраивается-zed).
 Zed перечитывает настройки сам — перезапуск не нужен.
 
 Запустить агента вручную:

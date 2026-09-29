@@ -64,11 +64,11 @@ VS Code и Zed, а для сторонних frontend-ов — версиони�
 введите его API key в замаскированном prompt `API key:`. Значение сохраняется в
 `~/.kvist/config.json` и не выводится в терминал.
 
-![Терминальный UI Kvist готов к задаче](preview/terminal-start.png)
+![Терминальный UI Kvist готов к задаче](docs/media/terminal-start.png)
 
-![Терминальный агент Kvist работает над задачей](preview/terminal-working.png)
+![Терминальный агент Kvist работает над задачей](docs/media/terminal-working.png)
 
-![Терминальная задача Kvist завершена](preview/terminal-end.png)
+![Терминальная задача Kvist завершена](docs/media/terminal-end.png)
 
 ### Electron GUI
 
@@ -77,11 +77,11 @@ Electron frontend использует тот же runtime и NDJSON-прото�
 подтверждений или input-запросов. API key настраивается runtime, а не вставляется
 в текст задачи.
 
-![GUI Kvist готов в Hyprland](preview/gui-start.png)
+![GUI Kvist готов в Hyprland](docs/media/gui-start.png)
 
-![GUI-агент Kvist работает над задачей в Hyprland](preview/gui-working.png)
+![GUI-агент Kvist работает над задачей в Hyprland](docs/media/gui-working.png)
 
-![GUI-задача Kvist завершена в Hyprland](preview/gui-end.png)
+![GUI-задача Kvist завершена в Hyprland](docs/media/gui-end.png)
 
 ## Возможности
 
@@ -115,7 +115,7 @@ CLI проверяется на Linux и Windows. macOS остаётся экс�
 запускает Kvist как внешний ACP-агент — это запись в настройках, а не плагин, —
 и получает тот же цикл агента, сессии, подтверждения и `/commit-message`;
 чего он получить не может, написано в
-[`zed-acp/README.ru.md`](zed-acp/README.ru.md).
+[`frontends/zed/README.ru.md`](frontends/zed/README.ru.md).
 
 Встроенные провайдеры: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute и
 FreeFlow LLM (beta). Дополнительно через `/provider` можно добавить совместимый
@@ -148,7 +148,7 @@ cd Kvist
 python3 -m venv .venv && echo "venv OK" || echo "error venv" # или python -m venv .venv
 source .venv/bin/activate && echo "venv activated" || echo "error activate"
 uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
-python installer/install.py && echo "Install OK" || echo "error install"
+python scripts/installer/install.py && echo "Install OK" || echo "error install"
 ```
 **Нюанс**: *работает только для bash, если у вас другой shell - адаптируйте*
 
@@ -173,9 +173,9 @@ python installer\install.py; if ($?) { echo "Install OK" } else { echo "error in
 Относительные пути разрешаются от каталога, из которого запущен Kvist.
 
 ```bash
-.venv/bin/python main.py --workspace /path/to/project
+.venv/bin/python -m kernel --workspace /path/to/project
 # Без --workspace используется Документы/Kvist Workspace
-.venv/bin/python main.py
+.venv/bin/python -m kernel
 ```
 
 При первом запуске в терминале выберите провайдера, модели и credentials. Они
@@ -216,16 +216,16 @@ curl -H "Authorization: Bearer $ANYMODEL_API_KEY" https://anymodel.org/v1/models
 Чтобы установить команду `kvist` и при необходимости собрать standalone binary:
 
 ```bash
-.venv/bin/python installer/install.py
+.venv/bin/python scripts/installer/install.py
 ```
 
-В каталоге `installer/` есть IDE- и desktop-установщики для Linux и Windows:
+В каталоге `scripts/installer/` есть IDE- и desktop-установщики для Linux и Windows:
 
 ```bash
-.venv/bin/python installer/install_jetbrains.py   # ставит плагин во все найденные JetBrains IDE
-.venv/bin/python installer/install_vscode.py      # ставит расширение в VS Code / Insiders / VSCodium
-.venv/bin/python installer/install_gui.py         # ставит GUI и ярлык / пункт меню приложений
-.venv/bin/python installer/install_zed.py         # регистрирует kvist-core как ACP-агент Zed
+.venv/bin/python scripts/installer/install_jetbrains.py   # ставит плагин во все найденные JetBrains IDE
+.venv/bin/python scripts/installer/install_vscode.py      # ставит расширение в VS Code / Insiders / VSCodium
+.venv/bin/python scripts/installer/install_gui.py         # ставит GUI и ярлык / пункт меню приложений
+.venv/bin/python scripts/installer/install_zed.py         # регистрирует kvist-core как ACP-агент Zed
 ```
 
 ### Zed
@@ -236,8 +236,8 @@ Zed связывается с кодящими агентами через
 `extension.toml` в этом репозитории нет. Сначала запустите установщик CLI, затем:
 
 ```bash
-.venv/bin/python installer/install_cli.py         # кладёт kvist-core на диск
-.venv/bin/python installer/install_zed.py         # пишет одну запись agent_servers
+.venv/bin/python scripts/installer/install_cli.py         # кладёт kvist-core на диск
+.venv/bin/python scripts/installer/install_zed.py         # пишет одну запись agent_servers
 ```
 
 Эта запись указывает Zed на `kvist-core --acp`. Zed перечитывает настройки сам,
@@ -249,20 +249,20 @@ Zed связывается с кодящими агентами через
 
 Какой паритет есть у этого с интеграциями для VS Code и JetBrains — и перечень
 того, для чего в Zed нет публичного API (например, строчное дополнение), —
-в [`zed-acp/README.ru.md`](zed-acp/README.ru.md)
-([EN](zed-acp/README.md)).
+в [`frontends/zed/README.ru.md`](frontends/zed/README.ru.md)
+([EN](frontends/zed/README.md)).
 
-Расширение VS Code собирается в `.vsix` из `vscode-extension/`:
+Расширение VS Code собирается в `.vsix` из `frontends/ide/vscode/`:
 
 ```bash
-cd vscode-extension
+cd frontends/ide/vscode
 ./build-plugin.sh      # Linux host
 # или на Windows: .\build-plugin.ps1 / build-plugin.bat
 ```
 
 Скрипт собирает binary Kvist для текущей OS через PyInstaller, копирует его в
-`vscode-extension/bin/...`, компилирует расширение и кладёт пакет в
-`vscode-extension/.build/vsix/`.
+`frontends/ide/vscode/bin/...`, компилирует расширение и кладёт пакет в
+`frontends/ide/vscode/.build/vsix/`.
 
 Установщик использует `dist/kvist` или `dist/kvist.exe`, а при отсутствии
 собирает его PyInstaller-ом. Реальный binary кладётся в пользовательский
@@ -327,15 +327,15 @@ kvist
 
 ## Headless frontend и скрипты
 
-Терминальный интерфейс на Ink (корневые `*.ts` и `ui/`, Node 22+, TypeScript) — отдельный процесс,
+Терминальный интерфейс на Ink (`frontends/tui/ink/`, Node 22+, TypeScript) — отдельный процесс,
 который управляет Python-ядром через `--frontend stdio-multi`. Он пишет в обычный
 scrollback терминала, поэтому нативная прокрутка и копирование работают. Один раз
 соберите его:
 
 ```bash
-npm install && npm run build   # один самодостаточный файл: dist-ui/kvist-tui.mjs
-.venv/bin/python main.py --frontend tui   # или /tui, сохраняется как `frontend`
-.venv/bin/python main.py --frontend claude   # то же приложение в облике Claude Code
+(cd frontends/tui/ink && npm install && npm run build)   # один самодостаточный файл: frontends/tui/ink/dist-ui/kvist-tui.mjs
+.venv/bin/python -m kernel --frontend tui   # или /tui, сохраняется как `frontend`
+.venv/bin/python -m kernel --frontend claude   # то же приложение в облике Claude Code
 ```
 
 Интерфейс в стиле Claude — второй скин того же приложения, а не отдельный процесс:
@@ -358,7 +358,7 @@ WezTerm, mintty, foot, iTerm2 и другие; Kvist спрашивает тер
 `--frontend terminal` или `--no-banner` отменяют сохранённый выбор на один запуск.
 Ink-интерфейсу нужен провайдер, настроенный в классическом терминале; если нет Node,
 собранного файла, провайдера или TTY, Kvist запускает классический терминал и
-сообщает причину. Инсталлятор (`installer/install_cli.py`) собирает этот файл, если
+сообщает причину. Инсталлятор (`scripts/installer/install_cli.py`) собирает этот файл, если
 доступен npm, и упаковывает его в бинарник `kvist`; при запуске бинарнику нужен
 Node.js 22+ в `PATH`. Поддерживаются
 все слэш-команды. `/help`, `/clear`, `/debug` и `/quit` выполняет сам интерфейс,
@@ -376,26 +376,26 @@ Node.js 22+ в `PATH`. Поддерживаются
 Встроенный stdio frontend использует NDJSON — один JSON-объект на строку:
 
 ```bash
-.venv/bin/python main.py --workspace /path/to/project --frontend stdio
+.venv/bin/python -m kernel --workspace /path/to/project --frontend stdio
 ```
 
 Первое событие — `hello`. Далее идут план, статусы, streaming, запросы
 подтверждений, ошибки и финальный ответ. Полный wire contract, ответы на
-`input_request`, операции сессий и resume описаны в [`UI_API.ru.md`](UI_API.ru.md)
-и [`UI_API.md`](UI_API.md).
+`input_request`, операции сессий и resume описаны в [`docs/UI_API.ru.md`](docs/UI_API.ru.md)
+и [`docs/UI_API.md`](docs/UI_API.md).
 
 Полезные headless-команды:
 
 ```bash
-.venv/bin/python main.py --workspace /path/to/project --config-info
-.venv/bin/python main.py --workspace /path/to/project --session-op status
-.venv/bin/python main.py --workspace /path/to/project --session-op create --session-name review
-.venv/bin/python main.py --workspace /path/to/project --journal-op changes
-.venv/bin/python main.py --workspace /path/to/project --journal-op revert
+.venv/bin/python -m kernel --workspace /path/to/project --config-info
+.venv/bin/python -m kernel --workspace /path/to/project --session-op status
+.venv/bin/python -m kernel --workspace /path/to/project --session-op create --session-name review
+.venv/bin/python -m kernel --workspace /path/to/project --journal-op changes
+.venv/bin/python -m kernel --workspace /path/to/project --journal-op revert
 
 # Сообщение коммита по набору изменений (так его вызывает плагин JetBrains; UI_API.ru.md §8b)
 echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
-  | .venv/bin/python main.py --commit-message
+  | .venv/bin/python -m kernel --commit-message
 ```
 
 Для stdio доступны overrides `--provider`, оба model-флага, `--role` и
@@ -408,24 +408,24 @@ GUI запускает Kvist как дочерний процесс и обща�
 Python-модули и HTTP/WebSocket не используются.
 
 ```bash
-cd gui
+cd frontends/gui/electron
 npm ci
 npm start -- --workspace /path/to/project
 ```
 
 Тесты GUI: `npm test`. Native-пакеты собираются через `npm run dist` отдельно
 на Linux (`AppImage`, `deb`) и Windows (`nsis`). Подробности — в
-[`gui/README.md`](gui/README.md).
+[`frontends/gui/electron/README.md`](frontends/gui/electron/README.md).
 
-В `gui/package.json` задано `"workspaces": []`, чтобы electron-builder считал
-каталог `gui/` собственным корнем workspace и не поднимался выше к постороннему
+В `frontends/gui/electron/package.json` задано `"workspaces": []`, чтобы electron-builder считал
+каталог `frontends/gui/electron/` собственным корнем workspace и не поднимался выше к постороннему
 монорепо, ломая сборку.
 
 ## Плагин JetBrains
 
 Плагин запускает Kvist во вкладке терминала IDE (Tools > Run Kvist или кнопка
 на панели) и пишет сообщения коммитов. Установка:
-`.venv/bin/python installer/install_jetbrains.py`, затем перезапуск IDE.
+`.venv/bin/python scripts/installer/install_jetbrains.py`, затем перезапуск IDE.
 
 ### Сообщения коммитов
 
@@ -448,8 +448,8 @@ npm start -- --workspace /path/to/project
 - Нужен встроенный Git-плагин IDE; без него доступен только запуск Kvist.
 - Плагин требует IntelliJ Platform 2025.3 или новее.
 
-Сборка и подробности — в [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md),
-протокол вызова — в [`UI_API.ru.md`](UI_API.ru.md) §8b.
+Сборка и подробности — в [`frontends/ide/jetbrains/README.md`](frontends/ide/jetbrains/README.md),
+протокол вызова — в [`docs/UI_API.ru.md`](docs/UI_API.ru.md) §8b.
 
 ## Расширение VS Code
 
@@ -464,14 +464,14 @@ Command Palette и заголовок Source Control. Генерация соо�
 JetBrains-плагин:
 
 ```bash
-cd vscode-extension
+cd frontends/ide/vscode
 ./build-plugin.sh
 ```
 
 На Windows используйте `.\build-plugin.ps1` в PowerShell или `build-plugin.bat`
-в Command Prompt. Готовый пакет лежит в `vscode-extension/.build/vsix/`; его
+в Command Prompt. Готовый пакет лежит в `frontends/ide/vscode/.build/vsix/`; его
 можно установить через `code --install-extension <file>.vsix` или Extensions >
-Install from VSIX. Подробности — в [`vscode-extension/README.md`](vscode-extension/README.md).
+Install from VSIX. Подробности — в [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md).
 
 ## Zed
 
@@ -481,8 +481,8 @@ Zed запускает Kvist как внешнего агента по Agent Cli
 устаревшими, а публичный способ добавить агента — запись в настройках.
 
 ```bash
-.venv/bin/python installer/install_cli.py
-.venv/bin/python installer/install_zed.py
+.venv/bin/python scripts/installer/install_cli.py
+.venv/bin/python scripts/installer/install_zed.py
 ```
 
 `install_zed.py` пишет одну запись `agent_servers` в JSONC-файл настроек Zed,
@@ -495,8 +495,8 @@ ACP, а всё остальное (провайдер, модели, стиль,
 
 Чего для Zed нет публичного API — строчного дополнения как ghost text, боковой
 панели Kvist, кнопки коммита в source-control UI — перечислено вместе с
-официальными источниками в [`zed-acp/README.ru.md`](zed-acp/README.ru.md)
-([EN](zed-acp/README.md)).
+официальными источниками в [`frontends/zed/README.ru.md`](frontends/zed/README.ru.md)
+([EN](frontends/zed/README.md)).
 
 ## Конфигурация и границы
 
@@ -528,19 +528,41 @@ workspace и запросы подтверждения.
 всегда имеют приоритет. При наличии sandbox сеть по умолчанию запрещена, а без
 ответа TTY/frontend подтверждение закрывается безопасно (deny).
 
+## Структура репозитория
+
+```text
+kernel/            Python-ядро (python -m kernel): цикл агента, исполнитель, провайдеры, сессии, промпты
+frontends/
+  tui/classic/     классический терминал (Python, prompt_toolkit)
+  tui/ink/         терминальный интерфейс на Ink (TypeScript), скины kvist и claude-code
+  gui/electron/    десктопное приложение (Electron)
+  ide/vscode/      расширение VS Code и чат-панель, общая с JetBrains
+  ide/jetbrains/   плагин IntelliJ
+  zed/             агент для Zed по ACP
+scripts/           установщики, run_task.py, package_script.py
+branding/          иконки и логотипы
+docs/              протокол фронтендов (UI_API) и медиа для README
+site/              лендинг kvist.site
+```
+
+Тесты каждого компонента лежат рядом с ним (`kernel/tests/`, `frontends/*/tests/`, …).
+
 ## Тесты и lint
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest              # ядро, классический терминал, Zed, скрипты
 .venv/bin/python -m ruff check .
+(cd frontends/tui/ink && npm test)      # терминальный интерфейс на Ink
+(cd frontends/ide/vscode && npm test)   # расширение VS Code и чат-панель
+(cd frontends/gui/electron && npm test) # Electron GUI
 ```
 
 ## Связанные документы
 
-- [`UI_API.ru.md`](UI_API.ru.md) — полный frontend-протокол;
-- [`gui/README.md`](gui/README.md) — разработка и packaging Electron GUI;
-- [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md) — IntelliJ-плагин;
-- [`vscode-extension/README.md`](vscode-extension/README.md) — расширение VS Code;
-- [`zed-acp/README.ru.md`](zed-acp/README.ru.md) — внешний агент Zed ([EN](zed-acp/README.md));
-- [`installer/README.ru.md`](installer/README.ru.md) — установщики ([EN](installer/README.md));
+- [`docs/UI_API.ru.md`](docs/UI_API.ru.md) — полный frontend-протокол;
+- [`frontends/gui/electron/README.md`](frontends/gui/electron/README.md) — разработка и packaging Electron GUI;
+- [`frontends/ide/jetbrains/README.md`](frontends/ide/jetbrains/README.md) — IntelliJ-плагин;
+- [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md) — расширение VS Code;
+- [`frontends/zed/README.ru.md`](frontends/zed/README.ru.md) — внешний агент Zed ([EN](frontends/zed/README.md));
+- [`scripts/installer/README.ru.md`](scripts/installer/README.ru.md) — установщики ([EN](scripts/installer/README.md));
 - [`LICENSE`](LICENSE) — лицензия MIT.

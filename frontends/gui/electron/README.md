@@ -16,7 +16,7 @@ npm ci
 npm start -- --workspace /path/to/project
 ```
 
-In development the app uses `../.venv/bin/python ../main.py`. Set
+In development the app uses `../../../.venv/bin/python ../../../kernel/__main__.py`. Set
 `KVIST_BINARY=/absolute/path/to/kvist` to test a specific frozen binary.
 
 Click the role, model, or approval chips below the prompt to configure the next

@@ -14,7 +14,7 @@ the Python core is built into the extension's private `.build/core` directory,
 then copied into `bin/`, and finally the VS Code extension is compiled and
 packaged.
 
-Run them from the `vscode-extension/` directory.
+Run them from the `frontends/ide/vscode/` directory.
 
 ### Linux
 
@@ -55,7 +55,7 @@ other OS in `bin/` as well.
 ### 1. Install Dependencies
 
 ```bash
-cd vscode-extension
+cd frontends/ide/vscode
 npm install
 ```
 
@@ -85,7 +85,7 @@ cd ..  # Go back to main Kvist directory
 .venv/bin/python -m PyInstaller kvist.spec
 
 # Copy the built binaries
-cp dist/kvist vscode-extension/bin/linux/kvist.bin
+cp dist/kvist frontends/ide/vscode/bin/linux/kvist.bin
 # For Windows, build on Windows or cross-compile and copy to bin/win/kvist.exe
 ```
 
@@ -117,7 +117,7 @@ code --install-extension kvist-0.1.0.vsix
 
 To test during development:
 
-1. Open the `vscode-extension` folder in VS Code
+1. Open the `frontends/ide/vscode` folder in VS Code
 2. Press F5 to launch an Extension Development Host
 3. Test your commands in the new VS Code window
 
@@ -130,7 +130,7 @@ npm run lint
 ## Directory Structure
 
 ```
-vscode-extension/
+frontends/ide/vscode/
 ├── src/
 │   ├── extension.ts          # Main entry point
 │   ├── launcher.ts            # Kvist terminal launcher

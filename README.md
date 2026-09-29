@@ -64,11 +64,11 @@ On the first terminal launch, run `kvist` in the project directory. Choose a
 provider, then enter its API key at the masked `API key:` prompt. The value is
 stored in `~/.kvist/config.json`; it is not echoed in the terminal.
 
-![Kvist terminal ready in Kitty](preview/terminal-start.png)
+![Kvist terminal ready in Kitty](docs/media/terminal-start.png)
 
-![Kvist terminal agent working in Kitty](preview/terminal-working.png)
+![Kvist terminal agent working in Kitty](docs/media/terminal-working.png)
 
-![Kvist terminal completed task in Kitty](preview/terminal-end.png)
+![Kvist terminal completed task in Kitty](docs/media/terminal-end.png)
 
 ### Electron GUI
 
@@ -77,11 +77,11 @@ a project, type the task in the composer, and answer any approval or input card
 shown in the conversation. Provider credentials are configured by the runtime,
 not pasted into the task prompt.
 
-![Kvist GUI ready on Hyprland](preview/gui-start.png)
+![Kvist GUI ready on Hyprland](docs/media/gui-start.png)
 
-![Kvist GUI agent working on Hyprland](preview/gui-working.png)
+![Kvist GUI agent working on Hyprland](docs/media/gui-working.png)
 
-![Kvist GUI completed task on Hyprland](preview/gui-end.png)
+![Kvist GUI completed task on Hyprland](docs/media/gui-end.png)
 
 ## What it does
 
@@ -115,7 +115,7 @@ Kvist for the opened project and can write commit messages from the IDE's
 source-control UI. Zed runs Kvist as an external ACP agent — that is a settings
 entry, not a plugin — and gets the same agent loop, sessions, confirmations and
 `/commit-message`; what it cannot get is written down in
-[`zed-acp/README.md`](zed-acp/README.md).
+[`frontends/zed/README.md`](frontends/zed/README.md).
 
 Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
 FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
@@ -148,7 +148,7 @@ cd Kvist
 python3 -m venv .venv && echo "venv OK" || echo "error venv" # or python -m venv .venv
 source .venv/bin/activate && echo "venv activated" || echo "error activate"
 uv pip install -r requirements.txt || echo "uv not found" && pip install -r requirements.txt
-python installer/install.py && echo "Install OK" || echo "error install"
+python scripts/installer/install.py && echo "Install OK" || echo "error install"
 ```
 **Note**: *works in bash only; if you use a different shell - adapt it*
 
@@ -171,7 +171,7 @@ The workspace argument is required. If the directory does not exist, Kvist
 creates it. Relative paths are resolved from the directory where Kvist starts.
 
 ```bash
-.venv/bin/python main.py --workspace /path/to/project
+.venv/bin/python -m kernel --workspace /path/to/project
 ```
 
 The first interactive launch asks for the provider, models, and credentials and
@@ -213,17 +213,17 @@ yet.
 To install a reusable `kvist` launcher and build a standalone binary when needed:
 
 ```bash
-.venv/bin/python installer/install.py
+.venv/bin/python scripts/installer/install.py
 ```
 
-The `installer/` directory also holds IDE and desktop installers for Linux and
+The `scripts/installer/` directory also holds IDE and desktop installers for Linux and
 Windows:
 
 ```bash
-.venv/bin/python installer/install_jetbrains.py   # install the plugin into every JetBrains IDE found
-.venv/bin/python installer/install_vscode.py      # install the extension into VS Code / Insiders / VSCodium
-.venv/bin/python installer/install_gui.py         # install the GUI app + launcher/desktop shortcut
-.venv/bin/python installer/install_zed.py         # register kvist-core as a Zed ACP agent
+.venv/bin/python scripts/installer/install_jetbrains.py   # install the plugin into every JetBrains IDE found
+.venv/bin/python scripts/installer/install_vscode.py      # install the extension into VS Code / Insiders / VSCodium
+.venv/bin/python scripts/installer/install_gui.py         # install the GUI app + launcher/desktop shortcut
+.venv/bin/python scripts/installer/install_zed.py         # register kvist-core as a Zed ACP agent
 ```
 
 ### Zed
@@ -234,8 +234,8 @@ extension there — extension-provided agents are deprecated in Zed and there is
 no `extension.toml` in this repository. Run the CLI installer first, then:
 
 ```bash
-.venv/bin/python installer/install_cli.py         # puts kvist-core on disk
-.venv/bin/python installer/install_zed.py         # writes one agent_servers entry
+.venv/bin/python scripts/installer/install_cli.py         # puts kvist-core on disk
+.venv/bin/python scripts/installer/install_zed.py         # writes one agent_servers entry
 ```
 
 That entry points Zed at `kvist-core --acp`. Zed re-reads its settings on its
@@ -247,19 +247,19 @@ own, so there is no restart. By hand, the whole thing is:
 
 The parity this has with the VS Code and JetBrains integrations — and the list
 of things Zed has no public API for, such as inline completion — is in
-[`zed-acp/README.md`](zed-acp/README.md) ([RU](zed-acp/README.ru.md)).
+[`frontends/zed/README.md`](frontends/zed/README.md) ([RU](frontends/zed/README.ru.md)).
 
-The VS Code extension is packaged as a `.vsix` from `vscode-extension/`:
+The VS Code extension is packaged as a `.vsix` from `frontends/ide/vscode/`:
 
 ```bash
-cd vscode-extension
+cd frontends/ide/vscode
 ./build-plugin.sh      # Linux host
 # or on Windows: .\build-plugin.ps1 / build-plugin.bat
 ```
 
 The helper builds the current OS Kvist binary with PyInstaller, copies it into
-`vscode-extension/bin/...`, compiles the extension, and writes the package under
-`vscode-extension/.build/vsix/`.
+`frontends/ide/vscode/bin/...`, compiles the extension, and writes the package under
+`frontends/ide/vscode/.build/vsix/`.
 
 The installer uses `dist/kvist` or `dist/kvist.exe` when available, otherwise
 builds it with PyInstaller. It installs the binary under the per-user data
@@ -329,14 +329,14 @@ powers `/changes` and `/revert`.
 
 ## Headless frontends and scripting
 
-The Ink terminal UI (repository root `*.ts` and `ui/`, Node 22+, TypeScript) is a separate process that
+The Ink terminal UI (`frontends/tui/ink/`, Node 22+, TypeScript) is a separate process that
 drives the Python core over `--frontend stdio-multi`. It writes to the normal
 terminal scrollback, so native scrolling and copying work. Build it once:
 
 ```bash
-npm install && npm run build   # one self-contained file: dist-ui/kvist-tui.mjs
-.venv/bin/python main.py --frontend tui   # or: /tui, saved as `frontend`
-.venv/bin/python main.py --frontend claude   # the same app drawn like Claude Code
+(cd frontends/tui/ink && npm install && npm run build)   # one self-contained file: frontends/tui/ink/dist-ui/kvist-tui.mjs
+.venv/bin/python -m kernel --frontend tui   # or: /tui, saved as `frontend`
+.venv/bin/python -m kernel --frontend claude   # the same app drawn like Claude Code
 ```
 
 The Claude-style UI is a second skin of the same app, not another process: `●`
@@ -358,7 +358,7 @@ sharp) in Windows Terminal, whose Cascadia Code font has them, and quadrants in 
 `--frontend terminal` or `--no-banner` overrides the saved choice for one launch.
 The Ink UI needs a provider configured in the classic terminal first; without
 Node.js, the built file, a provider or a TTY, Kvist starts the classic terminal
-instead and says why. The installer (`installer/install_cli.py`) builds that file
+instead and says why. The installer (`scripts/installer/install_cli.py`) builds that file
 when npm is available and packs it into the `kvist` binary; the binary then needs
 Node.js 22+ on `PATH` at run time.
 Every slash command works there. `/help`, `/clear`, `/debug` and `/quit` run in the
@@ -377,32 +377,32 @@ The built-in stdio frontend speaks newline-delimited JSON (NDJSON). Configure a
 provider once in the terminal, then launch it from another process:
 
 ```bash
-.venv/bin/python main.py --workspace /path/to/project --frontend stdio
+.venv/bin/python -m kernel --workspace /path/to/project --frontend stdio
 ```
 
 The first event is `hello`; events include plans, status, streamed text,
 approval requests, errors, and the final response. Replies to `input_request`
 must be JSON objects on stdin. The complete wire contract, including session
-operations and resume behavior, is in [`UI_API.md`](UI_API.md).
+operations and resume behavior, is in [`docs/UI_API.md`](docs/UI_API.md).
 
 Useful headless commands:
 
 ```bash
 # Inspect saved provider/model/credential state without an LLM call
-.venv/bin/python main.py --workspace /path/to/project --config-info
+.venv/bin/python -m kernel --workspace /path/to/project --config-info
 
 # Manage the active workspace's sessions
-.venv/bin/python main.py --workspace /path/to/project --session-op status
-.venv/bin/python main.py --workspace /path/to/project --session-op create --session-name review
-.venv/bin/python main.py --workspace /path/to/project --session-op switch --session-name review
+.venv/bin/python -m kernel --workspace /path/to/project --session-op status
+.venv/bin/python -m kernel --workspace /path/to/project --session-op create --session-name review
+.venv/bin/python -m kernel --workspace /path/to/project --session-op switch --session-name review
 
 # Write a commit message for a change payload (used by the JetBrains plugin; UI_API.md §8b)
 echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
-  | .venv/bin/python main.py --commit-message
+  | .venv/bin/python -m kernel --commit-message
 
 # Read or revert the durable change journal
-.venv/bin/python main.py --workspace /path/to/project --journal-op changes
-.venv/bin/python main.py --workspace /path/to/project --journal-op revert
+.venv/bin/python -m kernel --workspace /path/to/project --journal-op changes
+.venv/bin/python -m kernel --workspace /path/to/project --journal-op revert
 ```
 
 Per-run stdio overrides include `--provider`, both model flags
@@ -416,16 +416,16 @@ The GUI starts Kvist as a child process and uses only the stdio protocol; it doe
 not import Python modules or use HTTP/WebSockets.
 
 ```bash
-cd gui
+cd frontends/gui/electron
 npm ci
 npm start -- --workspace /path/to/project
 ```
 
 Run `npm test` for GUI tests. `npm run dist` builds native Linux (`AppImage`,
 `deb`) or Windows (`nsis`) packages; build separately on each target OS. See
-[`gui/README.md`](gui/README.md) for packaging details.
+[`frontends/gui/electron/README.md`](frontends/gui/electron/README.md) for packaging details.
 
-`gui/package.json` sets `"workspaces": []` so electron-builder treats it as its
+`frontends/gui/electron/package.json` sets `"workspaces": []` so electron-builder treats it as its
 own workspace root instead of walking up to an unrelated monorepo and failing
 the build.
 
@@ -441,14 +441,14 @@ extension uses the provider and **fast** model already saved in
 Build a local VSIX with the same bundled-binary flow as the JetBrains plugin:
 
 ```bash
-cd vscode-extension
+cd frontends/ide/vscode
 ./build-plugin.sh
 ```
 
 On Windows, run `./build-plugin.ps1` from PowerShell or `build-plugin.bat` from
-Command Prompt. The package is written to `vscode-extension/.build/vsix/` and can
+Command Prompt. The package is written to `frontends/ide/vscode/.build/vsix/` and can
 be installed with `code --install-extension <file>.vsix` or through Extensions >
-Install from VSIX. Details are in [`vscode-extension/README.md`](vscode-extension/README.md).
+Install from VSIX. Details are in [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md).
 
 ## Zed
 
@@ -458,8 +458,8 @@ Zed extension and no `extension.toml` — Zed deprecated extension-provided
 agents and the public way to add an agent is a settings entry.
 
 ```bash
-.venv/bin/python installer/install_cli.py
-.venv/bin/python installer/install_zed.py
+.venv/bin/python scripts/installer/install_cli.py
+.venv/bin/python scripts/installer/install_zed.py
 ```
 
 `install_zed.py` writes one `agent_servers` member into Zed's JSONC settings
@@ -472,7 +472,7 @@ Options, and everything else (provider, models, style, sandbox mode) stays in
 
 What Zed has no public API for — inline completion as ghost text, a Kvist side
 panel, a commit button in the source-control UI — is listed with the official
-sources in [`zed-acp/README.md`](zed-acp/README.md) ([RU](zed-acp/README.ru.md)).
+sources in [`frontends/zed/README.md`](frontends/zed/README.md) ([RU](frontends/zed/README.ru.md)).
 
 ## Configuration and boundaries
 
@@ -535,19 +535,41 @@ hard safety blocks always win. Network access is denied by the restricted
 sandbox when available, and approval is fail-closed when no TTY/frontend answer
 exists.
 
+## Repository layout
+
+```text
+kernel/            the Python core (python -m kernel): agent loop, executor, providers, sessions, prompts
+frontends/
+  tui/classic/     classic terminal (Python, prompt_toolkit)
+  tui/ink/         Ink terminal UI (TypeScript), skins kvist and claude-code
+  gui/electron/    desktop app (Electron)
+  ide/vscode/      VS Code extension and the chat panel shared with JetBrains
+  ide/jetbrains/   IntelliJ plugin
+  zed/             Zed agent over ACP
+scripts/           installers, run_task.py, package_script.py
+branding/          icons and logos
+docs/              frontend protocol (UI_API) and README media
+site/              kvist.site landing page
+```
+
+Each component keeps its tests next to it (`kernel/tests/`, `frontends/*/tests/`, …).
+
 ## Tests and lint
 
 ```bash
-.venv/bin/python -m pytest
+.venv/bin/python -m pytest              # kernel, classic terminal, Zed, scripts
 .venv/bin/python -m ruff check .
+(cd frontends/tui/ink && npm test)      # Ink terminal UI
+(cd frontends/ide/vscode && npm test)   # VS Code extension and chat panel
+(cd frontends/gui/electron && npm test) # Electron GUI
 ```
 
 ## Related docs
 
-- [`UI_API.md`](UI_API.md) — complete frontend protocol;
-- [`gui/README.md`](gui/README.md) — Electron development and packaging;
-- [`jetbrains-plugin/README.md`](jetbrains-plugin/README.md) — IntelliJ plugin;
-- [`vscode-extension/README.md`](vscode-extension/README.md) — VS Code extension;
-- [`zed-acp/README.md`](zed-acp/README.md) — Zed external agent ([RU](zed-acp/README.ru.md));
-- [`installer/README.md`](installer/README.md) — installers ([RU](installer/README.ru.md));
+- [`docs/UI_API.md`](docs/UI_API.md) — complete frontend protocol;
+- [`frontends/gui/electron/README.md`](frontends/gui/electron/README.md) — Electron development and packaging;
+- [`frontends/ide/jetbrains/README.md`](frontends/ide/jetbrains/README.md) — IntelliJ plugin;
+- [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md) — VS Code extension;
+- [`frontends/zed/README.md`](frontends/zed/README.md) — Zed external agent ([RU](frontends/zed/README.ru.md));
+- [`scripts/installer/README.md`](scripts/installer/README.md) — installers ([RU](scripts/installer/README.ru.md));
 - [`LICENSE`](LICENSE) — MIT license.

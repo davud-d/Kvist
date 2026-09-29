@@ -1,4 +1,4 @@
-# installer/
+# scripts/installer/
 
 Всё, что ставит Kvist на машину. Каждый скрипт работает в Linux и Windows
 (и, по мере возможности, в macOS).
@@ -15,19 +15,19 @@
 | `_common.py` | Общие помощники: тихий лог и спиннер, через которые отчитываются установщики, безопасная распаковка ZIP, поиск IDE JetBrains. |
 
 ```bash
-python installer/install.py                      # выбрать стрелками
-python installer/install.py --all                # всё, без вопросов
-python installer/install.py --cli --gui          # названные компоненты, без вопросов
+python scripts/installer/install.py                      # выбрать стрелками
+python scripts/installer/install.py --all                # всё, без вопросов
+python scripts/installer/install.py --cli --gui          # названные компоненты, без вопросов
 
-python installer/install_cli.py                  # или по одному напрямую
-python installer/install_jetbrains.py            # --build — сначала собрать ZIP плагина
-python installer/install_jetbrains.py --uninstall
-python installer/install_vscode.py               # --build — сначала собрать VSIX
-python installer/install_vscode.py --uninstall
-python installer/install_gui.py                  # --build — сначала запустить electron-builder
-python installer/install_gui.py --uninstall
-python installer/install_zed.py                  # сначала должен отработать install_cli.py
-python installer/install_zed.py --uninstall
+python scripts/installer/install_cli.py                  # или по одному напрямую
+python scripts/installer/install_jetbrains.py            # --build — сначала собрать ZIP плагина
+python scripts/installer/install_jetbrains.py --uninstall
+python scripts/installer/install_vscode.py               # --build — сначала собрать VSIX
+python scripts/installer/install_vscode.py --uninstall
+python scripts/installer/install_gui.py                  # --build — сначала запустить electron-builder
+python scripts/installer/install_gui.py --uninstall
+python scripts/installer/install_zed.py                  # сначала должен отработать install_cli.py
+python scripts/installer/install_zed.py --uninstall
 ```
 
 ## Вывод
@@ -106,7 +106,7 @@ Zed связывается с кодящими агентами через Agent
 stdout агента — Zed оборачивает команду логиновой оболочкой, и вывод любого
 старта заставляет Zed отвергнуть поток. `install_zed.py` создаёт этот каталог
 рядом с бинарником; сам механизм описан в
-[`zed-acp/README.ru.md`](../zed-acp/README.ru.md).
+[`frontends/zed/README.ru.md`](../../frontends/zed/README.ru.md).
 
 Настройки Zed — это JSONC, поэтому правка заменяет ровно тот диапазон символов,
 который занимает одна запись (`jsonc_settings.py`). Комментарии, порядок ключей
@@ -124,19 +124,20 @@ Zed документирует `~/.config/zed/settings.json` для macOS и д�
 использует.
 
 Какой паритет с интеграциями для VS Code и JetBrains у этой есть, а какого нет,
-написано в [`zed-acp/README.ru.md`](../zed-acp/README.ru.md).
+написано в [`frontends/zed/README.ru.md`](../../frontends/zed/README.ru.md).
 
-## `assets/`
+## Иконки (`branding/`)
 
+Установщики берут иконки из каталога `branding/` в корне репозитория.
 `icon.svg` — исходный знак (циановый шеврон и курсорная черта на сланцевом
 скруглённом квадрате). `icon-<n>.png` — плоские рендеры; `kvist.ico` —
 многоразрешённая иконка для Windows. Перегенерация из SVG:
 
 ```bash
-cd installer/assets
+cd branding/
 for s in 16 24 32 48 64 128 256 512; do rsvg-convert -w $s -h $s icon.svg -o icon-$s.png; done
 magick icon-256.png -define icon:auto-resize=256,128,64,48,32,16 kvist.ico
 ```
 
-Копии этих файлов для сборки GUI лежат в `gui/build/` и подключены в
-`gui/package.json` (`build.linux.icon`, `build.win.icon`).
+Копии этих файлов для сборки GUI лежат в `frontends/gui/electron/build/` и подключены в
+`frontends/gui/electron/package.json` (`build.linux.icon`, `build.win.icon`).
