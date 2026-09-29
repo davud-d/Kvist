@@ -185,6 +185,20 @@ def test_run_executes_safe_command_without_approval(tmp_path, monkeypatch):
     assert "hello" in result.stdout
 
 
+def test_run_survives_entries_created_in_cwd_between_context_builds(tmp_path, monkeypatch):
+    executor = TerminalExecutor(tmp_path)
+    original = TerminalExecutor._execute_validated
+
+    def touch_cwd_then_execute(self, *args, **kwargs):
+        (tmp_path / "created_meanwhile.txt").write_text("x", encoding="utf-8")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(TerminalExecutor, "_execute_validated", touch_cwd_then_execute)
+    result = executor.run(["echo", "hello"])
+
+    assert result.returncode == 0
+
+
 def test_assess_risk_is_role_aware_for_allowlisted_commands(tmp_path):
     """docker rm is allowlisted (docker: None) but risk-graded by role.
 

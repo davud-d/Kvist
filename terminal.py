@@ -502,7 +502,7 @@ class ExecutionContext:
 
     argv: tuple[str, ...]
     cwd: str
-    cwd_identity: FileIdentity | None
+    cwd_identity: tuple[str, int, int] | None
     role: str
     sandbox_mode: str
     sandbox_profile: str
@@ -2396,7 +2396,7 @@ class TerminalExecutor:
         return ExecutionContext(
             argv=tuple(command),
             cwd=str(work_dir),
-            cwd_identity=_path_identity(work_dir),
+            cwd_identity=_directory_identity(work_dir),
             role=role,
             sandbox_mode=sandbox_mode.value,
             sandbox_profile=self.profile,
@@ -3263,6 +3263,17 @@ def _path_identity(path: Path) -> FileIdentity | None:
         info.st_mtime_ns,
         info.st_ctime_ns,
     )
+
+
+def _directory_identity(path: Path) -> tuple[str, int, int] | None:
+    # No size/mtime/ctime: they change whenever an entry is created or removed
+    # in the directory, which is not a change of the directory itself.
+    try:
+        resolved = path.resolve(strict=True)
+        info = resolved.stat()
+    except OSError:
+        return None
+    return (str(resolved), info.st_dev, info.st_ino)
 
 
 def _path_entry_identity(path: Path) -> FileIdentity | None:
