@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { CLASSIC_COMMAND, COMMANDS, routeOf, sessionArgs } from "../src/commands.js"
+import { CLASSIC_COMMAND, COMMANDS, routeOf, sessionArgs } from "../commands.js"
 import {
   DIALOG_ROWS,
   choiceWindow,
@@ -15,9 +15,9 @@ import {
   stepLine,
   type ChoiceModel,
   type DialogKey,
-} from "../src/dialog.js"
-import { emptyEditor } from "../src/editor.js"
-import type { InputOption } from "../src/protocol.js"
+} from "../dialog.js"
+import { emptyEditor } from "../editor.js"
+import type { InputOption } from "../protocol.js"
 
 const options: InputOption[] = Array.from({ length: 45 }, (_, i) => {
   const n = String(i + 1).padStart(2, "0")
@@ -157,7 +157,7 @@ test("/session: a bare name means switch, explicit verbs pass through", () => {
 })
 
 test("/tui offers every interface, the running one is among them, and the values are what the launcher saves", async () => {
-  const { FRONTENDS, frontendOf } = await import("../src/commands.js")
+  const { FRONTENDS, frontendOf } = await import("../commands.js")
   const values: string[] = FRONTENDS.map((f) => f.value)
   assert.ok(values.includes(frontendOf("ink")))
   assert.ok(values.includes(frontendOf("claude")))

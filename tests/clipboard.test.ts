@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { candidateTargets, copyToClipboard, oscCopySequence } from "../src/clipboard.js"
+import { candidateTargets, copyToClipboard, oscCopySequence } from "../clipboard.js"
 
 test("candidateTargets prefers Wayland over X11 on Linux, in order", () => {
   assert.deepEqual(candidateTargets("linux", { WAYLAND_DISPLAY: "wayland-0", DISPLAY: ":0" }), [

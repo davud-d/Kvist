@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { fitSegments, highlightLines, languageOf } from "../src/highlight.js"
+import { fitSegments, highlightLines, languageOf } from "../highlight.js"
 
 const plain = (row: { text: string }[]) => row.map((segment) => segment.text).join("")
 

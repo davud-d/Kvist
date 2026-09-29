@@ -1,5 +1,5 @@
 # Marks this directory as its own pnpm workspace root. Kvist doesn't use
-# pnpm workspaces itself (gui/ and the Ink TUI in src/ are plain npm
+# pnpm workspaces itself (gui/ and the Ink TUI in the repository root are plain npm
 # packages), but without this marker `pnpm --workspace-root` walks up past
 # Kvist and lands on an unrelated pnpm monorepo higher in the directory
 # tree, which breaks electron-builder's Node module collector when it

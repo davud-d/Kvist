@@ -329,7 +329,7 @@ powers `/changes` and `/revert`.
 
 ## Headless frontends and scripting
 
-The Ink terminal UI (`src/`, Node 22+, TypeScript) is a separate process that
+The Ink terminal UI (repository root `*.ts` and `ui/`, Node 22+, TypeScript) is a separate process that
 drives the Python core over `--frontend stdio-multi`. It writes to the normal
 terminal scrollback, so native scrolling and copying work. Build it once:
 

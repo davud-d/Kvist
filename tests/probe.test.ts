@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { PassThrough } from "node:stream"
 import { test } from "node:test"
 
-import { parseProbe, probeTerminal } from "../src/probe.js"
+import { parseProbe, probeTerminal } from "../probe.js"
 
 test("a device-attributes reply that lists 4 means Sixel", () => {
   assert.deepEqual(parseProbe("\x1b[?61;4;6;22c"), { sixel: true, cell: null })

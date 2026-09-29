@@ -49,7 +49,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
-            "the Node/Ink terminal UI (src/), 'claude' for the same app drawn "
+            "the Node/Ink terminal UI (repository root, *.ts/ui/), 'claude' for the same app drawn "
             "like Claude Code, 'terminal' for the classic UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
@@ -740,7 +740,7 @@ _TUI_SAVED_NOTICE = {
 
 
 def launch_tui(args: argparse.Namespace) -> int | None:
-    """Run the Ink frontend (``src/``, bundled to ``dist-ui/kvist-tui.mjs``) with this program as its core.
+    """Run the Ink frontend (root ``*.ts``/``ui/``, bundled to ``dist-ui/kvist-tui.mjs``) with this program as its core.
 
     Returns the frontend's exit code, or None when it cannot run here so the
     caller falls back to the classic terminal.

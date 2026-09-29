@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { farewellText } from "../src/farewell.js"
+import { farewellText } from "../farewell.js"
 
 const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "")
 

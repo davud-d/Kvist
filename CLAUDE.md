@@ -462,7 +462,7 @@ that would orphan a build in a session that now survives the stop.
 transport-agnostic mechanism — observed between steps, while consuming an action-loop
 stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
 
-### Ink terminal frontend (`src/`, bundled to `dist-ui/kvist-tui.mjs`)
+### Ink terminal frontend (root `*.ts`/`ui/`, bundled to `dist-ui/kvist-tui.mjs`)
 A separate Node 22 / TypeScript / Ink app, **not** part of the Python process:
 `main.py --frontend tui` (or the saved `/tui` preference, `user_config.get_saved_frontend`)
 calls `launch_tui`, which runs `node dist-ui/kvist-tui.mjs` and passes the exact core
@@ -508,7 +508,7 @@ in half a second; above the input, right-aligned, `● high · /effort` (`Claude
 real commands and styles — re-read them when commands or `get_style_options` change.
 File edits follow Claude Code's look (`ui/claude-diff.tsx`): a blue `Update(path)` bullet, "Added
 6 lines, removed 2 lines", and numbered rows with a full-width red or green background, code
-coloured by highlight.js (`src/highlight.ts`, the only new dependency; only the languages
+coloured by highlight.js (`highlight.ts`, the only new dependency; only the languages
 imported there are bundled, chosen by file extension, colours in `ui/syntax.ts`). Successful
 `run_shell` calls and the reads around them fold into one dim line ("Searched for 2 patterns,
 ran 2 shell commands", `collapse` in `claude.tsx`); a failed command is never folded, a command

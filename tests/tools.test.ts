@@ -4,8 +4,8 @@ import { test } from "node:test"
 import { render } from "ink-testing-library"
 import { createElement } from "react"
 
-import type { ActionResult, Item } from "../src/state.js"
-import { ToolCard } from "../src/ui/tools.js"
+import type { ActionResult, Item } from "../state.js"
+import { ToolCard } from "../ui/tools.js"
 
 type Tool = Extract<Item, { kind: "tool" }>
 

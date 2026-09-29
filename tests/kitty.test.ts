@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { deleteImage, kittyGraphics, placeImage } from "../src/kitty.js"
+import { deleteImage, kittyGraphics, placeImage } from "../kitty.js"
 
 test("kitty, Ghostty and Konsole are told apart by their environment, and a multiplexer hides them", () => {
   assert.equal(kittyGraphics({ TERM: "xterm-kitty" }), true)

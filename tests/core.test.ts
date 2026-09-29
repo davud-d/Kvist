@@ -4,9 +4,9 @@ import path from "node:path"
 import { test } from "node:test"
 import { fileURLToPath } from "node:url"
 
-import { KvistCore, resolveCoreCommand, splitLines } from "../src/core.js"
-import type { CoreEvent } from "../src/protocol.js"
-import { sessionOp } from "../src/session.js"
+import { KvistCore, resolveCoreCommand, splitLines } from "../core.js"
+import type { CoreEvent } from "../protocol.js"
+import { sessionOp } from "../session.js"
 
 const fake = path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", "fake-core.mjs")
 const command = { command: process.execPath, prefixArgs: [fake] }

@@ -5,7 +5,7 @@ import { render } from "ink-testing-library"
 import { Text } from "ink"
 import { createElement } from "react"
 
-import { useWindowSize } from "../src/ui/window-size.js"
+import { useWindowSize } from "../ui/window-size.js"
 
 function Size() {
   const { columns } = useWindowSize()

@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { decodePalettePng, type Indexed } from "../src/png.js"
-import { encodeSixel, scaleNearest } from "../src/sixel.js"
-import { MASCOT_PNGS } from "../src/ui/mascot-images.js"
+import { decodePalettePng, type Indexed } from "../png.js"
+import { encodeSixel, scaleNearest } from "../sixel.js"
+import { MASCOT_PNGS } from "../ui/mascot-images.js"
 
 const image = (width: number, height: number, pixels: number[], palette: [number, number, number][], alpha: number[] = palette.map(() => 255)): Indexed => ({
   width,

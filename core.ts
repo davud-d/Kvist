@@ -30,7 +30,7 @@ export function resolveCoreCommand(env: NodeJS.ProcessEnv = process.env): CoreCo
     }
     return { command: parts[0] as string, prefixArgs: parts.slice(1) as string[] }
   }
-  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
   const venvPython = path.join(repoRoot, ".venv", "bin", "python")
   const python = existsSync(venvPython) ? venvPython : "python3"
   return { command: python, prefixArgs: [path.join(repoRoot, "main.py")] }

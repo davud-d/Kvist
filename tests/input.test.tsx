@@ -5,8 +5,8 @@ import { test } from "node:test"
 import { render } from "ink-testing-library"
 import { createElement } from "react"
 
-import { ViewContext } from "../src/ui/context.js"
-import { InputBox } from "../src/ui/input.js"
+import { ViewContext } from "../ui/context.js"
+import { InputBox } from "../ui/input.js"
 
 const plain = (text: string | undefined) => (text ?? "").replace(/\x1b\[[0-9;]*m/g, "")
 const view = { workspace: "/w", info: { provider: "p", model: "m", role: "coder", session: "s", kvistVersion: "1" }, effort: "high", pointer: null, expanded: false }

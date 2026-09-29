@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { diffLines, numberWidth, pairRows, toLines } from "../src/diff.js"
+import { diffLines, numberWidth, pairRows, toLines } from "../diff.js"
 
 const shape = (rows: ReturnType<typeof diffLines>) => rows.map((r) => `${r.kind === "ctx" ? " " : r.kind === "del" ? "-" : "+"}${r.text}`)
 

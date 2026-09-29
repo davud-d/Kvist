@@ -2,9 +2,9 @@ import assert from "node:assert/strict"
 import { Readable } from "node:stream"
 import { test } from "node:test"
 
-import type { ClipboardResult } from "../src/clipboard.js"
-import { Pointer, extractMouse, splitFrame } from "../src/pointer.js"
-import { MASCOT_PNGS } from "../src/ui/mascot-images.js"
+import type { ClipboardResult } from "../clipboard.js"
+import { Pointer, extractMouse, splitFrame } from "../pointer.js"
+import { MASCOT_PNGS } from "../ui/mascot-images.js"
 
 const press = (col: number, row: number) => `\x1b[<0;${col + 1};${row + 1}M`
 const move = (col: number, row: number) => `\x1b[<32;${col + 1};${row + 1}M`

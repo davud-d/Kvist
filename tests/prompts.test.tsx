@@ -4,8 +4,8 @@ import { test } from "node:test"
 import { render } from "ink-testing-library"
 import { createElement } from "react"
 
-import type { InputOption, InputRequest } from "../src/protocol.js"
-import { Prompt } from "../src/ui/prompts.js"
+import type { InputOption, InputRequest } from "../protocol.js"
+import { Prompt } from "../ui/prompts.js"
 
 const plain = (text: string | undefined) => (text ?? "").replace(/\x1b\[[0-9;]*m/g, "")
 const tick = () => new Promise((resolve) => setTimeout(resolve, 30))

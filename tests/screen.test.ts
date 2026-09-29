@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { cellAt, cellsOf, highlight, highlightLine, lineAt, order, selectedText, wordAt } from "../src/screen.js"
+import { cellAt, cellsOf, highlight, highlightLine, lineAt, order, selectedText, wordAt } from "../screen.js"
 
 const RED = "\x1b[31m"
 const OFF = "\x1b[39m"

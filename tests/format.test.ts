@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { clipLines, clipText, contextLabel, fit, formatThought, formatTokens, lastLines, outputLines, englishOnly } from "../src/format.js"
+import { clipLines, clipText, contextLabel, fit, formatThought, formatTokens, lastLines, outputLines, englishOnly } from "../format.js"
 
 test("formatThought keeps a decimal for short spans and rounds long ones", () => {
   assert.equal(formatThought(1.24), "Thought: 1.2s")

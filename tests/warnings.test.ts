@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { test } from "node:test"
 
-import { routeWarningsToLog } from "../src/warnings.js"
+import { routeWarningsToLog } from "../warnings.js"
 
 test("a process warning lands in the log file and not on stderr", async () => {
   const file = path.join(mkdtempSync(path.join(tmpdir(), "kvist-warn-")), "logs", "tui.log")

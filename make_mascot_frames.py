@@ -3,10 +3,10 @@
 
     python3 make_mascot_frames.py [--source preview/animate] [--rows 8]
 
-Writes ``src/ui/mascot-frames.ts``: for every frame a grid of cells, each a block
+Writes ``ui/mascot-frames.ts``: for every frame a grid of cells, each a block
 character with a foreground and a background colour, twice: as quadrants (2x2 pixels a
 cell, drawn by every font) and as octants (2x4, twice as sharp, needs a font that has
-Unicode 16's octants); and ``src/ui/mascot-images.ts``: the same frames as small
+Unicode 16's octants); and ``ui/mascot-images.ts``: the same frames as small
 transparent PNGs (base64) for terminals that draw pictures.
 Two things are decided here so the UI stays a plain renderer:
 
@@ -209,8 +209,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Convert PNG animation frames to terminal cells.")
     parser.add_argument("--source", default="preview/animate", help="directory with frame_1.png, frame_2.png, …")
     parser.add_argument("--rows", type=int, default=8, help="text rows tall (the picture is twice as many columns wide)")
-    parser.add_argument("--output", default="src/ui/mascot-frames.ts")
-    parser.add_argument("--images-output", default="src/ui/mascot-images.ts")
+    parser.add_argument("--output", default="ui/mascot-frames.ts")
+    parser.add_argument("--images-output", default="ui/mascot-images.ts")
     args = parser.parse_args()
     source = REPO / args.source
     paths = sorted(source.glob("frame_*.png"), key=lambda p: int(p.stem.split("_")[1]))

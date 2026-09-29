@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { syntaxColor } from "../src/ui/syntax.js"
+import { syntaxColor } from "../ui/syntax.js"
 
 test("scopes get colours, and plain text keeps the terminal's own", () => {
   assert.equal(syntaxColor(null), undefined)

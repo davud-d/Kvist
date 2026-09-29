@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { collapsePaste, emptyPasteStore, expandPastes, findRepeatedLabel, isLargePaste, labelLengthBefore } from "../src/paste.js"
+import { collapsePaste, emptyPasteStore, expandPastes, findRepeatedLabel, isLargePaste, labelLengthBefore } from "../paste.js"
 
 const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`).join("\n")
 

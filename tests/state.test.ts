@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import type { CoreEvent, JournalEvent } from "../src/protocol.js"
-import { actionTarget, answerFromEnd, exploreSummary, initialState, reduce, type State } from "../src/state.js"
+import type { CoreEvent, JournalEvent } from "../protocol.js"
+import { actionTarget, answerFromEnd, exploreSummary, initialState, reduce, type State } from "../state.js"
 
 // Stands in for the translation half of the core's bilingual messages, written
 // with escapes so no Russian text lives in this file.

@@ -6,14 +6,14 @@ import { render } from "ink-testing-library"
 import { createElement } from "react"
 
 import { Readable } from "node:stream"
-import { Pointer } from "../src/pointer.js"
-import type { Item } from "../src/state.js"
-import { ClaudeScreen } from "../src/ui/claude.js"
-import { ViewContext } from "../src/ui/context.js"
+import { Pointer } from "../pointer.js"
+import type { Item } from "../state.js"
+import { ClaudeScreen } from "../ui/claude.js"
+import { ViewContext } from "../ui/context.js"
 
-import { MASCOT_OCTANTS, MASCOT_QUADRANTS } from "../src/ui/mascot-frames.js"
+import { MASCOT_OCTANTS, MASCOT_QUADRANTS } from "../ui/mascot-frames.js"
 const MASCOT_FRAMES = MASCOT_QUADRANTS
-import { MASCOT_COLUMNS, MASCOT_FPS, MASCOT_ROWS, Mascot, MascotFrame, mascotGlyphs, runsOf } from "../src/ui/mascot.js"
+import { MASCOT_COLUMNS, MASCOT_FPS, MASCOT_ROWS, Mascot, MascotFrame, mascotGlyphs, runsOf } from "../ui/mascot.js"
 
 const plain = (text: string | undefined) => (text ?? "").replace(/\x1b\[[0-9;]*m/g, "")
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

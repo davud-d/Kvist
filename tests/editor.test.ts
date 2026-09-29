@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { MAX_BOX_ROWS, MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../src/commands.js"
-import { applyKey, emptyEditor, insert, moveLine, windowLine } from "../src/editor.js"
-import { parseBlocks } from "../src/ui/markdown.js"
+import { MAX_BOX_ROWS, MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
+import { applyKey, emptyEditor, insert, moveLine, windowLine } from "../editor.js"
+import { parseBlocks } from "../ui/markdown.js"
 
 test("typing inserts at the cursor and accented letters are fine", () => {
   let ed = insert(emptyEditor, "na\u00efve")
