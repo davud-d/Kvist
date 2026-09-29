@@ -9,6 +9,7 @@ import { kittyGraphics } from "./kitty.js"
 import { probeTerminal } from "./probe.js"
 import { Pointer } from "./pointer.js"
 import { sessionOp } from "./session.js"
+import { routeWarningsToLog } from "./warnings.js"
 import { App } from "./ui/app.js"
 import { SKINS, applySkin } from "./ui/theme.js"
 
@@ -37,6 +38,7 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 }
 
 const workspace = path.resolve(values.workspace ?? process.cwd())
+routeWarningsToLog(path.join(workspace, ".kvist", "logs", "tui.log"))
 const command = resolveCoreCommand()
 const models =
   values["fast-model"] && values["smart-model"]
