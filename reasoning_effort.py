@@ -310,6 +310,11 @@ _REASONING_ERROR_MARKERS: tuple[str, ...] = (
 def is_reasoning_error(error: Exception) -> bool:
     """Whether ``error`` looks like the provider rejecting a reasoning control."""
     text = str(error).casefold()
+    # DeepSeek answers a forced tool_choice in thinking mode with "Thinking mode
+    # does not support this tool_choice": it names thinking but rejects the tool
+    # parameter, and dropping the effort would not fix it.
+    if "tool_choice" in text:
+        return False
     if not any(marker in text for marker in _REASONING_ERROR_MARKERS):
         return False
     # A bare mention inside a long unrelated message is unlikely; require it to
@@ -374,13 +379,11 @@ def effort_advisory(provider: str, level: str) -> str | None:
     if normalized_provider == DEEPSEEK_PROVIDER:
         if normalized_level == "false":
             return "DeepSeek: 'false' turns thinking mode off."
-        if normalized_level == "max":
-            return "DeepSeek: 'max' is the deepest level."
-        if normalized_level == "low":
+        if _DEEPSEEK_SCALE[normalized_level] == normalized_level:
             return None
         return (
-            f"DeepSeek: '{normalized_level}' is mapped to 'high' server-side — "
-            "the API supports 'low', 'high' and 'max'."
+            f"DeepSeek: '{normalized_level}' is sent as "
+            f"'{_DEEPSEEK_SCALE[normalized_level]}' — the API supports 'low', 'high' and 'max'."
         )
 
     if normalized_provider == OPENROUTER_PROVIDER:

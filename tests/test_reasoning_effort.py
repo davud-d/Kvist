@@ -141,6 +141,7 @@ def test_is_reasoning_error_true_for_rejections(message):
         "rate limit exceeded",
         "the assistant was still thinking about it",
         "connection reset",
+        "Error code: 400 - Thinking mode does not support this tool_choice",
     ],
 )
 def test_is_reasoning_error_false_otherwise(message):
@@ -156,6 +157,9 @@ def test_advisory_flags_openai_max_and_deepseek_collapse():
 
 
 def test_advisory_is_quiet_when_the_level_maps_cleanly():
+    assert effort_advisory("deepseek", "high") is None
+    assert effort_advisory("deepseek", "low") is None
+    assert effort_advisory("deepseek", "max") is None
     assert effort_advisory("openai", "high") is None
     assert effort_advisory("openrouter", "high") is None
 
