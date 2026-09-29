@@ -35,9 +35,10 @@ class AgentConfig:
     # action. At 3 a file read fell out of context three steps later and the
     # model re-read it; at 8, once a response could carry a batch of 8 actions,
     # one batch of listings pushed every file read out before the model could
-    # edit from it. The prompt budget (context_budget.py) is what actually caps
+    # edit from it. Reads are not capped per response, so 35 leaves room for a
+    # response of a few dozen reads. The prompt budget (context_budget.py) is what actually caps
     # the size.
-    detailed_feedback_limit: int = 16
+    detailed_feedback_limit: int = 35
     # Char caps on one action payload and on one string inside it. They exist to
     # stop a single runaway value from filling the window, not to summarize: a
     # file the executor already capped at max_read_chars must reach the model

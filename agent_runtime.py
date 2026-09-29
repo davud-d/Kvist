@@ -840,6 +840,7 @@ class _PlannedCall:
     request: ToolCallRequest
     command: AgentCommand | None
     error: str = ""
+    over_limit: bool = False
 
     @property
     def readonly(self) -> bool:
@@ -855,17 +856,31 @@ _SKIPPED_AFTER_FAILED_WRITE = SKIPPED_ERROR
 _SKIPPED_LABELS = ("пропущено: предыдущая запись упала", "skipped: an earlier write failed")
 
 
+def _over_limit(calls: list[ToolCallRequest]) -> list[bool]:
+    """Per call: whether it is past the cap. Reads are exempt; the other calls are capped."""
+    others = 0
+    flags: list[bool] = []
+    for request in calls:
+        if request.name in READONLY_TOOLS:
+            flags.append(False)
+            continue
+        others += 1
+        flags.append(others > MAX_BATCH_ACTIONS)
+    return flags
+
+
 def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCall]:
-    kept = response.calls[:MAX_BATCH_ACTIONS]
+    over_limit = _over_limit(response.calls)
+    kept = [call for call, over in zip(response.calls, over_limit) if not over]
     plan_step = plan_step_for_calls([call.name for call in kept], bool(self._state.files_changed))
     language = self._state.response_language or "en"
     planned: list[_PlannedCall] = []
-    for number, request in enumerate(response.calls, start=1):
-        if number > MAX_BATCH_ACTIONS:
+    for number, (request, over) in enumerate(zip(response.calls, over_limit), start=1):
+        if over:
             planned.append(_PlannedCall(request, None, (
-                f"Not executed: a response holds at most {MAX_BATCH_ACTIONS} tool calls; "
-                "send this one again in your next response if you still need it."
-            )))
+                f"Not executed: the protocol accepts at most {MAX_BATCH_ACTIONS} calls besides reads "
+                "per response; send this one again in your next response if you still need it."
+            ), over_limit=True))
             continue
         try:
             command = build_command(
@@ -905,6 +920,11 @@ def _run_calls(
         item = planned[index]
         if outcome.finished or (refusal is not None and item is not refusal):
             answers.append(_NOT_RUN_AFTER_FINISH if outcome.finished else _NOT_RUN_BESIDE_REFUSAL)
+            index += 1
+            continue
+        if item.over_limit:
+            answers.append(item.error)
+            not_run.append(item.error)
             index += 1
             continue
         if item.command is None:

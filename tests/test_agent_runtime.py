@@ -2141,12 +2141,33 @@ def test_no_more_than_four_reads_run_at_once(agent_factory):
     assert probe["peak"] == 4
 
 
-def test_no_more_than_eight_calls_run_per_response(agent_factory):
-    agent = agent_factory(max_steps=12)
+def test_reads_are_not_limited_per_response(agent_factory):
+    agent = agent_factory(max_steps=40)
+    executed = []
+    responses = iter([
+        _v2("", *(_tool("list_dir", path=f"d{i}") for i in range(20))),
+        "Готово.",
+    ])
+
+    def fake_execute(command):
+        executed.append(command.action.args["path"])
+        return ExecutionResult(True, "list_dir", {"entries": []})
+
+    agent._call_action_model = lambda prompt: next(responses)
+    agent.executor.execute = fake_execute
+
+    agent._run_loop("Investigate files", start_step=1)
+
+    assert sorted(executed) == sorted(f"d{i}" for i in range(20))
+    assert not any("Not executed" in error for error in agent._state.error_history)
+
+
+def test_no_more_than_eight_non_read_calls_run_per_response(agent_factory):
+    agent = agent_factory(max_steps=30)
     prompts = []
     executed = []
     responses = iter([
-        _v2("", *(_tool("list_dir", path=f"d{i}") for i in range(10))),
+        _v2("", *(_tool("write_file", path=f"w{i}.txt", content="x") for i in range(10))),
         "Готово.",
     ])
 
@@ -2156,15 +2177,38 @@ def test_no_more_than_eight_calls_run_per_response(agent_factory):
 
     def fake_execute(command):
         executed.append(command.action.args["path"])
-        return ExecutionResult(True, "list_dir", {"entries": []})
+        return ExecutionResult(True, "write_file", {"path": command.action.args["path"]})
 
     agent._call_action_model = fake_call_action_model
     agent.executor.execute = fake_execute
 
-    agent._run_loop("Investigate files", start_step=1)
+    agent._run_loop("Create files", start_step=1)
 
-    assert sorted(executed) == sorted(f"d{i}" for i in range(8))
-    assert "at most 8 tool calls" in prompts[1]
+    assert executed == [f"w{i}.txt" for i in range(8)]
+    assert "at most 8 calls besides reads" in prompts[1]
+    assert not any("Not executed" in error for error in agent._state.error_history)
+
+
+def test_reads_do_not_use_up_the_non_read_allowance(agent_factory):
+    agent = agent_factory(max_steps=30)
+    executed = []
+    calls = []
+    for i in range(8):
+        calls.append(_tool("read_file", path=f"r{i}.py"))
+        calls.append(_tool("write_file", path=f"w{i}.txt", content="x"))
+    responses = iter([_v2("", *calls), "Готово."])
+
+    def fake_execute(command):
+        executed.append(command.action.type)
+        return ExecutionResult(True, command.action.type, {"path": "p", "content": "c"})
+
+    agent._call_action_model = lambda prompt: next(responses)
+    agent.executor.execute = fake_execute
+
+    agent._run_loop("Mixed work", start_step=1)
+
+    assert executed.count("read_file") == 8
+    assert executed.count("write_file") == 8
 
 
 def test_a_read_after_a_write_in_the_same_response_sees_the_write(agent_factory):
@@ -2219,7 +2263,7 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
         return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
     turns = [
-        response("", [call(f"c{i}", "read_file", path=f"f{i}.py") for i in range(9)]),
+        response("", [call(f"c{i}", "read_file", path=f"f{i}.py") for i in range(12)]),
         response("Готово.", []),
     ]
     requests = []
@@ -2231,7 +2275,7 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
         return turns.pop(0)
 
     agent_model._NATIVE_TOOL_SUPPORT.clear()
-    agent = agent_factory(max_steps=12, stream=False)
+    agent = agent_factory(max_steps=30, stream=False)
     agent.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     execute, _probe = _concurrency_probe({"f0.py": 0.3})
     agent.executor.execute = execute
@@ -2242,9 +2286,9 @@ def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
         agent_model._NATIVE_TOOL_SUPPORT.clear()
 
     answers = [m for m in requests[-1]["messages"] if m["role"] == "tool"]
-    assert [m["tool_call_id"] for m in answers] == [f"c{i}" for i in range(9)]
+    assert [m["tool_call_id"] for m in answers] == [f"c{i}" for i in range(12)]
     assert "content of f0.py" in answers[0]["content"]
-    assert answers[8]["content"].startswith("Not executed: a response holds at most 8 tool calls")
+    assert "content of f11.py" in answers[11]["content"]
 
 
 def test_call_events_carry_call_and_batch_ids(agent_factory):

@@ -252,8 +252,8 @@ enforced by `tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
 `report_to_user` are terminal actions handled in `run_loop` (never reach the executor);
 `report_to_user` additionally routes through the chat reporter (`prompts/system/report_prompt.txt`).
 
-**Action batches.** The model sends `"actions": [...]` (1 to `parser.MAX_BATCH_ACTIONS`
-= 8); a bare `"action"` object is still accepted for a model prompted from an older
+**Action batches.** The model sends `"actions": [...]` (any number of read-only calls plus at most `parser.MAX_BATCH_ACTIONS`
+= 8 others); a bare `"action"` object is still accepted for a model prompted from an older
 schema. **Every action is its own step** — step logs, `pending_action` and the step
 budget stay per action; only the number of model calls drops. The checkpoint is
 written right after an action with a side effect (a file write, `run_shell`,
@@ -775,7 +775,7 @@ action) cost ~3 s per action on this repository whenever a named file did not
 exist yet.
 
 **The detail window and the repeat guard are one mechanism.** Full results
-live in `recent_result_details` (`detailed_feedback_limit`, 16), index-aligned
+live in `recent_result_details` (`detailed_feedback_limit`, 35), index-aligned
 with `recent_result_signatures`; a repeated action replaces its own earlier copy
 (`agent_runtime._keep_result_in_view`), so a batch of `git_status`/`list_dir`
 cannot push a file read out. `is_repeat_blocked` refuses a repeated read-only
