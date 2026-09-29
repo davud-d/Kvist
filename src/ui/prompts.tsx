@@ -1,4 +1,5 @@
-import { Box, Text, useInput, usePaste, useWindowSize } from "ink"
+import { Box, Text, useInput, usePaste } from "ink"
+import { useWindowSize } from "./window-size.js"
 import { useEffect, useReducer, useRef, type ReactNode } from "react"
 
 import {

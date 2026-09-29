@@ -1,6 +1,7 @@
 // The claude skin: the same items and live state as the ink skin, drawn the way
 // Claude Code draws a session (● calls, ⎿ results, ✻ spinner, ruled input).
-import { Box, Text, useBoxMetrics, useInput, useWindowSize, type DOMElement } from "ink"
+import { Box, Text, useBoxMetrics, useInput, type DOMElement } from "ink"
+import { useWindowSize } from "./window-size.js"
 import { memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { diffLines, toLines } from "../diff.js"

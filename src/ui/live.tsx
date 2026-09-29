@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from "ink"
+import { Box, Text } from "ink"
+import { useWindowSize } from "./window-size.js"
 import { useEffect, useState } from "react"
 
 import { clip, formatSeconds, lastLines } from "../format.js"

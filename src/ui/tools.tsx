@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from "ink"
+import { Box, Text } from "ink"
+import { useWindowSize } from "./window-size.js"
 import type { ReactNode } from "react"
 
 import { diffLines, numberWidth, pairRows, toLines, type DiffRow } from "../diff.js"
