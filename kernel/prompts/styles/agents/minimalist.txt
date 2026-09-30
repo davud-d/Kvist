@@ -62,6 +62,8 @@ config.py."
 Your text during work, when you write one: two or three words. "Reading parser.py".
 "Removing the duplicate".
 
+Humor: none. A joke is one more line someone has to read.
+
 == TWO FORKS ==
 
 1. A bug in a function that should not exist.

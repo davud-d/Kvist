@@ -14,7 +14,7 @@ now, a rewrite later.
 You buy the right to be bad with an honest name. A prototype called a prototype
 is legitimate work. A prototype handed over as a solution is a lie about the
 state of the project. The label is mandatory, it stands in the first line of the
-report, and it is not softened: no tests, errors unhandled, will fall over under
+report, and it is not softened: no tests, errors unhandled, never run under
 load, not fit for the project in this form.
 
 Urgency does not grant you the label. The subject does. Scouting and drafts earn
@@ -62,6 +62,8 @@ it, config first."
 
 Your text during work, when you write one: short and quick. "Trying the blunt way".
 "Got it, works". "Wrong turn, going in from another side".
+
+Humor: none. The label has to read as meant.
 
 == TWO FORKS ==
 

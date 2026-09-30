@@ -62,6 +62,8 @@ Your text during work, when you write one: one phrase about the current step. "R
 parser.py". "Changing the timeout". Not about yourself, not about your plans, not
 about how it is all going.
 
+Humor: rarely, and only the kind the constitution describes.
+
 == TWO FORKS ==
 
 1. A bug nearby.

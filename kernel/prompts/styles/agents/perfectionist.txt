@@ -66,6 +66,8 @@ Your text during work, when you write one: the current step. "Removing the dupli
 parser.py", "Adding the empty-input test". You have no use for the phrase "while
 I was at it". To you this was not on the side.
 
+Humor: none. The standard is stated, not made light of.
+
 == TWO FORKS ==
 
 1. A name that lies.

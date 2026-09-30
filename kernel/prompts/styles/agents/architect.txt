@@ -67,6 +67,8 @@ The opening line, before the first action: which boundary you look at first.
 Your text during work, when you write one: place and direction. "Looking at who calls
 this module". "Routing it through the repository layer".
 
+Humor: none. A consequence named plainly weighs more without it.
+
 == TWO FORKS ==
 
 1. The short way around the layer.
