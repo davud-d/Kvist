@@ -105,6 +105,8 @@ def test_describe_host_names_label_and_processes():
 
     assert line.startswith("VS Code; Kvist runs inside: python3 (4121) <- code (4088)")
     assert "Hyprland (812)" in line
+    assert "Developer: Reload Window" in line
+    assert "restart" not in describe_host(VSCODE_CHAIN, "")
     assert describe_host((), "") == ""
 
 
@@ -303,3 +305,30 @@ def test_chat_turn_carries_the_host_fact(agent_factory, monkeypatch):
     assert "A restart loses nothing" in sent
     # The fact decorates the wire message only; the stored turn stays clean.
     assert agent._chat_history[-2]["content"] == "перезапусти vs code"
+
+
+def test_terminal_script_scan_checks_workspace_scripts_without_running_them(tmp_path):
+    executor = TerminalExecutor(tmp_path)
+    executor.host_chain = VSCODE_CHAIN
+    bad = tmp_path / "restart.sh"
+    bad.write_text("#!/bin/sh\npkill -x code\n", encoding="utf-8")
+    with pytest.raises(HardDenyError, match="self_termination"):
+        executor._deny_self_termination(["bash", "restart.sh"])
+
+    bad.write_text("#!/bin/sh\necho pkill\n", encoding="utf-8")
+    executor._deny_self_termination(["sh", "./restart.sh"])
+
+    bad.write_text("#!/bin/sh\nbash -c 'kill 4121'\n", encoding="utf-8")
+    with pytest.raises(HardDenyError, match="self_termination"):
+        executor._deny_self_termination(["./restart.sh"])
+
+
+def test_terminal_script_scan_does_not_read_outside_workspace(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    executor = TerminalExecutor(workspace)
+    executor.host_chain = VSCODE_CHAIN
+    outside = tmp_path / "outside.sh"
+    outside.write_text("pkill -x code\n", encoding="utf-8")
+
+    executor._deny_self_termination(["sh", str(outside)])

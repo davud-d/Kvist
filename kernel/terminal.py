@@ -1194,8 +1194,21 @@ class TerminalExecutor:
             self._require_allowlisted(segment, executable)
 
     def _deny_self_termination(self, command: list[str]) -> None:
+        work_dir = self.workspace
+
+        def resolve_script(token: str) -> str | None:
+            try:
+                path = self._resolve_workspace_reference(token, work_dir, "shell script")
+                if not path.is_file() or path.stat().st_size > 64 * 1024:
+                    return None
+                return path.read_text(encoding="utf-8", errors="strict")
+            except (OSError, UnicodeError, HardDenyError):
+                return None
+
         for segment in self._split_pipe_segments(command):
-            reason = self_termination_denial(segment, self.host_chain, self.host)
+            reason = self_termination_denial(
+                segment, self.host_chain, self.host, script_resolver=resolve_script
+            )
             if reason:
                 raise HardDenyError(f"Hard security denial: {reason}")
 

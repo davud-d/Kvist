@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """What Kvist runs inside, and the commands that would stop it.
 
+Known limitation: arbitrary inline Python/Node code is not inspected.
+
 Kvist is a process in a chain: its own interpreter, the frontend that spawned
 it, the editor or terminal around that, the desktop session around everything.
 The same chain carries the person's open work. A command that stops any link
@@ -199,18 +201,25 @@ def describe_host(chain: tuple[HostProcess, ...], host: str) -> str:
         return ""
     links = " <- ".join(f"{process.name} ({process.pid})" for process in chain[:8])
     label = _HOST_LABELS.get(host, "terminal or unrecognised host")
-    return (
-        f"{label}; Kvist runs inside: {links}. Stopping or restarting any of "
-        "these ends this turn; that step is handed to the person. A restart "
-        f"loses nothing: {_CONTINUE}"
-    )
+    if host in _HANDOFF:
+        handoff = (
+            f"Stopping or restarting any of these ends this turn; that step is "
+            f"handed to the person. {_HANDOFF[host]} "
+            f"A restart loses nothing: {_CONTINUE}"
+        )
+    else:
+        handoff = (
+            "Stopping any of these ends this turn; that step is handed to the "
+            f"person. {_HANDOFF_DEFAULT}"
+        )
+    return f"{label}; Kvist runs inside: {links}. {handoff}"
 
 
 def self_termination_denial(
-    segment: list[str], chain: tuple[HostProcess, ...], host: str
+    segment: list[str], chain: tuple[HostProcess, ...], host: str, script_resolver=None
 ) -> str | None:
     """Why one pipe segment would stop Kvist's host, or None if it would not."""
-    what = _what_segment_stops(segment, chain, depth=0)
+    what = _what_segment_stops(segment, chain, depth=0, script_resolver=script_resolver)
     if what is None:
         return None
     handoff = _HANDOFF_SESSION if what == "session" else _HANDOFF.get(host, _HANDOFF_DEFAULT)
@@ -227,14 +236,22 @@ def self_termination_denial(
 
 
 def _what_segment_stops(
-    segment: list[str], chain: tuple[HostProcess, ...], depth: int
+    segment: list[str], chain: tuple[HostProcess, ...], depth: int,
+    script_resolver=None,
 ) -> str | None:
     if not segment:
         return None
     program = _program_name(segment[0])
     args = segment[1:]
     if program in _SHELLS:
-        return _shell_script_stops(args, chain, depth)
+        inline = _shell_script_stops(args, chain, depth, script_resolver)
+        if inline is not None:
+            return inline
+        script = _shell_file(args)
+        if script_resolver is None:
+            return None
+        script = script_resolver(script or segment[0])
+        return _read_script_stops(script, chain, depth, script_resolver)
     if program in _POWER_COMMANDS:
         return "session"
     if program == "systemctl":
@@ -249,6 +266,9 @@ def _what_segment_stops(
         return _describe(_pkill_hits(args, chain))
     if program == "killall":
         return _describe(_killall_hits(args, chain))
+    if script_resolver is not None:
+        script = script_resolver(segment[0])
+        return _read_script_stops(script, chain, depth, script_resolver)
     return None
 
 
@@ -264,13 +284,20 @@ def _describe(hit: HostProcess | str | None) -> str | None:
 
 
 def _shell_script_stops(
-    args: list[str], chain: tuple[HostProcess, ...], depth: int
+    args: list[str], chain: tuple[HostProcess, ...], depth: int,
+    script_resolver=None,
 ) -> str | None:
     """Look inside `sh -c SCRIPT`: the guard must not be one quoting layer deep."""
     if depth >= 3:
         return None
     script = _shell_script(args)
     if script is None:
+        return None
+    return _read_script_stops(script, chain, depth, script_resolver)
+
+
+def _read_script_stops(script: str | None, chain, depth: int, script_resolver=None) -> str | None:
+    if depth >= 3 or script is None:
         return None
     lexer = shlex.shlex(script, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
@@ -283,7 +310,7 @@ def _shell_script_stops(
         if token not in _SHELL_OPERATORS:
             command.append(token)
             continue
-        what = _what_segment_stops(command, chain, depth + 1)
+        what = _what_segment_stops(command, chain, depth + 1, script_resolver)
         if what is not None:
             return what
         command = []
@@ -296,6 +323,14 @@ def _shell_script(args: list[str]) -> str | None:
         if arg.startswith("-") and not arg.startswith("--") and "c" in arg[1:]:
             return args[index + 1] if index + 1 < len(args) else None
     return None
+
+
+def _shell_file(args: list[str]) -> str | None:
+    """The script operand of a shell invocation that does not use -c."""
+    if _shell_script(args) is not None:
+        return None
+    positionals = [arg for arg in args if arg != "--" and not arg.startswith("-")]
+    return positionals[0] if positionals else None
 
 
 def _positionals(args: list[str]) -> list[str]:
