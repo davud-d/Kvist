@@ -12,7 +12,7 @@ import { addInputHistory, inputHistory, sessionHistory } from "../session.js"
 import { answerFromEnd, initialState, reduce } from "../state.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./skins/claude-code/claude.js"
 import { ViewContext } from "./context.js"
-import { InputBox } from "./input.js"
+import { ClosedBar, InputBox } from "./input.js"
 import { ItemView } from "./skins/kvist/items.js"
 import { Live } from "./skins/kvist/live.js"
 import { Prompt } from "./prompts.js"
@@ -321,16 +321,20 @@ export function App(props: AppProps) {
   const armed = stopArmedAt > 0
   const view = { workspace: props.workspace, info: state.info, effort: state.effort, pointer: props.pointer, expanded }
 
+  const caption = claude
+    ? <ClaudeFooter running={state.running} armed={armed} usage={state.usage} model={state.info.model} role={role} toast={toast} exitWarning={exitWarning} />
+    : <ModeLine model={state.info.model} role={role} effort={state.effort} />
   const input = state.pending ? (
     <Prompt key={state.pending.request_id} request={state.pending} onAnswer={answer} />
+  ) : state.closed !== null ? (
+    // Enter takes the same way as /new.
+    <ClosedBar notice={state.closed} active={!state.running && !state.command} caption={caption} onNewSession={() => sendCommand("new", [])} />
   ) : (
     <InputBox
       active={!state.running && !state.command}
       history={history}
       placeholder={state.command ? `running /${state.command}…` : state.running ? "working…" : "Ask Kvist, or / for commands"}
-      caption={claude
-        ? <ClaudeFooter running={state.running} armed={armed} usage={state.usage} model={state.info.model} role={role} toast={toast} exitWarning={exitWarning} />
-        : <ModeLine model={state.info.model} role={role} effort={state.effort} />}
+      caption={caption}
       onSubmit={submit}
     />
   )

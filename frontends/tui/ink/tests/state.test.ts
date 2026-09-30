@@ -649,3 +649,48 @@ test("a request shown as a paste label takes its language from the pasted text",
   const plan = reduce(asked, { type: "event", event: { type: "plan", markdown: "x" } }).items.at(-1)
   assert.equal(plan?.kind === "plan" && plan.russian, true)
 })
+
+const NOTICE = "conversation over · Enter — new session"
+const warning = "those last words weren't about the code."
+const closing = "the conversation is over."
+const ended: CoreEvent = { type: "session_ended", session_id: "s", warned_msg_id: 1, closed_msg_id: 3, reason: "r", closed_notice: NOTICE }
+
+test("session_ended puts the core's notice in place of the input", () => {
+  assert.equal(feed(hello).closed, null)
+  assert.equal(feed(hello, ended).closed, NOTICE)
+})
+
+test("switching into a closed session shows the notice, and switching away brings the input back", () => {
+  const closed = feed(hello, { type: "session", session: "old", has_checkpoint: false, closed: true, closed_notice: NOTICE })
+  assert.equal(closed.closed, NOTICE)
+  assert.equal(closed.info.session, "old")
+  const back = reduce(closed, { type: "event", event: { type: "session", session: "fresh", has_checkpoint: false } })
+  assert.equal(back.closed, null)
+  assert.equal(back.info.session, "fresh")
+})
+
+test("the notice survives the switch's command_result and the redrawn journal", () => {
+  const switched = feed(
+    hello,
+    { type: "session", session: "old", has_checkpoint: false, closed: true, closed_notice: NOTICE },
+    { type: "command_result", name: "session", ok: true, message: "Switched", effects: { session: "old", changed: true } },
+  )
+  const redrawn = reduce(switched, { type: "restore", events: [{ type: "user", text: "idiot" }, ended, { type: "final", message: closing, user_messages: [], outcome: "incomplete", closed: true }], banner: true })
+  assert.equal(switched.closed, NOTICE)
+  assert.equal(redrawn.closed, NOTICE)
+})
+
+test("the warning and the closing words are ordinary Kvist messages, with no status", () => {
+  const state = feed(
+    hello,
+    { type: "message", markdown: warning },
+    ended,
+    { type: "final", message: closing, user_messages: [], outcome: "incomplete", closed: true },
+    { type: "message", markdown: "plain reply" },
+  )
+  const answers = state.items.filter((item) => item.kind === "answer")
+  assert.deepEqual(answers.map((item) => item.kind === "answer" && item.text), [warning, closing, "plain reply"])
+  assert.equal(state.items.filter((item) => item.kind === "note").length, 0)
+  const shapes = answers.map(({ id: _id, ...rest }) => Object.keys(rest).sort().join(","))
+  assert.equal(new Set(shapes).size, 1)
+})

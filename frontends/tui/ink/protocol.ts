@@ -54,7 +54,8 @@ export type CoreEvent =
   | { type: "reasoning_chunk"; stream_id: string; text: string }
   | { type: "reasoning_commit"; stream_id: string; duration_seconds: number }
   | { type: "message"; markdown: string }
-  | { type: "final"; message: string; user_messages: string[]; outcome?: "done" | "incomplete" }
+  // `closed`: end_session's closing words or a closed session's reply, shown as an ordinary message.
+  | { type: "final"; message: string; user_messages: string[]; outcome?: "done" | "incomplete"; closed?: boolean }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number; context_limit: number; model: string; kind: string; step: number }
   | { type: "debug"; message: string }
   | { type: "error"; message: string }
@@ -65,6 +66,11 @@ export type CoreEvent =
   // well after that turn's own turn_end, and possibly for a session the user
   // has since switched away from (UI_API.md §7).
   | { type: "session_title"; session: string; title: string }
+  // The session a resume continues in or a session/new command switched to; `closed` and
+  // `closed_notice` only for a session end_session closed (UI_API.md, "Closed sessions").
+  | { type: "session"; session: string; has_checkpoint: boolean; closed?: boolean; closed_notice?: string }
+  // end_session closed the active session for good; `closed_notice` goes in place of the input.
+  | { type: "session_ended"; session_id: string; warned_msg_id: number | null; closed_msg_id: number; reason: string; closed_notice: string }
 
 // What `--session-op history` returns per event: the events the stream carried, plus two the journal adds
 // (UI_API.md, "Restoring a session's feed").

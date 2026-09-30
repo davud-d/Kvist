@@ -89,6 +89,9 @@ export interface State {
   command: string | null
   // The level `hello` announced, then the last `/effort` result.
   effort: string
+  // The core's notice when end_session closed the session on screen; it takes the input's
+  // place until another session is opened.
+  closed: string | null
   info: { provider: string; model: string; role: string; session: string; routedRole?: string; kvistVersion?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
@@ -141,6 +144,7 @@ export function initialState(effort = ""): State {
     pending: null,
     command: null,
     effort,
+    closed: null,
     info: { provider: "", model: "", role: "", session: "" },
     usage: { input: 0, output: 0, context: 0, limit: 0 },
     showDebug: false,
@@ -494,6 +498,10 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return { ...state, pending: event }
     case "command_result":
       return onCommandResult(state, event)
+    case "session":
+      return { ...state, info: { ...state.info, session: event.session }, closed: event.closed === true ? (event.closed_notice ?? "") : null }
+    case "session_ended":
+      return { ...state, closed: event.closed_notice }
     case "turn_end":
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
