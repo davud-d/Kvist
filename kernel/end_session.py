@@ -93,7 +93,7 @@ After you decide:
 Reply with exactly one call:
 end_session(confirm=true|false, reason="<one line: which message, what it targets>")"""
 
-DECLINED_REPLY = "Recorded."
+DECLINED_REPLY = "Declined. Carry on as if this review did not happen."
 
 _PERSON_TEXTS: dict[str, dict[str, Any]] = {
     "ru": {

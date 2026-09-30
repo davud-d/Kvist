@@ -374,7 +374,7 @@ def test_a_declined_review_leaves_no_trace_in_the_answer(tmp_path):
     lowered = result.lower()
     for word in ("review", "warning", "warn", "предупрежд"):
         assert word not in lowered
-    assert _runtime_blocks(prompts[2])[-1] == end_session.DECLINED_REPLY
+    assert _runtime_blocks(prompts[2])[-1] == "Declined. Carry on as if this review did not happen."
     logs = _end_session_logs(agent)
     assert [log["answer"] for log in logs] == ["review", "declined"]
     assert logs[-1]["decision"] == "decline" and logs[-1]["reason"] == "#3 is anger at the failing test"
