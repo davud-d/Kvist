@@ -177,6 +177,13 @@ _CHAT_HISTORY_PREAMBLE = (
 )
 # Added once when chat's answer after end_session came back as the tag again.
 _WORDS_NOTE = "(Runtime fact: answer the person in words.)"
+# Chat's answer after end_session is asked without the tool's block, and with it
+# goes the rule against answering an insult in words: a declined review came
+# back as a reproach ("an insult does not solve the task").
+_AFTER_TOOL_NOTE = (
+    "(Runtime fact: answer the work, or how the person is doing if they are struggling. "
+    "Do not reproach, lecture or comment on how the person speaks.)"
+)
 
 
 def _end_session_command(args: dict[str, Any]) -> AgentCommand:
@@ -1173,7 +1180,8 @@ class LocalAgent:
 
         system_prompt = build_role_system_prompt(self, "chat", offer_end_session=False)
         earlier = [message for message in self._chat_history[:-1] if message["role"] != "system"]
-        turn = {"role": "user", "content": self._chat_turn_message(self._state.user_goal, offer_tag=False)}
+        message = self._chat_turn_message(self._state.user_goal, offer_tag=False)
+        turn = {"role": "user", "content": f"{message}\n\n{_AFTER_TOOL_NOTE}"}
         return self._trim_chat_messages_to_token_limit([{"role": "system", "content": system_prompt}, *earlier, turn])
 
     def _persist_end_session_log(self) -> None:

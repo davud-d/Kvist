@@ -912,9 +912,35 @@ def _assert_asked_without_the_tool(first, words):
         assert "review" not in message["content"].lower()
         assert not re.search(r"message #\d", message["content"])
     assert rest[:-1] == first["messages"][1:-1]
-    assert _last_user_text(first).replace("(Runtime fact: this is the person's message #3.)\n\n", "") == (
-        _last_user_text(words)
+    assert _last_user_text(first).replace("(Runtime fact: this is the person's message #3.)\n\n", "") + (
+        f"\n\n{_AFTER_TOOL_NOTE}"
+    ) == _last_user_text(words)
+
+
+_AFTER_TOOL_NOTE = (
+    "(Runtime fact: answer the work, or how the person is doing if they are struggling. "
+    "Do not reproach, lecture or comment on how the person speaks.)"
+)
+
+
+def test_only_the_answer_after_the_tool_is_told_not_to_reproach(tmp_path):
+    agent, _ui, client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            ['<end_session message="3"/>'],
+            '<end_session confirm="false" reason="#3 is anger at the bug"/>',
+            ["The fixture is stale."],
+        ],
     )
+    agent.run(_INSULT, routed_role="chat")
+
+    agent.run("damn it, the test is broken again", routed_role="chat")
+
+    first, review, words = client.requests[1], client.requests[2], client.requests[3]
+    assert _AFTER_TOOL_NOTE not in json.dumps(first["messages"])
+    assert _AFTER_TOOL_NOTE not in json.dumps(review["messages"])
+    assert _last_user_text(words).endswith(_AFTER_TOOL_NOTE)
 
 
 def test_a_refused_chat_tag_is_answered_without_the_tool(tmp_path):
