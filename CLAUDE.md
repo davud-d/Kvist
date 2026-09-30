@@ -921,8 +921,11 @@ preference and calls `agent.adopt_session_style`: an untouched session adopts th
 new choice (nothing came out of the old one yet), a session that already holds
 work keeps its stamp and the change starts with the next session. The selected
 *file* is still re-read per call, so editing that file lands on the next step.
-The reporter (`report_prompt.txt`) does not see the
-style.
+The reporter (`report_prompt.txt`) is built by
+`agent_model.build_report_system_prompt`: the constitution, the report prompt and
+this session's agent style, so a report reached through `report_to_user` keeps the
+run's character and voice (a fast-and-dirty prototype label survives into it). The
+workspace instruction file never reaches it.
 
 ### Reasoning effort (`reasoning_effort.py`)
 One global knob (`/effort`, env `AGENT_REASONING_EFFORT`, persisted

@@ -344,7 +344,7 @@ def _render_report(self, context: str) -> str:
     """Call the chat model to render a report from agent context. Streams markdown to console."""
     from kernel.agent_model import (
         _emit_usage,
-        _load_role_prompt,
+        build_report_system_prompt,
         safe_extract_completion_content,
         append_reasoning_delta,
         safe_extract_reasoning_delta,
@@ -352,10 +352,10 @@ def _render_report(self, context: str) -> str:
         _create_json_completion,
     )
 
-    report_prompt = _load_role_prompt("report")
+    system_prompt = build_report_system_prompt(self)
     stream_model = self.config.fast_model
     messages = [
-        {"role": "system", "content": report_prompt},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": context},
     ]
 
@@ -373,7 +373,7 @@ def _render_report(self, context: str) -> str:
         _emit_usage(
             self,
             model=stream_model,
-            input_tokens=self._count_tokens(report_prompt) + self._count_tokens(context),
+            input_tokens=self._count_tokens(system_prompt) + self._count_tokens(context),
             output_tokens=self._count_tokens(raw),
             kind="report",
         )
@@ -431,7 +431,7 @@ def _render_report(self, context: str) -> str:
     _emit_usage(
         self,
         model=stream_model,
-        input_tokens=self._count_tokens(report_prompt) + self._count_tokens(context),
+        input_tokens=self._count_tokens(system_prompt) + self._count_tokens(context),
         output_tokens=self._count_tokens("".join(chunks))
         + self._count_tokens("".join(reasoning_chunks)),
         kind="report",

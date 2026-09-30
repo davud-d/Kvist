@@ -384,9 +384,10 @@ def _load_plan_mode_section() -> str:
 def _load_constitution() -> str:
     """The layer above every role: what the work is, what outranks what.
 
-    Cached like a role prompt. It is deliberately absent from the report and
-    commit prompts, which `_load_role_prompt` serves directly — those two
-    produce one piece of text from material already gathered and never act.
+    Cached like a role prompt. The commit prompt, which `_load_role_prompt`
+    serves directly, deliberately goes without it: it turns a diff into a
+    commit message and never speaks to the person. The reporter does speak to
+    them and gets it through `build_report_system_prompt`.
     """
     if _CONSTITUTION_KEY in _PROMPT_CACHE:
         return _PROMPT_CACHE[_CONSTITUTION_KEY]
@@ -429,6 +430,20 @@ def build_role_system_prompt(
         base = f"{base}\n\n{style}"
     project = workspace_instructions_context(self.executor.workspace, role)
     return f"{base}\n\n{project}" if project else base
+
+
+def build_report_system_prompt(self) -> str:
+    """The reporter's system prompt: the constitution, the report prompt, this
+    session's working style, in build_role_system_prompt's order.
+
+    The report is the person's account of the run, so it is written by the same
+    character and in the same voice as the run: a fast-and-dirty prototype label
+    has to survive into it. The workspace instruction file stays out, because
+    the report prompt carries none of the rules that bound it.
+    """
+    base = f"{_load_constitution()}\n\n{_load_role_prompt('report')}"
+    style = _style_context(self, "report")
+    return f"{base}\n\n{style}" if style else base
 
 
 def resolve_action_model(self) -> str:
