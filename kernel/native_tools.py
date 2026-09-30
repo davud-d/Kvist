@@ -150,6 +150,23 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         {"plan": {"type": "string", "description": "Short Markdown: goal, key changes, how you will verify, assumptions."}},
         ("plan",),
     ),
+    # Never in a role prompt's ALLOWED ACTIONS: the runtime adds it only where
+    # end_session.available holds. Two forms share one flat schema, because a
+    # oneOf is not accepted by every provider's tool validator.
+    "end_session": ToolSpec(
+        "Close this conversation for good; see end_session in the system prompt. First call: message_id "
+        "alone. The answer to END_SESSION REVIEW: confirm and reason, without message_id.",
+        {
+            "message_id": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "The number of the person's message, as the conversation shows it (#N).",
+            },
+            "confirm": {"type": "boolean"},
+            "reason": {"type": "string", "description": "One line: which message, what it targets."},
+        },
+        (),
+    ),
 }
 
 READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.readonly)
@@ -200,23 +217,23 @@ def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:
     if match is None:
         raise ValueError("role prompt has no ALLOWED ACTIONS section")
     names = [name.strip(" .") for name in match.group(1).split(",")]
-    return [_tool(name) for name in names if name in ACTION_TOOLS]
+    return [tool_definition(name) for name in names if name in ACTION_TOOLS]
 
 
 # A call with an empty argument object was lost on the way at least one
 # gateway (Claude through AnyModel): git_status arrived as a response with
-# neither text nor a call, nine times in one run. A tool with no required
-# argument therefore asks for the fact the call should settle, which is also
+# neither text nor a call, nine times in one run. The two tools with no
+# argument of their own therefore ask for the fact the call should settle, which is also
 # the constitution's test of whether a call earns its step; the runtime drops
 # it before the action runs, so the protocol is unchanged.
 _PURPOSE: dict[str, Any] = {
     "type": "string",
     "description": "One short phrase: what this call should settle.",
 }
-_PURPOSE_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if not spec.required)
+_PURPOSE_TOOLS = frozenset({"git_status", "git_diff"})
 
 
-def _tool(name: str) -> dict[str, Any]:
+def tool_definition(name: str) -> dict[str, Any]:
     spec = ACTION_TOOLS[name]
     properties, required = spec.properties, spec.required
     if name in _PURPOSE_TOOLS:

@@ -19,6 +19,9 @@ def _example_calls(prompt_text: str) -> list[str]:
 # Honoured when an older prompt calls them, never offered: a response without
 # a tool call ends the turn.
 _LEGACY_FINISHES = {"final_answer", "report_to_user"}
+# Added to the prompt at run time, and only by an interactive frontend
+# (end_session.with_tool_in_prompt); the static prompt files never list it.
+_CONDITIONAL = {"end_session"}
 
 
 def _extract_allowed_actions_block(prompt_text: str) -> set[str]:
@@ -37,7 +40,7 @@ def test_prompt_action_list_matches_parser(role):
     """The allowed-actions list in role prompts must mirror parser.ALLOWED_ACTIONS."""
     prompt_text = _load_role_prompt(role)
     prompt_actions = _extract_allowed_actions_block(prompt_text)
-    offered = ALLOWED_ACTIONS - _LEGACY_FINISHES
+    offered = ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL
     assert prompt_actions == offered, (
         f"{role} prompt action list is out of sync with parser.ALLOWED_ACTIONS. "
         f"Missing in prompt: {sorted(offered - prompt_actions)}. "
@@ -65,7 +68,7 @@ def test_prompt_tool_call_examples_pass_the_parser(role):
 
     for example in examples:
         (command,) = commands_from_response(example)
-        assert command.action.type in ALLOWED_ACTIONS - _LEGACY_FINISHES
+        assert command.action.type in ALLOWED_ACTIONS - _LEGACY_FINISHES - _CONDITIONAL
 
 
 @pytest.mark.parametrize("role", ["coder", "devops", "universal"])
@@ -84,3 +87,24 @@ def test_every_shell_example_names_its_purpose(role):
         call = json.loads(example[len("<tool_call>"):-len("</tool_call>")])
         if call["name"] == "run_shell":
             assert call["arguments"].get("purpose"), call
+
+
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
+def test_end_session_is_offered_with_its_block_and_schema(role):
+    from kernel.end_session import _PROMPT_FILE, with_tool_in_prompt
+
+    prompt_text = with_tool_in_prompt(_load_role_prompt(role))
+    listed = _extract_allowed_actions_block(prompt_text)
+    assert "end_session" in listed
+    assert listed - {"end_session"} == _extract_allowed_actions_block(_load_role_prompt(role))
+    assert _PROMPT_FILE.read_text(encoding="utf-8").strip() in prompt_text
+    assert 'end_session: {"message_id": <int>}' in prompt_text
+
+
+def test_end_session_block_is_the_agreed_text():
+    from kernel.end_session import _PROMPT_FILE
+
+    text = _PROMPT_FILE.read_text(encoding="utf-8")
+    assert text.startswith("end_session: closes this conversation for good when the person insults you or people. Rare.")
+    assert "The tool speaks." in text
+    assert text.rstrip().endswith("The call returns the rules; then you confirm or decline.")

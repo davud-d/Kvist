@@ -1238,6 +1238,7 @@ class KvistAcpAgent:
                     persist_logs=False,
                     verbose=False,
                     ui=ui,
+                    end_session=True,
                 )
         finally:
             sys.stdin = original_stdin

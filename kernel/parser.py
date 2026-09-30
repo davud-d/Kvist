@@ -38,6 +38,9 @@ ALLOWED_ACTIONS = {
     "report_to_user",
     "offer_plan",
     "propose_plan",
+    # Offered only by an interactive frontend (end_session.available); the
+    # runtime answers it as an unknown tool everywhere else.
+    "end_session",
 }
 
 MAX_BATCH_ACTIONS = 8
@@ -346,6 +349,9 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         require_only_allowed_keys(args, {"plan"})
         require_str(args, "plan")
 
+    elif action_type == "end_session":
+        _validate_end_session(args)
+
     elif action_type == "report_to_user":
         require_keys(args, {"summary", "result"})
         require_only_allowed_keys(args, {"summary", "result", "issues", "outcome"})
@@ -354,6 +360,27 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         if "issues" in args:
             require_text(args, "issues")
         _require_outcome(args)
+
+
+_MESSAGE_ID_RE = re.compile(r"#?\s*([1-9][0-9]*)")
+
+
+def _validate_end_session(args: dict[str, Any]) -> None:
+    """Two forms: ``{message_id}`` flags a message, ``{confirm, reason}`` answers the review."""
+    if "message_id" in args:
+        require_only_allowed_keys(args, {"message_id"})
+        value = args["message_id"]
+        text = str(value).strip() if isinstance(value, (int, str)) and not isinstance(value, bool) else ""
+        match = _MESSAGE_ID_RE.fullmatch(text)
+        if match is None:
+            raise CommandValidationError("'message_id' must be the number of a message, e.g. 7")
+        args["message_id"] = int(match.group(1))
+        return
+    require_keys(args, {"confirm", "reason"})
+    require_only_allowed_keys(args, {"confirm", "reason"})
+    if not isinstance(args["confirm"], bool):
+        raise CommandValidationError("'confirm' must be true or false")
+    require_str(args, "reason")
 
 
 def _require_outcome(args: dict[str, Any]) -> None:

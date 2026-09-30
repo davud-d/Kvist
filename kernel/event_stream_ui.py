@@ -24,6 +24,7 @@ from kernel.frontend_protocol import (
     ReasoningStartEvent,
     RouteEvent,
     SandboxNoticeEvent,
+    SessionEndedEvent,
     SessionTitleEvent,
     StatusEvent,
     StepEvent,
@@ -235,6 +236,17 @@ class EventStreamUI:
 
     def print_session_title(self, session: str, title: str) -> None:
         self._channel.emit(SessionTitleEvent(str(session), str(title)))
+
+    def print_session_ended(self, payload: dict) -> None:
+        self._channel.emit(
+            SessionEndedEvent(
+                session_id=str(payload["session_id"]),
+                warned_msg_id=payload.get("warned_msg_id"),
+                closed_msg_id=int(payload["closed_msg_id"]),
+                reason=redact_text(str(payload.get("reason", ""))),
+                closed_notice=str(payload["closed_notice"]),
+            )
+        )
 
     @contextlib.contextmanager
     def live_markdown(self) -> Iterator[Callable[[str], None]]:

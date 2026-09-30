@@ -59,6 +59,7 @@ def test_constitution_precedes_every_acting_role(tmp_path):
     """
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
+        config=SimpleNamespace(end_session_enabled=False),
         _session_styles={},
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role="coder", plan_phase="", read_only_goal=False),

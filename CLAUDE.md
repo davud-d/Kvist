@@ -279,10 +279,10 @@ not already have, so `agent_runtime.update_progress` derives `RunState.progress`
 the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
 monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of 20 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 21 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
 git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, refuse,
-final_answer, report_to_user, offer_plan, propose_plan). The parser tolerates fenced code blocks, smart quotes, and surrounding
+final_answer, report_to_user, offer_plan, propose_plan, end_session). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
 enforced by `kernel/tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
@@ -405,6 +405,38 @@ this loop check is the only enforcement. The create-goal "write now" nudges and
 `_note_unchanged_run` are off in this phase, a response without calls is not accepted as
 the end (the turn ends with `propose_plan`), and native tool definitions are narrowed per
 turn by `plan_mode.tools_for_phase`. Tests: `kernel/tests/test_plan_mode.py`.
+
+### Closing a conversation (`end_session.py`)
+`end_session` closes a session for good when the person insults the agent or people
+after a fresh warning (constitution STANCE: the line is held by the tool, never by the
+model's words). The model judges one thing — does the flagged message attack what the
+agent or a person is — and the code owns the rest. Only interactive frontends offer it:
+`build_agent(end_session=True)` from the classic REPL, `launch_multi` and ACP sets
+`AgentConfig.end_session_enabled`; elsewhere (headless `stdio`, `run_task.py`, tests) the
+tool is absent from the prompt and the tool list, and a stray call is an unknown tool.
+The static role prompts never list it: `with_tool_in_prompt` adds it to ALLOWED ACTIONS
+with the block in `kernel/prompts/system/end_session.txt` and a schema line, and
+`_call_native_turn` appends its tool definition. The chat role cannot call tools, so it
+never has it.
+Every person's message and agent reply of a session gets a number from one ledger
+(`messages.last_id` / `user_ids` in the session document); the runtime prompt shows
+`[the person's message #N]` and the history shows the numbers only when the tool is offered.
+Call 1 `end_session(message_id)` must name a person's message after `warned_msg_id`;
+without a fresh warning (more than `WARNING_FRESH_MESSAGES` = 3 person's messages since
+it) the person gets the fixed WARNING text and `warned_msg_id` is saved at once; with one,
+the model gets `REVIEW_INSTRUCTION` (numbers only, never the person's text) and
+`RunState.end_session_review` opens. Call 2 `end_session(confirm, reason)` is accepted only
+while that review is open in the same turn; `true` writes `closed`, `closed_at`,
+`closed_msg_id` into the session document, emits `session_ended` and ends the turn on
+the CLOSED text. Every answer to the tool goes on the runtime's own channel
+(`<KVIST_RUNTIME source="end_session">`, defanged in content like the other boundary
+tags), never as untrusted tool output; the model's own words beside the call are
+dropped; each call is one `step_logs` entry. The lock is `LocalAgent.run`/`resume`
+reading the stored document (`is_session_closed`, so an agent pointed at a session
+without loading it — ACP — still sees it): a closed session answers CLOSED_REPLY before
+routing, the journal or any model call. It stays readable (`--session-op history/list/status`
+and the `session` event carry `closed` and `closed_notice`), `find_resumable_session`
+skips it and `reset_session` refuses it. Tests: `kernel/tests/test_end_session.py`.
 
 **Session history is never cut by hand; the model's budget cuts it.**
 `_add_to_session_history` stores the turn's answer whole (it was once
@@ -849,7 +881,7 @@ and escalates to smart when `task_intent.is_complex_goal` flags the request, or 
 errors, consecutive errors, or stagnation — unless the user explicitly pinned a model.
 Role system prompts are loaded and cached from `kernel/prompts/system/`:
 `{chat,coder,commit,complete,devops,reader,report,router,universal}_prompt.txt`, plus
-`constitution.txt`, `native_tools.txt` and `plan_mode.txt`.
+`constitution.txt`, `native_tools.txt`, `plan_mode.txt` and `end_session.txt`.
 
 User-selectable styles live apart, in `kernel/prompts/styles/{agents,chat}/<slug>.txt`
 (`agents` covers coder/reader/devops, `chat` the chat role). **One session, one

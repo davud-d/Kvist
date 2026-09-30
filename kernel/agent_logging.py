@@ -18,6 +18,7 @@ from kernel.durable_json import (
     validate_storage_path,
     write_json_object,
 )
+from kernel import end_session
 from kernel.redaction import redact_value
 from kernel.session_events import JOURNAL_SUFFIX, delete_journal, journal_size
 
@@ -179,6 +180,7 @@ def _session_document(
         "checkpoint": checkpoint,
         "title": getattr(self, "_session_title", None),
         "title_manual": bool(getattr(self, "_title_manual", False)),
+        **end_session.document_fields(self),
     }
     sanitized = redact_value(document)
     assert isinstance(sanitized, dict)
@@ -258,7 +260,8 @@ def find_resumable_session(self) -> str | None:
     A launch opens its own session, so an interrupted run's checkpoint is
     usually not in the active one any more. Scanning is what keeps ``/resume``
     reachable without pinning a launch to the previous conversation. Damaged
-    sessions are skipped rather than reported as resumable.
+    sessions are skipped rather than reported as resumable, and so are sessions
+    end_session closed: nobody continues those.
     """
     newest: tuple[float, str] | None = None
     for session in list_sessions(self):
@@ -266,7 +269,7 @@ def find_resumable_session(self) -> str | None:
             document = read_session_document(self, session)
         except JsonStorageCorruptError:
             continue
-        if not document or _session_checkpoint(document) is None:
+        if not document or _session_checkpoint(document) is None or document.get("closed") is True:
             continue
         updated_at = document.get("updated_at")
         stamp = float(updated_at) if isinstance(updated_at, (int, float)) else 0.0
@@ -428,8 +431,13 @@ def begin_run(self, user_goal: str, run_id: str) -> None:
 
 def reset_session(self) -> None:
     """Durably reset the active session to an empty document (the /new
-    contract): history, chat, and checkpoint are gone; the name is kept."""
+    contract): history, chat, and checkpoint are gone; the name is kept.
+
+    A session end_session closed is refused: emptying it would reopen it.
+    """
     session = getattr(self, "current_session", "default")
+    if read_session_document(self, session).get("closed") is True:
+        raise ValueError(f"Session {session!r} is closed and cannot be reset; start a new one.")
     # The journal goes first: a crash in between must leave the conversation
     # without its display log, never a reset session that still shows its old feed.
     delete_journal(get_journal_path(self, session), self.executor.workspace)
@@ -612,6 +620,7 @@ def restore_session_document(self, data: dict[str, Any]) -> bool:
     title = data.get("title") if isinstance(data, dict) else None
     self._session_title = title if isinstance(title, str) and title.strip() else None
     self._title_manual = bool(data.get("title_manual")) if isinstance(data, dict) else False
+    end_session.restore(self, data if isinstance(data, dict) else {})
     if not data:
         return False
 

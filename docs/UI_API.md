@@ -195,7 +195,8 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
 | `turn_end` | — | `--frontend stdio-multi` only: the turn ended (after `final`, `error`, or a chat reply that has no `final`); the process stays up for the next goal |
-| `session` | `session:str, has_checkpoint:bool` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` (§8c). |
+| `session` | `session:str, has_checkpoint:bool`; optional `closed:true, closed_notice:str` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` — and the session a `session`/`new` command switched to (§8c). `closed` and `closed_notice` are present only for a session `end_session` closed (§8a, "Closed sessions"): show `closed_notice` in place of the input box. |
+| `session_ended` | `session_id:str, warned_msg_id:int, closed_msg_id:int, reason:str, closed_notice:str` | the model closed the conversation for good with `end_session` (§8a, "Closed sessions"). Sent during the turn, before its `final`, which carries the closing words for the person. `session_id` is the session name; `warned_msg_id`/`closed_msg_id` are the numbers of the person's messages that got the warning and that closed it; `reason` is the model's one-line reason, for logs rather than for the person; `closed_notice` is the core's text for the place of the input box, in the session's language. Recorded in the session's journal. |
 | `session_title` | `session:str, title:str` | a session's title became known: generated in the background from its first completed turn (never the first user message — see §8a), or set by hand with the `rename` command (§8c). Additive, out-of-band — it can arrive well after the turn's `turn_end`, and `session` may name a different session than the one currently active if the user switched sessions while generation was still running. |
 | `command_result` | `name:str, ok:bool, message:str, effects:object` | `--frontend stdio-multi` only: the outcome of an inbound `command` message (§8c). It is the last event of that command; **no `turn_end` follows it**. |
 
@@ -369,13 +370,15 @@ Semantics (identical to the terminal `/session` and `/new` commands):
 - `status` — active session, session list, checkpoint summary (`null` if none).
   Each `session_items` entry carries `name`, `title`, `updated_at`,
   `has_checkpoint`, `journal_bytes` (size of the session's event journal, `0`
-  if none) and the model-facing `session_history` / `chat_history`. Those two
+  if none), `closed: true` and `closed_notice` for a closed session (absent
+  otherwise), and the model-facing `session_history` / `chat_history`. Those two
   are the whole history of every session, so `status` grows with the
   workspace (~570 KB for 36 sessions).
 - `list` — the cheap `status`: the same payload without `session_history` and
   `chat_history` in the items. Use it for a session picker; the rest of
   `status` is unchanged and still what the Electron GUI reads.
-- `history` — the event journal of one session (below).
+- `history` — the event journal of one session (below); a closed session's
+  payload also carries `closed: true` and `closed_notice`.
 - `launch` — **run this once when your app starts.** A launch always opens its
   own fresh session instead of reopening the previous one. An interrupted run is
   not lost: `status` names the session that still holds it in
@@ -391,7 +394,27 @@ Semantics (identical to the terminal `/session` and `/new` commands):
   active session is refused.
 - `reset` — empty the active session in place (history, chat, checkpoint); the
   name is kept, other sessions are untouched. Unlike `new`, this **destroys**
-  the conversation it is called on.
+  the conversation it is called on. A closed session is refused
+  (`{"ok": false}`): emptying it would reopen it.
+
+### Closed sessions
+
+In an interactive frontend (the classic terminal, `--frontend stdio-multi`,
+`--acp`) the model has one more tool, `end_session`, for a person who insults
+it or people after a warning. The core decides everything but that one
+judgement: the warning (a `message` event with fixed text), whether it is still
+fresh, and the closing. A closed session:
+
+- is **read-only for good**. The core refuses every goal and every `resume` in
+  it before routing or any model call: the answer is one `final` event
+  (`outcome: "incomplete"`) with a fixed reply, followed by `turn_end` in
+  stdio-multi, and nothing is written to the session or its journal;
+- **stays readable**: `history`, `list`, `status` and switching to it work as
+  usual, and `list`/`status` items, the `history` payload and the `session`
+  event carry `closed: true` and `closed_notice` — the core's text for the place
+  of the input box, in the session's language, so a frontend never writes its own;
+- is skipped by `resumable_session`, cannot be `reset`, and leaves the files and
+  git alone. A new session (`new`, `launch`) starts without it.
 
 ### Restoring a session's feed: `--session-op history`
 
@@ -586,7 +609,13 @@ stream is exactly what a goal produces, with one extra event first:
 
 There is **no `command_result`** for a resumed turn; `turn_end` ends it, and
 `session` tells the frontend which conversation is now active. Like any turn it
-takes no `command` while it runs.
+takes no `command` while it runs. In a closed session (§8a) `resume` is a turn
+without the `session` event: the core's closed-session reply as `final`, then
+`turn_end`.
+
+A `session` or `new` command that changed the active session also emits a
+`session` event before its `command_result`, with `closed`/`closed_notice` when
+the target is closed.
 
 ## 8d. The Agent Client Protocol (`--acp`)
 

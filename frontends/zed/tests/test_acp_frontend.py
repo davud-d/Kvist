@@ -1237,3 +1237,48 @@ def test_every_advertised_command_is_executable():
     assert handlers.isdisjoint(ACP_ONLY_COMMANDS)
     assert all(description.strip() for description in advertised.values())
     assert {"commit-message", "terminal"} <= set(advertised)
+
+
+def test_a_closed_session_refuses_a_prompt_without_a_model_call(tmp_path):
+    """The core's lock holds over ACP too, even for an agent built on another session."""
+    from kernel import end_session
+    from kernel.agent import LocalAgent
+    from kernel.agent_state import AgentConfig
+    from kernel.executor import SafeExecutor
+    from kernel.session_store import SessionStore
+    from kernel.tests.conftest import FakeLLMClient, NullPerfLogger, NullUI
+
+    seed_history(tmp_path, "chat-1", [("you useless piece of junk", "closed")])
+    closer = LocalAgent(
+        client=FakeLLMClient(), executor=SafeExecutor(tmp_path), config=AgentConfig(), ui=NullUI()
+    )
+    closer._session_history = [{"goal": "you useless piece of junk", "role": "coder", "result": "closed"}]
+    closer._closure = {"closed_at": 1.0, "closed_msg_id": 1, "language": "en"}
+    closer.save_session()
+    # The ACP agent is built on the workspace's active session, which is not chat-1.
+    SessionStore(tmp_path).create("chat-2")
+    client = FakeLLMClient()
+
+    def build(executor, **kwargs):
+        config = AgentConfig(persist_logs=False, end_session_enabled=kwargs.get("end_session", False))
+        agent = LocalAgent(client=client, executor=executor, config=config, ui=kwargs["ui"])
+        agent._perf_logger = NullPerfLogger()
+        return agent, config, []
+
+    async def scenario():
+        async with Wire(build_agent_fn=build) as wire:
+            await wire.initialize()
+            session_id = acp_session_id(tmp_path, "chat-1")
+            opened = await wire.call(
+                "session/resume",
+                {"cwd": str(tmp_path), "sessionId": session_id, "mcpServers": [], "additionalDirectories": []},
+            )
+            assert "result" in opened, opened
+
+            response = await wire.call("session/prompt", _prompt(session_id, "hello again"))
+
+            assert "result" in response, response
+            assert end_session.closed_reply("en") in "".join(wire.agent_text())
+            assert client.requests == []
+
+    run(scenario())

@@ -68,6 +68,9 @@ class AgentConfig:
     # user typed for OpenAI must not be silently zeroed by that table.
     api_interval_user_set: bool = False
     api_timeout: float = 60.0
+    # Set only by the interactive frontends (classic terminal, stdio-multi,
+    # ACP): end_session needs a person reading the conversation.
+    end_session_enabled: bool = False
 
 
 PLAN_OFFERED = "offered"
@@ -112,6 +115,14 @@ class RunState:
     # How plan mode ended for this turn ("declined", "not_accepted",
     # "approved", or ""); recorded in session history for the next turn.
     plan_outcome: str = ""
+    # The number of the person's message this turn answers (end_session.py);
+    # 0 for a resumed turn, which has no new message.
+    message_id: int = 0
+    # Set by end_session when it hands the model END_SESSION REVIEW; the
+    # decision call is accepted only while it is set, so only in this turn.
+    end_session_review: dict[str, Any] | None = None
+    # end_session closed the session in this turn.
+    session_closed: bool = False
     selected_action_role: str = ""
     selected_action_model: str = ""
     progress: int = 0

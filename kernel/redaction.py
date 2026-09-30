@@ -354,10 +354,12 @@ def redact_text(text: str) -> str:
 # were the system prompt again, so the syntax is defanged wherever untrusted
 # content is embedded. Replacement is visible rather than silent: content that
 # legitimately documents these tags stays readable and the edit is auditable.
+# KVIST_RUNTIME is the runtime's own channel (end_session): content must never
+# be able to pose as it.
 DEFANGED_TAG = "[tag removed by Kvist]"
 
 _PROMPT_BOUNDARY_TAG_RE = re.compile(
-    r"</?\s*(?:PROJECT_INSTRUCTIONS|UNTRUSTED_TOOL_OUTPUT)\b[^>]*>",
+    r"</?\s*(?:PROJECT_INSTRUCTIONS|UNTRUSTED_TOOL_OUTPUT|KVIST_RUNTIME)\b[^>]*>",
     re.IGNORECASE,
 )
 

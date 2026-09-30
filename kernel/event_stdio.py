@@ -394,7 +394,21 @@ def _resumable_session(agent) -> str | None:
 
 
 def _run_resume(session: EventSession, out_stream) -> None:
-    """Continue an interrupted run as an ordinary turn (events, then turn_end)."""
+    """Continue an interrupted run as an ordinary turn (events, then turn_end).
+
+    From a session end_session closed the core answers the resume itself with
+    its closed-session reply, whatever checkpoints exist elsewhere.
+    """
+    if not session.agent.is_session_closed() and not _announce_resume(session, out_stream):
+        return
+    session.submit_resume()
+    _stream_events(session, out_stream)
+    out_stream.write(json.dumps({"type": "turn_end"}) + "\n")
+    out_stream.flush()
+
+
+def _announce_resume(session: EventSession, out_stream) -> bool:
+    """Name the session the resume continues in; False (and a refusal) when there is none."""
     try:
         holder = _resumable_session(session.agent)
     except JsonStorageError as exc:
@@ -408,7 +422,7 @@ def _run_resume(session: EventSession, out_stream) -> None:
             ),
             out_stream,
         )
-        return
+        return False
     if holder is None:
         _write_event(
             _rejected(
@@ -417,14 +431,11 @@ def _run_resume(session: EventSession, out_stream) -> None:
             ),
             out_stream,
         )
-        return
+        return False
     # The run may switch sessions itself; announcing the target first lets the
     # frontend show the right conversation before the first turn event.
     session.emit(SessionEvent(holder, True))
-    session.submit_resume()
-    _stream_events(session, out_stream)
-    out_stream.write(json.dumps({"type": "turn_end"}) + "\n")
-    out_stream.flush()
+    return True
 
 
 def _write_event(event: CommandResultEvent, out_stream) -> None:
@@ -637,6 +648,7 @@ def launch_multi(
                     provider_override=provider_override,
                     models_override=models_override,
                     ui=ui,
+                    end_session=True,
                 )
         finally:
             sys.stdin = original_stdin
@@ -661,6 +673,7 @@ def launch_multi(
                         provider_override=provider_override,
                         models_override=models_override,
                         ui=ui,
+                        end_session=True,
                         **({"interactive_ui": ui} if interactive else {}),
                     )
             finally:

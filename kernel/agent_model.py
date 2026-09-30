@@ -46,7 +46,7 @@ from kernel.llm_clients import (
     OPENROUTER_PROVIDER,
     MANUAL_MODEL_PROVIDERS,
 )
-from kernel import plan_mode
+from kernel import end_session, plan_mode
 from kernel.agent_state import RunCancelled
 from kernel.task_intent import is_complex_goal
 from kernel.native_tools import (
@@ -413,6 +413,8 @@ def build_role_system_prompt(self, role: str, *, native_tools: bool = False) -> 
     tool-call channel (``native_tools.native_role_prompt``).
     """
     role_prompt = _load_role_prompt(role)
+    if end_session.available(self, role):
+        role_prompt = end_session.with_tool_in_prompt(role_prompt)
     if native_tools:
         role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())
     base = f"{_load_constitution()}\n\n{role_prompt}"

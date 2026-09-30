@@ -6,6 +6,7 @@ import re
 import textwrap
 from typing import Any
 
+from kernel import end_session
 from kernel.agent_state import PLAN_APPROVED, PLAN_PLANNING
 from kernel.language_policy import response_language_name
 from kernel.redaction import defang_prompt_boundary_tags
@@ -215,7 +216,12 @@ _PLAN_OUTCOME_STATUS = {
 }
 
 
-def render_session_history(history: Any, *, include_outputs: bool) -> str:
+def _message_tag(entry: dict[str, Any], key: str, with_ids: bool) -> str:
+    value = entry.get(key)
+    return f" (message #{value})" if with_ids and type(value) is int else ""
+
+
+def render_session_history(history: Any, *, include_outputs: bool, with_ids: bool = False) -> str:
     """Render earlier turns of this session as one trimmable prompt section.
 
     Nothing is cut here: the per-model budget in ``trim_prompt_to_token_limit``
@@ -234,7 +240,7 @@ def render_session_history(history: Any, *, include_outputs: bool) -> str:
         goal = str(entry.get("goal", "")).strip()
         if not goal:
             continue
-        lines.append(f"- [{entry.get('role', '')}] user asked:")
+        lines.append(f"- [{entry.get('role', '')}] user asked{_message_tag(entry, 'msg_id', with_ids)}:")
         lines.append(_indent_turn_text(goal))
         if entry.get("stopped_by_user"):
             lines.append(
@@ -246,7 +252,7 @@ def render_session_history(history: Any, *, include_outputs: bool) -> str:
             lines.append(f"  status: {plan_status}")
         result = str(entry.get("result", "")).strip()
         if result:
-            lines.append("  agent answered:")
+            lines.append(f"  agent answered{_message_tag(entry, 'reply_id', with_ids)}:")
             lines.append(_indent_turn_text(result))
         if include_outputs:
             for output in entry.get("outputs", []):
@@ -301,15 +307,23 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             system_lines.append(f"- Host: {self._state.system_host}")
         system_block = "\n".join(system_lines) + "\n\n"
         # ── Session history context ─────────────────────────────────
+        # Message numbers exist for end_session, which names the message it
+        # is about; a run without the tool never sees them.
+        with_ids = end_session.available(self, self._state.current_agent_role)
         session_history = render_session_history(
-            getattr(self, "_session_history", None), include_outputs=True
+            getattr(self, "_session_history", None), include_outputs=True, with_ids=with_ids
+        )
+        message_line = (
+            f"[the person's message #{self._state.message_id}]\n"
+            if with_ids and self._state.message_id
+            else ""
         )
 
         cached_prefix = (
             system_block +
             session_history +
             f"{text['task_language']}: {response_language_name(response_language)}\n\n"
-            f"{text['user_task']}:\n{user_goal}\n\n"
+            f"{text['user_task']}:\n{message_line}{user_goal}\n\n"
         )
         language_block = (
             "USER-FACING LANGUAGE:\n"

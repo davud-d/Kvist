@@ -1076,10 +1076,13 @@ def build_agent(
     language_hint: str | None = None,
     ui: AgentUI | None = None,
     interactive_ui: AgentUI | None = None,
+    end_session: bool = False,
 ) -> tuple[LocalAgent, AgentConfig, list[str]]:
     # ``interactive_ui`` is how an event frontend answers what the terminal
     # answers through a TTY (provider, models, base URL, secrets). Without a
     # TTY and without it, those questions fail instead of hanging.
+    # ``end_session`` offers that tool; only a frontend with a person reading
+    # the conversation passes it.
     can_ask = interactive_ui is not None or sys.stdin.isatty()
     # Captured before the missing-models wizard may rebind the local ``ui``.
     provided_ui = ui
@@ -1319,6 +1322,7 @@ def build_agent(
         verbose=verbose,
         reasoning_effort=resolve_reasoning_effort(),
         title_model=get_saved_title_model() or "",
+        end_session_enabled=end_session,
     )
     apply_api_settings(config)
     agent_console = Console()
@@ -3165,7 +3169,21 @@ def _stdio_session(ctx: CommandContext) -> CommandResult:
         return CommandResult(False, sanitize_display_text(str(error).strip() or type(error).__name__))
     effects = _session_effects(agent)
     effects["changed"] = agent.current_session != before
+    if effects["changed"]:
+        ctx.session.emit(_session_event(agent))
     return CommandResult(True, message, effects)
+
+
+def _session_event(agent):
+    """The session a switch moved to, with the closed notice when end_session closed it."""
+    from kernel.end_session import closed_notice, closure_language
+    from kernel.frontend_protocol import SessionEvent
+
+    return SessionEvent(
+        agent.current_session,
+        agent._peek_checkpoint() is not None,
+        closed_notice(closure_language(agent)) if agent.is_session_closed() else None,
+    )
 
 
 def _stdio_new(ctx: CommandContext) -> CommandResult:
@@ -3953,6 +3971,7 @@ def main() -> None:
             persist_logs=persist_logs,
             verbose=verbose,
             language_hint=session_language,
+            end_session=True,
         )
     except (RuntimeError, ValueError) as error:
         print(sanitize_display_text(str(error)), file=sys.stderr)
@@ -4197,6 +4216,7 @@ def main() -> None:
                             persist_logs=persist_logs,
                             verbose=verbose,
                             language_hint=session_language,
+                            end_session=True,
                         )
                     except Exception as error:
                         build_error = sanitize_display_text(
@@ -4255,6 +4275,7 @@ def main() -> None:
                                 verbose=verbose,
                                 provider_override=selected_provider,
                                 language_hint=session_language,
+                                end_session=True,
                             )
                         except RuntimeError as error:
                             build_error = sanitize_display_text(str(error))
@@ -4315,6 +4336,7 @@ def main() -> None:
                             verbose=verbose,
                             provider_override=config.provider,
                             language_hint=session_language,
+                            end_session=True,
                         )
                     except Exception as error:
                         build_error = sanitize_display_text(
@@ -4403,6 +4425,7 @@ def main() -> None:
                                     provider_override=config.provider,
                                     models_override=selected_models,
                                     language_hint=session_language,
+                                    end_session=True,
                                 )
                             except RuntimeError as error:
                                 build_error = sanitize_display_text(str(error))
@@ -4661,6 +4684,7 @@ def main() -> None:
                             persist_logs=persist_logs,
                             verbose=verbose,
                             language_hint=session_language,
+                            end_session=True,
                         )
                     except Exception as error:
                         build_error = sanitize_display_text(
@@ -4860,6 +4884,12 @@ Support:
                 console.print("[dim] Repository: [blue]https://github.com/davud-d/Kvist[/blue] [/dim]")
                 console.print("[dim] Release Version: 1.0 [/dim]")
                 console.print("[orange]\nThank you for using Kvist [/orange]")
+                continue
+
+            if agent.is_session_closed():
+                # run() answers with the closed-session reply and calls no
+                # model; routing first would spend one on a closed session.
+                agent.run(user_goal)
                 continue
 
             from kernel.role_router import route_role_decision_with_llm, route_role

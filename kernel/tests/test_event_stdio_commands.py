@@ -44,6 +44,9 @@ class _Agent:
     def _find_resumable_session(self):
         return self.holder
 
+    def is_session_closed(self) -> bool:
+        return False
+
     def resume(self) -> str:
         self.resumed += 1
         self.release.wait(3.0)

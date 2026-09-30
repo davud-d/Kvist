@@ -13,7 +13,7 @@ named empty session (like ``/session`` → new), ``new`` does the same with a
 name Kvist allocates (``/new``), ``launch`` starts an app in its own fresh
 session, ``switch`` activates an existing session and fails on a missing or corrupt target,
 ``delete`` refuses the active session, and ``reset`` empties the active
-session in place.
+session in place — except a session end_session closed, which stays as it is.
 A headless process has no in-memory conversation to save, so ``switch`` only
 moves the active marker — the outgoing session was already persisted by the
 process that owned it.
@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kernel import end_session
 from kernel.agent_logging import (
     create_session,
     delete_session,
@@ -139,6 +140,7 @@ class SessionStore:
                 ),
                 "has_checkpoint": isinstance(checkpoint, dict),
                 "journal_bytes": self._journal_bytes(name),
+                **end_session.notice_fields(document),
             }
             if with_histories:
                 item["session_history"] = session_history
@@ -187,7 +189,8 @@ class SessionStore:
             raise ValueError(f"History limit must be between 1 and {MAX_HISTORY_LIMIT}")
         if before is not None and before < 1:
             raise ValueError("History cursor must be a positive sequence number")
-        if not read_session_document(self, name):
+        document = read_session_document(self, name)
+        if not document:
             raise ValueError(f"Unknown session: {name!r}")
         page = read_history(
             get_journal_path(self, name),
@@ -195,7 +198,7 @@ class SessionStore:
             limit=limit,
             before=before,
         )
-        return {"session": name, **page}
+        return {"session": name, **page, **end_session.notice_fields(document)}
 
     def create(self, name: str) -> dict[str, Any]:
         if not is_valid_session_name(name):

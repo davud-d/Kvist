@@ -64,7 +64,7 @@ _TRANSIENT_EVENTS = frozenset(
     {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output"}
 )
 _ANSWER_EVENTS = frozenset({"final", "message", "stream_commit"})
-_ESSENTIAL_EVENTS = _ANSWER_EVENTS | {"error", "journal_notice", "turn_end"}
+_ESSENTIAL_EVENTS = _ANSWER_EVENTS | {"error", "journal_notice", "turn_end", "session_ended"}
 
 
 def truncate_middle(text: str, limit: int) -> str:
@@ -495,6 +495,11 @@ class JournalingUI:
         # the turn that started it has already ended — never routed through
         # the journal (turn-scoped and inactive by then), only forwarded live.
         self._forward("print_session_title", session, title)
+
+    def print_session_ended(self, payload: dict) -> None:
+        # Recorded, so a replay of the session shows that it was closed.
+        self._events.print_session_ended(payload)
+        self._forward("print_session_ended", payload)
 
     def print_plan(self, markdown: str) -> None:
         self._events.print_plan(markdown)

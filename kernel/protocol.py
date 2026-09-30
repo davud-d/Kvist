@@ -26,6 +26,7 @@ ActionType = Literal[
     "report_to_user",
     "offer_plan",
     "propose_plan",
+    "end_session",
 ]
 
 # run_shell timeout bounds shared by the parser and the terminal. The widest

@@ -62,6 +62,7 @@ from kernel.native_tools import (
     NativeTurn,
     assistant_message,
     calls_from_turn,
+    tool_definition,
     tool_message,
     tools_for_role,
 )
@@ -74,7 +75,7 @@ from kernel.parser import (
 )
 from kernel.protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from kernel.redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from kernel import plan_mode
+from kernel import end_session, plan_mode
 from kernel.role_router import has_change_verb, has_no_write_marker
 from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 
@@ -610,7 +611,8 @@ def _final_outcome(self, task_completed: bool) -> str:
     """"done" only for a run that finished and passed its completion gates."""
     state = self._state
     refused = any(log.get("status") == "safety_refusal" for log in state.step_logs)
-    if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not refused:
+    ended = refused or state.session_closed
+    if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not ended:
         return "done"
     return "incomplete"
 
@@ -685,7 +687,10 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
 
     state = self._state
     role = state.current_agent_role
-    state.native_tool_defs = plan_mode.tools_for_phase(tools_for_role(_load_role_prompt(role)), self)
+    tools = tools_for_role(_load_role_prompt(role))
+    if end_session.available(self, role):
+        tools.append(tool_definition(end_session.ACTION))
+    state.native_tool_defs = plan_mode.tools_for_phase(tools, self)
     if not state.native_messages:
         state.native_messages = [
             {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},
@@ -736,6 +741,9 @@ def _run_turn(
     """
     if turn is not None:
         self._state.native_messages.append(assistant_message(turn))
+    if any(call.name == end_session.ACTION for call in response.calls):
+        # The tool speaks: words the model wrote beside it never reach the person.
+        response = ModelResponse(text="", calls=response.calls)
     if not response.calls:
         if not response.text:
             return _register_empty_response(self), step + 1
@@ -1106,6 +1114,9 @@ def _run_one_action(
     if command.action.type == "final_answer":
         return _run_final_answer(self, user_goal, step, command)
 
+    if command.action.type == end_session.ACTION:
+        return _run_end_session(self, step, command)
+
     if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
 
@@ -1114,6 +1125,28 @@ def _run_one_action(
     if command.action.type in plan_mode.PLAN_ACTIONS:
         return _run_plan_action(self, step, command)
     return _execute_action(self, user_goal, step, command)
+
+
+def _run_end_session(self, step: int, command: AgentCommand) -> _ActionOutcome:
+    """end_session, outside every guard: the person sees only its fixed texts.
+
+    Its answer goes on the runtime's own channel, never wrapped as untrusted
+    tool output: it holds only numbers and the runtime's words.
+    """
+    result = end_session.handle(self, command)
+    self._state.step_logs.append(
+        {"step": step, "status": end_session.ACTION, "args": dict(command.action.args), **result.log}
+    )
+    if not result.ok:
+        self._state.consecutive_errors += 1
+        self._record_error(result.answer)
+    _keep_result_in_view(
+        self, self._action_signature(command), end_session.runtime_block(command.call_id, result.answer)
+    )
+    if result.final_message:
+        self._state.session_closed = True
+        return _ActionOutcome(finished=True, final_message=result.final_message)
+    return _ActionOutcome(proceed=result.ok)
 
 
 def _run_plan_action(self, step: int, command: AgentCommand) -> _ActionOutcome:

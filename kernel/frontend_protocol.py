@@ -370,17 +370,53 @@ class ActionOutputEvent:
 
 @dataclass(slots=True)
 class SessionEvent:
-    """The session a resumed run continues in (may differ from the hello's)."""
+    """The session a resumed run continues in, or the one a switch moved to.
+
+    ``closed``/``closed_notice`` are present only for a session end_session
+    closed: it is read-only, and the notice is the core's text for the place
+    of the input box, in the session's language.
+    """
 
     session: str
     has_checkpoint: bool
+    closed_notice: str | None = None
     type: ClassVar[str] = "session"
+
+    def to_dict(self) -> dict:
+        payload = {
+            "type": self.type,
+            "session": self.session,
+            "has_checkpoint": self.has_checkpoint,
+        }
+        if self.closed_notice is not None:
+            payload["closed"] = True
+            payload["closed_notice"] = self.closed_notice
+        return payload
+
+
+@dataclass(slots=True)
+class SessionEndedEvent:
+    """end_session closed the session for good (additive, protocol v1).
+
+    ``reason`` is the model's one-line reason, recorded for the log; the
+    person's closing words arrive as the turn's ``final``.
+    """
+
+    session_id: str
+    warned_msg_id: int | None
+    closed_msg_id: int
+    reason: str
+    closed_notice: str
+    type: ClassVar[str] = "session_ended"
 
     def to_dict(self) -> dict:
         return {
             "type": self.type,
-            "session": self.session,
-            "has_checkpoint": self.has_checkpoint,
+            "session_id": self.session_id,
+            "warned_msg_id": self.warned_msg_id,
+            "closed_msg_id": self.closed_msg_id,
+            "reason": self.reason,
+            "closed_notice": self.closed_notice,
         }
 
 

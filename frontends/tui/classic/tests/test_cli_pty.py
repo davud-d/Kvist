@@ -460,8 +460,9 @@ def _build_chat_agent(
     models_override=None,
     language_hint=None,
     ui=None,
+    end_session=False,
 ):
-    _ = provider_override, models_override, language_hint, ui
+    _ = provider_override, models_override, language_hint, ui, end_session
     config = AgentConfig(
         provider="openai",
         fast_model="offline-fast",
@@ -596,8 +597,8 @@ class _BlockingChatClient:
 
 def _build(executor, max_steps, persist_logs, verbose,
            provider_override=None, models_override=None, language_hint=None,
-           ui=None):
-    _ = provider_override, models_override, language_hint, ui
+           ui=None, end_session=False):
+    _ = provider_override, models_override, language_hint, ui, end_session
     config = AgentConfig(
         provider="openai",
         fast_model="offline-fast",

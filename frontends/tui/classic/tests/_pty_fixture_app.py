@@ -57,8 +57,9 @@ def _build_offline_agent(
     models_override=None,
     language_hint=None,
     ui=None,
+    end_session=False,
 ):
-    _ = provider_override, models_override, language_hint, ui
+    _ = provider_override, models_override, language_hint, ui, end_session
     config = AgentConfig(
         provider="openai",
         fast_model="offline-fast",

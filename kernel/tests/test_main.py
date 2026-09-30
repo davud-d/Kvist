@@ -675,6 +675,9 @@ def test_main_recovers_from_redacted_task_failure(tmp_path, monkeypatch):
         _ui = FakeUI()
         client = object()
 
+        def is_session_closed(self):
+            return False
+
         def run(self, user_goal, routed_role=None):
             calls["run"] += 1
             raise RuntimeError(f"Authorization: Bearer {synthetic}")

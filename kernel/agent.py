@@ -103,6 +103,7 @@ from kernel.agent_runtime import (
     _is_report_artifact_blocked,
     _is_read_only_violation,
 )
+from kernel import end_session
 from kernel.change_journal import JournalUnavailableError, classify_pending_write
 from kernel.durable_json import JsonStorageCorruptError
 from kernel.deps import detect_dependency_versions
@@ -302,7 +303,10 @@ class LocalAgent:
             "role": role,
             # Stored whole: the per-model prompt budget decides what survives.
             "result": result,
+            "reply_id": end_session.next_message_id(self, from_person=False),
         }
+        if self._state.message_id:
+            entry["msg_id"] = self._state.message_id
         if outputs:
             entry["outputs"] = outputs
         if self._state.plan_outcome:
@@ -475,17 +479,38 @@ class LocalAgent:
         self._cancel_event.clear()
 
     def run(self, user_goal: str, routed_role: str | None = None) -> str:
+        refusal = self._refuse_closed_session()
+        if refusal is not None:
+            return refusal
         self._journal.begin_turn(user_goal)
         try:
             return self._run_turn(user_goal, routed_role)
         finally:
             self._journal.end_turn()
 
+    def is_session_closed(self) -> bool:
+        """Whether end_session closed the active session, as its stored document says."""
+        end_session.sync_from_disk(self)
+        return end_session.is_closed(self)
+
+    def _refuse_closed_session(self) -> str | None:
+        """Answer a message to a closed session with CLOSED_REPLY; None when it is open.
+
+        The one lock every transport passes through: it runs before routing,
+        the journal and any model call, and writes nothing to the session.
+        """
+        if not self.is_session_closed():
+            return None
+        reply = end_session.closed_reply(end_session.closure_language(self))
+        self._ui.print_final(reply, [], outcome="incomplete")
+        return reply
+
     def _run_turn(self, user_goal: str, routed_role: str | None) -> str:
         # Cleared before routing so a cancel requested during a previous turn
         # never aborts this one's setup.
         self._reset_cancel()
         self._reset_run_state()
+        self._state.message_id = end_session.next_message_id(self, from_person=True)
         self._state.user_goal = user_goal
         self._state.task_language = detect_request_language(user_goal)
         # User-facing response language is resolved by the runtime layer
@@ -567,6 +592,9 @@ class LocalAgent:
         return message
 
     def resume(self) -> str | None:
+        refusal = self._refuse_closed_session()
+        if refusal is not None:
+            return refusal
         self._journal.begin_turn("", resumed=True)
         try:
             return self._resume_turn()
