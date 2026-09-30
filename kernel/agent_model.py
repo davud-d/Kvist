@@ -414,7 +414,7 @@ def build_role_system_prompt(self, role: str, *, native_tools: bool = False) -> 
     """
     role_prompt = _load_role_prompt(role)
     if end_session.available(self, role):
-        role_prompt = end_session.with_tool_in_prompt(role_prompt)
+        role_prompt = end_session.offer_in_prompt(role_prompt, role)
     if native_tools:
         role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())
     base = f"{_load_constitution()}\n\n{role_prompt}"

@@ -416,6 +416,10 @@ fresh, and the closing. A closed session:
 - is skipped by `resumable_session`, cannot be `reset`, and leaves the files and
   git alone. A new session (`new`, `launch`) starts without it.
 
+In a chat turn the model uses it by replying with a tag and nothing else. Such a
+reply is never shown: its stream ends with an empty `stream_commit`, and the
+turn's answer arrives as the warning `message` or the closing `final`.
+
 ### Restoring a session's feed: `--session-op history`
 
 The session document keeps only what the model needs (goal, role, a 200-char

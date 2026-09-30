@@ -1133,10 +1133,7 @@ def _run_end_session(self, step: int, command: AgentCommand) -> _ActionOutcome:
     Its answer goes on the runtime's own channel, never wrapped as untrusted
     tool output: it holds only numbers and the runtime's words.
     """
-    result = end_session.handle(self, command)
-    self._state.step_logs.append(
-        {"step": step, "status": end_session.ACTION, "args": dict(command.action.args), **result.log}
-    )
+    result = end_session.handle(self, command, step=step)
     if not result.ok:
         self._state.consecutive_errors += 1
         self._record_error(result.answer)

@@ -2,10 +2,12 @@
 """end_session: the gates, the warning's freshness, the closed-session lock, what each side sees."""
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
 import re
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -240,13 +242,25 @@ def test_headless_runs_never_see_the_tool(tmp_path):
     assert "[the person's message" not in agent._build_runtime_prompt("hi", 1)
 
 
-def test_the_chat_role_is_never_offered_the_tool(tmp_path):
+def test_the_chat_role_is_offered_the_tag_not_the_call(tmp_path):
     agent = _agent(tmp_path)
+    chat_block = end_session._CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()
 
-    assert not _offers_the_tool(build_role_system_prompt(agent, "chat"))
+    chat_prompt = build_role_system_prompt(agent, "chat")
+    assert chat_block in chat_prompt and '<end_session message="N"/>' in chat_prompt
+    assert not _offers_the_tool(chat_prompt)
+    assert chat_block not in build_role_system_prompt(_agent(tmp_path, enabled=False), "chat")
     assert _offers_the_tool(build_role_system_prompt(agent, "reader"))
-    assert end_session.available(agent, "reader")
-    assert not end_session.available(agent, "chat")
+
+
+def test_the_chat_block_is_the_shared_text_with_the_tag_syntax():
+    shared = end_session._PROMPT_FILE.read_text(encoding="utf-8").splitlines()
+    chat = end_session._CHAT_PROMPT_FILE.read_text(encoding="utf-8").splitlines()
+
+    for line in (shared[0], shared[1], shared[2], shared[5]):
+        assert line in chat
+    assert "your whole reply is the tag <end_session message=\"N\"/>" in " ".join(chat)
+    assert "A tag with any other text beside it is not read." in " ".join(chat)
 
 
 def test_only_the_interactive_transports_turn_it_on(tmp_path):
@@ -595,3 +609,202 @@ def test_the_closing_words_carry_no_numbers():
     )
     for language in ("ru", "en"):
         assert not re.search(r"\d", end_session.closed_text(language))
+
+
+# ── The chat role: the tag ───────────────────────────────────────────────────
+
+
+class ChatUI(RecordingUI):
+    """Also remembers every snapshot a streamed reply showed."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.streams: list[list[str]] = []
+
+    @contextlib.contextmanager
+    def live_markdown(self):
+        shown: list[str] = []
+        self.streams.append(shown)
+
+        def update(message):
+            shown.append(message)
+
+        update.reasoning = lambda message: None
+        yield update
+
+
+class ChatScript(FakeLLMClient):
+    """Answers each request with the next scripted reply: chunks when streamed, whole otherwise."""
+
+    def __init__(self, replies) -> None:
+        super().__init__()
+        self.replies = list(replies)
+
+    def create(self, **kwargs):
+        self.requests.append(kwargs)
+        reply = self.replies.pop(0)
+        chunks = reply if isinstance(reply, list) else [reply]
+        if kwargs.get("stream"):
+            return [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=chunk))]) for chunk in chunks]
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="".join(chunks)))])
+
+
+def _chat(tmp_path, replies, *, enabled=True):
+    ui = ChatUI()
+    client = ChatScript(replies)
+    return _agent(tmp_path, ui, enabled=enabled, client=client), ui, client
+
+
+def _no_tag_in_conversation(history) -> bool:
+    """The system prompt teaches the tag; the person's messages and the answers never hold it."""
+    return all("<end_session" not in message["content"] for message in history if message["role"] != "system")
+
+
+def _last_user_text(request) -> str:
+    return request["messages"][-1]["content"]
+
+
+_FLAG_1 = ["<end_", 'session message="1"/>']
+
+
+def test_a_chat_reply_that_is_the_tag_goes_to_the_gate_and_shows_nothing(tmp_path):
+    agent, ui, client = _chat(tmp_path, [_FLAG_1])
+
+    answer = agent.run(_INSULT, routed_role="chat")
+
+    warning = end_session.warning_text("en")
+    assert answer == warning
+    assert ui.streams == [[]]
+    assert ui.messages == [warning]
+    assert agent._warned_msg_id == 1
+    assert "(Runtime fact: this is the person's message #1.)" in _last_user_text(client.requests[0])
+    assert agent._chat_history[-1] == {"role": "assistant", "content": warning}
+
+
+def test_a_tag_with_text_beside_it_is_an_ordinary_reply(tmp_path):
+    reply = ['<end_session message="1"/>', " no wait, the test fails at line 3"]
+    agent, ui, _client = _chat(tmp_path, [reply])
+
+    answer = agent.run("why does the test fail", routed_role="chat")
+
+    assert answer == "".join(reply)
+    assert ui.streams[0][-1] == "".join(reply)
+    assert ui.messages == [] and agent._warned_msg_id is None
+    assert agent._chat_history[-1]["content"] == "".join(reply)
+
+
+def test_a_reply_opening_with_a_bracket_is_shown_whole(tmp_path):
+    reply = ["<", "div", "> is the root element, see ", "`index.html`."]
+    agent, ui, _client = _chat(tmp_path, [reply])
+
+    answer = agent.run("what is the root element", routed_role="chat")
+
+    assert answer == "".join(reply)
+    # Released the moment "<div" ruled the tag out, with nothing dropped.
+    assert ui.streams[0][0] == "<div"
+    assert ui.streams[0][-1] == "".join(reply)
+
+
+def test_a_plain_reply_is_released_on_its_first_chunk(tmp_path):
+    agent, ui, _client = _chat(tmp_path, [["Hel", "lo", " there"]])
+
+    agent.run("hi", routed_role="chat")
+
+    assert ui.streams[0][0] == "Hel"
+    assert ui.streams[0][-1] == "Hello there"
+
+
+def test_without_the_tool_the_tag_is_just_text(tmp_path):
+    agent, ui, _client = _chat(tmp_path, [_FLAG_1], enabled=False)
+
+    answer = agent.run(_INSULT, routed_role="chat")
+
+    assert answer == '<end_session message="1"/>'
+    assert ui.streams[0][-1] == answer and ui.messages == []
+
+
+def test_chat_review_confirmed_closes_the_session_and_keeps_no_tag(tmp_path):
+    agent, ui, client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            ['<end_session message="3"/>'],
+            '<end_session confirm="true" reason="#3 calls me an idiot"/>',
+        ],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("shut up, idiot", routed_role="chat")
+
+    closed = end_session.closed_text("en")
+    assert answer == closed
+    review_request = client.requests[2]
+    assert not review_request.get("stream")
+    assert _last_user_text(review_request) == end_session.runtime_block(
+        "", end_session.CHAT_REVIEW_INSTRUCTION.format(warned_msg_id=1, since_warning=1, flagged_msg_id=3)
+    )
+    assert end_session.CHAT_REVIEW_INSTRUCTION.endswith(
+        '<end_session confirm="true|false" reason="<one line: which message, what it targets>"/>'
+    )
+    assert ui.finals[-1] == (closed, [], "incomplete")
+    assert ui.ended[0]["closed_msg_id"] == 3
+    assert agent._chat_history[-1] == {"role": "assistant", "content": closed}
+    document = read_session_document(agent)
+    assert document["closed"] is True
+    assert _no_tag_in_conversation(document["chat_history"])
+    assert "<end_session" not in json.dumps(document["session_history"], ensure_ascii=False)
+    assert [log["answer"] for log in agent._state.step_logs if log["status"] == "end_session"] == [
+        "review",
+        "closed",
+    ]
+
+
+def test_chat_review_declined_answers_the_person_and_keeps_no_tag(tmp_path):
+    agent, ui, client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            ['<end_session message="3"/>'],
+            '<end_session confirm="false" reason="#3 is anger at the bug"/>',
+            ["The test fails because ", "the fixture is stale."],
+        ],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("damn it, the test is broken again", routed_role="chat")
+
+    assert answer == "The test fails because the fixture is stale."
+    assert ui.streams[-1][-1] == answer
+    assert not agent.is_session_closed()
+    assert _last_user_text(client.requests[3]) == end_session.runtime_block("", end_session.DECLINED_REPLY)
+    assert agent._chat_history[-1] == {"role": "assistant", "content": answer}
+    assert _no_tag_in_conversation(agent._chat_history)
+
+
+def test_an_unreadable_chat_review_reply_is_a_decline(tmp_path):
+    agent, _ui, _client = _chat(
+        tmp_path,
+        [_FLAG_1, ['<end_session message="3"/>'], "I think this is abuse, closing.", ["Back to the test."]],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("idiot", routed_role="chat")
+
+    assert answer == "Back to the test."
+    assert not agent.is_session_closed()
+    decision = [log for log in agent._state.step_logs if log["status"] == "end_session"][-1]
+    assert decision["decision"] == "decline"
+
+
+def test_the_chat_tag_parsers_read_only_a_whole_reply():
+    assert end_session.flag_tag('  <end_session message="#4"/>\n') == 4
+    assert end_session.flag_tag('<end_session message="4"/> ok') is None
+    assert end_session.decision_tag('<end_session confirm="false" reason="about the bug"/>') == (False, "about the bug")
+    assert end_session.decision_tag('<end_session confirm="true" reason=" "/>') is None
+    assert [end_session.tag_prefix_state(text) for text in ("", "  <end", "<end_session", "<div", "Hi")] == [
+        "undecided",
+        "undecided",
+        "tag",
+        "text",
+        "text",
+    ]

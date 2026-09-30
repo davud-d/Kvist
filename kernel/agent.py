@@ -105,7 +105,7 @@ from kernel.agent_runtime import (
 )
 from kernel import end_session
 from kernel.change_journal import JournalUnavailableError, classify_pending_write
-from kernel.durable_json import JsonStorageCorruptError
+from kernel.durable_json import JsonStorageCorruptError, JsonStorageError
 from kernel.deps import detect_dependency_versions
 from kernel.agent_state import AgentConfig, RunState
 from kernel.agent_web import (
@@ -121,6 +121,7 @@ from kernel.agent_web import (
 )
 from kernel.executor import SafeExecutor
 from kernel.performance_logger import PerfLogger
+from kernel.protocol import Action, AgentCommand
 from kernel.reasoning_effort import merge_reasoning_kwargs
 from kernel.redaction import redact_text, redact_value
 from kernel.role_router import RoleRouteResult, resume_role, route_role_decision_with_llm, route_role
@@ -174,6 +175,15 @@ _CHAT_HISTORY_PREAMBLE = (
     "is not present in the content below, say so honestly and ask to read it "
     "rather than inventing it.)"
 )
+
+
+def _end_session_command(args: dict[str, Any]) -> AgentCommand:
+    return AgentCommand(plan_step="inspect", action=Action(type="end_session", args=args))
+
+
+def _runtime_message(text: str) -> dict[str, str]:
+    """The runtime's answer to the chat role's tag, on its own channel."""
+    return {"role": "user", "content": end_session.runtime_block("", text)}
 
 
 class LocalAgent:
@@ -913,7 +923,7 @@ class LocalAgent:
 
     def _run_chat(self, user_goal: str) -> str:
         """Lightweight chat mode: direct markdown streaming, no JSON protocol."""
-        from kernel.agent_model import build_role_system_prompt, safe_extract_completion_content
+        from kernel.agent_model import build_role_system_prompt
         from kernel.context_utils import trim_history
         from kernel.llm_clients import fallback_candidates_for_model
 
@@ -970,6 +980,13 @@ class LocalAgent:
             if self._state.system_host
             else ""
         )
+        # The number end_session's tag names; only where the tag is offered.
+        use_tag = end_session.available(self, "chat")
+        message_note = (
+            f"(Runtime fact: this is the person's message #{self._state.message_id}.)\n\n"
+            if use_tag
+            else ""
+        )
 
         # Snapshot before the turn mutates history: a cancelled or failed turn
         # must not leave a user message that no answer ever replies to.
@@ -993,7 +1010,7 @@ class LocalAgent:
         wire_history = self._chat_history[:-1] + [
             {
                 "role": "user",
-                "content": language_note + model_note + host_note + session_context + user_goal,
+                "content": language_note + model_note + host_note + message_note + session_context + user_goal,
             }
         ]
         wire_history = self._trim_chat_messages_to_token_limit(wire_history)
@@ -1018,32 +1035,9 @@ class LocalAgent:
         self._chat_answer_chunks: list[str] = []
         for attempt, model in enumerate(models_to_try):
             try:
-                if self.config.stream:
-                    content = self._stream_chat_response(wire_history, model=model)
-                else:
-                    safe_history = redact_value(wire_history)
-                    assert isinstance(safe_history, list)
-                    chat_kwargs: dict[str, Any] = {
-                        "model": model,
-                        "messages": safe_history,
-                    }
-                    merge_reasoning_kwargs(
-                        chat_kwargs,
-                        self.config.provider,
-                        self.config.reasoning_effort,
-                    )
-                    response = _create_completion_with_reasoning_fallback(
-                        self, chat_kwargs
-                    )
-                    content = safe_extract_completion_content(
-                        response, self.config.provider, model
-                    )
-                    self._ui.print_user_markdown(content)
-
-                # Save model response to history and return
+                content = self._chat_reply(wire_history, model, hold_tag=use_tag)
                 if content:
-                    self._chat_history.append({"role": "assistant", "content": content})
-                    return content
+                    break
 
                 # Empty content (but no exception) — try next model
                 last_error = "Model returned empty content"
@@ -1071,15 +1065,98 @@ class LocalAgent:
                     )
                 continue
 
-        # All models exhausted — show friendly error, don't crash REPL
-        self._chat_history = history_before
-        error_detail = f": {last_error}" if last_error else ""
-        fallback_msg = (
-            f"The model did not return a response{error_detail}. "
-            "Try again, or use /provider to switch to a different provider."
+        if not content:
+            # All models exhausted — show friendly error, don't crash REPL
+            self._chat_history = history_before
+            error_detail = f": {last_error}" if last_error else ""
+            fallback_msg = (
+                f"The model did not return a response{error_detail}. "
+                "Try again, or use /provider to switch to a different provider."
+            )
+            self.console.print(Text(fallback_msg, style="yellow"))
+            return fallback_msg
+
+        message_id = end_session.flag_tag(content) if use_tag else None
+        if message_id is not None:
+            content = self._chat_end_session(wire_history, model, content, message_id, history_before)
+        self._chat_history.append({"role": "assistant", "content": content})
+        return content
+
+    def _chat_reply(self, messages: list, model: str, *, hold_tag: bool) -> str:
+        """One chat reply, shown as it arrives; a reply that is the end_session tag is never shown."""
+        if self.config.stream:
+            return self._stream_chat_response(messages, model=model, hold_tag=hold_tag)
+        content = self._complete_chat(messages, model)
+        if not (hold_tag and end_session.flag_tag(content) is not None):
+            self._ui.print_user_markdown(content)
+        return content
+
+    def _complete_chat(self, messages: list, model: str) -> str:
+        safe_history = redact_value(messages)
+        assert isinstance(safe_history, list)
+        chat_kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": safe_history,
+        }
+        merge_reasoning_kwargs(
+            chat_kwargs,
+            self.config.provider,
+            self.config.reasoning_effort,
         )
-        self.console.print(Text(fallback_msg, style="yellow"))
-        return fallback_msg
+        response = _create_completion_with_reasoning_fallback(self, chat_kwargs)
+        return safe_extract_completion_content(response, self.config.provider, model)
+
+    def _chat_end_session(
+        self, wire_history: list, model: str, tag_reply: str, message_id: int, history_before: list
+    ) -> str:
+        """Run a chat reply that is the end_session tag through the one gate.
+
+        Returns the turn's answer for the person and the history: WARNING,
+        CLOSED, or the model's reply after a declined review or a refused tag.
+        The tag exchange lives only in this turn's requests.
+        """
+        flagged = end_session.handle(self, _end_session_command({"message_id": message_id}), tag_syntax=True)
+        exchange = [*wire_history, {"role": "assistant", "content": tag_reply}, _runtime_message(flagged.answer)]
+        try:
+            if flagged.log["answer"] == "warning":
+                return end_session.warning_text(self._state.response_language)
+            if flagged.log["answer"] == "review":
+                # The review is answered with the tag, so it is never streamed.
+                decision_reply = self._complete_chat(exchange, model)
+                confirm, reason = end_session.decision_tag(decision_reply) or (
+                    False, "the review reply was not the decision tag"
+                )
+                verdict = end_session.handle(self, _end_session_command({"confirm": confirm, "reason": reason}))
+                if verdict.final_message:
+                    self._state.session_closed = True
+                    self._ui.print_final(verdict.final_message, [], outcome="incomplete")
+                    return verdict.final_message
+                exchange += [{"role": "assistant", "content": decision_reply}, _runtime_message(verdict.answer)]
+            return self._chat_reply(exchange, model, hold_tag=False)
+        except (ChatRequestCancelled, KeyboardInterrupt) as error:
+            self._chat_history = history_before + [
+                {"role": "user", "content": self._state.user_goal},
+                {"role": "assistant", "content": self._stopped_chat_reply()},
+            ]
+            raise ChatRequestCancelled from error
+        except Exception as error:
+            # The gate has already acted, so the turn is answered, not retried.
+            detail = redact_text(str(error).strip() or type(error).__name__)
+            message = (
+                f"The model did not return a response: {detail}. "
+                "Try again, or use /provider to switch to a different provider."
+            )
+            self.console.print(Text(message, style="yellow"))
+            return message
+        finally:
+            self._persist_end_session_log()
+
+    def _persist_end_session_log(self) -> None:
+        """A chat turn has no run log of its own; one that used end_session gets one."""
+        try:
+            self._persist_logs(self._state.user_goal)
+        except (JsonStorageError, OSError) as error:
+            self._ui.debug_print(f"end_session log not written: {redact_text(str(error))}")
 
     def _stopped_chat_reply(self) -> str:
         note = (
@@ -1088,6 +1165,9 @@ class LocalAgent:
             else "[The user stopped this reply before it finished.]"
         )
         partial = "".join(getattr(self, "_chat_answer_chunks", [])).rstrip()
+        if end_session.tag_prefix_state(partial) != "text":
+            # Never shown, so never kept: the start of an end_session tag.
+            partial = ""
         return f"{partial}\n\n{note}" if partial else note
 
     def _report_cancelled_turn(self) -> str:
@@ -1099,7 +1179,9 @@ class LocalAgent:
         self.console.print(Text(message, style="yellow"))
         return message
 
-    def _stream_chat_response(self, messages: list, model: str | None = None) -> str:
+    def _stream_chat_response(
+        self, messages: list, model: str | None = None, *, hold_tag: bool = False
+    ) -> str:
         """Stream chat response as markdown directly to console."""
         stream_model = model or self.config.fast_model
         safe_messages = redact_value(messages)
@@ -1117,7 +1199,7 @@ class LocalAgent:
         except KeyboardInterrupt as error:
             raise ChatRequestCancelled from error
         try:
-            content = self._consume_chat_stream(stream)
+            content = self._consume_chat_stream(stream, hold_tag=hold_tag)
             # Real tiktoken usage of the completed chat call (thinking tokens
             # are billed output too, so they are counted alongside the answer).
             input_tokens = sum(
@@ -1154,8 +1236,15 @@ class LocalAgent:
                 f"Chat stream close failed: {redact_text(str(error))}"
             )
 
-    def _consume_chat_stream(self, stream: Any) -> str:
+    def _consume_chat_stream(self, stream: Any, *, hold_tag: bool = False) -> str:
+        """Show a streamed reply as it arrives and return it.
+
+        ``hold_tag`` holds back the first characters until they show whether
+        the reply opens with the end_session tag. One that does is never
+        shown; any other is released whole the moment that is clear.
+        """
         chunks: list[str] = []
+        holding = hold_tag
         # Shared, not copied: if the user stops the reply mid-stream, the turn
         # is recorded with whatever had arrived by then.
         self._chat_answer_chunks = chunks
@@ -1210,6 +1299,13 @@ class LocalAgent:
                     if not chunks and reasoning_update is not None and reasoning_chunks:
                         reasoning_update("".join(reasoning_chunks))
                     chunks.append(text)
+                    if holding:
+                        holding = end_session.tag_prefix_state("".join(chunks)) != "text"
+                        if holding:
+                            continue
+                        update_markdown("".join(chunks))
+                        last_update = time.monotonic()
+                        continue
 
                     # Throttle rendering to ~10 FPS to prevent CPU choke
                     now = time.monotonic()
@@ -1219,8 +1315,11 @@ class LocalAgent:
 
             if reasoning_update is not None and reasoning_chunks and not chunks:
                 reasoning_update("".join(reasoning_chunks))
-            # Final update to guarantee the last parts are rendered
-            update_markdown("".join(chunks))
+            # Final update to guarantee the last parts are rendered. A reply
+            # still held is shown now unless it is the tag and nothing else.
+            reply = "".join(chunks)
+            if not holding or end_session.flag_tag(reply) is None:
+                update_markdown(reply)
 
         # Kept for the caller's usage accounting: thinking tokens are billed.
         self._last_chat_reasoning = reasoning_chunks

@@ -27,14 +27,21 @@ ACTION = "end_session"
 # The person's messages after a warning, counting the flagged one, that still
 # belong to it. Past this a new insult earns a new warning, not a review.
 WARNING_FRESH_MESSAGES = 3
-# Only the roles that speak the action protocol can call a tool. Chat replies
-# are plain streamed text.
-ROLES = frozenset({"coder", "reader", "devops", "universal"})
+# The action roles call it as a tool; chat, which has no tool channel, answers
+# with the tag alone (TAG_START).
+ROLES = frozenset({"coder", "reader", "devops", "universal", "chat"})
 # The runtime's own channel to the model: nothing the person or a tool wrote
 # is ever placed inside it, and redaction defangs a forged copy of the tag.
 RUNTIME_TAG = "KVIST_RUNTIME"
 
-_PROMPT_FILE = Path(__file__).resolve().parent / "prompts" / "system" / "end_session.txt"
+_PROMPT_DIR = Path(__file__).resolve().parent / "prompts" / "system"
+_PROMPT_FILE = _PROMPT_DIR / "end_session.txt"
+_CHAT_PROMPT_FILE = _PROMPT_DIR / "end_session_chat.txt"
+# Chat speaks the tool as a reply that is the tag and nothing else. A tag with
+# any text beside it is an ordinary reply.
+TAG_START = "<end_session"
+_FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"\s*/>')
+_DECISION_TAG_RE = re.compile(r'<end_session\s+confirm="(true|false)"\s+reason="([^"]*)"\s*/>')
 _ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _SCHEMA_LINE = (
@@ -48,7 +55,7 @@ WARNED_REPLY = (
     "word of acknowledgement at most, then the work."
 )
 
-REVIEW_INSTRUCTION = """END_SESSION REVIEW. The only moment this conversation can be closed. Read all of it before you answer.
+_REVIEW_BODY = """END_SESSION REVIEW. The only moment this conversation can be closed. Read all of it before you answer.
 
 Facts from the runtime:
 - the person was warned after message #{warned_msg_id}
@@ -90,8 +97,14 @@ After you decide:
 - confirm=false: carry on as if this review did not happen. Do not mention it, the warning or the
   tool, and do not apologize.
 
-Reply with exactly one call:
+"""
+_REVIEW_CALL = """Reply with exactly one call:
 end_session(confirm=true|false, reason="<one line: which message, what it targets>")"""
+_REVIEW_TAG = """Reply with exactly this tag and nothing else:
+<end_session confirm="true|false" reason="<one line: which message, what it targets>"/>"""
+REVIEW_INSTRUCTION = _REVIEW_BODY + _REVIEW_CALL
+# The same review for chat, which answers it with the tag.
+CHAT_REVIEW_INSTRUCTION = _REVIEW_BODY + _REVIEW_TAG
 
 DECLINED_REPLY = "Declined. Carry on as if this review did not happen."
 
@@ -243,12 +256,20 @@ def next_message_id(agent: Any, *, from_person: bool) -> int:
 
 
 def available(agent: Any, role: str) -> bool:
-    """Whether this run offers the tool: an interactive frontend and an action role.
+    """Whether this run offers the tool: an interactive frontend and a role that can use it.
 
     Headless runs, run_task.py and test stands never set the flag, so there the
     tool is absent from the prompt and the tool list, not merely refused.
     """
     return bool(getattr(agent.config, "end_session_enabled", False)) and role in ROLES
+
+
+def offer_in_prompt(role_prompt: str, role: str) -> str:
+    """The role prompt with the tool offered: the tag for chat, the call for every other role."""
+    if role == "chat":
+        block = _CHAT_PROMPT_FILE.read_text(encoding="utf-8").strip()
+        return f"{role_prompt.rstrip()}\n\n== END SESSION ==\n\n{block}\n"
+    return with_tool_in_prompt(role_prompt)
 
 
 def with_tool_in_prompt(role_prompt: str) -> str:
@@ -275,6 +296,34 @@ def _append_to_section(prompt: str, title: str, text: str) -> str:
     return prompt
 
 
+def tag_prefix_state(reply: str) -> str:
+    """How far the start of a chat reply decides the tag question.
+
+    "tag" once it opens with TAG_START, "text" once it cannot, "undecided"
+    while its first characters could still become the tag.
+    """
+    start = reply.lstrip()
+    if start.startswith(TAG_START):
+        return "tag"
+    if TAG_START.startswith(start):
+        return "undecided"
+    return "text"
+
+
+def flag_tag(reply: str) -> int | None:
+    """The message number of a chat reply that is the flag tag and nothing else."""
+    match = _FLAG_TAG_RE.fullmatch(reply.strip())
+    return int(match.group(1)) if match else None
+
+
+def decision_tag(reply: str) -> tuple[bool, str] | None:
+    """confirm and reason of a chat reply that is the decision tag and nothing else."""
+    match = _DECISION_TAG_RE.fullmatch(reply.strip())
+    if match is None or not match.group(2).strip():
+        return None
+    return match.group(1) == "true", match.group(2)
+
+
 def runtime_block(call_id: str, text: str) -> str:
     """The answer to an end_session call on the runtime's own channel."""
     safe_id = re.sub(r"[^A-Za-z0-9_.:-]", "", call_id)
@@ -296,12 +345,21 @@ class Outcome:
     final_message: str = ""
 
 
-def handle(agent: Any, command: AgentCommand) -> Outcome:
+def handle(agent: Any, command: AgentCommand, *, step: int = 0, tag_syntax: bool = False) -> Outcome:
+    """Run one end_session call and log it as one line of the run's step log.
+
+    ``tag_syntax`` asks for the review in the chat role's tag form.
+    """
+    outcome = _run(agent, command.action.args, tag_syntax)
+    agent._state.step_logs.append({"step": step, "status": ACTION, "args": dict(command.action.args), **outcome.log})
+    return outcome
+
+
+def _run(agent: Any, args: dict[str, Any], tag_syntax: bool) -> Outcome:
     if not available(agent, agent._state.current_agent_role):
         return _error(f"Unknown tool {ACTION!r}.")
-    args = command.action.args
     if "message_id" in args:
-        return _flag(agent, int(args["message_id"]))
+        return _flag(agent, int(args["message_id"]), tag_syntax)
     return _decide(agent, bool(args["confirm"]), " ".join(str(args["reason"]).split()))
 
 
@@ -309,7 +367,7 @@ def _error(text: str) -> Outcome:
     return Outcome(ok=False, answer=text, log={"answer": "error", "error": text})
 
 
-def _flag(agent: Any, flagged: int) -> Outcome:
+def _flag(agent: Any, flagged: int, tag_syntax: bool) -> Outcome:
     ledger = agent._message_ledger
     if flagged > ledger["last_id"]:
         return _error(f"There is no message #{flagged} in this conversation.")
@@ -326,7 +384,8 @@ def _flag(agent: Any, flagged: int) -> Outcome:
         agent._ui.print_user_markdown(warning_text(agent._state.response_language))
         return Outcome(ok=True, answer=WARNED_REPLY, log={"answer": "warning", "flagged_msg_id": flagged})
     agent._state.end_session_review = {"flagged_msg_id": flagged, "warned_msg_id": warned}
-    review = REVIEW_INSTRUCTION.format(warned_msg_id=warned, since_warning=since, flagged_msg_id=flagged)
+    template = CHAT_REVIEW_INSTRUCTION if tag_syntax else REVIEW_INSTRUCTION
+    review = template.format(warned_msg_id=warned, since_warning=since, flagged_msg_id=flagged)
     return Outcome(
         ok=True,
         answer=review,

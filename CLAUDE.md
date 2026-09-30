@@ -416,8 +416,16 @@ agent or a person is — and the code owns the rest. Only interactive frontends 
 tool is absent from the prompt and the tool list, and a stray call is an unknown tool.
 The static role prompts never list it: `with_tool_in_prompt` adds it to ALLOWED ACTIONS
 with the block in `kernel/prompts/system/end_session.txt` and a schema line, and
-`_call_native_turn` appends its tool definition. The chat role cannot call tools, so it
-never has it.
+`_call_native_turn` appends its tool definition. The chat role has no tool channel, so
+it gets a tag instead (`offer_in_prompt`, `kernel/prompts/system/end_session_chat.txt`): a
+reply that is `<end_session message="N"/>` and nothing else goes through the same
+`end_session.handle`; a tag with text beside it is an ordinary reply.
+`_consume_chat_stream(hold_tag=True)` holds back only the first characters, until
+`tag_prefix_state` shows whether the reply opens with the tag, then releases them at
+once. The review is a second, non-streamed call with `CHAT_REVIEW_INSTRUCTION`,
+answered with `<end_session confirm="true|false" reason="..."/>` (anything else is a
+decline); after a decline or a refused tag a third, streamed call answers the person.
+The tag never enters `_chat_history`: the turn is stored as WARNING, CLOSED or that answer.
 Every person's message and agent reply of a session gets a number from one ledger
 (`messages.last_id` / `user_ids` in the session document); the runtime prompt shows
 `[the person's message #N]` and the history shows the numbers only when the tool is offered.
@@ -881,7 +889,8 @@ and escalates to smart when `task_intent.is_complex_goal` flags the request, or 
 errors, consecutive errors, or stagnation — unless the user explicitly pinned a model.
 Role system prompts are loaded and cached from `kernel/prompts/system/`:
 `{chat,coder,commit,complete,devops,reader,report,router,universal}_prompt.txt`, plus
-`constitution.txt`, `native_tools.txt`, `plan_mode.txt` and `end_session.txt`.
+`constitution.txt`, `native_tools.txt`, `plan_mode.txt`, `end_session.txt` and
+`end_session_chat.txt`.
 
 User-selectable styles live apart, in `kernel/prompts/styles/{agents,chat}/<slug>.txt`
 (`agents` covers coder/reader/devops, `chat` the chat role). **One session, one
