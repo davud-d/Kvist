@@ -1380,3 +1380,27 @@ def test_load_of_another_session_keeps_the_active_sessions_history_out_of_the_mo
     sent = json.dumps(client.requests, default=str)
     assert "BETA-MARKER" in sent
     assert "ALPHA-MARKER" not in sent
+
+
+def test_new_session_keeps_the_active_sessions_history_out_of_the_model(tmp_path):
+    from kernel.session_store import SessionStore
+    from kernel.tests.conftest import FakeLLMClient
+
+    _seed_chat_session(tmp_path, "alpha", "ALPHA-MARKER")
+    SessionStore(tmp_path).switch("alpha")
+    client = FakeLLMClient(content="chat", stream_chunks=["ok"])
+
+    async def scenario():
+        async with Wire(build_agent_fn=_real_agent_builder(client)) as wire:
+            await wire.initialize()
+            session_id = await wire.open_session(str(tmp_path))
+            prompt = await wire.call(
+                "session/prompt",
+                {"sessionId": session_id, "prompt": [{"type": "text", "text": "hello there"}]},
+            )
+            assert "result" in prompt, prompt
+
+    run(scenario())
+
+    assert client.requests
+    assert "ALPHA-MARKER" not in json.dumps(client.requests, default=str)

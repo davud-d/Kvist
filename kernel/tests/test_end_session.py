@@ -714,6 +714,38 @@ def test_a_plain_reply_is_released_on_its_first_chunk(tmp_path):
     assert ui.streams[0][-1] == "Hello there"
 
 
+def test_only_the_held_start_skips_the_render_throttle(tmp_path, monkeypatch):
+    import time
+
+    clock = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    ui = ChatUI()
+    agent = _agent(tmp_path, ui)
+    times: list[float] = []
+
+    @contextlib.contextmanager
+    def live_markdown():
+        def update(message):
+            times.append(clock[0])
+
+        update.reasoning = lambda message: None
+        yield update
+
+    ui.live_markdown = live_markdown
+
+    def stream():
+        for chunk in ["<", "div", *["x"] * 200]:
+            clock[0] += 0.01
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=chunk))])
+
+    agent._consume_chat_stream(stream(), hold_tag=True)
+
+    released, *throttled, final = times
+    assert released == pytest.approx(0.02)
+    gaps = [later - earlier for earlier, later in zip([released, *throttled], throttled)]
+    assert len(throttled) >= 10 and all(gap > 0.1 for gap in gaps)
+
+
 def test_without_the_tool_the_tag_is_just_text(tmp_path):
     agent, ui, _client = _chat(tmp_path, [_FLAG_1], enabled=False)
 
