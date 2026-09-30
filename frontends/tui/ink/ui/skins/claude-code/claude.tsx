@@ -9,7 +9,7 @@ import { clip, clipLines, contextLabel, formatSeconds, lastLines, outputLines } 
 import { actionTarget, type ActionResult, type ExploreCounts, type Item, type State } from "../../../state.js"
 import { ViewContext } from "../../context.js"
 import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.js"
-import { Markdown } from "../../markdown.js"
+import { Markdown, renderInline } from "../../markdown.js"
 import { color } from "../../theme.js"
 import { tipFor } from "./tips.js"
 import { doneLine, spinnerWord } from "./verbs.js"
@@ -280,7 +280,7 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
       return (
         <Box flexDirection="column" marginTop={1}>
           <Text color={color.thought} italic>✻ {item.seconds > 0 ? `Thought for ${formatSeconds(item.seconds)}` : "Thought"}</Text>
-          {item.text ? <Box paddingLeft={2}><Text color={color.thought} italic>{lastLines(item.text, THOUGHT_LINES)}</Text></Box> : null}
+          {item.text ? <Box paddingLeft={2}><Text color={color.thought} italic>{renderInline(lastLines(item.text, THOUGHT_LINES))}</Text></Box> : null}
         </Box>
       )
     case "explored":
@@ -355,7 +355,7 @@ function useTypewriter(text: string): string {
 function LiveThought({ text }: { text: string }) {
   return (
     <Box marginTop={1} paddingLeft={2}>
-      <Text color={color.thought} italic>{lastLines(useTypewriter(text), THOUGHT_LINES)}</Text>
+      <Text color={color.thought} italic>{renderInline(lastLines(useTypewriter(text), THOUGHT_LINES))}</Text>
     </Box>
   )
 }

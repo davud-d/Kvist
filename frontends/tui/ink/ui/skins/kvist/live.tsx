@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 
 import { clip, formatSeconds, lastLines } from "../../../format.js"
 import { actionTarget, exploreSummary, lastInflight, type State } from "../../../state.js"
-import { Markdown } from "../../markdown.js"
+import { Markdown, renderInline } from "../../markdown.js"
 import { BAR, color, planStepColor, SPINNER } from "../../theme.js"
 
 function useNow(active: boolean, every: number): number {
@@ -24,7 +24,7 @@ function Thinking({ reasoning, spinner, seconds }: { reasoning: string; spinner:
         {spinner} Thinking
         <Text color={color.faint}> · {formatSeconds(seconds)}</Text>
       </Text>
-      {reasoning ? <Text color={color.dim} italic>{lastLines(reasoning, 3)}</Text> : null}
+      {reasoning ? <Text color={color.dim} italic>{renderInline(lastLines(reasoning, 3))}</Text> : null}
     </Box>
   )
 }

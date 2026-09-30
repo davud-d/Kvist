@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 
 import { clip, formatThought, lastLines } from "../../../format.js"
 import { exploreSummary, type Item } from "../../../state.js"
-import { Markdown } from "../../markdown.js"
+import { Markdown, renderInline } from "../../markdown.js"
 import { BAR, color, planStepColor } from "../../theme.js"
 import { ToolCard } from "../../tools.js"
 
@@ -80,7 +80,7 @@ export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }
       return (
         <Box flexDirection="column" marginTop={1} borderStyle={BAR} borderColor={color.thought} borderTop={false} borderBottom={false} borderRight={false} paddingLeft={1}>
           <Text color={color.thought}>{formatThought(item.seconds)}</Text>
-          {item.text ? <Text color={color.dim}>{lastLines(item.text, THOUGHT_LINES)}</Text> : null}
+          {item.text ? <Text color={color.dim}>{renderInline(lastLines(item.text, THOUGHT_LINES))}</Text> : null}
         </Box>
       )
     case "explored":
