@@ -423,11 +423,16 @@ reply that is `<end_session message="N"/>` and nothing else goes through the sam
 `_consume_chat_stream(hold_tag=True)` holds back only the first characters, until
 `tag_prefix_state` shows whether the reply opens with the tag, then releases them at
 once. The review is a second, non-streamed call with `CHAT_REVIEW_INSTRUCTION`,
-answered with `<end_session confirm="true|false" reason="..."/>` (anything else is a
-decline); after a decline or a refused tag a third, streamed call answers the person
+answered with `<end_session confirm="true|false" reason="..."/>` (a backtick fence
+around the tag alone is read through; anything else is a decline, logged with the
+reply itself); after a decline or a refused tag a third, streamed call answers the person
 (`_chat_words`): the first call's conversation without the tool — no tag, no review,
 no message number, and a system prompt without the block
-(`build_role_system_prompt(offer_end_session=False)`). A reply that is still only a tag
+(`build_role_system_prompt(offer_end_session=False)`), plus one runtime fact
+(`_AFTER_TOOL_NOTE`: answer the work or how the person is doing, no reproach), since the
+block's rule against answering an insult in words left with it. Where the tag is offered,
+the first call's thinking is held with its first characters and never shown when the
+reply is the tag; the review is not streamed. A reply that is still only a tag
 (`tag_only`) is never shown: one retry with "(Runtime fact: answer the person in
 words.)", then the fixed `carry_on_text`, logged.
 The tag never enters `_chat_history`: the turn is stored as WARNING, CLOSED or that answer.
