@@ -190,7 +190,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `reasoning_chunk` | `stream_id:str, text:str` | current cumulative **thinking** text (a snapshot, separate channel from the answer) |
 | `reasoning_commit` | `stream_id:str, duration_seconds:number` | thinking ended (the answer is about to stream); carries how long it took |
 | `message` | `markdown:str` | a non-streamed Markdown message |
-| `final` | `message:str, user_messages:string[], outcome:str` | the run's final answer (terminal event). `outcome` is `"done"` when the run finished and passed its completion checks, `"incomplete"` otherwise (an honest "not done", a stop, the step budget, a refusal). |
+| `final` | `message:str, user_messages:string[], outcome:str`; optional `closed:true` | the run's final answer (terminal event). `outcome` is `"done"` when the run finished and passed its completion checks, `"incomplete"` otherwise (an honest "not done", a stop, the step budget, a refusal). `closed: true` marks end_session's closing words and a closed session's reply (§8a, "Closed sessions"): show `message` as an ordinary Kvist message, with no status or "not done" frame. `outcome` is then `"incomplete"`, for frontends that do not know the field. |
 | `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | token usage of one completed model call. `input_tokens`/`output_tokens` are **spend**: sum them over the run. `context_tokens` is the **size of that one prompt** — the conversation itself — so *replace* the previous value instead of summing (it is 0 for calls that do not carry the conversation, e.g. `kind` `report`: keep the last known size). Because every step resends the context, the summed spend runs far ahead of `context_tokens` — showing the sum as "tokens" reads as a huge conversation that does not exist. `context_limit` is the budget the core trims a prompt to. |
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
@@ -407,8 +407,9 @@ fresh, and the closing. A closed session:
 
 - is **read-only for good**. The core refuses every goal and every `resume` in
   it before routing or any model call: the answer is one `final` event
-  (`outcome: "incomplete"`) with a fixed reply, followed by `turn_end` in
-  stdio-multi, and nothing is written to the session or its journal;
+  (`closed: true`, `outcome: "incomplete"`) with a fixed reply, followed by
+  `turn_end` in stdio-multi, and nothing is written to the session or its
+  journal;
 - **stays readable**: `history`, `list`, `status` and switching to it work as
   usual, and `list`/`status` items, the `history` payload and the `session`
   event carry `closed: true` and `closed_notice` — the core's text for the place
@@ -422,7 +423,22 @@ fresh, and the closing. A closed session:
 
 In a chat turn the model uses it by replying with a tag and nothing else. Such a
 reply is never shown: its stream ends with an empty `stream_commit`, and the
-turn's answer arrives as the warning `message` or the closing `final`.
+turn's answer arrives as the warning `message` or the closing `final`. An empty
+`stream_commit` draws nothing.
+
+The warning (`message`) and the closing words (`final` with `closed: true`) are
+Kvist speaking: draw them as ordinary Kvist messages, never with a status frame,
+a "not done" mark or an error colour. A warning is not an unfinished answer, and
+a close is not a failed task.
+
+What a frontend shows in a closed session, the same on every surface: a bar in
+place of the input box, as tall as the box, with `closed_notice` in muted text —
+no red, no alarm icon, no animation. It appears on a live `session_ended` and
+when a session with `closed: true` is opened. Enter opens a new session through
+the frontend's usual new-session path; every other key does nothing, and there
+is no way to type into the session (no focus, no paste). The history stays
+scrollable, selectable and copyable. Switching to another session brings the
+input box back.
 
 ### Restoring a session's feed: `--session-op history`
 

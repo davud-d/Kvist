@@ -359,7 +359,7 @@ def test_insult_warning_insult_review_confirm_closes_the_session(tmp_path):
         }
     ]
     closing, said, outcome = ui.finals[-1]
-    assert closing == result and outcome == "incomplete"
+    assert closing == result and outcome == "closed"
     # The tool speaks: the model's own words beside the call never reach the person.
     assert "You are out of line." not in said
     assert [log["answer"] for log in _end_session_logs(agent)] == ["review", "closed"]
@@ -444,6 +444,29 @@ def _close(tmp_path, language="en") -> str:
     agent._closure = {"closed_at": 1.0, "closed_msg_id": 1, "language": language}
     agent.save_session()
     return agent.current_session
+
+
+def test_the_closing_final_is_marked_closed_on_the_wire_and_in_the_journal(tmp_path):
+    channel = FrontendChannel()
+    agent = _agent(tmp_path, EventStreamUI(channel))
+    _warned(agent)
+    _turn(
+        agent,
+        "shut up, idiot",
+        [_call("end_session", message_id=3), _call("end_session", confirm=True, reason="#3 calls me an idiot")],
+    )
+    refused = agent.run("hello again", routed_role="coder")
+
+    finals = [event.to_dict() for event in channel.drain() if event.to_dict()["type"] == "final"]
+    closed = end_session.closed_text("en")
+    assert finals[-2:] == [
+        {"type": "final", "message": closed, "user_messages": [], "outcome": "incomplete", "closed": True},
+        {"type": "final", "message": refused, "user_messages": [], "outcome": "incomplete", "closed": True},
+    ]
+    assert "closed" not in finals[0]
+    replayed = run_session_op(tmp_path, "history", agent.current_session)["events"]
+    (journaled,) = [item["event"] for item in replayed if item["event"]["type"] == "final" and item["turn"] == 2]
+    assert journaled["closed"] is True and journaled["message"] == closed
 
 
 def test_the_marks_survive_a_restart(tmp_path):
@@ -805,7 +828,7 @@ def test_chat_review_confirmed_closes_the_session_and_keeps_no_tag(tmp_path):
     assert end_session.CHAT_REVIEW_INSTRUCTION.endswith(
         '<end_session confirm="true|false" reason="<one line: which message, what it targets>"/>'
     )
-    assert ui.finals[-1] == (closed, [], "incomplete")
+    assert ui.finals[-1] == (closed, [], "closed")
     assert ui.ended[0]["closed_msg_id"] == 3
     assert agent._chat_history[-1] == {"role": "assistant", "content": closed}
     document = read_session_document(agent)

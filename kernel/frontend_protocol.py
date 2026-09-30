@@ -179,15 +179,22 @@ class FinalEvent:
     # "incomplete" for every other ending (an honest "not done", a stop, the
     # step budget, a refusal).
     outcome: str = "done"
+    # Additive: the closing words of end_session or a closed session's reply.
+    # A frontend shows them as an ordinary message, with no status; the
+    # outcome stays "incomplete" for frontends that do not know the field.
+    closed: bool = False
     type: ClassVar[str] = "final"
 
     def to_dict(self) -> dict:
-        return {
+        payload = {
             "type": self.type,
             "message": self.message,
             "user_messages": self.user_messages,
             "outcome": self.outcome,
         }
+        if self.closed:
+            payload["closed"] = True
+        return payload
 
 
 @dataclass(slots=True)

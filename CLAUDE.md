@@ -449,7 +449,12 @@ reading the stored document (`is_session_closed`, so an agent pointed at a sessi
 without loading it — ACP — still sees it): a closed session answers CLOSED_REPLY before
 routing, the journal or any model call. It stays readable (`--session-op history/list/status`
 and the `session` event carry `closed` and `closed_notice`), `find_resumable_session`
-skips it and `reset_session` refuses it. Tests: `kernel/tests/test_end_session.py`.
+skips it and `reset_session` refuses it; `delete` works (it is the person's history).
+CLOSED and CLOSED_REPLY go out as `print_final(outcome="closed")`: Kvist speaking, not a
+run status — the classic terminal prints plain Markdown, and the `final` event keeps
+`outcome: "incomplete"` for old frontends and adds `closed: true`. Every frontend puts a
+muted `closed_notice` bar in place of the input box (Enter = its own new-session path).
+Tests: `kernel/tests/test_end_session.py`.
 
 **Session history is never cut by hand; the model's budget cuts it.**
 `_add_to_session_history` stores the turn's answer whole (it was once

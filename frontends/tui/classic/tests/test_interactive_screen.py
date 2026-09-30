@@ -365,6 +365,26 @@ def test_stream_slot_commits_once_beside_pinned_status(screen_runtime):
     assert "STATUS-ONLY" in text
 
 
+@pytest.mark.parametrize("shown", [[], ["\n\n"], ["   "]])
+def test_an_empty_stream_commit_draws_nothing(screen_runtime, shown):
+    """A hidden reply (chat's end_session tag) leaves no empty block behind."""
+    from terminal_banner import TerminalBannerUI
+
+    screen = screen_runtime.screen
+    screen.suspend()
+    ui = TerminalBannerUI(verbose=False)
+    ui.attach_screen(screen)
+    before = list(screen._transcript_entries)
+
+    with ui.live_markdown() as update:
+        update.reasoning("weighing the tag")
+        for text in shown:
+            update(text)
+
+    assert list(screen._transcript_entries) == before
+    assert screen._stream is None
+
+
 def test_flush_stream_moves_settled_text_into_the_transcript(screen_runtime):
     """A settled block leaves the height-capped slot for the scrollable log."""
     screen = screen_runtime.screen

@@ -298,11 +298,13 @@ class EventStreamUI:
     def print_final(
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:
+        closed = outcome == "closed"
         self._channel.emit(
             FinalEvent(
                 redact_text(final_message),
                 [redact_text(m) for m in (user_messages or [])],
-                outcome,
+                "incomplete" if closed else outcome,
+                closed=closed,
             )
         )
 

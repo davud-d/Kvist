@@ -165,6 +165,47 @@ def test_print_final_renders_markdown_without_crashing():
     assert "second" in rendered
 
 
+def test_closing_words_are_an_ordinary_message_without_a_status_frame():
+    console = Console(record=True, width=100, force_terminal=True)
+    ui = AgentUI(console=console, verbose=False)
+
+    ui.print_final("the conversation is over.", [], outcome="closed")
+
+    rendered = console.export_text()
+    assert "the conversation is over." in rendered
+    assert "Final Answer" not in rendered and "╭" not in rendered
+
+
+@pytest.mark.parametrize("reasoning", [False, True])
+def test_a_stream_that_showed_nothing_leaves_no_block(reasoning):
+    """The Rich Live path: a hidden reply (chat's end_session tag) erases itself."""
+    import io
+
+    buffer = io.StringIO()
+    ui = AgentUI(console=Console(file=buffer, force_terminal=True, width=60), verbose=False)
+
+    with ui.live_markdown() as update:
+        if reasoning:
+            update.reasoning("weighing it")
+
+    # Live's closing newline is taken back: one row up, erased.
+    output = buffer.getvalue()
+    assert output.endswith("\n\x1b[?25h\r\x1b[1A\x1b[2K")
+    assert "weighing it" not in output.split("\x1b[2K")[-2]
+
+
+def test_a_stream_that_showed_text_stays():
+    import io
+
+    buffer = io.StringIO()
+    ui = AgentUI(console=Console(file=buffer, force_terminal=True, width=60), verbose=False)
+
+    with ui.live_markdown() as update:
+        update("the fixture is stale")
+
+    assert "the fixture is stale" in buffer.getvalue().rsplit("\x1b[2K", 1)[-1]
+
+
 def test_print_final_keeps_code_block_content():
     console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)

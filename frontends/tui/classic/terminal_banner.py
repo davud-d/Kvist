@@ -489,15 +489,27 @@ class TerminalBannerUI:
             console=self.console,
             refresh_per_second=15,
         ) as live:
+            shown = ""
 
             def update(message: str) -> None:
+                nonlocal shown
+                shown = message
                 live.update(self.render_user_markdown(message))
 
             def reasoning(message: str) -> None:
                 live.update(_reasoning_renderable(message))
 
             update.reasoning = reasoning
-            yield update
+            try:
+                yield update
+            finally:
+                # A reply that showed nothing (chat's hidden end_session tag)
+                # is erased with its thinking instead of leaving an empty block.
+                # Live ends on a newline and erases only the rows it drew, so
+                # it gets one blank row to take that newline back with it.
+                if not shown.strip():
+                    live.update(Text(" "), refresh=True)
+                    live.transient = True
 
     def print_plan(self, markdown: str) -> None:
         if self._plain:
@@ -549,6 +561,10 @@ class TerminalBannerUI:
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:
         _ = user_messages
+        if outcome == "closed":
+            # end_session's closing words are Kvist speaking, not a run's status.
+            self.print_user_markdown(final_message)
+            return
         done = outcome != "incomplete"
         if self._plain:
             print(f"[{'final' if done else 'final, not done'}] {sanitize_display_text(final_message)}")

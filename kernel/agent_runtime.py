@@ -608,11 +608,12 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
 
 
 def _final_outcome(self, task_completed: bool) -> str:
-    """"done" only for a run that finished and passed its completion gates."""
+    """"done" only for a run that finished and passed its completion gates; "closed" for end_session's close."""
     state = self._state
+    if state.session_closed:
+        return "closed"
     refused = any(log.get("status") == "safety_refusal" for log in state.step_logs)
-    ended = refused or state.session_closed
-    if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not ended:
+    if task_completed and not state.finished_incomplete and state.run_status != "blocked" and not refused:
         return "done"
     return "incomplete"
 

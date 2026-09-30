@@ -94,7 +94,11 @@ class AgentUI(Protocol):
     def print_final(
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:
-        """Render the final answer of a run; ``outcome`` is "done" or "incomplete"."""
+        """Render the final answer of a run; ``outcome`` is "done", "incomplete" or "closed".
+
+        "closed" is end_session's closing words or a closed session's reply:
+        an ordinary message, shown with no status.
+        """
         ...
 
     def print_result(self, message: str) -> None:

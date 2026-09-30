@@ -514,7 +514,7 @@ class LocalAgent:
         if not self.is_session_closed():
             return None
         reply = end_session.closed_reply(end_session.closure_language(self))
-        self._ui.print_final(reply, [], outcome="incomplete")
+        self._ui.print_final(reply, [], outcome="closed")
         return reply
 
     def _run_turn(self, user_goal: str, routed_role: str | None) -> str:
@@ -1126,7 +1126,7 @@ class LocalAgent:
                 verdict = end_session.handle(self, _end_session_command({"confirm": confirm, "reason": reason}))
                 if verdict.final_message:
                     self._state.session_closed = True
-                    self._ui.print_final(verdict.final_message, [], outcome="incomplete")
+                    self._ui.print_final(verdict.final_message, [], outcome="closed")
                     return verdict.final_message
             return self._chat_words(model)
         except (ChatRequestCancelled, KeyboardInterrupt) as error:
