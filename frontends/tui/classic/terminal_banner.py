@@ -151,6 +151,12 @@ class TerminalBannerUI:
         """
         self._screen = screen
 
+    def print_session_ended(self, payload: dict) -> None:
+        """end_session closed the session: its notice takes the input's place at once."""
+        setter = getattr(self._screen, "set_closed", None)
+        if setter is not None:
+            setter(str(payload["closed_notice"]))
+
     def _publish_live(self) -> None:
         """Push a snapshot of the live telemetry to the pinned banner."""
         screen = self._screen

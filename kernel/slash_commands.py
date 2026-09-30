@@ -101,6 +101,8 @@ SLASH_COMMAND_STYLE = Style.from_dict(
         "choice.option": "fg:#a6adc8",
         "choice.option.current": "fg:#f5e0dc bold noreverse",
         "choice.hint": "fg:#6c7086",
+        # A closed session's notice in place of the input: muted, never red.
+        "closed-bar": "fg:#7f849c",
         "scrollbar.background": "bg:default",
         "scrollbar.button": "bg:default",
     }

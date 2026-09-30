@@ -555,6 +555,46 @@ def test_a_closed_session_refuses_in_the_classic_terminal(tmp_path, monkeypatch)
     assert client.requests == []
 
 
+class _FakeScreen:
+    """The classic REPL's screen, reduced to its input row."""
+
+    inputs: list[str] = []
+    closed: list[str | None] = []
+
+    def __init__(self, session, config) -> None:
+        pass
+
+    def read_input(self) -> str:
+        return self.inputs.pop(0)
+
+    def set_closed(self, notice) -> None:
+        self.closed.append(notice)
+
+    def __getattr__(self, name):
+        return lambda *args, **kwargs: None
+
+
+def test_the_classic_repl_puts_the_notice_in_place_of_the_input_until_a_new_session(tmp_path, monkeypatch):
+    from kernel import main
+    from kernel.tests.test_main import _run_main_with_agent
+
+    session = _close(tmp_path)
+    agent = _agent(tmp_path, RecordingUI())
+    agent._ui.attach_screen = lambda screen: None
+    agent.start_fresh_session = lambda: (session, None)  # stay in the closed session
+    _run_main_with_agent(tmp_path, monkeypatch, agent, [])
+    monkeypatch.setattr(main.sys, "argv", ["kvist", "--workspace", str(tmp_path)])
+    monkeypatch.setattr(main.banner, "banner_available", lambda *args: True)
+    monkeypatch.setattr(main, "InteractiveScreen", _FakeScreen)
+    monkeypatch.setattr(_FakeScreen, "inputs", ["/new", "/bye"])
+    monkeypatch.setattr(_FakeScreen, "closed", [])
+
+    main.main()
+
+    assert _FakeScreen.closed == [end_session.closed_notice("en"), None]
+    assert agent.current_session != session
+
+
 def test_find_resumable_session_skips_a_closed_session(tmp_path):
     agent = _agent(tmp_path)
     agent._session_history = [{"goal": "g", "role": "coder", "result": "r"}]

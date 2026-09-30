@@ -453,7 +453,10 @@ skips it and `reset_session` refuses it; `delete` works (it is the person's hist
 CLOSED and CLOSED_REPLY go out as `print_final(outcome="closed")`: Kvist speaking, not a
 run status — the classic terminal prints plain Markdown, and the `final` event keeps
 `outcome: "incomplete"` for old frontends and adds `closed: true`. Every frontend puts a
-muted `closed_notice` bar in place of the input box (Enter = its own new-session path).
+muted `closed_notice` bar in place of the input box (Enter = its own new-session path). The
+classic REPL calls `InteractiveScreen.set_closed(_closed_notice(agent))` before every
+`read_input` (and `print_session_ended` sets it at once); Enter queues "/new", every other key
+and a paste hit an explicit no-op binding, since the read-only buffer would ring the bell.
 Tests: `kernel/tests/test_end_session.py`.
 
 **Session history is never cut by hand; the model's budget cuts it.**

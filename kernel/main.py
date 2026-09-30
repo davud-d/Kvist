@@ -3176,14 +3176,16 @@ def _stdio_session(ctx: CommandContext) -> CommandResult:
 
 def _session_event(agent):
     """The session a switch moved to, with the closed notice when end_session closed it."""
-    from kernel.end_session import closed_notice, closure_language
     from kernel.frontend_protocol import SessionEvent
 
-    return SessionEvent(
-        agent.current_session,
-        agent._peek_checkpoint() is not None,
-        closed_notice(closure_language(agent)) if agent.is_session_closed() else None,
-    )
+    return SessionEvent(agent.current_session, agent._peek_checkpoint() is not None, _closed_notice(agent))
+
+
+def _closed_notice(agent) -> str | None:
+    """The core's notice for the input's place when end_session closed the active session."""
+    from kernel.end_session import closed_notice, closure_language
+
+    return closed_notice(closure_language(agent)) if agent.is_session_closed() else None
 
 
 def _stdio_new(ctx: CommandContext) -> CommandResult:
@@ -4068,6 +4070,9 @@ def main() -> None:
             if interactive_screen is None:
                 user_goal = multiline_input()
             else:
+                # The stored lock decides, so /session, /new and a live close
+                # all land on the right input row.
+                interactive_screen.set_closed(_closed_notice(agent))
                 user_goal = interactive_screen.read_input()
             user_goal = normalize_slash_command(user_goal)
             # A bare Enter is a no-op in every shell. Re-prompt silently instead

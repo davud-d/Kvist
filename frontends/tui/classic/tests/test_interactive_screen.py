@@ -212,6 +212,54 @@ def test_five_submissions_do_not_duplicate_banner(screen_runtime):
     assert screen_runtime.session.default_buffer.text == ""
 
 
+_NOTICE = "conversation over · Enter — new session"
+
+
+def test_a_closed_session_shows_the_notice_in_place_of_the_input(screen_runtime):
+    screen = screen_runtime.screen
+    _wait_until(lambda: "❯" in _rendered_text(screen_runtime))
+    input_rows = [row for row, line in enumerate(_rendered_lines(screen_runtime)) if line.startswith("❯")]
+
+    screen.set_closed(_NOTICE)
+    _wait_until(lambda: _NOTICE in _rendered_text(screen_runtime))
+
+    lines = _rendered_lines(screen_runtime)
+    assert not any(line.startswith("❯") for line in lines)
+    # The notice sits on the input's own row, so the layout does not move.
+    assert [row for row, line in enumerate(lines) if _NOTICE in line] == input_rows
+
+
+def test_a_closed_session_takes_no_typing_and_enter_opens_a_new_session(screen_runtime):
+    screen = screen_runtime.screen
+    screen.set_closed(_NOTICE)
+    _wait_until(lambda: _NOTICE in _rendered_text(screen_runtime))
+    bells: list[int] = []
+    screen_runtime.output.bell = lambda: bells.append(1)
+
+    screen_runtime.input.send_text("hello")
+    screen_runtime.input.send_text("\x1b[200~pasted text\x1b[201~")
+    screen_runtime.input.send_text("\x1b")
+    screen_runtime.input.send_text("\x1b[A")
+    time.sleep(0.2)
+    assert screen_runtime.session.default_buffer.text == ""
+    assert screen._input_queue.empty()
+    assert bells == []
+
+    screen_runtime.input.send_text("\r")
+    assert screen.read_input() == "/new"
+
+
+def test_leaving_a_closed_session_brings_the_input_back(screen_runtime):
+    screen = screen_runtime.screen
+    screen.set_closed(_NOTICE)
+    _wait_until(lambda: _NOTICE in _rendered_text(screen_runtime))
+
+    screen.set_closed(None)
+    _wait_until(lambda: _NOTICE not in _rendered_text(screen_runtime))
+    screen_runtime.input.send_text("next task\r")
+    assert screen.read_input() == "next task"
+
+
 def test_history_navigation_and_multiline_submission(screen_runtime):
     for value in ("first history entry", "second history entry"):
         screen_runtime.input.send_text(value + "\r")

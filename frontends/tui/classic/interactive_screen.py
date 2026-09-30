@@ -475,6 +475,9 @@ class InteractiveScreen:
         self._awaiting_input.set()
         self._stop_armed_at: float | None = None
         self._language = "en"
+        # The core's notice while the active session is one end_session closed;
+        # it takes the input row's place and Enter opens a new session.
+        self._closed_notice: str | None = None
         # Arrow-key question asked from the agent thread and answered by the
         # UI thread. It renders inside the running application, directly under
         # the banner, so the live panel keeps updating while the user chooses.
@@ -809,6 +812,12 @@ class InteractiveScreen:
     def set_language(self, language: str) -> None:
         """Language of the turn in flight, for the screen's own hints."""
         self._language = language
+
+    def set_closed(self, notice: str | None) -> None:
+        """Show a closed session's notice in place of the input, or bring the input back (None)."""
+        with self._state_lock:
+            self._closed_notice = notice
+        self.invalidate()
 
     def set_status(self, content: Any | None) -> None:
         with self._state_lock:
@@ -1385,8 +1394,9 @@ class InteractiveScreen:
 
         buffer = self.session.default_buffer
         # Lock out typing while a run's status panel is live so nothing can be
-        # entered mid-run; the input row is also hidden (see ``input_area``).
-        buffer.read_only = Condition(self._has_status)
+        # entered mid-run, and in a closed session for good; the input row is
+        # hidden in both (see ``input_area``).
+        buffer.read_only = Condition(self._has_status) | Condition(self._is_closed)
         input_control = BufferControl(
             buffer=buffer,
             lexer=self.session.lexer,
@@ -1429,6 +1439,21 @@ class InteractiveScreen:
             ),
             filter=Condition(self._input_visible),
         )
+        # The same two rows as ``input_area``: the spacer, then the notice.
+        closed_bar = ConditionalContainer(
+            HSplit(
+                [
+                    Window(height=1, char=" "),
+                    Window(
+                        FormattedTextControl(self._get_closed_bar, show_cursor=False),
+                        height=1,
+                        dont_extend_height=True,
+                        always_hide_cursor=True,
+                    ),
+                ]
+            ),
+            filter=Condition(self._closed_bar_visible),
+        )
         choice = ConditionalContainer(
             Window(
                 FormattedTextControl(self._get_choice, show_cursor=False),
@@ -1447,6 +1472,7 @@ class InteractiveScreen:
                 transcript,
                 transient,
                 input_area,
+                closed_bar,
                 completion_menu,
             ]
         )
@@ -1495,10 +1521,27 @@ class InteractiveScreen:
         def choice_cancel(event: Any) -> None:
             self._close_choice(None)
 
-        buffer_focused = has_focus(self.session.default_buffer)
+        closed = Condition(self._is_closed) & ~choosing
+        # Every editing binding below stands down in a closed session.
+        buffer_focused = has_focus(self.session.default_buffer) & ~closed
         single_line = Condition(
             lambda: "\n" not in self.session.default_buffer.text
         )
+
+        @bindings.add(
+            Keys.Enter,
+            filter=closed & Condition(self._awaiting_input.is_set),
+            eager=True,
+        )
+        def closed_new_session(event: Any) -> None:
+            self._open_new_session()
+
+        # A closed session takes no other key: without these a key or a paste
+        # would reach the read-only buffer, which answers with the bell.
+        @bindings.add(Keys.Any, filter=closed)
+        @bindings.add(Keys.BracketedPaste, filter=closed, eager=True)
+        def closed_ignore(event: Any) -> None:
+            return
 
         @bindings.add(Keys.Enter, filter=buffer_focused & single_line, eager=True)
         def accept(event: Any) -> None:
@@ -1582,7 +1625,8 @@ class InteractiveScreen:
             self._stop_armed_at = None
             self._interrupt_main_thread()
 
-        @bindings.add(Keys.ControlD, filter=buffer_focused, eager=True)
+        # Quitting stays possible in a closed session.
+        @bindings.add(Keys.ControlD, filter=has_focus(self.session.default_buffer), eager=True)
         def eof_or_delete(event: Any) -> None:
             current = event.current_buffer
             if current.text:
@@ -1715,9 +1759,26 @@ class InteractiveScreen:
             return self._status is not None
 
     def _input_visible(self) -> bool:
-        """Hide the input row while a run's status panel is live."""
+        """Hide the input row while a run's status panel is live or the session is closed."""
         with self._state_lock:
-            return self._status is None
+            return self._status is None and self._closed_notice is None
+
+    def _is_closed(self) -> bool:
+        with self._state_lock:
+            return self._closed_notice is not None
+
+    def _closed_bar_visible(self) -> bool:
+        with self._state_lock:
+            return self._status is None and self._closed_notice is not None
+
+    def _get_closed_bar(self) -> AnyFormattedText:
+        with self._state_lock:
+            return [("class:closed-bar", f"  {self._closed_notice or ''}")]
+
+    def _open_new_session(self) -> None:
+        """Enter in a closed session: the REPL gets "/new", as if it had been typed."""
+        self._append_formatted([*_INPUT_PROMPT, ("class:slash-command.input", "/new"), ("", "\n")])
+        self._input_queue.put("/new")
 
     def _stop_armed(self) -> bool:
         armed_at = self._stop_armed_at
