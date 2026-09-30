@@ -175,6 +175,8 @@ _CHAT_HISTORY_PREAMBLE = (
     "is not present in the content below, say so honestly and ask to read it "
     "rather than inventing it.)"
 )
+# Added once when chat's answer after end_session came back as the tag again.
+_WORDS_NOTE = "(Runtime fact: answer the person in words.)"
 
 
 def _end_session_command(args: dict[str, Any]) -> AgentCommand:
@@ -937,56 +939,7 @@ class LocalAgent:
             # next message instead of the next session.
             self._chat_history[0] = {"role": "system", "content": system_prompt}
 
-        # Add new call messages (from user, system, and function calls)
-        # Inject session history context
-        session_context = ""
-        if hasattr(self, "_session_history") and self._session_history:
-            history_lines = [_CHAT_HISTORY_PREAMBLE]
-            # Newest first: when the budget cuts this message it keeps the
-            # head and the tail, so the oldest turns are what goes.
-            for entry in reversed(self._session_history):
-                history_lines.append(
-                    f"- [{entry['role']}] Asked: \"{entry['goal']}\""
-                )
-                if entry.get("stopped_by_user"):
-                    history_lines.append(
-                        "    Status: the user stopped this turn before it finished."
-                    )
-                # A chat reply is already in _chat_history as an assistant message.
-                if entry["role"] != "chat" and entry.get("result"):
-                    history_lines.append(f"    Answered: {entry['result']}")
-                for output in entry.get("outputs", []):
-                    history_lines.append(f"    Output: {output}")
-            session_context = "\n".join(history_lines) + "\n\n---\n\n"
-
-        # Per-turn runtime directive: the reply language is resolved by the
-        # runtime layer (language_policy), not guessed by the model.
-        language_note = (
-            f"(Runtime directive: response_language = {self._state.response_language}. "
-            f"Reply in {response_language_name(self._state.response_language)}.)\n\n"
-        )
-
-        # Tell the model which provider/model is actually serving this turn, so
-        # it can answer honestly when asked what it runs on.
-        model_note = (
-            f"(Runtime fact: you are being served by provider = "
-            f"{self.config.provider}, model = {self.config.fast_model}. "
-            f"If the user asks which model you are, answer with this.)\n\n"
-        )
-        # Without the host fact a chat reply to "restart the editor" invented
-        # that the conversation would be lost; it is on disk.
-        host_note = (
-            f"(Runtime fact: host = {self._state.system_host})\n\n"
-            if self._state.system_host
-            else ""
-        )
-        # The number end_session's tag names; only where the tag is offered.
         use_tag = end_session.available(self, "chat")
-        message_note = (
-            f"(Runtime fact: this is the person's message #{self._state.message_id}.)\n\n"
-            if use_tag
-            else ""
-        )
 
         # Snapshot before the turn mutates history: a cancelled or failed turn
         # must not leave a user message that no answer ever replies to.
@@ -1008,10 +961,7 @@ class LocalAgent:
         # that was actually stored. Re-trim afterwards so the decoration
         # itself can't push the request back over the hard input limit.
         wire_history = self._chat_history[:-1] + [
-            {
-                "role": "user",
-                "content": language_note + model_note + host_note + message_note + session_context + user_goal,
-            }
+            {"role": "user", "content": self._chat_turn_message(user_goal, offer_tag=use_tag)}
         ]
         wire_history = self._trim_chat_messages_to_token_limit(wire_history)
 
@@ -1076,18 +1026,64 @@ class LocalAgent:
             self.console.print(Text(fallback_msg, style="yellow"))
             return fallback_msg
 
-        message_id = end_session.flag_tag(content) if use_tag else None
-        if message_id is not None:
-            content = self._chat_end_session(wire_history, model, content, message_id, history_before)
+        if use_tag and end_session.tag_only(content):
+            content = self._chat_end_session(wire_history, model, content, history_before)
         self._chat_history.append({"role": "assistant", "content": content})
         return content
+
+    def _chat_turn_message(self, user_goal: str, *, offer_tag: bool) -> str:
+        """The person's message as the model gets it: this turn's runtime facts, the session, the text."""
+        # Per-turn runtime directive: the reply language is resolved by the
+        # runtime layer (language_policy), not guessed by the model.
+        language_note = (
+            f"(Runtime directive: response_language = {self._state.response_language}. "
+            f"Reply in {response_language_name(self._state.response_language)}.)\n\n"
+        )
+        # Tell the model which provider/model is actually serving this turn, so
+        # it can answer honestly when asked what it runs on.
+        model_note = (
+            f"(Runtime fact: you are being served by provider = "
+            f"{self.config.provider}, model = {self.config.fast_model}. "
+            f"If the user asks which model you are, answer with this.)\n\n"
+        )
+        # Without the host fact a chat reply to "restart the editor" invented
+        # that the conversation would be lost; it is on disk.
+        host_note = (
+            f"(Runtime fact: host = {self._state.system_host})\n\n"
+            if self._state.system_host
+            else ""
+        )
+        # The number end_session's tag names; only where the tag is offered.
+        message_note = (
+            f"(Runtime fact: this is the person's message #{self._state.message_id}.)\n\n"
+            if offer_tag
+            else ""
+        )
+        return language_note + model_note + host_note + message_note + self._chat_session_context() + user_goal
+
+    def _chat_session_context(self) -> str:
+        if not getattr(self, "_session_history", None):
+            return ""
+        history_lines = [_CHAT_HISTORY_PREAMBLE]
+        # Newest first: when the budget cuts this message it keeps the
+        # head and the tail, so the oldest turns are what goes.
+        for entry in reversed(self._session_history):
+            history_lines.append(f"- [{entry['role']}] Asked: \"{entry['goal']}\"")
+            if entry.get("stopped_by_user"):
+                history_lines.append("    Status: the user stopped this turn before it finished.")
+            # A chat reply is already in _chat_history as an assistant message.
+            if entry["role"] != "chat" and entry.get("result"):
+                history_lines.append(f"    Answered: {entry['result']}")
+            for output in entry.get("outputs", []):
+                history_lines.append(f"    Output: {output}")
+        return "\n".join(history_lines) + "\n\n---\n\n"
 
     def _chat_reply(self, messages: list, model: str, *, hold_tag: bool) -> str:
         """One chat reply, shown as it arrives; a reply that is the end_session tag is never shown."""
         if self.config.stream:
             return self._stream_chat_response(messages, model=model, hold_tag=hold_tag)
         content = self._complete_chat(messages, model)
-        if not (hold_tag and end_session.flag_tag(content) is not None):
+        if not (hold_tag and end_session.tag_only(content)):
             self._ui.print_user_markdown(content)
         return content
 
@@ -1106,22 +1102,23 @@ class LocalAgent:
         response = _create_completion_with_reasoning_fallback(self, chat_kwargs)
         return safe_extract_completion_content(response, self.config.provider, model)
 
-    def _chat_end_session(
-        self, wire_history: list, model: str, tag_reply: str, message_id: int, history_before: list
-    ) -> str:
+    def _chat_end_session(self, wire_history: list, model: str, tag_reply: str, history_before: list) -> str:
         """Run a chat reply that is the end_session tag through the one gate.
 
         Returns the turn's answer for the person and the history: WARNING,
-        CLOSED, or the model's reply after a declined review or a refused tag.
+        CLOSED, or the model's words after a declined review or a refused tag.
         The tag exchange lives only in this turn's requests.
         """
-        flagged = end_session.handle(self, _end_session_command({"message_id": message_id}), tag_syntax=True)
-        exchange = [*wire_history, {"role": "assistant", "content": tag_reply}, _runtime_message(flagged.answer)]
+        message_id = end_session.flag_tag(tag_reply)
         try:
+            if message_id is None:
+                return self._chat_words(model)
+            flagged = end_session.handle(self, _end_session_command({"message_id": message_id}), tag_syntax=True)
             if flagged.log["answer"] == "warning":
                 return end_session.warning_text(self._state.response_language)
             if flagged.log["answer"] == "review":
                 # The review is answered with the tag, so it is never streamed.
+                exchange = [*wire_history, {"role": "assistant", "content": tag_reply}, _runtime_message(flagged.answer)]
                 decision_reply = self._complete_chat(exchange, model)
                 confirm, reason = end_session.decision_tag(decision_reply) or (
                     False, "the review reply was not the decision tag"
@@ -1131,8 +1128,7 @@ class LocalAgent:
                     self._state.session_closed = True
                     self._ui.print_final(verdict.final_message, [], outcome="incomplete")
                     return verdict.final_message
-                exchange += [{"role": "assistant", "content": decision_reply}, _runtime_message(verdict.answer)]
-            return self._chat_reply(exchange, model, hold_tag=False)
+            return self._chat_words(model)
         except (ChatRequestCancelled, KeyboardInterrupt) as error:
             self._chat_history = history_before + [
                 {"role": "user", "content": self._state.user_goal},
@@ -1150,6 +1146,35 @@ class LocalAgent:
             return message
         finally:
             self._persist_end_session_log()
+
+    def _chat_words(self, model: str) -> str:
+        """The turn's answer after end_session acted: asked as if the tool had never been offered.
+
+        The tool has done its part in this turn, so the request carries neither
+        the tag nor the review nor the tool's block. A reply that is still the
+        tag is never shown: one retry with a runtime fact, then a fixed line.
+        """
+        messages = self._chat_words_history()
+        reply = self._chat_reply(messages, model, hold_tag=True)
+        if not end_session.tag_only(reply):
+            return reply
+        messages[-1] = {**messages[-1], "content": f"{messages[-1]['content']}\n\n{_WORDS_NOTE}"}
+        reply = self._chat_reply(messages, model, hold_tag=True)
+        if not end_session.tag_only(reply):
+            return reply
+        end_session.log_tag_instead_of_words(self)
+        carry_on = end_session.carry_on_text(self._state.response_language)
+        self._ui.print_user_markdown(carry_on)
+        return carry_on
+
+    def _chat_words_history(self) -> list:
+        """The first call's conversation without the tool: its system prompt, earlier turns, this message."""
+        from kernel.agent_model import build_role_system_prompt
+
+        system_prompt = build_role_system_prompt(self, "chat", offer_end_session=False)
+        earlier = [message for message in self._chat_history[:-1] if message["role"] != "system"]
+        turn = {"role": "user", "content": self._chat_turn_message(self._state.user_goal, offer_tag=False)}
+        return self._trim_chat_messages_to_token_limit([{"role": "system", "content": system_prompt}, *earlier, turn])
 
     def _persist_end_session_log(self) -> None:
         """A chat turn has no run log of its own; one that used end_session gets one."""
@@ -1318,7 +1343,7 @@ class LocalAgent:
             # Final update to guarantee the last parts are rendered. A reply
             # still held is shown now unless it is the tag and nothing else.
             reply = "".join(chunks)
-            if not holding or end_session.flag_tag(reply) is None:
+            if not holding or not end_session.tag_only(reply):
                 update_markdown(reply)
 
         # Kept for the caller's usage accounting: thinking tokens are billed.

@@ -424,7 +424,12 @@ reply that is `<end_session message="N"/>` and nothing else goes through the sam
 `tag_prefix_state` shows whether the reply opens with the tag, then releases them at
 once. The review is a second, non-streamed call with `CHAT_REVIEW_INSTRUCTION`,
 answered with `<end_session confirm="true|false" reason="..."/>` (anything else is a
-decline); after a decline or a refused tag a third, streamed call answers the person.
+decline); after a decline or a refused tag a third, streamed call answers the person
+(`_chat_words`): the first call's conversation without the tool — no tag, no review,
+no message number, and a system prompt without the block
+(`build_role_system_prompt(offer_end_session=False)`). A reply that is still only a tag
+(`tag_only`) is never shown: one retry with "(Runtime fact: answer the person in
+words.)", then the fixed `carry_on_text`, logged.
 The tag never enters `_chat_history`: the turn is stored as WARNING, CLOSED or that answer.
 Every person's message and agent reply of a session gets a number from one ledger
 (`messages.last_id` / `user_ids` in the session document); the runtime prompt shows

@@ -1243,13 +1243,15 @@ class KvistAcpAgent:
         finally:
             sys.stdin = original_stdin
 
+        # build_agent leaves the agent on the workspace's active session with
+        # that session's history loaded; only the agent's own session methods
+        # swap the document, run state and executor session together.
         if session_name is None:
-            from kernel.session_store import SessionStore
-
             # A new ACP thread starts its own conversation rather than
             # inheriting the previous launch's history.
-            session_name = SessionStore(workspace).new()["active_session"]
-        agent.current_session = session_name
+            session_name = agent.new_session()
+        else:
+            agent.switch_session(session_name)
         return {
             "name": session_name,
             "session": EventSession(channel, agent),

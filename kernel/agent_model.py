@@ -404,16 +404,20 @@ def _load_native_channel_section() -> str:
 _NATIVE_CHANNEL_KEY = "__native_tools__"
 
 
-def build_role_system_prompt(self, role: str, *, native_tools: bool = False) -> str:
+def build_role_system_prompt(
+    self, role: str, *, native_tools: bool = False, offer_end_session: bool = True
+) -> str:
     """The constitution, the role prompt, the user's response style, then this
     workspace's own instruction file — narrowing, each read per call so edits
     land on the next step.
 
     ``native_tools`` swaps the role prompt's text-mode protocol sections for the
-    tool-call channel (``native_tools.native_role_prompt``).
+    tool-call channel (``native_tools.native_role_prompt``). ``offer_end_session``
+    false leaves the end_session block out even where the tool is available:
+    chat's answer after the tool already acted in the turn.
     """
     role_prompt = _load_role_prompt(role)
-    if end_session.available(self, role):
+    if offer_end_session and end_session.available(self, role):
         role_prompt = end_session.offer_in_prompt(role_prompt, role)
     if native_tools:
         role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())

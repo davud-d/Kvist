@@ -57,11 +57,21 @@ class FakeConfig:
 class FakeAgent:
     """A LocalAgent stand-in: records the goal and answers without an LLM."""
 
-    def __init__(self, config: FakeConfig) -> None:
+    def __init__(self, config: FakeConfig, workspace=None) -> None:
         self.config = config
+        self.workspace = workspace
         self.current_session = None
         self.goals: list[str] = []
         self.cancelled = 0
+
+    def new_session(self):
+        from kernel.session_store import SessionStore
+
+        self.current_session = SessionStore(self.workspace).new()["active_session"]
+        return self.current_session
+
+    def switch_session(self, name):
+        self.current_session = name
 
     def run(self, goal, routed_role=None):
         self.goals.append(goal)
@@ -89,7 +99,7 @@ def fake_build_agent(config: FakeConfig | None = None):
     resolved = config or FakeConfig()
 
     def build(executor, **kwargs):
-        return FakeAgent(resolved), resolved, []
+        return FakeAgent(resolved, executor.workspace), resolved, []
 
     return build
 
@@ -619,7 +629,7 @@ def test_cancel_stops_the_turn_and_leaves_the_process_healthy(tmp_path):
 
     def build(executor, **kwargs):
         config = FakeConfig()
-        agent = CancellingAgent(config)
+        agent = CancellingAgent(config, executor.workspace)
         agent_holder["agent"] = agent
         return agent, config, []
 
@@ -1282,3 +1292,91 @@ def test_a_closed_session_refuses_a_prompt_without_a_model_call(tmp_path):
             assert client.requests == []
 
     run(scenario())
+
+
+# --- Session switching ---------------------------------------------------------
+
+
+def _real_agent_builder(client):
+    """``build_agent`` stand-in that returns a real LocalAgent on a shared fake client."""
+    from kernel.agent import LocalAgent
+    from kernel.agent_state import AgentConfig
+    from kernel.tests.conftest import NullPerfLogger, NullUI
+
+    def build(executor, **kwargs):
+        config = AgentConfig(
+            persist_logs=False,
+            api_request_interval=0,
+            retry_base_delay=0,
+            cache_enabled=False,
+        )
+        agent = LocalAgent(client=client, executor=executor, config=config, ui=NullUI())
+        agent._perf_logger = NullPerfLogger()
+        return agent, FakeConfig(role="chat"), []
+
+    return build
+
+
+def _seed_chat_session(workspace, name, marker):
+    """Persist a session document whose chat history carries ``marker``."""
+    from kernel.agent import LocalAgent
+    from kernel.agent_state import AgentConfig
+    from kernel.executor import SafeExecutor
+    from kernel.tests.conftest import FakeLLMClient, NullPerfLogger, NullUI
+
+    agent = LocalAgent(
+        client=FakeLLMClient(),
+        executor=SafeExecutor(workspace),
+        config=AgentConfig(persist_logs=False),
+        ui=NullUI(),
+    )
+    agent._perf_logger = NullPerfLogger()
+    agent.new_session(name)
+    agent._chat_history = [
+        {"role": "user", "content": f"question {marker}"},
+        {"role": "assistant", "content": f"answer {marker}"},
+    ]
+    agent._session_history = [
+        {"role": "coder", "goal": f"goal {marker}", "result": f"result {marker}"}
+    ]
+    agent.save_session()
+
+
+def test_load_of_another_session_keeps_the_active_sessions_history_out_of_the_model(tmp_path):
+    from kernel.tests.conftest import FakeLLMClient
+
+    _seed_chat_session(tmp_path, "alpha", "ALPHA-MARKER")
+    _seed_chat_session(tmp_path, "beta", "BETA-MARKER")
+    # The workspace's active session is the one saved last; make it alpha.
+    from kernel.session_store import SessionStore
+
+    SessionStore(tmp_path).switch("alpha")
+    client = FakeLLMClient(content="chat", stream_chunks=["ok"])
+
+    async def scenario():
+        async with Wire(build_agent_fn=_real_agent_builder(client)) as wire:
+            await wire.initialize()
+            response = await wire.call(
+                "session/load",
+                {
+                    "cwd": str(tmp_path),
+                    "sessionId": acp_session_id(tmp_path, "beta"),
+                    "mcpServers": [],
+                    "additionalDirectories": [],
+                },
+            )
+            assert "result" in response, response
+            prompt = await wire.call(
+                "session/prompt",
+                {
+                    "sessionId": acp_session_id(tmp_path, "beta"),
+                    "prompt": [{"type": "text", "text": "hello there"}],
+                },
+            )
+            assert "result" in prompt, prompt
+
+    run(scenario())
+
+    sent = json.dumps(client.requests, default=str)
+    assert "BETA-MARKER" in sent
+    assert "ALPHA-MARKER" not in sent

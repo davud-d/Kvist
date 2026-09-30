@@ -41,6 +41,7 @@ _CHAT_PROMPT_FILE = _PROMPT_DIR / "end_session_chat.txt"
 # any text beside it is an ordinary reply.
 TAG_START = "<end_session"
 _FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"\s*/>')
+_TAG_ONLY_RE = re.compile(r"<end_session\b[^>]*>?")
 _DECISION_TAG_RE = re.compile(r'<end_session\s+confirm="(true|false)"\s+reason="([^"]*)"\s*/>')
 _ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
@@ -125,6 +126,7 @@ _PERSON_TEXTS: dict[str, dict[str, Any]] = {
         ),
         "closed_reply": ("эта сессия закрыта. Enter откроет новую.",),
         "closed_notice": "разговор окончен · Enter — новая сессия",
+        "carry_on": "продолжаем.",
     },
     "en": {
         "warning": (
@@ -142,6 +144,7 @@ _PERSON_TEXTS: dict[str, dict[str, Any]] = {
         ),
         "closed_reply": ("this session is closed. Enter opens a new one.",),
         "closed_notice": "conversation over · Enter — new session",
+        "carry_on": "carrying on.",
     },
 }
 
@@ -171,6 +174,11 @@ def closed_reply(language: str | None) -> str:
 
 def closed_notice(language: str | None) -> str:
     return _texts(language)["closed_notice"]
+
+
+def carry_on_text(language: str | None) -> str:
+    """Chat's answer when the model gave the tag where words were due."""
+    return _texts(language)["carry_on"]
 
 
 # --- Session marks: the message ledger, the warning, the closure -------------
@@ -310,6 +318,14 @@ def tag_prefix_state(reply: str) -> str:
     return "text"
 
 
+def tag_only(reply: str) -> bool:
+    """Whether a chat reply is an end_session tag and nothing else, well-formed or not.
+
+    Such a reply is never shown to the person.
+    """
+    return _TAG_ONLY_RE.fullmatch(reply.strip()) is not None
+
+
 def flag_tag(reply: str) -> int | None:
     """The message number of a chat reply that is the flag tag and nothing else."""
     match = _FLAG_TAG_RE.fullmatch(reply.strip())
@@ -353,6 +369,13 @@ def handle(agent: Any, command: AgentCommand, *, step: int = 0, tag_syntax: bool
     outcome = _run(agent, command.action.args, tag_syntax)
     agent._state.step_logs.append({"step": step, "status": ACTION, "args": dict(command.action.args), **outcome.log})
     return outcome
+
+
+def log_tag_instead_of_words(agent: Any) -> None:
+    """Log chat's answer after the tool acted coming back as the tag twice."""
+    agent._state.step_logs.append(
+        {"step": 0, "status": ACTION, "answer": "carry_on", "error": "the reply after the tool was the tag, twice"}
+    )
 
 
 def _run(agent: Any, args: dict[str, Any], tag_syntax: bool) -> Outcome:

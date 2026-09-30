@@ -776,9 +776,80 @@ def test_chat_review_declined_answers_the_person_and_keeps_no_tag(tmp_path):
     assert answer == "The test fails because the fixture is stale."
     assert ui.streams[-1][-1] == answer
     assert not agent.is_session_closed()
-    assert _last_user_text(client.requests[3]) == end_session.runtime_block("", end_session.DECLINED_REPLY)
+    _assert_asked_without_the_tool(client.requests[1], client.requests[3])
     assert agent._chat_history[-1] == {"role": "assistant", "content": answer}
     assert _no_tag_in_conversation(agent._chat_history)
+
+
+def _assert_asked_without_the_tool(first, words):
+    """The call after the tool acted: the first call's conversation, minus everything about the tool."""
+    system, *rest = words["messages"]
+    assert system["role"] == "system" and "end_session" not in system["content"]
+    for message in rest:
+        assert "end_session" not in message["content"] and "KVIST_RUNTIME" not in message["content"]
+        assert "review" not in message["content"].lower()
+        assert not re.search(r"message #\d", message["content"])
+    assert rest[:-1] == first["messages"][1:-1]
+    assert _last_user_text(first).replace("(Runtime fact: this is the person's message #3.)\n\n", "") == (
+        _last_user_text(words)
+    )
+
+
+def test_a_refused_chat_tag_is_answered_without_the_tool(tmp_path):
+    agent, ui, client = _chat(tmp_path, [_FLAG_1, ['<end_session message="9"/>'], ["Line 3 is wrong."]])
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("what is wrong", routed_role="chat")
+
+    assert answer == "Line 3 is wrong."
+    assert _end_session_logs(agent)[-1]["answer"] == "error"
+    _assert_asked_without_the_tool(client.requests[1], client.requests[2])
+    assert ui.streams[-1][-1] == answer
+
+
+def test_a_tag_where_words_were_due_is_retried_once_and_never_shown(tmp_path):
+    agent, ui, client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            ['<end_session message="3"/>'],
+            '<end_session confirm="false" reason="#3 is anger at the bug"/>',
+            ['<end_session confirm="false" ', 'reason="again"/>'],
+            ["The fixture is stale."],
+        ],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("damn it", routed_role="chat")
+
+    assert answer == "The fixture is stale."
+    retry = _last_user_text(client.requests[4])
+    assert retry == _last_user_text(client.requests[3]) + "\n\n(Runtime fact: answer the person in words.)"
+    assert all("<end_session" not in shown for stream in ui.streams for shown in stream)
+    assert ui.streams[-1][-1] == answer
+
+
+def test_a_tag_twice_where_words_were_due_carries_on_and_is_logged(tmp_path):
+    agent, ui, client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            ['<end_session message="3"/>'],
+            '<end_session confirm="false" reason="#3 is anger at the bug"/>',
+            ['<end_session message="3"/>'],
+            ["<end_session", ' message="3"/>'],
+        ],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("продолжай", routed_role="chat")
+
+    assert answer == end_session.carry_on_text("ru") == "продолжаем."
+    assert len(client.requests) == 5
+    assert ui.messages[-1] == answer
+    assert all("<end_session" not in shown for stream in ui.streams for shown in stream)
+    assert _end_session_logs(agent)[-1]["answer"] == "carry_on"
+    assert agent._chat_history[-1] == {"role": "assistant", "content": answer}
 
 
 def test_an_unreadable_chat_review_reply_is_a_decline(tmp_path):
@@ -801,6 +872,10 @@ def test_the_chat_tag_parsers_read_only_a_whole_reply():
     assert end_session.flag_tag('<end_session message="4"/> ok') is None
     assert end_session.decision_tag('<end_session confirm="false" reason="about the bug"/>') == (False, "about the bug")
     assert end_session.decision_tag('<end_session confirm="true" reason=" "/>') is None
+    assert end_session.tag_only(' <end_session confirm="true" reason="x"/>\n')
+    assert end_session.tag_only("<end_session message=")
+    assert not end_session.tag_only('<end_session message="1"/> ok')
+    assert not end_session.tag_only("<end_sessions/>")
     assert [end_session.tag_prefix_state(text) for text in ("", "  <end", "<end_session", "<div", "Hi")] == [
         "undecided",
         "undecided",
