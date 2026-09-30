@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
 import os
 import threading
 import uuid
@@ -1127,9 +1128,10 @@ class LocalAgent:
                 # The review is answered with the tag, so it is never streamed.
                 exchange = [*wire_history, {"role": "assistant", "content": tag_reply}, _runtime_message(flagged.answer)]
                 decision_reply = self._complete_chat(exchange, model)
-                confirm, reason = end_session.decision_tag(decision_reply) or (
-                    False, "the review reply was not the decision tag"
-                )
+                # The reply itself goes into the log: without it a decline and
+                # an unreadable answer look the same afterwards.
+                unread = f"the review reply was not the decision tag: {json.dumps(decision_reply, ensure_ascii=False)}"
+                confirm, reason = end_session.decision_tag(decision_reply) or (False, unread)
                 verdict = end_session.handle(self, _end_session_command({"confirm": confirm, "reason": reason}))
                 if verdict.final_message:
                     self._state.session_closed = True

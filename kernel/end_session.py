@@ -43,6 +43,8 @@ TAG_START = "<end_session"
 _FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"\s*/>')
 _TAG_ONLY_RE = re.compile(r"<end_session\b[^>]*>?")
 _DECISION_TAG_RE = re.compile(r'<end_session\s+confirm="(true|false)"\s+reason="([^"]*)"\s*/>')
+# One pair of backtick fences around a whole reply, with an optional language.
+_FENCED_RE = re.compile(r"(`+)[A-Za-z0-9_-]*\s*(.*?)\s*\1", re.DOTALL)
 _ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _SCHEMA_LINE = (
@@ -333,11 +335,21 @@ def flag_tag(reply: str) -> int | None:
 
 
 def decision_tag(reply: str) -> tuple[bool, str] | None:
-    """confirm and reason of a chat reply that is the decision tag and nothing else."""
-    match = _DECISION_TAG_RE.fullmatch(reply.strip())
+    """confirm and reason of a chat reply that is the decision tag and nothing else.
+
+    A model may wrap its whole answer as code; a fence around the tag alone
+    adds nothing beside it, so the tag inside is read.
+    """
+    match = _DECISION_TAG_RE.fullmatch(_unfenced(reply))
     if match is None or not match.group(2).strip():
         return None
     return match.group(1) == "true", match.group(2)
+
+
+def _unfenced(reply: str) -> str:
+    text = reply.strip()
+    fenced = _FENCED_RE.fullmatch(text)
+    return fenced.group(2) if fenced else text
 
 
 def runtime_block(call_id: str, text: str) -> str:

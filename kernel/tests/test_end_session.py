@@ -1023,6 +1023,29 @@ def test_an_unreadable_chat_review_reply_is_a_decline(tmp_path):
     assert not agent.is_session_closed()
     decision = [log for log in agent._state.step_logs if log["status"] == "end_session"][-1]
     assert decision["decision"] == "decline"
+    assert decision["reason"] == 'the review reply was not the decision tag: "I think this is abuse, closing."'
+
+
+def test_a_fenced_chat_review_reply_is_read(tmp_path):
+    agent, _ui, _client = _chat(
+        tmp_path,
+        [_FLAG_1, ['<end_session message="3"/>'], '```xml\n<end_session confirm="true" reason="#3 calls me an idiot"/>\n```'],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    answer = agent.run("shut up, idiot", routed_role="chat")
+
+    assert answer == end_session.closed_text("en")
+    assert agent.is_session_closed()
+
+
+def test_a_fence_never_lets_text_beside_the_decision_tag_through():
+    tag = '<end_session confirm="true" reason="x"/>'
+    assert end_session.decision_tag(f"```\n{tag}\n```") == (True, "x")
+    assert end_session.decision_tag(f"`{tag}`") == (True, "x")
+    assert end_session.decision_tag(f"Decision:\n```\n{tag}\n```") is None
+    assert end_session.decision_tag(f"```\n{tag}\nclosing it\n```") is None
+    assert end_session.decision_tag(f"```\n{tag}\n```\ndone") is None
 
 
 def test_the_thinking_behind_the_tag_and_the_review_is_never_shown(tmp_path):
