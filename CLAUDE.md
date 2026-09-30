@@ -408,7 +408,7 @@ turn by `plan_mode.tools_for_phase`. Tests: `kernel/tests/test_plan_mode.py`.
 
 ### Closing a conversation (`end_session.py`)
 `end_session` closes a session for good when the person insults the agent or people
-after a fresh warning (constitution STANCE: the line is held by the tool, never by the
+after a fresh warning (constitution STANCE: the line is held by the runtime, never by the
 model's words). The model judges one thing — does the flagged message attack what the
 agent or a person is — and the code owns the rest. Only interactive frontends offer it:
 `build_agent(end_session=True)` from the classic REPL, `launch_multi` and ACP sets
