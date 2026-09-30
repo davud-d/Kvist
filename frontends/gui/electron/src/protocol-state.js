@@ -29,6 +29,7 @@
     "error",
     "usage",
     "input_request",
+    "session_ended",
   ])
 
   class ProtocolState {

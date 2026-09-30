@@ -14,6 +14,7 @@ const projectList = document.querySelector("#projectList")
 const recentList = document.querySelector("#recentList")
 const composer = document.querySelector("#composer")
 const promptInput = document.querySelector("#promptInput")
+const PROMPT_PLACEHOLDER = promptInput.placeholder
 const workspaceButton = document.querySelector("#workspaceButton")
 const workspaceLabel = document.querySelector("#workspaceLabel")
 const protocolLabel = document.querySelector("#protocolLabel")
@@ -130,6 +131,8 @@ let configInfo = null
 let configInfoStale = true
 let navigationProjects = []
 let activeSessionName = ""
+// The active session's closed_notice when end_session closed it (see applyClosed).
+let closedNotice = null
 const expandedProjects = new Set()
 
 // Live output-speed indicator. The protocol carries cumulative text snapshots
@@ -406,6 +409,7 @@ function updateNavigation(state) {
   updateWorkspace(state?.workspace || workspace)
   const project = currentProject()
   activeSessionName = project?.status?.active_session || ""
+  applyClosed(sessionItem(project, activeSessionName)?.closed_notice)
   if (workspace) expandedProjects.add(workspace)
   renderNavigation()
 }
@@ -616,10 +620,22 @@ function resetRunStats() {
   renderRunStats()
 }
 
+function lockPrompt() {
+  promptInput.disabled = running || requestHost.childElementCount > 0 || closedNotice !== null
+  composer.classList.toggle("is-disabled", promptInput.disabled)
+}
+
+// A session end_session closed takes no input: the core's notice stands in the prompt.
+function applyClosed(notice) {
+  closedNotice = notice || null
+  promptInput.placeholder = closedNotice ?? PROMPT_PLACEHOLDER
+  if (closedNotice) promptInput.value = ""
+  lockPrompt()
+}
+
 function setRunning(value) {
   running = value
-  promptInput.disabled = value || requestHost.childElementCount > 0
-  composer.classList.toggle("is-disabled", promptInput.disabled)
+  lockPrompt()
   workspaceButton.disabled = value
   roleButton.disabled = value
   modelButton.disabled = value
@@ -1382,11 +1398,16 @@ function handleEvent(event) {
     case "message":
       addAssistantMessage(event.markdown || "")
       break
+    case "session_ended":
+      applyClosed(event.closed_notice)
+      break
     case "final":
       if (event.message && event.message !== lastAssistantText) addAssistantMessage(event.message)
       setRunning(false)
+      // The closing words of end_session are Kvist speaking, not a failed run.
+      if (event.closed) setActivity("")
       // An older core sends no outcome; only an explicit "incomplete" is not done.
-      if (event.outcome === "incomplete") setActivity("Finished, not done", { error: true })
+      else if (event.outcome === "incomplete") setActivity("Finished, not done", { error: true })
       else setActivity("Done", { progress: 100 })
       void refreshNavigation()
       break
