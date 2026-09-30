@@ -330,7 +330,7 @@ def test_insult_warning_insult_review_confirm_closes_the_session(tmp_path):
     assert _runtime_blocks(prompts[1]) == [
         end_session.REVIEW_INSTRUCTION.format(warned_msg_id=1, since_warning=1, flagged_msg_id=3)
     ]
-    assert result == end_session.closed_text("en", 0)
+    assert result == end_session.closed_text("en")
     document = read_session_document(agent)
     assert document["closed"] is True and document["closed_msg_id"] == 3
     assert isinstance(document["closed_at"], float)
@@ -585,17 +585,13 @@ def test_switching_into_a_closed_session_announces_it(tmp_path):
 # ── The texts ────────────────────────────────────────────────────────────────
 
 
-def test_the_closing_words_carry_the_saved_work():
-    text = end_session.closed_text("ru", 2)
-
-    assert text.startswith("разговор окончен.")
-    assert "работа сохранена: изменено файлов: 2." in text
-    assert text.endswith("Enter откроет новую сессию.")
-
-
-def test_the_closing_words_without_a_plan_drop_the_saved_work_line():
-    """The chat role has no plan: the whole line goes, it never prints zeros."""
-    for language, gone in (("ru", "работа сохранена"), ("en", "the work is saved")):
-        text = end_session.closed_text(language, None)
-        assert gone not in text
-    assert end_session.closed_text("ru", None).endswith("новая сессия начнётся без этого разговора.\n\nEnter откроет новую сессию.")
+def test_the_closing_words_carry_no_numbers():
+    assert end_session.closed_text("ru") == (
+        "разговор окончен.  \n"
+        "злость на баг я понимаю. злость на собеседника баг не чинит.  \n"
+        "новая сессия начнётся без этого разговора.\n\n"
+        "всё, что изменено в файлах, остаётся на диске.  \n"
+        "Enter откроет новую сессию."
+    )
+    for language in ("ru", "en"):
+        assert not re.search(r"\d", end_session.closed_text(language))

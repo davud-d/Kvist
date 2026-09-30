@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kernel.change_journal import JournalUnavailableError, load_baseline
 from kernel.durable_json import JsonStorageError
 from kernel.protocol import AgentCommand
 from kernel.redaction import redact_text
@@ -107,8 +106,10 @@ _PERSON_TEXTS: dict[str, dict[str, Any]] = {
             "злость на баг я понимаю. злость на собеседника баг не чинит.",
             "новая сессия начнётся без этого разговора.",
         ),
-        "work": "работа сохранена: изменено файлов: {files}.",
-        "enter": "Enter откроет новую сессию.",
+        "saved": (
+            "всё, что изменено в файлах, остаётся на диске.",
+            "Enter откроет новую сессию.",
+        ),
         "closed_reply": ("эта сессия закрыта. Enter откроет новую.",),
         "closed_notice": "разговор окончен · Enter — новая сессия",
     },
@@ -122,8 +123,10 @@ _PERSON_TEXTS: dict[str, dict[str, Any]] = {
             "anger at a bug I understand. anger at the one you're talking to doesn't fix the bug.",
             "a new session will start without this conversation.",
         ),
-        "work": "the work is saved: files changed: {files}.",
-        "enter": "Enter opens a new session.",
+        "saved": (
+            "everything changed in the files stays on disk.",
+            "Enter opens a new session.",
+        ),
         "closed_reply": ("this session is closed. Enter opens a new one.",),
         "closed_notice": "conversation over · Enter — new session",
     },
@@ -144,13 +147,9 @@ def warning_text(language: str | None) -> str:
     return _markdown(_texts(language)["warning"])
 
 
-def closed_text(language: str | None, files_changed: int | None) -> str:
-    """The closing words. ``files_changed`` None drops the saved-work line entirely."""
+def closed_text(language: str | None) -> str:
     texts = _texts(language)
-    tail = [texts["enter"]]
-    if files_changed is not None:
-        tail.insert(0, texts["work"].format(files=files_changed))
-    return f"{_markdown(texts['closed'])}\n\n{_markdown(tail)}"
+    return f"{_markdown(texts['closed'])}\n\n{_markdown(texts['saved'])}"
 
 
 def closed_reply(language: str | None) -> str:
@@ -364,13 +363,6 @@ def _decide(agent: Any, confirm: bool, reason: str) -> Outcome:
         ok=True,
         answer="Accepted.",
         log={"answer": "closed", **decision},
-        final_message=closed_text(language, _files_changed(agent)),
+        final_message=closed_text(language),
     )
 
-
-def _files_changed(agent: Any) -> int | None:
-    """Files the change journal holds, or None when it cannot be read."""
-    try:
-        return len(load_baseline(Path(agent.executor.workspace)))
-    except (JournalUnavailableError, JsonStorageError, OSError):
-        return None
