@@ -122,6 +122,7 @@ never received: oneshot canceled`. Ни то ни другое не называ
 | **Публикация в реестре расширений Zed** | Агенты-расширения объявлены устаревшими ([Agent Server Extensions](https://zed.dev/docs/extensions/agent-servers)); публикация принадлежит ACP Registry, и Kvist туда не выкладывается. | Ручная регистрация из этого каталога. |
 | **Аудио- и image-промпты** | В `acp_frontend.py` не реализованы и поэтому не заявлены — `PromptCapabilities(image=False, audio=False)`. | Только текст и пути к файлам. |
 | **Next-edit suggestions от агента** | Нет в ACP v1 (см. выше). | Нет. |
+| **Плашка закрытой сессии на месте поля ввода** (после `end_session`) | Поле ввода рисует сам Zed; ACP не даёт агенту способа его спрятать или заменить. | Замок ядра: на любой запрос в закрытую сессию приходит фиксированный ответ закрытой сессии и `stopReason: "end_turn"`, до любого вызова модели. Не `refusal`: на него Zed обрезает ленту до сообщения человека ([`acp_thread.rs`](https://github.com/zed-industries/zed/blob/main/crates/acp_thread/src/acp_thread.rs)), и стёрся бы тот самый ответ, который объясняет замок, а ход помечается ошибкой. Новый тред начинает новую сессию. |
 | **Автоматический запуск команд в терминале** | `create_terminal` в ACP поддерживает `initial_input`, но Zed может игнорировать его или обрабатывать иначе в зависимости от версии. | Вручную вводить команды в открытом терминале. |
 
 ## Что агент заявляет
@@ -149,3 +150,10 @@ never received: oneshot canceled`. Ни то ни другое не называ
 * <https://agentclientprotocol.com/protocol/v1/libraries/python>
 * <https://agentclientprotocol.com/get-started/registry.md>
 * <https://github.com/agentclientprotocol/registry>
+
+Перепроверено 2026-09-30 для ответа закрытой сессии:
+`agent-client-protocol` 0.12.1 (`StopReason = end_turn | max_tokens |
+max_turn_requests | refusal | cancelled`),
+<https://agentclientprotocol.com/protocol/prompt-turn> («refusal: The Agent
+refuses to continue») и `crates/acp_thread/src/acp_thread.rs` Zed в ветке
+`main`, который вырезает отклонённый запрос человека из ленты.

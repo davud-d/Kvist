@@ -119,6 +119,7 @@ Same capability, delivered through ACP and drawn by Zed rather than by Kvist:
 | **A Zed Extension Registry listing** | Extension-provided agents are deprecated ([Agent Server Extensions](https://zed.dev/docs/extensions/agent-servers)); a listing would belong in the ACP Registry, and Kvist is not published there. | This directory's manual registration. |
 | **Audio or image prompts** | Not implemented in `acp_frontend.py`, so they are not advertised — `PromptCapabilities(image=False, audio=False)`. | Text and file paths only. |
 | **Next-edit suggestions from the agent** | Not in ACP v1 (see above). | None. |
+| **The closed-session bar in place of the input** (after `end_session`) | Zed draws its own message box; ACP gives an agent no way to hide or replace it. | The core's lock: every prompt to a closed session is answered with the fixed closed-session reply and `stopReason: "end_turn"`, before any model call. Not `refusal`: Zed answers that by truncating the thread back to before the person's message ([`acp_thread.rs`](https://github.com/zed-industries/zed/blob/main/crates/acp_thread/src/acp_thread.rs)), which would erase the reply that explains the lock, and marks the turn as an error. A new thread starts a new session. |
 | **Automatic command execution in terminal** | `create_terminal` in ACP supports `initial_input`, but Zed may ignore it or handle it differently depending on version. | Manually enter commands in the opened terminal. |
 
 ## What the agent advertises
@@ -146,3 +147,10 @@ the `agent_servers` fields and the registry's icon support:
 * <https://agentclientprotocol.com/protocol/v1/libraries/python>
 * <https://agentclientprotocol.com/get-started/registry.md>
 * <https://github.com/agentclientprotocol/registry>
+
+Re-checked on 2026-09-30 for the closed-session reply:
+`agent-client-protocol` 0.12.1 (`StopReason = end_turn | max_tokens |
+max_turn_requests | refusal | cancelled`),
+<https://agentclientprotocol.com/protocol/prompt-turn> ("refusal: The Agent
+refuses to continue"), and Zed's `crates/acp_thread/src/acp_thread.rs` on
+`main`, which truncates a refused user prompt out of the thread.

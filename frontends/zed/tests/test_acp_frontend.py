@@ -1289,6 +1289,9 @@ def test_a_closed_session_refuses_a_prompt_without_a_model_call(tmp_path):
 
             assert "result" in response, response
             assert end_session.closed_reply("en") in "".join(wire.agent_text())
+            # Not "refusal": Zed answers that by truncating the thread back to
+            # before the person's message, which would erase this very reply.
+            assert response["result"]["stopReason"] == "end_turn"
             assert client.requests == []
 
     run(scenario())
