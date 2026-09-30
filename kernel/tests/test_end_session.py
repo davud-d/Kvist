@@ -573,6 +573,33 @@ def test_a_closed_session_cannot_be_reset(tmp_path):
     assert run_session_op(tmp_path, "status")["session_items"][0]["closed"] is True
 
 
+def test_a_closed_session_can_be_deleted(tmp_path):
+    closed = _close(tmp_path)
+    agent = _agent(tmp_path)
+    journal = get_journal_path(agent, closed)
+    journal.write_text('{"seq": 1}\n', encoding="utf-8")
+    run_session_op(tmp_path, "new")
+
+    payload = run_session_op(tmp_path, "delete", closed)
+
+    assert closed not in payload["sessions"]
+    assert not journal.exists()
+
+
+def test_a_closed_session_can_be_deleted_over_stdio_multi(tmp_path):
+    from kernel.event_stdio import CommandContext
+    from kernel.main import _stdio_session
+
+    closed = _close(tmp_path)
+    channel = FrontendChannel()
+    agent = _agent(tmp_path, EventStreamUI(channel))
+    agent.new_session("fresh")
+
+    result = _stdio_session(CommandContext(EventSession(channel, agent), None, None, None, ["delete", closed]))
+
+    assert result.ok and closed not in result.effects["sessions"]
+
+
 def test_switching_into_a_closed_session_announces_it(tmp_path):
     from kernel.event_stdio import CommandContext
     from kernel.main import _stdio_session

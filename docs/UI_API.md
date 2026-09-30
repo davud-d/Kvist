@@ -414,7 +414,11 @@ fresh, and the closing. A closed session:
   event carry `closed: true` and `closed_notice` — the core's text for the place
   of the input box, in the session's language, so a frontend never writes its own;
 - is skipped by `resumable_session`, cannot be `reset`, and leaves the files and
-  git alone. A new session (`new`, `launch`) starts without it.
+  git alone. A new session (`new`, `launch`) starts without it;
+- **can be deleted like any other**: `delete` (the session-op and the `session
+  delete` command) removes it and its journal when it is not the active one. It
+  is the person's history: the lock forbids continuing the conversation, not
+  keeping it.
 
 In a chat turn the model uses it by replying with a tag and nothing else. Such a
 reply is never shown: its stream ends with an empty `stream_commit`, and the
