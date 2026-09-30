@@ -8,6 +8,7 @@ import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Icon, Ring } from "./icons"
+import { opensNewSession } from "./closed"
 import { onMessage, post } from "./host"
 import { Markdown } from "./markdown"
 import { NO_METRICS, shortSeconds, trackMetrics, type TurnMetrics } from "./metrics"
@@ -171,6 +172,19 @@ export function App() {
   }, [text])
 
   useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [state.items.length, state.live?.answer, state.live?.reasoning, state.pending])
+
+  // A closed session has no composer to type into; Enter anywhere takes the New session path.
+  useEffect(() => {
+    if (state.closed === null || busy || state.pending) return
+    function onKey(event: KeyboardEvent): void {
+      const targetTag = event.target instanceof Element ? event.target.tagName : ""
+      if (!opensNewSession({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, altKey: event.altKey, metaKey: event.metaKey, targetTag })) return
+      event.preventDefault()
+      runCommandRef.current("new")
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [state.closed, busy, state.pending])
 
   function submit(): void {
     const value = text.trim()
@@ -353,6 +367,13 @@ export function App() {
             {metrics.tokensPerSecond ? <span title="Estimated from output tokens and call time">≈{Math.round(metrics.tokensPerSecond)} tokens/s</span> : null}
           </div>
         ) : null}
+        {state.closed !== null ? (
+          // The core's notice where the composer was, as tall as it: a calm stop, not an error.
+          <div class="composer closed-bar" role="status">
+            <div class="closed-notice">{state.closed}</div>
+            <div class="toolbar" aria-hidden="true" />
+          </div>
+        ) : (
         <div class={`composer lit ${lightState}`}>
           {attachments.length > 0 ? (
             <div class="chips">
@@ -393,6 +414,7 @@ export function App() {
             )}
           </div>
         </div>
+        )}
       </footer>
     </div>
   )
