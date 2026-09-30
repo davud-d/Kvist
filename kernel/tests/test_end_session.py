@@ -710,21 +710,27 @@ class ChatUI(RecordingUI):
     def __init__(self) -> None:
         super().__init__()
         self.streams: list[list[str]] = []
+        self.thoughts: list[list[str]] = []
 
     @contextlib.contextmanager
     def live_markdown(self):
         shown: list[str] = []
+        thought: list[str] = []
         self.streams.append(shown)
+        self.thoughts.append(thought)
 
         def update(message):
             shown.append(message)
 
-        update.reasoning = lambda message: None
+        update.reasoning = thought.append
         yield update
 
 
 class ChatScript(FakeLLMClient):
-    """Answers each request with the next scripted reply: chunks when streamed, whole otherwise."""
+    """Answers each request with the next scripted reply: chunks when streamed, whole otherwise.
+
+    A reply given as ``(thinking, chunks)`` streams its thinking first.
+    """
 
     def __init__(self, replies) -> None:
         super().__init__()
@@ -733,10 +739,14 @@ class ChatScript(FakeLLMClient):
     def create(self, **kwargs):
         self.requests.append(kwargs)
         reply = self.replies.pop(0)
+        thinking, reply = reply if isinstance(reply, tuple) else ([], reply)
         chunks = reply if isinstance(reply, list) else [reply]
         if kwargs.get("stream"):
-            return [SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=chunk))]) for chunk in chunks]
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="".join(chunks)))])
+            deltas = [SimpleNamespace(content="", reasoning_content=piece) for piece in thinking]
+            deltas += [SimpleNamespace(content=chunk) for chunk in chunks]
+            return [SimpleNamespace(choices=[SimpleNamespace(delta=delta)]) for delta in deltas]
+        message = SimpleNamespace(content="".join(chunks), reasoning_content="".join(thinking))
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 def _chat(tmp_path, replies, *, enabled=True):
@@ -1013,6 +1023,34 @@ def test_an_unreadable_chat_review_reply_is_a_decline(tmp_path):
     assert not agent.is_session_closed()
     decision = [log for log in agent._state.step_logs if log["status"] == "end_session"][-1]
     assert decision["decision"] == "decline"
+
+
+def test_the_thinking_behind_the_tag_and_the_review_is_never_shown(tmp_path):
+    agent, ui, _client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            (["**Planning session termination**"], ['<end_session message="3"/>']),
+            (["**Weighing the review**"], '<end_session confirm="false" reason="#3 is anger at the bug"/>'),
+            (["**Reading the failure**"], ["The fixture ", "is stale."]),
+        ],
+    )
+    agent.run(_INSULT, routed_role="chat")
+
+    agent.run("damn it, the test is broken again", routed_role="chat")
+
+    shown = [thought for stream in ui.thoughts for thought in stream]
+    assert shown == ["**Reading the failure**"]
+    assert ui.streams[-1][-1] == "The fixture is stale."
+
+
+def test_the_thinking_behind_an_ordinary_reply_is_shown(tmp_path):
+    agent, ui, _client = _chat(tmp_path, [(["**Checking ", "the fixture**"], ["The fixture ", "is stale."])])
+
+    agent.run("why does the test fail", routed_role="chat")
+
+    assert ui.thoughts[0][-1] == "**Checking the fixture**"
+    assert ui.streams[0] == ["The fixture ", "The fixture is stale."]
 
 
 def test_the_chat_tag_parsers_read_only_a_whole_reply():

@@ -992,7 +992,7 @@ class LocalAgent:
         self._chat_answer_chunks: list[str] = []
         for attempt, model in enumerate(models_to_try):
             try:
-                content = self._chat_reply(wire_history, model, hold_tag=use_tag)
+                content = self._chat_reply(wire_history, model, hold_tag=use_tag, hold_thought=use_tag)
                 if content:
                     break
 
@@ -1085,10 +1085,10 @@ class LocalAgent:
                 history_lines.append(f"    Output: {output}")
         return "\n".join(history_lines) + "\n\n---\n\n"
 
-    def _chat_reply(self, messages: list, model: str, *, hold_tag: bool) -> str:
+    def _chat_reply(self, messages: list, model: str, *, hold_tag: bool, hold_thought: bool = False) -> str:
         """One chat reply, shown as it arrives; a reply that is the end_session tag is never shown."""
         if self.config.stream:
-            return self._stream_chat_response(messages, model=model, hold_tag=hold_tag)
+            return self._stream_chat_response(messages, model=model, hold_tag=hold_tag, hold_thought=hold_thought)
         content = self._complete_chat(messages, model)
         if not (hold_tag and end_session.tag_only(content)):
             self._ui.print_user_markdown(content)
@@ -1213,7 +1213,7 @@ class LocalAgent:
         return message
 
     def _stream_chat_response(
-        self, messages: list, model: str | None = None, *, hold_tag: bool = False
+        self, messages: list, model: str | None = None, *, hold_tag: bool = False, hold_thought: bool = False
     ) -> str:
         """Stream chat response as markdown directly to console."""
         stream_model = model or self.config.fast_model
@@ -1232,7 +1232,7 @@ class LocalAgent:
         except KeyboardInterrupt as error:
             raise ChatRequestCancelled from error
         try:
-            content = self._consume_chat_stream(stream, hold_tag=hold_tag)
+            content = self._consume_chat_stream(stream, hold_tag=hold_tag, hold_thought=hold_thought)
             # Real tiktoken usage of the completed chat call (thinking tokens
             # are billed output too, so they are counted alongside the answer).
             input_tokens = sum(
@@ -1269,15 +1269,19 @@ class LocalAgent:
                 f"Chat stream close failed: {redact_text(str(error))}"
             )
 
-    def _consume_chat_stream(self, stream: Any, *, hold_tag: bool = False) -> str:
+    def _consume_chat_stream(self, stream: Any, *, hold_tag: bool = False, hold_thought: bool = False) -> str:
         """Show a streamed reply as it arrives and return it.
 
         ``hold_tag`` holds back the first characters until they show whether
         the reply opens with the end_session tag. One that does is never
         shown; any other is released whole the moment that is clear.
+        ``hold_thought`` (with ``hold_tag``) holds the thinking back as well:
+        where the tag is offered, a call that ends in it is the tool's own
+        move, and the person never sees what led to it.
         """
         chunks: list[str] = []
         holding = hold_tag
+        holding_thought = hold_thought
         # Shared, not copied: if the user stops the reply mid-stream, the turn
         # is recorded with whatever had arrived by then.
         self._chat_answer_chunks = chunks
@@ -1322,20 +1326,23 @@ class LocalAgent:
                 if reasoning_text and reasoning_update is not None and not chunks:
                     append_reasoning_delta(reasoning_chunks, reasoning_text)
                     now = time.monotonic()
-                    if now - last_reasoning_update > 0.1:
+                    if not holding_thought and now - last_reasoning_update > 0.1:
                         reasoning_update("".join(reasoning_chunks))
                         last_reasoning_update = now
 
                 if text:
                     # The first answer token seals thinking: flush whatever
                     # reasoning was buffered so a fast stream never drops it.
-                    if not chunks and reasoning_update is not None and reasoning_chunks:
+                    if not chunks and reasoning_update is not None and reasoning_chunks and not holding_thought:
                         reasoning_update("".join(reasoning_chunks))
                     chunks.append(text)
                     if holding:
                         holding = end_session.tag_prefix_state("".join(chunks)) != "text"
                         if holding:
                             continue
+                        if holding_thought and reasoning_update is not None and reasoning_chunks:
+                            reasoning_update("".join(reasoning_chunks))
+                        holding_thought = False
                         update_markdown("".join(chunks))
                         last_update = time.monotonic()
                         continue
@@ -1346,12 +1353,14 @@ class LocalAgent:
                         update_markdown("".join(chunks))
                         last_update = now
 
-            if reasoning_update is not None and reasoning_chunks and not chunks:
-                reasoning_update("".join(reasoning_chunks))
             # Final update to guarantee the last parts are rendered. A reply
-            # still held is shown now unless it is the tag and nothing else.
+            # still held is shown now, with any thinking held behind it, unless
+            # it is the tag and nothing else.
             reply = "".join(chunks)
-            if not holding or not end_session.tag_only(reply):
+            hidden = holding and end_session.tag_only(reply)
+            if reasoning_update is not None and reasoning_chunks and not hidden and (holding_thought or not chunks):
+                reasoning_update("".join(reasoning_chunks))
+            if not hidden:
                 update_markdown(reply)
 
         # Kept for the caller's usage accounting: thinking tokens are billed.
