@@ -166,7 +166,7 @@ _ALWAYS_SAFE: frozenset[str] = frozenset({
 
 # find is safe only as a pure search; these predicates turn it into a
 # deletion/execution primitive and must never pass silently.
-# Public: terminal.py rejects the same tokens at validation time.
+# Public: terminal_validation.py rejects the same tokens at validation time.
 FIND_ACTION_TOKENS: frozenset[str] = frozenset({
     "-exec", "-execdir", "-ok", "-okdir", "-delete",
     "-fprint", "-fprintf", "-fprint0", "-fls",

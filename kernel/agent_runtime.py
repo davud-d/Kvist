@@ -3598,7 +3598,7 @@ def _is_safe_read_only_sqlite3_command(parts: list[str]) -> bool:
 
     `parts` are casefolded argv tokens including the leading "sqlite3".
     Workspace/path validation for the database file argument is the
-    executor's/terminal's job (see terminal.py `_validate_common_tokens`),
+    executor's/terminal's job (see terminal_validation.py `_validate_common_tokens`),
     not this classifier's — it only judges SQL/dot-command intent.
     """
     positional = [token for token in parts[1:] if not token.startswith("-")]

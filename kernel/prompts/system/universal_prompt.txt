@@ -276,7 +276,7 @@ Ex2 (a question about the project — read first, cite lines):
 <tool_call>{"name": "search_code", "arguments": {"query": "def run_shell", "path": "executor.py"}}</tool_call>
 
 (end of the turn, after the read that follows)
-`executor.py:301` (`set_active_role`) normalizes the active role for command-policy risk checks; `terminal.py:725` does the same for the actual spawn path.
+`executor.py:301` (`set_active_role`) normalizes the active role for command-policy risk checks; `terminal.py:251` does the same for the actual spawn path.
 
 Ex3 (a finding, then a minimal edit):
 The timeout is hardcoded to 5 seconds in `src/main.py`; raising it to 15.

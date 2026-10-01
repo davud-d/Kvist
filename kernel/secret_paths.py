@@ -2,7 +2,7 @@
 """Workspace secret classification and enumeration.
 
 The execution boundary protects secret material two ways: hard-denying argv
-tokens that name secret paths (defence in depth in ``terminal.py``) and — the
+tokens that name secret paths (defence in depth in ``terminal_validation.py``) and — the
 real boundary — masking those files inside the OS sandbox so arbitrary child
 code cannot read them through runtime-constructed paths.  Both consumers share
 the classification here so the argv check and the filesystem mask never drift.

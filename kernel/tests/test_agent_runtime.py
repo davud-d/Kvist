@@ -1197,7 +1197,7 @@ def test_read_only_shell_rejects_sqlite3_multi_statement_with_a_trailing_write(a
 def test_read_only_shell_still_rejects_python_dash_c(agent_factory):
     """python -c stays out of the read-only allowlist regardless of this change.
 
-    terminal.py allows '-c' only as one code argument (see
+    terminal_interpreters.py allows '-c' only as one code argument (see
     tests/test_terminal.py); this confirms the read-only-goal gate never
     grew a bypass for it.
     """

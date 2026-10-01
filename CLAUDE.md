@@ -1072,6 +1072,22 @@ file whole and took 8.5 s on this repository. It enforces the workspace boundary
 checked with `relative_to`, symlink-escape protection), blocks the internal `.kvist`
 dir, and **strictly forbids reading or writing `.env` files**.
 
+**`terminal.py` is split into `terminal_*.py` modules; `terminal.py` stays the import point.**
+It holds `TerminalExecutor` (`__init__`, `run`, `_run_once`, approval, policy,
+`_assess_risk`, `_execute_validated`, env and child-HOME handling) and re-exports the names
+other modules import from `kernel.terminal`. `TerminalExecutor` composes four mixins:
+`ArgumentValidationMixin` (`terminal_validation.py`), `GitValidationMixin`
+(`terminal_git.py`), `InterpreterValidationMixin` (`terminal_interpreters.py`) and
+`ExecutableBindingMixin` (`terminal_bindings.py`); a mixin never imports `kernel.terminal`.
+The rest is module-level: `terminal_types.py` (results, errors, execution-context
+dataclasses), `terminal_rules.py` (forbidden executables and operators, secret-token
+regexes, per-profile allowlists), `terminal_limits.py` (timeout ceilings, resource limits),
+`terminal_env.py` (child environment and controlled PATH), `terminal_paths.py` (file
+identity helpers), `terminal_trust.py` (shebang parsing, venv launcher and trusted system
+executable checks) and `terminal_hitl.py` (HITL flag and alternate screen). Tests patch
+`assess_command` and `resolve_bubblewrap_path` on `kernel.terminal`, so `_assess_risk` and
+`__init__`, the only callers, stay in `terminal.py`.
+
 Before any of that, `SafeExecutor._relativize_workspace_paths` rewrites an absolute
 `cwd`, absolute argv tokens and a leading `git -C <dir>` into relative form **only when
 the path's real (resolved) location is inside the workspace** — anything else stays as
