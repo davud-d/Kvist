@@ -185,6 +185,23 @@ def has_no_write_marker(text: str) -> bool:
     return not has_change_verb(_strip_no_write_markers(lowered))
 
 
+_DEFERRED_WRITE_RE = re.compile(
+    "(?:" + "|".join(re.escape(marker) for marker in _NO_WRITE_MARKERS) + ")"
+    r"[^.!?\n]{0,60}?\b(?:пока\s+не|до\s+того,?\s+как|until|before)\b"
+)
+
+
+def has_deferred_write_marker(text: str) -> bool:
+    """True when the user forbids modifying files only until a stage is done.
+
+    "Don't change files until steps 1-4 are finished" is an order of work, not
+    a request for an edit: the run must not be held to a change while the
+    stages before it are still open, and it is not read-only either, since the
+    later stage may change files.
+    """
+    return bool(_DEFERRED_WRITE_RE.search(text.casefold()))
+
+
 def _strip_no_write_markers(lowered: str) -> str:
     for marker in _NO_WRITE_MARKERS:
         lowered = lowered.replace(marker, " ")

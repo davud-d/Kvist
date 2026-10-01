@@ -150,6 +150,13 @@ class RunState:
     # The model ended the run with outcome "incomplete": seals as "blocked"
     # however clean the evidence looks, because nothing was claimed as done.
     finished_incomplete: bool = False
+    # Exit code of the latest run_shell that actually ran (None until one
+    # does). A "no change needed" finish is accepted only after a run that
+    # exited cleanly, so a failing reproduction cannot be called "absent".
+    last_shell_returncode: int | None = None
+    # The model ended this attempt with outcome "no_change_needed" and the
+    # run holds the evidence for it; the change-required blockers stand down.
+    no_change_declared: bool = False
     # Ends of a turn (a response without calls) the runtime refused this run.
     # After one refusal the next end is taken as an honest "not done".
     finish_refusals: int = 0

@@ -18,7 +18,14 @@ from kernel.protocol import ToolCallRequest
 
 _STRING: dict[str, Any] = {"type": "string"}
 _STRINGS: dict[str, Any] = {"type": "array", "items": {"type": "string"}}
-_OUTCOME: dict[str, Any] = {"type": "string", "enum": ["done", "incomplete"]}
+_OUTCOME: dict[str, Any] = {
+    "type": "string",
+    "enum": ["done", "incomplete", "no_change_needed"],
+    "description": (
+        "incomplete: the work was not done. no_change_needed: you ran the reported "
+        "problem and it does not occur; show that run's output in the message."
+    ),
+}
 # The schema is what a model reads while it fills the arguments, so the path
 # rule belongs here as well as in the prompt: a task naming the repository by
 # its absolute path otherwise walks the model into refusals.

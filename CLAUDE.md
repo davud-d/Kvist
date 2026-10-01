@@ -910,6 +910,23 @@ act when a finish is attempted — `_finish_with_final_answer` and
 ("Additional instruction", priority 0). "Allowed next actions now" appears only
 while `required_next_actions` actually restricts the next step.
 
+**A change-required gate never leaves only a write, and a bug claim can be
+refuted.** The blockers for a task that expects a change (`not_modified`,
+`no_changes`, `no_activity`) allow `_CHANGE_OR_REPRODUCE_ACTIONS` — the writes
+*and* `run_shell` — because running the reported problem is how the claim is
+confirmed (then fixed) or refuted; a write-only set once left a run unable to
+execute its own reproduction. `role_router.has_deferred_write_marker` ("don't
+change files until steps 1-4 are done") clears `create_goal`/`modify_goal` and
+the required-artifacts guess in `run_loop`: no change is owed while the earlier
+stages are open, and writes stay possible after them (it is not `read_only_goal`).
+A finish with `"outcome": "no_change_needed"` (`parser.FINISH_OUTCOMES`; a
+`done` for frontends) says the reported problem was run and does not occur. The
+runtime checks only what it can: a file was read, the latest `run_shell` that
+actually ran exited 0 (`RunState.last_shell_returncode`) and nothing changed
+(`_no_change_claim_unproven`); then the change blockers stand down for that
+finish. An unproven claim is refused once with what is missing, and a repeat is
+taken as an honest `incomplete`, like every other refused end.
+
 **Section headers in `agent_context.SECTION_PRIORITIES` must match what
 `build_runtime_prompt` renders, character for character.** A header that does
 not match is not a section at all: its text folds into the section above and is
@@ -1086,6 +1103,15 @@ inheritance is allowlisted; `AGENT_CHILD_ENV_ALLOW` is the explicit extension me
 and cannot re-enable secrets or loader/startup controls. Every run uses a new private,
 verified-empty child HOME, including explicit workspace mode and the automatic weak
 fallback.
+
+**Inline Python is one argument.** `_interpreter_target` returns mode `inline`
+for `python [safe flags] -c CODE` with exactly one non-empty code item; anything
+else with `-c` (extra arguments, `-cCODE`, `-c` after a script) stays hard-denied,
+and so do the other interpreters' inline modes and `python -`. The code is an argv
+item, so the approved `ExecutionContext.argv` binds it exactly, the approval
+dialog shows it, and the sandbox, the `.env`/`.kvist` token guards and the
+per-execution approval rules apply as to a script. It exists so a reproduction
+can run without writing a file into a workspace the person said not to touch.
 
 **Executable scripts with a `#!` line have their interpreter attested**: the shebang is
 parsed (direct, `/usr/bin/env NAME`, `env -S NAME ARGS`), the interpreter is resolved

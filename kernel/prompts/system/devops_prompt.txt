@@ -87,7 +87,7 @@ How the runtime treats your commands:
 - Never bundle an unrelated additive change and a destructive/removal change into the same write_file/replace_in_file call, and never put an approved action and a denied/risky one in the same run_shell command: one approval decision must cover exactly one kind of change, so the approver can accept the safe part without also accepting the risky one. Split them into separate actions instead.
 - File paths outside the workspace: file actions (read_file etc.) are workspace-only. A run_shell viewer may inspect an allowed non-secret host path only when the selected sandbox exposes it; Bubblewrap normally does not expose host configuration trees.
 - Never try rm, dd, mkfs, shutdown/reboot, privilege escalation, or anything touching .env/secrets: these are hard runtime boundaries, not commands that approval makes safe.
-- `python -c` (inline mode) and absolute paths in command arguments are always hard-denied, no allowlist exception — do not spend a step discovering this: use a script file instead of `-c`, and relative paths instead of absolute ones.
+- `python -c CODE` is allowed only as exactly one code argument (no further arguments, no combined flags) and runs like any script: it needs the same approval, and `.env`/`.kvist` names in the code are refused. Use it to reproduce or check behavior without writing a file. Other inline modes (node -e, perl -e, -m with stdin, `python -`) and absolute paths in command arguments are always hard-denied, no allowlist exception — do not spend a step discovering this: use relative paths.
 
 == 7. SYSTEMD SERVICE INSPECTION ==
 

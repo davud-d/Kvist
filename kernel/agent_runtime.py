@@ -76,7 +76,7 @@ from kernel.parser import (
 from kernel.protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from kernel.redaction import defang_prompt_boundary_tags, redact_text, redact_value
 from kernel import end_session, plan_mode
-from kernel.role_router import has_change_verb, has_no_write_marker
+from kernel.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker
 from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 
 _READ_ONLY_ACTIONS = {
@@ -85,6 +85,9 @@ _READ_ONLY_ACTIONS = {
 }
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
+# What can answer "no file changed yet": an edit, or running the reported
+# problem, which is how a bug claim is confirmed (then fixed) or refuted.
+_CHANGE_OR_REPRODUCE_ACTIONS = _WRITE_ACTIONS | {"run_shell"}
 # Beyond the file reads, what plan mode still allows: it asks the person and
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
@@ -110,6 +113,11 @@ _HONEST_EXIT_HINT = (
     "user denied the change, environment blocks it), end your turn again with a "
     "response that has no tool call and says plainly what was not done and why; "
     "it is recorded as not done."
+)
+_NO_CHANGE_NEEDED_HINT = (
+    "If you ran the reported problem and it does not occur, finish with "
+    "outcome \"no_change_needed\" and show that run's output: a problem that "
+    "does not reproduce is a finished answer, not a missing edit."
 )
 _HONEST_EXIT_HINT_RU = (
     "Если работу нельзя или не нужно выполнять (цели нет, предпосылка ложна, "
@@ -508,7 +516,10 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     # blocking its writes left it with nothing it was allowed to do. Clearing
     # create/modify avoids the runtime demanding a write it will then refuse.
     read_only_goal = self._state.current_agent_role == "reader" or has_no_write_marker(user_goal)
-    if read_only_goal:
+    # "Don't change files until steps 1-4 are done" orders the work: no change
+    # is owed while those stages are open, and writes stay possible after them.
+    write_deferred = has_deferred_write_marker(user_goal)
+    if read_only_goal or write_deferred:
         create_goal = False
         modify_goal = False
     self._state.user_goal = user_goal
@@ -518,7 +529,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.verify_only_goal = verify_only_goal
     self._state.report_goal = _is_report_goal(user_goal)
     # "check if main.py exists" names a file it must not be required to create.
-    if not self._state.required_artifacts and not (read_only_goal or verify_only_goal):
+    if not self._state.required_artifacts and not (read_only_goal or verify_only_goal or write_deferred):
         self._state.required_artifacts = _anchor_artifacts(
             Path(self.executor.workspace),
             _extract_required_artifacts(user_goal),
@@ -806,6 +817,9 @@ def _run_final_answer(self, user_goal: str, step: int, command: AgentCommand) ->
     A run can then never claim what its evidence does not show, and can never
     be trapped between a refused finish and nothing left to do.
     """
+    if _no_change_claim_unproven(self, command):
+        self._state.finish_refusals += 1
+        return _BLOCKED
     if self._state.finish_refusals and not _is_incomplete_finish(command):
         self._refresh_completion_requirements(force_enforcement=True)
         if self._state.completion_blockers:
@@ -1122,6 +1136,9 @@ def _run_one_action(
         return _BLOCKED
 
     if command.action.type == "report_to_user":
+        if _no_change_claim_unproven(self, command):
+            self._state.finish_refusals += 1
+            return _BLOCKED
         return _finish_with_report(self, user_goal, step, command)
     if command.action.type in plan_mode.PLAN_ACTIONS:
         return _run_plan_action(self, step, command)
@@ -1407,6 +1424,35 @@ def _reject_exhausted_web_budget(
 
 def _is_incomplete_finish(command: AgentCommand) -> bool:
     return command.action.args.get("outcome") == "incomplete"
+
+
+def _declares_no_change(command: AgentCommand) -> bool:
+    return command.action.args.get("outcome") == "no_change_needed"
+
+
+def _no_change_claim_unproven(self, command: AgentCommand) -> bool:
+    """Record a "no change needed" finish; True when the run lacks its evidence.
+
+    The claim says the reported problem was exercised and is absent. That needs
+    a read of the target and a run that exited cleanly, and no file changed.
+    Until then the finish is refused with what is missing, and the change-required
+    blockers keep standing.
+    """
+    declared = _declares_no_change(command)
+    st = self._state
+    proven = bool(st.files_read) and st.last_shell_returncode == 0 and not st.files_changed
+    st.no_change_declared = declared and proven
+    if not declared or proven:
+        return False
+    if st.finish_refusals:
+        # Same exit as the completion gates: a repeated end is taken as an
+        # honest "not done" rather than trapping the run between refusals.
+        command.action.args["outcome"] = "incomplete"
+        if "message" in command.action.args:
+            command.action.args["message"] += _build_no_change_unproven_note(st.response_language)
+        return False
+    st.pending_instruction = _build_no_change_unproven_instruction(st.task_language)
+    return True
 
 
 def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _ActionOutcome:
@@ -1778,6 +1824,9 @@ def register_feedback(
 ) -> None:
     previous_progress = self._state.progress
     ok = bool(feedback.get("ok"))
+    shell_result = feedback.get("data") or {}
+    if command.action.type == "run_shell" and "returncode" in shell_result:
+        self._state.last_shell_returncode = shell_result["returncode"]
     summary_line = self._feedback_to_line(command, feedback)
     detail_line = self._feedback_to_detail(command, feedback)
     signature = self._action_signature(command)
@@ -2693,7 +2742,9 @@ def required_followup_error(self, command: AgentCommand) -> str | None:
         return None
     if command.action.type in plan_mode.PLAN_ACTIONS:
         return None
-    if command.action.type in _FINISH_ACTIONS and _is_incomplete_finish(command):
+    if command.action.type in _FINISH_ACTIONS and (
+        _is_incomplete_finish(command) or _declares_no_change(command)
+    ):
         return None
 
     # A read-only inspection is never a stall. Blocking it here is what forces
@@ -2864,6 +2915,8 @@ def _is_report_goal(user_goal: str) -> bool:
 
 
 def _expects_file_changes(self) -> bool:
+    if has_deferred_write_marker(self._state.user_goal):
+        return False
     return infer_task_kind(self._state.user_goal) == "change"
 
 
@@ -2942,7 +2995,22 @@ def _build_missing_implementation_error(language: str) -> str:
     return (
         "Completion blocked: this looks like a FIX/MODIFY task, "
         "but no files were changed. If a change is needed, read the target file, "
-        f"edit it, then verify. {_HONEST_EXIT_HINT}"
+        f"edit it, then verify. {_NO_CHANGE_NEEDED_HINT} {_HONEST_EXIT_HINT}"
+    )
+
+
+def _build_no_change_unproven_note(language: str) -> str:
+    if language == "ru":
+        return "\n\n_Kvist: отсутствие проблемы не подтверждено запуском — задача не отмечена как выполненная._"
+    return "\n\n_Kvist: the problem's absence was not confirmed by a run — the task is not marked as done._"
+
+
+def _build_no_change_unproven_instruction(language: str) -> str:
+    return (
+        "\"no_change_needed\" is accepted only after you read the target and ran the "
+        "reported problem with run_shell, and that run exited cleanly. Run it, then finish "
+        "again with the command's real output in the message; if it reproduces the "
+        "problem, fix it instead."
     )
 
 
@@ -3220,10 +3288,10 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
         blockers.append(_build_premature_final_answer_error(self._state.task_language))
         required_actions.update(_WRITE_ACTIONS)
 
-    if self._state.modify_goal and not self._state.files_changed:
+    if self._state.modify_goal and not self._state.files_changed and not self._state.no_change_declared:
         kinds.append("not_modified")
         blockers.append(_build_missing_implementation_error(self._state.task_language))
-        required_actions.update(_WRITE_ACTIONS)
+        required_actions.update(_CHANGE_OR_REPRODUCE_ACTIONS)
 
     if missing and not (self._state.read_only_goal and not self._state.files_changed):
         kinds.append("artifacts_missing")
@@ -3249,7 +3317,7 @@ def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
     for kind, text in _evidence_completion_blockers(self):
         kinds.append(kind)
         blockers.append(text)
-        required_actions.update(_WRITE_ACTIONS)
+        required_actions.update(_CHANGE_OR_REPRODUCE_ACTIONS)
 
     return blockers, kinds, sorted(required_actions)
 
@@ -3265,7 +3333,7 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
     # keyword guesses keep their exceptions for read-only and verify-only
     # runs, since they can mistake a question for an edit.
     change_by_intent = _expects_file_changes(self)
-    change_task = (
+    change_task = not st.no_change_declared and (
         change_by_intent
         or st.create_goal
         or st.modify_goal
@@ -3273,7 +3341,7 @@ def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
     )
     verify_only_done = st.verify_only_goal and bool(st.verification_evidence)
     guessed_change_open = change_task and not st.read_only_goal and not verify_only_done
-    if not st.files_changed and (change_by_intent or guessed_change_open):
+    if not st.files_changed and not st.no_change_declared and (change_by_intent or guessed_change_open):
         out.append((
             "no_changes",
             "Completion blocked: this task changes files but files_changed is empty. "

@@ -148,7 +148,8 @@ _RUNTIME_TEXT = {
             "accurate account of where the work stands. While the work can still be finished, finish it — a gap "
             "that verification found is closed by a corrective action, not by describing it. When it cannot or "
             "should not be finished (the premise is false, the environment refuses, the missing piece is something "
-            "no action here can produce), finish with \"outcome\": \"incomplete\" and say why."
+            "no action here can produce), finish with \"outcome\": \"incomplete\" and say why. When you ran the "
+            "reported problem and it does not occur, finish with \"outcome\": \"no_change_needed\" and show that run's output."
         ),
         "error_instruction": (
             "If normalized_error is present, use it for the next step; do not copy raw_error into public text."
@@ -186,7 +187,7 @@ def _required_next_actions_block(state: Any, text: dict[str, str]) -> str:
     return (
         f"{text['allowed_next_actions']}: {allowed} (until one of these runs, the runtime refuses "
         f"other actions except {state.corrective_read_budget} more read-only look(s) and an "
-        "\"incomplete\" finish)\n\n"
+        "\"incomplete\" or \"no_change_needed\" finish)\n\n"
     )
 
 

@@ -1897,10 +1897,15 @@ class TerminalExecutor:
     ) -> None:
         if is_exact_version_probe(command):
             return
-        if executable in {"python", "python3", "py"} and any(
-            arg == "-c" or arg.startswith("-c") for arg in command[1:]
+        if (
+            executable in {"python", "python3", "py"}
+            and any(arg == "-c" or arg.startswith("-c") for arg in command[1:])
+            and _interpreter_target(command, executable)[0] != "inline"
         ):
-            raise HardDenyError(f"Hard security denial: Inline mode '-c' is forbidden for Python")
+            raise HardDenyError(
+                "Hard security denial: Python '-c' is allowed only as "
+                "`python -c CODE` with one code argument and no further arguments"
+            )
         if executable == "node" and any(
             arg in {"-e", "--eval", "-p", "--print"}
             or arg.startswith(("--eval=", "--print=", "-e"))
@@ -3825,6 +3830,14 @@ def _interpreter_target(command: list[str], executable: str) -> tuple[str, str |
         if index >= len(args):
             return "none", None
         token = args[index]
+        if token == "-c":
+            # The code is one argv item, so the approved context binds it
+            # exactly; extra arguments would reach the program as sys.argv.
+            if index + 2 != len(args) or not args[index + 1].strip():
+                raise HardDenyError(
+                    "Hard security denial: Python '-c' takes exactly one non-empty code argument"
+                )
+            return "inline", args[index + 1]
         if token == "-m":
             if index + 1 >= len(args) or not args[index + 1] or args[index + 1].startswith("-"):
                 raise HardDenyError("Hard security denial: Python -m requires a module name")

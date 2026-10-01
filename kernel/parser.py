@@ -55,8 +55,10 @@ PURPOSE_KEY = "purpose"
 # (native_tools._PURPOSE) that is dropped unseen.
 _PURPOSE_ACTIONS = frozenset({"run_shell", "git_status", "git_diff"})
 # "incomplete" lets the model end a run it cannot or should not finish
-# without having to claim success.
-FINISH_OUTCOMES = ("done", "incomplete")
+# without having to claim success. "no_change_needed" ends a run whose
+# reported problem the model exercised and found absent: a finished answer
+# with no file change, backed by the output of that run.
+FINISH_OUTCOMES = ("done", "incomplete", "no_change_needed")
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)
 

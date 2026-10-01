@@ -32,7 +32,11 @@ def test_terminal_allows_common_read_only_command(
         ([], "Empty command"),
         (["rm", "-rf", "x"], "forbidden"),
         (["git", "reset", "--hard"], "Subcommand"),
-        (["python", "-c", "print(1)"], "Inline mode"),
+        (["python", "-c", "print(1)", "extra"], "exactly one"),
+        (["python", "-c"], "exactly one"),
+        (["python", "-c", "  "], "exactly one"),
+        (["python", "-cprint(1)"], "unsupported or clustered"),
+        (["python", "script.py", "-c", "print(1)"], "allowed only"),
         (["echo", "$(whoami)"], "Command substitution"),
         (["cat", "../secret"], "Path traversal"),
         (["echo", "/etc/passwd"], "Absolute paths"),
@@ -863,3 +867,17 @@ def test_allowlisted_command_runs_without_approval_gate(tmp_path):
 
     assert result.returncode == 0
     assert "git" in result.stdout.lower()
+
+
+def test_python_inline_code_is_one_argument_and_validates(tmp_path):
+    executor = TerminalExecutor(tmp_path, timeout=5)
+
+    executor._validate(["python", "-c", "print(6 * 7)"])
+    executor._validate(["python3", "-B", "-c", "import sys; print(sys.version_info[0])"])
+
+
+def test_inline_python_stays_forbidden_for_other_interpreters(tmp_path):
+    executor = TerminalExecutor(tmp_path, timeout=5)
+
+    with pytest.raises(TerminalError, match="inline Node"):
+        executor._validate(["node", "-e", "console.log(1)"])
