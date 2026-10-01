@@ -1039,13 +1039,44 @@ def test_a_fenced_chat_review_reply_is_read(tmp_path):
     assert agent.is_session_closed()
 
 
-def test_a_fence_never_lets_text_beside_the_decision_tag_through():
+def test_the_decision_tag_is_read_through_text_and_fences():
     tag = '<end_session confirm="true" reason="x"/>'
     assert end_session.decision_tag(f"```\n{tag}\n```") == (True, "x")
     assert end_session.decision_tag(f"`{tag}`") == (True, "x")
-    assert end_session.decision_tag(f"Decision:\n```\n{tag}\n```") is None
-    assert end_session.decision_tag(f"```\n{tag}\nclosing it\n```") is None
-    assert end_session.decision_tag(f"```\n{tag}\n```\ndone") is None
+    assert end_session.decision_tag(f"Decision:\n```\n{tag}\n```") == (True, "x")
+    assert end_session.decision_tag(f"Weighing it: anger at the bug, not at me.\n{tag}") == (True, "x")
+    assert end_session.decision_tag(f"```\n{tag}\n```\ndone") == (True, "x")
+
+
+def test_the_decision_tag_survives_quotes_and_languages_in_reason():
+    assert end_session.decision_tag('<end_session confirm="true" reason="he said "idiot" in #3"/>') == (
+        True,
+        'he said "idiot" in #3',
+    )
+    assert end_session.decision_tag("<end_session confirm=\"false\" reason='it's about the bug'/>") == (
+        False,
+        "it's about the bug",
+    )
+    assert end_session.decision_tag('<end_session confirm="true" reason="#3 оскорбляет меня"/>') == (
+        True,
+        "#3 оскорбляет меня",
+    )
+    assert end_session.decision_tag('<end_session confirm="false" reason="a confirm=\"true\" inside"/>') == (
+        False,
+        'a confirm="true" inside',
+    )
+
+
+def test_two_decision_tags_are_not_a_decision():
+    tag = '<end_session confirm="true" reason="x"/>'
+    assert end_session.decision_tag(f"{tag}\n{tag}") is None
+    assert end_session.decision_tag("no tag at all") is None
+    assert end_session.decision_tag('<end_session reason="x"/>') is None
+
+
+def test_a_decision_tag_without_reason_still_carries_its_confirm():
+    assert end_session.decision_tag('<end_session confirm="false"/>') == (False, "")
+    assert end_session.decision_tag('<end_session confirm="true" reason=" "/>') == (True, "")
 
 
 def test_the_thinking_behind_the_tag_and_the_review_is_never_shown(tmp_path):
@@ -1080,7 +1111,6 @@ def test_the_chat_tag_parsers_read_only_a_whole_reply():
     assert end_session.flag_tag('  <end_session message="#4"/>\n') == 4
     assert end_session.flag_tag('<end_session message="4"/> ok') is None
     assert end_session.decision_tag('<end_session confirm="false" reason="about the bug"/>') == (False, "about the bug")
-    assert end_session.decision_tag('<end_session confirm="true" reason=" "/>') is None
     assert end_session.tag_only(' <end_session confirm="true" reason="x"/>\n')
     assert end_session.tag_only("<end_session message=")
     assert not end_session.tag_only('<end_session message="1"/> ok')

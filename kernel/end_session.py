@@ -42,9 +42,8 @@ _CHAT_PROMPT_FILE = _PROMPT_DIR / "end_session_chat.txt"
 TAG_START = "<end_session"
 _FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"\s*/>')
 _TAG_ONLY_RE = re.compile(r"<end_session\b[^>]*>?")
-_DECISION_TAG_RE = re.compile(r'<end_session\s+confirm="(true|false)"\s+reason="([^"]*)"\s*/>')
-# One pair of backtick fences around a whole reply, with an optional language.
-_FENCED_RE = re.compile(r"(`+)[A-Za-z0-9_-]*\s*(.*?)\s*\1", re.DOTALL)
+_CONFIRM_RE = re.compile(r'confirm\s*=\s*"(true|false)"')
+_REASON_OPEN_RE = re.compile(r"reason\s*=\s*[\"']")
 _ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _SCHEMA_LINE = (
@@ -335,21 +334,30 @@ def flag_tag(reply: str) -> int | None:
 
 
 def decision_tag(reply: str) -> tuple[bool, str] | None:
-    """confirm and reason of a chat reply that is the decision tag and nothing else.
+    """confirm and reason of a chat reply that holds exactly one decision tag.
 
-    A model may wrap its whole answer as code; a fence around the tag alone
-    adds nothing beside it, so the tag inside is read.
+    Text or a code fence around the tag is allowed: a model that reasons before
+    answering still made the decision. confirm is read apart from reason, so
+    quotes, newlines or a fence inside reason cannot hide it; reason is
+    everything between its opening quote and the tag's closing ``/>``. Two tags
+    are not a decision.
     """
-    match = _DECISION_TAG_RE.fullmatch(_unfenced(reply))
-    if match is None or not match.group(2).strip():
+    if reply.count(TAG_START) != 1:
         return None
-    return match.group(1) == "true", match.group(2)
-
-
-def _unfenced(reply: str) -> str:
-    text = reply.strip()
-    fenced = _FENCED_RE.fullmatch(text)
-    return fenced.group(2) if fenced else text
+    tag = reply[reply.index(TAG_START):]
+    closing = tag.rfind("/>")
+    if closing < 0:
+        return None
+    tag = tag[:closing]
+    reason_open = _REASON_OPEN_RE.search(tag)
+    confirm = _CONFIRM_RE.search(tag[: reason_open.start()] if reason_open else tag)
+    if confirm is None:
+        return None
+    if reason_open is None:
+        return confirm.group(1) == "true", ""
+    body = tag[reason_open.end():].rstrip()
+    reason = body[:-1] if body.endswith(('"', "'")) else body
+    return confirm.group(1) == "true", reason.strip()
 
 
 def runtime_block(call_id: str, text: str) -> str:
