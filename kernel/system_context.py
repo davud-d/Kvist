@@ -127,6 +127,19 @@ def current_sandbox_context(sandbox_mode: str, network_allowed: bool) -> str:
     return f"{sandbox_mode}, net {'allowed' if network_allowed else 'denied'}"
 
 
+def identity_fact(provider: str, model: str) -> str:
+    """Who the model is, and which language model runs it, as two separate facts.
+
+    Given only the model name, a model took it for its identity and named itself
+    after its vendor or after another coding agent.
+    """
+    return (
+        "you are Kvist, an open-source coding agent. The language model running you this turn "
+        f"is provider = {provider}, model = {model}; it is a separate thing and it changes. "
+        "Asked what you are, you are Kvist. Asked which model runs you, name this one."
+    )
+
+
 ### WORKSPACE INSTRUCTION FILES
 
 AGENT_INSTRUCTIONS_FILE = "KVIST.md"

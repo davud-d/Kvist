@@ -10,7 +10,7 @@ from kernel import end_session
 from kernel.agent_state import PLAN_APPROVED, PLAN_PLANNING
 from kernel.language_policy import response_language_name
 from kernel.redaction import defang_prompt_boundary_tags
-from kernel.system_context import current_time_context
+from kernel.system_context import current_time_context, identity_fact
 
 
 # ── Section-aware prompt trimming ───────────────────────────────────────────
@@ -402,7 +402,12 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{final_answer_style}"
     )
 
-    return cached_prefix + dynamic + cached_suffix
+    # Built every step, not cached with the prefix: the run may escalate from
+    # the fast to the smart model, and the line must name the model that answers.
+    identity = identity_fact(self.config.provider, self._state.selected_action_model or self.config.fast_model)
+    environment_header = "System environment:\n"
+    prefix = f"{environment_header}- Identity: {identity}\n{cached_prefix[len(environment_header):]}"
+    return prefix + dynamic + cached_suffix
 
 
 def format_dependency_versions_for_prompt(self, language: str = "en") -> str:

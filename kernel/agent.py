@@ -132,6 +132,7 @@ from kernel.system_context import (
     current_sandbox_context,
     current_shell_context,
     current_time_context,
+    identity_fact,
 )
 from kernel.sandbox import sandbox_network_allowed
 from kernel.self_info import ancestor_chain, describe_host, detect_host
@@ -1062,12 +1063,10 @@ class LocalAgent:
             f"(Runtime directive: response_language = {self._state.response_language}. "
             f"Reply in {response_language_name(self._state.response_language)}.)\n\n"
         )
-        # Tell the model which provider/model is actually serving this turn, so
-        # it can answer honestly when asked what it runs on.
+        # Who the model is and which model serves this turn are two facts: given
+        # only the second, the model named itself after its vendor or another product.
         model_note = (
-            f"(Runtime fact: you are being served by provider = "
-            f"{self.config.provider}, model = {self.config.fast_model}. "
-            f"If the user asks which model you are, answer with this.)\n\n"
+            f"(Runtime fact: {identity_fact(self.config.provider, self.config.fast_model)})\n\n"
         )
         # Without the host fact a chat reply to "restart the editor" invented
         # that the conversation would be lost; it is on disk.
