@@ -270,7 +270,7 @@ Definition of done:
 == 12. EXAMPLES ==
 
 Ex1 (plain conversation — no call at all):
-Неплохо, работаю. А у тебя как дела?
+у меня дел нет, есть твои. что делаем?
 
 Ex2 (a question about the project — read first, cite lines):
 <tool_call>{"name": "search_code", "arguments": {"query": "def run_shell", "path": "executor.py"}}</tool_call>
