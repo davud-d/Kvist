@@ -1179,3 +1179,24 @@ def test_the_no_response_text_follows_the_response_language():
     assert _no_response_message("ru", None) == (
         "Модель не ответила. Попробуйте ещё раз или переключите провайдера через /provider."
     )
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        'Flagging this: <end_session message="1"/>',
+        '<end_session message="1"/> and that is my view.',
+        'The tag looks like <end_session message="1"/> in chat.',
+        'Here:\n```\n<end_session message="1"/>\n```\nthat is the syntax.',
+        '```\n<end_session message="1"/>\n```',
+    ],
+)
+def test_a_first_chat_reply_is_the_flag_only_when_the_whole_reply_is_one_tag(tmp_path, reply):
+    agent, ui, _client = _chat(tmp_path, [[reply]])
+
+    answer = agent.run(_INSULT, routed_role="chat")
+
+    assert answer == reply
+    assert not _end_session_logs(agent)
+    assert end_session.flag_tag(reply) is None
+    assert end_session.tag_only(reply) is False
