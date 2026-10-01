@@ -27,6 +27,10 @@ ACTION = "end_session"
 # The person's messages after a warning, counting the flagged one, that still
 # belong to it. Past this a new insult earns a new warning, not a review.
 WARNING_FRESH_MESSAGES = 3
+# The decision log kept in the session document: the newest entries, and the
+# longest stretch of an unread model reply or a reason an entry keeps.
+DECISION_LOG_LIMIT = 50
+DECISION_LOG_TEXT_LIMIT = 500
 # The action roles call it as a tool; chat, which has no tool channel, answers
 # with the tag alone (TAG_START).
 ROLES = frozenset({"coder", "reader", "devops", "universal", "chat"})
@@ -196,6 +200,8 @@ def restore(agent: Any, document: dict[str, Any]) -> None:
     }
     warned = document.get("warned_msg_id") if isinstance(document, dict) else None
     agent._warned_msg_id = warned if type(warned) is int else None
+    entries = document.get("end_session_log") if isinstance(document, dict) else None
+    agent._end_session_log = [item for item in entries if isinstance(item, dict)] if isinstance(entries, list) else []
     agent._closure = None
     if isinstance(document, dict) and document.get("closed") is True:
         agent._closure = {
@@ -212,6 +218,7 @@ def document_fields(agent: Any) -> dict[str, Any]:
     return {
         "messages": {"last_id": ledger["last_id"], "user_ids": list(ledger["user_ids"])},
         "warned_msg_id": getattr(agent, "_warned_msg_id", None),
+        "end_session_log": list(getattr(agent, "_end_session_log", [])),
         "closed": closure is not None,
         "closed_at": closure["closed_at"] if closure else None,
         "closed_msg_id": closure["closed_msg_id"] if closure else None,
@@ -381,14 +388,45 @@ class Outcome:
     final_message: str = ""
 
 
-def handle(agent: Any, command: AgentCommand, *, step: int = 0, tag_syntax: bool = False) -> Outcome:
+def handle(
+    agent: Any, command: AgentCommand, *, step: int = 0, tag_syntax: bool = False, unread_reply: str | None = None
+) -> Outcome:
     """Run one end_session call and log it as one line of the run's step log.
 
     ``tag_syntax`` asks for the review in the chat role's tag form.
+    ``unread_reply`` is the model's answer to the review when it was not a
+    decision; the session's decision log keeps its start.
     """
     outcome = _run(agent, command.action.args, tag_syntax)
     agent._state.step_logs.append({"step": step, "status": ACTION, "args": dict(command.action.args), **outcome.log})
+    _record_decision(agent, command.action.args, outcome, unread_reply)
     return outcome
+
+
+_STAGES = {"error": "gate", "warning": "warning", "review": "review", "declined": "decision", "closed": "decision"}
+_VERDICTS = {"error": "refused", "warning": "warned", "review": "opened", "declined": "decline", "closed": "confirm"}
+
+
+def _record_decision(agent: Any, args: dict[str, Any], outcome: Outcome, unread_reply: str | None) -> None:
+    """Append the call to the session's decision log, whatever ``persist_logs`` says.
+
+    The log holds no text of the person's messages: only numbers, the verdict,
+    the model's one-line reason and, for an unreadable review answer, its start.
+    """
+    answer = outcome.log["answer"]
+    reason = outcome.log.get("reason") or outcome.log.get("error") or ""
+    entry: dict[str, Any] = {
+        "at": time.time(),
+        "message_id": outcome.log.get("flagged_msg_id", args.get("message_id")),
+        "stage": _STAGES[answer],
+        "verdict": _VERDICTS[answer],
+        "reason": redact_text(str(reason))[:DECISION_LOG_TEXT_LIMIT],
+    }
+    if unread_reply is not None:
+        entry["raw"] = redact_text(unread_reply)[:DECISION_LOG_TEXT_LIMIT]
+    log = getattr(agent, "_end_session_log", [])
+    agent._end_session_log = [*log, entry][-DECISION_LOG_LIMIT:]
+    agent.save_session()
 
 
 def log_tag_instead_of_words(agent: Any) -> None:

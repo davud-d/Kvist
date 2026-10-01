@@ -445,7 +445,9 @@ it) the person gets the fixed WARNING text and `warned_msg_id` is saved at once;
 the model gets `REVIEW_INSTRUCTION` (numbers only, never the person's text) and
 `RunState.end_session_review` opens. Call 2 `end_session(confirm, reason)` is accepted only
 while that review is open in the same turn; `true` writes `closed`, `closed_at`,
-`closed_msg_id` into the session document, emits `session_ended` and ends the turn on
+`closed_msg_id` into the session document; every call, whatever `persist_logs` says, also appends to
+`end_session_log` there (newest 50: time, message number, stage gate/warning/review/decision, verdict,
+reason and, for a review answer that was no decision, its first 500 characters — never the person's text), emits `session_ended` and ends the turn on
 the CLOSED text. Every answer to the tool goes on the runtime's own channel
 (`<KVIST_RUNTIME source="end_session">`, defanged in content like the other boundary
 tags), never as untrusted tool output; the model's own words beside the call are

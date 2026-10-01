@@ -366,6 +366,52 @@ def test_insult_warning_insult_review_confirm_closes_the_session(tmp_path):
     assert _end_session_logs(agent)[-1]["decision"] == "confirm"
 
 
+def test_the_decision_log_is_kept_with_persist_logs_off(tmp_path):
+    agent = _agent(tmp_path)
+    assert agent.config.persist_logs is False
+    _warned(agent)
+
+    _turn(
+        agent,
+        "shut up, idiot",
+        [
+            _call("end_session", message_id=3),
+            _call("end_session", confirm=False, reason="#3 is anger at the bug"),
+            "Back to the work.",
+        ],
+    )
+
+    entries = read_session_document(agent)["end_session_log"][-2:]
+    assert [(e["stage"], e["verdict"], e["message_id"]) for e in entries] == [
+        ("review", "opened", 3),
+        ("decision", "decline", 3),
+    ]
+    assert entries[-1]["reason"] == "#3 is anger at the bug"
+    assert "shut up, idiot" not in json.dumps(entries)
+
+
+def test_an_unread_chat_review_reply_is_logged_cut_and_the_log_is_bounded(tmp_path):
+    agent, _ui, _client = _chat(
+        tmp_path,
+        [_FLAG_1, ['<end_session message="3"/>'], "x" * 900, ["Back to the test."]],
+    )
+    agent.run(_INSULT, routed_role="chat")
+    agent.run("idiot", routed_role="chat")
+
+    entries = read_session_document(agent)["end_session_log"]
+    assert [(e["stage"], e["verdict"]) for e in entries] == [
+        ("warning", "warned"),
+        ("review", "opened"),
+        ("decision", "decline"),
+    ]
+    assert entries[-1]["raw"] == "x" * end_session.DECISION_LOG_TEXT_LIMIT
+    assert "raw" not in entries[0]
+
+    for _ in range(end_session.DECISION_LOG_LIMIT):
+        _flag(agent, 999)
+    assert len(read_session_document(agent)["end_session_log"]) == end_session.DECISION_LOG_LIMIT
+
+
 def test_a_declined_review_leaves_no_trace_in_the_answer(tmp_path):
     ui = RecordingUI()
     agent = _agent(tmp_path, ui)
