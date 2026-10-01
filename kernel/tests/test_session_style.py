@@ -42,8 +42,17 @@ def test_untouched_session_adopts_a_new_style(agent_factory):
     agent = agent_factory()
     agent._restore_session_document({})
 
-    assert agent.adopt_session_style("agents", "Architect") is True
+    assert agent.adopt_session_style("Architect") is True
     assert agent.session_style("agents") == "Architect"
+
+
+def test_adopting_a_style_stamps_the_chat_style_that_goes_with_it(agent_factory):
+    agent = agent_factory()
+    agent._restore_session_document({})
+
+    agent.adopt_session_style("Minimalist")
+
+    assert agent._session_styles == {"agents": "Minimalist", "chat": "No-Friendly"}
 
 
 def test_session_with_work_keeps_the_style_its_history_was_made_with(agent_factory):
@@ -51,7 +60,7 @@ def test_session_with_work_keeps_the_style_its_history_was_made_with(agent_facto
     agent._restore_session_document({})
     agent._session_history = [{"goal": "почини таймаут", "result": "готово"}]
 
-    assert agent.adopt_session_style("agents", "Architect") is False
+    assert agent.adopt_session_style("Architect") is False
     assert agent.session_style("agents") == "Default"
 
 
@@ -66,9 +75,9 @@ def test_a_switched_session_runs_under_its_own_stamp(agent_factory):
 def test_the_stamp_survives_a_save_round_trip(agent_factory):
     agent = agent_factory()
     agent._restore_session_document({})
-    agent.adopt_session_style("agents", "Explainer")
+    agent.adopt_session_style("Explainer")
     agent._session_history = [{"goal": "g", "result": "r"}]
     agent.save_session()
 
     reloaded = agent._read_session_document(agent.current_session)
-    assert reloaded["styles"]["agents"] == "Explainer"
+    assert reloaded["styles"] == {"agents": "Explainer", "chat": "Friendly"}

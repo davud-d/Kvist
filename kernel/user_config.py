@@ -85,20 +85,12 @@ StyleType = Literal["chat", "agents"]
 STYLES_KEY = "styles"
 DEFAULT_STYLE = "Default"
 
-# One-line summaries shown in the `/style` picker. The keys are the style names;
-# the same keys must exist in the matching *_PROMPTS dict below.
-_STYLE_CHAT_DESCRIPTIONS = {
-    "Default": "Cool, professional, concise, to the point.",
-    "Friendly": "Casual and friendly, but still professional and concise.",
-    "No-Friendly": "Only work, no small talk. Professional and concise, not friendly.",
-    "Honest": "Nonchalant and honest, reserved, won't just go along with the crowd.",
-    "Energetic": "Energetic, keeps you moving toward the goal.",
-}
-
-_STYLE_AGENTS_DESCRIPTIONS = {
+# One-line summaries shown in the `/style` picker. The keys are the agent style
+# names; each one has a prompt file under prompts/styles/agents/.
+_STYLE_DESCRIPTIONS = {
     "Default": "Does what was asked. Answers for everything it touched, and nothing else.",
     "Senior-dev": "Does what the result needs, not only what was asked. Never makes a point of it.",
-    "Friendly Developer": "The same work, but you are never left alone with the result.",
+    "Friendly Developer": "The same work, but the person is never left alone with the result.",
     "Perfectionist": "Quality is part of the task, not a task for later. Pays in time.",
     "Paranoid": "An outage costs more than time spent checking. Looks before irreversible steps.",
     "Minimalist": "Every line is an obligation for years. Extends a task only toward deletion.",
@@ -107,15 +99,28 @@ _STYLE_AGENTS_DESCRIPTIONS = {
     "Architect": "A change that blurs the structure is negative even when the task is done.",
 }
 
+# The one choice is the agent style; the chat style is derived from it here and
+# nowhere else. Every value names a file under prompts/styles/chat/.
+_CHAT_STYLE_FOR_AGENT_STYLE = {
+    "Default": "Default",
+    "Architect": "Default",
+    "Senior-dev": "Honest",
+    "Paranoid": "Honest",
+    "Perfectionist": "Honest",
+    "Friendly Developer": "Friendly",
+    "Explainer": "Friendly",
+    "Minimalist": "No-Friendly",
+    "Fast-and-dirty": "Energetic",
+}
+
 # The system-prompt text for each style lives in its own file under
 # prompts/styles/<chat|agents>/<slug>.txt (slug = style_slug(name)). A missing
 # or empty file means "no style instruction" (the behaviour of "Default").
 
 
-def _style_descriptions(style_type: StyleType) -> dict[str, str]:
-    if style_type == "chat":
-        return _STYLE_CHAT_DESCRIPTIONS
-    return _STYLE_AGENTS_DESCRIPTIONS
+def chat_style_for(agent_style: str) -> str:
+    """The chat style that goes with an agent style name from `get_style_options`."""
+    return _CHAT_STYLE_FOR_AGENT_STYLE[agent_style]
 
 
 def style_slug(name: str) -> str:
@@ -123,20 +128,31 @@ def style_slug(name: str) -> str:
     return name.strip().lower().replace(" ", "-")
 
 
-def get_style_options(style_type: StyleType) -> dict[str, str]:
-    """Style name -> one-line description, for the `/style` picker."""
-    return dict(_style_descriptions(style_type))
+def get_style_options() -> dict[str, str]:
+    """Agent style name -> one-line description, for the `/style` picker.
+
+    The line ends with the chat style the choice brings with it.
+    """
+    return {
+        name: f"{description} Chat: {chat_style_for(name)}."
+        for name, description in _STYLE_DESCRIPTIONS.items()
+    }
 
 
 def get_saved_style(style_type: StyleType, config_path: Path | None = None) -> str:
-    """The saved style name for this mode, or 'Default' if none is set."""
+    """The saved agent style, or the chat style that goes with it.
+
+    Only `styles.agents` is read: a `styles.chat` left in the file by an older
+    build is ignored. "Default" when nothing valid is saved.
+    """
     payload = load_user_config(config_path)
     styles = payload.get(STYLES_KEY)
+    agent_style = DEFAULT_STYLE
     if isinstance(styles, dict):
-        value = styles.get(style_type)
-        if isinstance(value, str) and value in _style_descriptions(style_type):
-            return value
-    return DEFAULT_STYLE
+        value = styles.get("agents")
+        if isinstance(value, str) and value in _STYLE_DESCRIPTIONS:
+            agent_style = value
+    return agent_style if style_type == "agents" else chat_style_for(agent_style)
 
 def get_user_config_path() -> Path:
     return Path.home() / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME
@@ -757,17 +773,13 @@ def reset_user_config(config_path: Path | None = None) -> None:
     save_user_config({}, config_path)
 
 
-def save_style_configuration(
-    style_type: StyleType,
-    style: str,
-    config_path: Path | None = None,
-) -> bool:
-    """Save a style configuration. Returns True if saved, False if not found."""
-    if style not in _style_descriptions(style_type):
+def save_style_configuration(style: str, config_path: Path | None = None) -> bool:
+    """Save the agent style. Returns True if saved, False if not found."""
+    if style not in _STYLE_DESCRIPTIONS:
         return False
 
     def set_style(config: dict) -> dict:
-        config.setdefault(STYLES_KEY, {})[style_type] = style
+        config.setdefault(STYLES_KEY, {})["agents"] = style
         return config
 
     _update_user_config(set_style, config_path)

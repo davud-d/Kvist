@@ -927,9 +927,16 @@ its empty-document exit) and every read inside that session resolves it through
 `agent_model._session_style_name`, never through the global preference. Without
 that, step 0 and the steps that follow it could come from different beliefs — a
 paranoid opening executed by a minimalist that no longer believes in the pre-check
-it was handed. `/style` writes the global
+it was handed. **The person picks one style, the agent's**: the chat style is
+derived from it by the single table `user_config._CHAT_STYLE_FOR_AGENT_STYLE`
+(`chat_style_for`; default and architect → default, senior-dev, paranoid and
+perfectionist → honest, friendly-developer and explainer → friendly, minimalist →
+no-friendly, fast-and-dirty → energetic), so no frontend carries a chat picker or a
+copy of the table, and `get_saved_style("chat")` reads only `styles.agents` — a
+`styles.chat` left in `~/.kvist/config.json` by an older build is ignored. The
+session stamp keeps both names. `/style` writes the global
 preference and calls `agent.adopt_session_style`: an untouched session adopts the
-new choice (nothing came out of the old one yet), a session that already holds
+new pair (nothing came out of the old one yet), a session that already holds
 work keeps its stamp and the change starts with the next session. The selected
 *file* is still re-read per call, so editing that file lands on the next step.
 The reporter (`report_prompt.txt`) is built by

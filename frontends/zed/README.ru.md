@@ -104,7 +104,7 @@ never received: oneshot canceled`. Ни то ни другое не называ
 | Открыть терминал с Kvist | `/terminal`: `client.create_terminal`, если клиент это умеет, иначе — точная строка команды, чтобы запустили сами |
 | Открыть файл из результата | Пути в `ToolCallLocation`, на которые Zed умеет переходить |
 | Переключатели роли / усилия / verbose | Session Config Options ACP: `role` (`mode` category), `effort` (`thought_level` category) и `verbose` (булевы или select на старых клиентах) |
-| Выбор стиля агента и чата | Session Config Options ACP: `style_agents` и `style_chat` (select с доступными стилями из `prompts/styles/`) |
+| Выбор стиля | Session Config Option ACP `style` (select со стилями из `prompts/styles/agents/`; стиль чата следует из выбора) |
 | Настройки моделей, провайдера, API | Session Config Option `advanced` (меню "⚙️ Advanced") открывает терминал с диалогами `/models`, `/provider`, `/settings-api`, создание custom provider |
 
 ### 3. Воспроизвести буквально нельзя — нет публичного API Zed

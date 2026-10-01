@@ -101,7 +101,7 @@ Same capability, delivered through ACP and drawn by Zed rather than by Kvist:
 | Open a terminal on Kvist | `/terminal`: ACP `client.create_terminal` when the client offers it, otherwise the exact command line to run yourself |
 | Open a file from a result | `ToolCallLocation` paths that Zed can jump to |
 | Role / effort / verbose pickers | ACP Session Config Options: `role` (`mode` category), `effort` (`thought_level` category) and `verbose` (boolean or select on older clients) |
-| Agent and chat style selection | ACP Session Config Options: `style_agents` and `style_chat` (select with available styles from `prompts/styles/`) |
+| Style selection | ACP Session Config Option `style` (select with the styles from `prompts/styles/agents/`; the chat style follows from the pick) |
 | Model, provider, API settings | Session Config Option `advanced` (menu "⚙️ Advanced") opens a terminal with dialogs `/models`, `/provider`, `/settings-api`, custom provider creation |
 
 ### 3. Not reproducible literally — no public Zed API

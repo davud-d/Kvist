@@ -85,7 +85,7 @@ def _report_agent(workspace, agents_style):
     )
 
 
-@pytest.mark.parametrize("style", sorted(get_style_options("agents")))
+@pytest.mark.parametrize("style", sorted(get_style_options()))
 def test_the_reporter_speaks_under_the_constitution_and_the_session_style(tmp_path, style):
     """The report is the person's account of the run: same character, same voice."""
     constitution = _load_constitution()

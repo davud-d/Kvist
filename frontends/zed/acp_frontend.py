@@ -54,8 +54,7 @@ AGENT_NAME = "kvist"
 CONFIG_ROLE = "role"
 CONFIG_EFFORT = "effort"
 CONFIG_VERBOSE = "verbose"
-CONFIG_STYLE_AGENTS = "style_agents"
-CONFIG_STYLE_CHAT = "style_chat"
+CONFIG_STYLE = "style"
 CONFIG_ADVANCED = "advanced"
 
 ROLE_CHOICES = ("auto", "coder", "reader", "devops", "chat", "universal")
@@ -943,10 +942,8 @@ class KvistAcpAgent:
                     {"config_id": config_id, "value": str(value)}
                 )
             await self._apply_command(session, "verbose", [choice])
-        elif config_id == CONFIG_STYLE_AGENTS:
-            await self._apply_command(session, "style", ["agents", str(value)])
-        elif config_id == CONFIG_STYLE_CHAT:
-            await self._apply_command(session, "style", ["chat", str(value)])
+        elif config_id == CONFIG_STYLE:
+            await self._apply_command(session, "style", [str(value)])
         elif config_id == CONFIG_ADVANCED:
             choice = str(value)
             if choice in ADVANCED_CHOICES:
@@ -1068,8 +1065,7 @@ class KvistAcpAgent:
             role=self._current_role(session),
             effort=self._current_effort(session),
             verbose=self._current_verbose(session),
-            style_agents=self._current_style(session, "agents"),
-            style_chat=self._current_style(session, "chat"),
+            style=self._current_style(),
             allow_boolean=self._allows_boolean_config(),
         )
 
@@ -1104,10 +1100,10 @@ class KvistAcpAgent:
     def _current_verbose(self, session: KvistAcpSession) -> bool:
         return bool(getattr(session.agent.config, "verbose", False))
 
-    def _current_style(self, session: KvistAcpSession, style_type: str) -> str:
+    def _current_style(self) -> str:
         from kernel.user_config import get_saved_style
 
-        return str(get_saved_style(style_type))  # type: ignore[arg-type]
+        return get_saved_style("agents")
 
     # -- helpers -----------------------------------------------------------
 
@@ -1429,8 +1425,7 @@ def build_config_options(
     role: str,
     effort: str,
     verbose: bool,
-    style_agents: str,
-    style_chat: str,
+    style: str,
     allow_boolean: bool,
 ) -> list[Any]:
     """Render Kvist's session knobs as ACP Session Config Options.
@@ -1443,8 +1438,7 @@ def build_config_options(
     :param role: the active role id.
     :param effort: the active reasoning-effort id.
     :param verbose: whether verbose logging is on.
-    :param style_agents: the active agent style name.
-    :param style_chat: the active chat style name.
+    :param style: the active style name; the chat style follows from it.
     :param allow_boolean: whether the client accepts boolean config options.
     :returns: the complete option list in priority order.
     """
@@ -1453,8 +1447,7 @@ def build_config_options(
     role = role if role in ROLE_CHOICES else "auto"
     effort = effort if effort in EFFORT_CHOICES else "medium"
 
-    agents_style_options = get_style_options("agents")
-    chat_style_options = get_style_options("chat")
+    style_options = get_style_options()
 
     options: list[Any] = [
         schema.SessionConfigOptionSelect(
@@ -1482,25 +1475,14 @@ def build_config_options(
             ],
         ),
         schema.SessionConfigOptionSelect(
-            id=CONFIG_STYLE_AGENTS,
-            name="Agent style",
-            description="Tone and habits of coder/reader/devops action loop",
+            id=CONFIG_STYLE,
+            name="Style",
+            description="How the agent works and talks, in the action loop and in chat",
             type="select",
-            current_value=style_agents,
+            current_value=style,
             options=[
                 schema.SessionConfigSelectOption(value=name, name=name)
-                for name in agents_style_options.keys()
-            ],
-        ),
-        schema.SessionConfigOptionSelect(
-            id=CONFIG_STYLE_CHAT,
-            name="Chat style",
-            description="Tone of the chat role's answers",
-            type="select",
-            current_value=style_chat,
-            options=[
-                schema.SessionConfigSelectOption(value=name, name=name)
-                for name in chat_style_options.keys()
+                for name in style_options
             ],
         ),
     ]

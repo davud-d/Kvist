@@ -565,22 +565,25 @@ def session_style(self, style_type: str) -> str:
     return session_styles({})[style_type]
 
 
-def adopt_session_style(self, style_type: str, style_name: str) -> bool:
-    """Apply a style choice to the active session, when that is still honest.
+def adopt_session_style(self, agent_style: str) -> bool:
+    """Apply an agent style choice, and the chat style that goes with it, to the active session.
 
     One session, one style. A session that has produced nothing yet can adopt
     the new choice: no plan, no step and no answer came out of the old one. A
-    session that already holds work keeps the style its history was made with,
+    session that already holds work keeps the styles its history was made with,
     and the choice starts with the next session. Returns True when the active
     session adopted it.
     """
+    from kernel.user_config import chat_style_for
+
     styles = getattr(self, "_session_styles", None)
     if not isinstance(styles, dict):
         styles = session_styles({})
         self._session_styles = styles
     if _has_session_content(self):
         return False
-    styles[style_type] = style_name
+    styles["agents"] = agent_style
+    styles["chat"] = chat_style_for(agent_style)
     save_session(self)
     return True
 

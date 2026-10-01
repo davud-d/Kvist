@@ -1812,52 +1812,24 @@ def choose_effort(
     )
 
 
-def choose_style(
-    verbose: bool, ui: AgentUI | None = None
-) -> tuple[str, str] | None:
-    """Pick a response style for chat or for the action-loop agents.
+def choose_style(verbose: bool, ui: AgentUI | None = None) -> str | None:
+    """Pick the working style; the chat style follows from it.
 
-    Returns (style_type, style_name) or None if the user cancelled at any step.
+    Returns the agent style name or None if the user cancelled.
     """
     if ui is None:
         ui = TerminalBannerUI(console=console, verbose=verbose)
 
-    style_type = ui.choose_option(
-        title="Style for which mode?",
-        options=[
-            {
-                "value": "chat",
-                "label": "Chat",
-                "description": "Tone of the chat role's answers",
-            },
-            {
-                "value": "agents",
-                "label": "Agents",
-                "description": "Tone and habits of the coder/reader/devops action loop",
-            },
-        ],
-        current_value="chat",
-        help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
-    )
-    if style_type is None:
-        return None
-
-    current_style = get_saved_style(style_type)
     options = [
         {"value": name, "label": name, "description": description}
-        for name, description in get_style_options(style_type).items()
+        for name, description in get_style_options().items()
     ]
-
-    selected = ui.choose_option(
-        title=f"Select {style_type} style",
-        current_value=current_style,
+    return ui.choose_option(
+        title="Select style",
+        current_value=get_saved_style("agents"),
         options=options,
         help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
     )
-    if selected is None:
-        return None
-
-    return style_type, selected
 
 
 # ── /settings-api ════════════════════════════════════════════════════════════
@@ -3105,27 +3077,24 @@ def _stdio_verbose(ctx: CommandContext) -> CommandResult:
 
 def _stdio_style(ctx: CommandContext) -> CommandResult:
     agent = ctx.session.agent
-    if len(ctx.args) == 2:
-        chosen: tuple[str, str] | None = (ctx.args[0].casefold(), ctx.args[1])
+    if len(ctx.args) == 1:
+        style_name = ctx.args[0]
     elif ctx.args:
-        return CommandResult(False, "Usage: style [chat|agents NAME]")
+        return CommandResult(False, "Usage: style [NAME]")
     else:
-        chosen = choose_style(agent.config.verbose, ui=ctx.ui)
-    if chosen is None:
+        style_name = choose_style(agent.config.verbose, ui=ctx.ui)
+    if style_name is None:
         return _command_cancelled()
-    style_type, style_name = chosen
-    if style_type not in ("chat", "agents") or not save_style_configuration(style_type, style_name):
-        return CommandResult(False, f"Unknown style: {style_type} {style_name}")
-    adopted = agent.adopt_session_style(style_type, style_name)
-    message = f"{style_type.capitalize()} style set to: {style_name}"
+    if not save_style_configuration(style_name):
+        return CommandResult(False, f"Unknown style: {style_name}")
+    adopted = agent.adopt_session_style(style_name)
+    message = f"Style set to: {style_name}"
     if not adopted:
-        message += (
-            f". This session keeps {agent.session_style(style_type)}; the new style starts with the next session."
-        )
+        message += f". This session keeps {agent.session_style('agents')}; the new style starts with the next session."
     return CommandResult(
         True,
         message,
-        {"style": {"type": style_type, "name": style_name, "applied_to_session": adopted}},
+        {"style": {"name": style_name, "applied_to_session": adopted}},
     )
 
 
@@ -4476,27 +4445,21 @@ def main() -> None:
 
             if user_goal.lower() == "/style":
                 with paused_interactive_screen(interactive_screen):
-                    result = choose_style(verbose)
-                if result is None:
+                    style_name = choose_style(verbose)
+                if style_name is None:
                     console.print("[yellow]Style selection cancelled.[/yellow]")
                     continue
-                style_type, style_name = result
-                save_style_configuration(style_type, style_name)
+                save_style_configuration(style_name)
                 # One session, one style: this session takes the new choice only
                 # while nothing has been produced under the old one.
-                adopted = agent.adopt_session_style(style_type, style_name)
+                adopted = agent.adopt_session_style(style_name)
                 if interactive_screen is not None:
                     interactive_screen.set_config(config)
-                console.print(
-                    _display_text(
-                        f"{style_type.capitalize()} style set to: {style_name}",
-                        "green",
-                    )
-                )
+                console.print(_display_text(f"Style set to: {style_name}", "green"))
                 if not adopted:
                     console.print(
                         _display_text(
-                            f"This session keeps {agent.session_style(style_type)}. "
+                            f"This session keeps {agent.session_style('agents')}. "
                             "The new style starts with the next session (/new).",
                             "yellow",
                         )

@@ -367,23 +367,22 @@ def test_verbose_toggles_the_runtime_flag_only(home, agent_factory):
     assert _run_handler("verbose", agent, args=["false"])[0].effects == {"verbose": False}
 
 
-def test_style_wizard_asks_mode_then_style(home, agent_factory):
-    from kernel.user_config import get_style_options
+def test_style_wizard_asks_one_question_and_sets_both_styles(home, agent_factory):
+    from kernel.user_config import chat_style_for, get_style_options
 
     agent = agent_factory()
-    name = list(get_style_options("agents"))[1]
-    result, requests, _ = _run_handler("style", agent, answers=["agents", name])
+    name = list(get_style_options())[1]
+    result, requests, _ = _run_handler("style", agent, answers=[name])
 
-    assert [r.title for r in requests][0] == "Style for which mode?"
+    assert [r.title for r in requests] == ["Select style"]
     assert result.ok
-    assert result.effects["style"]["type"] == "agents"
-    assert result.effects["style"]["name"] == name
-    assert result.effects["style"]["applied_to_session"] is True
-    assert _saved("styles")["agents"] == name
+    assert result.effects["style"] == {"name": name, "applied_to_session": True}
+    assert _saved("styles") == {"agents": name}
+    assert agent.session_style("chat") == chat_style_for(name)
 
 
 def test_style_arguments_validate_the_name(home, agent_factory):
-    result, _, _ = _run_handler("style", agent_factory(), args=["agents", "No-Such-Style"])
+    result, _, _ = _run_handler("style", agent_factory(), args=["No-Such-Style"])
     assert result.ok is False
 
 

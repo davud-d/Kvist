@@ -232,9 +232,6 @@ def steps_for(scenario: str) -> list[tuple]:
             ("wait", 0.5),
             ("key", "enter"),
             ("wait", 2.2),
-            ("key", "down"), ("wait", 0.9),   # Agents, not Chat
-            ("key", "enter"),
-            ("wait", 2.4),
             ("key", "down"), ("wait", 0.5),
             ("key", "down"), ("wait", 0.5),
             ("key", "down"), ("wait", 0.5),

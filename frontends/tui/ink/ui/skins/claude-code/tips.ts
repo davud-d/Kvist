@@ -1,18 +1,18 @@
 // The "Tip:" line under the spinner while a turn runs, as in Claude Code: a hint
 // about something Kvist can do, changing every few seconds. Each tip names a command the
-// person can type, with the names the core really has (`/style` offers "Chat" and
-// "Agents", each with the styles listed by main.get_style_options). When a command or
+// person can type, with the names the core really has (`/style` offers the styles
+// listed by main.get_style_options; one pick sets the agent and the chat voice). When a command or
 // style is renamed, re-read this list. Russian is picked by the language of the request.
 
 export const TIPS: readonly string[] = [
-  "Want a friendlier agent? /style → Agents → Friendly Developer",
-  "Want a senior's judgement without spelling it out in the prompt? /style → Agents → Senior-dev",
-  "Afraid of steps that can't be undone? /style → Agents → Paranoid looks before it acts",
-  "Building a prototype? /style → Agents → Fast-and-dirty says so up front",
-  "Want the cause, not just the fix? /style → Agents → Explainer",
-  "Want tidy structure over speed? /style → Agents → Architect or Minimalist",
-  "Chat too talkative? /style → Chat → No-Friendly keeps to the work",
-  "Chat too agreeable? /style → Chat → Honest doesn't just go along",
+  "Want a friendlier agent? /style → Friendly Developer",
+  "Want a senior's judgement without spelling it out in the prompt? /style → Senior-dev",
+  "Afraid of steps that can't be undone? /style → Paranoid looks before it acts",
+  "Building a prototype? /style → Fast-and-dirty says so up front",
+  "Want the cause, not just the fix? /style → Explainer",
+  "Want tidy structure over speed? /style → Architect or Minimalist",
+  "Chat too talkative? /style → Minimalist keeps to the work",
+  "Chat too agreeable? /style → Senior-dev doesn't just go along",
   "Make it think harder with /effort: high, xhigh or max; false turns reasoning off",
   "Only want a review? /role reader can't write files; auto lets Kvist choose",
   "Changed your mind? /changes lists what the agent changed, /revert undoes it when safe",
@@ -33,14 +33,14 @@ export const TIPS: readonly string[] = [
 ]
 
 export const TIPS_RU: readonly string[] = [
-  "Хочешь дружелюбного агента? /style → Agents → Friendly Developer",
-  "Нужен синьор, но не хочешь объяснять это в промпте? /style → Agents → Senior-dev",
-  "Боишься необратимых шагов? /style → Agents → Paranoid смотрит, прежде чем действовать",
-  "Пишешь прототип? /style → Agents → Fast-and-dirty честно скажет об этом сразу",
-  "Нужна причина, а не только правка? /style → Agents → Explainer",
-  "Важнее порядок, чем скорость? /style → Agents → Architect или Minimalist",
-  "Чат слишком болтлив? /style → Chat → No-Friendly держится дела",
-  "Чат поддакивает? /style → Chat → Honest не идёт на поводу",
+  "Хочешь дружелюбного агента? /style → Friendly Developer",
+  "Нужен синьор, но не хочешь объяснять это в промпте? /style → Senior-dev",
+  "Боишься необратимых шагов? /style → Paranoid смотрит, прежде чем действовать",
+  "Пишешь прототип? /style → Fast-and-dirty честно скажет об этом сразу",
+  "Нужна причина, а не только правка? /style → Explainer",
+  "Важнее порядок, чем скорость? /style → Architect или Minimalist",
+  "Чат слишком болтлив? /style → Minimalist держится дела",
+  "Чат поддакивает? /style → Senior-dev не идёт на поводу",
   "Пусть думает глубже: /effort high, xhigh или max; false отключает рассуждения",
   "Нужен только разбор? /role reader не пишет файлы; auto — пусть Kvist выберет сам",
   "Передумал? /changes покажет правки агента, /revert откатит их, если это безопасно",

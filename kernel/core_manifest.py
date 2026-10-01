@@ -154,17 +154,10 @@ def _api_settings() -> list[dict[str, Any]]:
     return result
 
 
-def _styles() -> dict[str, list[dict[str, str]]]:
+def _styles() -> list[dict[str, str]]:
     from kernel.user_config import get_style_options
 
-    result: dict[str, list[dict[str, str]]] = {}
-    for style_type in ("chat", "agents"):
-        options = get_style_options(style_type)
-        result[style_type] = [
-            {"value": name, "description": desc}
-            for name, desc in options.items()
-        ]
-    return result
+    return [{"value": name, "description": desc} for name, desc in get_style_options().items()]
 
 
 def _themes(

@@ -717,8 +717,7 @@ def test_config_options_cover_role_effort_and_verbose():
         role="coder",
         effort="high",
         verbose=False,
-        style_agents="senior-dev",
-        style_chat="concise",
+        style="Senior-dev",
         allow_boolean=True,
     )
 
@@ -727,8 +726,8 @@ def test_config_options_cover_role_effort_and_verbose():
     assert "effort" in option_ids
     assert "planning" not in option_ids
     assert "verbose" in option_ids
-    assert "style_agents" in option_ids
-    assert "style_chat" in option_ids
+    assert "style" in option_ids
+    assert "style_agents" not in option_ids and "style_chat" not in option_ids
     assert "advanced" in option_ids
 
     role_option = next(opt for opt in options if opt.id == "role")
@@ -745,8 +744,7 @@ def test_verbose_degrades_to_a_select_without_boolean_support():
         role="coder",
         effort="high",
         verbose=True,
-        style_agents="senior-dev",
-        style_chat="concise",
+        style="Senior-dev",
         allow_boolean=False,
     )
 
@@ -760,8 +758,7 @@ def test_unknown_role_or_effort_falls_back_to_a_real_choice():
         role="nonsense",
         effort="nonsense",
         verbose=False,
-        style_agents="senior-dev",
-        style_chat="concise",
+        style="Senior-dev",
         allow_boolean=True,
     )
 
@@ -824,8 +821,7 @@ def test_set_config_option_never_carries_credentials():
         role="auto",
         effort="medium",
         verbose=False,
-        style_agents="senior-dev",
-        style_chat="concise",
+        style="Senior-dev",
         allow_boolean=True,
     )
     dumped = json.dumps(
@@ -842,8 +838,7 @@ def test_advanced_menu_offers_terminal_dialogs():
         role="auto",
         effort="medium",
         verbose=False,
-        style_agents="senior-dev",
-        style_chat="concise",
+        style="Senior-dev",
         allow_boolean=True,
     )
 
