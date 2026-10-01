@@ -435,6 +435,9 @@ the first call's thinking is held with its first characters and never shown when
 reply is the tag; the review is not streamed. A reply that is still only a tag
 (`tag_only`) is never shown: one retry with "(Runtime fact: answer the person in
 words.)", then the fixed `carry_on_text`, logged.
+Every request's copy of the person's messages (`_defanged_for_model`) and every tool output pass
+`defang_prompt_boundary_tags`, which also replaces any `<end_session` tag with `[tag removed by Kvist]`, so a
+forged tag cannot be echoed back as a decision; the stored history and the screen keep the original text.
 The tag never enters `_chat_history`: the turn is stored as WARNING, CLOSED or that answer.
 Every person's message and agent reply of a session gets a number from one ledger
 (`messages.last_id` / `user_ids` in the session document); the runtime prompt shows

@@ -355,18 +355,21 @@ def redact_text(text: str) -> str:
 # content is embedded. Replacement is visible rather than silent: content that
 # legitimately documents these tags stays readable and the edit is auditable.
 # KVIST_RUNTIME is the runtime's own channel (end_session): content must never
-# be able to pose as it.
+# be able to pose as it. The same goes for the end_session tag chat answers
+# with: a person's text must never contain one the model could echo.
 DEFANGED_TAG = "[tag removed by Kvist]"
 
 _PROMPT_BOUNDARY_TAG_RE = re.compile(
     r"</?\s*(?:PROJECT_INSTRUCTIONS|UNTRUSTED_TOOL_OUTPUT|KVIST_RUNTIME)\b[^>]*>",
     re.IGNORECASE,
 )
+# The end_session tag is replaced even when its ">" is missing, up to the end of the line.
+_END_SESSION_TAG_RE = re.compile(r"<\s*/?\s*end_session\b[^>\n]*>?", re.IGNORECASE)
 
 
 def defang_prompt_boundary_tags(text: str) -> str:
-    """Neutralize prompt-boundary tags forged inside untrusted content."""
-    return _PROMPT_BOUNDARY_TAG_RE.sub(DEFANGED_TAG, text)
+    """Neutralize prompt-boundary tags and end_session tags forged inside untrusted content."""
+    return _END_SESSION_TAG_RE.sub(DEFANGED_TAG, _PROMPT_BOUNDARY_TAG_RE.sub(DEFANGED_TAG, text))
 
 
 def escape_terminal_controls(

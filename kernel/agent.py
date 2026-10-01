@@ -124,7 +124,7 @@ from kernel.executor import SafeExecutor
 from kernel.performance_logger import PerfLogger
 from kernel.protocol import Action, AgentCommand
 from kernel.reasoning_effort import merge_reasoning_kwargs
-from kernel.redaction import redact_text, redact_value
+from kernel.redaction import defang_prompt_boundary_tags, redact_text, redact_value
 from kernel.role_router import RoleRouteResult, resume_role, route_role_decision_with_llm, route_role
 from kernel.system_context import (
     current_os_context,
@@ -193,6 +193,17 @@ def _no_response_message(language: str | None, detail: str | None) -> str:
     if language == "ru":
         return f"Модель не ответила{suffix}. Попробуйте ещё раз или переключите провайдера через /provider."
     return f"The model did not return a response{suffix}. Try again, or use /provider to switch to a different provider."
+
+
+def _defanged_for_model(messages: list) -> list:
+    """The conversation as the model sees it: the people's messages with forged runtime tags defanged.
+
+    A copy: the stored history and the screen keep what the person wrote.
+    """
+    return [
+        {**message, "content": defang_prompt_boundary_tags(message["content"])} if message["role"] == "user" else message
+        for message in messages
+    ]
 
 
 def _end_session_command(args: dict[str, Any]) -> AgentCommand:
@@ -979,7 +990,7 @@ class LocalAgent:
         wire_history = self._chat_history[:-1] + [
             {"role": "user", "content": self._chat_turn_message(user_goal, offer_tag=use_tag)}
         ]
-        wire_history = self._trim_chat_messages_to_token_limit(wire_history)
+        wire_history = self._trim_chat_messages_to_token_limit(_defanged_for_model(wire_history))
 
         content = ""
         last_error: str | None = None
@@ -1190,7 +1201,8 @@ class LocalAgent:
         earlier = [message for message in self._chat_history[:-1] if message["role"] != "system"]
         message = self._chat_turn_message(self._state.user_goal, offer_tag=False)
         turn = {"role": "user", "content": f"{message}\n\n{_AFTER_TOOL_NOTE}"}
-        return self._trim_chat_messages_to_token_limit([{"role": "system", "content": system_prompt}, *earlier, turn])
+        history = [{"role": "system", "content": system_prompt}, *earlier, turn]
+        return self._trim_chat_messages_to_token_limit(_defanged_for_model(history))
 
     def _persist_end_session_log(self) -> None:
         """A chat turn has no run log of its own; one that used end_session gets one."""
