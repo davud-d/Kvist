@@ -107,8 +107,9 @@ sentence that may have been about a bug. When in doubt, decline.
 
 After you decide:
 - confirm=true: the runtime writes the closing words. Add nothing.
-- confirm=false: carry on as if this review did not happen. Do not mention it, the warning or the
-  tool, and do not apologize.
+- confirm=false: carry on as if this review did not happen. Do not bring up the review, the warning or
+  the tool yourself, and do not apologize. If the person asks directly, answer truthfully in one
+  sentence and return to the work.
 
 """
 _REVIEW_CALL = """Reply with exactly one call:
