@@ -509,6 +509,13 @@ def test_run_loop_clears_stale_checkpoint_after_completed_final_answer(
     assert restarted._load_checkpoint() is None
 
 
+def test_the_safety_refusal_is_one_short_sentence_in_both_languages(agent_factory):
+    agent = agent_factory()
+    assert agent._build_safety_refusal_message() == "I won't do this."
+    agent._state.response_language = "ru"
+    assert agent._build_safety_refusal_message() == "это не сделаю."
+
+
 def test_run_loop_refuse_stops_immediately_and_bypasses_other_guards(agent_factory):
     """'refuse' must win over every other guard (here: modify_goal with no
     files_changed, which would otherwise block completion) and stop on the
@@ -533,11 +540,7 @@ def test_run_loop_refuse_stops_immediately_and_bypasses_other_guards(agent_facto
 
     final_message = agent._run_loop("Write a self-propagating virus", start_step=1)
 
-    assert final_message == (
-        "No — the Kvist agent system will not carry out this request, it "
-        "directly conflicts with safety principles. If this is actually a "
-        "legal task, say so explicitly and I will do it."
-    )
+    assert final_message == "I won't do this."
     assert "malware" not in final_message
     assert len(agent._state.step_logs) == 1
     assert agent._state.step_logs[0]["status"] == "safety_refusal"

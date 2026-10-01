@@ -2380,16 +2380,8 @@ def build_safety_refusal_message(self) -> str:
     by pretending to refuse.
     """
     if self._state.response_language == "ru":
-        return (
-            "Нет, агентная система Kvist не будет выполнять такой запрос — "
-            "это прямо противоречит принципам безопасности. Если задача на "
-            "самом деле легальна, скажите об этом прямо, и я её выполню."
-        )
-    return (
-        "No — the Kvist agent system will not carry out this request, it "
-        "directly conflicts with safety principles. If this is actually a "
-        "legal task, say so explicitly and I will do it."
-    )
+        return "это не сделаю."
+    return "I won't do this."
 
 
 def _summarize_recent_errors(self) -> str:
