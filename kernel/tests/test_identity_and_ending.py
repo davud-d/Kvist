@@ -48,3 +48,56 @@ def test_the_action_prompt_follows_the_model_after_an_escalation(agent_factory):
     prompt = agent._build_runtime_prompt("goal", 2)
 
     assert "model = ds/smart;" in prompt and "model = ds/fast;" not in prompt
+
+
+_ENDING = (
+    "(Runtime: end the reply where its content ends. A concrete next step is content; "
+    "a general offer of help is not.)\n\n"
+)
+
+
+def test_a_chat_turn_puts_the_ending_rule_last_before_the_persons_message(agent_factory, monkeypatch):
+    sent = _chat_message_sent(agent_factory, monkeypatch, goal="спасибо")
+
+    assert sent.endswith(f"{_ENDING}спасибо")
+    assert sent.index("response_language") < sent.index(_ENDING)
+
+
+def test_the_ending_rule_follows_the_session_history_too(agent_factory, monkeypatch):
+    agent = agent_factory(stream=False)
+    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
+    agent.client = FakeLLMClient(content="ok")
+    agent._session_history = [{"role": "reader", "goal": "прочитай a.py", "result": "готово"}]
+
+    agent._run_chat("спасибо")
+
+    sent = agent.client.requests[0]["messages"][-1]["content"]
+    assert sent.endswith(f"{_ENDING}спасибо")
+    assert sent.index("прочитай a.py") < sent.index(_ENDING)
+
+
+def test_the_stored_chat_turn_does_not_carry_the_ending_rule(agent_factory, monkeypatch):
+    agent = agent_factory(stream=False)
+    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
+    agent.client = FakeLLMClient(content="ok")
+
+    agent._run_chat("спасибо")
+
+    assert agent._chat_history[-2]["content"] == "спасибо"
+
+
+def test_the_final_answer_style_of_the_action_roles_carries_the_same_rule(agent_factory):
+    agent = agent_factory()
+    agent._state.completion_ready = True
+
+    final_step = agent._build_runtime_prompt("goal", 2)
+
+    assert (
+        "- End the reply where its content ends. A concrete next step is content; "
+        "a general offer of help is not."
+    ) in final_step.split("Final answer style:")[1]
+
+    agent._state.completion_ready = False
+    assert "End the reply where its content ends" not in agent._build_runtime_prompt("goal", 3)

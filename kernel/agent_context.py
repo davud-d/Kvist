@@ -69,7 +69,9 @@ _FINAL_ANSWER_STYLE = (
     "\"все проверки пройдены\", \"готово\") when the user wanted content. A status "
     "phrase is only acceptable for a pure action task with no findings to report.\n"
     "- Match length to the request: a one-line ask gets one line; an analysis ask "
-    "gets the full findings. Do not pad."
+    "gets the full findings. Do not pad.\n"
+    "- End the reply where its content ends. A concrete next step is content; a "
+    "general offer of help is not."
 )
 
 # Build a regex that matches any known section header at the start of a line.

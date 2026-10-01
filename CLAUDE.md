@@ -489,6 +489,13 @@ still apply.
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
 the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
 - **chat** role takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol.
+  Each turn's message opens with runtime facts (`_chat_turn_message`): the response
+  language, `system_context.identity_fact` (you are Kvist; the language model behind you
+  is a separate thing, named with provider and model), the host, and — last before the
+  person's words — the rule that a reply ends where its content ends. The same identity
+  fact is the first line of the action roles' `System environment:` (rebuilt every step,
+  so it follows an escalation to the smart model) and the same rule is the last bullet of
+  their `Final answer style:`.
   **A streamed reply settles into the transcript as it arrives.** The screen's stream
   slot is height-capped (`_transient_height` leaves `_MIN_TRANSCRIPT_ROWS_WHILE_STREAMING`
   for the history), so a long answer used to scroll its own head out of that slot with

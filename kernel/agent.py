@@ -177,6 +177,12 @@ _CHAT_HISTORY_PREAMBLE = (
     "is not present in the content below, say so honestly and ask to read it "
     "rather than inventing it.)"
 )
+# The rule stands in the constitution too, but a model drops it there and holds
+# to it when it is the last thing before the person's message.
+_REPLY_END_NOTE = (
+    "(Runtime: end the reply where its content ends. A concrete next step is content; "
+    "a general offer of help is not.)\n\n"
+)
 # Added once when chat's answer after end_session came back as the tag again.
 _WORDS_NOTE = "(Runtime fact: answer the person in words.)"
 # Chat's answer after end_session is asked without the tool's block, and with it
@@ -1081,7 +1087,10 @@ class LocalAgent:
             if offer_tag
             else ""
         )
-        return language_note + model_note + host_note + message_note + self._chat_session_context() + user_goal
+        return (
+            language_note + model_note + host_note + message_note + self._chat_session_context()
+            + _REPLY_END_NOTE + user_goal
+        )
 
     def _chat_session_context(self) -> str:
         if not getattr(self, "_session_history", None):
