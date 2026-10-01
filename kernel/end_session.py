@@ -47,7 +47,14 @@ TAG_START = "<end_session"
 _FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"\s*/>')
 _TAG_ONLY_RE = re.compile(r"<end_session\b[^>]*>?")
 _CONFIRM_RE = re.compile(r'confirm\s*=\s*"(true|false)"')
-_REASON_OPEN_RE = re.compile(r"reason\s*=\s*[\"']")
+# A tag with a reason: reason runs to the first closing quote followed by "/>" and that ends the reply.
+_DECISION_TAIL_RE = re.compile(
+    r"""<end_session\b(?P<head>[^<]*?)\breason\s*=\s*(?P<quote>["'])"""
+    r"""(?P<reason>(?:(?!(?P=quote)\s*/>).)*)(?P=quote)\s*/>\Z""",
+    re.DOTALL,
+)
+_BARE_DECISION_RE = re.compile(r'<end_session\s+confirm\s*=\s*"(true|false)"\s*/>\Z')
+_FENCE_MARK_RE = re.compile(r"`{3,}[A-Za-z0-9_-]*")
 _ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _SCHEMA_LINE = (
@@ -341,30 +348,27 @@ def flag_tag(reply: str) -> int | None:
 
 
 def decision_tag(reply: str) -> tuple[bool, str] | None:
-    """confirm and reason of a chat reply that holds exactly one decision tag.
+    """confirm and reason of a chat review answer: its last tag, which must end the answer.
 
-    Text or a code fence around the tag is allowed: a model that reasons before
-    answering still made the decision. confirm is read apart from reason, so
-    quotes, newlines or a fence inside reason cannot hide it; reason is
-    everything between its opening quote and the tag's closing ``/>``. Two tags
-    are not a decision.
+    Reasoning before the tag is allowed, and so is a code fence around it, but
+    a tag followed by any text, or one quoted in the middle, decides nothing.
+    A tag quoted in the reasoning does not count while the answer's own tag
+    comes last. confirm is read apart from reason, so quotes inside reason
+    cannot hide it.
     """
-    if reply.count(TAG_START) != 1:
+    text = _FENCE_MARK_RE.sub("", reply).strip().strip("`").strip()
+    start = text.rfind(TAG_START)
+    if start < 0:
         return None
-    tag = reply[reply.index(TAG_START):]
-    closing = tag.rfind("/>")
-    if closing < 0:
+    tail = text[start:]
+    bare = _BARE_DECISION_RE.match(tail)
+    if bare:
+        return bare.group(1) == "true", ""
+    match = _DECISION_TAIL_RE.match(tail)
+    confirm = _CONFIRM_RE.search(match.group("head")) if match else None
+    if match is None or confirm is None:
         return None
-    tag = tag[:closing]
-    reason_open = _REASON_OPEN_RE.search(tag)
-    confirm = _CONFIRM_RE.search(tag[: reason_open.start()] if reason_open else tag)
-    if confirm is None:
-        return None
-    if reason_open is None:
-        return confirm.group(1) == "true", ""
-    body = tag[reason_open.end():].rstrip()
-    reason = body[:-1] if body.endswith(('"', "'")) else body
-    return confirm.group(1) == "true", reason.strip()
+    return confirm.group(1) == "true", match.group("reason").strip()
 
 
 def runtime_block(call_id: str, text: str) -> str:

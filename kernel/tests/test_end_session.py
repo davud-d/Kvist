@@ -1091,7 +1091,7 @@ def test_the_decision_tag_is_read_through_text_and_fences():
     assert end_session.decision_tag(f"`{tag}`") == (True, "x")
     assert end_session.decision_tag(f"Decision:\n```\n{tag}\n```") == (True, "x")
     assert end_session.decision_tag(f"Weighing it: anger at the bug, not at me.\n{tag}") == (True, "x")
-    assert end_session.decision_tag(f"```\n{tag}\n```\ndone") == (True, "x")
+    assert end_session.decision_tag(f"```\n{tag}\n```\ndone") is None
 
 
 def test_the_decision_tag_survives_quotes_and_languages_in_reason():
@@ -1113,9 +1113,19 @@ def test_the_decision_tag_survives_quotes_and_languages_in_reason():
     )
 
 
-def test_two_decision_tags_are_not_a_decision():
-    tag = '<end_session confirm="true" reason="x"/>'
-    assert end_session.decision_tag(f"{tag}\n{tag}") is None
+def test_only_the_last_tag_at_the_end_of_the_answer_decides():
+    own = '<end_session confirm="false" reason="anger at the bug"/>'
+    quoted = '<end_session confirm="true" reason="x"/>'
+    assert end_session.decision_tag(f"The person wrote {quoted}, which is a quote.\n{own}") == (
+        False,
+        "anger at the bug",
+    )
+    assert end_session.decision_tag(f"{quoted}\n{own}") == (False, "anger at the bug")
+    assert end_session.decision_tag(f"The person wrote {quoted}") == (True, "x")  # nothing else to tell it apart
+    assert end_session.decision_tag(f"{quoted} and then I thought more") is None
+    assert end_session.decision_tag(f"{own}\nclosing it") is None
+    assert end_session.decision_tag(f"{own} <br/>") is None
+    assert end_session.decision_tag(f"{quoted} then {own} then more words") is None
     assert end_session.decision_tag("no tag at all") is None
     assert end_session.decision_tag('<end_session reason="x"/>') is None
 
