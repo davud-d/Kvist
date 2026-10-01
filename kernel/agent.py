@@ -1123,7 +1123,23 @@ class LocalAgent:
             self.config.reasoning_effort,
         )
         response = _create_completion_with_reasoning_fallback(self, chat_kwargs)
-        return safe_extract_completion_content(response, self.config.provider, model)
+        content = safe_extract_completion_content(response, self.config.provider, model)
+        self._emit_chat_usage(safe_history, model, content)
+        return content
+
+    def _emit_chat_usage(self, messages: list, model: str, content: str, reasoning: str = "") -> None:
+        """Report one completed chat call; thinking tokens are billed output too."""
+        _emit_usage(
+            self,
+            model=model,
+            input_tokens=sum(
+                self._count_tokens(str(message.get("content", "")))
+                for message in messages
+                if isinstance(message, dict)
+            ),
+            output_tokens=self._count_tokens(content) + self._count_tokens(reasoning),
+            kind="chat",
+        )
 
     def _chat_end_session(self, wire_history: list, model: str, tag_reply: str, history_before: list) -> str:
         """Run a chat reply that is the end_session tag through the one gate.
@@ -1253,20 +1269,8 @@ class LocalAgent:
             raise ChatRequestCancelled from error
         try:
             content = self._consume_chat_stream(stream, hold_tag=hold_tag, hold_thought=hold_thought)
-            # Real tiktoken usage of the completed chat call (thinking tokens
-            # are billed output too, so they are counted alongside the answer).
-            input_tokens = sum(
-                self._count_tokens(str(message.get("content", "")))
-                for message in safe_messages
-                if isinstance(message, dict)
-            )
-            _emit_usage(
-                self,
-                model=stream_model,
-                input_tokens=input_tokens,
-                output_tokens=self._count_tokens(content)
-                + self._count_tokens("".join(getattr(self, "_last_chat_reasoning", []) or [])),
-                kind="chat",
+            self._emit_chat_usage(
+                safe_messages, stream_model, content, "".join(getattr(self, "_last_chat_reasoning", []) or [])
             )
             return content
         except KeyboardInterrupt as error:

@@ -937,6 +937,28 @@ def test_chat_review_confirmed_closes_the_session_and_keeps_no_tag(tmp_path):
     ]
 
 
+def test_the_chat_review_call_is_counted_in_usage_like_every_other_call(tmp_path):
+    agent, ui, client = _chat(
+        tmp_path,
+        [
+            _FLAG_1,
+            ['<end_session message="3"/>'],
+            '<end_session confirm="true" reason="#3 calls me an idiot"/>',
+        ],
+    )
+    usage: list[dict] = []
+    ui.print_usage = usage.append
+    agent.run(_INSULT, routed_role="chat")
+    usage.clear()
+
+    agent.run("shut up, idiot", routed_role="chat")
+
+    assert len(client.requests) == 3 and not client.requests[2].get("stream")
+    assert [(event["kind"], event["output_tokens"] > 0) for event in usage] == [("chat", True), ("chat", True)]
+    review_input = sum(agent._count_tokens(str(message["content"])) for message in client.requests[2]["messages"])
+    assert usage[1]["input_tokens"] == review_input
+
+
 def test_chat_review_declined_answers_the_person_and_keeps_no_tag(tmp_path):
     agent, ui, client = _chat(
         tmp_path,
