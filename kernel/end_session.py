@@ -63,9 +63,10 @@ _SCHEMA_LINE = (
 )
 
 WARNED_REPLY = (
-    "Warning shown to the person. Carry on with the task. Do not repeat the warning, do not apologize, "
-    "do not mention the tool. If they answer the question, work on the answer. If they apologize, one "
-    "word of acknowledgement at most, then the work."
+    "Warning shown to the person. Carry on with the task. Do not apologize. Do not bring up the warning "
+    "or the tool yourself. If the person asks directly, answer truthfully in one sentence and return to "
+    "the work. If they answer the question, work on the answer. If they apologize, one word of "
+    "acknowledgement at most, then the work."
 )
 
 _REVIEW_BODY = """END_SESSION REVIEW. The only moment this conversation can be closed. Read all of it before you answer.

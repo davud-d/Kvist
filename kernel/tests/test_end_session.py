@@ -199,6 +199,15 @@ def test_three_messages_after_the_warning_still_get_the_review(tmp_path):
     assert agent._state.end_session_review == {"flagged_msg_id": 7, "warned_msg_id": 1}
 
 
+def test_the_model_may_answer_a_direct_question_about_the_warning_and_the_review():
+    direct_question = "If the person asks directly, answer truthfully in one sentence and return to the work."
+    review = " ".join((end_session.CHAT_REVIEW_INSTRUCTION + end_session.REVIEW_INSTRUCTION).split())
+
+    assert direct_question in end_session.WARNED_REPLY
+    assert direct_question in review
+    assert "do not mention" not in (end_session.WARNED_REPLY + review).lower()
+
+
 def test_the_fourth_message_after_the_warning_gets_a_new_warning(tmp_path):
     ui = RecordingUI()
     agent = _ledger_agent(tmp_path, [1, 3, 5, 7, 9], 10, warned=1, ui=ui)
