@@ -187,6 +187,14 @@ _AFTER_TOOL_NOTE = (
 )
 
 
+def _no_response_message(language: str | None, detail: str | None) -> str:
+    """The chat turn's answer when no model returned one; ``detail`` is redacted error text."""
+    suffix = f": {detail}" if detail else ""
+    if language == "ru":
+        return f"Модель не ответила{suffix}. Попробуйте ещё раз или переключите провайдера через /provider."
+    return f"The model did not return a response{suffix}. Try again, or use /provider to switch to a different provider."
+
+
 def _end_session_command(args: dict[str, Any]) -> AgentCommand:
     return AgentCommand(plan_step="inspect", action=Action(type="end_session", args=args))
 
@@ -1026,11 +1034,7 @@ class LocalAgent:
         if not content:
             # All models exhausted — show friendly error, don't crash REPL
             self._chat_history = history_before
-            error_detail = f": {last_error}" if last_error else ""
-            fallback_msg = (
-                f"The model did not return a response{error_detail}. "
-                "Try again, or use /provider to switch to a different provider."
-            )
+            fallback_msg = _no_response_message(self._state.response_language, last_error)
             self.console.print(Text(fallback_msg, style="yellow"))
             return fallback_msg
 
@@ -1152,10 +1156,7 @@ class LocalAgent:
         except Exception as error:
             # The gate has already acted, so the turn is answered, not retried.
             detail = redact_text(str(error).strip() or type(error).__name__)
-            message = (
-                f"The model did not return a response: {detail}. "
-                "Try again, or use /provider to switch to a different provider."
-            )
+            message = _no_response_message(self._state.response_language, detail)
             self.console.print(Text(message, style="yellow"))
             return message
         finally:

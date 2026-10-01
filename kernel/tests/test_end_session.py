@@ -1168,3 +1168,14 @@ def test_the_chat_tag_parsers_read_only_a_whole_reply():
         "text",
         "text",
     ]
+
+
+def test_the_no_response_text_follows_the_response_language():
+    from kernel.agent import _no_response_message
+
+    assert _no_response_message("en", "boom") == (
+        "The model did not return a response: boom. Try again, or use /provider to switch to a different provider."
+    )
+    assert _no_response_message("ru", None) == (
+        "Модель не ответила. Попробуйте ещё раз или переключите провайдера через /provider."
+    )
