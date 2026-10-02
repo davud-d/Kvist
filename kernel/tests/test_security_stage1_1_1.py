@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 
-from kernel.tests.conftest import requires_posix
+from kernel.tests.conftest import SYSTEM_BASH, SYSTEM_SH, requires_posix
 
 from kernel import terminal as terminal_module
 from kernel.sandbox import resolve_bubblewrap_path, SandboxMode
@@ -213,6 +213,7 @@ def test_secret_symlink_target_outside_workspace_not_readable(tmp_path, monkeypa
     assert SECRET not in result.stderr
 
 
+@requires_posix
 def test_symlink_target_mutation_during_confirmation_invalidates_approval(tmp_path, monkeypatch):
     """A DANGEROUS command earns HITL; mutating a secret symlink's target
     inside the approval callback must invalidate the bound context so the
@@ -350,7 +351,7 @@ def _venv_bin(tmp_path: Path) -> Path:
 
 def test_venv_cat_symlink_to_bash_denied_before_project_allow(tmp_path, monkeypatch):
     vb = _venv_bin(tmp_path)
-    (vb / "cat").symlink_to("/usr/bin/bash")
+    (vb / "cat").symlink_to(SYSTEM_BASH)
     _write_policy(tmp_path, ["cat *"])
     approvals = []
     ex = TerminalExecutor(tmp_path, timeout=5)
@@ -368,7 +369,7 @@ def test_venv_cat_symlink_to_bash_denied_before_project_allow(tmp_path, monkeypa
 
 def test_venv_python_symlink_to_bash_denied_before_project_allow(tmp_path, monkeypatch):
     vb = _venv_bin(tmp_path)
-    (vb / "python").symlink_to("/usr/bin/bash")
+    (vb / "python").symlink_to(SYSTEM_BASH)
     (tmp_path / "script.py").write_text("echo BYPASS > marker\n", encoding="utf-8")
     _write_policy(tmp_path, ["python *"])
     approvals = []
@@ -388,7 +389,7 @@ def test_venv_python_symlink_to_bash_denied_before_project_allow(tmp_path, monke
 def test_venv_python3_symlink_to_sh_denied(tmp_path, monkeypatch):
     vb = tmp_path / "venv" / "bin"
     vb.mkdir(parents=True)
-    (vb / "python3").symlink_to("/usr/bin/sh")
+    (vb / "python3").symlink_to(SYSTEM_SH)
     (tmp_path / "script.py").write_text("echo BYPASS > marker\n", encoding="utf-8")
     _write_policy(tmp_path, ["python3 *"])
     ex = TerminalExecutor(tmp_path, timeout=5)
@@ -408,7 +409,7 @@ def test_workspace_path_cat_alias_to_bash_requires_approval_not_silent_allow(tmp
     (.venv/bin prepended) onto a Bash alias must not silently execute: the
     'cat *' allow rule alone must not authorize it without approval."""
     vb = _venv_bin(tmp_path)
-    (vb / "cat").symlink_to("/usr/bin/bash")
+    (vb / "cat").symlink_to(SYSTEM_BASH)
     _write_policy(tmp_path, ["cat *"])
     ex = TerminalExecutor(tmp_path, timeout=5)
     monkeypatch.setattr(
@@ -424,7 +425,7 @@ def test_workspace_path_cat_alias_to_bash_requires_approval_not_silent_allow(tmp
 @requires_posix
 def test_executable_binding_records_requested_and_effective_identity(tmp_path):
     vb = _venv_bin(tmp_path)
-    (vb / "cat").symlink_to("/usr/bin/bash")
+    (vb / "cat").symlink_to(SYSTEM_BASH)
     ex = TerminalExecutor(tmp_path, timeout=5)
 
     binding = ex._resolve_executable_binding("cat", tmp_path, ex._build_env(None))
@@ -433,7 +434,7 @@ def test_executable_binding_records_requested_and_effective_identity(tmp_path):
     assert binding.lookup_path == str(vb / "cat")
     assert binding.lookup_in_workspace is True
     assert binding.lookup_is_symlink is True
-    assert binding.resolved_path == str(Path("/usr/bin/bash").resolve())
+    assert binding.resolved_path == str(Path(SYSTEM_BASH).resolve())
     assert binding.requested_identity == "cat"
     assert binding.effective_identity == "bash"
     assert binding.identity_matches is False
@@ -480,7 +481,7 @@ def test_executable_binding_records_verified_venv_launcher(tmp_path, trusted_pyt
 
 def test_executable_symlink_chain_ending_in_bash_is_denied(tmp_path, monkeypatch):
     vb = _venv_bin(tmp_path)
-    (vb / "link-two").symlink_to("/usr/bin/bash")
+    (vb / "link-two").symlink_to(SYSTEM_BASH)
     (vb / "python").symlink_to("link-two")
     (tmp_path / "script.py").write_text("echo BYPASS > marker\n", encoding="utf-8")
     _write_policy(tmp_path, ["python *"])
@@ -509,7 +510,7 @@ def test_confirmation_callback_cannot_mutate_symlink_to_bash(tmp_path, monkeypat
     def mutate(command, reason):
         approvals.append((command, reason))
         (vb / "python").unlink()
-        (vb / "python").symlink_to("/usr/bin/bash")
+        (vb / "python").symlink_to(SYSTEM_BASH)
         return True
 
     ex = TerminalExecutor(tmp_path, timeout=5)
@@ -528,7 +529,7 @@ def test_fake_pyvenv_cfg_does_not_authorize_non_python_target(tmp_path, monkeypa
     """A pyvenv.cfg alone (no genuine trusted Python target) must not launder
     an arbitrary interpreter through the venv exception."""
     vb = _venv_bin(tmp_path)
-    (vb / "python").symlink_to("/usr/bin/bash")
+    (vb / "python").symlink_to(SYSTEM_BASH)
     (tmp_path / ".venv" / "pyvenv.cfg").write_text("home = /usr\n", encoding="utf-8")
     (tmp_path / "script.py").write_text("echo BYPASS > marker\n", encoding="utf-8")
     _write_policy(tmp_path, ["python *"])
@@ -619,7 +620,7 @@ def test_launcher_chain_mutation_invalidates_approval(tmp_path, monkeypatch, tru
     def mutate(command, reason):
         approvals.append((command, reason))
         (vb / "python").unlink()
-        (vb / "python").symlink_to("/usr/bin/bash")
+        (vb / "python").symlink_to(SYSTEM_BASH)
         return True
 
     ex = TerminalExecutor(tmp_path, timeout=5)

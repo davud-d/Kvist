@@ -964,6 +964,7 @@ def test_venv_workspace_mode_permits_trusted_root_interpreter(
     assert "prefix ok" in result.stdout
 
 
+@requires_posix
 def test_venv_workspace_mode_permits_external_interpreter_matching_pyvenv_cfg(
     tmp_path, monkeypatch, external_python_interpreter
 ):

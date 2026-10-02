@@ -7,7 +7,7 @@ import pytest
 
 from kernel.agent import LocalAgent
 from kernel.change_journal import load_baseline, revert_workspace
-from kernel.tests.conftest import make_command
+from kernel.tests.conftest import last_json_line, make_command
 
 pytestmark = pytest.mark.slow
 
@@ -21,7 +21,7 @@ def _write(agent, path, content):
 def test_failed_second_write_keeps_first_write_revertable(agent_factory, monkeypatch):
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "f.txt").write_text("ORIGINAL\n", encoding="utf-8")
+    (ws / "f.txt").write_text("ORIGINAL\n", encoding="utf-8", newline="")
 
     assert _write(agent, "f.txt", "V1\n")["ok"] is True
     assert (ws / "f.txt").read_text(encoding="utf-8") == "V1\n"
@@ -53,7 +53,7 @@ def test_failed_second_write_keeps_first_write_revertable(agent_factory, monkeyp
 def test_revert_does_not_resurrect_user_deleted_file(agent_factory):
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "keep.txt").write_text("BEFORE\n", encoding="utf-8")
+    (ws / "keep.txt").write_text("BEFORE\n", encoding="utf-8", newline="")
 
     assert _write(agent, "keep.txt", "AGENT\n")["ok"] is True
     (ws / "keep.txt").unlink()  # user deletes the file after the agent edited it
@@ -71,7 +71,7 @@ def test_interrupted_revert_restore_leaves_no_partial_file(tmp_path, monkeypatch
     from kernel import change_journal
     from kernel.change_journal import content_digest, record_baseline, promote_baseline
 
-    (tmp_path / "big.txt").write_text("ORIGINAL-BASELINE-CONTENT\n" * 50, encoding="utf-8")
+    (tmp_path / "big.txt").write_text("ORIGINAL-BASELINE-CONTENT\n" * 50, encoding="utf-8", newline="")
     baseline_text = (tmp_path / "big.txt").read_text(encoding="utf-8")
     agent_text = "AGENT-CONTENT\n" * 50
     record_baseline(
@@ -81,18 +81,20 @@ def test_interrupted_revert_restore_leaves_no_partial_file(tmp_path, monkeypatch
         content=baseline_text,
         pending_digest=content_digest(agent_text),
     )
-    (tmp_path / "big.txt").write_text(agent_text, encoding="utf-8")
+    (tmp_path / "big.txt").write_text(agent_text, encoding="utf-8", newline="")
     promote_baseline(tmp_path, "big.txt", content_digest(agent_text))
 
-    # Restoration is atomic via fd-relative os.rename; inject a crash there.
-    real_rename = _os.rename
+    # Restoration is atomic: fd-relative os.rename where directory fds exist,
+    # os.replace otherwise (Windows). Inject a crash into the one it uses.
+    swap = "rename" if change_journal._HAS_DIR_FD else "replace"
+    real_swap = getattr(_os, swap)
 
-    def crashing_rename(src, dst, *a, **k):
-        if str(dst) == "big.txt":
+    def crashing_swap(src, dst, *a, **k):
+        if _os.path.basename(str(dst)) == "big.txt":
             raise OSError("simulated crash during atomic rename")
-        return real_rename(src, dst, *a, **k)
+        return real_swap(src, dst, *a, **k)
 
-    monkeypatch.setattr(change_journal.os, "rename", crashing_rename)
+    monkeypatch.setattr(change_journal.os, swap, crashing_swap)
     with pytest.raises(OSError):
         change_journal.revert_workspace(tmp_path)
 
@@ -102,7 +104,7 @@ def test_interrupted_revert_restore_leaves_no_partial_file(tmp_path, monkeypatch
     assert not list(tmp_path.glob("*.revert.tmp"))
 
     # Re-running after the interruption completes cleanly (idempotent recovery).
-    monkeypatch.setattr(change_journal.os, "rename", real_rename)
+    monkeypatch.setattr(change_journal.os, swap, real_swap)
     result = change_journal.revert_workspace(tmp_path)
     assert [(r.path, r.action) for r in result] == [("big.txt", "restored")]
     assert (tmp_path / "big.txt").read_text(encoding="utf-8") == baseline_text
@@ -115,7 +117,7 @@ def test_changes_cannot_disclose_files_outside_the_workspace(tmp_path):
     from kernel.change_journal import build_diff_report, journal_path, revert_workspace
 
     secret = tmp_path.parent / "outside-secret.txt"
-    secret.write_text("TOP-SECRET-MARKER-9F3\n", encoding="utf-8")
+    secret.write_text("TOP-SECRET-MARKER-9F3\n", encoding="utf-8", newline="")
 
     journal = journal_path(tmp_path)
     journal.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +165,7 @@ def test_reconcile_agent_committed_advances_with_ownership(agent_factory):
     ws = agent.executor.workspace
     record_baseline(ws, relative_path="x.txt", existed=False, content=None,
                     pending_digest=content_digest("hello\n"))
-    (ws / "x.txt").write_text("hello\n", encoding="utf-8")
+    (ws / "x.txt").write_text("hello\n", encoding="utf-8", newline="")
     promote_baseline(ws, "x.txt", content_digest("hello\n"))  # executor promoted in-process
 
     _seed_pending(agent, path="x.txt", pre_digest=None,
@@ -185,7 +187,7 @@ def test_reconcile_desired_present_advances_without_ownership(agent_factory):
     # ran (crash between replace and promote) -> ownership unproven.
     record_baseline(ws, relative_path="x.txt", existed=False, content=None,
                     pending_digest=content_digest("hello\n"))
-    (ws / "x.txt").write_text("hello\n", encoding="utf-8")
+    (ws / "x.txt").write_text("hello\n", encoding="utf-8", newline="")
 
     _seed_pending(agent, path="x.txt", pre_digest=None,
                   intended_digest=content_digest("hello\n"), step=3)
@@ -201,7 +203,7 @@ def test_reconcile_not_executed_retries_same_step(agent_factory):
     from kernel.change_journal import content_digest, record_baseline
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "y.txt").write_text("BEFORE\n", encoding="utf-8")
+    (ws / "y.txt").write_text("BEFORE\n", encoding="utf-8", newline="")
     record_baseline(ws, relative_path="y.txt", existed=True, content="BEFORE\n",
                     pending_digest=content_digest("AFTER\n"))
     # The mutation never reached disk: file still holds the pre-content.
@@ -215,7 +217,7 @@ def test_reconcile_ambiguous_fails_safely(agent_factory):
     from kernel.change_journal import content_digest
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "z.txt").write_text("SOMETHING-ELSE\n", encoding="utf-8")
+    (ws / "z.txt").write_text("SOMETHING-ELSE\n", encoding="utf-8", newline="")
     _seed_pending(agent, path="z.txt", pre_digest=content_digest("BEFORE\n"),
                   intended_digest=content_digest("AFTER\n"), step=1)
     agent._load_checkpoint()
@@ -226,7 +228,7 @@ def test_resume_aborts_safely_on_ambiguous_pending(agent_factory):
     from kernel.change_journal import content_digest
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "z.txt").write_text("MYSTERY\n", encoding="utf-8")
+    (ws / "z.txt").write_text("MYSTERY\n", encoding="utf-8", newline="")
     _seed_pending(agent, path="z.txt", pre_digest=content_digest("BEFORE\n"),
                   intended_digest=content_digest("AFTER\n"), step=1)
 
@@ -333,7 +335,7 @@ def test_crash_after_append_does_not_duplicate_on_resume(tmp_path):
         cwd=root, env=env, capture_output=True, text=True, timeout=40,
     )
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
-    payload = json.loads(resumed.stdout.strip().splitlines()[-1])
+    payload = last_json_line(resumed)
     assert payload["session"] == "work"
     # The append must NOT have been replayed: exactly one "hello".
     assert payload["content"] == "hello\n"

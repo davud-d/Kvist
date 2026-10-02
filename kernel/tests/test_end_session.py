@@ -641,6 +641,12 @@ def test_the_classic_repl_puts_the_notice_in_place_of_the_input_until_a_new_sess
     monkeypatch.setattr(main.sys, "argv", ["kvist", "--workspace", str(tmp_path)])
     monkeypatch.setattr(main.banner, "banner_available", lambda *args: True)
     monkeypatch.setattr(main, "InteractiveScreen", _FakeScreen)
+    # A real PromptSession needs an attached console, which Windows CI has not.
+    monkeypatch.setattr(
+        main,
+        "_get_session",
+        lambda: SimpleNamespace(history=None, default_buffer=SimpleNamespace(history=None)),
+    )
     monkeypatch.setattr(_FakeScreen, "inputs", ["/new", "/bye"])
     monkeypatch.setattr(_FakeScreen, "closed", [])
 

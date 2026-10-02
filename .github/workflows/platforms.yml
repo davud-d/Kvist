@@ -19,19 +19,31 @@ env:
 
 jobs:
   python:
-    name: Python tests on ${{ matrix.os }}
+    name: Python tests on ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
+          # A clean server image: no Bubblewrap, so the default sandbox mode
+          # refuses arbitrary-code commands.
+          - label: ubuntu-22.04 (bare server)
+            os: ubuntu-22.04
             python-version: "3.11"
-          - os: macos-latest
+            bubblewrap: false
+          - label: ubuntu-22.04 (with Bubblewrap)
+            os: ubuntu-22.04
+            python-version: "3.11"
+            bubblewrap: true
+          - label: macos-latest
+            os: macos-latest
             python-version: "3.12"
-          - os: windows-latest
+            bubblewrap: false
+          - label: windows-latest
+            os: windows-latest
             python-version: "3.12"
+            bubblewrap: false
 
     steps:
       - name: Check out repository
@@ -48,10 +60,8 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
-      # A clean Ubuntu has no Bubblewrap; without it the default sandbox mode
-      # refuses arbitrary-code commands, so the sandbox tests would only skip.
       - name: Install Bubblewrap
-        if: runner.os == 'Linux'
+        if: matrix.bubblewrap
         run: sudo apt-get install -y --no-install-recommends bubblewrap
 
       - name: Install development dependencies

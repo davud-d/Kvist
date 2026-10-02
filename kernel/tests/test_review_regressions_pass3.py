@@ -10,7 +10,7 @@ import pytest
 
 
 from kernel.agent import LocalAgent
-from kernel.tests.conftest import requires_posix
+from kernel.tests.conftest import last_json_line, requires_posix
 
 pytestmark = pytest.mark.slow
 
@@ -21,12 +21,12 @@ def test_user_authored_content_matching_intent_is_not_owned_by_revert(agent_fact
 
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "f.txt").write_text("A\n", encoding="utf-8")
+    (ws / "f.txt").write_text("A\n", encoding="utf-8", newline="")
     # Agent recorded intent to write B (write-ahead) but died BEFORE writing.
     record_baseline(ws, relative_path="f.txt", existed=True, content="A\n",
                     pending_digest=content_digest("B\n"))
     # The USER then writes exactly B.
-    (ws / "f.txt").write_text("B\n", encoding="utf-8")
+    (ws / "f.txt").write_text("B\n", encoding="utf-8", newline="")
 
     # Resume must not replay, and must NOT claim ownership of B.
     agent._save_checkpoint("do it", 1, pending_action={
@@ -53,7 +53,7 @@ def test_changes_and_revert_reject_hardlink_to_outside_inode(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
     secret = tmp_path / "outside-secret.txt"
-    secret.write_text("ULTRA_SECRET_XYZ\n", encoding="utf-8")
+    secret.write_text("ULTRA_SECRET_XYZ\n", encoding="utf-8", newline="")
     link = workspace / "f.txt"
     os.link(secret, link)  # hardlink inside the workspace to an outside inode
 
@@ -92,7 +92,7 @@ def test_reconcile_never_promotes_a_mismatched_journal_digest(agent_factory):
 
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "g.txt").write_text("B\n", encoding="utf-8")  # current == intended B
+    (ws / "g.txt").write_text("B\n", encoding="utf-8", newline="")  # current == intended B
     # Journal pending belongs to a DIFFERENT digest C.
     record_baseline(ws, relative_path="g.txt", existed=True, content="A\n",
                     pending_digest=content_digest("C\n"))
@@ -189,7 +189,7 @@ def test_crashed_run_shell_is_not_replayed_on_resume(tmp_path):
 
     resumed = _run(_SIDE_EFFECT_RESUME, tmp_path)
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
-    payload = json.loads(resumed.stdout.strip().splitlines()[-1])
+    payload = last_json_line(resumed)
     # The side effect ran exactly once; resume refused to replay it.
     assert payload["counter"] == "1"
     assert "resume" in payload["result"].lower() or "возобновл" in payload["result"].lower()
@@ -245,7 +245,7 @@ def _run2(ws, first_action):
 def test_new_run_durably_supersedes_old_before_its_first_step(tmp_path, first_action):
     crashed = _run2(tmp_path, first_action)
     assert crashed.returncode == 0, crashed.stdout + crashed.stderr
-    payload = json.loads(crashed.stdout.strip().splitlines()[-1])
+    payload = last_json_line(crashed)
     # NEW was durably activated before its first step; OLD is gone but NEW is NOT
     # lost — the durable truth is the NEW run, recoverable by restarting it.
     assert payload["goal"] is not None
@@ -273,7 +273,7 @@ def test_new_run_durably_supersedes_old_before_its_first_step(tmp_path, first_ac
     resumed = subprocess.run([sys.executable, "-c", resume_script, str(tmp_path)],
                              cwd=Path(__file__).parents[2], env=env,
                              capture_output=True, text=True, timeout=40)
-    payload = json.loads(resumed.stdout.strip().splitlines()[-1])
+    payload = last_json_line(resumed)
     assert payload["result_none"] is False  # NEW resumed, not "nothing"
     assert payload["resumed_goal"].startswith("NEW TASK")  # OLD never returned
 
@@ -291,7 +291,7 @@ def test_recovered_write_requires_reverification_before_completion(agent_factory
 
     record_baseline(ws, relative_path="feature.py", existed=False, content=None,
                     pending_digest=content_digest("code\n"))
-    (ws / "feature.py").write_text("code\n", encoding="utf-8")
+    (ws / "feature.py").write_text("code\n", encoding="utf-8", newline="")
     agent._save_checkpoint("build feature", 1, pending_action={
         "step": 1, "action_kind": "file", "path": "feature.py",
         "pre_digest": None, "intended_digest": content_digest("code\n"),
@@ -313,11 +313,11 @@ def test_direct_revert_after_crash_before_promote_is_conservative(agent_factory)
     from kernel.change_journal import content_digest, record_baseline, revert_workspace
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "v.txt").write_text("V1\n", encoding="utf-8")
+    (ws / "v.txt").write_text("V1\n", encoding="utf-8", newline="")
     # Simulate: agent committed V2 to disk, crashed BEFORE promote.
     record_baseline(ws, relative_path="v.txt", existed=True, content="V1\n",
                     pending_digest=content_digest("V2\n"))
-    (ws / "v.txt").write_text("V2\n", encoding="utf-8")  # replace succeeded, promote did NOT
+    (ws / "v.txt").write_text("V2\n", encoding="utf-8", newline="")  # replace succeeded, promote did NOT
 
     # Direct /revert (no /resume first): provenance unproven -> conservative skip,
     # deterministic, never destroys V2.

@@ -7,7 +7,7 @@ import threading
 
 import pytest
 
-from kernel.tests.conftest import requires_posix
+from kernel.tests.conftest import SYSTEM_CAT, requires_posix
 from kernel.permission_policy import (
     PermissionPolicy,
     append_allow_rule,
@@ -232,7 +232,7 @@ def test_deny_rule_applies_to_canonical_path_qualified_executable(tmp_path, monk
     executor = TerminalExecutor(tmp_path)
     requested = deny_approval(monkeypatch)
     with pytest.raises(HardDenyError, match="deny rule"):
-        executor.run(["/usr/bin/cat", "fixture"])
+        executor.run([SYSTEM_CAT, "fixture"])
     assert requested == []
 
 
@@ -241,7 +241,7 @@ def test_ask_rule_applies_to_canonical_path_qualified_executable(tmp_path, monke
     write_policy(tmp_path, ask=["cat *"])
     executor = TerminalExecutor(tmp_path)
     requested = deny_approval(monkeypatch)
-    result = executor.run(["/usr/bin/cat", "fixture"])
+    result = executor.run([SYSTEM_CAT, "fixture"])
     assert result.denied is True
     assert requested and "ask rule" in requested[0][1]
 

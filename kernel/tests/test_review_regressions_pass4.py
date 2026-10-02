@@ -22,7 +22,7 @@ def test_write_with_failed_promotion_is_not_reported_as_success(agent_factory, m
 
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "f.txt").write_text("A\n", encoding="utf-8")
+    (ws / "f.txt").write_text("A\n", encoding="utf-8", newline="")
 
     # Force compare-and-promote to fail (as if the journal pending belonged to a
     # different transaction). The filesystem write still lands.
@@ -52,7 +52,7 @@ def test_promotion_is_bound_to_action_identity(tmp_path):
     # Action A records a pending write of B.
     record_baseline(tmp_path, relative_path="f.txt", existed=True, content="A\n",
                     pending_digest=digest_b, run_id="run-1", action_id="action-A")
-    (tmp_path / "f.txt").write_text("B\n", encoding="utf-8")
+    (tmp_path / "f.txt").write_text("B\n", encoding="utf-8", newline="")
 
     # Action B (same run, different action) also intends B and tries to promote.
     ok = promote_baseline(tmp_path, "f.txt", digest_b,
@@ -83,12 +83,12 @@ def test_corrupt_journal_blocks_mutation(agent_factory, action, args):
 
     agent = agent_factory()
     ws = agent.executor.workspace
-    (ws / "f.txt").write_text("ORIG\n", encoding="utf-8")
+    (ws / "f.txt").write_text("ORIG\n", encoding="utf-8", newline="")
 
     j = journal_path(ws)
     j.parent.mkdir(parents=True, exist_ok=True)
-    j.write_text("{corrupt", encoding="utf-8")
-    j.with_suffix(".json.bak").write_text("{corrupt", encoding="utf-8")
+    j.write_text("{corrupt", encoding="utf-8", newline="")
+    j.with_suffix(".json.bak").write_text("{corrupt", encoding="utf-8", newline="")
 
     feedback = agent._execute_command(make_command(action, args))
     # Write-ahead recovery could not be recorded, so the mutation is refused and
@@ -102,8 +102,8 @@ def test_corrupt_journal_is_reported_not_treated_as_empty(tmp_path):
 
     j = journal_path(tmp_path)
     j.parent.mkdir(parents=True, exist_ok=True)
-    j.write_text("{corrupt", encoding="utf-8")
-    j.with_suffix(".json.bak").write_text("{corrupt", encoding="utf-8")
+    j.write_text("{corrupt", encoding="utf-8", newline="")
+    j.with_suffix(".json.bak").write_text("{corrupt", encoding="utf-8", newline="")
 
     report = build_diff_report(tmp_path)
     assert "corrupt" in report.lower()
@@ -126,7 +126,7 @@ def test_committed_reconciliation_matches_normal_success_state(agent_factory):
     # --- Normal uninterrupted successful write ---
     normal = agent_factory()
     normal._state.create_goal = True
-    (normal.executor.workspace / "feature.py").write_text("", encoding="utf-8")
+    (normal.executor.workspace / "feature.py").write_text("", encoding="utf-8", newline="")
     cmd = make_command("write_file", {"path": "feature.py", "content": "code\n"},
                        plan_step="edit implementation")
     normal.executor.begin_action_transaction("run-x", "act-1")
@@ -143,7 +143,7 @@ def test_committed_reconciliation_matches_normal_success_state(agent_factory):
     ws = recov.executor.workspace
     record_baseline(ws, relative_path="feature.py", existed=False, content=None,
                     pending_digest=content_digest("code\n"), run_id="run-x", action_id="act-1")
-    (ws / "feature.py").write_text("code\n", encoding="utf-8")
+    (ws / "feature.py").write_text("code\n", encoding="utf-8", newline="")
     promote_baseline(ws, "feature.py", content_digest("code\n"), run_id="run-x", action_id="act-1")
     recov._save_checkpoint("build feature", 1, pending_action={
         "step": 1, "run_id": "run-x", "action_id": "act-1", "action_kind": "file",
@@ -190,10 +190,10 @@ def test_changes_does_not_follow_parent_swapped_to_symlink(tmp_path):
 
     ws = tmp_path / "ws"
     (ws / "safe").mkdir(parents=True)
-    (ws / "safe" / "file.txt").write_text("REPLACEMENT\n", encoding="utf-8")
+    (ws / "safe" / "file.txt").write_text("REPLACEMENT\n", encoding="utf-8", newline="")
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "file.txt").write_text("OUTSIDE_SECRET_MARKER\n", encoding="utf-8")
+    (outside / "file.txt").write_text("OUTSIDE_SECRET_MARKER\n", encoding="utf-8", newline="")
 
     j = journal_path(ws)
     j.parent.mkdir(parents=True, exist_ok=True)
@@ -235,14 +235,14 @@ def test_internal_hardlinks_allowed_external_rejected(tmp_path):
     ws = tmp_path / "ws"
     ws.mkdir()
     # Two hardlinks fully inside the workspace -> allowed (executor policy).
-    (ws / "a.txt").write_text("SHARED\n", encoding="utf-8")
+    (ws / "a.txt").write_text("SHARED\n", encoding="utf-8", newline="")
     os.link(ws / "a.txt", ws / "b.txt")
     with _SafeChild(ws, "a.txt") as child:
         assert child.read_bytes() == b"SHARED\n"
 
     # A link whose inode also has an alias OUTSIDE the workspace -> rejected.
     outside = tmp_path / "outside.txt"
-    outside.write_text("EXTERNAL\n", encoding="utf-8")
+    outside.write_text("EXTERNAL\n", encoding="utf-8", newline="")
     os.link(outside, ws / "ext.txt")
     with _SafeChild(ws, "ext.txt") as child:
         with pytest.raises(JournalPathBindingError):

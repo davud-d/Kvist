@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +19,32 @@ from kernel.terminal import (
     _controlled_child_path,
     _is_trusted_system_executable,
 )
+
+
+def last_json_line(completed) -> dict:
+    """The JSON object a child script printed last; a failure shows all of its output."""
+    lines = completed.stdout.strip().splitlines()
+    try:
+        return json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError) as error:
+        raise AssertionError(
+            f"no JSON on the last stdout line.\n--- stdout:\n{completed.stdout}"
+            f"\n--- stderr:\n{completed.stderr}"
+        ) from error
+
+
+def _system_binary(name: str) -> str:
+    """Path of a system binary: /usr/bin on Linux, /bin on macOS (no /usr/bin/bash there)."""
+    for directory in ("/usr/bin", "/bin"):
+        candidate = os.path.join(directory, name)
+        if os.path.exists(candidate):
+            return candidate
+    return os.path.join("/usr/bin", name)
+
+
+SYSTEM_BASH = _system_binary("bash")
+SYSTEM_SH = _system_binary("sh")
+SYSTEM_CAT = _system_binary("cat")
 
 requires_posix = pytest.mark.skipif(
     os.name != "posix",
@@ -220,6 +248,16 @@ def trusted_python_path(tmp_path):
     if found is None:
         pytest.skip("no trusted system Python executable is available")
     _name, resolved = found
+    # macOS /usr/bin/python3 is an Xcode shim that looks its target up by the
+    # name it is started under, so a venv symlink named "python" cannot start.
+    probe = tmp_path / "python-launcher-probe"
+    probe.symlink_to(resolved)
+    started = subprocess.run(
+        [str(probe), "-c", "pass"], capture_output=True, timeout=30, check=False
+    )
+    probe.unlink()
+    if started.returncode != 0:
+        pytest.skip("the trusted system Python cannot start through a differently named symlink")
     return resolved
 
 

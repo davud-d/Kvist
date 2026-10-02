@@ -157,7 +157,13 @@ class Wire:
         )
         await self.writer.drain()
         while True:
-            line = await asyncio.wait_for(self.reader.readline(), timeout=15)
+            try:
+                line = await asyncio.wait_for(self.reader.readline(), timeout=15)
+            except asyncio.TimeoutError as error:
+                raise AssertionError(
+                    f"no reply to {method} in 15s; messages received meanwhile: "
+                    f"{json.dumps(self.notifications, default=str)[:4000]}"
+                ) from error
             assert line, "agent closed the connection"
             message = json.loads(line)
             if message.get("id") == request_id:

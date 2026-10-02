@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -579,7 +580,7 @@ def test_child_environment_does_not_inherit_parent_secrets(
     assert observed["secrets"] == {name: None for name in secret_names}
     assert observed["path"] is True
     assert observed["lang"] == "C.UTF-8"
-    assert Path(observed["home"]).parent == Path("/tmp")
+    assert Path(observed["home"]).parent == Path(tempfile.gettempdir())
     assert Path(observed["home"]).name.startswith("kvist-home-")
     assert observed["tmpdir"] == "/tmp"
     assert observed["git_no_lazy_fetch"] == "1"
@@ -653,7 +654,7 @@ def test_child_home_is_private_empty_and_bound_across_approval(tmp_path, monkeyp
     executor = TerminalExecutor(tmp_path)
     initial_env = executor._build_env(None)
     home = Path(initial_env["HOME"])
-    assert home.parent == Path("/tmp")
+    assert home.parent == Path(tempfile.gettempdir())
     assert home.name.startswith("kvist-home-")
     assert home.stat().st_mode & 0o077 == 0
     assert list(home.iterdir()) == []
