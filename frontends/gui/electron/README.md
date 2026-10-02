@@ -46,8 +46,13 @@ npm run dist
 ```
 
 The build runs PyInstaller and embeds the resulting Kvist binary into the
-Electron application. Build separately on Linux and Windows for native
-packages.
+Electron application. Build separately on Linux, Windows and macOS for native
+packages. `build:core` uses the repository's `.venv` when it exists and the
+Python on `PATH` otherwise (`KVIST_PYTHON` overrides both).
+
+On macOS (best-effort) the build produces a `.dmg`, a `.zip` and the unpacked
+`dist/mac-arm64/Kvist.app` (`dist/mac/` on Intel). The app is not notarized;
+`scripts/installer/install_gui.py` copies it into `~/Applications`.
 
 `package.json` sets `"workspaces": []` so electron-builder treats this
 directory as its own workspace root. Without it, electron-builder walks up the

@@ -15,7 +15,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
-    "build:core": "../../../.venv/bin/python -m PyInstaller ../../../kvist.spec --noconfirm --distpath resources/bin --workpath .build/core",
+    "build:core": "node scripts/build-core.js",
     "dist:app": "electron-builder",
     "dist": "npm run build:core && npm run dist:app"
   },
@@ -55,6 +55,14 @@
       "target": [
         "AppImage",
         "deb"
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "target": [
+        "dmg",
+        "zip"
       ]
     },
     "win": {

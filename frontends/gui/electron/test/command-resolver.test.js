@@ -52,3 +52,17 @@ test("reports a broken packaged installation when neither runtime exists", () =>
     /Bundled Kvist executable not found/,
   )
 })
+
+test("finds the bundled binary inside a macOS app bundle", () => {
+  const bundled = "/Applications/Kvist.app/Contents/Resources/bin/kvist"
+  const command = resolveKvistCommand({
+    appIsPackaged: true,
+    resourcesPath: "/Applications/Kvist.app/Contents/Resources",
+    projectRoot: "/Applications/Kvist.app/Contents/Resources/app.asar",
+    platform: "darwin",
+    env: {},
+    existsSync: (value) => value === bundled,
+  })
+
+  assert.deepEqual(command, { command: bundled, prefixArgs: [] })
+})
