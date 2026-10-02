@@ -128,3 +128,50 @@ jobs:
           whl="$(ls dist/*.whl)"
           echo "=== prompts/themes/assets/dist-ui entries in $whl ==="
           unzip -l "$whl" | grep -E "prompts|themes|assets|dist-ui"
+
+  release-installer-smoke:
+    name: Release installer smoke test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      # The scripts only copy files, so stand-in assets exercise every path
+      # the real release takes, including the JetBrains ZIP layout.
+      - name: Run install.sh against stand-in assets
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          assets="$RUNNER_TEMP/assets"
+          mkdir -p "$assets" "$RUNNER_TEMP/zip/kvist-intellij/lib" "$HOME/.local/share/JetBrains/PyCharm2025.2"
+          printf '#!/bin/sh\necho kvist-core "$@"\n' > "$assets/kvist-linux-x64"
+          echo stand-in > "$RUNNER_TEMP/zip/kvist-intellij/lib/kvist.jar"
+          (cd "$RUNNER_TEMP/zip" && zip -qr "$assets/kvist-jetbrains.zip" kvist-intellij)
+          echo stand-in > "$assets/kvist-vscode.vsix"
+          bash scripts/release/install.sh --from "$assets"
+          test "$("$HOME/.local/bin/kvist")" = "kvist-core --workspace $PWD"
+          test -f "$HOME/.local/share/JetBrains/PyCharm2025.2/kvist-intellij/lib/kvist.jar"
+
+      - name: Run install.ps1 against stand-in assets
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $assets = Join-Path $env:RUNNER_TEMP "assets"
+          $zipRoot = Join-Path $env:RUNNER_TEMP "zip"
+          New-Item -ItemType Directory -Force -Path $assets, "$zipRoot\kvist-intellij\lib", "$env:APPDATA\JetBrains\PyCharm2025.2" | Out-Null
+          Set-Content "$assets\kvist-windows-x64.exe" "stand-in"
+          Set-Content "$zipRoot\kvist-intellij\lib\kvist.jar" "stand-in"
+          Compress-Archive -Path "$zipRoot\kvist-intellij" -DestinationPath "$assets\kvist-jetbrains.zip"
+          Set-Content "$assets\kvist-vscode.vsix" "stand-in"
+          .\scripts\release\install.ps1 -From $assets
+          if (-not (Test-Path "$env:LOCALAPPDATA\Kvist\kvist-core.exe")) { throw "kvist-core.exe was not installed" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Kvist\bin\kvist.cmd")) { throw "kvist.cmd was not installed" }
+          if (-not (Test-Path "$env:APPDATA\JetBrains\PyCharm2025.2\plugins\kvist-intellij\lib\kvist.jar")) { throw "the JetBrains plugin was not installed" }

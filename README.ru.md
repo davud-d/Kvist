@@ -121,6 +121,30 @@ CLI проверяется на Linux и Windows. macOS остаётся экс�
 FreeFlow LLM (beta). Дополнительно через `/provider` можно добавить совместимый
 с OpenAI или Anthropic custom endpoint.
 
+## Установка из релиза
+
+Каждый push в `main` пересобирает скользящий
+[релиз](https://github.com/davud-d/Kvist/releases/tag/latest-plugin-build).
+Один скрипт кладёт команду `kvist`, плагин JetBrains (в каждую найденную IDE
+JetBrains) и расширение VS Code (VS Code, Insiders, VSCodium) куда нужно. Python
+не требуется:
+
+```bash
+# Linux
+curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash
+```
+
+```powershell
+# Windows
+irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.ps1 | iex
+```
+
+Ассеты можно скачать и по отдельности: `kvist-linux-x64`,
+`kvist-windows-x64.exe`, `kvist-jetbrains.zip`, `kvist-vscode.vsix`. Чтобы
+установить из файлов, уже лежащих на диске, запустите `bash install.sh --from <dir>`
+или `.\install.ps1 -From <dir>`. Zed регистрируется отдельно:
+`scripts/installer/install_zed.py`.
+
 ## Установка из исходников
 
 Из корня репозитория:

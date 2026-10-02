@@ -14,6 +14,8 @@ Windows (and, best-effort, macOS).
 | `jsonc_settings.py` | Surgical editor for one member of a JSONC document. Pure text surgery; `install_zed.py` is its only caller. |
 | `_common.py` | Shared helpers: the quiet log + spinner every installer reports through, safe ZIP extraction, JetBrains IDE discovery. |
 
+The release ships its own dependency-free twins of these installers, `scripts/release/install.sh` and `install.ps1`: they download the release assets and install the CLI binary, the JetBrains plugin and the VS Code extension (no Zed, no GUI). `plugin-release.yml` attaches them to the rolling release; CI smoke-tests both.
+
 ```bash
 python scripts/installer/install.py                      # pick with the arrow keys
 python scripts/installer/install.py --all                # everything, no questions

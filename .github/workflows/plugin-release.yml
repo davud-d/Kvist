@@ -98,9 +98,13 @@ jobs:
       - name: Prepare binaries
         run: |
           set -euo pipefail
-          mkdir -p frontends/ide/jetbrains/bin/linux
+          mkdir -p release frontends/ide/jetbrains/bin/linux frontends/ide/vscode/bin/linux frontends/ide/vscode/bin/win
+          cp dist/kvist release/kvist-linux-x64
+          cp frontends/ide/jetbrains/bin/win/kvist.exe release/kvist-windows-x64.exe
+          cp frontends/ide/jetbrains/bin/win/kvist.exe frontends/ide/vscode/bin/win/kvist.exe
           mv dist/kvist frontends/ide/jetbrains/bin/linux/kvist.bin
-          chmod +x frontends/ide/jetbrains/bin/linux/kvist.bin
+          cp frontends/ide/jetbrains/bin/linux/kvist.bin frontends/ide/vscode/bin/linux/kvist.bin
+          chmod +x release/kvist-linux-x64 frontends/ide/jetbrains/bin/linux/kvist.bin frontends/ide/vscode/bin/linux/kvist.bin
 
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
@@ -114,14 +118,62 @@ jobs:
           chmod +x gradlew
           ./gradlew clean buildPlugin
 
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontends/ide/vscode/package-lock.json
+
+      - name: Build VS Code extension (one VSIX with both binaries)
+        working-directory: frontends/ide/vscode
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npx --no-install vsce package --no-dependencies --skip-license --out "../../../release/kvist-vscode.vsix"
+
+      - name: Collect release assets
+        run: |
+          set -euo pipefail
+          cp frontends/ide/jetbrains/build/distributions/*.zip release/kvist-jetbrains.zip
+          cp scripts/release/install.sh scripts/release/install.ps1 release/
+          chmod +x release/install.sh
+          ls -l release
+
       - name: Publish/update rolling release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: latest-plugin-build
-          name: "Latest plugin build (rolling, from main)"
+          name: "Latest build (rolling, from main)"
           body: |
             Automatically rebuilt from `${{ github.sha }}` on every push to `main`.
-            Install the attached `.zip` directly in the JetBrains IDE plugin manager.
+
+            **Install everything in one step** (the `kvist` command, the JetBrains plugin and the VS Code extension, into every IDE found):
+
+            ```sh
+            # Linux
+            curl -fsSL https://github.com/${{ github.repository }}/releases/download/latest-plugin-build/install.sh | bash
+            ```
+
+            ```powershell
+            # Windows
+            irm https://github.com/${{ github.repository }}/releases/download/latest-plugin-build/install.ps1 | iex
+            ```
+
+            | Asset | What it is |
+            | --- | --- |
+            | `install.sh`, `install.ps1` | Download the assets below and put them where they belong. |
+            | `kvist-linux-x64`, `kvist-windows-x64.exe` | The standalone agent binary. |
+            | `kvist-jetbrains.zip` | JetBrains plugin (also installable from the IDE plugin manager). |
+            | `kvist-vscode.vsix` | VS Code / Insiders / VSCodium extension. |
           make_latest: true
           prerelease: false
-          files: frontends/ide/jetbrains/build/distributions/*.zip
+          fail_on_unmatched_files: true
+          files: |
+            release/kvist-linux-x64
+            release/kvist-windows-x64.exe
+            release/kvist-jetbrains.zip
+            release/kvist-vscode.vsix
+            release/install.sh
+            release/install.ps1

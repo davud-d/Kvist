@@ -121,6 +121,30 @@ Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
 FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
 Anthropic-compatible endpoints from `/provider`.
 
+## Install from a release
+
+Every push to `main` rebuilds the rolling
+[release](https://github.com/davud-d/Kvist/releases/tag/latest-plugin-build).
+One script puts the `kvist` command, the JetBrains plugin (into every JetBrains
+IDE found) and the VS Code extension (VS Code, Insiders, VSCodium) where they
+belong. It needs no Python:
+
+```bash
+# Linux
+curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash
+```
+
+```powershell
+# Windows
+irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.ps1 | iex
+```
+
+The assets are also downloadable one by one: `kvist-linux-x64`,
+`kvist-windows-x64.exe`, `kvist-jetbrains.zip`, `kvist-vscode.vsix`. To install
+from files already on disk, run `bash install.sh --from <dir>` or
+`.\install.ps1 -From <dir>`. Zed is registered separately with
+`scripts/installer/install_zed.py`.
+
 ## Install from source
 
 From the repository root:
