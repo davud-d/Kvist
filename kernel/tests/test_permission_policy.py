@@ -246,6 +246,24 @@ def test_ask_rule_applies_to_canonical_path_qualified_executable(tmp_path, monke
     assert requested and "ask rule" in requested[0][1]
 
 
+def test_unrequested_run_is_denied_without_a_dialog(tmp_path, monkeypatch):
+    write_policy(tmp_path, ask=["git status"])
+    executor = TerminalExecutor(tmp_path)
+    requested = deny_approval(monkeypatch)
+    result = executor.run(["git", "status"], ask_user=False)
+    assert result.denied is True
+    assert requested == []
+
+
+def test_git_context_summary_never_asks_the_person(tmp_path, monkeypatch):
+    from kernel.executor import SafeExecutor
+
+    write_policy(tmp_path, ask=["git status *"])
+    requested = deny_approval(monkeypatch)
+    assert SafeExecutor(tmp_path).git_context_summary() is None
+    assert requested == []
+
+
 def test_ask_rule_forces_hitl_for_safe_command(tmp_path, monkeypatch):
     write_policy(tmp_path, ask=["git status"])
     executor = TerminalExecutor(tmp_path)

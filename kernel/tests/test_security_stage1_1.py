@@ -31,7 +31,12 @@ from kernel.process_tree import (
     cgroup_supervision_available,
     run_supervised,
 )
-from kernel.sandbox import resolve_bubblewrap_path, wrap_command_for_sandbox, SandboxMode
+from kernel.sandbox import (
+    resolve_bubblewrap_path,
+    validated_external_tool_path,
+    wrap_command_for_sandbox,
+    SandboxMode,
+)
 from kernel.secret_paths import (
     UnsafeSecretPathError,
     enumerate_secret_targets,
@@ -54,6 +59,24 @@ requires_bwrap = pytest.mark.skipif(BWRAP is None, reason="bubblewrap not instal
 requires_cgroup = pytest.mark.skipif(
     not cgroup_supervision_available(), reason="cgroup v2 scope unavailable"
 )
+
+
+def _interpreter_root_not_bindable(interpreter: Path) -> bool:
+    """Bubblewrap binds an interpreter outside the system roots by its install
+    root and refuses a group- or world-writable one (CI tool caches are)."""
+    if _is_trusted_system_executable(interpreter, interpreter):
+        return False
+    return validated_external_tool_path(interpreter.parent.parent) is None
+
+
+def _warn_interpreter_root_refused(run) -> None:
+    warnings.warn(
+        "the interpreter's install directory is writable by its group or others, "
+        "so Bubblewrap refuses to bind it: the interpreter run was not exercised",
+        stacklevel=2,
+    )
+    with pytest.raises(HardDenyError, match="unsafe external tool path"):
+        run()
 
 
 def _write_policy(workspace: Path, allow) -> None:
@@ -1033,6 +1056,9 @@ def test_venv_non_workspace_mode_runs_external_interpreter_read_only(
         with pytest.raises(HardDenyError, match="cannot control detached descendants"):
             ex.run([".venv/bin/python", "hi.py"])
         return
+    if ex.sandbox_mode is SandboxMode.BUBBLEWRAP and _interpreter_root_not_bindable(external):
+        _warn_interpreter_root_refused(lambda: ex.run([".venv/bin/python", "hi.py"]))
+        return
 
     result = ex.run([".venv/bin/python", "hi.py"])
 
@@ -1102,6 +1128,9 @@ def test_real_venv_runs_and_imports_local_fixture(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     ex = _bwrap_executor(tmp_path, monkeypatch)
+    if _interpreter_root_not_bindable(Path(os.path.realpath(sys.executable))):
+        _warn_interpreter_root_refused(lambda: ex.run([".venv/bin/python", "check.py"]))
+        return
     result = ex.run([".venv/bin/python", "check.py"])
     assert "imported-ok" in result.stdout
     assert str(venv_dir) in result.stdout  # sys.prefix identifies the venv
