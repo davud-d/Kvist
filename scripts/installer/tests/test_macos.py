@@ -70,18 +70,20 @@ def test_nothing_is_run_to_drop_a_quarantine_mark_off_a_mac(monkeypatch, tmp_pat
 @pytest.mark.parametrize(
     ("shell", "macos", "expected"),
     [
-        ("/bin/zsh", True, "echo 'export PATH=\"/home/me/.local/bin:$PATH\"' >> ~/.zshrc"),
-        ("/bin/bash", True, "echo 'export PATH=\"/home/me/.local/bin:$PATH\"' >> ~/.bash_profile"),
-        ("/bin/bash", False, "echo 'export PATH=\"/home/me/.local/bin:$PATH\"' >> ~/.bashrc"),
-        ("/opt/homebrew/bin/fish", True, "fish_add_path /home/me/.local/bin"),
-        ("", True, 'export PATH="/home/me/.local/bin:$PATH"'),
+        ("/bin/zsh", True, "echo 'export PATH=\"{bin}:$PATH\"' >> ~/.zshrc"),
+        ("/bin/bash", True, "echo 'export PATH=\"{bin}:$PATH\"' >> ~/.bash_profile"),
+        ("/bin/bash", False, "echo 'export PATH=\"{bin}:$PATH\"' >> ~/.bashrc"),
+        ("/opt/homebrew/bin/fish", True, "fish_add_path {bin}"),
+        ("", True, 'export PATH="{bin}:$PATH"'),
     ],
 )
 def test_the_path_hint_fits_the_login_shell(monkeypatch, shell, macos, expected):
     monkeypatch.setenv("SHELL", shell)
     monkeypatch.setattr(install, "IS_MACOS", macos)
 
-    assert install.path_hint(Path("/home/me/.local/bin")) == expected
+    bin_dir = Path("/home/me/.local/bin")
+
+    assert install.path_hint(bin_dir) == expected.format(bin=bin_dir)
 
 
 # ------------------------------------------------------------------ install_vscode
@@ -95,7 +97,7 @@ def test_vscode_is_looked_for_inside_the_app_bundles_on_a_mac(monkeypatch, tmp_p
     commands = vscode._candidate_commands()
     bundle = Path("Contents") / "Resources" / "app" / "bin"
 
-    assert ("VS Code", f"/Applications/Visual Studio Code.app/{bundle}/code") in commands
+    assert ("VS Code", str(Path("/Applications/Visual Studio Code.app") / bundle / "code")) in commands
     assert ("VSCodium", str(tmp_path / "Applications" / "VSCodium.app" / bundle / "codium")) in commands
     # `code` on PATH is still tried first.
     assert commands[0] == ("VS Code", "code")
