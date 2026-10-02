@@ -129,3 +129,6 @@ KVIST-CHAT.md
 # Pentest scratch (local automation browser profile and screenshots)
 .playwright-mcp/
 clickjacking-test.png
+
+# freebuff
+.freebuff
