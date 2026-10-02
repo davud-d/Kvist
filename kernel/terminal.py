@@ -160,6 +160,7 @@ class TerminalExecutor(
         self._authorization_lock = threading.Lock()
         self._authorized_context_ids: set[int] = set()
         self._run_lock = threading.RLock()
+        self._ask_user = True
         self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
         self._child_home = Path()
         self._rotate_child_home()
@@ -220,10 +221,16 @@ class TerminalExecutor(
         env_overrides: dict[str, str] | None = None,
         timeout: float | None = None,
         role: str = "coder",
+        ask_user: bool = True,
     ) -> TerminalResult:
-        """Execute one serialized run with a fresh, private child HOME."""
+        """Execute one serialized run with a fresh, private child HOME.
+
+        With ``ask_user=False`` a command that needs approval is denied without
+        a dialog, for runs the person did not request (prompt-context lookups).
+        """
         with self._run_lock:
             self._rotate_child_home()
+            self._ask_user = ask_user
             return self._run_once(command, cwd, env_overrides, timeout, role)
 
     def _run_once(
@@ -393,7 +400,7 @@ class TerminalExecutor(
         to persist a project allow-rule. Never offered for hard validation
         failures: those are non-interactive hard denials.
         """
-        if not self._request_user_approval(command, reason):
+        if not (self._ask_user and self._request_user_approval(command, reason)):
             return TerminalResult(
                 command=command,
                 returncode=-1,

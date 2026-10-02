@@ -1794,7 +1794,7 @@ class SafeExecutor:
         action, so this pays the same cost/policy as a real action rather than
         opening a second, unsandboxed way to shell out to git.
         """
-        result = self._git_status()
+        result = self._git_status(ask_user=False)
         if not result.data.get("git_available"):
             return None
         lines = [line for line in result.data.get("stdout", "").splitlines() if line.strip()]
@@ -1805,9 +1805,11 @@ class SafeExecutor:
         status = "clean" if dirty == 0 else f"{dirty} uncommitted"
         return f"{branch} ({status})"
 
-    def _git_status(self) -> ExecutionResult:
+    def _git_status(self, ask_user: bool = True) -> ExecutionResult:
         try:
-            result = self._terminal.run(["git", "status", "--short", "--branch"])
+            result = self._terminal.run(
+                ["git", "status", "--short", "--branch"], ask_user=ask_user
+            )
         except TerminalError as exc:
             return ExecutionResult(
                 ok=True,
