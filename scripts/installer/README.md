@@ -9,12 +9,12 @@ Windows (and, best-effort, macOS).
 | `install_cli.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). Formerly at the repo root, then `install.py`. |
 | `install_jetbrains.py` | Finds every installed JetBrains IDE and unpacks the **Kvist Launcher** plugin into each one's `plugins/` folder. |
 | `install_vscode.py` | Finds VS Code, VS Code Insiders and VSCodium command-line launchers and installs the Kvist `.vsix` into each editor. |
-| `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux. |
+| `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux, `Kvist.app` copied into `~/Applications` on macOS. |
 | `install_zed.py` | Registers the installed `kvist-core` as a Zed ACP external agent: one `agent_servers` member in Zed's settings file, comments and all else left alone. |
 | `jsonc_settings.py` | Surgical editor for one member of a JSONC document. Pure text surgery; `install_zed.py` is its only caller. |
 | `_common.py` | Shared helpers: the quiet log + spinner every installer reports through, safe ZIP extraction, JetBrains IDE discovery. |
 
-The release ships its own dependency-free twins of these installers, `scripts/release/install.sh` and `install.ps1`: they download the release assets and install the CLI binary, the JetBrains plugin and the VS Code extension (no Zed, no GUI). `plugin-release.yml` attaches them to the rolling release; CI smoke-tests both.
+The release ships its own dependency-free twins of these installers, `scripts/release/install.sh` and `install.ps1`: they download the release assets and install the CLI binary, the JetBrains plugin and the VS Code extension (no Zed, no GUI). `install.sh` runs on Linux and, best-effort, macOS (the system bash 3.2 is enough); on a Mac it picks `kvist-macos-arm64` or `kvist-macos-x64` by CPU. `plugin-release.yml` attaches them to the rolling release; CI smoke-tests both.
 
 ```bash
 python scripts/installer/install.py                      # pick with the arrow keys

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Install the Kvist Launcher plugin into every JetBrains IDE on this machine.
 
-Works on Linux and Windows (and macOS). It finds each installed IDE by its
+Works on Linux and Windows, and best-effort on macOS. It finds each installed IDE by its
 per-user data directory, then unpacks the plugin ZIP into that IDE's
 `plugins/` folder. Restart the IDE afterwards to pick up the plugin.
 

@@ -9,12 +9,12 @@
 | `install_cli.py` | Ставит команду `kvist` и автономный бинарник (собирает его через PyInstaller, если в `dist/` его нет). Раньше лежал в корне репозитория, потом в `install.py`. |
 | `install_jetbrains.py` | Находит все установленные IDE JetBrains и распаковывает плагин **Kvist Launcher** в папку `plugins/` каждой из них. |
 | `install_vscode.py` | Находит команды запуска VS Code, VS Code Insiders и VSCodium и ставит `.vsix` Kvist в каждый редактор. |
-| `install_gui.py` | Ставит Electron-GUI как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux. |
+| `install_gui.py` | Ставит Electron-GUI как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux, копия `Kvist.app` в `~/Applications` в macOS. |
 | `install_zed.py` | Регистрирует установленный `kvist-core` как внешний ACP-агент Zed: одна запись `agent_servers` в файле настроек Zed, комментарии и всё остальное не трогаются. |
 | `jsonc_settings.py` | Точечный редактор одной записи JSONC-документа. Чистая работа с текстом; единственный вызывающий — `install_zed.py`. |
 | `_common.py` | Общие помощники: тихий лог и спиннер, через которые отчитываются установщики, безопасная распаковка ZIP, поиск IDE JetBrains. |
 
-У релиза есть собственные близнецы этих установщиков без зависимостей — `scripts/release/install.sh` и `install.ps1`: они скачивают ассеты релиза и ставят бинарник CLI, плагин JetBrains и расширение VS Code (без Zed и GUI). `plugin-release.yml` прикладывает их к скользящему релизу, CI проверяет оба на подставных ассетах.
+У релиза есть собственные близнецы этих установщиков без зависимостей — `scripts/release/install.sh` и `install.ps1`: они скачивают ассеты релиза и ставят бинарник CLI, плагин JetBrains и расширение VS Code (без Zed и GUI). `install.sh` работает в Linux и, по мере возможности, в macOS (хватает системного bash 3.2); на Mac он выбирает `kvist-macos-arm64` или `kvist-macos-x64` по процессору. `plugin-release.yml` прикладывает их к скользящему релизу, CI проверяет оба на подставных ассетах.
 
 ```bash
 python scripts/installer/install.py                      # выбрать стрелками

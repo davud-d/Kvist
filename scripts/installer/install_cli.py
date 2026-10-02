@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Installs the kvist agent binary as a `kvist` command, on Linux or Windows.
+"""Installs the kvist agent binary as a `kvist` command, on Linux, Windows or macOS (best-effort).
 
 If a prebuilt binary isn't found, builds one first: creates/reuses a venv
 next to this script, installs requirements.txt + pyinstaller into it, and
@@ -76,6 +76,7 @@ STEPS = {
 }
 
 IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SPEC_FILE = PROJECT_ROOT / "kvist.spec"
@@ -389,6 +390,17 @@ def make_executable(path: Path) -> None:
     path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def clear_quarantine(path: Path) -> None:
+    """Drop the quarantine mark a browser puts on a download.
+
+    Gatekeeper refuses to run a quarantined binary that is not notarized. A binary
+    built here or fetched with curl carries no mark, so a failure only means there
+    was nothing to drop.
+    """
+    if IS_MACOS:
+        probe_command(["xattr", "-d", "com.apple.quarantine", str(path)], timeout=30)
+
+
 def install(binary: Path, lib_dir: Path, bin_dir: Path, status: Status | None = None) -> Path:
     if not binary.is_file():
         raise SystemExit(f"error: binary not found: {binary}")
@@ -407,6 +419,7 @@ def install(binary: Path, lib_dir: Path, bin_dir: Path, status: Status | None = 
         show_step(status, STEPS["copy_binary"])
         shutil.copy2(binary, core_tmp)
         make_executable(core_tmp)
+        clear_quarantine(core_tmp)
         template = WINDOWS_WRAPPER if IS_WINDOWS else UNIX_WRAPPER
         core_literal = str(core_path) if IS_WINDOWS else shlex.quote(str(core_path))
         wrapper_text = template.format(core_path=core_literal)
@@ -460,6 +473,18 @@ def path_contains(bin_dir: Path) -> bool:
     entries = os.environ.get("PATH", "").split(os.pathsep)
     target = os.path.normcase(os.path.normpath(str(bin_dir)))
     return any(os.path.normcase(os.path.normpath(e)) == target for e in entries if e)
+
+
+def path_hint(bin_dir: Path) -> str:
+    """The command that puts bin_dir on PATH for the user's login shell."""
+    shell = Path(os.environ.get("SHELL", "")).name
+    if shell == "fish":
+        return f"fish_add_path {bin_dir}"
+    export = f'export PATH="{bin_dir}:$PATH"'
+    # Terminal.app starts login shells, which read .bash_profile and not .bashrc.
+    rc_files = {"zsh": "~/.zshrc", "bash": "~/.bash_profile" if IS_MACOS else "~/.bashrc"}
+    rc_file = rc_files.get(shell)
+    return f"echo {shlex.quote(export)} >> {rc_file}" if rc_file else export
 
 
 def add_to_user_path_windows(bin_dir: Path) -> bool:
@@ -662,8 +687,9 @@ def main() -> None:
             )
         else:
             print(
-                f"\nWarning: {args.bin_dir} is not on your PATH. Add it, e.g. in fish:\n"
-                f"  fish_add_path {args.bin_dir}"
+                f"\nWarning: {args.bin_dir} is not on your PATH. Add it, e.g.:\n"
+                f"  {path_hint(args.bin_dir)}\n"
+                "  (then open a new terminal)"
             )
     else:
         print("\nDone. Run `kvist` in any directory to start the agent there.")

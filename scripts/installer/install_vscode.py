@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Install the Kvist VS Code extension into every VS Code-compatible editor found.
 
-Works on Linux and Windows. It finds command-line launchers for VS Code,
+Works on Linux and Windows, and best-effort on macOS. It finds command-line launchers for VS Code,
 VS Code Insiders and VSCodium, then installs the Kvist `.vsix` with the
 editor's own `--install-extension` command. Restart or reload the editor
 afterwards if it was already open.
@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from _common import (
+    IS_MACOS,
     IS_WINDOWS,
     REPO_ROOT,
     InstallCommandError,
@@ -77,12 +78,33 @@ STEPS = {
 }
 
 
+def _macos_app_commands() -> list[tuple[str, str]]:
+    """The command-line launchers inside the app bundles.
+
+    `code` is on PATH only after the user ran "Install 'code' command in PATH"
+    from the editor, so the bundles are looked at directly as well.
+    """
+    bundles = [
+        ("VS Code", "Visual Studio Code", "code"),
+        ("VS Code Insiders", "Visual Studio Code - Insiders", "code-insiders"),
+        ("VSCodium", "VSCodium", "codium"),
+    ]
+    roots = [Path("/Applications"), Path.home() / "Applications"]
+    return [
+        (label, str(root / f"{app}.app" / "Contents" / "Resources" / "app" / "bin" / cli))
+        for root in roots
+        for label, app, cli in bundles
+    ]
+
+
 def _candidate_commands() -> list[tuple[str, str]]:
     names = [
         ("VS Code", "code.cmd" if IS_WINDOWS else "code"),
         ("VS Code Insiders", "code-insiders.cmd" if IS_WINDOWS else "code-insiders"),
         ("VSCodium", "codium.cmd" if IS_WINDOWS else "codium"),
     ]
+    if IS_MACOS:
+        return [*names, *_macos_app_commands()]
     if not IS_WINDOWS:
         return names
 

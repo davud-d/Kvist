@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Install the Kvist GUI as a desktop application, on Linux or Windows.
+"""Install the Kvist GUI as a desktop application, on Linux, Windows or macOS (best-effort).
 
 Linux: installs the app under ~/.local/share/kvist-gui, drops the icons into
 the hicolor theme, and writes a ~/.local/share/applications/kvist.desktop entry
@@ -8,6 +8,10 @@ so Kvist shows up in the application launcher.
 
 Windows: installs the app under %LOCALAPPDATA%\\Kvist\\gui and creates a
 "Kvist" shortcut on the Desktop and in the Start Menu.
+
+macOS: copies the built Kvist.app into ~/Applications, where Launchpad and
+Spotlight find it. The app is not signed or notarized, so a copy downloaded with a
+browser needs "Open" from its context menu the first time.
 
 It reuses an already-built GUI from frontends/gui/electron/dist when possible; pass --build to
 produce one first (needs Node.js + npm).
@@ -26,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -37,6 +42,7 @@ from _common import (
     ASSETS_DIR,
     GUI_APP_NAME,
     GUI_LINUX_DESKTOP_ID,
+    IS_MACOS,
     IS_WINDOWS,
     REPO_ROOT,
     InstallCommandError,
@@ -94,6 +100,8 @@ LOG_FILE = Path(tempfile.gettempdir()) / "kvist-gui-install.log"
 
 if IS_WINDOWS:
     INSTALL_ROOT = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Kvist" / "gui"
+elif IS_MACOS:
+    INSTALL_ROOT = Path.home() / "Applications" / f"{GUI_APP_NAME}.app"
 else:
     INSTALL_ROOT = Path.home() / ".local" / "share" / "kvist-gui"
 
@@ -273,6 +281,68 @@ def _best_effort(cmd: list[str]) -> None:
         warn(f"{cmd[0]} failed: {exc}")
 
 
+# ----------------------------------------------------------------------------- macos
+
+def _find_macos_payload() -> Path:
+    """The unpacked Kvist.app electron-builder leaves next to the dmg and the zip.
+
+    Its folder is named after the architecture it was built for: `mac-arm64` on Apple
+    Silicon, `mac` for x64, `mac-universal` for a universal build.
+    """
+    folders = ["mac-arm64", "mac-universal", "mac"] if platform.machine() == "arm64" else ["mac", "mac-universal"]
+    for folder in folders:
+        apps = sorted((GUI_DIST / folder).glob("*.app"))
+        if apps:
+            return apps[0]
+    raise SystemExit(
+        "error: no built macOS GUI found in frontends/gui/electron/dist (expected mac-arm64/*.app "
+        "or mac/*.app). Re-run with --build."
+    )
+
+
+def install_macos(status: Status | None = None) -> str:
+    """Install the built GUI; return the line main() prints once done."""
+    show_step(status, STEPS["find_payload"])
+    payload = _find_macos_payload()
+    show_step(status, STEPS["payload_found"].format(payload=payload.name))
+    INSTALL_ROOT.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".kvist-gui.", dir=INSTALL_ROOT.parent))
+    backup = INSTALL_ROOT.with_name(f".{INSTALL_ROOT.name}.old")
+    committed = False
+    try:
+        show_step(status, STEPS["copy_app"])
+        # A bundle is full of symlinks (Electron Framework.framework/Versions/Current);
+        # copying them as files breaks its code signature and doubles its size.
+        shutil.copytree(payload, staging / INSTALL_ROOT.name, symlinks=True)
+
+        show_step(status, STEPS["activate_app"])
+        if backup.exists() or backup.is_symlink():
+            remove_path(backup)
+        if INSTALL_ROOT.exists() or INSTALL_ROOT.is_symlink():
+            INSTALL_ROOT.replace(backup)
+        (staging / INSTALL_ROOT.name).replace(INSTALL_ROOT)
+        committed = True
+        log(f"installed app -> {INSTALL_ROOT}")
+        # A bundle built here has no quarantine mark; one copied from a download does.
+        probe_command(["xattr", "-dr", "com.apple.quarantine", str(INSTALL_ROOT)], timeout=60)
+        return f"Installed {GUI_APP_NAME} to {INSTALL_ROOT}\nOpen it from Launchpad or Spotlight."
+    except BaseException:
+        if committed:
+            remove_path(INSTALL_ROOT)
+            if backup.exists() or backup.is_symlink():
+                backup.replace(INSTALL_ROOT)
+        raise
+    finally:
+        if staging.exists():
+            remove_path(staging)
+        if backup.exists() or backup.is_symlink():
+            remove_path(backup)
+
+
+def uninstall_macos() -> None:
+    _remove_all([INSTALL_ROOT])
+
+
 # --------------------------------------------------------------------------- windows
 
 def _find_windows_payload() -> tuple[str, Path]:
@@ -395,7 +465,7 @@ def _install_gui(args: argparse.Namespace, status: Status | None = None) -> str:
     if args.build or installed:
         build_gui(status)
 
-    done = (install_windows if IS_WINDOWS else install_linux)(status)
+    done = (install_windows if IS_WINDOWS else install_macos if IS_MACOS else install_linux)(status)
     show_step(status, STEPS["done"])
     hold_last_step()
     return done
@@ -415,7 +485,7 @@ def main() -> None:
 
     if args.uninstall:
         # Removal spawns nothing, so it needs neither a log nor a spinner.
-        (uninstall_windows if IS_WINDOWS else uninstall_linux)()
+        (uninstall_windows if IS_WINDOWS else uninstall_macos if IS_MACOS else uninstall_linux)()
         return
 
     if not args.verbose:
