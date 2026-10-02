@@ -206,6 +206,44 @@ jobs:
           python -m PyInstaller kvist.spec --noconfirm
           ./dist/kvist --version
 
+      # The macOS layout of the VS Code extension: the binary goes into bin/mac-<cpu>/ and
+      # must run from there and end up in the VSIX. Mac runners only, so it costs little.
+      - name: Package the VS Code extension with the macOS binary
+        if: runner.os == 'macOS'
+        working-directory: frontends/ide/vscode
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in arm64) arch=arm64 ;; *) arch=x64 ;; esac
+          mkdir -p "bin/mac-$arch"
+          cp ../../../dist/kvist "bin/mac-$arch/kvist.bin"
+          chmod +x "bin/mac-$arch/kvist.bin"
+          "bin/mac-$arch/kvist.bin" --version
+          npm ci
+          npm run build
+          npx --no-install vsce package --no-dependencies --skip-license --out "$RUNNER_TEMP/kvist.vsix"
+          python3 - "$RUNNER_TEMP/kvist.vsix" "$arch" <<'PY'
+          import sys, zipfile
+
+          entry = f"extension/bin/mac-{sys.argv[2]}/kvist.bin"
+          assert entry in zipfile.ZipFile(sys.argv[1]).namelist(), f"{entry} is not in the VSIX"
+          PY
+
+      # Runs the release installer under the system bash 3.2 of macOS, with stand-in assets.
+      - name: Run the release installer on macOS
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in arm64) asset=kvist-macos-arm64 ;; *) asset=kvist-macos-x64 ;; esac
+          assets="$RUNNER_TEMP/assets"
+          mkdir -p "$assets" "$RUNNER_TEMP/zip/kvist-intellij/lib" "$HOME/Library/Application Support/JetBrains/PyCharm2025.3"
+          printf '#!/bin/sh\necho kvist-core "$@"\n' > "$assets/$asset"
+          echo stand-in > "$RUNNER_TEMP/zip/kvist-intellij/lib/kvist.jar"
+          (cd "$RUNNER_TEMP/zip" && zip -qr "$assets/kvist-jetbrains.zip" kvist-intellij)
+          echo stand-in > "$assets/kvist-vscode.vsix"
+          /bin/bash scripts/release/install.sh --from "$assets"
+          test "$("$HOME/.local/bin/kvist")" = "kvist-core --workspace $PWD"
+          test -f "$HOME/Library/Application Support/JetBrains/PyCharm2025.3/plugins/kvist-intellij/lib/kvist.jar"
+
   agent-smoke:
     # The agent end to end: a fake provider on a local port answers with tool
     # calls (create a file, edit it, run a command) and the script checks the
