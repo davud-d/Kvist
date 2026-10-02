@@ -1911,6 +1911,21 @@ def test_paths_outside_the_workspace_are_never_required_artifacts():
     assert _extract_required_artifacts(goal) == ["src/billing.py"]
 
 
+def test_the_internal_agent_directory_is_never_a_required_artifact():
+    from kernel.agent_runtime import _extract_required_artifacts
+
+    goal = "Добавь /permissions: команда читает `.kvist/permissions.json`, а правит src/billing.py."
+
+    assert _extract_required_artifacts(goal) == ["src/billing.py"]
+
+
+def test_a_dotted_directory_keeps_its_leading_dot_in_a_required_artifact():
+    from kernel.agent_runtime import _extract_required_artifacts
+
+    assert _extract_required_artifacts("Поправь `.github/workflows/ci.yml`.") == [".github/workflows/ci.yml"]
+    assert _extract_required_artifacts("Fix app.py.") == ["app.py"]
+
+
 def test_removed_security_checks_reads_only_deleted_lines_from_the_journal(agent_factory):
     from kernel.agent_runtime import _removed_security_checks
 

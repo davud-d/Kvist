@@ -3052,14 +3052,22 @@ def _extract_required_artifacts(user_goal: str) -> list[str]:
         # as relative it became a deliverable no action could ever satisfy.
         if match.group(1).startswith("/") or user_goal[match.start() - 1 : match.start()] == "~":
             continue
-        cleaned = match.group(1).strip().strip(".,:;()[]{}\"'")
+        # Trailing punctuation only: a leading dot belongs to ".kvist/x.json" and
+        # ".github/ci.yml", and stripping it named a file that does not exist.
+        cleaned = match.group(1).strip().strip("([{\"'").rstrip(".,:;)]}\"'")
         if not cleaned:
             continue
             
         # Ignore URLs
         if cleaned.startswith("http://") or cleaned.startswith("https://"):
             continue
-            
+
+        # The internal agent directory is closed to every action: a task that
+        # mentions .kvist/permissions.json reads it, and requiring it as a
+        # deliverable blocked a finished run on a file no action may write.
+        if cleaned.replace("\\", "/").removeprefix("./").casefold().startswith(".kvist/"):
+            continue
+
         # Must be a path with / or have a valid extension
         has_slash = "/" in cleaned
         ext = Path(cleaned).suffix.lower()
