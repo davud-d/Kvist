@@ -4844,7 +4844,7 @@ def main() -> None:
 Support: 
   [green]Linux: Yes
   Windows: Yes [/green]
-  [dim]macOS: Untested (or Experimental)[/dim]
+  [dim]macOS: best-effort, no guarantees[/dim]
                 [/red]''')
                 console.print("[dim]\nKvist by Davud, © 2026 [/dim]")
                 console.print("[dim] Author: Davud [/dim]")

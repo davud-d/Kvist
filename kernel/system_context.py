@@ -87,7 +87,7 @@ def current_shell_context():
             return "powershell" if "powershell" in name or "pwsh" in name else name
         return "unknown"
 
-    # macOS (experimental, not officially supported)
+    # macOS (best-effort)
     elif current_platform == "darwin":
         shell = os.environ.get("SHELL", "")
         return os.path.basename(shell) if shell else "unknown"

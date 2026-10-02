@@ -312,7 +312,7 @@ OS_STEPS = {
     "detect": "Detecting operating system",
     "windows": "Detected Windows",
     "linux": "Detected Linux",
-    "macos": "[yellow]Detected macOS (untested)[/yellow]",
+    "macos": "[yellow]Detected macOS (best-effort, not officially supported)[/yellow]",
 }
 
 

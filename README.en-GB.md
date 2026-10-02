@@ -108,7 +108,10 @@ and not a complete security boundary: review the diff and command output.
 - an API key and models for one supported provider;
 - a TTY for the interactive terminal configuration and approval prompts.
 
-The CLI is tested on Linux and Windows. macOS is experimental. The optional IDE
+The CLI is tested in CI on Linux, Windows and macOS (Apple Silicon): installation
+and the agent's file and shell tools. Linux and Windows are the supported
+platforms; macOS is best-effort, with no guarantee that every feature works
+there. The OS-level sandbox (Bubblewrap) exists only on Linux. The optional IDE
 integrations support Linux and Windows: the JetBrains plugin targets IntelliJ
 Platform 2025.3, and the VS Code extension targets VS Code 1.85+. Both launch
 Kvist for the opened project and can write commit messages from the IDE's
