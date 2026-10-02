@@ -454,6 +454,16 @@ def test_path_contains_handles_empty_and_duplicate_entries(tmp_path, monkeypatch
     assert not install.path_contains(tmp_path / "missing")
 
 
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_shared_libpython_is_only_required_on_linux(monkeypatch, platform):
+    monkeypatch.setattr(install.sys, "platform", platform)
+    monkeypatch.setattr(
+        install, "probe_command", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("probed"))
+    )
+
+    assert install._has_shared_libpython("/any/python") is True
+
+
 def test_venv_recreation_does_not_silently_ignore_rmtree_failure(monkeypatch, tmp_path):
     python_path = install.venv_python(tmp_path)
     python_path.parent.mkdir(parents=True)

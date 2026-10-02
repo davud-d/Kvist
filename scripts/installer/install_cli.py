@@ -125,7 +125,9 @@ def venv_python(venv_dir: Path) -> Path:
 
 
 def _has_shared_libpython(python_exe: str) -> bool:
-    if IS_WINDOWS:
+    # Only Linux needs one: Windows and macOS builds (macOS framework builds
+    # report Py_ENABLE_SHARED=0) are bundled by PyInstaller as they are.
+    if not sys.platform.startswith("linux"):
         return True
     result = probe_command(
         [python_exe, "-c", "import sysconfig; print(sysconfig.get_config_var('Py_ENABLE_SHARED'))"]
