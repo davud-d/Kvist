@@ -1,9 +1,15 @@
 name: Platforms
 
-# Manual cross-platform check on the three systems Kvist ships for. ci.yml stays
-# the fast per-push gate; this one also runs the slow real-PTY tests, the Ink UI
-# and the packaged artifacts (wheel, PyInstaller binary).
+# Cross-platform check on the systems Kvist ships for, after every push (and on
+# demand). It runs next to ci.yml and plugin-release.yml, which are separate
+# workflows and run in parallel. Besides the tests it covers the slow real-PTY
+# tests, the Ink UI, the packaged artifacts (wheel, PyInstaller binary), the
+# agent tools against a fake provider and the CLI installer.
+# macOS counts ten times a Linux minute on a private repository, so it joins
+# manual runs and every tenth run only; the other runs cover Linux and Windows
+# (about 46 billed minutes; a run with macOS is about 136).
 on:
+  push:
   workflow_dispatch:
 
 permissions:
@@ -18,32 +24,48 @@ env:
   PYTHONUNBUFFERED: "1"
 
 jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 2
+    outputs:
+      os: ${{ steps.plan.outputs.os }}
+      python: ${{ steps.plan.outputs.python }}
+    steps:
+      # run_number counts every run of this workflow, so macOS joins about one
+      # push in ten, and every manual run.
+      - name: Choose the systems
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os
+
+          macos = os.environ["EVENT"] == "workflow_dispatch" or int(os.environ["RUN_NUMBER"]) % 10 == 0
+          systems = ["ubuntu-22.04", "windows-latest"] + (["macos-latest"] if macos else [])
+          python_legs = [
+              # A clean server image: no Bubblewrap, so the default sandbox mode
+              # refuses arbitrary-code commands.
+              {"label": "ubuntu-22.04 (bare server)", "os": "ubuntu-22.04", "python-version": "3.11", "bubblewrap": False},
+              {"label": "ubuntu-22.04 (with Bubblewrap)", "os": "ubuntu-22.04", "python-version": "3.12", "bubblewrap": True},
+              {"label": "macos-latest", "os": "macos-latest", "python-version": "3.12", "bubblewrap": False},
+              {"label": "windows-latest", "os": "windows-latest", "python-version": "3.12", "bubblewrap": False},
+          ]
+          print("os=" + json.dumps(systems))
+          print("python=" + json.dumps([leg for leg in python_legs if leg["os"] in systems]))
+          PY
+
   python:
     name: Python tests on ${{ matrix.label }}
+    needs: plan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # A clean server image: no Bubblewrap, so the default sandbox mode
-          # refuses arbitrary-code commands.
-          - label: ubuntu-22.04 (bare server)
-            os: ubuntu-22.04
-            python-version: "3.11"
-            bubblewrap: false
-          - label: ubuntu-22.04 (with Bubblewrap)
-            os: ubuntu-22.04
-            python-version: "3.11"
-            bubblewrap: true
-          - label: macos-latest
-            os: macos-latest
-            python-version: "3.12"
-            bubblewrap: false
-          - label: windows-latest
-            os: windows-latest
-            python-version: "3.12"
-            bubblewrap: false
+        include: ${{ fromJSON(needs.plan.outputs.python) }}
 
     steps:
       - name: Check out repository
@@ -67,8 +89,14 @@ jobs:
       - name: Install development dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
 
+      - name: Verify dependency consistency
+        run: python -m pip check
+
       - name: Lint
         run: python -m ruff check .
+
+      - name: Compile Python sources
+        run: python -m compileall -q .
 
       - name: Run offline test suite
         run: python -m pytest -ra
@@ -81,12 +109,13 @@ jobs:
 
   ink:
     name: Ink terminal UI on ${{ matrix.os }}
+    needs: plan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
 
     defaults:
       run:
@@ -112,12 +141,13 @@ jobs:
 
   package:
     name: Wheel and binary on ${{ matrix.os }}
+    needs: plan
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
 
     defaults:
       run:
@@ -161,6 +191,16 @@ jobs:
           "$venv_bin/pip" install --disable-pip-version-check dist/*.whl
           cd "$RUNNER_TEMP" && "$venv_bin/kvist" --version
 
+      - name: Check the data files packaged into the wheel
+        run: |
+          python - <<'PY'
+          import glob, zipfile
+
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          for part in ("prompts", "themes", "assets", "dist-ui"):
+              assert any(part in name for name in names), f"the wheel carries no {part}"
+          PY
+
       - name: Build the PyInstaller binary and run it
         run: |
           python -m PyInstaller kvist.spec --noconfirm
@@ -171,13 +211,13 @@ jobs:
     # calls (create a file, edit it, run a command) and the script checks the
     # workspace after each turn. Runs last, only when everything above passed.
     name: Agent tools smoke on ${{ matrix.os }}
-    needs: [python, ink, package]
+    needs: [plan, python, ink, package]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
 
     steps:
       - name: Check out repository
@@ -208,13 +248,13 @@ jobs:
     # into a scratch home, then the installed launcher runs on a fake provider
     # (three file tools and one terminal command). Only the CLI installer runs.
     name: Install smoke on ${{ matrix.os }}
-    needs: [python, ink, package, agent-smoke]
+    needs: [plan, python, ink, package, agent-smoke]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, macos-latest, windows-latest]
+        os: ${{ fromJSON(needs.plan.outputs.os) }}
 
     steps:
       - name: Check out repository
