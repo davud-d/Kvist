@@ -396,7 +396,11 @@ class _SafeChild:
         target = self._parent_path / self.name
         tmp = self._parent_path / temp_name
         tmp.write_bytes(encoded)
-        os.replace(tmp, target)
+        try:
+            os.replace(tmp, target)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def unlink(self) -> None:
         info = self._final_info()
