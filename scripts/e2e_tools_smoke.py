@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -42,6 +43,14 @@ SCENARIOS = (
     ("print the git version", {"name": "run_shell", "arguments": {
         "command": ["git", "--version"], "purpose": "check git"}}, None),
 )
+
+
+class LocalServer(ThreadingHTTPServer):
+    """HTTPServer without the reverse DNS lookup its server_bind makes (slow on a CI Mac)."""
+
+    def server_bind(self) -> None:
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
 
 
 class FakeProvider:
@@ -74,7 +83,7 @@ class FakeProvider:
                 provider.requests.append(request)
                 self._send(provider.completion(request))
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.server = LocalServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}/v1"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
@@ -214,15 +223,17 @@ def report_failure(error: Exception, core: Kvist, provider: FakeProvider) -> int
 def main() -> int:
     started = time.monotonic()
     provider = FakeProvider()
+    print(f"provider ready  ({time.monotonic() - started:.1f}s)")
     with tempfile.TemporaryDirectory(prefix="kvist-smoke-") as scratch:
         home, workspace = Path(scratch, "home"), Path(scratch, "workspace")
         home.mkdir()
         workspace.mkdir()
         configure(home, provider.url)
+        launched = time.monotonic()
         core = Kvist([sys.executable, "-m", "kernel", "--workspace", str(workspace)], ROOT, home)
         try:
             core.collect_until("hello", TURN_TIMEOUT_SECONDS)
-            print(f"core ready  ({time.monotonic() - started:.1f}s)")
+            print(f"core ready  ({time.monotonic() - launched:.1f}s after launch)")
             elapsed = run_turns(core, workspace)
         except (AssertionError, TimeoutError) as error:
             return report_failure(error, core, provider)

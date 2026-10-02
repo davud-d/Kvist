@@ -74,8 +74,10 @@ def main() -> int:
         try:
             run_installer(home, lib_dir, bin_dir)
             launcher = check_installed(lib_dir, bin_dir, workspace)
+            launched = time.monotonic()
             core = smoke.Kvist([str(launcher)], workspace, home)
             core.collect_until("hello", FIRST_START_TIMEOUT_SECONDS)
+            print(f"core ready  ({time.monotonic() - launched:.1f}s after launch)")
             elapsed = smoke.run_turns(core, workspace)
         except (AssertionError, TimeoutError, subprocess.TimeoutExpired) as error:
             print(f"FAIL: {error}")
