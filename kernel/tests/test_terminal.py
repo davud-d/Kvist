@@ -845,6 +845,36 @@ def test_unix_resource_limits_set_nproc(monkeypatch):
     assert calls[resource.RLIMIT_CPU] == (10, 10)
 
 
+@requires_posix
+def test_unix_resource_limits_rejected_limit_does_not_skip_the_rest(monkeypatch, capsys):
+    import resource
+
+    applied: list[int] = []
+
+    def reject_address_space(kind, value):
+        if kind == resource.RLIMIT_AS:
+            raise ValueError("current limit exceeds maximum limit")
+        applied.append(kind)
+
+    monkeypatch.setattr(resource, "setrlimit", reject_address_space)
+    limits = terminal_module.ResourceLimits(
+        cpu_seconds=10,
+        address_space_bytes=1024 * 1024 * 1024,
+        nproc=99,
+        fsize_bytes=1024,
+        nofile=32,
+    )
+    terminal_module._unix_resource_limits(limits)
+
+    assert applied == [
+        resource.RLIMIT_CPU,
+        resource.RLIMIT_NPROC,
+        resource.RLIMIT_FSIZE,
+        resource.RLIMIT_NOFILE,
+    ]
+    assert "Failed to set RLIMIT_AS" in capsys.readouterr().err
+
+
 @pytest.mark.xfail(
     sys.platform == "win32",
     strict=True,

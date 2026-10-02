@@ -77,23 +77,28 @@ def _unix_resource_limits(limits: ResourceLimits) -> None:
     Called as preexec_fn — runs in the child process before exec.
     RLIMIT_NPROC counts processes per user, so it is a fork-bomb brake,
     not a per-command process cap.
+    Each limit is applied on its own: a kernel that rejects one of them
+    (macOS rejects RLIMIT_AS values) must not leave the others unset.
     """
     try:
         import resource
-
-        resource.setrlimit(resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds))
-        resource.setrlimit(
-            resource.RLIMIT_AS,
-            (limits.address_space_bytes, limits.address_space_bytes),
-        )
-        resource.setrlimit(resource.RLIMIT_NPROC, (limits.nproc, limits.nproc))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (limits.fsize_bytes, limits.fsize_bytes))
-        resource.setrlimit(resource.RLIMIT_NOFILE, (limits.nofile, limits.nofile))
     except ImportError:
-        pass
-    except Exception:
-        import sys
-        print(
-            "[TerminalExecutor] Failed to set resource limits",
-            file=sys.stderr,
-        )
+        return
+
+    requested = (
+        ("RLIMIT_CPU", limits.cpu_seconds),
+        ("RLIMIT_AS", limits.address_space_bytes),
+        ("RLIMIT_NPROC", limits.nproc),
+        ("RLIMIT_FSIZE", limits.fsize_bytes),
+        ("RLIMIT_NOFILE", limits.nofile),
+    )
+    for name, value in requested:
+        try:
+            resource.setrlimit(getattr(resource, name), (value, value))
+        except (ValueError, OSError) as error:
+            import sys
+
+            print(
+                f"[TerminalExecutor] Failed to set {name}: {error}",
+                file=sys.stderr,
+            )
