@@ -1152,6 +1152,16 @@ could not run in the default sandbox. A launcher keeps its own path as argv[0] e
 found through a bare `python` on the child PATH, or the interpreter starts outside the
 venv and cannot import the project's packages.
 
+**Windows trust** (`terminal_windows_acl.py`): `st_mode` is synthetic there, so
+`_path_is_user_mutable` reads the DACL and calls a path mutable when an allow entry grants a
+write right to any principal except SYSTEM, Administrators and TrustedInstaller
+(inherit-only entries and owner rights are not evaluated; an unreadable DACL or missing
+pywin32 means mutable). The trusted roots are `System32`, `SystemRoot` and the Program Files
+directories, and the child PATH is the system directories plus the entries of the real PATH
+that pass the same directory check — `os.defpath` (`.;C:\bin`) holds no executables. So
+`git` and the OS tools run without the origin-approval gate, and a user-writable Python or
+Node install stays out of PATH until `AGENT_TOOL_PATHS` names it, as on Unix.
+
 **Project toolchains**: the child PATH prepends existing project-local tool directories
 (`.venv/bin`, `venv/bin`, `node_modules/.bin`) inside the workspace, then validated
 `AGENT_TOOL_PATHS` entries, then trusted system dirs — the user's full HOME/`.local`/

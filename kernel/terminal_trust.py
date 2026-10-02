@@ -10,6 +10,7 @@ from pathlib import Path
 from kernel.sandbox import RUNTIME_MOUNT_ROOTS
 from kernel.terminal_paths import _is_relative_to, _path_entry_identity, _sha256_file
 from kernel.terminal_types import ExecutableBinding, FileIdentity
+from kernel.terminal_windows_acl import windows_path_is_user_mutable
 
 
 def _parse_shebang(head: bytes) -> list[str] | None:
@@ -260,11 +261,16 @@ def _read_pyvenv_cfg_executable(pyvenv_cfg: Path) -> Path | None:
     return None
 
 
-def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:
-    """Trust only fixed system roots that the current user cannot mutate."""
+def _canonical_trust_roots() -> list[Path]:
+    """The fixed system roots, resolved; roots that do not exist are skipped."""
     if os.name == "nt":
         system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
-        roots = [system_root / "System32", system_root]
+        program_files = [
+            Path(os.environ[name])
+            for name in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432")
+            if name in os.environ
+        ]
+        roots = [system_root / "System32", system_root, *program_files]
     else:
         roots = [Path("/usr"), Path("/bin"), Path("/sbin")]
 
@@ -276,6 +282,33 @@ def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:
             continue
         if candidate not in canonical_roots:
             canonical_roots.append(candidate)
+    return canonical_roots
+
+
+def _is_trusted_system_directory(directory: Path) -> bool:
+    """A directory inside a system root with no user-mutable path up to that root."""
+    try:
+        target = directory.resolve(strict=True)
+    except OSError:
+        return False
+    matching_root = next(
+        (root for root in _canonical_trust_roots() if _is_relative_to(target, root)),
+        None,
+    )
+    if matching_root is None:
+        return False
+    current = target
+    while True:
+        if _path_is_user_mutable(current):
+            return False
+        if current == matching_root:
+            return True
+        current = current.parent
+
+
+def _is_trusted_system_executable(lookup: Path, resolved: Path) -> bool:
+    """Trust only fixed system roots that the current user cannot mutate."""
+    canonical_roots = _canonical_trust_roots()
 
     try:
         lookup_parent = lookup.parent.resolve(strict=True)
@@ -312,6 +345,8 @@ def _path_is_user_mutable(path: Path) -> bool:
         info = path.stat()
     except OSError:
         return True
+    if os.name == "nt":
+        return windows_path_is_user_mutable(path)
     if not hasattr(os, "geteuid"):
         return bool(info.st_mode & stat.S_IWOTH)
     if info.st_uid == os.geteuid():

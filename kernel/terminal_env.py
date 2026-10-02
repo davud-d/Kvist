@@ -8,6 +8,7 @@ from pathlib import Path
 
 from kernel.sandbox import validated_external_tool_path
 from kernel.terminal_paths import _is_relative_to
+from kernel.terminal_trust import _is_trusted_system_directory
 from kernel.terminal_types import HardDenyError
 
 
@@ -100,9 +101,26 @@ def _external_tool_paths(workspace: Path | None = None) -> tuple[Path, ...]:
     return tuple(paths)
 
 
+def _windows_exec_dirs() -> list[Path]:
+    """System directories plus the PATH entries that pass the executable trust check.
+
+    ``os.defpath`` on Windows is ``.;C:\\bin``, which holds no executables. The
+    entries of the real PATH are filtered by the same check that trusts an
+    executable, so user-writable tool directories stay out as on Unix.
+    """
+    system_root = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    candidates = [system_root / "System32", system_root]
+    candidates += [Path(part) for part in os.environ.get("PATH", "").split(os.pathsep) if part]
+    trusted: list[Path] = []
+    for candidate in candidates:
+        if candidate.is_absolute() and _is_trusted_system_directory(candidate) and candidate not in trusted:
+            trusted.append(candidate)
+    return trusted
+
+
 def _system_exec_dirs() -> list[Path]:
     if os.name == "nt":
-        return [Path(part) for part in os.defpath.split(os.pathsep) if part]
+        return _windows_exec_dirs()
     return [Path(p) for p in ("/usr/sbin", "/usr/bin", "/sbin", "/bin") if Path(p).is_dir()]
 
 
