@@ -334,6 +334,34 @@ class LocalAgent:
                     )
         return outputs[-_SESSION_MAX_HARVESTED_OUTPUTS:]
 
+    def _stopped_run_trail(self) -> dict[str, list[str]]:
+        """What a user-stopped run had already read, searched for and changed.
+
+        A native run's conversation is not kept, so the next turn starts blind
+        and reads the same files again: a stop after 40 steps of reading once
+        cost 48 more. Paths and queries are enough to go straight back to them.
+        """
+        trail: dict[str, list[str]] = {"read": [], "searched": [], "changed": []}
+        for log_entry in self._state.step_logs:
+            if log_entry.get("status") != "ok":
+                continue
+            action = log_entry.get("command", {}).get("action", {})
+            args = action.get("args", {})
+            action_type = action.get("type", "")
+            if action_type == "read_file":
+                lines = f":{args.get('start_line', 1)}-{args['end_line']}" if "end_line" in args else ""
+                key, items = "read", [f"{args.get('path', '')}{lines}"]
+            elif action_type == "read_multiple_files":
+                key, items = "read", [str(path) for path in args.get("paths", [])]
+            elif action_type == "search_code":
+                key, items = "searched", [str(args.get("query", ""))]
+            elif action_type in {"write_file", "append_file", "replace_in_file"}:
+                key, items = "changed", [str(args.get("path", ""))]
+            else:
+                continue
+            trail[key].extend(item for item in items if item and item not in trail[key])
+        return {key: items for key, items in trail.items() if items}
+
     def _add_to_session_history(
         self,
         user_goal: str,
@@ -359,6 +387,9 @@ class LocalAgent:
             entry["plan_outcome"] = self._state.plan_outcome
         if stopped_by_user:
             entry["stopped_by_user"] = True
+            trail = self._stopped_run_trail()
+            if trail:
+                entry["trail"] = trail
             self._journal.mark_stopped()
         safe_entry = redact_value(entry)
         assert isinstance(safe_entry, dict)

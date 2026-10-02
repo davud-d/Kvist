@@ -153,8 +153,9 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
 
     elif action_type == "read_file":
         require_keys(args, {"path"})
-        require_only_allowed_keys(args, {"path"})
+        require_only_allowed_keys(args, {"path", "start_line", "end_line"})
         require_str(args, "path")
+        _require_line_range(args)
 
     elif action_type == "read_multiple_files":
         require_keys(args, {"paths"})
@@ -390,6 +391,18 @@ def _require_outcome(args: dict[str, Any]) -> None:
         raise CommandValidationError(
             f"'outcome' must be one of: {', '.join(FINISH_OUTCOMES)}"
         )
+
+
+def _require_line_range(args: dict[str, Any]) -> None:
+    for key in ("start_line", "end_line"):
+        value = args.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise CommandValidationError(f"'{key}' must be an integer >= 1")
+    start, end = args.get("start_line"), args.get("end_line")
+    if start is not None and end is not None and end < start:
+        raise CommandValidationError("'end_line' must not be less than 'start_line'")
 
 
 def require_keys(data: dict[str, Any], required: set[str]) -> None:

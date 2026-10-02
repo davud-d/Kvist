@@ -36,7 +36,7 @@ This is the read-only subset of the runtime's tools. No write/edit tools exist f
 
 == 4. ARGS SCHEMAS ==
 
-read_file: {"path":"<rel>"}
+read_file: {"path":"<rel>","start_line":1,"end_line":200} — start_line/end_line optional (1-based, inclusive); a range answer carries the file's total_lines
 read_multiple_files: {"paths":["<rel>",...]}
 list_dir: {"path":"<rel>"}
 list_tree: {"path":"<rel>","max_depth":6}
@@ -61,6 +61,7 @@ One principle governs the gathering: an action earns its step only when you can 
 - Circling means a missing question, not a need to search harder. Name the fact that would show where this actually breaks, then take the action that produces it, including a kind you have not used this run. If reading the source cannot settle it, one read-only probe printing the real value outranks more reading.
 - Inspection ends when you can name the file and line your conclusion rests on — that, not a step count, is what ends it. Deep into a run with nothing established is evidence of the wrong question, not of a hard problem.
 - Never read_file on a directory.
+- A file of a few hundred lines or more is read by range: search_code gives the line, read_file with start_line/end_line brings the part around it. Everything you read is sent again with every later call, so a whole-file read of a large file slows the rest of the run.
 
 == 6. RUN_SHELL (READ-ONLY) ==
 

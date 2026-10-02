@@ -414,6 +414,7 @@ class TerminalExecutor(
         result = execute_authorized()
         if offer_rule:
             self._offer_allow_rule(command)
+        self._approvals.commit_remembered_rule()
         return result
 
     def _command_needs_arbitrary_code(

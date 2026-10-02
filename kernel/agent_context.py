@@ -250,6 +250,9 @@ def render_session_history(history: Any, *, include_outputs: bool, with_ids: boo
                 "  status: the user stopped this turn before it finished; "
                 "its remaining work was not done"
             )
+        trail = entry.get("trail")
+        if entry.get("stopped_by_user") and isinstance(trail, dict):
+            lines.extend(_render_stopped_trail(trail))
         plan_status = _PLAN_OUTCOME_STATUS.get(str(entry.get("plan_outcome", "")))
         if plan_status:
             lines.append(f"  status: {plan_status}")
@@ -271,6 +274,23 @@ def render_session_history(history: Any, *, include_outputs: bool, with_ids: boo
         + defang_prompt_boundary_tags("\n".join(lines))
         + "\n\n"
     )
+
+
+_TRAIL_LABELS = {"read": "read", "searched": "searched for", "changed": "changed"}
+
+
+def _render_stopped_trail(trail: dict[str, Any]) -> list[str]:
+    """What the stopped run had looked at, so the next turn can go straight to it."""
+    lines = [
+        f"  before the stop it {label}: {', '.join(str(item) for item in trail[key])}"
+        for key, label in _TRAIL_LABELS.items()
+        if trail.get(key)
+    ]
+    if trail.get("read"):
+        lines.append(
+            "  what it read was not kept; read again only the part you need, by line range"
+        )
+    return lines
 
 
 def _indent_turn_text(text: str) -> str:

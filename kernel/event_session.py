@@ -28,8 +28,10 @@ class EventApprovalGate:
         self._channel = channel
         self._mode = mode
         self._workspace = Path(workspace) if workspace else None
+        self._remembered_pattern: str | None = None
 
     def confirm_command(self, command: list[str], reason: str) -> bool:
+        self._remembered_pattern = None
         if self._mode == "deny":
             return False
         # Shell-join for display; the pattern for "don't ask again" is the exact
@@ -51,8 +53,13 @@ class EventApprovalGate:
             remember_pattern=remember_pattern,
         )
         if response.approved and response.remember and remember_pattern and self._workspace:
-            self._save_allow_pattern(remember_pattern)
+            self._remembered_pattern = remember_pattern
         return bool(response.approved)
+
+    def commit_remembered_rule(self) -> None:
+        pattern, self._remembered_pattern = self._remembered_pattern, None
+        if pattern:
+            self._save_allow_pattern(pattern)
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         _ = question

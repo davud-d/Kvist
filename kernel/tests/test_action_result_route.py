@@ -153,6 +153,11 @@ def test_run_shell_denied_and_timeout_have_no_exit_code():
     [
         ("read_file", {"path": "a", "content": "a\nb\n", "truncated": False}, "Read 2 lines"),
         ("read_file", {"path": "a", "content": "a", "truncated": True}, "Read 1 line (truncated)"),
+        (
+            "read_file",
+            {"path": "a", "content": "b\n", "start_line": 2, "end_line": 2, "total_lines": 9, "truncated": False},
+            "Read lines 2-2 of 9",
+        ),
         ("read_multiple_files", {"files": [{}, {}]}, "Read 2 files"),
         ("list_dir", {"path": "", "items": [{}, {}, {}]}, "3 entries"),
         ("list_tree", {"path": "", "tree": "a\nb", "truncated": False}, "Listed 2 lines"),

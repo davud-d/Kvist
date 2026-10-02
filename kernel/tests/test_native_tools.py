@@ -127,6 +127,20 @@ def test_calls_become_call_requests_in_order():
     ]
 
 
+def test_read_file_offers_a_line_range_and_passes_it_on():
+    tools = {tool["function"]["name"]: tool["function"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
+    parameters = tools["read_file"]["parameters"]
+
+    assert set(parameters["properties"]) == {"path", "start_line", "end_line"}
+    assert parameters["required"] == ["path"]
+
+    turn = NativeTurn(
+        "", tool_calls=[ToolCall("c1", "read_file", json.dumps({"path": "a.py", "start_line": 5, "end_line": 9}))]
+    )
+
+    assert _commands(turn)[0].action.args == {"path": "a.py", "start_line": 5, "end_line": 9}
+
+
 def test_argumentless_tools_ask_for_a_purpose_and_drop_it_before_running():
     tools = {tool["function"]["name"]: tool["function"] for tool in tools_for_role(agent_model._load_role_prompt("coder"))}
 
@@ -244,7 +258,9 @@ def test_a_fix_run_hears_how_many_calls_changed_nothing(agent_factory):
     _note_unchanged_run(state)
 
     notes = [m["content"] for m in state.native_messages if m["role"] == "user"]
-    assert notes == ["Run so far: 10 tool calls, and none of them changed a file."]
+    assert len(notes) == 1
+    assert notes[0].startswith("Run so far: 10 tool calls, and none of them changed a file.")
+    assert "sends the whole conversation again" in notes[0]
 
 
 def test_an_analysis_run_is_not_told_it_only_reads(agent_factory):

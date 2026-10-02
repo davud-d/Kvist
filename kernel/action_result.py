@@ -72,6 +72,8 @@ def _summary(
 def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) -> str:
     if action_type == "read_file":
         suffix = " (truncated)" if data.get("truncated") else ""
+        if "total_lines" in data:
+            return f"Read lines {data['start_line']}-{data['end_line']} of {data['total_lines']}{suffix}"
         return f"Read {_plural(len(str(data.get('content', '')).splitlines()), 'line')}{suffix}"
     if action_type == "read_multiple_files":
         return f"Read {_plural(len(data.get('files', [])), 'file')}"

@@ -51,7 +51,7 @@ This list mirrors the tools the runtime runs. No others. No invention. No renami
 == 4. ARGS SCHEMAS ==
 
 refuse: {"reason": "<str>"} — see SAFETY DIRECTIVE above; only legal action on step 1 for an illegal/malicious task
-read_file: {"path": "<rel>"}
+read_file: {"path": "<rel>", "start_line": 1, "end_line": 200} — start_line/end_line optional (1-based, inclusive); a range answer carries the file's total_lines
 read_multiple_files: {"paths": ["<rel>",...]}
 write_file: {"path": "<rel>", "content": "<str>"}
 append_file: {"path": "<rel>", "content": "<str>"}

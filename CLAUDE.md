@@ -339,8 +339,16 @@ rejects an unanswered call). A reply with no call is the final answer.
 the budget. The conversation has no step counter, so a run expected to change
 files (`modify_goal`/`create_goal`) gets one factual user message every 10
 answered calls while nothing has changed (`_note_unchanged_run`: "Run so far: N
-tool calls, and none of them changed a file.") — a fact about its own work,
-never an order; a read-only task gets none. A silent turn's `user_message` is
+tool calls, and none of them changed a file. Every call sends the whole conversation
+again, so each further read is slower than the last.") — facts about its own work
+and their cost, never an order (the bare count alone did not stop a run that read
+40 files before its first edit); a read-only task gets none. `read_file` takes
+optional `start_line`/`end_line` (1-based, inclusive, lines end at `\n` only, as in
+`sed` and `rg`) and a range answer carries `total_lines`; before it existed every
+read was the whole file, and five reads of 1k–5k-line modules pushed one run's
+context to 250k tokens, with a single model call taking 113 s. The role prompts
+say to read large files by range and to start with the clear part of a
+multi-module task. A silent turn's `user_message` is
 what the calls touch in full (paths, queries, commands), not the tool names; only the
 banner's 16-character Action row gets the shortened form. While a call's arguments
 stream, `_note_tool_call_progress` shows "Writing <tool> → <path> · N characters"
@@ -548,7 +556,12 @@ note (`_stopped_chat_reply`), so the transcript alternates correctly.
 `stopped_by_user: true` into the entry. Both readers of session history render it —
 the action loop's session-history section (`agent_context.render_session_history`) and
 the chat preamble — so "продолжай" after a stop is understood as
-unfinished work rather than a completed task.
+unfinished work rather than a completed task. A stopped action run also stores
+`trail` in the entry (`LocalAgent._stopped_run_trail`: paths read with their line
+ranges, search queries, paths changed, from `step_logs`); the session-history
+section renders it, so the next turn goes straight back to those files by line
+range instead of exploring again (a native run's conversation is not kept, and
+one stop after 40 steps of reading once cost 48 more).
 
 **Escape needs two presses; Ctrl+C needs one.** The first Escape only arms the stop
 (`_stop_armed_at`) and shows `_STOP_HINTS` in a one-line window directly under the
@@ -732,6 +745,10 @@ cannot wedge the input box). Because `agent.resume()` may switch sessions itself
 DANGEROUS command (`command_policy.assess_command`), so "don't ask again" is never
 offered for one. A reply carrying `remember: true` appends that pattern to the
 project's allow rules; saving is best-effort and never blocks the approval itself.
+The gate only holds the pattern; `TerminalExecutor._approve_or_deny` calls
+`commit_remembered_rule()` after the command ran. Saving during the answer changed
+the policy digest bound to the approval, and the spawn was refused with "approved
+execution context changed before process creation".
 **Switching interfaces.** `/tui` in the Ink app is a *local* dialog: a `choice`
 `input_request` with id `local:frontend`, built in `app.tsx` from `commands.FRONTENDS`
 and answered there, never sent to the core. Picking another interface writes its name

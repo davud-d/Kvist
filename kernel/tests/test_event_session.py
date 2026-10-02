@@ -146,7 +146,7 @@ def test_event_approval_gate_approves_and_fails_closed():
     assert denied["value"] is False
 
 
-def test_event_approval_gate_remember_saves_allow_rule(tmp_path):
+def test_event_approval_gate_remember_saves_allow_rule_once_the_command_ran(tmp_path):
     channel = FrontendChannel()
     gate = EventApprovalGate(channel, workspace=tmp_path)
     approved: dict[str, bool] = {}
@@ -162,9 +162,59 @@ def test_event_approval_gate_remember_saves_allow_rule(tmp_path):
     worker.join(timeout=2.0)
 
     assert approved["value"] is True
+    assert load_policy(tmp_path)[0].allow == ()
+
+    gate.commit_remembered_rule()
     policy, note = load_policy(tmp_path)
     assert note == ""
     assert policy.allow == ("node tools/check.js",)
+
+    gate.commit_remembered_rule()
+    assert load_policy(tmp_path)[0].allow == ("node tools/check.js",)
+
+
+def test_a_remembered_choice_does_not_leak_into_the_next_approval(tmp_path):
+    channel = FrontendChannel()
+    gate = EventApprovalGate(channel, workspace=tmp_path)
+
+    def answer(**response) -> None:
+        worker = threading.Thread(
+            target=lambda: gate.confirm_command(["node", "tools/check.js"], "needs approval"), daemon=True
+        )
+        worker.start()
+        request = channel.get(timeout=2.0)
+        channel.respond(request.request_id, **response)
+        worker.join(timeout=2.0)
+
+    answer(approved=True, remember=True)
+    answer(approved=True, remember=False)
+    gate.commit_remembered_rule()
+
+    assert load_policy(tmp_path)[0].allow == ()
+
+
+def test_remembering_an_approval_does_not_invalidate_the_approved_run(tmp_path):
+    # The rule used to be saved while the person answered, so the policy digest
+    # bound to the approval no longer matched at spawn and the command was
+    # refused with "approved execution context changed".
+    from kernel.terminal import TerminalExecutor
+
+    (tmp_path / "notes.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
+    channel = FrontendChannel()
+    executor = TerminalExecutor(tmp_path, approvals=EventApprovalGate(channel, workspace=tmp_path))
+
+    def approve_and_remember() -> None:
+        request = channel.get(timeout=5.0)
+        channel.respond(request.request_id, approved=True, remember=True)
+
+    responder = threading.Thread(target=approve_and_remember, daemon=True)
+    responder.start()
+    result = executor.run(["sed", "-n", "1,2p", "notes.txt"])
+    responder.join(timeout=5.0)
+
+    assert result.denied is False
+    assert result.stdout == "one\ntwo\n"
+    assert load_policy(tmp_path)[0].allow == ("sed -n 1,2p notes.txt",)
 
 
 def test_event_approval_gate_deny_mode_never_prompts():

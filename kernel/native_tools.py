@@ -85,7 +85,16 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         ("summary", "result"),
     ),
     "refuse": ToolSpec("Refuse an illegal or malicious task.", {"reason": _STRING}, ("reason",)),
-    "read_file": ToolSpec("Read one workspace file.", {"path": _PATH}, ("path",), readonly=True),
+    "read_file": ToolSpec(
+        "Read one workspace file, whole or a range of its lines. The answer carries the file's total_lines.",
+        {
+            "path": _PATH,
+            "start_line": {"type": "integer", "minimum": 1, "description": "First line to read (1-based)."},
+            "end_line": {"type": "integer", "minimum": 1, "description": "Last line to read, inclusive."},
+        },
+        ("path",),
+        readonly=True,
+    ),
     "read_multiple_files": ToolSpec("Read several workspace files.", {"paths": _PATHS}, ("paths",), readonly=True),
     "write_file": ToolSpec("Create or overwrite a file.", {"path": _PATH, "content": _STRING}, ("path", "content")),
     "append_file": ToolSpec("Append to a file.", {"path": _PATH, "content": _STRING}, ("path", "content")),

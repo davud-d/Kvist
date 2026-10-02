@@ -68,6 +68,9 @@ class AllowAllApprovals:
     def confirm(self, title: str, body: str, question: str) -> bool:
         return True
 
+    def commit_remembered_rule(self) -> None:
+        pass
+
 
 class NullUI:
     def start_live(self):

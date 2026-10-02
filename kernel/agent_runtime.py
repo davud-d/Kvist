@@ -738,7 +738,13 @@ def _note_unchanged_run(state: RunState) -> None:
         return
     state.native_unchanged_mark = mark
     state.native_messages.append(
-        {"role": "user", "content": f"Run so far: {calls} tool calls, and none of them changed a file."}
+        {
+            "role": "user",
+            "content": (
+                f"Run so far: {calls} tool calls, and none of them changed a file. "
+                "Every call sends the whole conversation again, so each further read is slower than the last."
+            ),
+        }
     )
 
 

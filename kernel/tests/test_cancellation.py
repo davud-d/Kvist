@@ -345,6 +345,62 @@ def test_a_finished_turn_is_not_marked_as_stopped(agent_factory):
     assert "stopped_by_user" not in agent._session_history[-1]
 
 
+def _logged(action_type, status="ok", **args):
+    return {"status": status, "command": {"action": {"type": action_type, "args": args}}}
+
+
+def test_a_stopped_run_keeps_what_it_read_searched_and_changed(agent_factory):
+    agent = agent_factory()
+    agent._state.step_logs = [
+        _logged("read_file", path="kernel/main.py"),
+        _logged("read_file", path="kernel/main.py"),
+        _logged("read_file", path="kernel/agent.py", start_line=100, end_line=180),
+        _logged("read_multiple_files", paths=["a.py", "b.py"]),
+        _logged("read_file", status="blocked", path="never.py"),
+        _logged("search_code", query="files_changed"),
+        _logged("replace_in_file", path="kernel/main.py", old_text="a", new_text="b"),
+        _logged("run_shell", command=["ls"]),
+    ]
+
+    agent._add_to_session_history("do it", "coder", "stopped", stopped_by_user=True)
+
+    assert agent._session_history[-1]["trail"] == {
+        "read": ["kernel/main.py", "kernel/agent.py:100-180", "a.py", "b.py"],
+        "searched": ["files_changed"],
+        "changed": ["kernel/main.py"],
+    }
+
+
+def test_the_trail_is_kept_for_a_stopped_turn_only(agent_factory):
+    agent = agent_factory()
+    agent._state.step_logs = [_logged("read_file", path="a.py")]
+
+    agent._add_to_session_history("do it", "coder", "done")
+    agent._add_to_session_history("again", "coder", "stopped", stopped_by_user=True)
+    agent._state.step_logs = []
+    agent._add_to_session_history("chat", "chat", "stopped", stopped_by_user=True)
+
+    assert "trail" not in agent._session_history[-3]
+    assert agent._session_history[-2]["trail"] == {"read": ["a.py"]}
+    assert "trail" not in agent._session_history[-1]
+
+
+def test_the_next_turn_is_told_what_the_stopped_run_had_read(agent_factory):
+    from kernel.agent_context import render_session_history
+
+    history = [
+        {"goal": "add commands", "role": "coder", "result": "x", "stopped_by_user": True,
+         "trail": {"read": ["kernel/main.py:3600-3900"], "searched": ["STDIO_COMMANDS"]}},
+    ]
+
+    rendered = render_session_history(history, include_outputs=False)
+
+    assert "before the stop it read: kernel/main.py:3600-3900" in rendered
+    assert "before the stop it searched for: STDIO_COMMANDS" in rendered
+    assert "by line range" in rendered
+    assert "changed" not in rendered
+
+
 def test_every_history_reader_tells_the_model_about_the_stop(agent_factory):
     from kernel.agent_context import render_session_history
 

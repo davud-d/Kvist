@@ -338,7 +338,7 @@ class SafeExecutor:
             )
 
         if action_type == "read_file":
-            return self._read_file(args["path"])
+            return self._read_file(args["path"], args.get("start_line"), args.get("end_line"))
 
         if action_type == "read_multiple_files":
             return self._read_multiple_files(args["paths"])
@@ -844,7 +844,9 @@ class SafeExecutor:
         self._check_env_file(target)
         return target
 
-    def _read_file(self, path: str) -> ExecutionResult:
+    def _read_file(
+        self, path: str, start_line: int | None = None, end_line: int | None = None
+    ) -> ExecutionResult:
         target = self._guard_env_file_access(path, read_only=True)
 
         if not target.exists():
@@ -853,15 +855,18 @@ class SafeExecutor:
         if not target.is_file():
             raise ExecutorError(f"Not a file: {path}")
 
-        content, truncated = self._safe_read_text(target)
+        if start_line is None and end_line is None:
+            content, truncated = self._safe_read_text(target)
+            read_data: dict[str, Any] = {"content": content, "truncated": truncated}
+        else:
+            read_data = self._safe_read_line_range(target, path, start_line or 1, end_line)
 
         return ExecutionResult(
             ok=True,
             action_type="read_file",
             data={
                 "path": path,
-                "content": content,
-                "truncated": truncated,
+                **read_data,
                 "untrusted": True,
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
@@ -2599,9 +2604,57 @@ class SafeExecutor:
         return (
             raw[: self.max_read_chars]
             + f"\n\n[TRUNCATED: showing the first {self.max_read_chars} "
-            f"characters; the file is {size} bytes]",
+            f"characters; the file is {size} bytes. read_file with start_line "
+            "and end_line reads the rest]",
             True,
         )
+
+    def _safe_read_line_range(
+        self, target: Path, path: str, start_line: int, end_line: int | None
+    ) -> dict[str, Any]:
+        """Lines start_line..end_line (1-based, inclusive) plus the file's line count.
+
+        Lines end at "\\n" only, as in sed and rg, so the numbers agree with
+        search_code. The whole file is streamed to count its lines; only the
+        requested lines are kept, up to max_read_chars.
+        """
+        target = self._canonical_read_target(target)
+        kept: list[str] = []
+        kept_chars = 0
+        last_kept = start_line - 1
+        truncated = False
+        total_lines = 0
+        try:
+            with target.open("r", encoding="utf-8", errors="replace", newline="\n") as handle:
+                for total_lines, line in enumerate(handle, 1):
+                    if truncated or total_lines < start_line:
+                        continue
+                    if end_line is not None and total_lines > end_line:
+                        continue
+                    if kept_chars + len(line) > self.max_read_chars:
+                        truncated = True
+                        if not kept:
+                            kept.append(line[: self.max_read_chars])
+                            last_kept = total_lines
+                        continue
+                    kept.append(line)
+                    kept_chars += len(line)
+                    last_kept = total_lines
+        except OSError as error:
+            raise ExecutorError(f"Failed to read file: {target.name}") from error
+
+        if start_line > total_lines:
+            raise ExecutorError(
+                f"start_line {start_line} is past the end of {path}: the file has "
+                f"{total_lines} lines"
+            )
+        return {
+            "content": "".join(kept),
+            "start_line": start_line,
+            "end_line": last_kept,
+            "total_lines": total_lines,
+            "truncated": truncated,
+        }
 
     def _truncate_text(self, text: str, limit: int) -> str:
         if len(text) <= limit:

@@ -70,6 +70,88 @@ def test_read_file_preserves_crlf_instead_of_hiding_it(tmp_path):
     assert result.data["content"] == "line1\r\nline2\r\n"
 
 
+def test_read_file_range_returns_the_lines_and_the_file_length(tmp_path):
+    (tmp_path / "f.txt").write_text("".join(f"line{n}\n" for n in range(1, 11)), encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    data = executor._read_file("f.txt", 3, 5).data
+
+    assert data["content"] == "line3\nline4\nline5\n"
+    assert (data["start_line"], data["end_line"], data["total_lines"]) == (3, 5, 10)
+    assert data["truncated"] is False
+    assert data["untrusted"] is True
+
+
+def test_read_file_range_clamps_to_the_end_and_defaults_the_start(tmp_path):
+    (tmp_path / "f.txt").write_text("a\nb\nc", encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    assert executor._read_file("f.txt", 2, 99).data["content"] == "b\nc"
+    assert executor._read_file("f.txt", 2, 99).data["end_line"] == 3
+    assert executor._read_file("f.txt", None, 2).data["content"] == "a\nb\n"
+
+
+def test_read_file_range_counts_lines_by_newline_only_and_keeps_crlf(tmp_path):
+    # sed and rg number lines by "\n"; a lone "\r" or U+2028 must not shift the numbers.
+    (tmp_path / "f.txt").write_bytes(b"a\r\nb\rstill b\nc\xe2\x80\xa8still c\nd\n")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    data = executor._read_file("f.txt", 2, 3).data
+
+    assert data["content"] == "b\rstill b\nc still c\n"
+    assert data["total_lines"] == 4
+    assert executor._read_file("f.txt", 1, 1).data["content"] == "a\r\n"
+
+
+def test_read_file_range_past_the_end_names_the_file_length(tmp_path):
+    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    with pytest.raises(ExecutorError, match="start_line 5 is past the end of f.txt: the file has 2 lines"):
+        executor._read_file("f.txt", 5, 9)
+
+
+def test_read_file_range_stops_at_the_read_limit_and_says_where(tmp_path):
+    (tmp_path / "f.txt").write_text("12345678\n" * 10, encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+    executor.max_read_chars = 30
+
+    data = executor._read_file("f.txt", 2, 10).data
+
+    assert data["truncated"] is True
+    assert data["content"] == "12345678\n" * 3
+    assert (data["start_line"], data["end_line"], data["total_lines"]) == (2, 4, 10)
+
+
+def test_read_file_range_cuts_a_single_line_longer_than_the_limit(tmp_path):
+    (tmp_path / "min.js").write_text("x" * 100 + "\nnext\n", encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+    executor.max_read_chars = 40
+
+    data = executor._read_file("min.js", 1, 2).data
+
+    assert data["content"] == "x" * 40
+    assert data["end_line"] == 1 and data["truncated"] is True
+
+
+def test_read_file_range_keeps_the_secret_guards(tmp_path):
+    (tmp_path / ".env").write_text("KEY=1\n", encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+
+    with pytest.raises(ExecutorError):
+        executor._read_file(".env", 1, 1)
+
+
+def test_whole_file_truncation_marker_points_at_line_ranges(tmp_path):
+    (tmp_path / "big.txt").write_text("y" * 50, encoding="utf-8")
+    executor = executor_module.SafeExecutor(str(tmp_path))
+    executor.max_read_chars = 20
+
+    content = executor._read_file("big.txt").data["content"]
+
+    assert "start_line and end_line" in content
+
+
 def test_replace_in_file_does_not_rewrite_unrelated_crlf_lines(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
     (tmp_path / "f.txt").write_bytes(b"line1\r\nline2\r\nline3\r\n")

@@ -98,6 +98,8 @@ def test_plan_step_is_derived_from_the_calls(names, files_changed, expected):
     [
         ("refuse", {"reason": "illegal request"}),
         ("read_file", {"path": "a.py"}),
+        ("read_file", {"path": "a.py", "start_line": 10, "end_line": 10}),
+        ("read_file", {"path": "a.py", "start_line": 10}),
         ("read_multiple_files", {"paths": ["a.py", "b.py"]}),
         ("write_file", {"path": "a.py", "content": ""}),
         ("append_file", {"path": "a.py", "content": "x"}),
@@ -123,6 +125,10 @@ def test_validate_action_args_accepts_valid_shapes(action_type, args):
     [
         ("refuse", {}, "Missing required fields"),
         ("refuse", {"reason": ""}, "reason"),
+        ("read_file", {"path": "a.py", "start_line": 0}, "'start_line' must be an integer >= 1"),
+        ("read_file", {"path": "a.py", "end_line": "9"}, "'end_line' must be an integer >= 1"),
+        ("read_file", {"path": "a.py", "start_line": True}, "'start_line' must be an integer >= 1"),
+        ("read_file", {"path": "a.py", "start_line": 9, "end_line": 8}, "must not be less"),
         ("read_multiple_files", {"paths": []}, "non-empty list"),
         ("replace_in_file", {"path": "a", "old_text": "x", "new_text": "y", "count": 0}, "range 1..1000"),
         ("list_tree", {"path": ".", "max_depth": 11}, "range 1..10"),

@@ -27,9 +27,21 @@ class ApprovalGate(Protocol):
         """Generic yes/no confirmation. May raise to fail closed."""
         ...
 
+    def commit_remembered_rule(self) -> None:
+        """Save the "don't ask again" choice made with the last approved command.
+
+        Called after that command ran. Saving inside ``confirm_command`` changes
+        the project policy the approval is bound to, and the run is then
+        refused as a changed execution context.
+        """
+        ...
+
 
 class TerminalApprovalGate:
     """Default gate: interactive terminal prompts, fail-closed off a TTY."""
+
+    def commit_remembered_rule(self) -> None:
+        """Nothing to save: the terminal offers its rule itself, after the run."""
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         from kernel.terminal import request_user_confirmation
