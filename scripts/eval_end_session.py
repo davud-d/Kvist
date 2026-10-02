@@ -1,276 +1,468 @@
 # -*- coding: utf-8 -*-
-"""end_session evaluation script: run cases through real chat/coder paths.
+"""end_session evaluation: run dataset cases through the real chat and action-loop paths.
 
 Usage:
   RUN_LIVE_LLM_TESTS=1 .venv/bin/python scripts/eval_end_session.py \\
-    --model cc/claude-opus-5 \\
-    --model cc/claude-sonnet-5 \\
-    --model ds/deepseek-v4-pro \\
+    --model deepseek:deepseek-v4-pro \\
+    --out-dir workspace/_runs/end_session_eval \\
     --budget 2000000 \\
-    --stop-at 19:15+06:00
+    --stop-at 2026-10-01T19:15:00+06:00
 
-Runs each case through the real agent (_run_chat for chat, run_loop for coder),
-records every call's usage, stops when budget is exhausted or time runs out.
+A model is ``provider:model`` (``deepseek:deepseek-v4-pro``, ``anymodel:ds/deepseek-v4-pro``).
+``main.build_agent`` runs once per model (the product path, with the saved settings and
+``end_session`` offered) and fails if the provider resolves a different model than requested.
+Each case then gets a fresh workspace and a new agent on that client, seeded with the case's
+earlier turns, and the flagged message is sent. Spend is the provider-reported usage of every
+request, times the route multiplier. Results are appended to ``<out-dir>/<model>.jsonl``
+after every case; a rerun skips completed cases and retries errored ones. Only gateway
+outages are retried inside a run.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import sys
+import tempfile
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from collections import defaultdict
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
-from kernel.llm_clients import create_llm_client
-from kernel.tests.conftest import NullUI
-from kernel.user_config import load_credentials
+from kernel import end_session  # noqa: E402
+from kernel.agent import LocalAgent  # noqa: E402
+from kernel.agent_state import AgentConfig  # noqa: E402
+from kernel.executor import SafeExecutor  # noqa: E402
+from kernel.main import build_agent  # noqa: E402
+from kernel.system_context import ensure_workspace_instructions  # noqa: E402
+from kernel.tests.conftest import NullUI  # noqa: E402
 
-# Model route multipliers from the user's AnyModel account
+CASES_PATH = ROOT / "kernel" / "tests" / "data" / "end_session_cases.jsonl"
+
+# Billing multipliers of the user's AnyModel account, keyed by "provider:route-prefix".
+# A direct provider is billed by raw usage, so it has no entry.
 ROUTE_MULTIPLIERS = {
-    "cc/": 0.06,
-    "ds/": 0.15,
+    "anymodel:cc/": 0.06,
+    "anymodel:ds/": 0.15,
+    "anymodel:am/": 0.0,  # free models: nothing is billed, raw usage is still recorded
 }
 
+# A coder case that wanders into real work must not eat the whole budget.
+CODER_MAX_STEPS = 25
 
-class UsageCollectorUI(NullUI):
-    """UI that accumulates token usage from print_usage calls."""
+# Consecutive errored cases that mean the provider is down or out of balance, not that cases are bad.
+MAX_CONSECUTIVE_ERRORS = 3
 
-    def __init__(self):
-        super().__init__()
-        self.calls: list[dict] = []
+# A 502/503/504 or a timeout from the gateway usually clears within a minute. Anything else
+# (401/402, a missing usage report, a bug in the case) repeats identically, so it is not retried.
+OUTAGE_RETRIES = 3
+OUTAGE_PAUSE_SECONDS = 30
+OUTAGE_ERROR_MARKERS = ("Error code: 502", "Error code: 503", "Error code: 504", "Timeout", "ConnectionError")
 
-    def print_usage(self, usage: dict):
-        """Callback for _emit_usage; records each call's tokens."""
-        self.calls.append(
+# A verdict the model reached by calling end_session; "refused" is a gate rejection of a bad call.
+FLAGGING_VERDICTS = ("warned", "opened", "decline", "confirm")
+
+
+class UsageTap:
+    """Wraps an OpenAI-style client and records the provider-reported usage of every request."""
+
+    def __init__(self, inner: Any, sink: list[dict[str, Any]]):
+        self._inner = inner
+        self.chat = _TappedChat(inner.chat, sink)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+class _TappedChat:
+    def __init__(self, inner: Any, sink: list[dict[str, Any]]):
+        self.completions = _TappedCompletions(inner.completions, sink)
+
+
+class _TappedCompletions:
+    def __init__(self, inner: Any, sink: list[dict[str, Any]]):
+        self._inner = inner
+        self._sink = sink
+
+    def create(self, **kwargs: Any) -> Any:
+        try:
+            result = self._inner.create(**kwargs)
+        except Exception as error:
+            self._record_failure(error)
+            raise
+        if kwargs.get("stream"):
+            return self._tap_stream(result)
+        self._record(getattr(result, "usage", None))
+        return result
+
+    def _tap_stream(self, stream: Any):
+        usage = None
+        try:
+            for chunk in stream:
+                # Some gateways repeat cumulative usage in every chunk, so only the last one counts.
+                usage = getattr(chunk, "usage", None) or usage
+                yield chunk
+        except Exception as error:
+            self._record_failure(error)
+            raise
+        finally:
+            # agent_model closes an abandoned stream; the close must reach the provider's connection.
+            close = getattr(stream, "close", None)
+            if close is not None:
+                close()
+            self._record(usage)
+
+    def _record_failure(self, error: Exception) -> None:
+        # Kvist turns a provider failure into a reply text, so the case would otherwise look completed.
+        self._sink.append({"error": f"{type(error).__name__}: {error}"[:300]})
+
+    def _record(self, usage: Any) -> None:
+        if usage is None:
+            return
+        self._sink.append(
             {
-                "input_tokens": usage["input_tokens"],
-                "output_tokens": usage["output_tokens"],
-                "total_tokens": usage["input_tokens"] + usage["output_tokens"],
+                "input_tokens": int(usage.prompt_tokens or 0),
+                "output_tokens": int(usage.completion_tokens or 0),
             }
         )
 
 
-@dataclass
-class CaseRun:
-    """One case's outcome."""
+class EstimateUI(NullUI):
+    """Collects Kvist's own tiktoken-based usage events, kept only as a cross-check of the tap."""
 
-    case_id: int
+    def __init__(self) -> None:
+        super().__init__()
+        self.estimated_tokens = 0
+
+    def print_usage(self, usage: dict) -> None:
+        self.estimated_tokens += usage["input_tokens"] + usage["output_tokens"]
+
+
+@dataclass(slots=True)
+class CaseRun:
+    index: int
     category: str
     language: str
     role: str
     model: str
     warning_state: str
     expected: str
-    status: str  # "completed" | "errored" | "skipped"
-    error: str | None = None
-    final: dict | None = None  # closed, warned_msg_id, closed_msg_id, reason if closed
-    usage_calls: list[dict] = field(default_factory=list)  # each call's usage dict
-    total_tokens: int = 0  # sum of (prompt+completion) across calls
-    weighted_tokens: float = 0.0  # total_tokens × route multiplier
-
-
-def parse_args():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--model", action="append", dest="models", required=True, help="Model id (repeatable)")
-    parser.add_argument("--budget", type=int, required=True, help="Total token budget (weighted)")
-    parser.add_argument("--stop-at", required=True, help="Stop new cases at this ISO timestamp (e.g. 19:15+06:00)")
-    return parser.parse_args()
-
-
-def load_cases(path: Path) -> list[dict]:
-    """Load JSONL cases."""
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    status: str  # "completed" | "errored"
+    closed: bool = False
+    flagged: bool = False  # end_session reached a warning, a review or a decision (not a gate refusal)
+    decision_log: list[dict[str, Any]] = field(default_factory=list)
+    reply: str = ""
+    error: str = ""
+    requests: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_tokens: int = 0
+    weighted_tokens: float = 0.0
+    earlier_errors: list[str] = field(default_factory=list)  # errors of the attempts that were retried
 
 
 def route_multiplier(model: str) -> float:
-    """Return the billing multiplier for this model's route."""
-    for prefix, mult in ROUTE_MULTIPLIERS.items():
+    for prefix, multiplier in ROUTE_MULTIPLIERS.items():
         if model.startswith(prefix):
-            return mult
-    return 1.0  # unknown route = no discount
+            return multiplier
+    return 1.0
 
 
-def run_case(case: dict, case_id: int, model: str, tmp_path: Path) -> CaseRun:
-    """Run one case through the real agent on the given model."""
-    # Build agent with end_session_enabled and the chosen model
-    credentials = load_credentials()
-    config = AgentConfig(
-        provider="anymodel",
-        fast_model=model,
-        smart_model=model,
-        persist_logs=False,
-        cache_enabled=False,
-        api_request_interval=0.2,
-        retry_base_delay=0.1,
-        max_retries=2,
-        end_session_enabled=True,
-    )
-    client = create_llm_client(config.provider, credentials, verbose=False)
-    executor = SafeExecutor(tmp_path)
-    ui = UsageCollectorUI()
-    agent = LocalAgent(client=client, executor=executor, config=config, ui=ui)
+def load_cases(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
-    # Seed history: the case conversation minus the last message (that's the run input)
-    conversation = case["conversation"]
-    history = []
-    for msg in conversation[:-1]:
-        role = "user" if msg["from"] == "user" else "assistant"
-        history.append({"role": role, "content": msg["text"]})
-    if history:
-        # Set system + history on _chat_history; the agent will refresh system on the next turn
-        # The first message in history is the first user turn, system is added by the agent
-        agent._chat_history = history
 
-    # The flagged message is the last one
-    user_input = conversation[-1]["text"]
+def interleaved(cases: list[dict]) -> list[tuple[int, dict]]:
+    """Cases as (1-based index, case), round-robin across categories so a cut run still covers all of them."""
+    by_category: dict[str, list[tuple[int, dict]]] = defaultdict(list)
+    for index, case in enumerate(cases, start=1):
+        by_category[case["category"]].append((index, case))
+    rounds = max(len(items) for items in by_category.values())
+    return [items[n] for n in range(rounds) for items in by_category.values() if n < len(items)]
 
-    # Inject warning if the case says so
-    if case["warning_state"] == "fresh":
-        # Mark warned_msg_id: the turn before this one
-        from kernel import end_session
 
-        agent._message_ledger = {"last_id": len(conversation) - 2, "user_ids": list(range(1, len(conversation), 2))}
-        agent._warned_msg_id = len(conversation) - 2
-    elif case["warning_state"] == "stale":
-        # warned_msg_id is more than WARNING_FRESH_MESSAGES turns ago
-        from kernel import end_session
+def seed_conversation(agent: Any, case: dict) -> str:
+    """Load the case's earlier turns into the agent as a finished conversation; return the flagged message.
 
-        agent._message_ledger = {"last_id": len(conversation) - 2, "user_ids": list(range(1, len(conversation), 2))}
-        agent._warned_msg_id = max(1, len(conversation) - 2 - end_session.WARNING_FRESH_MESSAGES - 1)
-    else:  # none
-        pass
-
-    # Run: chat vs coder
-    role = case["role"]
-    try:
-        if role == "chat":
-            agent.run(user_input, routed_role="chat")
-        else:  # coder
-            agent.run(user_input, routed_role="coder")
-    except Exception as error:
-        return CaseRun(
-            case_id=case_id,
-            category=case["category"],
-            language=case["language"],
-            role=role,
-            model=model,
-            warning_state=case["warning_state"],
-            expected=case["expected"],
-            status="errored",
-            error=str(error)[:500],
+    Message numbers follow the runtime's ledger (each person's message and each reply gets one), so
+    the flagged message becomes number len(earlier) + 1 and a fresh warning follows the first one.
+    """
+    *earlier, flagged = case["conversation"]
+    agent.start_fresh_session()
+    chat_history: list[dict[str, str]] = [{"role": "system", "content": ""}]
+    session_history: list[dict[str, Any]] = []
+    user_ids: list[int] = []
+    last_id = 0
+    for turn, reply in zip(earlier[::2], earlier[1::2]):
+        user_ids.append(last_id + 1)
+        session_history.append(
+            {
+                "goal": turn["text"],
+                "role": case["role"],
+                "result": reply["text"],
+                "msg_id": last_id + 1,
+                "reply_id": last_id + 2,
+            }
         )
+        chat_history += [
+            {"role": "user", "content": turn["text"]},
+            {"role": "assistant", "content": reply["text"]},
+        ]
+        last_id += 2
+    agent._session_history = session_history
+    if case["role"] == "chat":
+        agent._chat_history = chat_history
+    agent._message_ledger = {"last_id": last_id, "user_ids": user_ids}
+    if case["warning_state"] == "fresh":
+        agent._warned_msg_id = user_ids[-1]
+    agent.save_session()
+    return flagged["text"]
 
-    # Harvest usage: UsageCollectorUI recorded every print_usage call
-    usage_calls = ui.calls
-    total = sum(call["total_tokens"] for call in usage_calls)
 
-    # Check closure
-    from kernel import end_session
+def build_model_setup(spec: str) -> tuple[Any, AgentConfig, list[str]]:
+    """Build the provider client and config of ``spec`` once; every case reuses them.
 
-    final = None
-    if end_session.is_closed(agent):
-        closure = agent._closure
-        final = {
-            "closed": True,
-            "closed_at": closure.get("closed_at"),
-            "closed_msg_id": closure.get("closed_msg_id"),
-        }
-        # Try to extract reason from the decision log
-        log = getattr(agent, "_end_session_log", [])
-        if log:
-            last = log[-1]
-            if last.get("verdict") == "confirm":
-                final["reason"] = last.get("reason", "")
+    Goes through ``build_agent`` for the saved settings, credentials and the live catalog check,
+    which replaces a model missing from the catalog with a fallback. The eval must measure the
+    requested model, so a differing result is an error, and runtime fallbacks are switched off.
+    """
+    provider, _, model = spec.partition(":")
+    with tempfile.TemporaryDirectory(prefix="eval_end_session_setup_") as workspace:
+        agent, config, warnings = build_agent(
+            SafeExecutor(Path(workspace)),
+            max_steps=CODER_MAX_STEPS,
+            persist_logs=False,
+            verbose=False,
+            provider_override=provider,
+            models_override={"fast": model, "smart": model},
+            ui=NullUI(),
+            end_session=True,
+        )
+    if (config.fast_model, config.smart_model) != (model, model):
+        raise RuntimeError(
+            f"{spec}: the provider resolved fast={config.fast_model!r} smart={config.smart_model!r} "
+            f"instead of {model!r}; warnings: {warnings}"
+        )
+    return agent.client, replace(config, runtime_model_fallbacks_enabled=False), warnings
 
-    multiplier = route_multiplier(model)
-    return CaseRun(
-        case_id=case_id,
+
+def open_agent(workspace: Path, client: Any, config: AgentConfig, ui: EstimateUI) -> LocalAgent:
+    executor = SafeExecutor(workspace)
+    ensure_workspace_instructions(workspace)
+    return LocalAgent(client=client, executor=executor, config=replace(config), ui=ui)
+
+
+def run_case(index: int, case: dict, spec: str, client: Any, config: AgentConfig) -> CaseRun:
+    base = CaseRun(
+        index=index,
         category=case["category"],
         language=case["language"],
-        role=role,
-        model=model,
+        role=case["role"],
+        model=spec,
         warning_state=case["warning_state"],
         expected=case["expected"],
-        status="completed",
-        final=final,
-        usage_calls=usage_calls,
-        total_tokens=total,
-        weighted_tokens=total * multiplier,
+        status="errored",
     )
+    ui = EstimateUI()
+    tapped: list[dict[str, Any]] = []
+    with tempfile.TemporaryDirectory(prefix="eval_end_session_") as workspace:
+        try:
+            agent = open_agent(Path(workspace), UsageTap(client, tapped), config, ui)
+            flagged_text = seed_conversation(agent, case)
+            base.reply = agent.run(flagged_text, routed_role=case["role"])
+            base.decision_log = [
+                {key: entry.get(key) for key in ("stage", "verdict", "reason")} for entry in agent._end_session_log
+            ]
+            base.closed = end_session.is_closed(agent)
+        except Exception as error:  # noqa: BLE001 - one bad case is recorded, the rest of the run goes on
+            base.error = f"{type(error).__name__}: {error}"[:500]
+    answered = [call for call in tapped if "error" not in call]
+    if not base.error and tapped and "error" in tapped[-1]:
+        base.error = "last model request failed: " + tapped[-1]["error"]
+    if not base.error and not answered:
+        base.error = "no model request returned usage"
+    base.status = "errored" if base.error else "completed"
+    base.reply = base.reply[:600]
+    base.flagged = any(entry["verdict"] in FLAGGING_VERDICTS for entry in base.decision_log)
+    base.requests = len(answered)
+    base.input_tokens = sum(call["input_tokens"] for call in answered)
+    base.output_tokens = sum(call["output_tokens"] for call in answered)
+    base.estimated_tokens = ui.estimated_tokens
+    base.weighted_tokens = (base.input_tokens + base.output_tokens) * route_multiplier(spec)
+    return base
 
 
-def main():
+def is_outage(error: str) -> bool:
+    return any(marker in error for marker in OUTAGE_ERROR_MARKERS)
+
+
+def add_attempt(retry: CaseRun, earlier: CaseRun) -> None:
+    """Fold a failed earlier attempt into the retry, so spend and the cross-check cover every attempt."""
+    retry.requests += earlier.requests
+    retry.input_tokens += earlier.input_tokens
+    retry.output_tokens += earlier.output_tokens
+    retry.estimated_tokens += earlier.estimated_tokens
+    retry.weighted_tokens += earlier.weighted_tokens
+    retry.earlier_errors = [*earlier.earlier_errors, earlier.error]
+
+
+def run_case_with_retries(index: int, case: dict, spec: str, client: Any, config: AgentConfig, stop_time: datetime) -> CaseRun:
+    """Rerun a case whose gateway is briefly unavailable; any other error repeats identically and is final."""
+    run = run_case(index, case, spec, client, config)
+    for attempt in range(1, OUTAGE_RETRIES + 1):
+        if run.status == "completed" or not is_outage(run.error) or datetime.now(stop_time.tzinfo) >= stop_time:
+            break
+        time.sleep(OUTAGE_PAUSE_SECONDS * attempt)
+        retry = run_case(index, case, spec, client, config)
+        add_attempt(retry, run)
+        run = retry
+    return run
+
+
+def results_path(out_dir: Path, spec: str) -> Path:
+    return out_dir / (re.sub(r"[^A-Za-z0-9._-]+", "_", spec) + ".jsonl")
+
+
+def load_runs(path: Path) -> list[dict]:
+    """Every saved run; a line torn by a killed process costs only itself, and is reported."""
+    if not path.exists():
+        return []
+    runs = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            runs.append(json.loads(line))
+        except json.JSONDecodeError:
+            print(f"{path.name}:{number}: unreadable line skipped", file=sys.stderr)
+    return runs
+
+
+def append_run(path: Path, run: CaseRun) -> None:
+    """Append one run as a line, first ending a torn last line so the new one stays parseable."""
+    with path.open("a+b") as handle:
+        if handle.tell() > 0:
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                handle.write(b"\n")
+        handle.write((json.dumps(asdict(run), ensure_ascii=False) + "\n").encode("utf-8"))
+
+
+def latest_runs(path: Path) -> list[dict]:
+    """One run per case, the last attempt, so a rerun replaces an errored line."""
+    return list({run["index"]: run for run in load_runs(path)}.values())
+
+
+def summarize(runs: list[dict]) -> str:
+    """Per-category table: false closures (expected decline, closed) and misses (expected close, not closed)."""
+    rows: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for run in runs:
+        if run["status"] != "completed":
+            rows[run["category"]]["errored"] += 1
+            continue
+        row = rows[run["category"]]
+        row["n"] += 1
+        row["flagged"] += run["flagged"]
+        if run["expected"] == "decline":
+            row["decline_n"] += 1
+            row["false_close"] += run["closed"]
+        else:
+            row["close_n"] += 1
+            row["miss"] += not run["closed"]
+    lines = ["category            n  flagged  false_close/decline_n  miss/close_n  errored"]
+    for category, row in sorted(rows.items()):
+        lines.append(
+            f"{category:<18}{row['n']:>3}{row['flagged']:>9}"
+            f"{row['false_close']:>12}/{row['decline_n']:<9}{row['miss']:>8}/{row['close_n']:<4}{row['errored']:>6}"
+        )
+    return "\n".join(lines)
+
+
+def main() -> int:
     if os.environ.get("RUN_LIVE_LLM_TESTS") != "1":
         print("RUN_LIVE_LLM_TESTS must be 1", file=sys.stderr)
         return 1
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--model", action="append", dest="models", required=True, help="provider:model (repeatable)")
+    parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument("--budget", type=int, required=True, help="weighted tokens across all models")
+    parser.add_argument("--stop-at", required=True, help="no new case after this ISO timestamp with offset")
+    parser.add_argument("--only", help="comma-separated case indexes (1-based), for a dry run")
+    args = parser.parse_args()
 
-    args = parse_args()
-    cases_path = Path(__file__).parent.parent / "kernel" / "tests" / "data" / "end_session_cases.jsonl"
-    cases = load_cases(cases_path)
-    models = args.models
-    budget = args.budget
     stop_time = datetime.fromisoformat(args.stop_at)
+    if stop_time.tzinfo is None:
+        parser.error("--stop-at needs a UTC offset, e.g. 2026-10-01T19:15:00+06:00")
+    only = {int(item) for item in args.only.split(",")} if args.only else None
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    ordered = [(index, case) for index, case in interleaved(load_cases(CASES_PATH)) if only is None or index in only]
 
-    print(f"Loaded {len(cases)} cases, {len(models)} models, budget {budget}, stop at {stop_time}")
-    print(f"Models: {', '.join(models)}")
-    print()
-
-    tmp_path = Path("/tmp/eval_end_session")
-    tmp_path.mkdir(exist_ok=True)
-
-    runs: list[CaseRun] = []
     spent = 0.0
+    setup_failed = False
+    for spec in args.models:
+        try:
+            client, config, warnings = build_model_setup(spec)
+        except RuntimeError as error:
+            print(f"=== {spec}: setup failed, model skipped: {error}", file=sys.stderr, flush=True)
+            setup_failed = True
+            continue
+        for warning in warnings:
+            print(f"=== {spec}: {warning}", flush=True)
+        spent = run_model(spec, client, config, ordered, args.out_dir, args.budget, stop_time, spent)
+    print(f"weighted tokens spent: {spent:.0f} / {args.budget}")
+    return 1 if setup_failed else 0
 
-    for model_idx, model in enumerate(models):
-        print(f"=== Model {model_idx + 1}/{len(models)}: {model} ===")
-        for case_idx, case in enumerate(cases):
-            now = datetime.now(timezone.utc)
-            if now >= stop_time:
-                print(f"Time limit reached at case {case_idx + 1}/{len(cases)}, stopping new cases")
-                break
-            if spent >= budget:
-                print(f"Budget exhausted ({spent:.0f} >= {budget}), stopping")
-                break
 
-            case_id = case_idx + 1
-            print(f"[{case_id}/{len(cases)}] {case['category']} / {case['role']} / {case['language']}", end=" ")
-            sys.stdout.flush()
+def stop_reason(spent: float, budget: int, consecutive_errors: int, stop_time: datetime) -> str | None:
+    if datetime.now(stop_time.tzinfo) >= stop_time:
+        return "stop time reached, no new cases"
+    if spent >= budget:
+        return f"budget reached ({spent:.0f} >= {budget})"
+    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+        return f"{consecutive_errors} errored cases in a row"
+    return None
 
-            run = run_case(case, case_id, model, tmp_path)
-            runs.append(run)
-            spent += run.weighted_tokens
 
-            if run.status == "errored":
-                print(f"ERROR: {run.error}")
-            else:
-                closed = run.final and run.final.get("closed")
-                print(f"OK ({run.total_tokens} tok, {run.weighted_tokens:.0f} weighted, closed={closed})")
-            sys.stdout.flush()
-
-            # Progress every 30 cases
-            if case_id % 30 == 0:
-                print(f"  [{model}] {case_id}/{len(cases)} cases, {spent:.0f}/{budget} spent")
-
-        # Model done or stopped
-        completed_this_model = sum(1 for r in runs if r.model == model and r.status == "completed")
-        errored_this_model = sum(1 for r in runs if r.model == model and r.status == "errored")
-        print(f"Model {model} done: {completed_this_model} completed, {errored_this_model} errored\n")
-
-    # Write results
-    out_path = Path(__file__).parent.parent / "eval_end_session_results.jsonl"
-    with out_path.open("w", encoding="utf-8") as handle:
-        for run in runs:
-            handle.write(json.dumps(asdict(run), ensure_ascii=False) + "\n")
-    print(f"Written {out_path}")
-    print(f"Total weighted tokens spent: {spent:.0f} / {budget}")
-    return 0
+def run_model(
+    spec: str,
+    client: Any,
+    config: AgentConfig,
+    ordered: list[tuple[int, dict]],
+    out_dir: Path,
+    budget: int,
+    stop_time: datetime,
+    spent: float,
+) -> float:
+    """Run the model's pending cases, appending each result; return the total spend so far."""
+    path = results_path(out_dir, spec)
+    done = {run["index"] for run in latest_runs(path) if run["status"] == "completed"}
+    pending = [(index, case) for index, case in ordered if index not in done]
+    spent += sum(run["weighted_tokens"] for run in load_runs(path))
+    print(f"=== {spec}: {len(pending)} cases to run, spent so far {spent:.0f}/{budget} ===", flush=True)
+    consecutive_errors = 0
+    for index, case in pending:
+        reason = stop_reason(spent, budget, consecutive_errors, stop_time)
+        if reason:
+            print(f"{reason}, stopping {spec}", flush=True)
+            break
+        run = run_case_with_retries(index, case, spec, client, config, stop_time)
+        append_run(path, run)
+        spent += run.weighted_tokens
+        consecutive_errors = consecutive_errors + 1 if run.status == "errored" else 0
+        print(
+            f"[{index:>3}] {run.category:<16}{run.role:<6}{run.language} {run.status:<9}"
+            f"expected={run.expected:<8}closed={run.closed!s:<5}flagged={run.flagged!s:<5}"
+            f"req={run.requests} in={run.input_tokens} out={run.output_tokens} {run.error}",
+            flush=True,
+        )
+    print(summarize(latest_runs(path)), flush=True)
+    return spent
 
 
 if __name__ == "__main__":
