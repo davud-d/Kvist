@@ -754,6 +754,30 @@ sees `post`/`onMessage`. `KvistChatHost.kt` is a port of `chatView.ts` and
 `ToHost`/`ToWebview` message in `frontends/ide/vscode/src/messages.ts` needs a handler on both sides. Without JCEF the tool window falls
 back to the terminal launcher.
 
+### macOS branches (best-effort; nothing here is verified on a Mac)
+A binary per platform is bundled: `bin/win/kvist.exe`, `bin/linux/kvist.bin`,
+`bin/mac-arm64/kvist.bin`, `bin/mac-x64/kvist.bin`. Both plugins pick one by OS and CPU
+(`KvistBinaryResolver.kt`, `frontends/ide/vscode/src/platform.ts`; an IDE under Rosetta
+reports x64 and takes that one), treat Linux and macOS alike as POSIX (shell launch, `chmod
++x`, and on a Mac `xattr -d com.apple.quarantine`), and build with a missing other-platform
+binary as a warning only. Gradle's `hostBinaryPath` and the two `build-plugin.sh` pick the
+host's folder; BSD `install` has no `-D`, so they `mkdir -p` first.
+`scripts/release/install.sh` maps `uname` to `kvist-linux-x64`, `kvist-macos-arm64` or
+`kvist-macos-x64`, nests the JetBrains plugin in `plugins/` under
+`~/Library/Application Support/JetBrains/<Product><version>` and finds VS Code inside its
+`.app`; it must stay valid bash 3.2. `install_cli.py` prints the PATH command for the login
+shell (`path_hint`) and drops the quarantine mark; `install_gui.py` copies the unpacked
+`Kvist.app` into `~/Applications` with `symlinks=True`; the electron-builder `mac` target
+makes dmg and zip (the unsigned bundle is ad-hoc signed by electron-builder only when it
+finds no identity, which no one has checked), and `frontends/gui/electron/scripts/build-core.js`
+replaces the old `.venv/bin/python` path. `plugin-release.yml` builds `kvist-macos-arm64`
+(`macos-latest`) and `kvist-macos-x64` (`macos-15-intel`) only on manual runs and every tenth
+run (its `plan` job; GitHub expressions have no `%`); other runs reuse the assets the rolling
+release already holds, so the macOS binaries can lag behind `main`. `platforms.yml` covers
+the macOS layout on its mac runner only: a VSIX with the binary, and `install.sh` under the
+system bash. Unit tests fake the platform; Intel Macs, Android Studio (Google's data root),
+notarization and a real IDE run are not covered.
+
 ### Zed / ACP frontend (`acp_frontend.py`, `acp_events.py`, `frontends/zed/`)
 Zed reaches coding agents over the **Agent Client Protocol**, so this is an
 external agent registration and not an extension: there is no `extension.toml`

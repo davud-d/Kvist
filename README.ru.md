@@ -112,7 +112,8 @@ CLI проверяется в CI на Linux, Windows и macOS (Apple Silicon): �
 и shell-инструменты агента. Официально поддерживаются Linux и Windows; macOS — по
 мере возможности, без гарантий, что там работают все функции. Изоляция на уровне ОС
 (Bubblewrap) есть только на Linux. IDE-интеграции
-поддерживают Linux и Windows: JetBrains-плагин нацелен на IntelliJ Platform
+поддерживают Linux и Windows (macOS — по мере возможности: бинарники для Apple
+Silicon и Intel поставляются, но на Mac не проверены): JetBrains-плагин нацелен на IntelliJ Platform
 2025.3, а расширение VS Code — на VS Code 1.85+. Оба запускают Kvist для
 открытого проекта и умеют писать сообщения коммитов из source-control UI. Zed
 запускает Kvist как внешний ACP-агент — это запись в настройках, а не плагин, —
@@ -133,7 +134,7 @@ JetBrains) и расширение VS Code (VS Code, Insiders, VSCodium) куд�
 не требуется:
 
 ```bash
-# Linux
+# Linux и macOS (по мере возможности)
 curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash
 ```
 
@@ -143,7 +144,10 @@ irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/insta
 ```
 
 Ассеты можно скачать и по отдельности: `kvist-linux-x64`,
-`kvist-windows-x64.exe`, `kvist-jetbrains.zip`, `kvist-vscode.vsix`. Чтобы
+`kvist-windows-x64.exe`, `kvist-macos-arm64`, `kvist-macos-x64`,
+`kvist-jetbrains.zip`, `kvist-vscode.vsix`. На macOS скрипт берёт binary под
+процессор, на котором запущен; macOS-бинарники пересобираются на каждый десятый
+push и могут отставать от `main`. Чтобы
 установить из файлов, уже лежащих на диске, запустите `bash install.sh --from <dir>`
 или `.\install.ps1 -From <dir>`. Zed регистрируется отдельно:
 `scripts/installer/install_zed.py`.
@@ -246,7 +250,7 @@ curl -H "Authorization: Bearer $ANYMODEL_API_KEY" https://anymodel.org/v1/models
 .venv/bin/python scripts/installer/install.py
 ```
 
-В каталоге `scripts/installer/` есть IDE- и desktop-установщики для Linux и Windows:
+В каталоге `scripts/installer/` есть IDE- и desktop-установщики для Linux, Windows и (по мере возможности) macOS:
 
 ```bash
 .venv/bin/python scripts/installer/install_jetbrains.py   # ставит плагин во все найденные JetBrains IDE
@@ -283,7 +287,7 @@ Zed связывается с кодящими агентами через
 
 ```bash
 cd frontends/ide/vscode
-./build-plugin.sh      # Linux host
+./build-plugin.sh      # Linux или macOS host
 # или на Windows: .\build-plugin.ps1 / build-plugin.bat
 ```
 
@@ -293,10 +297,10 @@ cd frontends/ide/vscode
 
 Установщик использует `dist/kvist` или `dist/kvist.exe`, а при отсутствии
 собирает его PyInstaller-ом. Реальный binary кладётся в пользовательский
-каталог данных, launcher — в `~/.local/bin` (Linux) или
+каталог данных, launcher — в `~/.local/bin` (Linux и macOS) или
 `%LOCALAPPDATA%\\Kvist\\bin` (Windows). На Windows установщик сам добавляет этот
-каталог в пользовательский `PATH` (после этого откройте новый терминал); на Linux
-добавьте его вручную, если установщик предупредит. Для пересборки используйте
+каталог в пользовательский `PATH` (после этого откройте новый терминал); на Linux и macOS
+добавьте его вручную, если установщик предупредит (он выводит команду для вашей оболочки). Для пересборки используйте
 `--rebuild`.
 
 Установленный launcher использует текущий каталог как workspace:
@@ -313,7 +317,7 @@ kvist
 .venv/bin/python -m PyInstaller kvist.spec
 ```
 
-Результат — `dist/kvist` в Linux или `dist/kvist.exe` в Windows.
+Результат — `dist/kvist` в Linux и macOS или `dist/kvist.exe` в Windows.
 
 ## Команды терминала
 
@@ -441,7 +445,7 @@ npm start -- --workspace /path/to/project
 ```
 
 Тесты GUI: `npm test`. Native-пакеты собираются через `npm run dist` отдельно
-на Linux (`AppImage`, `deb`) и Windows (`nsis`). Подробности — в
+на Linux (`AppImage`, `deb`), Windows (`nsis`) и, по мере возможности, macOS (`dmg`, `zip`). Подробности — в
 [`frontends/gui/electron/README.md`](frontends/gui/electron/README.md).
 
 В `frontends/gui/electron/package.json` задано `"workspaces": []`, чтобы electron-builder считал
@@ -495,8 +499,8 @@ cd frontends/ide/vscode
 ./build-plugin.sh
 ```
 
-На Windows используйте `.\build-plugin.ps1` в PowerShell или `build-plugin.bat`
-в Command Prompt. Готовый пакет лежит в `frontends/ide/vscode/.build/vsix/`; его
+Скрипт работает на Linux и macOS. На Windows используйте `.\build-plugin.ps1` в
+PowerShell или `build-plugin.bat` в Command Prompt. Готовый пакет лежит в `frontends/ide/vscode/.build/vsix/`; его
 можно установить через `code --install-extension <file>.vsix` или Extensions >
 Install from VSIX. Подробности — в [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md).
 

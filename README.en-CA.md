@@ -112,7 +112,8 @@ The CLI is tested in CI on Linux, Windows and macOS (Apple Silicon): installatio
 and the agent's file and shell tools. Linux and Windows are the supported
 platforms; macOS is best-effort, with no guarantee that every feature works
 there. The OS-level sandbox (Bubblewrap) exists only on Linux. The optional IDE
-integrations support Linux and Windows: the JetBrains plugin targets IntelliJ
+integrations support Linux and Windows (macOS best-effort: binaries ship for Apple
+Silicon and Intel, unverified on a Mac): the JetBrains plugin targets IntelliJ
 Platform 2025.3, and the VS Code extension targets VS Code 1.85+. Both launch
 Kvist for the opened project and can write commit messages from the IDE's
 source-control UI. Zed runs Kvist as an external ACP agent — that is a settings
@@ -219,8 +220,8 @@ To install a reusable `kvist` launcher and build a standalone binary when needed
 .venv/bin/python scripts/installer/install.py
 ```
 
-The `scripts/installer/` directory also holds IDE and desktop installers for Linux and
-Windows:
+The `scripts/installer/` directory also holds IDE and desktop installers for Linux, Windows and
+(best-effort) macOS:
 
 ```bash
 .venv/bin/python scripts/installer/install_jetbrains.py   # install the plugin into every JetBrains IDE found
@@ -256,7 +257,7 @@ The VS Code extension is packaged as a `.vsix` from `frontends/ide/vscode/`:
 
 ```bash
 cd frontends/ide/vscode
-./build-plugin.sh      # Linux host
+./build-plugin.sh      # Linux or macOS host
 # or on Windows: .\build-plugin.ps1 / build-plugin.bat
 ```
 
@@ -266,10 +267,10 @@ The helper builds the current OS Kvist binary with PyInstaller, copies it into
 
 The installer uses `dist/kvist` or `dist/kvist.exe` when available, otherwise
 builds it with PyInstaller. It installs the binary under the per-user data
-directory and a launcher under `~/.local/bin` on Linux or `%LOCALAPPDATA%\\Kvist\\bin`
+directory and a launcher under `~/.local/bin` on Linux and macOS or `%LOCALAPPDATA%\\Kvist\\bin`
 on Windows. On Windows the installer adds that bin directory to your user `PATH`
-automatically (open a new terminal afterwards); on Linux add it yourself if the
-installer reports it is missing. Re-run with `--rebuild` after changing the source.
+automatically (open a new terminal afterwards); on Linux and macOS add it yourself
+if the installer reports it is missing (it prints the command for your shell). Re-run with `--rebuild` after changing the source.
 
 The installed launcher uses the current directory as the workspace:
 
@@ -285,7 +286,7 @@ Build manually if you need the artifact only:
 .venv/bin/python -m PyInstaller kvist.spec
 ```
 
-The result is `dist/kvist` on Linux or `dist/kvist.exe` on Windows.
+The result is `dist/kvist` on Linux and macOS or `dist/kvist.exe` on Windows.
 
 ## Terminal commands
 
@@ -425,7 +426,7 @@ npm start -- --workspace /path/to/project
 ```
 
 Run `npm test` for GUI tests. `npm run dist` builds native Linux (`AppImage`,
-`deb`) or Windows (`nsis`) packages; build separately on each target OS. See
+`deb`), Windows (`nsis`) or, best-effort, macOS (`dmg`, `zip`) packages; build separately on each target OS. See
 [`frontends/gui/electron/README.md`](frontends/gui/electron/README.md) for packaging details.
 
 `frontends/gui/electron/package.json` sets `"workspaces": []` so electron-builder treats it as its
@@ -448,8 +449,8 @@ cd frontends/ide/vscode
 ./build-plugin.sh
 ```
 
-On Windows, run `./build-plugin.ps1` from PowerShell or `build-plugin.bat` from
-Command Prompt. The package is written to `frontends/ide/vscode/.build/vsix/` and can
+The script runs on Linux and macOS. On Windows, run `./build-plugin.ps1` from
+PowerShell or `build-plugin.bat` from Command Prompt. The package is written to `frontends/ide/vscode/.build/vsix/` and can
 be installed with `code --install-extension <file>.vsix` or through Extensions >
 Install from VSIX. Details are in [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md).
 
