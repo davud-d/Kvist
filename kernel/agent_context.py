@@ -462,11 +462,10 @@ def compact_for_prompt(self, value: Any, depth: int = 0) -> Any:
         return self._truncate_for_prompt(value, self.config.prompt_value_char_limit)
 
     if isinstance(value, list):
-        limit = 12
-        compacted = [self._compact_for_prompt(item, depth + 1) for item in value[:limit]]
-        if len(value) > limit:
-            compacted.append(f"[TRUNCATED_LIST: showing first {limit} of {len(value)}]")
-        return compacted
+        # No item cap: the tools bound their own lists, and a cap here handed
+        # the model 12 of the 50 search hits it asked for, with only a marker
+        # to say so. The result's character limit is the bound.
+        return [self._compact_for_prompt(item, depth + 1) for item in value]
 
     if isinstance(value, dict):
         return {

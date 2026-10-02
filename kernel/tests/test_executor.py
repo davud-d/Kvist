@@ -48,6 +48,39 @@ def test_executor_file_lifecycle_and_search(tmp_path):
     assert executor._search_code("changed").data["results"][0]["path"] == "src/app.py"
 
 
+def test_search_code_returns_as_many_hits_as_asked_up_to_the_schema_maximum(tmp_path):
+    (tmp_path / "many.txt").write_text("needle\n" * 120, encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+
+    data = executor._search_code("needle", max_results=100).data
+
+    assert len(data["results"]) == 100
+    assert data["truncated"] is True
+    assert executor._search_code("needle", max_results=200).data["truncated"] is False
+    assert len(executor._search_code("needle", max_results=200).data["results"]) == 120
+
+
+def test_search_code_without_more_matches_is_not_marked_truncated(tmp_path):
+    (tmp_path / "few.txt").write_text("needle\n" * 3, encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+
+    assert executor._search_code("needle", max_results=3).data["truncated"] is False
+    assert executor._search_code("needle", max_results=2).data["truncated"] is True
+
+
+def test_find_files_says_when_it_stopped_at_its_limit(tmp_path):
+    for index in range(5):
+        (tmp_path / f"f{index}.txt").write_text("x", encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+    executor.max_find_results = 3
+
+    limited = executor._find_files("*.txt").data
+    assert len(limited["matches"]) == 3 and limited["truncated"] is True
+
+    executor.max_find_results = 5
+    assert executor._find_files("*.txt").data["truncated"] is False
+
+
 def test_find_files_double_star_matches_root_level_files(tmp_path):
     executor = executor_module.SafeExecutor(str(tmp_path))
     executor._write_file("setup.py", "pass\n")

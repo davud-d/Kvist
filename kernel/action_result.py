@@ -89,9 +89,11 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
         suffix = " (truncated)" if data.get("truncated") else ""
         return f"Listed {_plural(len(str(data.get('tree', '')).splitlines()), 'line')}{suffix}"
     if action_type == "find_files":
-        return _plural(len(data.get("matches", [])), "match", "matches")
+        suffix = " (truncated)" if data.get("truncated") else ""
+        return _plural(len(data.get("matches", [])), "match", "matches") + suffix
     if action_type == "search_code":
-        return _plural(len(data.get("results", [])), "match", "matches")
+        suffix = " (truncated)" if data.get("truncated") else ""
+        return _plural(len(data.get("results", [])), "match", "matches") + suffix
     if action_type == "git_status":
         return _git_status_summary(data)
     if action_type == "git_diff":

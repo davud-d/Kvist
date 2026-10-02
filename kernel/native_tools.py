@@ -107,9 +107,9 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
     "list_tree": ToolSpec(
         "List a directory tree.", {"path": _PATH, "max_depth": _integer(1, 10)}, ("path",), readonly=True
     ),
-    "find_files": ToolSpec("Find files by glob.", {"pattern": _STRING, "path": _PATH}, ("pattern",), readonly=True),
+    "find_files": ToolSpec("Find files by glob. truncated: true means more files match than were returned.", {"pattern": _STRING, "path": _PATH}, ("pattern",), readonly=True),
     "search_code": ToolSpec(
-        "Search file contents for a fixed string, case-insensitively.",
+        "Search file contents for a fixed string, case-insensitively. truncated: true means more matches exist than were returned.",
         {"query": _STRING, "path": _PATH, "max_results": _integer(1, 200)},
         ("query",),
         readonly=True,

@@ -1109,7 +1109,11 @@ degrades to configured models with a warning when that fails.
 `SafeExecutor` is the single gate for every action and returns an `ExecutionResult`
 (`ok`, `action_type`, `data`). `search_code` runs a trusted system `rg` (`--no-config`,
 fixed-string, case-insensitive, `.gitignore`-aware, symlinks not followed; the result
-says `skips_gitignored_files`) and passes every hit through the same read boundary as
+says `skips_gitignored_files`, and `truncated` when more hits exist than the
+`max_results` it was given, up to 200 like the schema; `find_files` has the same
+`truncated`. Three silent cuts once gave the model 12 of the 113 hits it asked for
+(schema 200, executor 50, `compact_for_prompt` 12 per list) and it searched again
+with narrower queries; lists are no longer cut by item count in the prompt) and passes every hit through the same read boundary as
 `read_file`; without one it falls back to walking the tree in Python, which read every
 file whole and took 8.5 s on this repository. It enforces the workspace boundary (all paths resolved and
 checked with `relative_to`, symlink-escape protection), blocks the internal `.kvist`

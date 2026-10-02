@@ -28,7 +28,7 @@ def test_context_formatting_compaction_and_summary(agent_factory):
     )
     assert agent._truncate_for_prompt("abcdef", 3).startswith("abc")
     compact = agent._compact_for_prompt({"items": list(range(20)), "deep": {"a": {"b": {"c": {"d": "x"}}}}})
-    assert compact["items"][-1].startswith("[TRUNCATED_LIST")
+    assert compact["items"] == list(range(20))
     assert compact["deep"]["a"]["b"]["c"] == "[TRUNCATED_DEPTH]"
     summary = agent._build_summary()
     assert "Changed: app.py" in summary

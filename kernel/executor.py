@@ -168,7 +168,10 @@ class SafeExecutor:
 
         self.max_read_chars = 200000
         self.max_output_chars = 12000
-        self.max_search_results = 50
+        # The schema offers search_code max_results up to 200; a lower cap here
+        # would hand the model fewer hits than it asked for without saying so.
+        self.max_search_results = 200
+        self.max_find_results = 200
         self.max_file_size_bytes = 256 * 1024
         self.max_writable_file_bytes = 2 * 1024 * 1024
 
@@ -1649,7 +1652,7 @@ class SafeExecutor:
                     for pat in patterns
                 ):
                     matches.append(relative)
-                if len(matches) >= 200:
+                if len(matches) > self.max_find_results:
                     break
         except PermissionError as error:
             raise ExecutorError(
@@ -1662,13 +1665,15 @@ class SafeExecutor:
                 + self._path_error_details(path, base_dir, error)
             ) from error
 
+        truncated = len(matches) > self.max_find_results
         return ExecutionResult(
             ok=True,
             action_type="find_files",
             data={
                 "pattern": pattern,
                 "path": path,
-                "matches": matches,
+                "matches": matches[: self.max_find_results],
+                "truncated": truncated,
             },
         )
 
@@ -1682,11 +1687,12 @@ class SafeExecutor:
         target = self._resolve_read_path(path) if path else self.workspace
         search_root = target if target.is_file() else self._resolve_read_dir(path)
 
+        # One hit past the limit tells whether the answer is complete.
         ripgrep = _trusted_ripgrep()
         if ripgrep is None:
-            results, unreadable = self._search_by_walking(query, search_root, safe_limit)
+            results, unreadable = self._search_by_walking(query, search_root, safe_limit + 1)
         else:
-            results, unreadable = self._search_with_ripgrep(ripgrep, query, search_root, safe_limit)
+            results, unreadable = self._search_with_ripgrep(ripgrep, query, search_root, safe_limit + 1)
 
         return ExecutionResult(
             ok=True,
@@ -1694,7 +1700,8 @@ class SafeExecutor:
             data={
                 "query": query,
                 "path": path,
-                "results": results,
+                "results": results[:safe_limit],
+                "truncated": len(results) > safe_limit,
                 "skipped_unreadable_files": unreadable,
                 "skips_gitignored_files": ripgrep is not None,
                 "untrusted": True,
