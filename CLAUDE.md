@@ -83,7 +83,8 @@ python3 -m venv .venv
 .venv/bin/python -m pytest -m ""                        # also the slow real-process/PTY tests
 RUN_LIVE_LLM_TESTS=1 .venv/bin/python -m pytest -m live_llm
 .venv/bin/python -m ruff check .                        # static runtime-error lint
-.venv/bin/python scripts/e2e_tools_smoke.py             # agent tools against a fake local provider (create, edit, shell; ~3 s)
+.venv/bin/python scripts/e2e_tools_smoke.py             # agent tools against a fake local provider (create, edit, append, shell; ~3 s)
+python scripts/e2e_install_smoke.py                     # install_cli.py into a scratch home, then the same turns through the installed kvist (minutes; builds in dist/ and .venv-build of the checkout, so use a clean copy)
 
 cd frontends/tui/ink && npm install && npm run build    # Ink terminal UI -> frontends/tui/ink/dist-ui/kvist-tui.mjs
 cd frontends/tui/ink && npm test && npm run typecheck   # Ink UI tests and types

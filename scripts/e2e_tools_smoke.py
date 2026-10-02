@@ -2,11 +2,13 @@
 """Agent tools smoke test: Kvist against a fake OpenAI-compatible provider.
 
 The provider answers with scripted tool calls, one scenario per goal: create a
-file, edit it, run a command. After each turn the script checks the workspace
-and the events Kvist emitted. Standard library only; the whole run is held to
-TOTAL_BUDGET_SECONDS. Exit code 0 means every check passed.
+file, edit it, append to it, then run a command. After each turn the script
+checks the workspace and the events Kvist emitted. Standard library only; the
+turns are held to TURN_BUDGET_SECONDS. Exit code 0 means every check passed.
 
     python scripts/e2e_tools_smoke.py
+
+e2e_install_smoke.py reuses these parts to test an installed binary.
 """
 from __future__ import annotations
 
@@ -22,18 +24,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-TOTAL_BUDGET_SECONDS = 45
+TURN_BUDGET_SECONDS = 45
 TURN_TIMEOUT_SECONDS = 15
 
-CREATED = "hello from kvist\n"
-EDIT_OLD, EDIT_NEW = "hello", "goodbye"
+CREATED = b"hello from kvist\n"
+EDITED = b"goodbye from kvist\n"
+APPENDED = EDITED + b"and another line\n"
+# (goal, the tool call the fake provider makes, the file content to expect or
+# None for the terminal turn).
 SCENARIOS = (
     ("create hello.txt with a greeting", {"name": "write_file", "arguments": {
-        "path": "hello.txt", "content": CREATED}}),
+        "path": "hello.txt", "content": CREATED.decode()}}, CREATED),
     ("change the greeting in hello.txt", {"name": "replace_in_file", "arguments": {
-        "path": "hello.txt", "old_text": EDIT_OLD, "new_text": EDIT_NEW}}),
+        "path": "hello.txt", "old_text": "hello", "new_text": "goodbye"}}, EDITED),
+    ("add a line to hello.txt", {"name": "append_file", "arguments": {
+        "path": "hello.txt", "content": "and another line\n"}}, APPENDED),
     ("print the git version", {"name": "run_shell", "arguments": {
-        "command": ["git", "--version"], "purpose": "check git"}}),
+        "command": ["git", "--version"], "purpose": "check git"}}, None),
 )
 
 
@@ -102,14 +109,13 @@ class FakeProvider:
 class Kvist:
     """One stdio-multi core process, read through a thread so waits can time out."""
 
-    def __init__(self, workspace: Path, home: Path, base_url: str) -> None:
+    def __init__(self, argv: list[str], cwd: Path, home: Path) -> None:
         env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), PYTHONUTF8="1",
                    PYTHONUNBUFFERED="1", AGENT_WRITE_APPROVAL="0", AGENT_API_INTERVAL="0",
                    NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost")
         self.process = subprocess.Popen(
-            [sys.executable, "-m", "kernel", "--workspace", str(workspace),
-             "--frontend", "stdio-multi", "--provider", "custom:fake", "--role", "coder"],
-            cwd=ROOT, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            argv + ["--frontend", "stdio-multi", "--provider", "custom:fake", "--role", "coder"],
+            cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, text=True, encoding="utf-8")
         self.events: queue.Queue[dict] = queue.Queue()
         self.stderr_lines: list[str] = []
@@ -168,7 +174,7 @@ def configure(home: Path, base_url: str) -> None:
         "models": {"fast": "fake-fast", "smart": "fake-smart"}, "streaming": False})
 
 
-def check_turn(turn: int, events: list[dict], workspace: Path) -> None:
+def check_turn(expected: bytes | None, events: list[dict], workspace: Path) -> None:
     """Assertions after each scenario; raises AssertionError with what was seen."""
     types = [event.get("type") for event in events]
     asked = [event for event in events if event.get("type") == "input_request"]
@@ -177,15 +183,32 @@ def check_turn(turn: int, events: list[dict], workspace: Path) -> None:
     results = [event for event in events if event.get("type") == "action_result"]
     assert results, f"no action_result in {types}"
     assert all(r.get("ok", True) is not False for r in results), f"a tool failed: {results}"
-    target = workspace / "hello.txt"
-    if turn == 0:
-        assert target.read_bytes() == CREATED.encode(), f"created file: {target.read_bytes()!r}"
-    elif turn == 1:
-        expected = CREATED.replace(EDIT_OLD, EDIT_NEW).encode()
-        assert target.read_bytes() == expected, f"edited file: {target.read_bytes()!r}"
-    else:
-        output = " ".join(str(r.get("output", "")) for r in results)
-        assert "git version" in output, f"the terminal returned nothing useful: {results}"
+    if expected is not None:
+        actual = (workspace / "hello.txt").read_bytes()
+        assert actual == expected, f"hello.txt is {actual!r}, expected {expected!r}"
+        return
+    output = " ".join(str(r.get("output", "")) for r in results)
+    assert "git version" in output, f"the terminal returned nothing useful: {results}"
+
+
+def run_turns(core: Kvist, workspace: Path) -> float:
+    """Send every scenario goal, check after each turn; returns the seconds the turns took."""
+    started = mark = time.monotonic()
+    for goal, _call, expected in SCENARIOS:
+        core.send_goal(goal)
+        events = core.collect_until("turn_end", TURN_TIMEOUT_SECONDS)
+        check_turn(expected, events, workspace)
+        now = time.monotonic()
+        print(f"ok  turn: {goal}  (+{now - mark:.1f}s)")
+        mark = now
+    return time.monotonic() - started
+
+
+def report_failure(error: Exception, core: Kvist, provider: FakeProvider) -> int:
+    print(f"FAIL: {error}")
+    print("--- core stderr:\n" + "\n".join(core.stderr_lines[-40:]))
+    print(f"--- provider saw {len(provider.requests)} requests")
+    return 1
 
 
 def main() -> int:
@@ -196,26 +219,19 @@ def main() -> int:
         home.mkdir()
         workspace.mkdir()
         configure(home, provider.url)
-        core = Kvist(workspace, home, provider.url)
+        core = Kvist([sys.executable, "-m", "kernel", "--workspace", str(workspace)], ROOT, home)
         try:
             core.collect_until("hello", TURN_TIMEOUT_SECONDS)
-            for turn, (goal, _call) in enumerate(SCENARIOS):
-                core.send_goal(goal)
-                events = core.collect_until("turn_end", TURN_TIMEOUT_SECONDS)
-                check_turn(turn, events, workspace)
-                print(f"ok  turn {turn + 1}: {goal}  ({time.monotonic() - started:.1f}s)")
+            print(f"core ready  ({time.monotonic() - started:.1f}s)")
+            elapsed = run_turns(core, workspace)
         except (AssertionError, TimeoutError) as error:
-            print(f"FAIL: {error}")
-            print("--- core stderr:\n" + "\n".join(core.stderr_lines[-40:]))
-            print(f"--- provider saw {len(provider.requests)} requests")
-            return 1
+            return report_failure(error, core, provider)
         finally:
             core.stop()
             provider.server.shutdown()
-    elapsed = time.monotonic() - started
     print(f"all {len(SCENARIOS)} turns passed in {elapsed:.1f}s")
-    if elapsed > TOTAL_BUDGET_SECONDS:
-        print(f"FAIL: over the {TOTAL_BUDGET_SECONDS}s budget")
+    if elapsed > TURN_BUDGET_SECONDS:
+        print(f"FAIL: over the {TURN_BUDGET_SECONDS}s budget")
         return 1
     return 0
 
