@@ -14,16 +14,27 @@ object KvistBinaryResolver {
     private const val PLUGIN_ID = "com.kvist.intellij"
     private val WINDOWS_BINARY: Path = Path.of("bin", "win", "kvist.exe")
     private val LINUX_BINARY: Path = Path.of("bin", "linux", "kvist.bin")
+    private val MACOS_ARM64_BINARY: Path = Path.of("bin", "mac-arm64", "kvist.bin")
+    private val MACOS_X64_BINARY: Path = Path.of("bin", "mac-x64", "kvist.bin")
 
     enum class SupportedOs {
         WINDOWS,
         LINUX,
+        MACOS_ARM64,
+        MACOS_X64,
+        ;
+
+        /** Whether the binary is started through a POSIX shell and needs the execute bit. */
+        val isPosix: Boolean
+            get() = this != WINDOWS
     }
 
     fun currentOs(): SupportedOs? {
         return when {
             SystemInfo.isWindows -> SupportedOs.WINDOWS
             SystemInfo.isLinux -> SupportedOs.LINUX
+            // An IDE running under Rosetta reports x64 and takes the x64 binary, which Rosetta runs too.
+            SystemInfo.isMac -> if (SystemInfo.isAarch64) SupportedOs.MACOS_ARM64 else SupportedOs.MACOS_X64
             else -> null
         }
     }
@@ -32,6 +43,8 @@ object KvistBinaryResolver {
         return when (os) {
             SupportedOs.WINDOWS -> WINDOWS_BINARY
             SupportedOs.LINUX -> LINUX_BINARY
+            SupportedOs.MACOS_ARM64 -> MACOS_ARM64_BINARY
+            SupportedOs.MACOS_X64 -> MACOS_X64_BINARY
         }
     }
 

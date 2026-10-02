@@ -29,8 +29,8 @@ object KvistLauncher {
             get() = listOf(binaryPath.toString(), "--workspace", projectPath.toString())
 
         val command: List<String>
-            get() = if (operatingSystem == SupportedOs.LINUX) {
-                linuxShellCommand(binaryCommand)
+            get() = if (operatingSystem.isPosix) {
+                posixShellCommand(binaryCommand)
             }
             else {
                 binaryCommand
@@ -222,12 +222,12 @@ object KvistLauncher {
     }
 
     private fun ensureBinaryReadyForLaunch(launchSpec: LaunchSpec, report: (String) -> Unit): Boolean {
-        if (launchSpec.operatingSystem != SupportedOs.LINUX || Files.isExecutable(launchSpec.binaryPath)) {
+        if (!launchSpec.operatingSystem.isPosix || Files.isExecutable(launchSpec.binaryPath)) {
             return true
         }
 
         val chmodResult = try {
-            runLinuxChmod(launchSpec.binaryPath)
+            runChmod(launchSpec.binaryPath)
         }
         catch (exception: IOException) {
             fail(
@@ -273,8 +273,8 @@ object KvistLauncher {
         return true
     }
 
-    private fun linuxShellCommand(binaryCommand: List<String>): List<String> {
-        // Kvist renders a TUI inside the IDE terminal, so Linux launches must avoid
+    private fun posixShellCommand(binaryCommand: List<String>): List<String> {
+        // Kvist renders a TUI inside the IDE terminal, so Linux and macOS launches must avoid
         // interactive shell startup files that can dump banners, prompts, or auto-started
         // tools into stdout before the UI is ready.
         val shellPath = System.getenv("SHELL")?.trim().orEmpty().ifBlank { null } ?: return binaryCommand
@@ -309,7 +309,7 @@ object KvistLauncher {
         return "\"$escaped\""
     }
 
-    private fun runLinuxChmod(binaryPath: Path): ChmodResult {
+    private fun runChmod(binaryPath: Path): ChmodResult {
         val process = ProcessBuilder("chmod", "+x", binaryPath.toString())
             .redirectErrorStream(true)
             .start()

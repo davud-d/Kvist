@@ -33,6 +33,16 @@ intellijPlatform {
 }
 
 val hostOsName = System.getProperty("os.name").lowercase(Locale.US)
+val hostArchName = System.getProperty("os.arch").lowercase(Locale.US)
+
+// The binary this host runs, relative to the project: bin/<platform>/kvist.<ext>. A Mac takes the
+// one for its CPU; Intel Macs, and JVMs running under Rosetta, take the x64 build.
+val hostBinaryPath: String? = when {
+    hostOsName.contains("mac") -> if (hostArchName == "aarch64" || hostArchName == "arm64") "bin/mac-arm64/kvist.bin" else "bin/mac-x64/kvist.bin"
+    hostOsName.contains("win") -> "bin/win/kvist.exe"
+    hostOsName.contains("linux") -> "bin/linux/kvist.bin"
+    else -> null
+}
 val pluginDistributionDirectoryName = project.name
 
 // The chat tool window shows the VS Code extension's webview. Its sources stay in
@@ -86,15 +96,11 @@ tasks.named("processResources") {
 fun requiredBinariesForBuild(): List<File> = listOf(
     file("bin/win/kvist.exe"),
     file("bin/linux/kvist.bin"),
+    file("bin/mac-arm64/kvist.bin"),
+    file("bin/mac-x64/kvist.bin"),
 )
 
-fun requiredBinariesForRunIde(): List<File> {
-    return when {
-        hostOsName.contains("win") -> listOf(file("bin/win/kvist.exe"))
-        hostOsName.contains("linux") -> listOf(file("bin/linux/kvist.bin"))
-        else -> emptyList()
-    }
-}
+fun requiredBinariesForRunIde(): List<File> = listOfNotNull(hostBinaryPath).map { file(it) }
 
 fun validateBinarySet(files: List<File>, context: String) {
     val missingFiles = files.filterNot { it.isFile }
@@ -106,7 +112,9 @@ fun validateBinarySet(files: List<File>, context: String) {
                 missingFiles.forEach { appendLine(" - ${it.invariantSeparatorsPath}") }
                 appendLine("Expected files:")
                 appendLine(" - bin/win/kvist.exe")
-                append(" - bin/linux/kvist.bin")
+                appendLine(" - bin/linux/kvist.bin")
+                appendLine(" - bin/mac-arm64/kvist.bin")
+                append(" - bin/mac-x64/kvist.bin")
             }
         )
     }
@@ -125,6 +133,17 @@ val kvistSandboxBinaries = copySpec {
         includeEmptyDirs = false
         filePermissions {
             unix("rwxr-xr-x")
+        }
+    }
+
+    for (folder in listOf("mac-arm64", "mac-x64")) {
+        from("bin/$folder") {
+            include("kvist.bin")
+            into("$pluginDistributionDirectoryName/bin/$folder")
+            includeEmptyDirs = false
+            filePermissions {
+                unix("rwxr-xr-x")
+            }
         }
     }
 }
@@ -175,14 +194,12 @@ tasks.named<Zip>("buildPlugin") {
     doLast {
         val archiveFile = archiveFile.get().asFile
 
-        val hostEntry = when {
-            hostOsName.contains("win") -> "$pluginDistributionDirectoryName/bin/win/kvist.exe"
-            hostOsName.contains("linux") -> "$pluginDistributionDirectoryName/bin/linux/kvist.bin"
-            else -> null
-        }
+        val hostEntry = hostBinaryPath?.let { "$pluginDistributionDirectoryName/$it" }
         val optionalEntries = listOf(
             "$pluginDistributionDirectoryName/bin/win/kvist.exe",
             "$pluginDistributionDirectoryName/bin/linux/kvist.bin",
+            "$pluginDistributionDirectoryName/bin/mac-arm64/kvist.bin",
+            "$pluginDistributionDirectoryName/bin/mac-x64/kvist.bin",
         ).filterNot { it == hostEntry }
 
         ZipFile(archiveFile).use { zipFile ->

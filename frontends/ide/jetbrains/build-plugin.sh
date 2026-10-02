@@ -15,13 +15,31 @@ WORK_DIR="$CORE_BUILD_DIR/work"
 PLUGIN_BUILD_DIR="$PLUGIN_DIR/build"
 SANDBOX_ROOT="$PLUGIN_DIR/.intellijPlatform/sandbox"
 PLUGIN_NAME="kvist-intellij"
-LINUX_BINARY_SRC="$DIST_DIR/kvist"
-LINUX_BINARY_DST="$PLUGIN_DIR/bin/linux/kvist.bin"
+BINARY_SRC="$DIST_DIR/kvist"
 MIN_JAVA_VERSION=17
 PREFERRED_JAVA_VERSION=21
 
 log() {
 	printf '===> %s\n' "$1"
+}
+
+# The binary built here is for this host only; the plugin picks one per platform (see
+# KvistBinaryResolver). A Mac gets the folder for its CPU.
+case "$(uname -s)/$(uname -m)" in
+	Linux/*) BINARY_RELATIVE="bin/linux/kvist.bin" ;;
+	Darwin/arm64) BINARY_RELATIVE="bin/mac-arm64/kvist.bin" ;;
+	Darwin/*) BINARY_RELATIVE="bin/mac-x64/kvist.bin" ;;
+	*)
+		printf 'This script builds the Linux and macOS plugin; use build-plugin.ps1 or .bat on Windows.\n' >&2
+		exit 1
+		;;
+esac
+BINARY_DST="$PLUGIN_DIR/$BINARY_RELATIVE"
+
+# BSD install, the one macOS ships, has no -D.
+install_executable() {
+	mkdir -p "$(dirname "$2")"
+	install -m 755 "$1" "$2"
 }
 
 find_python() {
@@ -59,7 +77,9 @@ find_java_home() {
 	local candidate version
 	local best="" best_version=0
 
-	for candidate in "${JAVA_HOME:-}" /usr/lib/jvm/*; do
+	for candidate in "${JAVA_HOME:-}" /usr/lib/jvm/* /Library/Java/JavaVirtualMachines/*/Contents/Home \
+		/opt/homebrew/opt/openjdk*/libexec/openjdk.jdk/Contents/Home /usr/local/opt/openjdk*/libexec/openjdk.jdk/Contents/Home \
+		"$(/usr/libexec/java_home 2>/dev/null || true)"; do
 		[[ -n "$candidate" && -d "$candidate" ]] || continue
 		version="$(java_major_version "$candidate" || true)"
 		[[ -n "$version" ]] || continue
@@ -91,7 +111,7 @@ stop_running_sandbox_agents() {
 		return 0
 	fi
 
-	local pattern="$SANDBOX_ROOT/.*/plugins/$PLUGIN_NAME/bin/linux/kvist\.bin"
+	local pattern="$SANDBOX_ROOT/.*/plugins/$PLUGIN_NAME/${BINARY_RELATIVE//./\\.}"
 	local pids
 	pids="$(pgrep -f "$pattern" || true)"
 	if [[ -z "$pids" ]]; then
@@ -114,10 +134,10 @@ refresh_sandbox_binary() {
 	while IFS= read -r sandbox_bin; do
 		[[ -n "$sandbox_bin" ]] || continue
 		mkdir -p "$(dirname "$sandbox_bin")"
-		install -Dm755 "$LINUX_BINARY_DST" "$sandbox_bin"
+		install_executable "$BINARY_DST" "$sandbox_bin"
 		copied_any=1
 		printf '    synced: %s\n' "$sandbox_bin"
-	done < <(find "$SANDBOX_ROOT" -type f -path "*/plugins/$PLUGIN_NAME/bin/linux/kvist.bin" 2>/dev/null | sort)
+	done < <(find "$SANDBOX_ROOT" -type f -path "*/plugins/$PLUGIN_NAME/$BINARY_RELATIVE" 2>/dev/null | sort)
 
 	if [[ "$copied_any" -eq 1 ]]; then
 		log "Sandbox binaries refreshed"
@@ -157,13 +177,13 @@ log "Building Kvist binary with PyInstaller"
 cd "$PROJECT_DIR"
 "$PYTHON_BIN" -m PyInstaller kvist.spec --noconfirm --distpath "$DIST_DIR" --workpath "$WORK_DIR"
 
-if [[ ! -f "$LINUX_BINARY_SRC" ]]; then
-	printf 'PyInstaller output not found: %s\n' "$LINUX_BINARY_SRC" >&2
+if [[ ! -f "$BINARY_SRC" ]]; then
+	printf 'PyInstaller output not found: %s\n' "$BINARY_SRC" >&2
 	exit 1
 fi
 
-log "Installing Linux binary into plugin"
-install -Dm755 "$LINUX_BINARY_SRC" "$LINUX_BINARY_DST"
+log "Installing the host binary into the plugin ($BINARY_RELATIVE)"
+install_executable "$BINARY_SRC" "$BINARY_DST"
 
 refresh_sandbox_binary
 

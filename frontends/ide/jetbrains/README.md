@@ -44,8 +44,9 @@ It uses the reworked Terminal API, which is the reason the plugin is limited to 
 
 - Windows
 - Linux
+- macOS (best-effort)
 
-macOS is intentionally unsupported in this MVP.
+macOS (Apple Silicon and Intel) is best-effort: the plugin ships a binary for each, but nobody has verified it on a Mac, so there is no guarantee that every feature works there.
 
 ## Binaries
 
@@ -53,15 +54,16 @@ Put the real binaries here before running packaging or sandbox tasks:
 
 - bin/win/kvist.exe
 - bin/linux/kvist.bin
+- bin/mac-arm64/kvist.bin (optional)
+- bin/mac-x64/kvist.bin (optional)
 
-If any required binary is missing, the build fails with a clear error.
-
-The plugin ZIP always expects both files to exist.
+If the binary for the host you build on is missing, the build fails with a clear error. The other platforms' binaries are optional: a missing one only produces a warning, and the plugin is built without support for that platform.
 
 The helper scripts below rebuild only the binary for the current host OS:
 
 - Linux host -> refreshes `bin/linux/kvist.bin`
 - Windows host -> refreshes `bin/win/kvist.exe`
+- macOS host -> refreshes `bin/mac-arm64/kvist.bin` (Apple Silicon) or `bin/mac-x64/kvist.bin` (Intel)
 
 So for a full distributable ZIP, keep the binary for the other OS in `bin/` as well.
 
@@ -200,6 +202,12 @@ Result:
 2. Run `./build-plugin.sh`.
 3. Pick the ZIP from `build/distributions/`.
 
+### Fast local macOS build
+
+1. Run `./build-plugin.sh` (the Linux script; it picks the folder by `uname -m`). It needs JDK 21 (`JAVA_HOME`, Homebrew `openjdk@21` or `/Library/Java/JavaVirtualMachines` are searched) and Python with PyInstaller.
+2. Pick the ZIP from `build/distributions/`.
+3. Copy the other platforms' binaries into `bin/` first if the ZIP should carry them.
+
 ### Fast local Windows build
 
 1. Make sure `bin/linux/kvist.bin` is already present.
@@ -231,5 +239,6 @@ kvist --workspace "<project_path>"
 
 - Windows
 - Linux
+- macOS (best-effort)
 
-macOS is intentionally unsupported.
+macOS is best-effort: the plugin ships binaries for Apple Silicon and Intel, but they are not verified on a Mac.
