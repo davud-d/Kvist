@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { BinaryResolver, SupportedOs } from './binaryResolver';
+import { BinaryResolver } from './binaryResolver';
+import { SupportedOs, defaultPosixShell, isPosix } from './platform';
 
 export class KvistLauncher {
     private binaryResolver: BinaryResolver;
@@ -53,9 +54,9 @@ export class KvistLauncher {
     private getShellPath(): string | undefined {
         const os = this.binaryResolver.getCurrentOs();
         
-        if (os === SupportedOs.LINUX) {
-            // Use user's shell or fall back to bash
-            return process.env.SHELL || '/bin/bash';
+        if (os !== null && isPosix(os)) {
+            // Use user's shell or fall back to the platform's default
+            return process.env.SHELL || defaultPosixShell(os);
         }
         
         // On Windows, let VS Code use default shell
@@ -65,8 +66,8 @@ export class KvistLauncher {
     private getShellArgs(binaryPath: string, workspacePath: string): string[] | undefined {
         const os = this.binaryResolver.getCurrentOs();
         
-        if (os === SupportedOs.LINUX) {
-            const shell = process.env.SHELL || '/bin/bash';
+        if (os !== null && isPosix(os)) {
+            const shell = process.env.SHELL || defaultPosixShell(os);
             const shellName = shell.split('/').pop() || '';
             
             const command = `${this.quoteForShell(binaryPath)} --workspace ${this.quoteForShell(workspacePath)}`;

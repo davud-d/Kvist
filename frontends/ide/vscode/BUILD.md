@@ -27,6 +27,19 @@ What it updates:
 - `bin/linux/kvist.bin`
 - `.build/vsix/kvist-*-linux-x64.vsix`
 
+### macOS (best-effort)
+
+```bash
+./build-plugin.sh
+```
+
+The script is the Linux one; it picks the folder by `uname -m`.
+
+What it updates:
+
+- `bin/mac-arm64/kvist.bin` (Apple Silicon) or `bin/mac-x64/kvist.bin` (Intel)
+- `.build/vsix/kvist-*-macos-arm64.vsix` or `kvist-*-macos-x64.vsix`
+
 ### Windows PowerShell
 
 ```powershell
@@ -46,9 +59,8 @@ build-plugin.bat
 
 Use this if you prefer plain `cmd.exe` instead of PowerShell.
 
-The helper scripts rebuild only the binary for the current host OS. If you want
-one package to work on both supported operating systems, keep the binary for the
-other OS in `bin/` as well.
+The helper scripts rebuild only the binary for the current host. If you want one
+package to work on several platforms, keep the binaries for the others in `bin/` as well.
 
 ## Manual Build Steps
 
@@ -77,6 +89,7 @@ Before packaging, you need to place the Kvist binaries in the correct locations:
 
 - **Windows**: Copy `kvist.exe` to `bin/win/kvist.exe`
 - **Linux**: Copy `kvist` binary to `bin/linux/kvist.bin`
+- **macOS**: Copy `kvist` binary to `bin/mac-arm64/kvist.bin` (Apple Silicon) or `bin/mac-x64/kvist.bin` (Intel)
 
 To build the Kvist binaries from the main project:
 
@@ -86,7 +99,7 @@ cd ..  # Go back to main Kvist directory
 
 # Copy the built binaries
 cp dist/kvist frontends/ide/vscode/bin/linux/kvist.bin
-# For Windows, build on Windows or cross-compile and copy to bin/win/kvist.exe
+# For Windows or macOS, build on that system and copy to bin/win/kvist.exe or bin/mac-<arch>/kvist.bin
 ```
 
 ### 4. Package the Extension

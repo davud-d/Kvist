@@ -47,8 +47,8 @@ The generated message will be inserted into the commit message input box.
 
 - Windows (x64)
 - Linux (x64)
-
-macOS is not supported in this MVP.
+- macOS (Apple Silicon and Intel), best-effort: the extension ships a binary for each, but
+  nobody has verified it on a Mac, so there is no guarantee that every feature works there.
 
 ## Quick Build
 
@@ -67,6 +67,22 @@ What it updates:
 
 - `bin/linux/kvist.bin`
 - `.build/vsix/kvist-*-linux-x64.vsix`
+
+### macOS
+
+```bash
+cd frontends/ide/vscode
+./build-plugin.sh
+```
+
+The same script as on Linux. It needs Python 3 with PyInstaller (the repository's `.venv`
+is used when it exists) and Node.js. What it updates:
+
+- `bin/mac-arm64/kvist.bin` on Apple Silicon, `bin/mac-x64/kvist.bin` on Intel
+- `.build/vsix/kvist-*-macos-arm64.vsix` (`macos-x64` on Intel)
+
+The binary is not notarized. The extension clears the quarantine mark before it starts
+the binary, but a copy downloaded by a browser may need "Open" from the context menu once.
 
 ### Windows PowerShell
 
@@ -89,8 +105,9 @@ build-plugin.bat
 
 Use this if you prefer plain `cmd.exe` instead of PowerShell.
 
-The scripts build only the current OS binary. For a VSIX that should work on
-both Linux and Windows, keep the other platform's binary in `bin/` as well.
+The scripts build only the current host's binary. For a VSIX that should work on
+several platforms, keep their binaries in `bin/` as well; the release build does that
+(`.github/workflows/plugin-release.yml`).
 
 Install the generated package from VS Code with Extensions > Install from VSIX,
 or from the command line:
@@ -117,6 +134,7 @@ Before packaging, place the Kvist binary in the expected location:
 
 - Windows: `bin/win/kvist.exe`
 - Linux: `bin/linux/kvist.bin`
+- macOS: `bin/mac-arm64/kvist.bin` (Apple Silicon) and `bin/mac-x64/kvist.bin` (Intel)
 
 Then package the extension:
 

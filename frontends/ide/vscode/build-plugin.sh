@@ -11,8 +11,7 @@ CORE_BUILD_DIR="$EXTENSION_DIR/.build/core"
 DIST_DIR="$CORE_BUILD_DIR/dist"
 WORK_DIR="$CORE_BUILD_DIR/work"
 VSIX_DIR="$EXTENSION_DIR/.build/vsix"
-LINUX_BINARY_SRC="$DIST_DIR/kvist"
-LINUX_BINARY_DST="$EXTENSION_DIR/bin/linux/kvist.bin"
+BINARY_SRC="$DIST_DIR/kvist"
 
 log() {
 	printf '===> %s\n' "$1"
@@ -55,13 +54,18 @@ ensure_node_deps() {
 	fi
 }
 
-case "$(uname -s)" in
-	Linux*) ;;
+# The binary built here is for this host; the extension holds one folder per platform
+# (see src/platform.ts). A Mac gets the folder for its CPU.
+case "$(uname -s)/$(uname -m)" in
+	Linux/*) BINARY_RELATIVE="bin/linux/kvist.bin"; VSIX_PLATFORM="linux-x64" ;;
+	Darwin/arm64) BINARY_RELATIVE="bin/mac-arm64/kvist.bin"; VSIX_PLATFORM="macos-arm64" ;;
+	Darwin/*) BINARY_RELATIVE="bin/mac-x64/kvist.bin"; VSIX_PLATFORM="macos-x64" ;;
 	*)
-		printf 'This script builds the Linux VS Code extension package. Use build-plugin.ps1 on Windows.\n' >&2
+		printf 'This script builds the Linux and macOS VS Code extension package. Use build-plugin.ps1 on Windows.\n' >&2
 		exit 1
 		;;
 esac
+BINARY_DST="$EXTENSION_DIR/$BINARY_RELATIVE"
 
 PYTHON_BIN="$(find_python)"
 
@@ -99,20 +103,22 @@ log "Building Kvist binary with PyInstaller"
 cd "$PROJECT_DIR"
 "$PYTHON_BIN" -m PyInstaller kvist.spec --noconfirm --distpath "$DIST_DIR" --workpath "$WORK_DIR"
 
-if [[ ! -f "$LINUX_BINARY_SRC" ]]; then
-	printf 'PyInstaller output not found: %s\n' "$LINUX_BINARY_SRC" >&2
+if [[ ! -f "$BINARY_SRC" ]]; then
+	printf 'PyInstaller output not found: %s\n' "$BINARY_SRC" >&2
 	exit 1
 fi
 
-log "Installing Linux binary into extension"
-install -Dm755 "$LINUX_BINARY_SRC" "$LINUX_BINARY_DST"
+log "Installing the host binary into the extension ($BINARY_RELATIVE)"
+# BSD install, the one macOS ships, has no -D.
+mkdir -p "$(dirname "$BINARY_DST")"
+install -m 755 "$BINARY_SRC" "$BINARY_DST"
 
 log "Compiling VS Code extension"
 cd "$EXTENSION_DIR"
 npm run build
 
 VERSION="$(node -p "require('./package.json').version")"
-VSIX_PATH="$VSIX_DIR/kvist-$VERSION-linux-x64.vsix"
+VSIX_PATH="$VSIX_DIR/kvist-$VERSION-$VSIX_PLATFORM.vsix"
 mkdir -p "$VSIX_DIR"
 
 log "Packaging VS Code extension VSIX"

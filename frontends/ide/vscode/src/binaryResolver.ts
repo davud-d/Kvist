@@ -1,11 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-
-export enum SupportedOs {
-    WINDOWS = 'windows',
-    LINUX = 'linux'
-}
+import { execFileSync } from 'child_process';
+import { SupportedOs, currentOs, isMacos, isPosix, relativeBinarySegments } from './platform';
 
 export class BinaryResolver {
     private extensionPath: string;
@@ -15,13 +12,7 @@ export class BinaryResolver {
     }
 
     getCurrentOs(): SupportedOs | null {
-        const platform = process.platform;
-        if (platform === 'win32') {
-            return SupportedOs.WINDOWS;
-        } else if (platform === 'linux') {
-            return SupportedOs.LINUX;
-        }
-        return null;
+        return currentOs(process.platform, process.arch);
     }
 
     resolveBinaryPath(): string | null {
@@ -35,8 +26,7 @@ export class BinaryResolver {
             return null;
         }
 
-        const relativePath = this.getRelativeBinaryPath(os);
-        const binaryPath = path.join(this.extensionPath, relativePath);
+        const binaryPath = path.join(this.extensionPath, ...relativeBinarySegments(os));
 
         if (!fs.existsSync(binaryPath)) {
             return null;
@@ -45,12 +35,13 @@ export class BinaryResolver {
         return binaryPath;
     }
 
-    private getRelativeBinaryPath(os: SupportedOs): string {
-        switch (os) {
-            case SupportedOs.WINDOWS:
-                return path.join('bin', 'win', 'kvist.exe');
-            case SupportedOs.LINUX:
-                return path.join('bin', 'linux', 'kvist.bin');
+    // Gatekeeper refuses a quarantined binary that is not notarized. Nothing is wrong when the
+    // mark is absent, which is the usual case, so a failure of xattr is not reported.
+    private clearQuarantine(binaryPath: string): void {
+        try {
+            execFileSync('xattr', ['-d', 'com.apple.quarantine', binaryPath], { stdio: 'ignore' });
+        } catch {
+            // xattr exits non-zero when the attribute is not there.
         }
     }
 
@@ -66,8 +57,10 @@ export class BinaryResolver {
                 return 'Binary file is empty.';
             }
 
-            // On Linux, check if executable
-            if (this.getCurrentOs() === SupportedOs.LINUX) {
+            const os = this.getCurrentOs();
+
+            // On Linux and macOS, check if executable
+            if (isPosix(os)) {
                 try {
                     fs.accessSync(binaryPath, fs.constants.X_OK);
                 } catch {
@@ -78,6 +71,10 @@ export class BinaryResolver {
                         return `Failed to make binary executable: ${error}`;
                     }
                 }
+            }
+
+            if (isMacos(os)) {
+                this.clearQuarantine(binaryPath);
             }
 
             return null;
