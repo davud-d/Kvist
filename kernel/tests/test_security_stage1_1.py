@@ -15,6 +15,7 @@ import signal
 import sys
 import threading
 import time
+import warnings
 from pathlib import Path
 
 import pytest
@@ -1019,6 +1020,18 @@ def test_venv_non_workspace_mode_runs_external_interpreter_read_only(
         encoding="utf-8",
     )
     ex = TerminalExecutor(tmp_path, timeout=20)
+
+    if ex.sandbox_mode is not SandboxMode.BUBBLEWRAP and not cgroup_supervision_available():
+        # Automatic mode refuses arbitrary code when it cannot stop detached
+        # descendants; the interpreter cannot run on this host.
+        warnings.warn(
+            "neither bubblewrap nor a cgroup v2 scope is available: "
+            "the external-interpreter run was not exercised",
+            stacklevel=1,
+        )
+        with pytest.raises(HardDenyError, match="cannot control detached descendants"):
+            ex.run([".venv/bin/python", "hi.py"])
+        return
 
     result = ex.run([".venv/bin/python", "hi.py"])
 
