@@ -54,7 +54,16 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("resume", "Continue the latest saved checkpoint"),
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
     SlashCommand("changes", "Show agent file changes across all sessions"),
+    SlashCommand("diff", "Show agent file changes recorded in this session"),
     SlashCommand("revert", "Restore agent-changed files to their baselines"),
+    SlashCommand(
+        "status",
+        "Show the current session, role, provider, models and execution mode",
+    ),
+    SlashCommand(
+        "permissions",
+        "Show project permission rules and explain a command's decision",
+    ),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),
     SlashCommand(

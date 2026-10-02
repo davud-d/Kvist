@@ -316,6 +316,15 @@ class SafeExecutor:
         normalized = (session or "").strip()
         self._active_session = normalized or "default"
 
+    def explain_shell_command(self, command: list[str], role: str = "coder") -> dict:
+        """Read-only allow/ask/deny explanation for a shell command.
+
+        Delegates to the terminal layer's decision logic without running the
+        command or prompting, so the ``/permissions`` command can explain the
+        sandbox's verdict for an arbitrary argv list.
+        """
+        return self._terminal.explain_command(command, role=role)
+
     def set_output_sink(self, sink: Callable[[str], None] | None) -> None:
         """Watch the output of the shell command about to run; ``None`` stops."""
         self._terminal.output_sink = sink
@@ -1262,6 +1271,7 @@ class SafeExecutor:
                 existed=existed,
                 content=old_text if existed else None,
                 session=self._active_session,
+                new_content=new_content,
                 pending_digest=content_digest(new_content),
                 run_id=self._txn_run_id,
                 action_id=self._txn_action_id,

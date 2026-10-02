@@ -134,6 +134,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "(requires --workspace), print JSON, exit.",
     )
     parser.add_argument(
+        "--selection-task",
+        action="store_true",
+        help="Run one model call for an IDE editor action on a selection, from a "
+        "JSON {system, user} payload on stdin, print JSON, exit.",
+    )
+    parser.add_argument(
         "--config-op",
         choices=(
             "add-custom-provider",
@@ -258,6 +264,28 @@ def _run_complete_op(args: argparse.Namespace) -> None:
     print(json.dumps({"ok": True, "completion": completion_text}))
 
 
+def _run_selection_task_op() -> None:
+    import json
+    from contextlib import redirect_stdout
+
+    from kernel.completion import CompletionError
+    from kernel.redaction import sanitize_display_text
+    from kernel.selection_task import generate_selection_reply
+
+    payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
+    try:
+        with redirect_stdout(sys.stderr):
+            reply = generate_selection_reply(payload_text)
+    except (CompletionError, RuntimeError, OSError) as error:
+        failure = {
+            "ok": False,
+            "error": sanitize_display_text(str(error).strip() or type(error).__name__),
+        }
+        print(json.dumps(failure))
+        raise SystemExit(1) from error
+    print(json.dumps({"ok": True, "text": reply}))
+
+
 def _run_set_provider_op(raw: object) -> dict:
     """Save a provider and its API key non-interactively (a frontend's first-run setup).
 
@@ -357,6 +385,11 @@ if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.complete:
     _run_complete_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.selection_task:
+    _run_selection_task_op()
     raise SystemExit(0)
 
 
@@ -3728,6 +3761,10 @@ def main() -> None:
         _run_complete_op(args)
         return
 
+    if args.selection_task:
+        _run_selection_task_op()
+        return
+
     if args.config_op:
         import json as _json
 
@@ -4517,6 +4554,134 @@ def main() -> None:
                     title="Agent changes in this workspace (all sessions)",
                     border_style="bright_cyan",
                 ))
+                continue
+
+            if user_goal.lower() == "/diff":
+                from kernel.change_journal import build_session_diff_report
+
+                session_name = getattr(agent, "current_session", "default")
+                report = build_session_diff_report(agent.executor.workspace, session_name)
+                console.print(Panel(
+                    Text(report),
+                    title=f"Agent changes in this session ({session_name})",
+                    border_style="bright_cyan",
+                ))
+                continue
+
+            if user_goal.lower() == "/status":
+                from kernel.sandbox import sandbox_network_allowed
+
+                session_name = getattr(agent, "current_session", "default")
+                saved_role = get_saved_role() or "auto"
+                find_resumable = getattr(agent, "_find_resumable_session", None)
+                resumable = None
+                if callable(find_resumable):
+                    try:
+                        resumable = find_resumable()
+                    except Exception:
+                        resumable = None
+                sandbox_mode = getattr(agent.executor, "sandbox_mode", "unknown")
+                net_state = (
+                    "allowed" if sandbox_network_allowed() else "denied"
+                ) if sandbox_mode == "bubblewrap" else "host (unisolated)"
+                stream_state = "on" if config.stream else "off"
+
+                rows = [
+                    ("Session", session_name),
+                    ("Role", saved_role),
+                    ("Provider", provider_label(config.provider)),
+                    ("Fast model", config.fast_model),
+                    ("Smart model", config.smart_model),
+                    (
+                        "Execution",
+                        f"{sandbox_mode}, net {net_state}, streaming {stream_state}",
+                    ),
+                    (
+                        "Interrupted task",
+                        f"{resumable} (use /resume)" if resumable else "none",
+                    ),
+                ]
+                body = Text()
+                for label, value in rows:
+                    body.append(f"  {label}: ", style="bold")
+                    body.append(sanitize_display_text(str(value)))
+                    body.append("\n")
+                console.print(Panel(body, title="/status", border_style="bright_cyan"))
+                continue
+
+            if user_goal.lower() == "/permissions" or user_goal.lower().startswith("/permissions "):
+                from kernel.permission_policy import load_policy
+
+                workspace = agent.executor.workspace
+                policy, note = load_policy(workspace)
+
+                rules_body = Text()
+                if note:
+                    rules_body.append(sanitize_display_text(note) + "\n", style="yellow")
+                for key, label in (("allow", "Allow"), ("ask", "Ask"), ("deny", "Deny")):
+                    rules = getattr(policy, key, ())
+                    rules_body.append(f"{label}: ", style="bold")
+                    if rules:
+                        rules_body.append(", ".join(sanitize_display_text(rule) for rule in rules))
+                    else:
+                        rules_body.append("(none)", style="dim")
+                    rules_body.append("\n")
+                console.print(Panel(
+                    rules_body,
+                    title="Project permission rules (.kvist/permissions.json)",
+                    border_style="bright_cyan",
+                ))
+
+                argument = user_goal[len("/permissions"):].strip()
+                if not argument:
+                    console.print(
+                        "[dim]Usage: /permissions <command> — explain the sandbox "
+                        "decision for that command.[/dim]"
+                    )
+                    continue
+
+                import shlex
+
+                try:
+                    command = shlex.split(argument)
+                except ValueError as error:
+                    console.print(
+                        _display_text(
+                            f"Could not parse the command: "
+                            f"{sanitize_display_text(str(error))}",
+                            "yellow",
+                        )
+                    )
+                    continue
+                if not command:
+                    console.print("[yellow]Usage: /permissions <command>[/yellow]")
+                    continue
+
+                try:
+                    explanation = agent.executor.explain_shell_command(
+                        command, role=agent.executor.active_role
+                    )
+                except Exception as error:
+                    console.print(
+                        _display_text(
+                            "Could not explain the command: "
+                            f"{sanitize_display_text(str(error).strip() or type(error).__name__)}",
+                            "yellow",
+                        )
+                    )
+                    continue
+
+                verdict = explanation.get("verdict", "unknown")
+                reasons = explanation.get("reasons", [])
+                verdict_style = {"allow": "green", "ask": "yellow", "deny": "red"}.get(
+                    verdict, "white"
+                )
+                console.print(
+                    f"[bold]{sanitize_display_text(' '.join(command))}[/bold] "
+                    f"→ [{verdict_style}]{verdict}[/{verdict_style}]"
+                )
+                for reason in reasons:
+                    console.print(f"  [dim]{sanitize_display_text(reason)}[/dim]")
                 continue
 
             if user_goal.lower() == "/revert":

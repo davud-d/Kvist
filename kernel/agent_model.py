@@ -363,15 +363,27 @@ def _read_style_prompt(self, style_type: str) -> str:
 
 
 def _style_context(self, role: str) -> str:
-    """This session's response-style instruction for this role, if any.
+    """Shared voice, this session's style, and its conversational accent.
 
-    Sits high in the system prompt — right after the role prompt, before
-    workspace instructions.
+    Read per call, like the style files. Chat inherits only the working
+    style's voice section, never its instructions for carrying out work.
+    Sits after the role prompt and before workspace instructions.
     """
+    common = (_STYLES_DIR / "common.txt").read_text(encoding="utf-8").strip()
     prompt = _read_style_prompt(self, "chat" if role == "chat" else "agents")
-    if not prompt:
-        return ""
-    return f"## RESPONSE STYLE\n\n{prompt}"
+    parts = [common, prompt]
+    if role == "chat":
+        working_style = _read_style_prompt(self, "agents")
+        _, _, voice = working_style.partition("== HOW IT SOUNDS ==")
+        voice = voice.split("\n== ", 1)[0].strip()
+        if voice:
+            parts.append(
+                "== SELECTED STYLE'S CONVERSATION ACCENT ==\n\n"
+                "This adds the selected working style's emphasis to conversation. "
+                "It shapes explanation, not access or permission to act.\n\n"
+                + voice
+            )
+    return "## RESPONSE STYLE\n\n" + "\n\n".join(part for part in parts if part)
 
 
 def _load_plan_mode_section() -> str:

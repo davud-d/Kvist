@@ -723,7 +723,9 @@ def test_main_recovers_from_redacted_task_failure(tmp_path, monkeypatch):
 
 
 def _run_main_with_agent(tmp_path, monkeypatch, agent, inputs):
-    config = SimpleNamespace(provider="openai", stream=False, fast_model="fixture")
+    config = SimpleNamespace(
+        provider="openai", stream=False, fast_model="fixture", smart_model="fixture-smart"
+    )
     recorded_console = Console(
         record=True,
         width=120,
@@ -758,6 +760,59 @@ class _ShutdownUI:
 
     def start_live(self):
         pass
+
+
+@pytest.mark.parametrize("mode,network,expected", [
+    ("workspace_only", "deny", "net host (unisolated)"),
+    ("workspace_only", "allow", "net host (unisolated)"),
+    ("bubblewrap", "deny", "net denied"),
+    ("bubblewrap", "allow", "net allowed"),
+])
+def test_status_reports_effective_network_isolation(tmp_path, monkeypatch, mode, network, expected):
+    monkeypatch.setenv("AGENT_SANDBOX_NET", network)
+    agent = SimpleNamespace(
+        current_session="default", executor=SimpleNamespace(sandbox_mode=mode),
+        start_fresh_session=lambda: ("default", True),
+        _ui=_ShutdownUI(), save_session=lambda: None,
+    )
+    recorded = _run_main_with_agent(tmp_path, monkeypatch, agent, ["/status", "/bye"])
+
+    main.main()
+
+    assert expected in recorded.export_text()
+
+
+def test_permissions_uses_active_role_and_renders_literal_policy_values(tmp_path, monkeypatch):
+    from kernel.permission_policy import PermissionPolicy
+
+    calls = []
+    agent = SimpleNamespace(
+        current_session="default", start_fresh_session=lambda: ("default", True),
+        _ui=_ShutdownUI(), save_session=lambda: None,
+        executor=SimpleNamespace(
+            workspace=tmp_path, active_role="devops",
+            explain_shell_command=lambda command, role: (
+                calls.append((command, role)) or {"verdict": "ask", "reasons": []}
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        "kernel.permission_policy.load_policy",
+        lambda workspace: (PermissionPolicy(allow=("echo [red]literal[/red]",)), ""),
+    )
+    recorded = _run_main_with_agent(
+        tmp_path, monkeypatch, agent, ["/permissions docker stop worker", "/bye"]
+    )
+    monkeypatch.setattr(main, "get_saved_role", lambda: "auto")
+
+    main.main()
+
+    assert calls == [(["docker", "stop", "worker"], "devops")]
+    rendered = recorded.export_text()
+    assert "Allow: echo [red]literal[/red]" in rendered
+    assert "Ask: (none)" in rendered
+    assert "[bold]" not in rendered
+    assert "[dim]" not in rendered
 
 
 def test_interrupted_session_save_does_not_crash_shutdown(tmp_path, monkeypatch):

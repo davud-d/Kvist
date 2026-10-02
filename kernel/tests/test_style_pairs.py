@@ -46,6 +46,16 @@ def test_every_pick_has_an_agent_file_and_a_chat_file():
         ).strip()
 
 
+def test_every_working_style_has_a_voice_for_conversation():
+    for style in get_style_options():
+        prompt = (_STYLES_DIR / "agents" / f"{style_slug(style)}.txt").read_text(
+            encoding="utf-8"
+        )
+        assert prompt.count("== HOW IT SOUNDS ==") == 1, style
+        voice = prompt.split("== HOW IT SOUNDS ==", 1)[1].split("\n== ", 1)[0]
+        assert voice.strip(), style
+
+
 def test_every_chat_style_file_is_reachable_from_some_pick():
     reachable = {style_slug(chat_style_for(name)) for name in get_style_options()}
     on_disk = {path.stem for path in (_STYLES_DIR / "chat").glob("*.txt")}

@@ -55,6 +55,7 @@ packages = [
 
 [tool.setuptools.package-data]
 "kernel.prompts.system" = ["*.txt"]
+"kernel.prompts.styles" = ["*.txt"]
 "kernel.prompts.styles.agents" = ["*.txt"]
 "kernel.prompts.styles.chat" = ["*.txt"]
 "kernel.themes" = ["*.json"]

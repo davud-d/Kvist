@@ -2,6 +2,7 @@ import org.gradle.api.GradleException
 import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.bundling.Zip
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import java.io.File
 import java.util.Locale
 import java.util.zip.ZipFile
@@ -19,7 +20,10 @@ dependencies {
         intellijIdea("2025.3")
         bundledPlugin("org.jetbrains.plugins.terminal")
         bundledPlugin("Git4Idea")
+        testFramework(TestFrameworkType.Platform)
     }
+
+    testImplementation("junit:junit:4.13.2")
 }
 
 kotlin {
@@ -30,6 +34,11 @@ kotlin {
 // nothing to instrument, and the task would download a Java compiler for nothing.
 intellijPlatform {
     instrumentCode = false
+}
+
+// Platform tests build real editors; without a display they need AWT in headless mode.
+tasks.test {
+    systemProperty("java.awt.headless", "true")
 }
 
 val hostOsName = System.getProperty("os.name").lowercase(Locale.US)

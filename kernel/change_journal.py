@@ -130,6 +130,7 @@ def record_baseline(
     existed: bool,
     content: str | None,
     session: str | None = None,
+    new_content: str | None = None,
     pending_digest: str | None = None,
     run_id: str | None = None,
     action_id: str | None = None,
@@ -152,9 +153,24 @@ def record_baseline(
                 "existed": existed,
                 "content": content,
                 "session": session,
+                "session_changes": [],
             }
             baseline[relative_path] = entry
         if pending_digest is not None:
+            # A first-touch baseline cannot attribute later writes by other
+            # sessions. Keep each write's patch until its transaction commits.
+            entry.pop("pending_session_change", None)
+            entry["pending_session_history_missing"] = new_content is None
+            if new_content is not None:
+                entry["pending_session_change"] = {
+                    "session": session,
+                    "diff": "".join(difflib.unified_diff(
+                        (content or "").splitlines(keepends=True),
+                        new_content.splitlines(keepends=True),
+                        fromfile=relative_path if existed else "/dev/null",
+                        tofile=relative_path,
+                    )),
+                }
             entry["pending_digest"] = pending_digest
             entry["pending_run_id"] = run_id
             entry["pending_action_id"] = action_id
@@ -201,6 +217,16 @@ def promote_baseline(
             and entry.get("pending_action_id") == action_id
         ):
             entry["last_digest"] = expected_pending_digest
+            change = entry.pop("pending_session_change", None)
+            if isinstance(change, dict):
+                changes = entry.get("session_changes")
+                if not isinstance(changes, list):
+                    changes = []
+                    entry["session_history_incomplete"] = True
+                changes.append(change)
+                entry["session_changes"] = changes
+            if entry.pop("pending_session_history_missing", False):
+                entry["session_history_incomplete"] = True
             entry.pop("commit_unconfirmed", None)
             promoted = True
         return {"version": _JOURNAL_VERSION, "baseline": baseline}
@@ -433,24 +459,11 @@ def _entry_label(relative_path: str, entry: dict[str, Any]) -> str:
     return relative_path
 
 
-def build_diff_report(workspace: Path) -> str:
-    """Unified diff between baseline and current content for every tracked path.
-
-    Reports corruption explicitly rather than pretending the journal is empty,
-    and reads through the TOCTOU-safe primitive so a tampered/raced path can
-    neither disclose content outside the workspace nor follow a symlink.
-    """
-    try:
-        baseline = load_baseline(workspace)
-    except JournalUnavailableError:
-        return (
-            "The change journal is corrupt and cannot be read. Its history and "
-            "revert data are unavailable until the journal is reset "
-            "(remove .kvist/change_journal.json to start tracking afresh)."
-        )
-    if not baseline:
-        return "No tracked agent changes — the change journal is empty."
-
+def _render_diff_sections(
+    workspace: Path,
+    baseline: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Build the per-path unified-diff sections for a baseline mapping."""
     sections: list[str] = []
     for relative_path in sorted(baseline):
         if journal_path_violation(workspace, relative_path) is not None:
@@ -477,9 +490,80 @@ def build_diff_report(workspace: Path) -> str:
         )
         note = " [filesystem write unconfirmed in journal]" if entry.get("commit_unconfirmed") else ""
         sections.append(f"# {_entry_label(relative_path, entry)}{note}\n" + "".join(diff_lines))
+    return sections
 
+
+def build_diff_report(workspace: Path) -> str:
+    """Unified diff between baseline and current content for every tracked path.
+
+    Reports corruption explicitly rather than pretending the journal is empty,
+    and reads through the TOCTOU-safe primitive so a tampered/raced path can
+    neither disclose content outside the workspace nor follow a symlink.
+    """
+    try:
+        baseline = load_baseline(workspace)
+    except JournalUnavailableError:
+        return (
+            "The change journal is corrupt and cannot be read. Its history and "
+            "revert data are unavailable until the journal is reset "
+            "(remove .kvist/change_journal.json to start tracking afresh)."
+        )
+    if not baseline:
+        return "No tracked agent changes — the change journal is empty."
+
+    sections = _render_diff_sections(workspace, baseline)
     if not sections:
         return "No net agent changes remain — every tracked file matches its baseline."
+    return "\n".join(sections)
+
+
+def build_session_diff_report(workspace: Path, session: str | None) -> str:
+    """Show committed write patches attributed to one session.
+
+    Historical patches must not use current filesystem content: a later
+    session or an external editor may have changed the same path again.
+    """
+    try:
+        baseline = load_baseline(workspace)
+    except JournalUnavailableError:
+        return (
+            "The change journal is corrupt and cannot be read. Its history and "
+            "revert data are unavailable until the journal is reset "
+            "(remove .kvist/change_journal.json to start tracking afresh)."
+        )
+
+    sections: list[str] = []
+    history_missing = False
+    for path, entry in sorted(baseline.items()):
+        if journal_path_violation(workspace, path) is not None:
+            continue
+        try:
+            with _SafeChild(workspace, path) as child:
+                child.read_bytes()
+        except JournalPathBindingError:
+            continue
+        changes = entry.get("session_changes")
+        history_missing = history_missing or bool(entry.get("session_history_incomplete"))
+        if not isinstance(changes, list):
+            history_missing = True
+            continue
+        for change in changes:
+            if not isinstance(change, dict) or change.get("session") != session:
+                continue
+            diff = change.get("diff")
+            if isinstance(diff, str) and diff:
+                sections.append(f"# {_entry_label(path, change)}\n{diff}")
+
+    if history_missing:
+        sections.append(
+            "Earlier journal entries have no per-session history. "
+            "Use /changes for the workspace-wide diff."
+        )
+    if not sections:
+        return (
+            f"No recorded agent changes for session {session or '?'} — either "
+            "nothing was committed yet, or the journal holds other sessions."
+        )
     return "\n".join(sections)
 
 

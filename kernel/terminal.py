@@ -445,6 +445,122 @@ class TerminalExecutor(
                 return True
         return False
 
+    def explain_command(self, command: list[str], role: str = "coder") -> dict:
+        """Read-only explanation of the allow/ask/deny decision for a command.
+
+        Mirrors ``_run_once``'s decision order without executing anything and
+        without prompting, so ``/permissions`` can answer "what would the
+        sandbox do with this command?" exactly as the executor would decide it.
+        """
+        role = role if role in {"coder", "devops", "chat", "universal"} else "coder"
+
+        def _deny(reason: str) -> dict:
+            return {"verdict": "deny", "reasons": [reason], "risk": None}
+
+        def _ask(reason: str, risk: str | None = None) -> dict:
+            return {"verdict": "ask", "reasons": [reason], "risk": risk}
+
+        def _allow(reason: str, risk: str | None = None) -> dict:
+            return {"verdict": "allow", "reasons": [reason], "risk": risk}
+
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(item, str) for item in command)
+        ):
+            return _deny("command must be a non-empty list of strings")
+        if (
+            len(command) > _MAX_COMMAND_ITEMS
+            or sum(len(item) for item in command) + len(command) - 1
+            > _MAX_COMMAND_CHARS
+        ):
+            return _deny("command is too large for safe validation and approval")
+
+        command = list(command)
+        self._refresh_policy()
+
+        decision = self._policy_decision(command)
+        if decision == "deny":
+            return _deny("blocked by a project permission policy deny rule")
+
+        try:
+            self._deny_self_termination(command)
+        except HardDenyError as error:
+            return _deny(str(error))
+
+        try:
+            work_dir = self._resolve_cwd(None)
+        except HardDenyError as error:
+            return _deny(str(error))
+
+        if self._sandbox_required_unavailable:
+            return _deny("mandatory Bubblewrap sandbox is unavailable")
+
+        try:
+            environment = self._build_env(None)
+            bindings = self._resolve_executable_bindings(command, work_dir, environment)
+        except HardDenyError as error:
+            return _deny(str(error))
+
+        if (
+            self._automatic_restricted_fallback
+            and not self._cgroup_available
+            and self._command_needs_arbitrary_code(command, bindings)
+        ):
+            return _deny(
+                "automatic fallback cannot control detached descendants without "
+                "a Bubblewrap PID namespace or cgroup v2 scope"
+            )
+
+        try:
+            self._validate_executable_boundaries(command, work_dir, bindings)
+            self._hard_validate(command, work_dir, bindings)
+        except HardDenyError as error:
+            return _deny(str(error))
+
+        assessment = self._assess_risk(command, role)
+
+        allowlist_error: str | None = None
+        try:
+            self._validate_allowlist(command, bindings)
+        except CommandNotAllowedError as error:
+            allowlist_error = str(error)
+
+        fallback_approval = self._fallback_requires_approval(command, bindings)
+        origin_approval = self._requires_executable_origin_approval(command, bindings)
+
+        if assessment.risk is RiskLevel.DANGEROUS:
+            return _ask(
+                f"risk assessment: {assessment.reason} "
+                "(intrinsic DANGEROUS is never auto-allowed)",
+                "dangerous",
+            )
+        if decision == "ask":
+            return _ask("project permission policy requires confirmation (ask rule)")
+        if fallback_approval:
+            return _ask(
+                "automatic sandbox fallback requires per-execution approval "
+                "for arbitrary-code commands"
+            )
+        if origin_approval:
+            return _ask(
+                "executable origin is not eligible for trusted-name or "
+                "project-allow suppression"
+            )
+        if decision == "allow":
+            return _allow(
+                f"project allow rule matches (risk: {assessment.risk.value})",
+                assessment.risk.value,
+            )
+        if allowlist_error is not None:
+            return _ask(allowlist_error, assessment.risk.value)
+        if assessment.requires_approval:
+            return _ask(
+                f"risk assessment: {assessment.reason}",
+                assessment.risk.value,
+            )
+        return _allow(f"risk assessment: {assessment.reason}", assessment.risk.value)
+
     def _policy_decision(self, command: list[str]) -> str | None:
         """Worst-per-segment policy decision: deny > ask > allow.
 

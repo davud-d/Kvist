@@ -8,6 +8,7 @@ from kernel.tests.conftest import requires_posix
 
 from kernel.change_journal import (
     build_diff_report,
+    build_session_diff_report,
     clear_journal,
     content_digest,
     journal_path,
@@ -36,6 +37,7 @@ def _record_write(workspace, relative_path, *, old_content, new_content, session
         existed=existed,
         content=old_content if existed else None,
         session=session,
+        new_content=new_content,
         pending_digest=content_digest(new_content),
     )
     _write(workspace / relative_path, new_content)
@@ -170,6 +172,87 @@ def test_sessions_share_one_workspace_journal_with_attribution(tmp_path):
     reverted = revert_workspace(tmp_path)
     assert [(item.path, item.action) for item in reverted] == [("shared.py", "restored")]
     assert (tmp_path / "shared.py").read_text(encoding="utf-8") == "origin\n"
+
+
+def test_session_diff_preserves_attribution_across_interleaved_sessions(tmp_path):
+    _write(tmp_path / "shared.py", "origin\n")
+    for before, after, session in (
+        ("origin\n", "alpha-one\n", "alpha"),
+        ("alpha-one\n", "beta-one\n", "beta"),
+        ("beta-one\n", "alpha-two\n", "alpha"),
+    ):
+        _record_write(
+            tmp_path, "shared.py", old_content=before, new_content=after, session=session
+        )
+    _write(tmp_path / "shared.py", "external edit\n")
+
+    alpha = build_session_diff_report(tmp_path, "alpha")
+    beta = build_session_diff_report(tmp_path, "beta")
+
+    assert "-origin\n+alpha-one\n" in alpha
+    assert "-beta-one\n+alpha-two\n" in alpha
+    assert "+beta-one\n" not in alpha
+    assert "-alpha-one\n+beta-one\n" in beta
+    assert "alpha-two" not in beta
+    assert "external edit" not in alpha + beta
+
+
+def test_session_diff_records_only_matching_promoted_transactions(tmp_path):
+    _write(tmp_path / "file.py", "before\n")
+    record_baseline(
+        tmp_path, relative_path="file.py", existed=True, content="before\n",
+        new_content="after\n", session="alpha", pending_digest=content_digest("after\n"),
+        run_id="run", action_id="write",
+    )
+    _write(tmp_path / "file.py", "after\n")
+    assert "No recorded agent changes" in build_session_diff_report(tmp_path, "alpha")
+    assert not promote_baseline(
+        tmp_path, "file.py", content_digest("after\n"), run_id="other", action_id="write"
+    )
+    assert "No recorded agent changes" in build_session_diff_report(tmp_path, "alpha")
+    assert promote_baseline(
+        tmp_path, "file.py", content_digest("after\n"), run_id="run", action_id="write"
+    )
+    # Repeating a promotion must not append the same historical patch twice.
+    promote_baseline(
+        tmp_path, "file.py", content_digest("after\n"), run_id="run", action_id="write"
+    )
+    assert build_session_diff_report(tmp_path, "alpha").count("+after\n") == 1
+
+
+def test_session_diff_reports_missing_legacy_history(tmp_path):
+    journal = journal_path(tmp_path)
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({"version": 1, "baseline": {"file.py": {
+        "session": "alpha", "content": "before\n", "existed": True,
+        "last_digest": content_digest("after\n"),
+    }}}), encoding="utf-8")
+    _write(tmp_path / "file.py", "after\n")
+
+    assert "no per-session history" in build_session_diff_report(tmp_path, "alpha")
+    _record_write(
+        tmp_path, "file.py", old_content="after\n", new_content="beta\n", session="beta"
+    )
+    report = build_session_diff_report(tmp_path, "beta")
+    assert "-after\n+beta\n" in report
+    assert "no per-session history" in report
+
+
+def test_executor_records_session_diff_without_changing_revert_baseline(tmp_path, monkeypatch):
+    from kernel.executor import SafeExecutor
+
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    executor = SafeExecutor(tmp_path)
+    executor.set_active_session("alpha")
+    executor._write_file("file.py", "alpha\n")
+    executor.set_active_session("beta")
+    executor._write_file("file.py", "beta\n")
+
+    assert "+alpha\n" in build_session_diff_report(tmp_path, "alpha")
+    assert "-alpha\n+beta\n" in build_session_diff_report(tmp_path, "beta")
+    assert [(item.path, item.action) for item in revert_workspace(tmp_path)] == [
+        ("file.py", "deleted")
+    ]
 
 
 def test_revert_refuses_tampered_journal_paths(tmp_path):

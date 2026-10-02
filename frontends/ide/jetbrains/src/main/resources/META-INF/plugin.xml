@@ -7,8 +7,9 @@
     <description><![CDATA[
     The Kvist coding agent as a chat tool window (the same panel as the VS Code
     extension, in the IDE's embedded browser), a launcher that runs Kvist inside the
-    IDE Terminal, commit messages for the changes selected in the commit dialog, and
-    ghost-text inline completion as you type.
+    IDE Terminal, commit messages for the changes selected in the commit dialog,
+    ghost-text inline completion as you type, and a Kvist submenu in the editor
+    context menu (rewrite, translate, explain and fix the selection).
     ]]></description>
 
     <idea-version since-build="253" />
@@ -48,5 +49,33 @@
         >
             <add-to-group group-id="ToolsMenu" anchor="last" />
         </action>
+
+        <group
+            id="com.kvist.intellij.EditorPopupGroup"
+            text="Kvist"
+            icon="/icons/kvist.svg"
+            popup="true"
+        >
+            <add-to-group group-id="EditorPopupMenu" anchor="first" />
+
+            <action
+                id="com.kvist.intellij.RewriteAsSeniorAction"
+                class="com.kvist.intellij.actions.RewriteAsSeniorAction"
+                text="Rewrite as Senior"
+                description="Rewrite the selected code for readability without changing its behavior"
+            />
+            <action
+                id="com.kvist.intellij.TranslateSelectionAction"
+                class="com.kvist.intellij.actions.TranslateSelectionAction"
+                text="Translate Selection"
+                description="Translate the selected text, comment or string into another language"
+            />
+            <action
+                id="com.kvist.intellij.ExplainAndFixAction"
+                class="com.kvist.intellij.actions.ExplainAndFixAction"
+                text="Explain and Fix"
+                description="Explain the selected code, list its weak spots and propose a safe patch"
+            />
+        </group>
     </actions>
 </idea-plugin>

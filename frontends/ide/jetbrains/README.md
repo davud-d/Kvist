@@ -34,6 +34,28 @@ As you type, the editor shows a gray-text ("ghost text") suggestion from `kvist 
 - Only Python and JS/TS variants get their imports resolved into extra context by the core; every other language still gets a plain completion.
 - The bundled binary must be built from a Kvist version that has `--complete`; rebuild it with the scripts below.
 
+## Editor context menu
+
+Right-click in the editor: the **Kvist** submenu (first entry of the menu) has three actions that work on the selected text. They are disabled without a selection, and in read-only viewers.
+
+- **Rewrite as Senior**: asks the model for a cleaner version of the selected fragment (same behavior, simpler conditions, less duplication, better local names, no API changes, no new architecture).
+- **Translate Selection**: pick a language (English, Russian, Kazakh, Kyrgyz, Arabic, British English, American English, or a custom one); comment markers, string quotes and escapes, Markdown markup and HTML/XML tags are kept.
+- **Explain and Fix**: a dialog with the explanation, risks, bugs and, when a safe patch exists, why it is safe. Logic changes, public API changes, edits in other files, renames, broad refactorings and dependency changes are not proposed as patches.
+
+Nothing is written without a confirmation: every replacement (and **Apply Patch…** in Explain and Fix) first opens a diff of the selection against the suggestion, and only **Apply** edits the document, in one write command, so Undo reverts it in a single step. If the document changed while the model was answering, the edit is refused ("Document changed, retry action").
+
+- One short-lived `kvist --selection-task` process per request, using the provider and **fast** model saved in `~/.kvist/config.json`. The prompts are built by the plugin (`selection/prompt/`); the selected code is quoted in `<UNTRUSTED_TOOL_OUTPUT>` blocks, and the core path has no tools, so the model can only return text.
+- Besides the selection, about 20 lines of code on each side (at most 2000 characters) are sent as context.
+- The bundled binary must be built from a Kvist version that has `--selection-task`; rebuild it with the scripts below.
+
+## Tests
+
+```bash
+./gradlew test
+```
+
+Platform tests (editor, undo, action registration) run headless. The first run downloads the IntelliJ test framework and JUnit.
+
 ## Compatibility
 
 This MVP is intentionally pinned to IntelliJ Platform 2025.3.

@@ -32,3 +32,9 @@ def test_pyproject_lists_every_runtime_directory():
 
 def test_pyproject_ships_no_test_directory():
     assert not any("tests" in name.split(".") for name in _declared_packages())
+
+
+def test_pyproject_bundles_the_shared_voice():
+    pyproject = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = pyproject["tool"]["setuptools"]["package-data"]["kernel.prompts.styles"]
+    assert any(Path("common.txt").match(pattern) for pattern in patterns)

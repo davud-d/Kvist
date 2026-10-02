@@ -115,7 +115,9 @@ _CHAT_STYLE_FOR_AGENT_STYLE = {
 
 # The system-prompt text for each style lives in its own file under
 # prompts/styles/<chat|agents>/<slug>.txt (slug = style_slug(name)). A missing
-# or empty file means "no style instruction" (the behaviour of "Default").
+# or empty file leaves the shared voice without that style's accent. Chat also
+# receives the selected working style's HOW IT SOUNDS section, so styles that
+# share a chat palette still retain their own emphasis.
 
 
 def chat_style_for(agent_style: str) -> str:

@@ -104,6 +104,92 @@ def test_the_prototype_label_reaches_the_reporter(tmp_path):
     assert "The label is mandatory, it stands in the first line of the\nreport" in built
 
 
+@pytest.mark.parametrize("style", sorted(get_style_options()))
+@pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "report"])
+def test_every_style_and_role_gets_the_shared_voice(agent_factory, style, role):
+    from kernel.agent_model import _STYLES_DIR
+    from kernel.user_config import chat_style_for
+
+    agent = agent_factory()
+    agent._session_styles = {"agents": style, "chat": chat_style_for(style)}
+    built = (build_report_system_prompt(agent) if role == "report"
+             else build_role_system_prompt(agent, role))
+    common = (_STYLES_DIR / "common.txt").read_text(encoding="utf-8").strip()
+
+    assert built.count(common) == 1
+    assert built.index(common) > built.index(_load_role_prompt(role))
+    family = "chat" if role == "chat" else "agents"
+    selected = agent._session_styles[family]
+    specific = (_STYLES_DIR / family / f"{style_slug(selected)}.txt").read_text(
+        encoding="utf-8"
+    ).strip()
+    assert built.index(specific) > built.index(common)
+
+
+def test_chat_inherits_only_the_stamped_working_styles_voice(agent_factory, monkeypatch):
+    from kernel.user_config import chat_style_for
+
+    agent = agent_factory()
+    # Both choices have the same chat palette, but retain their own accent.
+    assert chat_style_for("Explainer") == chat_style_for("Friendly Developer")
+    monkeypatch.setattr("kernel.user_config.get_saved_style", lambda family: "Minimalist")
+    agent._session_styles = {"agents": "Explainer", "chat": "Friendly"}
+    explaining = build_role_system_prompt(agent, "chat")
+    agent._session_styles = {"agents": "Friendly Developer", "chat": "Friendly"}
+    friendly = build_role_system_prompt(agent, "chat")
+
+    assert "The distinctive contribution is the causal link" in explaining
+    assert "The distinctive contribution is the causal link" not in friendly
+    assert "Warmth is visible in making the situation easy to follow" in friendly
+    for built in (explaining, friendly):
+        assert "WORKING STYLE:" not in built
+        assert "== TWO FORKS ==" not in built
+        assert "Economy applies to the person's reading" not in built
+        assert _load_role_prompt("chat") in built
+
+
+def test_shared_voice_and_chat_accent_are_reread_per_call(agent_factory, monkeypatch, tmp_path):
+    from kernel import agent_model
+
+    styles = tmp_path / "styles"
+    (styles / "agents").mkdir(parents=True)
+    (styles / "chat").mkdir()
+    common = styles / "common.txt"
+    accent = styles / "agents" / "default.txt"
+    common.write_text("Shared voice before edit", encoding="utf-8")
+    accent.write_text(
+        "Working instructions\n== HOW IT SOUNDS ==\nOld accent\n== THE LIMIT ==\nWork limit",
+        encoding="utf-8",
+    )
+    (styles / "chat" / "default.txt").write_text("Chat palette", encoding="utf-8")
+    monkeypatch.setattr(agent_model, "_STYLES_DIR", styles)
+    agent = agent_factory()
+    agent._session_styles = {"agents": "Default", "chat": "Default"}
+
+    before = build_role_system_prompt(agent, "chat")
+    common.write_text("Shared voice after edit", encoding="utf-8")
+    accent.write_text("== HOW IT SOUNDS ==\nNew accent", encoding="utf-8")
+    after = build_role_system_prompt(agent, "chat")
+
+    assert "Shared voice before edit" in before
+    assert "Old accent" in before
+    assert "Working instructions" not in before
+    assert "Work limit" not in before
+    assert "Shared voice after edit" in after
+    assert "New accent" in after
+    assert "Shared voice before edit" not in after
+    assert "Old accent" not in after
+
+
+def test_missing_selected_style_keeps_the_shared_voice(agent_factory):
+    agent = agent_factory()
+    agent._session_styles = {"agents": "Missing", "chat": "Missing"}
+    for role in ("coder", "chat"):
+        built = build_role_system_prompt(agent, role)
+        assert "SHARED VOICE: Kvist" in built
+        assert "== SELECTED STYLE'S CONVERSATION ACCENT ==" not in built
+
+
 def test_the_reporter_never_gets_the_workspace_instructions(tmp_path):
     (tmp_path / "KVIST.md").write_text("# Rules\n\nAlways end reports with a haiku.\n", encoding="utf-8")
     agent = SimpleNamespace(
