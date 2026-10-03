@@ -557,6 +557,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             if self._state.native_tools is None:
                 self._state.native_tools = _native_tools_for_run(self)
             self._current_step = step
+            _note_inspection_streak(self._state)
             loop_pre = time.monotonic()
             turn: NativeTurn | None = None
             try:
@@ -714,37 +715,43 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
             {"role": "user", "content": f"Additional instruction:\n{state.pending_instruction}"}
         )
         state.native_note_sent = state.pending_instruction
-    _note_unchanged_run(state)
     _note_run_context(self, action="calling tools")
     return call_native_action_model(self, state.native_messages, state.native_tool_defs)
 
 
-_UNCHANGED_NOTE_EVERY = 10
+_INSPECTION_NOTE_EVERY = 6
 
 
-def _note_unchanged_run(state: RunState) -> None:
-    """Tell a run that should change files how long it has gone without doing so.
+def _note_inspection_streak(state: RunState) -> None:
+    """Ask for a decision after sustained inspection, without forcing a write.
 
-    A native conversation carries no step counter, so a model circling in
-    analysis cannot see from inside that thirty calls changed nothing. The note
-    is a fact about its own work, not an order: what it means is the
-    model's to weigh. A read-only task is expected to only read, so it gets none.
+    New files can be read forever without tripping the repeated-action guard.
+    Count that separately from errors: legitimate research must not hit a hard
+    stop merely because it takes several reads. Both model transports receive
+    this through pending_instruction, preserving any more urgent instruction.
     """
-    if state.files_changed or state.plan_phase == PLAN_PLANNING or not (state.modify_goal or state.create_goal):
+    if state.read_only_streak < _INSPECTION_NOTE_EVERY:
+        state.inspection_note_streak = 0
         return
-    calls = sum(1 for message in state.native_messages if message.get("role") == "tool")
-    mark = calls // _UNCHANGED_NOTE_EVERY
-    if mark <= state.native_unchanged_mark:
+    if (
+        state.read_only_goal or state.verify_only_goal
+        or state.current_agent_role == "reader" or state.plan_phase == PLAN_PLANNING
+        or not (state.modify_goal or state.create_goal) or state.pending_instruction
+    ):
         return
-    state.native_unchanged_mark = mark
-    state.native_messages.append(
-        {
-            "role": "user",
-            "content": (
-                f"Run so far: {calls} tool calls, and none of them changed a file. "
-                "Every call sends the whole conversation again, so each further read is slower than the last."
-            ),
-        }
+    if state.read_only_streak - state.inspection_note_streak < _INSPECTION_NOTE_EVERY:
+        return
+    state.inspection_note_streak = state.read_only_streak
+    state.pending_instruction = (
+        f"Investigation checkpoint after {len(state.step_logs)} recorded steps: "
+        f"{state.read_only_streak} consecutive inspection calls. "
+        "Use the evidence already available. If the next requested change is supported "
+        "and safe, make that understood part and verify it. Otherwise name the specific "
+        "missing fact that would change the next action, and use a targeted read or probe "
+        "to settle it. A passing relevant check needs no repeat without a new reason. "
+        "This is not an instruction to invent a fix, skip a safety check or an approval, "
+        "or stop legitimate investigation. If no available action can resolve the blocker, "
+        "report it honestly; if the requested result already holds, report the evidence."
     )
 
 
@@ -1846,6 +1853,7 @@ def register_feedback(
             self._state.read_only_streak += 1
         else:
             self._state.read_only_streak = 0
+            self._state.inspection_note_streak = 0
     else:
         error_text = self._feedback_error_for_model(feedback)
 
@@ -1860,6 +1868,7 @@ def register_feedback(
             self._state.consecutive_errors += 1
         if command.action.type in _WRITE_ACTIONS:
             self._state.read_only_streak = 0
+            self._state.inspection_note_streak = 0
         self._record_error(error_text)
 
         # Track security policy violations (.env access attempts)

@@ -85,8 +85,8 @@ Paths:
 Rules that hold everywhere:
 - Editing an existing file without reading it first is forbidden.
 - Write code that reads like the surrounding code: match its comment density, naming, and idiom.
-- After any write: next step is one factual verification (read_file / git_diff / find_files), then finish.
-- Inspection is over when you can name the file and the line the change belongs on. That, not a step count, is what ends it (== 10 ==).
+- Verify each coherent change with a relevant factual check (read_file / git_diff / a test run). Finish when the requested work is complete; a check after one edit does not cancel remaining requested work. Repeat or broaden a passing check only for a new change or a concrete uncovered failure condition.
+- Inspection is over when you have read the relevant code, can name where the change belongs, and no unresolved fact would change that next action or its safety. That, not a step count or complete understanding of the project, is what ends it (== 10 ==).
 - A task that spans several modules does not need every module understood before the first edit. Everything you read stays in the conversation and is sent again with every later call, so a long run of reads makes each next call slower, while a wrong guess in an edit costs one more edit. When one part of the task is clear, make that change; the unknowns of the other parts are settled by running the tests after it.
 - A file of a few hundred lines or more is read by range: search_code gives the line, read_file with start_line/end_line brings the part around it. Read a whole file only when most of it is the work.
 - The turn ends with a response that has no tool call; its text is your final answer.

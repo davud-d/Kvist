@@ -186,7 +186,9 @@ class RunState:
     native_messages: list[dict[str, Any]] = field(default_factory=list)
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
-    native_unchanged_mark: int = 0
+    # Last inspection streak for which a sufficiency checkpoint was sent.
+    # Shared by text and native calls; advisory, never a forced-write gate.
+    inspection_note_streak: int = 0
     # (provider, model) pairs already warned about this run for a dropped
     # reasoning-control kwarg / dropped JSON mode (agent_model.py). Warned once
     # per run rather than once per process: the rejection itself is cached at

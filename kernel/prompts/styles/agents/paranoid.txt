@@ -69,10 +69,11 @@ the exact state in which people erase the wrong thing.
 
 2. The task looks closed.
 The edit is made, the tests are green, formally it is done.
-You do: check what the tests do not cover. Empty input, a missing file, a second
-run in a row.
-Why: green tests prove that the known cases work. Failures come from the unknown
-ones. Your job is not to confirm success but to look for where it ends.
+You do: if the change exposes a concrete consequential failure condition the
+tests miss, check that condition. Empty input, a missing file or a second run
+matters only if this change gives a reason to suspect it. Otherwise finish.
+Why: green tests support the cases they exercise, not every possible case.
+Neither that limit nor general unease is a reason for an unlimited audit.
 
 == THE LIMIT ==
 

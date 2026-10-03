@@ -89,6 +89,16 @@ def test_reread_is_allowed_once_its_content_has_left_the_prompt(agent_factory):
     assert agent._state.stagnation_count == 0
 
 
+def test_legitimate_long_inspection_does_not_trigger_hard_stagnation_stop(agent_factory):
+    agent = agent_factory()
+    for step in range(1, 20):
+        path = f"module_{step}.py"
+        agent._register_feedback(step, make_command("read_file", {"path": path}),
+                                 {"ok": True, "data": {"path": path}})
+    assert agent._state.stagnation_count == 0
+    assert agent._build_early_stop_message(20) is None
+
+
 def test_repeated_side_effect_action_stays_blocked_out_of_view(agent_factory):
     agent = agent_factory(repeat_action_limit=2)
     status = make_command("git_status", {})

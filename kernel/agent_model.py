@@ -644,6 +644,7 @@ def call_native_action_model(
     for attempt in range(1, self.config.max_retries + 1):
         compact_history(messages, self._count_tokens, context_token_limit(self))
         input_tokens = sum(self._count_tokens(json.dumps(message, ensure_ascii=False)) for message in messages)
+        input_tokens += self._count_tokens(json.dumps(tools, ensure_ascii=False))
         _throttle_request_rate(self)
         try:
             turn = _request_native_turn(self, model, messages, tools)
@@ -673,12 +674,12 @@ def call_native_action_model(
             time.sleep(self.config.retry_base_delay * (2 ** (attempt - 1)))
             continue
         self._last_model_duration = time.monotonic() - started
-        output_text = turn.content + "".join(call.arguments for call in turn.tool_calls)
+        output_text = turn.reasoning + turn.content + "".join(call.arguments for call in turn.tool_calls)
         _emit_usage(
             self,
             model=model,
-            input_tokens=input_tokens,
-            output_tokens=self._count_tokens(output_text),
+            input_tokens=turn.input_tokens if turn.input_tokens is not None else input_tokens,
+            output_tokens=turn.output_tokens if turn.output_tokens is not None else self._count_tokens(output_text),
             kind="step",
             duration_seconds=self._last_model_duration,
         )
@@ -708,7 +709,7 @@ def _request_native_turn(
     _note_thinking(self, "")
     response = _create_completion_with_reasoning_fallback(self, request)
     if not self.config.stream:
-        turn = _native_turn_from_message(response.choices[0].message)
+        turn = _native_turn_from_message(response.choices[0].message, getattr(response, "usage", None))
         self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
         return turn
     return _native_turn_from_stream(self, response, started)
@@ -731,7 +732,12 @@ def _sends_temperature(self, model: str) -> bool:
     return (self.config.provider, model) not in _TEMPERATURE_UNSUPPORTED
 
 
-def _native_turn_from_message(message: Any) -> NativeTurn:
+def _usage_token_count(usage: Any, key: str) -> int | None:
+    value = usage.get(key) if isinstance(usage, dict) else getattr(usage, key, None)
+    return value if type(value) is int and value >= 0 else None
+
+
+def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
     reasoning = getattr(message, "reasoning_content", None)
     calls = [
         ToolCall(call_id=call.id, name=call.function.name, arguments=call.function.arguments or "{}")
@@ -742,6 +748,8 @@ def _native_turn_from_message(message: Any) -> NativeTurn:
         reasoning=reasoning or safe_extract_reasoning_delta(message),
         echo_reasoning=isinstance(reasoning, str) and bool(reasoning),
         tool_calls=calls,
+        input_tokens=_usage_token_count(usage, "prompt_tokens"),
+        output_tokens=_usage_token_count(usage, "completion_tokens"),
     )
 
 
@@ -754,6 +762,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     content: list[str] = []
     reasoning: list[str] = []
     echo_reasoning = False
+    input_tokens: int | None = None
+    output_tokens: int | None = None
     calls: dict[int, dict[str, str]] = {}
     first_output: float | None = None
     last_push = 0.0
@@ -762,6 +772,15 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
         for chunk in stream:
             if self._cancel_event.is_set():
                 raise RunCancelled
+            # The final usage-only chunk has no choices/delta. Capture totals
+            # before skipping it, and never add reasoning on top of that total.
+            usage = getattr(chunk, "usage", None)
+            prompt_count = _usage_token_count(usage, "prompt_tokens")
+            completion_count = _usage_token_count(usage, "completion_tokens")
+            if prompt_count is not None:
+                input_tokens = prompt_count
+            if completion_count is not None:
+                output_tokens = completion_count
             delta = safe_extract_stream_delta(chunk)
             if delta is None:
                 continue
@@ -799,6 +818,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
         content="".join(content),
         reasoning="".join(reasoning),
         echo_reasoning=echo_reasoning,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
         tool_calls=[
             ToolCall(call_id=entry["id"], name=entry["name"], arguments=entry["arguments"] or "{}")
             for _index, entry in sorted(calls.items())
@@ -926,8 +947,9 @@ def _emit_usage(
     """Report one model call's token usage to UIs exposing ``print_usage``.
 
     Optional capability (like the streaming reasoning channel): probed with
-    ``getattr`` so UIs without a usage channel keep working. Counts are real
-    tiktoken measurements of the exact prompt/response text, not estimates.
+    ``getattr`` so UIs without a usage channel keep working. Native calls prefer
+    provider usage totals, including reasoning; when unavailable, local token
+    counts estimate the payload. Other call paths supply local counts.
 
     Two different quantities travel here and must not be confused. ``input_tokens``
     /``output_tokens`` are *spend*: every step resends the whole conversation, so

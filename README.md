@@ -340,10 +340,13 @@ Type `/` to open command completion. The most useful commands are:
 
 Multiline input: `Alt+Enter` or `Esc+Enter`.
 
-Reasoning effort defaults to `medium` and is translated per provider (some
-levels collapse — e.g. DeepSeek treats `low`/`medium` as `high`; Gemini ignores
-it). If a provider rejects the setting, Kvist retries the request without it and
-warns each time. `AGENT_REASONING_EFFORT` overrides the saved level for a launch.
+Reasoning effort defaults to `medium` and is translated per provider. DeepSeek
+maps `medium` and `xhigh` to `high`; `/effort low` requests its lighter thinking
+mode, and `/effort false` disables thinking. More reasoning does not guarantee
+fewer tool calls or a better result; the same honesty and safety rules apply at
+every level. If a provider rejects the setting, Kvist retries without it and warns
+once per provider/model per run. `AGENT_REASONING_EFFORT` overrides the saved level
+for a launch.
 
 On the first task of a launch, Kvist sends one tiny request to check whether the
 active provider and model call tools natively. If they do, the run is one growing
@@ -351,6 +354,11 @@ conversation of tool calls and results, which the model keeps across steps and
 the provider can cache; if not, the run uses Kvist's JSON protocol as before. A
 provider that refuses tools mid-run moves that run to the JSON protocol.
 `AGENT_NATIVE_TOOLS=0` keeps every run on the JSON protocol.
+
+During change tasks, sustained inspection prompts the agent to act on sufficient
+evidence or identify the specific missing fact. This does not force an edit or
+stop legitimate research. Native tool-call token counts use the provider's usage
+totals when supplied, including reasoning; otherwise they are local estimates.
 
 Named sessions have 1–64 lowercase letters, digits, `-`, or `_`, and start with
 a letter or digit. Each session stores its own history and checkpoint. A

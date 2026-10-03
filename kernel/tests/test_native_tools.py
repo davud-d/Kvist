@@ -246,33 +246,96 @@ def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory)
     assert "response_format" not in agent.client.requests[-1]
 
 
-def test_a_fix_run_hears_how_many_calls_changed_nothing(agent_factory):
-    from kernel.agent_runtime import _note_unchanged_run
+def test_a_fix_run_gets_a_sufficiency_checkpoint_once_per_read_streak(agent_factory):
+    from kernel.agent_runtime import _note_inspection_streak
 
     agent = _native_agent(agent_factory, [])
     state = agent._state
     state.modify_goal = True
-    state.native_messages = [{"role": "tool", "tool_call_id": str(i), "content": "x"} for i in range(10)]
+    state.read_only_streak = 6
 
-    _note_unchanged_run(state)
-    _note_unchanged_run(state)
+    _note_inspection_streak(state)
+    assert "6 consecutive inspection calls" in state.pending_instruction
+    assert "specific missing fact" in state.pending_instruction
+    assert "not an instruction to invent a fix" in state.pending_instruction
+    assert not state.required_next_actions
 
-    notes = [m["content"] for m in state.native_messages if m["role"] == "user"]
-    assert len(notes) == 1
-    assert notes[0].startswith("Run so far: 10 tool calls, and none of them changed a file.")
-    assert "sends the whole conversation again" in notes[0]
+    state.pending_instruction = ""
+    _note_inspection_streak(state)
+    assert state.pending_instruction == ""
+    state.read_only_streak = 12
+    _note_inspection_streak(state)
+    assert "12 consecutive inspection calls" in state.pending_instruction
 
 
-def test_an_analysis_run_is_not_told_it_only_reads(agent_factory):
-    from kernel.agent_runtime import _note_unchanged_run
+@pytest.mark.parametrize("exemption", ["read_only_goal", "verify_only_goal", "reader", "planning", "no_change_goal"])
+def test_read_only_and_planning_runs_are_not_pushed_toward_edits(agent_factory, exemption):
+    from kernel.agent_runtime import _note_inspection_streak
 
     agent = _native_agent(agent_factory, [])
     state = agent._state
-    state.native_messages = [{"role": "tool", "tool_call_id": str(i), "content": "x"} for i in range(30)]
+    state.read_only_streak = 30
+    state.modify_goal = exemption != "no_change_goal"
+    if exemption in {"read_only_goal", "verify_only_goal"}:
+        setattr(state, exemption, True)
+    elif exemption == "reader":
+        state.current_agent_role = "reader"
+    elif exemption == "planning":
+        state.plan_phase = "planning"
 
-    _note_unchanged_run(state)
+    _note_inspection_streak(state)
 
-    assert all(m["role"] == "tool" for m in state.native_messages)
+    assert state.pending_instruction == ""
+
+
+def test_inspection_checkpoint_preserves_denials_and_rearms_after_action(agent_factory):
+    from kernel.agent_runtime import _note_inspection_streak
+    from kernel.tests.conftest import make_command
+
+    agent = _native_agent(agent_factory, [])
+    state = agent._state
+    state.modify_goal = True
+    state.read_only_streak = 6
+    state.pending_instruction = "User denied this change."
+    _note_inspection_streak(state)
+    assert state.pending_instruction == "User denied this change."
+    assert state.inspection_note_streak == 0
+    state.pending_instruction = ""
+    _note_inspection_streak(state)
+    agent._register_feedback(7, make_command("run_shell", {"command": ["python", "--version"]}),
+                             {"ok": True, "data": {"returncode": 0}})
+    assert state.read_only_streak == state.inspection_note_streak == 0
+    state.read_only_streak = 6
+    _note_inspection_streak(state)
+    assert "6 consecutive inspection calls" in state.pending_instruction
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_long_inspection_checkpoint_reaches_both_transports(agent_factory, monkeypatch, native):
+    from kernel.agent_model import NativeTurn
+    from kernel import agent_runtime
+
+    agent = _native_agent(agent_factory, [_response("The cause remains unverified.")])
+    agent._state.native_tools = native
+    agent._state.read_only_streak = 6
+    prompts = []
+    if native:
+        def capture(_agent, messages, tools):
+            prompts.extend(m["content"] for m in messages)
+            return NativeTurn("The cause remains unverified.")
+        monkeypatch.setattr(agent_model, "call_native_action_model", capture)
+    else:
+        def capture(prompt):
+            prompts.append(prompt)
+            return "The cause remains unverified."
+        agent._call_action_model = capture
+    # Observe delivery without invoking completion retries for this fixture.
+    monkeypatch.setattr(agent_runtime, "_finish_turn", lambda *args: agent_runtime._ActionOutcome(
+        finished=True, final_message="The cause remains unverified."))
+
+    agent._run_loop("fix a.py", start_step=1)
+
+    assert any("6 consecutive inspection calls" in prompt for prompt in prompts)
 
 
 def test_a_failed_read_does_not_stop_the_next_one(agent_factory):
@@ -344,6 +407,60 @@ def test_streamed_tool_call_fragments_are_reassembled(agent_factory):
         ("c1", "read_file", '{"path": "a.py"}'),
         ("c2", "git_status", "{}"),
     ]
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_native_usage_prefers_provider_totals_including_reasoning(agent_factory, streaming):
+    usage = SimpleNamespace(
+        prompt_tokens=1234, completion_tokens=567,
+        completion_tokens_details=SimpleNamespace(reasoning_tokens=500),
+    )
+    response = _response("Done", reasoning="visible reasoning")
+    response.usage = usage
+    if streaming:
+        response = iter([
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+                reasoning_content="visible reasoning", content=None, tool_calls=None))]),
+            SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+                content="Done", tool_calls=None))]),
+            # Usage commonly arrives after the last content chunk, with no choices.
+            SimpleNamespace(choices=[], usage=usage),
+        ])
+    agent = _native_agent(agent_factory, [response])
+    agent.config.stream = streaming
+    records = []
+    agent._ui.print_usage = records.append
+
+    agent_model.call_native_action_model(agent, [{"role": "user", "content": "task"}], tools_for_role(
+        agent_model._load_role_prompt("coder")))
+
+    assert len(records) == 1
+    assert records[0]["input_tokens"] == 1234
+    assert records[0]["output_tokens"] == 567  # already includes the 500 reasoning tokens
+
+
+def test_native_usage_fallback_counts_reasoning_and_tool_definitions(agent_factory):
+    response = _response("Done", reasoning="analysis " * 100)
+    agent = _native_agent(agent_factory, [response])
+    agent._count_tokens = len  # deterministic local estimate for this fixture
+    records = []
+    agent._ui.print_usage = records.append
+    messages = [{"role": "user", "content": "task"}]
+    tools = tools_for_role(agent_model._load_role_prompt("coder"))
+
+    agent_model.call_native_action_model(agent, messages, tools)
+
+    assert records[0]["output_tokens"] == len("analysis " * 100 + "Done")
+    assert records[0]["input_tokens"] == sum(len(json.dumps(m, ensure_ascii=False)) for m in messages) + len(
+        json.dumps(tools, ensure_ascii=False))
+
+
+@pytest.mark.parametrize("value", [None, -1, True, "123", 1.5])
+def test_invalid_provider_usage_falls_back_to_local_count(value):
+    turn = agent_model._native_turn_from_message(_response("Done").choices[0].message,
+                                               {"prompt_tokens": value, "completion_tokens": 0})
+    assert turn.input_tokens is None
+    assert turn.output_tokens == 0  # a reported zero is valid, not missing usage
 
 
 class _FlakyProbeClient:

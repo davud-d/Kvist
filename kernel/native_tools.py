@@ -221,6 +221,10 @@ class NativeTurn:
     # the dialect (DeepSeek) that requires it back on later requests.
     echo_reasoning: bool = False
     tool_calls: list[ToolCall] = field(default_factory=list)
+    # Provider totals include hidden reasoning and tool-schema overhead. None
+    # means the provider omitted usage, so the caller must estimate locally.
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 def tools_for_role(role_prompt: str) -> list[dict[str, Any]]:

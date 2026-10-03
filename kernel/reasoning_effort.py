@@ -51,10 +51,10 @@ EFFORT_LEVELS: tuple[str, ...] = (
 DEFAULT_EFFORT = "medium"
 
 EFFORT_DESCRIPTIONS: dict[str, str] = {
-    "false": "No reasoning — fastest, cheapest, weakest on hard problems",
-    "low": "Light reasoning — quick answers, shallow multi-step work",
+    "false": "Reasoning off where supported — less inference overhead",
+    "low": "Light reasoning — a smaller reasoning budget",
     "medium": "Balanced reasoning — the default trade-off",
-    "high": "Deep reasoning — slower, better on complex tasks",
+    "high": "Deep reasoning — more inference work for complex tasks",
     "xhigh": "Extended reasoning — noticeably slower, for the hardest tasks",
     "max": "Maximum reasoning the provider allows — slowest",
 }
