@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from "preact/hooks"
+import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
 import { contextLabel, formatSeconds, formatTokens } from "../../../tui/ink/format"
@@ -248,17 +248,21 @@ export function App() {
   // light circling it) survives the moment the result arrives.
   const shellKey = (step: number) => `shell-${state.epoch}-${step}`
   const startOf = (step: number) => shellStarts.current.get(step) ?? 0
-  const feed = state.items
-    .filter((item) => item.kind !== "note" || item.tone !== "debug" || state.showDebug)
-    .map((item) =>
-      item.kind === "tool" && item.action === "run_shell"
-        ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
-        : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
   const running = lastInflight(state)
-  if (running?.action === "run_shell") {
-    const { step, args } = running
-    feed.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)
-  }
+  // Typing and the elapsed timer do not change the transcript or its DOM selection.
+  const feed = useMemo(() => {
+    const cards = state.items
+      .filter((item) => item.kind !== "note" || item.tone !== "debug" || state.showDebug)
+      .map((item) =>
+        item.kind === "tool" && item.action === "run_shell"
+          ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
+          : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
+    if (running?.action === "run_shell") {
+      const { step, args } = running
+      cards.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)
+    }
+    return cards
+  }, [state.items, state.epoch, state.settledThrough, state.showDebug, running, liveOutput])
 
   if (needsSetup) {
     return (

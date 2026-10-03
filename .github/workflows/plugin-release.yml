@@ -32,22 +32,44 @@ jobs:
           done
 
   plan:
-    # macOS minutes count ten times on a private repository, so the macOS binaries are
-    # rebuilt on manual runs and on every tenth run only. The other runs reuse the ones
-    # the rolling release already holds (see "Prepare macOS binaries").
+    # macOS minutes count ten times on a private repository. Rebuild on manual
+    # runs, every tenth run, and whenever the web payload, its frozen dispatch,
+    # or its release wrappers change. Other runs can reuse the rolling release's
+    # macOS artifacts (see "Prepare macOS binaries").
     name: Plan
     runs-on: ubuntu-latest
     timeout-minutes: 2
     outputs:
       macos: ${{ steps.plan.outputs.macos }}
     steps:
+      - name: Check out history for the web payload comparison
+        if: github.event_name == 'push'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Decide whether to build macOS
         id: plan
         env:
           EVENT: ${{ github.event_name }}
           RUN_NUMBER: ${{ github.run_number }}
+          BEFORE: ${{ github.event.before }}
         run: |
           if [ "$EVENT" = workflow_dispatch ] || [ $((RUN_NUMBER % 10)) -eq 0 ]; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+          elif [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            # A new branch/history has no safe predecessor to compare.
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- \
+              frontends/web-local \
+              kernel/__main__.py \
+              kvist.spec \
+              pyproject.toml \
+              requirements.txt \
+              scripts/release/install.sh \
+              scripts/release/install.ps1; then
+            # Never pair a new kvist-web wrapper or payload with a stale binary.
             echo "macos=true" >> "$GITHUB_OUTPUT"
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"
@@ -268,7 +290,7 @@ jobs:
             | --- | --- |
             | `install.sh`, `install.ps1` | Download the assets below and put them where they belong. |
             | `kvist-linux-x64`, `kvist-windows-x64.exe` | The standalone agent binary. |
-            | `kvist-macos-arm64`, `kvist-macos-x64` | The standalone agent binary for macOS (Apple Silicon, Intel). Best-effort and not verified on a Mac. Rebuilt on every tenth build, so it can lag behind `main`. |
+            | `kvist-macos-arm64`, `kvist-macos-x64` | The standalone agent binary for macOS (Apple Silicon, Intel). Best-effort and not verified on a Mac. Rebuilt every tenth build and for web-payload/wrapper changes, so it can still lag unrelated `main` changes. |
             | `kvist-jetbrains.zip` | JetBrains plugin (also installable from the IDE plugin manager). |
             | `kvist-vscode.vsix` | VS Code / Insiders / VSCodium extension. |
           make_latest: true

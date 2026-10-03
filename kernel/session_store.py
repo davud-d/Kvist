@@ -182,6 +182,7 @@ class SessionStore:
         name: str,
         limit: int = DEFAULT_HISTORY_LIMIT,
         before: int | None = None,
+        after: int | None = None,
     ) -> dict[str, Any]:
         if not is_valid_session_name(name):
             raise ValueError(f"Invalid session name: {name!r}")
@@ -189,6 +190,10 @@ class SessionStore:
             raise ValueError(f"History limit must be between 1 and {MAX_HISTORY_LIMIT}")
         if before is not None and before < 1:
             raise ValueError("History cursor must be a positive sequence number")
+        if after is not None and after < 0:
+            raise ValueError("History cursor must be a non-negative sequence number")
+        if before is not None and after is not None:
+            raise ValueError("History cursors 'before' and 'after' are mutually exclusive")
         document = read_session_document(self, name)
         if not document:
             raise ValueError(f"Unknown session: {name!r}")
@@ -197,6 +202,7 @@ class SessionStore:
             self.executor.workspace,
             limit=limit,
             before=before,
+            after=after,
         )
         return {"session": name, **page, **end_session.notice_fields(document)}
 
@@ -253,6 +259,7 @@ def run_session_op(
     *,
     limit: int | None = None,
     before: int | None = None,
+    after: int | None = None,
     text: str | None = None,
 ) -> dict[str, Any]:
     """Execute one session operation and return its JSON payload.
@@ -275,7 +282,7 @@ def run_session_op(
         raise ValueError(f"Session operation {op!r} requires a session name")
     elif op == "history":
         payload = store.history(
-            name, DEFAULT_HISTORY_LIMIT if limit is None else limit, before
+            name, DEFAULT_HISTORY_LIMIT if limit is None else limit, before, after
         )
     else:
         payload = getattr(store, op)(name)

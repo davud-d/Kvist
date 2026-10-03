@@ -16,6 +16,8 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
+    <!-- JCEF moved out of the platform in 2026.2; older 253 builds have no plugin alias. -->
+    <depends optional="true" config-file="kvist-jcef.xml">com.intellij.modules.jcef</depends>
     <depends optional="true" config-file="kvist-git.xml">Git4Idea</depends>
 
     <extensions defaultExtensionNs="com.intellij">

@@ -146,20 +146,36 @@ def read_history(
     *,
     limit: int = DEFAULT_HISTORY_LIMIT,
     before: int | None = None,
+    after: int | None = None,
 ) -> dict[str, Any]:
-    """The newest ``limit`` events older than ``before`` (all events when None)."""
+    """Read a cursor page from the durable journal.
+
+    ``before`` pages backwards and keeps the newest matching events, preserving
+    the original history-view contract. ``after`` pages forwards and keeps the
+    oldest matching events, which lets reconnecting frontends recover every
+    event after their last durable cursor without rereading the transcript.
+    """
+    if before is not None and after is not None:
+        raise ValueError("History cursors 'before' and 'after' are mutually exclusive")
     raw = read_private_bytes(path, boundary=workspace) or b""
     entries, skipped = _parse(raw)
     total = len(entries)
     if before is not None:
         entries = [entry for entry in entries if entry.seq < before]
-    older = max(0, len(entries) - limit)
+    if after is not None:
+        entries = [entry for entry in entries if entry.seq > after]
+        selected = entries[:limit]
+        has_more = len(entries) > limit
+    else:
+        older = max(0, len(entries) - limit)
+        selected = entries[older:]
+        has_more = older > 0
     return {
         "events": [
             {"seq": e.seq, "turn": e.turn, "ts": e.ts, "event": e.event}
-            for e in entries[older:]
+            for e in selected
         ],
-        "has_more": older > 0,
+        "has_more": has_more,
         "total_events": total,
         "skipped_lines": skipped,
         "journal_bytes": len(raw),

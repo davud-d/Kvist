@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it"
+import { useMemo } from "preact/hooks"
 
 import { post } from "./host"
 
@@ -14,5 +15,6 @@ function openLink(event: MouseEvent): void {
 }
 
 export function Markdown({ text }: { text: string }) {
-  return <div class="markdown" onClick={openLink} dangerouslySetInnerHTML={{ __html: renderer.render(text) }} />
+  const html = useMemo(() => renderer.render(text), [text])
+  return <div class="markdown" onClick={openLink} dangerouslySetInnerHTML={{ __html: html }} />
 }

@@ -16,4 +16,22 @@ from pathlib import Path
 if not __package__ and not getattr(sys, "frozen", False):
     sys.path[0] = str(Path(__file__).resolve().parent.parent)
 
+_web_modules = Path(__file__).resolve().parent.parent / "frontends" / "web-local"
+if _web_modules.is_dir() and str(_web_modules) not in sys.path:
+    sys.path.insert(1, str(_web_modules))
+
+if "--web-controller" in sys.argv:
+    sys.argv.remove("--web-controller")
+    from kvist_web.cli import main as _web_main
+
+    _web_main()
+    raise SystemExit
+
+if "--web-bridge" in sys.argv:
+    sys.argv.remove("--web-bridge")
+    from kvist_web.bridge_cli import main as _bridge_main
+
+    _bridge_main()
+    raise SystemExit
+
 runpy.run_module("kernel.main", run_name="__main__", alter_sys=True)

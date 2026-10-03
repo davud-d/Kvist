@@ -112,6 +112,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Only events with a smaller seq than this (pages back through history).",
     )
     parser.add_argument(
+        "--history-after",
+        type=int,
+        help="Only events with a larger seq than this (reconnect recovery).",
+    )
+    parser.add_argument(
         "--config-info",
         action="store_true",
         help="Print the saved run configuration as JSON and exit (no LLM call).",
@@ -204,6 +209,7 @@ def _run_session_op(args: argparse.Namespace) -> None:
             args.session_name,
             limit=args.history_limit,
             before=args.history_before,
+            after=args.history_after,
             text=text,
         )
     except (ValueError, JsonStorageError, OSError) as error:

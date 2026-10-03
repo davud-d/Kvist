@@ -28,7 +28,7 @@ def _assets(directory: Path, binary: str) -> Path:
     return directory
 
 
-def _run(tmp_path: Path, system: str, machine: str, binary: str, shell: str = "/bin/zsh"):
+def _run(tmp_path: Path, system: str, machine: str, binary: str, shell: str = "/bin/zsh", extra_env=None):
     """Run the installer in a scratch home; returns (result, home)."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -50,6 +50,7 @@ def _run(tmp_path: Path, system: str, machine: str, binary: str, shell: str = "/
         "SHELL": shell,
         "TMPDIR": str(tmp_path),
     }
+    env.update(extra_env or {})
     result = subprocess.run(
         [shutil.which("bash"), str(SCRIPT), "--from", str(_assets(tmp_path / "assets", binary))],
         env=env, capture_output=True, text=True, timeout=60, check=False,
@@ -70,6 +71,8 @@ def test_macos_apple_silicon_installs_the_arm64_binary_and_nests_the_jetbrains_p
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert (home / ".local" / "share" / "kvist" / "kvist-core").read_bytes() == b"core:kvist-macos-arm64"
+    assert "--web-controller" in (home / ".local" / "bin" / "kvist-web").read_text()
+    assert "--web-bridge" in (home / ".local" / "bin" / "kvist-web-bridge").read_text()
     assert (ide / "plugins" / "kvist-intellij" / "lib" / "kvist.jar").read_bytes() == b"jar"
     assert not (ide / "kvist-intellij").exists()
     assert "--install-extension" in (tmp_path / "code-args").read_text()
@@ -97,8 +100,53 @@ def test_linux_keeps_its_binary_and_the_flat_jetbrains_layout(tmp_path):
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert (home / ".local" / "share" / "kvist" / "kvist-core").read_bytes() == b"core:kvist-linux-x64"
+    assert "--web-controller" in (home / ".local" / "bin" / "kvist-web").read_text()
+    assert "--web-bridge" in (home / ".local" / "bin" / "kvist-web-bridge").read_text()
     assert (ide / "kvist-intellij" / "lib" / "kvist.jar").read_bytes() == b"jar"
     assert "~/.bashrc" in result.stdout
+
+
+@pytest.mark.parametrize("version", ["2025.3", "2026.1", "2026.2", "2027.1"])
+def test_linux_finds_a_fresh_pycharm_from_settings_only(tmp_path, version):
+    name = f"PyCharmCE{version}"
+    settings = tmp_path / "home" / ".config" / "JetBrains" / name
+    settings.mkdir(parents=True)
+
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    destination = home / ".local" / "share" / "JetBrains" / name
+    assert (destination / "kvist-intellij" / "lib" / "kvist.jar").read_bytes() == b"jar"
+    assert not (settings / "kvist-intellij").exists()
+    assert result.stdout.count("JetBrains plugin installed into") == 1
+
+
+def test_linux_settings_discovery_uses_xdg_paths(tmp_path):
+    config = tmp_path / "settings"
+    data = tmp_path / "data"
+    (config / "JetBrains" / "PyCharmCE2026.2").mkdir(parents=True)
+
+    result, _home = _run(
+        tmp_path, "Linux", "x86_64", "kvist-linux-x64",
+        extra_env={"XDG_CONFIG_HOME": str(config), "XDG_DATA_HOME": str(data)},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (data / "JetBrains" / "PyCharmCE2026.2" / "kvist-intellij" / "lib" / "kvist.jar").read_bytes() == b"jar"
+    assert not (config / "JetBrains" / "PyCharmCE2026.2" / "kvist-intellij").exists()
+
+
+def test_linux_settings_and_data_do_not_install_the_same_ide_twice(tmp_path):
+    name = "PyCharmCE2026.2"
+    (tmp_path / "home" / ".config" / "JetBrains" / name).mkdir(parents=True)
+    destination = tmp_path / "home" / ".local" / "share" / "JetBrains" / name
+    destination.mkdir(parents=True)
+
+    result, _home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (destination / "kvist-intellij" / "lib" / "kvist.jar").is_file()
+    assert result.stdout.count("JetBrains plugin installed into") == 1
 
 
 @pytest.mark.parametrize(("system", "machine"), [("Linux", "aarch64"), ("Darwin", "ppc")])

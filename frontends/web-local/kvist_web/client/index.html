@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="kvist-csrf" content="{{KVIST_CSRF}}">
+  <title>Kvist</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2368a5ff'/%3E%3Cpath d='M9 7v18h4v-7l6 7h5l-8-9 8-9h-5l-6 7V7z' fill='%2307101d'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <div id="startup" class="startup" role="status" aria-live="polite">
+    <div class="startup-mark">K</div>
+    <div><strong>Starting Kvist</strong><span id="startup-stage">Loading configuration</span></div>
+  </div>
+
+  <div id="app" class="app" hidden>
+    <aside class="sidebar" aria-label="Servers and sessions">
+      <header class="sidebar-head">
+        <button id="server-switcher" class="server-switcher" aria-haspopup="menu">
+          <span class="brand-mark">K</span><span id="active-server-label">local</span><span class="chevron">⌄</span>
+        </button>
+        <button id="new-session" class="icon-button" title="New session" aria-label="New session">＋</button>
+      </header>
+      <button id="inbox-button" class="inbox-button"><span>Inbox</span><span id="inbox-count" class="badge">0</span></button>
+      <nav id="navigation" class="navigation"></nav>
+      <footer class="sidebar-foot">
+        <button id="add-workspace" class="quiet-button">＋ Workspace</button>
+        <button id="connect-server" class="quiet-button">＋ Server</button>
+      </footer>
+    </aside>
+
+    <main class="main">
+      <header class="session-head">
+        <div class="session-identity">
+          <span id="connection-dot" class="connection-dot"></span>
+          <div><h1 id="session-title">Choose a session</h1><p id="session-path">Kvist control center</p></div>
+        </div>
+        <div class="head-actions">
+          <span id="agent-state" class="state-pill">idle</span>
+          <button id="search-button" class="icon-button" title="Quick open (Ctrl/Cmd+P)">⌕</button>
+          <button id="toggle-inspector" class="icon-button" aria-expanded="true" title="Toggle inspector">◫</button>
+        </div>
+      </header>
+
+      <section id="empty-state" class="empty-state">
+        <div class="empty-glyph">⌁</div><h2>Pick up where you left off</h2>
+        <p>Select a workspace session, or create a new one. Agents continue when you navigate away.</p>
+      </section>
+      <section id="conversation" class="conversation" aria-live="polite" hidden></section>
+
+      <section id="pending-input" class="pending-input" hidden></section>
+      <form id="composer" class="composer" hidden>
+        <textarea id="prompt" rows="1" aria-label="Message Kvist" placeholder="Ask Kvist to inspect, change, or explain…"></textarea>
+        <div class="composer-foot">
+          <span class="composer-hint"><kbd>Ctrl</kbd><kbd>Enter</kbd> send</span>
+          <div><button type="button" id="stop-agent" class="stop-button" hidden>Stop</button><button type="submit" class="send-button">Send ↑</button></div>
+        </div>
+      </form>
+    </main>
+
+    <aside id="inspector" class="inspector" aria-label="Session inspector">
+      <div class="inspector-tabs" role="tablist">
+        <button role="tab" data-tab="activity" aria-selected="true">Activity</button>
+        <button role="tab" data-tab="files">Files</button>
+        <button role="tab" data-tab="diff">Diff</button>
+        <button role="tab" data-tab="terminal">Terminal</button>
+        <button role="tab" data-tab="context">Context</button>
+        <button role="tab" data-tab="usage">Usage</button>
+      </div>
+      <div id="inspector-content" class="inspector-content"></div>
+    </aside>
+  </div>
+
+  <div id="palette" class="overlay" hidden>
+    <section class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+      <input id="palette-input" autocomplete="off" placeholder="Type a command or search sessions…">
+      <div id="palette-results" class="palette-results"></div>
+      <footer><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>Enter</kbd> open · <kbd>Esc</kbd> close</span></footer>
+    </section>
+  </div>
+
+  <div id="modal" class="overlay" hidden></div>
+  <div id="toasts" class="toasts" aria-live="assertive"></div>
+  <script type="module" src="/assets/app.js"></script>
+</body>
+</html>

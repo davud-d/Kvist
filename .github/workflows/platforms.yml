@@ -190,6 +190,14 @@ jobs:
           [ -d "$venv_bin" ] || venv_bin="$RUNNER_TEMP/wheel-venv/Scripts"
           "$venv_bin/pip" install --disable-pip-version-check dist/*.whl
           cd "$RUNNER_TEMP" && "$venv_bin/kvist" --version
+          cd "$RUNNER_TEMP" && "$venv_bin/kvist-web" --help
+          "$venv_bin/python" - <<'PY'
+          from kvist_web.http_api import client_root
+
+          root = client_root()
+          for path in ("index.html", "app.js", "styles.css", "utils/api.js"):
+              assert (root / path).is_file(), path
+          PY
 
       - name: Check the data files packaged into the wheel
         run: |
@@ -197,7 +205,7 @@ jobs:
           import glob, zipfile
 
           names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
-          for part in ("prompts", "themes", "assets", "dist-ui"):
+          for part in ("prompts", "themes", "assets", "dist-ui", "kvist_web/client/index.html"):
               assert any(part in name for name in names), f"the wheel carries no {part}"
           PY
 
@@ -205,6 +213,7 @@ jobs:
         run: |
           python -m PyInstaller kvist.spec --noconfirm
           ./dist/kvist --version
+          ./dist/kvist --web-controller --help
 
       # The macOS layout of the VS Code extension: the binary goes into bin/mac-<cpu>/ and
       # must run from there and end up in the VSIX. Mac runners only, so it costs little.

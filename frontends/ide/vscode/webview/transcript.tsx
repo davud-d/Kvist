@@ -474,7 +474,7 @@ async function copy(text: string): Promise<boolean> {
 
 // Bottom-right of the answer: a quiet icon that opens a two-line choice between the
 // answer alone and everything the agent did to produce it.
-function CopyMenu({ answerText, turnText }: { answerText: string; turnText: string }) {
+function CopyMenu({ answerText, turnText }: { answerText: string; turnText: () => string }) {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const root = useRef<HTMLDivElement>(null)
@@ -504,7 +504,7 @@ function CopyMenu({ answerText, turnText }: { answerText: string; turnText: stri
       {open ? (
         <div class="copy-options">
           <button onClick={() => pick(answerText)}>Copy answer</button>
-          <button onClick={() => pick(turnText)}>Copy full turn</button>
+          <button onClick={() => pick(turnText())}>Copy full turn</button>
         </div>
       ) : null}
     </div>
@@ -516,7 +516,7 @@ function Answer({ item, items }: { item: Extract<Item, { kind: "answer" }>; item
     <div class="answer-block">
       <Markdown text={item.text} />
       <div class="answer-actions">
-        <CopyMenu answerText={item.text.trim()} turnText={turnToText(turnSlice(items, item.id))} />
+        <CopyMenu answerText={item.text.trim()} turnText={() => turnToText(turnSlice(items, item.id))} />
       </div>
     </div>
   )

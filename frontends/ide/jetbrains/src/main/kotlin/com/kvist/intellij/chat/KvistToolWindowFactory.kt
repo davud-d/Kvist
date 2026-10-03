@@ -28,15 +28,25 @@ private const val NO_JCEF_MESSAGE =
         "Pick a boot runtime with JCEF (Help | Find Action | Choose Boot Java Runtime for the IDE) and restart, " +
         "or use Kvist in the terminal."
 
+private const val MISSING_JCEF_MESSAGE =
+    "The Kvist chat needs the IDE's embedded browser (JCEF). " +
+        "Enable Web Browser (JCEF) in Settings | Plugins and restart, or use Kvist in the terminal."
+
 class KvistToolWindowFactory : ToolWindowFactory, DumbAware {
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        if (!JBCefApp.isSupported()) {
-            LOG.warn("JCEF is not supported in this IDE; the Kvist tool window offers the terminal instead")
-            show(toolWindow, terminalFallback(project, NO_JCEF_MESSAGE))
-            return
-        }
         val panel = try {
+            if (!JBCefApp.isSupported()) {
+                LOG.warn("JCEF is not supported in this IDE; the Kvist tool window offers the terminal instead")
+                show(toolWindow, terminalFallback(project, NO_JCEF_MESSAGE))
+                return
+            }
             KvistChatPanel(project)
+        }
+        catch (error: NoClassDefFoundError) {
+            // An optional JCEF plugin may be absent or disabled on 2026.2+.
+            LOG.warn("JCEF classes are unavailable; the Kvist tool window offers the terminal instead", error)
+            show(toolWindow, terminalFallback(project, MISSING_JCEF_MESSAGE))
+            return
         }
         catch (exception: IllegalStateException) {
             LOG.warn("Failed to open the Kvist chat", exception)

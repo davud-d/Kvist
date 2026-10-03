@@ -9,6 +9,7 @@ import pkgutil
 # New files in these directories are picked up without touching this spec.
 _CLASSIC_DIR = os.path.join(SPECPATH, 'frontends', 'tui', 'classic')
 _ZED_DIR = os.path.join(SPECPATH, 'frontends', 'zed')
+_WEB_DIR = os.path.join(SPECPATH, 'frontends', 'web-local', 'kvist_web')
 
 
 def _module_names(directory, prefix=''):
@@ -24,6 +25,11 @@ local_hiddenimports = sorted(
     + _module_names(os.path.join(SPECPATH, 'kernel', 'providers'), 'kernel.providers.')
     + _module_names(_CLASSIC_DIR)
     + _module_names(_ZED_DIR)
+    + _module_names(_WEB_DIR, 'kvist_web.')
+    + _module_names(os.path.join(_WEB_DIR, 'runtime'), 'kvist_web.runtime.')
+    + _module_names(os.path.join(_WEB_DIR, 'ssh'), 'kvist_web.ssh.')
+    + _module_names(os.path.join(_WEB_DIR, 'bridge'), 'kvist_web.bridge.')
+    + _module_names(os.path.join(_WEB_DIR, 'installers'), 'kvist_web.installers.')
 )
 local_hiddenimports = [name.removesuffix('.__init__') for name in local_hiddenimports]
 
@@ -58,12 +64,13 @@ _ui_datas = [(_UI_BUNDLE, 'frontends/tui/ink/dist-ui')] if os.path.isfile(_UI_BU
 # unpack under kernel/, the classic terminal's modules at the top level.
 a = Analysis(
     ['kernel/__main__.py'],
-    pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR],
+    pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR, os.path.join(SPECPATH, 'frontends', 'web-local')],
     binaries=[],
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
         ('kernel/themes', 'kernel/themes'),
         ('frontends/tui/classic/assets', 'assets'),
+        ('frontends/web-local/kvist_web/client', 'kvist_web/client'),
         # version.py's pyproject.toml fallback (no installed distribution
         # metadata exists inside a frozen build either).
         ('pyproject.toml', '.'),

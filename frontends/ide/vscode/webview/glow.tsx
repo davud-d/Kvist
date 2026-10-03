@@ -14,11 +14,14 @@ export function CursorGlow() {
     const pos = { x: window.innerWidth / 2, y: window.innerHeight / 2 }
     const target = { ...pos }
     let frame = 0
+    let active = false
 
     const paint = () => {
       element.style.transform = `translate3d(${pos.x}px, ${pos.y}px, 0)`
-      root.style.setProperty("--px", `${pos.x}px`)
-      root.style.setProperty("--py", `${pos.y}px`)
+      // Inherited variables on :root invalidate the entire transcript on every frame.
+      const surface = document.querySelector<HTMLElement>(".lit")
+      surface?.style.setProperty("--px", `${pos.x}px`)
+      surface?.style.setProperty("--py", `${pos.y}px`)
     }
     const step = () => {
       pos.x += (target.x - pos.x) * 0.16
@@ -30,11 +33,18 @@ export function CursorGlow() {
     const onMove = (event: PointerEvent) => {
       target.x = event.clientX
       target.y = event.clientY
-      element.classList.add("is-active")
-      root.classList.add("pointer")
+      if (!active) {
+        active = true
+        element.classList.add("is-active")
+        root.classList.add("pointer")
+      }
       if (!frame) frame = requestAnimationFrame(step)
     }
     const hide = () => {
+      cancelAnimationFrame(frame)
+      frame = 0
+      if (!active) return
+      active = false
       element.classList.remove("is-active")
       root.classList.remove("pointer")
     }
@@ -44,7 +54,7 @@ export function CursorGlow() {
     document.addEventListener("mouseleave", hide)
     window.addEventListener("blur", hide)
     return () => {
-      cancelAnimationFrame(frame)
+      hide()
       window.removeEventListener("pointermove", onMove)
       document.removeEventListener("mouseleave", hide)
       window.removeEventListener("blur", hide)

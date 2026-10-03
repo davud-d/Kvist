@@ -58,9 +58,9 @@ Platform tests (editor, undo, action registration) run headless. The first run d
 
 ## Compatibility
 
-This MVP is intentionally pinned to IntelliJ Platform 2025.3.
+The plugin is built against IntelliJ Platform 2025.3 (build 253), its minimum supported version because it uses the reworked Terminal API. The minimum version stays at 253; newer platform versions, including 2026.2, are allowed.
 
-It uses the reworked Terminal API, which is the reason the plugin is limited to the 253 platform line.
+In 2026.2, JCEF moved from the platform into the bundled **Web Browser (JCEF)** plugin. Kvist declares an optional dependency on `com.intellij.modules.jcef` for classloader access on these IDEs. The dependency is optional so the original 2025.3 builds, which have JCEF in the platform but no plugin alias, still load the chat window. If JCEF is absent, disabled or unsupported by the boot runtime, the window offers **Open Kvist in Terminal** instead.
 
 ## Supported platforms
 

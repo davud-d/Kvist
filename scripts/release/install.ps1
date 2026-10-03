@@ -62,7 +62,11 @@ function Install-Cli([string]$Binary) {
     # cmd.exe reads a batch file in the OEM code page, so a non-ASCII user name survives only in that encoding.
     $oem = [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
     [IO.File]::WriteAllText((Join-Path $BinDir "kvist.cmd"), $wrapper, $oem)
-    Write-Step "Installed $core and the launcher $(Join-Path $BinDir 'kvist.cmd')"
+    $webWrapper = "@echo off`r`n`"$core`" --web-controller %*`r`nexit /b %ERRORLEVEL%`r`n"
+    $bridgeWrapper = "@echo off`r`n`"$core`" --web-bridge %*`r`nexit /b %ERRORLEVEL%`r`n"
+    [IO.File]::WriteAllText((Join-Path $BinDir "kvist-web.cmd"), $webWrapper, $oem)
+    [IO.File]::WriteAllText((Join-Path $BinDir "kvist-web-bridge.cmd"), $bridgeWrapper, $oem)
+    Write-Step "Installed $core and the kvist, kvist-web and kvist-web-bridge launchers"
 }
 
 function Add-ToUserPath([string]$Dir) {

@@ -146,8 +146,9 @@ irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/insta
 The assets are also downloadable one by one: `kvist-linux-x64`,
 `kvist-windows-x64.exe`, `kvist-macos-arm64`, `kvist-macos-x64`,
 `kvist-jetbrains.zip`, `kvist-vscode.vsix`. On macOS the script takes the binary
-for the CPU it runs on; the macOS binaries are rebuilt on every tenth push, so
-they can lag behind `main`. To install
+for the CPU it runs on; the macOS binaries are rebuilt on every tenth push and
+whenever the web payload or release wrappers change, so they can still lag
+unrelated `main` changes. To install
 from files already on disk, run `bash install.sh --from <dir>` or
 `.\install.ps1 -From <dir>`. Zed is registered separately with
 `scripts/installer/install_zed.py`.

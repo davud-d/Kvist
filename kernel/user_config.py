@@ -195,6 +195,29 @@ def save_user_config(payload: dict[str, object], config_path: Path | None = None
         raise RuntimeError("Failed to save user config.") from error
 
 
+WEB_LOCAL_CONFIG_KEY = "web_local"
+
+
+def get_web_local_config(config_path: Path | None = None) -> dict[str, object]:
+    """Return the non-secret local-web settings from Kvist's global config."""
+    value = load_user_config(config_path).get(WEB_LOCAL_CONFIG_KEY)
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def save_web_local_config(
+    value: dict[str, object], config_path: Path | None = None
+) -> None:
+    """Atomically replace local-web settings without touching core settings."""
+    if not isinstance(value, dict):
+        raise TypeError("Web configuration must be an object.")
+
+    def update(payload: dict[str, object]) -> dict[str, object]:
+        payload[WEB_LOCAL_CONFIG_KEY] = value
+        return payload
+
+    _update_user_config(update, config_path)
+
+
 def _update_user_config(
     update: Callable[[dict[str, object]], dict[str, object]],
     config_path: Path | None = None,

@@ -432,10 +432,11 @@ def _match_product(dir_name: str) -> str | None:
 
 
 def discover_jetbrains_ides() -> list[tuple[str, Path]]:
-    """Return (label, config_dir) for every installed JetBrains IDE found."""
+    """Return (label, plugin_data_dir), including Linux IDEs with only settings yet."""
     found: list[tuple[str, Path]] = []
     seen: set[Path] = set()
-    for root in jetbrains_config_roots():
+    data_roots = jetbrains_config_roots()
+    for root in data_roots:
         if not root.is_dir():
             continue
         for entry in sorted(root.iterdir()):
@@ -446,6 +447,19 @@ def discover_jetbrains_ides() -> list[tuple[str, Path]]:
                 continue
             seen.add(entry)
             found.append((label, entry))
+
+    # A newly launched Linux IDE can have settings before its plugin data
+    # directory exists. Discover it there, but still install into the data root.
+    if not IS_WINDOWS and not IS_MACOS and data_roots:
+        settings_root = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "JetBrains"
+        known_names = {path.name for _, path in found}
+        if settings_root.is_dir():
+            for entry in sorted(settings_root.iterdir()):
+                if not entry.is_dir() or entry.name in known_names:
+                    continue
+                label = _match_product(entry.name)
+                if label is not None:
+                    found.append((label, data_roots[0] / entry.name))
     return found
 
 

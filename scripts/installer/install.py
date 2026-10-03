@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 """Pick what to install and watch it happen.
 
-This is the front door: it offers the five installers (`install_cli.py`,
-`install_jetbrains.py`, `install_vscode.py`, `install_gui.py`, `install_zed.py`)
-as an arrow-key list, all selected by default, and runs the ones you keep.
+This is the front door: it offers the installers (`install_cli.py`,
+`install_web.py`, `install_jetbrains.py`, `install_vscode.py`, `install_gui.py`,
+`install_zed.py`) as an arrow-key list, all selected by default, and runs the
+ones you keep.
 
     python scripts/installer/install.py             # pick with the arrow keys
     python scripts/installer/install.py --all       # everything, no questions
@@ -63,6 +64,7 @@ class Component:
 
 COMPONENTS = (
     Component("cli", "CLI — the `kvist` command", "install_cli.py"),
+    Component("web", "Web control center — `kvist-web`", "install_web.py", after=("cli",)),
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),
     Component("vscode", "VS Code extension", "install_vscode.py"),
     Component("gui", "GUI application", "install_gui.py"),

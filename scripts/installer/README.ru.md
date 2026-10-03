@@ -62,6 +62,8 @@ PyCharm, WebStorm, GoLand, CLion, Rider, RubyMine, DataGrip, RustRover, Android
 Studio, …) и ставит в `.../<Product><version>/plugins/`. После этого перезапустите
 IDE.
 
+В Linux плагин ставится прямо в `.../<Product><version>/`, без вложенной папки `plugins/`. Поиск также проверяет `~/.config/JetBrains` (или `$XDG_CONFIG_HOME/JetBrains`): у недавно запущенной IDE каталог данных плагинов может ещё отсутствовать. Для неё установщик создаёт каталог в `~/.local/share/JetBrains` (или `$XDG_DATA_HOME/JetBrains`). Ограничения на год версии нет.
+
 ## Как ищутся редакторы VS Code
 
 `install_vscode.py` ищет команды запуска в `PATH`: `code`, `code-insiders` и

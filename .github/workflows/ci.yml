@@ -45,6 +45,8 @@ jobs:
           echo stand-in > "$assets/kvist-vscode.vsix"
           bash scripts/release/install.sh --from "$assets"
           test "$("$HOME/.local/bin/kvist")" = "kvist-core --workspace $PWD"
+          test "$("$HOME/.local/bin/kvist-web" --no-open)" = "kvist-core --web-controller --no-open"
+          test "$("$HOME/.local/bin/kvist-web-bridge" status)" = "kvist-core --web-bridge status"
           test -f "$HOME/.local/share/JetBrains/PyCharm2025.2/kvist-intellij/lib/kvist.jar"
 
       - name: Run install.ps1 against stand-in assets
@@ -61,4 +63,7 @@ jobs:
           .\scripts\release\install.ps1 -From $assets
           if (-not (Test-Path "$env:LOCALAPPDATA\Kvist\kvist-core.exe")) { throw "kvist-core.exe was not installed" }
           if (-not (Test-Path "$env:LOCALAPPDATA\Kvist\bin\kvist.cmd")) { throw "kvist.cmd was not installed" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Kvist\bin\kvist-web.cmd")) { throw "kvist-web.cmd was not installed" }
+          if (-not (Test-Path "$env:LOCALAPPDATA\Kvist\bin\kvist-web-bridge.cmd")) { throw "kvist-web-bridge.cmd was not installed" }
+          if (-not ((Get-Content "$env:LOCALAPPDATA\Kvist\bin\kvist-web.cmd" -Raw).Contains("--web-controller"))) { throw "kvist-web.cmd has the wrong command" }
           if (-not (Test-Path "$env:APPDATA\JetBrains\PyCharm2025.2\plugins\kvist-intellij\lib\kvist.jar")) { throw "the JetBrains plugin was not installed" }

@@ -61,6 +61,8 @@ PyCharm, WebStorm, GoLand, CLion, Rider, RubyMine, DataGrip, RustRover, Android
 Studio, …) and installs into `.../<Product><version>/plugins/`. Restart the IDE
 afterwards.
 
+On Linux, plugins go directly into `.../<Product><version>/`, without a `plugins/` subdirectory. Discovery also checks `~/.config/JetBrains` (or `$XDG_CONFIG_HOME/JetBrains`) for newly launched IDEs whose plugin data directory does not exist yet, and maps them to `~/.local/share/JetBrains` (or `$XDG_DATA_HOME/JetBrains`). Product versions are not restricted to particular years.
+
 ## How VS Code editors are discovered
 
 `install_vscode.py` looks for command-line launchers on `PATH`: `code`,

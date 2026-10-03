@@ -24,10 +24,14 @@ dependencies = [
     # been verified against 0.12.x only. A 0.13 that routes it natively just
     # needs the bound relaxed (the patch is a no-op then).
     "agent-client-protocol>=0.12.1,<0.13",
+    "paramiko>=3.4.0",
+    "keyring>=25.0.0",
 ]
 
 [project.scripts]
 kvist = "kernel.main:main"
+kvist-web = "kvist_web.cli:main"
+kvist-web-bridge = "kvist_web.bridge_cli:main"
 
 [tool.setuptools]
 # The core is the `kernel` package. Everything else here is installed at the
@@ -51,9 +55,27 @@ packages = [
     "frontends.tui.classic.assets",
     "frontends.tui.ink.dist-ui",
     "frontends.zed",
+    "kvist_web",
+    "kvist_web.runtime",
+    "kvist_web.ssh",
+    "kvist_web.bridge",
+    "kvist_web.installers",
 ]
 
+[tool.setuptools.package-dir]
+kvist_web = "frontends/web-local/kvist_web"
+
 [tool.setuptools.package-data]
+kvist_web = [
+    "client/index.html",
+    "client/app.js",
+    "client/styles.css",
+    "client/utils/api.js",
+    "client/state/store.js",
+    "client/features/navigation.js",
+    "client/features/session.js",
+    "client/features/palette.js",
+]
 "kernel.prompts.system" = ["*.txt"]
 "kernel.prompts.styles" = ["*.txt"]
 "kernel.prompts.styles.agents" = ["*.txt"]

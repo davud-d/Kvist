@@ -258,6 +258,7 @@ def test_cli_does_not_claim_success_after_vscode_install_failure(tmp_path, monke
 def test_front_door_includes_vscode_component():
     assert [(component.key, component.script) for component in install_main.COMPONENTS] == [
         ("cli", "install_cli.py"),
+        ("web", "install_web.py"),
         ("jetbrains", "install_jetbrains.py"),
         ("vscode", "install_vscode.py"),
         ("gui", "install_gui.py"),

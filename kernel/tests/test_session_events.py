@@ -373,6 +373,17 @@ def test_history_pages_back_from_the_newest_events(tmp_path):
     first = session_events.read_history(path, tmp_path, limit=1000)
     assert first["has_more"] is False
 
+    recovered = session_events.read_history(
+        path, tmp_path, limit=3, after=everything[2]["seq"]
+    )
+    assert [event["seq"] for event in recovered["events"]] == [
+        event["seq"] for event in everything[3:6]
+    ]
+    assert recovered["has_more"] is True
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        session_events.read_history(path, tmp_path, before=4, after=2)
+
 
 def test_history_op_validates_its_arguments(agent_factory):
     agent = agent_factory()

@@ -1,0 +1,2 @@
+<!-- Only adds classloader access on 2026.2+. The tool window also uses core JCEF on older IDEs. -->
+<idea-plugin />

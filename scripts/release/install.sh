@@ -86,11 +86,25 @@ exec '$LIB_DIR/kvist-core' --workspace "\$PWD" "\$@"
 EOF
 	chmod 755 "$BIN_DIR/.kvist.new"
 	mv -f "$BIN_DIR/.kvist.new" "$BIN_DIR/kvist"
+	cat >"$BIN_DIR/.kvist-web.new" <<EOF
+#!/usr/bin/env bash
+# Installed by the Kvist release installer.
+exec '$LIB_DIR/kvist-core' --web-controller "\$@"
+EOF
+	chmod 755 "$BIN_DIR/.kvist-web.new"
+	mv -f "$BIN_DIR/.kvist-web.new" "$BIN_DIR/kvist-web"
+	cat >"$BIN_DIR/.kvist-web-bridge.new" <<EOF
+#!/usr/bin/env bash
+# Installed by the Kvist release installer.
+exec '$LIB_DIR/kvist-core' --web-bridge "\$@"
+EOF
+	chmod 755 "$BIN_DIR/.kvist-web-bridge.new"
+	mv -f "$BIN_DIR/.kvist-web-bridge.new" "$BIN_DIR/kvist-web-bridge"
 	if [[ "$OS_NAME" == "Darwin" ]]; then
 		# A binary saved by a browser is quarantined, and Gatekeeper refuses it unless notarized.
 		xattr -d com.apple.quarantine "$LIB_DIR/kvist-core" 2>/dev/null || true
 	fi
-	step "Installed $LIB_DIR/kvist-core and the launcher $BIN_DIR/kvist"
+	step "Installed $LIB_DIR/kvist-core and launchers kvist, kvist-web, kvist-web-bridge"
 }
 
 # The directories that hold one folder per installed JetBrains IDE.
@@ -106,7 +120,7 @@ jetbrains_roots() {
 }
 
 jetbrains_config_dirs() {
-	local root dir name
+	local root dir name settings data existing
 	while IFS= read -r root; do
 		[[ -d "$root" ]] || continue
 		for dir in "$root"/*/; do
@@ -116,6 +130,28 @@ jetbrains_config_dirs() {
 			fi
 		done
 	done < <(jetbrains_roots) | sort -u
+
+	# A fresh Linux IDE may have settings but no plugin data directory yet.
+	# Find it by settings and return the data destination, never the settings path.
+	if [[ "$OS_NAME" == "Linux" ]]; then
+		settings="${XDG_CONFIG_HOME:-$HOME/.config}/JetBrains"
+		data="${XDG_DATA_HOME:-$HOME/.local/share}/JetBrains"
+		for dir in "$settings"/*/; do
+			[[ -d "$dir" ]] || continue
+			name="$(basename "$dir")"
+			[[ "$name" =~ ^($JETBRAINS_PRODUCTS)[0-9] ]] || continue
+			existing=0
+			while IFS= read -r root; do
+				if [[ -d "$root/$name" ]]; then
+					existing=1
+					break
+				fi
+			done < <(jetbrains_roots)
+			if [[ "$existing" == 0 ]]; then
+				printf '%s\n' "$data/$name"
+			fi
+		done
+	fi
 }
 
 # Where an IDE loads unpacked plugins from: the data directory itself on Linux, a
