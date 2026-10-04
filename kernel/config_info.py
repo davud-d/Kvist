@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from kernel.llm_clients import (
+    ANYMODEL_PROVIDER,
     ANTHROPIC_PROVIDER,
     CUSTOM_PROVIDER_PREFIX,
     DEEPSEEK_PROVIDER,
@@ -38,17 +39,21 @@ from kernel.user_config import (
     secret_label_for_key,
 )
 
-# The providers the GUI offers as first-class choices. Custom providers are
-# appended separately because their credentials and models live in their own
-# config block rather than in the shared secret/model keys.
+# The providers the GUI offers as first-class choices. AnyModel leads: it is the
+# partner provider and the blank-start default. Custom providers are appended
+# separately because their credentials and models live in their own config block
+# rather than in the shared secret/model keys.
 _BUILTIN_PROVIDERS = (
+    ANYMODEL_PROVIDER,
     OPENAI_PROVIDER,
     ANTHROPIC_PROVIDER,
     DEEPSEEK_PROVIDER,
     OPENROUTER_PROVIDER,
     OMNIROUTE_PROVIDER,
     FREEFLOW_PROVIDER,
-) + tuple(MANUAL_OPENAI_PROVIDERS)
+) + tuple(
+    provider for provider in MANUAL_OPENAI_PROVIDERS if provider != ANYMODEL_PROVIDER
+)
 
 
 def _empty_roles() -> dict[str, str]:

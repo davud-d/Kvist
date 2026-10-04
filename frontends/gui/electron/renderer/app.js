@@ -97,7 +97,10 @@ const metricElapsed = document.querySelector("#metricElapsed")
 const CONFIG_STORAGE_KEY = "kvist.run-options.v1"
 const MODEL_ROLES = ["fast", "smart"]
 
+// Fallback labels and order used when the core has not reported a provider
+// catalog yet: AnyModel leads (it is the blank-start default).
 const BUILTIN_PROVIDER_LABELS = {
+  anymodel: "AnyModel",
   openai: "OpenAI",
   anthropic: "Anthropic",
   deepseek: "DeepSeek",

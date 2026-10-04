@@ -309,10 +309,16 @@ DEFAULT_BLANK_START_PROVIDER = ANYMODEL_PROVIDER
 
 MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
 
+# AnyModel leads the list: it is a partner provider and the blank-start
+# default, so the frontends fed from this tuple show it first. It stays a
+# plain manual-tier entry in MANUAL_OPENAI_PROVIDERS above, and is skipped in
+# the manual tail to keep the tuple free of duplicates.
 SUPPORTED_LLM_PROVIDERS = (
-    OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, FREEFLOW_PROVIDER,
-    OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
-) + tuple(MANUAL_OPENAI_PROVIDERS)
+    ANYMODEL_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
+    FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
+) + tuple(
+    provider for provider in MANUAL_OPENAI_PROVIDERS if provider != ANYMODEL_PROVIDER
+)
 
 # Manual-tier providers with more than one known regional/mirror endpoint. A
 # key issued for one region gets a plain 401 on another region's endpoint —

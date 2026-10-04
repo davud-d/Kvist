@@ -424,6 +424,7 @@ from kernel.llm_clients import (
     create_llm_client,
     configured_freeflow_backends,
     ANTHROPIC_PROVIDER,
+    ANYMODEL_PROVIDER,
     CUSTOM_PROVIDER_PREFIX,
     CUSTOM_PROVIDER_PLACEHOLDER,
     DEFAULT_BLANK_START_PROVIDER,
@@ -1522,8 +1523,14 @@ def choose_provider(
     if ui is None:
         ui = TerminalBannerUI(console=console, verbose=verbose)
 
-    # Built-in providers in order: OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute
+    # Built-in providers in order: AnyModel first (partner provider and blank-start
+    # default), then OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute.
     options: list[dict[str, str]] = [
+        {
+            "value": ANYMODEL_PROVIDER,
+            "label": "AnyModel",
+            "description": "Kvist's default router — one key, many models",
+        },
         {
             "value": "openai",
             "label": "OpenAI",
@@ -1561,6 +1568,9 @@ def choose_provider(
     # Third-party OpenAI-compatible providers — one API key, manual model entry
     # (same tier as OmniRoute above; see MANUAL_OPENAI_PROVIDERS in llm_clients.py).
     for slug, config in MANUAL_OPENAI_PROVIDERS.items():
+        if slug == ANYMODEL_PROVIDER:
+            # Already listed first above; skip it so it is not offered twice.
+            continue
         options.append({
             "value": slug,
             "label": config["label"],

@@ -1065,7 +1065,8 @@ DeepInfra, Novita, Vercel AI Gateway, Baseten, SambaNova, Nebius AI Studio, Frie
 AI, Databricks Model Serving, Google AI Studio (direct), Cohere, AI21 Labs, ByteDance
 Doubao (Volcengine Ark), GitHub Models, iFlytek Spark, Scaleway Generative APIs), plus
 arbitrary user-defined endpoints under a `custom:` name
-prefix. `SUPPORTED_LLM_PROVIDERS` is the six core providers followed by
+prefix. `SUPPORTED_LLM_PROVIDERS` leads with `anymodel` (the partner provider and
+blank-start default), then the six core providers, then the rest of
 `tuple(MANUAL_OPENAI_PROVIDERS)` — adding a vendor is one dict entry (`label`,
 `api_key_key`, `base_url_key`, `default_base_url`); every lookup (`provider_label`,
 `required_secret_keys_for_provider`, `resolve_models_for_provider`,

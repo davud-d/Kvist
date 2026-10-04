@@ -20,7 +20,7 @@ from kernel.durable_json import (
 from kernel.llm_clients import (
     FREEFLOW_PROVIDER, OPENAI_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
     ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER, MANUAL_OPENAI_PROVIDERS,
-    CUSTOM_PROVIDER_PREFIX, is_custom_provider, extract_custom_provider_name,
+    ANYMODEL_PROVIDER, CUSTOM_PROVIDER_PREFIX, is_custom_provider, extract_custom_provider_name,
     normalize_provider,
 )
 
@@ -582,7 +582,9 @@ def get_saved_provider_or_none(config_path: Path | None = None) -> str | None:
 
 
 def prompt_provider_choice() -> str:
+    # AnyModel leads: it is the partner provider and the blank-start default.
     fixed_options: list[tuple[str, str, set[str]]] = [
+        (ANYMODEL_PROVIDER, "AnyModel", {"anymodel"}),
         (OPENAI_PROVIDER, "OpenAI", {"openai", "o"}),
         (ANTHROPIC_PROVIDER, "Anthropic (Claude)", {"anthropic", "claude", "ant", "a"}),
         (DEEPSEEK_PROVIDER, "DeepSeek", {"deepseek", "ds"}),
@@ -590,9 +592,11 @@ def prompt_provider_choice() -> str:
         (OMNIROUTE_PROVIDER, "OmniRoute", {"omniroute", "omni", "or"}),
         (OPENROUTER_PROVIDER, "OpenRouter", {"openrouter", "openroute", "openrt", "router"}),
     ]
+    # AnyModel is listed first above; skip its manual-tier entry to avoid a duplicate.
     manual_options = [
         (slug, config["label"], {slug})
         for slug, config in MANUAL_OPENAI_PROVIDERS.items()
+        if slug != ANYMODEL_PROVIDER
     ]
     options = fixed_options + manual_options
 
