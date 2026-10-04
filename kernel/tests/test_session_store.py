@@ -50,6 +50,27 @@ def test_status_reports_session_titles_history_and_recency(agent_factory):
     assert payload["session_items"][0]["session_history"][0]["result"] == "Green"
 
 
+def test_listing_prefers_the_generated_title_over_the_first_goal(agent_factory):
+    agent = agent_factory()
+    agent.new_session("generated-title")
+    agent._session_history = [
+        {
+            "goal": "Please investigate the entire authentication flow and fix its race",
+            "role": "coder",
+            "result": "Done",
+        }
+    ]
+    agent.save_session()
+    agent._store_session_title("generated-title", "Fix authentication race")
+
+    payload = run_session_op(agent.executor.workspace, "list")
+
+    item = next(
+        item for item in payload["session_items"] if item["name"] == "generated-title"
+    )
+    assert item["title"] == "Fix authentication race"
+
+
 def test_create_activates_a_fresh_empty_session(tmp_path):
     created = run_session_op(tmp_path, "create", "fresh")
 

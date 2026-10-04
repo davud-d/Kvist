@@ -125,6 +125,8 @@ def session_display_title(document: dict[str, Any], session_name: str) -> str:
     generation has not landed yet, carries no ``title`` — its first recorded
     message stands in, exactly like the async-generation fallback, so a
     listing never shows a session as untitled while it already holds content.
+    A run interrupted before its first turn was recorded may only have a
+    checkpoint, whose goal is the final fallback before the storage name.
     """
     title = document.get("title")
     if isinstance(title, str) and title.strip():
@@ -146,6 +148,11 @@ def session_display_title(document: dict[str, Any], session_name: str) -> str:
                 and message["content"].strip()
             ):
                 return fallback_session_title(message["content"])
+    checkpoint = document.get("checkpoint")
+    if isinstance(checkpoint, dict):
+        goal = checkpoint.get("goal")
+        if isinstance(goal, str) and goal.strip():
+            return fallback_session_title(goal)
     return session_name
 
 

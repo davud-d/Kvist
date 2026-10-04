@@ -47,6 +47,7 @@ from kernel.session_events import (
     journal_size,
     read_history,
 )
+from kernel.session_titler import session_display_title
 
 SESSION_OPS = (
     "status",
@@ -105,34 +106,12 @@ class SessionStore:
             if not isinstance(chat_history, list):
                 chat_history = []
 
-            title = ""
-            for entry in session_history:
-                if isinstance(entry, dict) and isinstance(entry.get("goal"), str):
-                    title = entry["goal"].strip()
-                    if title:
-                        break
-            if not title:
-                for message in chat_history:
-                    if (
-                        isinstance(message, dict)
-                        and message.get("role") == "user"
-                        and isinstance(message.get("content"), str)
-                    ):
-                        title = message["content"].strip()
-                        if title:
-                            break
             checkpoint = document.get("checkpoint")
-            if (
-                not title
-                and isinstance(checkpoint, dict)
-                and isinstance(checkpoint.get("goal"), str)
-            ):
-                title = checkpoint["goal"].strip()
 
             updated_at = document.get("updated_at")
             item = {
                 "name": name,
-                "title": title or name,
+                "title": session_display_title(document, name),
                 "updated_at": (
                     float(updated_at)
                     if isinstance(updated_at, (int, float))

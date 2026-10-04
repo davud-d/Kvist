@@ -173,6 +173,18 @@ def test_session_display_title_falls_back_to_first_chat_message():
     assert session_display_title(document, "chat-1") == "what does this repo do"
 
 
+def test_session_display_title_falls_back_to_checkpoint_goal():
+    document = {
+        "title": None,
+        "session_history": [],
+        "chat_history": [],
+        "checkpoint": {"goal": "finish the interrupted parser refactor"},
+    }
+    assert session_display_title(document, "chat-1") == (
+        "finish the interrupted parser refactor"
+    )
+
+
 def test_session_display_title_falls_back_to_session_name():
     document = {"title": None, "session_history": [], "chat_history": []}
     assert session_display_title(document, "chat-1") == "chat-1"
