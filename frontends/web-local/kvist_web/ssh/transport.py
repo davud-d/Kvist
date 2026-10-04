@@ -2,16 +2,18 @@
 from __future__ import annotations
 
 import base64
+import codecs
 import hashlib
 import io
 import json
 import logging
 import socket
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Callable
 
 from ..protocol import AuthMethod, ServerSpec
 from ..security import SecretStore
@@ -139,6 +141,62 @@ class SSHTransport:
             if status != 0:
                 raise RuntimeError((error or output or f"Remote command exited {status}").strip())
             return output
+
+    def execute_stream(
+        self, command: str, *, on_output: Callable[[str, str], None], timeout: float = 300.0
+    ) -> str:
+        """Drain stdout and stderr together and deliver complete UTF-8 log lines.
+
+        A slow installer must not wait for process exit to display output, nor
+        deadlock when one of the channel's two buffers fills up. The returned
+        stdout tail is bounded; normal RPCs continue to use execute().
+        """
+        with self._lock:
+            if self._client is None or not self._transport_active():
+                self.connect()
+            channel_in, channel_out, _ = self._client.exec_command(command, timeout=timeout)
+            channel = channel_out.channel
+            channel_in.channel.shutdown_write()
+            decoders = {name: codecs.getincrementaldecoder("utf-8")("replace") for name in ("stdout", "stderr")}
+            pending = {"stdout": "", "stderr": ""}
+            tails = {"stdout": "", "stderr": ""}
+            deadline = time.monotonic() + timeout
+
+            def deliver(name: str, data: bytes, *, final: bool = False) -> None:
+                text = decoders[name].decode(data, final=final)
+                tails[name] = (tails[name] + text)[-262_144:]
+                pending[name] += text
+                while "\n" in pending[name]:
+                    line, pending[name] = pending[name].split("\n", 1)
+                    on_output(name, line + "\n")
+                if final or len(pending[name]) >= 8192:
+                    if pending[name]:
+                        on_output(name, pending[name])
+                        pending[name] = ""
+
+            try:
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Remote setup timed out.")
+                    received = False
+                    if channel.recv_ready():
+                        deliver("stdout", channel.recv(4096))
+                        received = True
+                    if channel.recv_stderr_ready():
+                        deliver("stderr", channel.recv_stderr(4096))
+                        received = True
+                    if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                        break
+                    if not received:
+                        time.sleep(0.02)
+                deliver("stdout", b"", final=True)
+                deliver("stderr", b"", final=True)
+                status = channel.recv_exit_status()
+                if status != 0:
+                    raise RuntimeError((tails["stderr"] or tails["stdout"] or f"Remote setup exited {status}").strip())
+                return tails["stdout"]
+            finally:
+                channel.close()
 
     def upload_file(
         self,

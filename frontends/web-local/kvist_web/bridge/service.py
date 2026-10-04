@@ -79,6 +79,7 @@ class BridgeApplication:
             return {
                 "protocol_version": BRIDGE_PROTOCOL_VERSION,
                 "kvist_version": kvist_version(),
+                "capabilities": ["web_configuration", "model_commands"],
                 "time": time.time(),
             }
         if method == "workspaces.list":
@@ -117,6 +118,11 @@ class BridgeApplication:
             if not isinstance(payload, dict):
                 raise ValueError("Configuration sync payload is required.")
             return apply_sync_payload(payload)
+        if method == "config.web":
+            payload = params.get("payload", {})
+            if not isinstance(payload, dict):
+                raise ValueError("Configuration payload must be an object.")
+            return self.runtime.configuration(_text(params, "operation"), payload)
         workspace = _text(params, "workspace")
         if method == "sessions.list":
             return self.runtime.sessions(workspace)
@@ -140,6 +146,11 @@ class BridgeApplication:
                 return self.runtime.send(workspace, session, _text(params, "text"))
         if method == "sessions.stop":
             return self.runtime.stop(workspace, session)
+        if method == "sessions.command":
+            with self._lifecycle_lock:
+                if not self._accepting_work:
+                    raise RuntimeError("Remote bridge is restarting; retry after it is ready.")
+                return self.runtime.command(workspace, session, _text(params, "name"), params.get("args", []))
         if method == "sessions.respond":
             response = params.get("response")
             if not isinstance(response, dict):

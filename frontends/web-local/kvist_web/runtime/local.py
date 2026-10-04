@@ -104,6 +104,21 @@ class LocalRuntime(Runtime):
     def processes(self) -> list[dict[str, Any]]:
         return self.supervisor.snapshots()
 
+    def configuration(self, operation: str, payload: dict | None = None) -> dict:
+        from ..configuration import configuration_info, model_catalog, save_configuration
+
+        handlers = {"info": lambda _: configuration_info(), "models": model_catalog, "save": save_configuration}
+        if operation not in handlers:
+            raise ValueError("Unknown configuration operation.")
+        return handlers[operation](payload or {})
+
+    def command(self, workspace: str, session: str, name: str, args: list[str]) -> dict:
+        process = self.supervisor.find(self._workspace(workspace), session)
+        if process is None:
+            raise ValueError("This session has no running core. Save defaults for its next launch.")
+        process.command(name, args)
+        return {"ok": True}
+
     def changes(self, workspace: str, session: str | None = None) -> dict[str, Any]:
         path = self._workspace(workspace)
         report = (

@@ -75,6 +75,11 @@ kvist_web = [
     "client/features/navigation.js",
     "client/features/session.js",
     "client/features/palette.js",
+    "client/features/connections.js",
+    "client/features/configuration.js",
+    "client/features/views.js",
+    "client/utils/ui.js",
+    "client/kvist-mark.svg",
 ]
 "kernel.prompts.system" = ["*.txt"]
 "kernel.prompts.styles" = ["*.txt"]

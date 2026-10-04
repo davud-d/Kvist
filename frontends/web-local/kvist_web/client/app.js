@@ -1,304 +1,355 @@
-import { api } from "/assets/utils/api.js"
-import { state, update } from "/assets/state/store.js"
-import { renderNavigation } from "/assets/features/navigation.js"
-import { applyLive, isCurrentSelection, loadDiff, openSession, recoverSelected, renderInspector, selectionSnapshot, setAgentState } from "/assets/features/session.js"
-import { closePalette, openPalette } from "/assets/features/palette.js"
-
-const startup = document.querySelector("#startup"), stage = document.querySelector("#startup-stage"), app = document.querySelector("#app")
-const form = document.querySelector("#composer"), prompt = document.querySelector("#prompt"), modal = document.querySelector("#modal")
-const NAVIGATION_EVENT_TYPES = new Set(["turn_end", "error", "input_request", "session_title", "agent.state_changed", "agent.process_exited", "connection.state_changed", "connection.lost", "connection.restored"])
-let navigationGeneration = 0
-let eventSource = null
-let eventSourceGeneration = 0
-let eventProbeTimer = null
-let eventProbeAttempts = 0
-
-function toast(message, error = false) {
-  const node = document.createElement("div"); node.className = `toast ${error ? "error" : ""}`; node.textContent = message
-  document.querySelector("#toasts").append(node); setTimeout(() => node.remove(), 5000)
+import { api } from '/assets/utils/api.js';
+import { state, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
+import { renderNavigation } from '/assets/features/navigation.js';
+import { applyLive, isCurrentSelection, loadDiff, openSession, recoverSelected, selectionSnapshot, setAgentState } from '/assets/features/session.js';
+import { openView, closeView } from '/assets/features/views.js';
+import { closePalette, openPalette } from '/assets/features/palette.js';
+import { $, icons, toast, closeModal, trapFocus, installGlow } from '/assets/utils/ui.js';
+import { configureConnections, handleConnectionLog, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
+import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
+const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
+let navigationGeneration = 0, eventSource = null, eventSourceGeneration = 0, eventProbeTimer = null, refreshTimer = null, sending = false, creatingSession = null;
+const drafts = state.drafts;
+function paintNavigation() { renderNavigation(selectSession, chooseWorkspace); renderConnection(); if (!state.selected && state.workspace)
+    $('#session-path').textContent = state.workspace.workspace; }
+export async function refresh() {
+    const generation = ++navigationGeneration;
+    const navigation = await api.navigation();
+    if (generation !== navigationGeneration)
+        return false;
+    update(s => { s.navigation = navigation; });
+    paintNavigation();
+    const item = sessionOf();
+    if (item) {
+        setAgentState(item.execution);
+        $('#session-title').textContent = item.title || item.name;
+    }
+    return true;
 }
-
-function esc(value) {
-  return String(value).replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char])
-}
-
-async function refresh() {
-  const generation = ++navigationGeneration
-  const navigation = await api.navigation()
-  if (generation !== navigationGeneration) return false
-  update(current => { current.navigation = navigation })
-  renderNavigation(selectSession)
-  return true
-}
-
+function scheduleRefresh() { if (refreshTimer)
+    return; refreshTimer = setTimeout(() => { refreshTimer = null; refresh().catch(() => { }); }, 120); }
+function collapseMobile() { if (matchMedia('(max-width:1000px)').matches)
+    $('#app').classList.remove('sidebar-open'); }
 async function selectSession(serverId, workspace, session) {
-  try {
-    if (await openSession(serverId, workspace, session)) renderNavigation(selectSession)
-  } catch (error) {
-    toast(error.message, true)
-  }
+    refreshConfiguration(serverId).catch(() => {});
+    state.workspace = { serverId, workspace };
+    collapseMobile();
+    try {
+        const opened = openSession(serverId, workspace, session);
+        paintNavigation();
+        await opened;
+        paintNavigation();
+    }
+    catch (error) {
+        toast(error.message, true);
+    }
 }
-
+function chooseWorkspace(serverId, workspace) {
+    refreshConfiguration(serverId, true).catch(error => toast(error.message, true));
+    const entry = serverOf(serverId);
+    if (entry?.connection.state !== 'connected') {
+        showServers();
+        return;
+    }
+    const sessions = entry.workspaces.find(w => w.path === workspace)?.sessions?.session_items || [];
+    if (sessions.length) {
+        selectSession(serverId, workspace, sessions[0].name);
+        return;
+    }
+    state.workspace = { serverId, workspace };
+    newSession();
+}
+function chooseServer(serverId) { const entry = serverOf(serverId); const workspace = entry?.workspaces[0]?.path; if (workspace)
+    chooseWorkspace(serverId, workspace);
+else
+    addWorkspace(serverId); }
+configureConnections({ refresh, chooseServer, chooseWorkspace });
+function newSession() {
+    // Sending immediately after New session must await the same creation request.
+    // Two concurrent auto-name allocations can otherwise collide in the runtime.
+    if (creatingSession)
+        return creatingSession;
+    const selection = state.workspace || state.selected;
+    if (!selection?.workspace) {
+        showWorkspaces();
+        return Promise.resolve(false);
+    }
+    const target = { serverId: selection.serverId, workspace: selection.workspace };
+    const button = $('#new-session');
+    button.disabled = true;
+    creatingSession = (async () => {
+        try {
+            const value = await api.createSession(target);
+            await refresh();
+            await selectSession(target.serverId, target.workspace, value.active_session);
+            $('#prompt').focus();
+            return true;
+        }
+        catch (error) {
+            toast(error.message, true);
+            return false;
+        }
+        finally {
+            button.disabled = false;
+            creatingSession = null;
+        }
+    })();
+    return creatingSession;
+}
+function renderConnection() {
+    const entry = serverOf((state.selected || state.workspace)?.serverId || 'local');
+    const value = state.transport !== 'connected' ? state.transport : entry?.connection.state || 'connected';
+    $('#connection-dot').className = `connection-dot ${value}`;
+    $('#connection-label').textContent = stateLabel(value);
+    $('#connection-label').title = entry?.connection.error || 'Connection to Kvist';
+}
 async function bootstrap() {
-  try {
-    stage.textContent = "Restoring sessions"
-    const data = await api.bootstrap()
-    const stream = data.event_stream || { cursor: data.event_cursor || 0, epoch: "" }
-    update(current => {
-      current.navigation = data.navigation
-      current.liveCursor = Number(stream.cursor) || 0
-      current.liveEpoch = typeof stream.epoch === "string" ? stream.epoch : ""
-    })
-    renderNavigation(selectSession)
-    stage.textContent = data.navigation.servers.some(item => item.connection.state === "connecting") ? "Connecting servers" : "Ready"
-    startup.hidden = true; app.hidden = false; connectEvents()
-  } catch (error) {
-    stage.textContent = error.message; stage.style.color = "var(--red)"
-  }
+    try {
+        $('#retry-startup').hidden = true;
+        const data = await api.bootstrap(), stream = data.event_stream || { cursor: data.event_cursor || 0, epoch: '' };
+        update(s => { s.navigation = data.navigation; s.liveCursor = Number(stream.cursor) || 0; s.liveEpoch = stream.epoch || ''; });
+        paintNavigation();
+        connectEvents();
+        const first = state.navigation.servers.find(e => e.connection.state === 'connected' && e.workspaces.length);
+        if (first) {
+            const workspace = first.workspaces[0];
+            state.workspace = { serverId: first.server.id, workspace: workspace.path };
+            const session = workspace.sessions?.session_items?.[0];
+            if (session)
+                await selectSession(first.server.id, workspace.path, session.name);
+            else
+                paintNavigation();
+        }
+        // Expose session controls only after restoration finishes. Otherwise a
+        // quick New session / Send can race the initial session selection.
+        $('#startup').hidden = true;
+        $('#app').hidden = false;
+        await refreshConfiguration(undefined, true);
+    }
+    catch (error) {
+        $('#startup-stage').textContent = error.message;
+        $('#retry-startup').hidden = false;
+    }
 }
-
-function clearEventProbe() {
-  clearTimeout(eventProbeTimer)
-  eventProbeTimer = null
-  eventProbeAttempts = 0
-}
-
 function probeBrowserSession(source, generation) {
-  if (eventProbeTimer || eventProbeAttempts >= 3 || source !== eventSource || generation !== eventSourceGeneration) return
-  const delays = [250, 750, 1500]
-  const delay = delays[eventProbeAttempts++]
-  eventProbeTimer = setTimeout(async () => {
-    eventProbeTimer = null
-    if (source !== eventSource || generation !== eventSourceGeneration) return
-    try {
-      await api.bootstrap()
-    } catch (error) {
-      if (error?.status === 401) {
-        source.close()
-        if (eventSource === source) eventSource = null
-        window.location.reload()
-      }
-    }
-  }, delay)
+    if (eventProbeTimer)
+        return;
+    eventProbeTimer = setTimeout(async () => {
+        eventProbeTimer = null;
+        if (source !== eventSource || generation !== eventSourceGeneration)
+            return;
+        try {
+            await api.bootstrap();
+        }
+        catch (error) {
+            if (error?.status === 401) {
+                try {
+                    await api.renewSession();
+                    if (source === eventSource)
+                        connectEvents();
+                }
+                catch (_) { /* EventSource and the next probe retry without losing the transcript. */ }
+            }
+        }
+    }, 1200);
 }
-
+function recovered() { recoverSelected().then(count => { if (count)
+    toast(`Connected · recovered ${count} events`); }).catch(error => toast(`Recovery paused: ${error.message}`, true)); refresh().catch(() => { }); }
 function resetLiveStream(source, generation, envelope) {
-  const event = envelope.event || {}
-  // A remote bridge reset is forwarded through the local stream. It needs
-  // durable recovery, but it must not replace the local controller epoch.
-  if (event.remote !== true) {
-    const cursor = Number(envelope.id)
-    state.liveCursor = Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
-    state.liveEpoch = typeof event.epoch === "string" ? event.epoch : ""
-    clearEventProbe()
-    source.close()
-    if (eventSource === source && generation === eventSourceGeneration) {
-      eventSource = null
-      queueMicrotask(() => {
-        if (generation === eventSourceGeneration) connectEvents()
-      })
+    const event = envelope.event || {};
+    if (event.remote !== true) {
+        state.liveCursor = Number(envelope.id) || 0;
+        state.liveEpoch = event.epoch || '';
+        source.close();
+        if (source === eventSource && generation === eventSourceGeneration)
+            queueMicrotask(connectEvents);
     }
-  }
-  recoverSelected().catch(() => {})
-  refresh().catch(() => {})
+    recovered();
 }
-
 function connectEvents() {
-  const generation = ++eventSourceGeneration
-  if (eventSource) eventSource.close()
-  const source = api.events(state.liveCursor, state.liveEpoch)
-  eventSource = source
-  source.onopen = () => {
-    if (source !== eventSource || generation !== eventSourceGeneration) return
-    clearEventProbe()
-    document.querySelector("#connection-dot").className = "connection-dot"
-    recoverSelected().catch(() => {})
-    refresh().catch(() => {})
-  }
-  source.onmessage = message => {
-    if (source !== eventSource || generation !== eventSourceGeneration) return
-    let envelope
+    clearTimeout(eventProbeTimer);
+    eventProbeTimer = null;
+    const generation = ++eventSourceGeneration;
+    if (eventSource)
+        eventSource.close();
+    const source = api.events(state.liveCursor, state.liveEpoch);
+    eventSource = source;
+    source.onopen = () => { if (source !== eventSource || generation !== eventSourceGeneration)
+        return; clearTimeout(eventProbeTimer); eventProbeTimer = null; state.transport = 'connected'; renderConnection(); recovered(); };
+    source.onmessage = message => {
+        if (source !== eventSource || generation !== eventSourceGeneration)
+            return;
+        let envelope;
+        try {
+            envelope = JSON.parse(message.data);
+        }
+        catch (_) {
+            return;
+        }
+        if (!envelope?.event?.type)
+            return;
+        if (envelope.event.type === "stream.reset") {
+            resetLiveStream(source, generation, envelope);
+            return;
+        }
+        const id = Number(envelope.id);
+        if (Number.isFinite(id))
+            state.liveCursor = Math.max(state.liveCursor, id);
+        if (envelope.event.type === 'connection.log') { handleConnectionLog(envelope); return; }
+        applyLive(envelope);
+        if (NAVIGATION_EVENT_TYPES.has(envelope.event.type))
+            scheduleRefresh();
+    };
+    source.onerror = () => { if (source !== eventSource)
+        return; state.transport = 'reconnecting'; renderConnection(); probeBrowserSession(source, generation); };
+}
+const form = $('#composer'), prompt = $('#prompt');
+form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (sending || busy(state.execution))
+        return;
+    const text = prompt.value.trim();
+    if (!text)
+        return;
+    sending = true;
+    $('#send-button').disabled = true;
     try {
-      envelope = JSON.parse(message.data)
-    } catch (_) {
-      toast("Kvist sent an invalid live event.", true)
-      return
+        if (!(await ensureConfigured())) return;
+        if (creatingSession && !(await creatingSession))
+            return;
+        if (!state.selected) {
+            drafts.set(keyOf(state.workspace), text);
+            if (!(await newSession()) || !state.selected)
+                return;
+            prompt.value = text;
+        }
+        const snapshot = selectionSnapshot();
+        if (!snapshot)
+            return;
+        await api.send(snapshot.selection, text);
+        drafts.delete(keyOf(snapshot.selection));
+        if (isCurrentSelection(snapshot)) {
+            prompt.value = '';
+            prompt.dispatchEvent(new Event('input'));
+            setAgentState('running');
+        }
+        scheduleRefresh();
     }
-    if (!envelope || typeof envelope !== "object" || !envelope.event || typeof envelope.event.type !== "string") return
-    if (envelope.event.type === "stream.reset") {
-      resetLiveStream(source, generation, envelope)
-      return
+    catch (error) {
+        toast(`Message was not sent. ${error.message}`, true);
     }
-    const id = Number(envelope.id)
-    if (Number.isFinite(id)) state.liveCursor = Math.max(state.liveCursor, id)
-    applyLive(envelope)
-    if (NAVIGATION_EVENT_TYPES.has(envelope.event.type)) refresh().catch(() => {})
-  }
-  source.onerror = () => {
-    if (source !== eventSource || generation !== eventSourceGeneration) return
-    document.querySelector("#connection-dot").className = "connection-dot reconnecting"
-    probeBrowserSession(source, generation)
-  }
+    finally {
+        sending = false;
+        $('#send-button').disabled = false;
+    }
+});
+prompt.addEventListener('input', () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 180)}px`; drafts.set(keyOf(state.selected || state.workspace), prompt.value); });
+prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
+    event.preventDefault();
+    form.requestSubmit();
+} });
+$('#stop-agent').onclick = async () => { const snapshot = selectionSnapshot(); if (!snapshot)
+    return; const button = $('#stop-agent'); button.disabled = true; try {
+    await api.stop(snapshot.selection);
+    toast('Stop requested');
+    scheduleRefresh();
 }
-
-form.addEventListener("submit", async event => {
-  event.preventDefault()
-  const snapshot = selectionSnapshot()
-  const text = prompt.value.trim()
-  if (!snapshot || !text) return
-  prompt.value = ""; prompt.style.height = "auto"
-  try {
-    await api.send(snapshot.selection, text)
-    if (isCurrentSelection(snapshot)) setAgentState("running")
-  } catch (error) {
-    toast(error.message, true)
-  }
-})
-
-prompt.addEventListener("input", () => { prompt.style.height = "auto"; prompt.style.height = `${Math.min(prompt.scrollHeight, 180)}px` })
-prompt.addEventListener("keydown", event => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); form.requestSubmit() } })
-
-document.querySelector("#stop-agent").onclick = async () => {
-  const snapshot = selectionSnapshot()
-  if (!snapshot) return
-  try {
-    await api.stop(snapshot.selection)
-    if (isCurrentSelection(snapshot)) setAgentState("stopped")
-  } catch (error) {
-    toast(error.message, true)
-  }
+catch (error) {
+    toast(error.message, true);
 }
-
-document.querySelector("#toggle-inspector").onclick = event => {
-  const panel = document.querySelector("#inspector"); panel.classList.toggle("closed")
-  event.currentTarget.setAttribute("aria-expanded", String(!panel.classList.contains("closed")))
-}
-
-for (const tab of document.querySelectorAll(".inspector-tabs button")) tab.onclick = () => {
-  for (const other of document.querySelectorAll(".inspector-tabs button")) other.setAttribute("aria-selected", "false")
-  tab.setAttribute("aria-selected", "true"); state.inspectorTab = tab.dataset.tab; renderInspector()
-  if (state.inspectorTab === "diff") loadDiff().catch(error => toast(error.message, true))
-}
-
-function paletteChoice(item) {
-  if (item.selection?.session) selectSession(item.selection.serverId, item.selection.workspace, item.selection.session)
-  else if (item.type === "command") command(item.label)
-}
-
+finally {
+    button.disabled = false;
+} };
+function paletteChoice(item) { if (item.selection?.session)
+    selectSession(item.selection.serverId, item.selection.workspace, item.selection.session);
+else if (item.selection)
+    chooseWorkspace(item.selection.serverId, item.selection.workspace);
+else
+    command(item.label); }
 function command(label) {
-  if (label === "New session") newSession()
-  else if (label === "Show inbox") openPalette("inbox", paletteChoice)
-  else if (label === "Connect server") showServerModal()
-  else if (label === "Add workspace") addWorkspace()
-  else if (label === "Stop agent") document.querySelector("#stop-agent").click()
-  else if (label === "Settings") showConfigSync()
-  else if (label.startsWith("Open ")) {
-    const tab = label.slice(5).toLowerCase(); document.querySelector(`[data-tab="${tab}"]`)?.click()
-  } else toast(`${label} is available from its dedicated panel.`)
-}
-
-document.addEventListener("keydown", event => {
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openPalette("commands", paletteChoice) }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") { event.preventDefault(); openPalette("search", paletteChoice) }
-  if (event.key === "Escape") { if (!modal.hidden) closeModal(); else closePalette() }
-  if (event.key === "Tab") {
-    const active = !modal.hidden ? modal : !document.querySelector("#palette").hidden ? document.querySelector("#palette") : null
-    if (active) trapFocus(event, active)
-  }
-})
-
-document.querySelector("#search-button").onclick = () => openPalette("search", paletteChoice)
-document.querySelector("#server-switcher").onclick = () => openPalette("search", paletteChoice)
-document.querySelector("#new-session").onclick = newSession
-
-async function newSession() {
-  let serverId = "local", workspace
-  if (state.selected) { serverId = state.selected.serverId; workspace = state.selected.workspace }
-  else {
-    const first = state.navigation.servers.find(server => server.workspaces.length)
-    serverId = first?.server.id; workspace = first?.workspaces[0]?.path
-  }
-  if (!workspace) return toast("Add a workspace first.", true)
-  try {
-    const value = await api.createSession({ serverId, workspace })
-    await refresh()
-    await selectSession(serverId, workspace, value.active_session)
-  } catch (error) {
-    toast(error.message, true)
-  }
-}
-
-document.querySelector("#add-workspace").onclick = addWorkspace
-async function addWorkspace() {
-  const path = window.prompt("Absolute workspace path on the selected server")
-  if (!path) return
-  const serverId = state.selected?.serverId || "local"
-  try {
-    await api.addWorkspace(serverId, path); await refresh()
-  } catch (error) {
-    toast(error.message, true)
-  }
-}
-
-document.querySelector("#connect-server").onclick = showServerModal
-function showServerModal() {
-  modal.hidden = false
-  modal.innerHTML = `<form class="modal-card" role="dialog" aria-modal="true" aria-labelledby="server-dialog-title"><h2 id="server-dialog-title">Connect server</h2><div class="form-grid"><label>Name<input name="name" required></label><label>SSH alias<input name="alias" placeholder="server-gz8q"></label><label>Hostname<input name="host"></label><label>Port<input name="port" type="number" value="22"></label><label>Username<input name="username"></label><label>Authentication<select name="auth"><option value="ssh_config">SSH config / agent</option><option value="agent">SSH agent</option><option value="key">Private key</option><option value="password">Password</option></select></label><label>Private key<input name="key"></label><label>Password<input name="password" type="password"></label></div><div class="modal-actions"><button type="button" class="quiet-button" data-cancel>Cancel</button><button class="primary-button">Connect</button></div></form>`
-  modal.querySelector("[data-cancel]").onclick = closeModal; modal.querySelector("form").onsubmit = submitServer
-  queueMicrotask(() => modal.querySelector("input")?.focus())
-}
-
-async function submitServer(event) {
-  event.preventDefault()
-  const data = new FormData(event.currentTarget), name = data.get("name").trim(), id = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-|-$/g, "")
-  const payload = { id, name, kind: "remote", ssh_alias: data.get("alias"), host: data.get("host"), port: Number(data.get("port")), username: data.get("username"), auth_method: data.get("auth"), private_key_path: data.get("key"), password: data.get("password") }
-  try {
-    await api.addServer(payload)
-    let result = await api.connectServer(id)
-    if (result.state === "trust_required") {
-      if (!confirm(`Trust ${result.host}?\n\n${result.key_type} ${result.fingerprint}\n\nVerify this fingerprint with the server administrator.`)) throw new Error("Host key was not trusted.")
-      result = await api.connectServer(id, result.fingerprint)
+    if (label === 'New session')
+        newSession();
+    else if (label === 'Show unread' || label === 'Show inbox')
+        openPalette("inbox", paletteChoice);
+    else if (label === 'Switch session')
+        openPalette('search', paletteChoice);
+    else if (label === 'Switch workspace')
+        showWorkspaces();
+    else if (label === 'Switch server')
+        showServers();
+    else if (label === 'Connect server')
+        showServerModal();
+    else if (label === 'Add workspace')
+        addWorkspace();
+    else if (label === 'Stop agent') {
+        if (busy(state.execution))
+            $('#stop-agent').click();
+        else
+            toast('No agent is running in this session.');
     }
-    if (result.state !== "connected") throw new Error(result.error || "Connection failed.")
-    closeModal(); await refresh(); toast(`Connected to ${name}`)
-  } catch (error) {
-    toast(error.message, true)
-  }
+    else if (label === 'Settings')
+        showSettings();
+    else if (label.startsWith('Open '))
+        openView(label.slice(5).toLowerCase());
 }
-
-async function showConfigSync() {
-  try {
-    const preview = await api.configSyncPreview(), remotes = state.navigation.servers.filter(item => item.server.kind === "remote")
-    if (!remotes.length) return toast("Connect a remote server first.", true)
-    modal.hidden = false
-    const options = remotes.map(item => `<option value="${esc(item.server.id)}">${esc(item.server.name)}</option>`).join("")
-    const credentials = preview.credentials.map(item => `<label><input type="checkbox" name="credential" value="${esc(item.id)}" ${item.present ? "" : "disabled"}> ${esc(item.label)}</label>`).join("")
-    modal.innerHTML = `<form class="modal-card" role="dialog" aria-modal="true" aria-labelledby="sync-dialog-title"><h2 id="sync-dialog-title">Sync configuration</h2><p>General Kvist settings are synchronized. Choose credentials explicitly.</p><label>Server<select name="server">${options}</select></label><div class="credential-list">${credentials || "No stored credentials found."}</div><div class="modal-actions"><button type="button" class="quiet-button" data-cancel>Cancel</button><button class="primary-button">Synchronize</button></div></form>`
-    modal.querySelector("[data-cancel]").onclick = closeModal
-    modal.querySelector("form").onsubmit = async submit => {
-      submit.preventDefault()
-      const data = new FormData(submit.currentTarget), credentials = data.getAll("credential")
-      try {
-        await api.syncConfig(data.get("server"), credentials); closeModal(); toast("Configuration synchronized.")
-      } catch (error) {
-        toast(error.message, true)
-      }
+const commands = () => openPalette('commands', paletteChoice);
+$('#search-button').onclick = () => openPalette('search', paletteChoice);
+$('#workspace-switcher').onclick = showWorkspaces;
+$('#server-switcher').onclick = showServers;
+$('#new-session').onclick = newSession;
+$('#add-workspace').onclick = () => addWorkspace();
+$('#settings-button').onclick = showSettings;
+$('#model-selector').onclick = showModel;
+$('#inbox-button').onclick = () => openPalette("inbox", paletteChoice);
+$('#commands-button').onclick = commands;
+$('#more-tools').onclick = commands;
+$('#composer-tools').onclick = commands;
+$('#context-button').onclick = () => openView('context');
+$('#retry-startup').onclick = bootstrap;
+for (const button of document.querySelectorAll('[data-view]'))
+    button.onclick = () => openView(button.dataset.view);
+function toggleSidebar() { const app = $('#app'), small = matchMedia('(max-width:1000px)').matches; app.classList.toggle(small ? 'sidebar-open' : 'sidebar-collapsed'); $('#toggle-sidebar').setAttribute('aria-expanded', String(small ? app.classList.contains('sidebar-open') : !app.classList.contains('sidebar-collapsed'))); }
+$('#toggle-sidebar').onclick = toggleSidebar;
+$('#sidebar-scrim').onclick = toggleSidebar;
+const smallMedia = matchMedia('(max-width:1000px)');
+smallMedia.addEventListener('change', () => { $('#app').classList.remove('sidebar-open'); $('#toggle-sidebar').setAttribute('aria-expanded', String(!smallMedia.matches && !$('#app').classList.contains('sidebar-collapsed'))); });
+$('#toggle-sidebar').setAttribute('aria-expanded', String(!smallMedia.matches));
+document.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        closeModal();
+        closeView();
+        commands();
     }
-    queueMicrotask(() => modal.querySelector("select")?.focus())
-  } catch (error) {
-    toast(error.message, true)
-  }
-}
-
-function closeModal() { modal.hidden = true; modal.replaceChildren() }
-function trapFocus(event, container) {
-  const focusable = [...container.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')].filter(node => node.offsetParent !== null)
-  if (!focusable.length) return
-  const first = focusable[0], last = focusable.at(-1)
-  if (event.shiftKey && (document.activeElement === first || !container.contains(document.activeElement))) { event.preventDefault(); last.focus() }
-  else if (!event.shiftKey && (document.activeElement === last || !container.contains(document.activeElement))) { event.preventDefault(); first.focus() }
-}
-
-document.querySelector("#inbox-button").onclick = () => openPalette("inbox", paletteChoice)
-document.addEventListener("kvist:navigation-refresh", () => refresh().catch(() => {}))
-bootstrap()
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        closeModal();
+        closeView();
+        openPalette('search', paletteChoice);
+    }
+    if (event.key === 'Escape') {
+        if (!$('#modal').hidden)
+            closeModal();
+        else if (!$('#palette').hidden)
+            closePalette();
+        else if (!$('#workspace-view').hidden)
+            closeView();
+        else if ($('#app').classList.contains('sidebar-open')) {
+            collapseMobile();
+            $('#toggle-sidebar').focus();
+        }
+    }
+    if (event.key === 'Tab') {
+        const active = !$('#modal').hidden ? $('#modal') : !$('#palette').hidden ? $('#palette') : !$('#workspace-view').hidden ? $('#workspace-view') : null;
+        if (active)
+            trapFocus(event, active);
+    }
+});
+$('#modal').addEventListener('mousedown', event => { if (event.target === event.currentTarget)
+    closeModal(); });
+document.addEventListener('kvist:navigation-refresh', scheduleRefresh);
+document.addEventListener('kvist:view-open', event => { if (event.detail === 'diff')
+    loadDiff(); });
+icons();
+installGlow();
+bootstrap();

@@ -57,7 +57,7 @@ def test_client_recovers_durable_events_without_second_transcript_or_stale_sse_c
     # second transcript. stream_start is deliberately idempotent so cumulative
     # transient chunks still have an immediate target.
     assert "const durable = envelope.durable === true" in session
-    assert 'if (!durable || event.type === "stream_start") applyEvent(event)' in session
+    assert re.search(r'if \(!durable \|\| event.type === "stream_start"\)\s+applyEvent\(event\)', session)
     assert "activeRecovery.dirty = true" in session
     assert "while (recovery.dirty && currentSelectionMatches(selection, generation))" in session
     assert "streamNodes.has(event.stream_id)" in session
@@ -67,7 +67,9 @@ def test_client_recovers_durable_events_without_second_transcript_or_stale_sse_c
     assert "event_stream" in app and '"stream.reset"' in app
     assert "api.events(state.liveCursor, state.liveEpoch)" in app
     assert "event.remote !== true" in app
-    assert "window.location.reload()" in app
+    assert "window.location.reload()" not in app
+    assert "api.renewSession()" in app
+    assert "DOMParser" in api
     assert 'events: (after, epoch = "")' in api
     assert "durable: true" in docs and "stream.reset" in docs
 

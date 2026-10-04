@@ -16,9 +16,13 @@ kvist-web --status
 kvist-web --stop
 ```
 
-From a source checkout:
+From a source checkout, install the project into the same virtual environment
+as the controller. This is required because agent processes start in the selected
+workspace, where the repository is not automatically on Python’s import path.
+After installing the project requirements:
 
 ```bash
+.venv/bin/python -m pip install --no-deps --no-build-isolation -e .
 .venv/bin/python kernel/__main__.py --web-controller
 ```
 
@@ -154,3 +158,62 @@ Sending a real agent prompt needs the same provider configuration Kvist CLI
 already uses. Remote bootstrap needs Python 3.11+ and the matching Kvist release
 available to remote `pip`; bootstrap reports a clear error without replacing a
 working installation when that prerequisite is unavailable.
+
+## Browser interface
+
+The desktop layout is a session sidebar and one conversation canvas. Execution
+selection (Local or an SSH server) and model information live in the composer.
+Files, Diff, Terminal, Activity, Context and Usage open temporary dialogs; Escape
+returns to the conversation. Ctrl/Cmd+K opens commands; Ctrl/Cmd+P searches sessions
+and workspaces. Read receipts advance only after viewing the conversation tail.
+
+The frontend remains native ES modules without a build step or runtime UI
+framework. `features/connections.js` owns server/workspace dialogs,
+`features/views.js` owns temporary session tools, and `utils/ui.js` provides shared
+accessible controls, safe Markdown and the cursor glow. The transport adapter
+retains the v1 API and now renews expired browser credentials without reloading.
+
+The composer opens `features/configuration.js`: provider/model discovery and
+first-run AnyModel registration use the Python core services on the selected host.
+POST `/api/v1/configuration` saves defaults; `/api/v1/configuration/models` fetches
+the catalog without saving credentials. `/api/v1/command` forwards only model and
+reasoning commands to an idle session. GET `/api/v1/ssh-aliases` lists concrete
+Host aliases using the same parser as the existing SSH transport (no Include
+expansion). Private SSH keys still use paths on the controller machine. Files and Terminal show session-reported data rather than arbitrary file
+browsing or an interactive shell. See [design.md](design.md) for the design and
+contract audit, and [browser tests](tests/browser/README.md) for visual regression
+commands and coverage.
+
+Older remote bridges keep working for sessions. The provider dialog requests the
+`web_configuration` capability before using the new API; when absent it asks to
+update that server, without interrupting its tasks or forcing an upgrade.
+
+## Custom server setup and live logs
+
+You can add a standalone, user-authored `kvist_web/ssh/setup_server.py` beside
+`ssh/config.py`. The Web frontend does not generate that script. On an explicit
+Connect, after SSH authentication and Python 3.11+ discovery, it uploads the file
+to a private temporary server location and runs it with the discovered Python:
+`python -u <uploaded-path> --mode <ssh-config|password|key|agent>
+--connection-json <uploaded-json>`. Its stdout and stderr stream into the
+connection dialog. Return exit code 0 to continue the existing Kvist version,
+installation and bridge checks; a nonzero exit stops connection setup. The script
+has a ten-minute timeout. Uploaded temporary files are cleaned up afterwards.
+
+The connection JSON contains the server id, display name, host, port, username,
+SSH alias and auth method. `ssh-config` mode is for a selected `~/.ssh/config`
+alias and includes `ssh_alias`; `password` mode includes the submitted password;
+`key` mode includes `private_key_path`; `agent` mode covers manual host/user
+connections that rely on the local SSH agent or default keys. The password is
+not placed on the remote process command line.
+
+If the file is absent, standard bootstrap continues. Automatic reconnects do not
+run the custom script. Adding it later takes effect on the next explicit Connect;
+its contents remain yours to write. The script should be self-contained and print
+log lines with newlines (Python runs unbuffered).
+
+Connection logs use the existing authenticated SSE transport and are separate
+from conversation history. Each browser attempt has its own ID. Output is redacted
+and limited to the latest 64 KiB; the final POST response includes a bounded tail
+for recovery when live output was interrupted. The dialog retains the finished
+log until Open workspace or Escape, instead of disappearing on success.

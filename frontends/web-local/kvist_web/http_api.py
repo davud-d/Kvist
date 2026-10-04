@@ -92,6 +92,11 @@ class ControllerHandler(BaseHTTPRequestHandler):
                 self._json(self.server.controller.bootstrap())
             elif route == "/api/navigation":
                 self._json(self.server.controller.navigation())
+            elif route == "/api/ssh-aliases":
+                from .ssh.config import ssh_aliases
+                self._json(ssh_aliases())
+            elif route == "/api/configuration":
+                self._json(self.server.controller.configuration(_one(parse_qs(parsed.query), "server", "local")))
             elif route == "/api/sessions":
                 query = parse_qs(parsed.query)
                 self._json(
@@ -152,10 +157,17 @@ class ControllerHandler(BaseHTTPRequestHandler):
             controller = self.server.controller
             if route == "/api/servers":
                 result = controller.add_server(body)
+            elif route in {"/api/configuration", "/api/configuration/models"}:
+                result = controller.configuration(_text(body, "server_id"), "models" if route.endswith("/models") else "save", body)
+            elif route == "/api/command":
+                result = controller.command(_text(body, "server_id"), _text(body, "workspace"),
+                                            _text(body, "session"), _text(body, "name"), body.get("args", []))
             elif route == "/api/servers/connect":
                 result = controller.connect_server(
                     _text(body, "server_id"),
                     str(body.get("fingerprint") or "") or None,
+                    run_setup=True,
+                    attempt_id=body.get("attempt_id", ""),
                 )
             elif route == "/api/workspaces":
                 result = controller.add_workspace(
@@ -374,11 +386,17 @@ class ControllerHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self._security_headers()
         self.end_headers()
         self.wfile.write(body)
 
     def _error(self, status: HTTPStatus, message: str) -> None:
+        # A rejected POST may still have an unread body (e.g. CSRF or origin
+        # failure). It cannot become the next request line on a keep-alive socket.
+        if self.command == "POST":
+            self.close_connection = True
         self._json({"ok": False, "error": message}, status)
 
     def _security_headers(self) -> None:

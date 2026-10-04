@@ -68,6 +68,7 @@ class SessionProcess:
         self._ready = threading.Event()
         self._stdout_done = threading.Event()
         self._stop_requested = False
+        self._command_in_flight = False
         self._snapshot = ProcessSnapshot(server_id, str(workspace), session)
 
     def start(self) -> None:
@@ -117,9 +118,34 @@ class SessionProcess:
         if not text.strip():
             raise ValueError("Task cannot be empty.")
         self.start()
-        self._stop_requested = False
-        self._write({"type": "goal", "text": text.strip()})
-        self._set_state(ExecutionState.RUNNING)
+        with self._state_lock:
+            if self._command_in_flight:
+                raise ValueError("Wait for the model change to finish before sending a message.")
+            self._stop_requested = False
+            self._write({"type": "goal", "text": text.strip()})
+            self._set_state(ExecutionState.RUNNING)
+
+    def command(self, name: str, args: list[str]) -> None:
+        from kernel.llm_clients import MODEL_ROLES
+        from kernel.reasoning_effort import EFFORT_LEVELS
+
+        if not isinstance(args, list) or not all(isinstance(v, str) and v.strip() for v in args):
+            raise ValueError("Command arguments must be nonempty text.")
+        if not ((name == "models" and len(args) == len(MODEL_ROLES)) or
+                (name == "effort" and len(args) == 1 and args[0] in EFFORT_LEVELS)):
+            raise ValueError("Only model and reasoning changes are supported here.")
+        with self._state_lock:
+            if self._snapshot.state not in {ExecutionState.IDLE, ExecutionState.FINISHED, ExecutionState.STOPPED}:
+                raise ValueError("Wait for the current task to finish before changing models.")
+            self._snapshot.state = ExecutionState.RUNNING
+            self._command_in_flight = True
+            try:
+                self._write({"type": "command", "name": name, "args": args})
+            except Exception:
+                self._command_in_flight = False
+                self._snapshot.state = ExecutionState.FAILED
+                raise
+        self._notify()
 
     def respond(self, response: dict[str, Any]) -> None:
         request_id = response.get("request_id")
@@ -238,6 +264,10 @@ class SessionProcess:
             elif kind == "error":
                 self._snapshot.state = ExecutionState.FAILED
                 self._snapshot.error = str(event.get("message", "Kvist failed."))
+            elif kind == "command_result" and self._command_in_flight:
+                self._command_in_flight = False
+                self._snapshot.pending_input = None
+                self._snapshot.state = ExecutionState.IDLE
             elif kind == "turn_end":
                 self._snapshot.pending_input = None
                 self._snapshot.state = (

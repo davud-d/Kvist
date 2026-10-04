@@ -40,10 +40,17 @@ class RemoteRuntime(Runtime):
         self._remote_python = "python3"
         self._remote_os = "linux"
 
-    def connect(self, *, trust_fingerprint: str | None = None) -> dict[str, Any]:
+    def connect(
+        self, *, trust_fingerprint: str | None = None, run_setup: bool = False,
+        on_log: Callable[[str, str], None] | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
+            if on_log:
+                on_log("status", "Opening SSH connection…")
             self.transport.connect(trust_fingerprint=trust_fingerprint)
-            bootstrap = RemoteBootstrap(self.transport).run()
+            if on_log:
+                on_log("status", "SSH authentication succeeded.")
+            bootstrap = RemoteBootstrap(self.transport, run_setup=run_setup, on_log=on_log).run()
             self._remote_python = bootstrap.python
             self._remote_os = bootstrap.os
             self._ready = True
@@ -101,6 +108,19 @@ class RemoteRuntime(Runtime):
 
     def sync_config(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._rpc("config.sync", payload=payload)
+
+    def configuration(self, operation: str, payload: dict | None = None) -> dict:
+        if "web_configuration" not in self._rpc("ping").get("capabilities", []):
+            if operation == "info":
+                return {"available": False, "setup_required": False,
+                        "reason": "Update Kvist on this server to configure providers from Web. Existing sessions remain available."}
+            raise ValueError("Update Kvist on this server to configure providers from Web.")
+        return self._rpc("config.web", operation=operation, payload=payload or {})
+
+    def command(self, workspace: str, session: str, name: str, args: list[str]) -> dict:
+        if "model_commands" not in self._rpc("ping").get("capabilities", []):
+            raise ValueError("Update Kvist on this server to change session models from Web.")
+        return self._rpc("sessions.command", workspace=workspace, session=session, name=name, args=args)
 
     def _rpc(self, method: str, *, _transport=None, **params) -> dict[str, Any]:
         if not self._ready:

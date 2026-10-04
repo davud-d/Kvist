@@ -12,11 +12,11 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from kernel.version import kvist_version
 
-from ..protocol import BRIDGE_PROTOCOL_VERSION
+from ..protocol import BRIDGE_PROTOCOL_VERSION, AuthMethod
 from .transport import SSHTransport
 
 
@@ -45,11 +45,32 @@ class BootstrapResult:
 class RemoteBootstrap:
     """Keep platform selection in one abstraction, not scattered call sites."""
 
-    def __init__(self, transport: SSHTransport) -> None:
+    def __init__(
+        self, transport: SSHTransport, *, run_setup: bool = False,
+        on_log: Callable[[str, str], None] | None = None,
+        setup_script: Path | None = None,
+    ) -> None:
         self.transport = transport
+        self.run_setup = run_setup
+        self.on_log = on_log
+        self.setup_script = setup_script or Path(__file__).with_name("setup_server.py")
+
+    def _report(self, text: str) -> None:
+        if self.on_log:
+            self.on_log("status", text)
+
+    def _execute_logged(self, command: str, *, timeout: float) -> str:
+        if self.on_log:
+            return self.transport.execute_stream(command, on_output=self.on_log, timeout=timeout)
+        return self.transport.execute(command, timeout=timeout)
 
     def run(self) -> BootstrapResult:
+        self._report("Checking remote Python…")
         facts = self._facts()
+        self._report(f"Python {facts['python_version']} found on {facts['os']}.")
+        if self.run_setup:
+            self._run_setup(facts)
+        self._report("Checking Kvist installation…")
         installed, current = self._installed_version(facts)
         wanted = kvist_version()
         updated = False
@@ -62,6 +83,7 @@ class RemoteBootstrap:
                     "The existing bridge was left untouched."
                 )
             updated = True
+        self._report("Starting remote bridge…")
         bridge = self._ensure_bridge(facts, wanted)
         if int(bridge.get("protocol_version", -1)) != BRIDGE_PROTOCOL_VERSION:
             raise RuntimeError(
@@ -74,6 +96,7 @@ class RemoteBootstrap:
                 "Remote bridge version is incompatible after bootstrap. "
                 "It was not replaced automatically."
             )
+        self._report("Remote bridge is ready.")
         return BootstrapResult(
             os=facts["os"],
             python=facts["python"],
@@ -81,6 +104,85 @@ class RemoteBootstrap:
             updated=updated,
             bridge=bridge,
         )
+
+    def _run_setup(self, facts: dict[str, str]) -> None:
+        if not self.setup_script.is_file():
+            self._report("No custom setup script yet. Continuing standard setup.")
+            return
+        self._report("Uploading setup_server.py…")
+        uploaded = self.transport.upload_file(self.setup_script, remote_directory=".kvist/web-bridge/setup")
+        payload = ""
+        try:
+            payload = self._upload_setup_payload()
+            self._report("Running setup_server.py on the server…")
+            mode = self._setup_mode()
+            command = (
+                f"{quote_remote_arg(facts['python'], facts['os'])} -u "
+                f"{quote_remote_arg(uploaded, facts['os'])} "
+                f"--mode {quote_remote_arg(mode, facts['os'])} "
+                f"--connection-json {quote_remote_arg(payload, facts['os'])}"
+            )
+            self._execute_logged(command, timeout=600)
+            self._report("Custom setup completed.")
+        finally:
+            if payload:
+                self._discard_uploaded_artifact(payload)
+            self._discard_uploaded_artifact(uploaded)
+
+    def _setup_mode(self) -> str:
+        method = self.transport.spec.auth_method
+        if method == AuthMethod.CONFIG:
+            return "ssh-config"
+        if method == AuthMethod.PASSWORD:
+            return "password"
+        if method == AuthMethod.KEY:
+            return "key"
+        if method == AuthMethod.AGENT:
+            return "agent"
+        return str(method).replace("_", "-")
+
+    def _setup_payload(self) -> dict[str, Any]:
+        spec = self.transport.spec
+        mode = self._setup_mode()
+        payload: dict[str, Any] = {
+            "mode": mode,
+            "server_id": spec.id,
+            "name": spec.name,
+            "host": spec.host,
+            "port": spec.port,
+            "username": spec.username,
+            "ssh_alias": spec.ssh_alias,
+            "auth_method": spec.auth_method,
+        }
+        if spec.auth_method == AuthMethod.PASSWORD:
+            payload["password"] = self.transport.secrets.get(f"server:{spec.id}:password") or ""
+        if spec.auth_method == AuthMethod.KEY:
+            payload["private_key_path"] = spec.private_key_path
+        return payload
+
+    def _upload_setup_payload(self) -> str:
+        data = json.dumps(self._setup_payload(), ensure_ascii=False, sort_keys=True).encode("utf-8")
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "wb",
+                prefix="kvist-connection-",
+                suffix=".json",
+                delete=False,
+            ) as handle:
+                handle.write(data)
+                temporary = Path(handle.name)
+            return self.transport.upload_file(
+                temporary,
+                remote_directory=".kvist/web-bridge/setup",
+                permissions=0o600,
+            )
+        finally:
+            if temporary is not None:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
 
     def _facts(self) -> dict[str, str]:
         script = (
@@ -141,7 +243,9 @@ class RemoteBootstrap:
     def _install(self, facts: dict[str, str], version: str) -> None:
         if not _SAFE_VERSION.fullmatch(version):
             raise RuntimeError("Local Kvist version cannot be used for remote bootstrap.")
+        self._report("Preparing Kvist package…")
         with _remote_wheel_artifact(version) as artifact:
+            self._report("Uploading Kvist package…")
             remote_artifact = self.transport.upload_file(
                 artifact,
                 remote_directory=".kvist/web-bridge/artifacts",
@@ -153,7 +257,8 @@ class RemoteBootstrap:
                 f"{package}"
             )
             try:
-                self.transport.execute(command, timeout=300)
+                self._report("Installing Kvist…")
+                self._execute_logged(command, timeout=300)
             except Exception as error:
                 raise RuntimeError(
                     "Remote installation from the reviewed Kvist wheel failed. "

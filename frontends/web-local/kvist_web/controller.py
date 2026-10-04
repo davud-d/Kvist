@@ -162,15 +162,32 @@ class WebController:
             self._persist()
         return {"server": spec.to_dict(), "connection": self._connections[spec.id]}
 
-    def connect_server(self, server_id: str, fingerprint: str | None = None) -> dict[str, Any]:
+    def connect_server(
+        self, server_id: str, fingerprint: str | None = None, *,
+        run_setup: bool = False, attempt_id: str = "",
+    ) -> dict[str, Any]:
+        from .connection_logs import ConnectionLogs
+
+        if not isinstance(attempt_id, str) or len(attempt_id) > 128:
+            raise ValueError("Invalid connection attempt id.")
         runtime = self._remote(server_id)
+        logs = ConnectionLogs(self.events, server_id, attempt_id, password=self.secrets.get(f"server:{server_id}:password") or "")
+
+        def finish(value):
+            return logs.result(value) if run_setup else value
+
         with self._connect_lock(server_id):
             self._set_connection(server_id, ConnectionState.CONNECTING, {})
             started = __import__("time").monotonic()
             try:
-                result = runtime.connect(trust_fingerprint=fingerprint)
+                if run_setup:
+                    result = runtime.connect(trust_fingerprint=fingerprint, run_setup=True, on_log=logs.append)
+                else:
+                    result = runtime.connect(trust_fingerprint=fingerprint)
             except UnknownHostKey as error:
-                return self._replace_connection(
+                if run_setup:
+                    logs.append("status", "Waiting for server fingerprint confirmation.")
+                return finish(self._replace_connection(
                     server_id,
                     {
                         "state": ConnectionState.TRUST_REQUIRED,
@@ -178,12 +195,15 @@ class WebController:
                         "key_type": error.key_type,
                         "fingerprint": error.fingerprint,
                     },
-                )
+                ))
             except Exception as error:
-                return self._replace_connection(
+                detail = logs.clean(error)
+                if run_setup:
+                    logs.append("stderr", detail)
+                return finish(self._replace_connection(
                     server_id,
-                    {"state": ConnectionState.FAILED, "error": str(error)},
-                )
+                    {"state": ConnectionState.FAILED, "error": detail},
+                ))
             latency = round((__import__("time").monotonic() - started) * 1000)
             self._replace_connection(
                 server_id,
@@ -200,12 +220,16 @@ class WebController:
         except Exception:
             pass
         try:
+            if run_setup:
+                logs.append("status", "Restoring workspaces and sessions…")
             paths = runtime.list_workspaces()
         except Exception:
             paths = []
         self._servers[server_id].workspaces = paths
         self._persist()
-        return dict(self._connections[server_id])
+        if run_setup:
+            logs.append("status", "Connected.")
+        return finish(dict(self._connections[server_id]))
 
     def add_workspace(self, server_id: str, path: str) -> dict[str, Any]:
         result = self.runtime(server_id).add_workspace(path)
@@ -249,6 +273,12 @@ class WebController:
 
     def send(self, server_id: str, workspace: str, session: str, text: str):
         return self.runtime(server_id).send(workspace, session, text)
+
+    def configuration(self, server_id: str, operation: str = "info", payload: dict | None = None):
+        return self.runtime(server_id).configuration(operation, payload)
+
+    def command(self, server_id: str, workspace: str, session: str, name: str, args: list[str]):
+        return self.runtime(server_id).command(workspace, session, name, args)
 
     def stop(self, server_id: str, workspace: str, session: str):
         return self.runtime(server_id).stop(workspace, session)

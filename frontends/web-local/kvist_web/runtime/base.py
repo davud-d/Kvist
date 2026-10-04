@@ -6,6 +6,12 @@ from typing import Any
 
 
 class Runtime(ABC):
+    def configuration(self, operation: str, payload: dict | None = None) -> dict:
+        raise NotImplementedError("This runtime does not support Web configuration yet.")
+
+    def command(self, workspace: str, session: str, name: str, args: list[str]) -> dict:
+        raise NotImplementedError("This runtime does not support Web model commands yet.")
+
     @abstractmethod
     def list_workspaces(self) -> list[str]: ...
 

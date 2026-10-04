@@ -119,7 +119,7 @@ class _BootstrapTransport:
             )
         raise AssertionError(command)
 
-    def upload_file(self, source, *, remote_directory):
+    def upload_file(self, source, *, remote_directory, permissions=0o600):
         self.uploads.append((source, remote_directory))
         return ".kvist/web-bridge/artifacts/remote-kvist.whl"
 
