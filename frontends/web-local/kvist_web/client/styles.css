@@ -931,7 +931,7 @@ svg {
 .palette,
 .workspace-view {
   background: var(--bg-1);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r);
   max-height: calc(100dvh - 48px);
   overflow: auto;
@@ -1288,7 +1288,7 @@ svg {
 
 .toast {
   background: var(--bg-2);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r);
   padding: 8px 12px;
   display: flex;
@@ -1351,7 +1351,7 @@ svg {
   position: relative;
   width: 64px;
   height: 64px;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: var(--r);
   overflow: hidden;
 }
