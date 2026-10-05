@@ -77,6 +77,7 @@ val buildWebview = tasks.register<Exec>("buildWebview") {
     dependsOn(installWebviewDependencies)
     workingDir = vscodeExtensionDir.asFile
     commandLine(npmCommand("run", "build"))
+    inputs.file(vscodeExtensionDir.file("../../gui/electron/renderer/image-attachments.js"))
     inputs.dir(vscodeExtensionDir.dir("webview"))
     inputs.dir(vscodeExtensionDir.dir("src"))
     // The panel also bundles the Ink app's shared modules (state, protocol, commands, …).

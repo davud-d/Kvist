@@ -1,3 +1,4 @@
+import { mountImageAttachments } from "./image-attachments.js"
 "use strict"
 
 const { ProtocolState } = window.KvistProtocol
@@ -1429,9 +1430,14 @@ function handleEvent(event) {
   }
 }
 
+const imageAttachments = mountImageAttachments(composer, promptInput, composer.querySelector(".composer-meta") || composer, addError)
+
 async function startGoal(goal) {
   const value = String(goal).trim()
-  if (!value || running) return
+  await imageAttachments.ready()
+  if ((!value && !imageAttachments.count()) || running) return
+  const payload = imageAttachments.pack(value)
+  const shown = `${value} ${imageAttachments.labels()}`.trim()
   protocol = new ProtocolState()
   lastAssistantText = ""
   resetTokenSpeed()
@@ -1439,13 +1445,14 @@ async function startGoal(goal) {
   runStats.startedAt = Date.now()
   requestHost.replaceChildren()
   enterConversation()
-  addUserMessage(value)
+  addUserMessage(shown)
   promptInput.value = ""
   resizePrompt()
   setRunning(true)
   setActivity("Starting Kvist…", { busy: true, progress: 0 })
   try {
-    await window.kvist.start(value, workspace, runOptions)
+    await window.kvist.start(payload, workspace, runOptions)
+    imageAttachments.clear()
   } catch (error) {
     setRunning(false)
     addError(error.message)
@@ -1455,6 +1462,7 @@ async function startGoal(goal) {
 
 function resetView() {
   if (running) return
+  imageAttachments.clear()
   protocol = new ProtocolState()
   lastAssistantText = ""
   resetTokenSpeed()

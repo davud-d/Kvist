@@ -867,7 +867,11 @@ class SafeExecutor:
         if not target.is_file():
             raise ExecutorError(f"Not a file: {path}")
 
-        if start_line is None and end_line is None:
+        from kernel.vision import IMAGE_SUFFIXES
+        if target.suffix.lower() in IMAGE_SUFFIXES:
+            content, truncated = self._safe_read_image(target), False
+            read_data = {"content": content, "truncated": truncated, "image": True}
+        elif start_line is None and end_line is None:
             content, truncated = self._safe_read_text(target)
             read_data: dict[str, Any] = {"content": content, "truncated": truncated}
         else:
@@ -2599,7 +2603,23 @@ class SafeExecutor:
         except UnicodeDecodeError as error:
             raise ExecutorError(f"File is not valid UTF-8 text: {target.name}") from error
 
+    def _safe_read_image(self, target: Path) -> str:
+        from kernel.vision import MAX_IMAGE_BYTES, image_from_bytes
+        target = self._canonical_read_target(target)
+        reader = getattr(self, "image_reader", None)
+        if reader is None:
+            return "Vision unavailable / Vision не подключён. Image cannot be read as text."
+        try:
+            with target.open("rb") as handle:
+                image = image_from_bytes(handle.read(MAX_IMAGE_BYTES + 1), target.name)
+        except (OSError, ValueError) as error:
+            raise ExecutorError(f"Cannot read image: {target.name}: {error}") from error
+        return reader([image])
+
     def _safe_read_text(self, target: Path) -> tuple[str, bool]:
+        from kernel.vision import IMAGE_SUFFIXES
+        if target.suffix.lower() in IMAGE_SUFFIXES:
+            return self._safe_read_image(target), False
         target = self._canonical_read_target(target)
         size = target.stat().st_size
         try:

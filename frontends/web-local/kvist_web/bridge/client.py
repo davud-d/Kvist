@@ -56,7 +56,7 @@ def _call_descriptor(
             )
         )
         reader = connection.makefile("rb")
-        line = reader.readline(2 * 1024 * 1024)
+        line = reader.readline(30 * 1024 * 1024)
     value = json.loads(line)
     if not isinstance(value, dict):
         raise RuntimeError("Remote bridge returned an invalid response.")

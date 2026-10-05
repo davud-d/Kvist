@@ -199,7 +199,7 @@ def _active_processes(processes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 class _BridgeHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         server: BridgeServer = self.server  # type: ignore[assignment]
-        line = self.rfile.readline(2 * 1024 * 1024)
+        line = self.rfile.readline(30 * 1024 * 1024)
         try:
             payload = json.loads(line)
             if not isinstance(payload, dict) or not secrets.compare_digest(

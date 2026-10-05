@@ -1,3 +1,4 @@
+import { readImages, imageGoal, MAX_IMAGES, type ImageAttachment } from "../../../gui/electron/renderer/image-attachments.js"
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
@@ -34,6 +35,9 @@ export function App() {
   const [, setTick] = useState(0)
   const [metrics, setMetrics] = useState<TurnMetrics>(NO_METRICS)
   const [attachments, setAttachments] = useState<string[]>([])
+  const [images, setImages] = useState<ImageAttachment[]>([])
+  const [loadingImages, setLoadingImages] = useState(false)
+  const imagePicker = useRef<HTMLInputElement>(null)
   const [liveOutput, setLiveOutput] = useState<{ step: number; text: string } | null>(null)
   const [environment, setEnvironment] = useState<Record<string, string> | null>(null)
   // null: unknown yet or already set up. An array: the panel has never run a turn because
@@ -127,6 +131,8 @@ export function App() {
         case "environment":
           return setEnvironment(message.env)
         case "history":
+          setImages([])
+          setAttachments([])
           // A page that starts mid-way says so at the top of the feed.
           return dispatch({ type: "restore", events: message.hasMore ? [{ type: "journal_notice" }, ...message.events] : message.events })
         case "config":
@@ -186,9 +192,24 @@ export function App() {
     return () => window.removeEventListener("keydown", onKey)
   }, [state.closed, busy, state.pending])
 
+  async function attachImages(files: FileList | File[]): Promise<void> {
+    if (busy || loadingImages) return
+    setLoadingImages(true)
+    try {
+      const added = await readImages(files)
+      if (images.length + added.length > MAX_IMAGES) throw new Error("Up to 8 images / Не больше 8 изображений")
+      if ([...images, ...added].reduce((size, item) => size + item.data_url.length, 0) > 28 * 1024 * 1024) throw new Error("Images exceed 20 MiB / Изображения больше 20 МиБ")
+      setImages(previous => [...previous, ...added])
+    } catch (error) {
+      dispatch({ type: "note", tone: "error", text: String(error) })
+    } finally {
+      setLoadingImages(false)
+    }
+  }
+
   function submit(): void {
     const value = text.trim()
-    if (!value || busy) return
+    if ((!value && !images.length) || busy || loadingImages) return
     setText("")
     const slash = parseSlash(value)
     if (!slash) {
@@ -196,8 +217,9 @@ export function App() {
       const files = attachments
       const line = files.length ? `[Attached files, contents not included, read them if needed: ${files.join(", ")}] ${value}` : value
       beginTurn()
-      dispatch({ type: "submit", text: files.length ? `${value}\n[${files.join(", ")}]` : value })
-      post({ type: "submit", text: line })
+      dispatch({ type: "submit", text: (files.length ? `${value}\n[${files.join(", ")}]` : value) + images.map((_, index) => ` [Image #${index + 1}]`).join("") })
+      post({ type: "submit", text: imageGoal(line, images) })
+      setImages([])
       setAttachments([])
       return
     }
@@ -378,7 +400,17 @@ export function App() {
             <div class="toolbar" aria-hidden="true" />
           </div>
         ) : (
-        <div class={`composer lit ${lightState}`}>
+        <div class={`composer lit ${lightState}`}
+          onDragOver={event => event.preventDefault()}
+          onDrop={event => { event.preventDefault(); void attachImages(Array.from(event.dataTransfer?.files || [])) }}>
+          <input ref={imagePicker} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/tiff" multiple hidden
+            onChange={event => { void attachImages(Array.from(event.currentTarget.files || [])); event.currentTarget.value = "" }} />
+          {images.length ? <div class="image-attachments" aria-label="Attached images">
+            {images.map((image, index) => <div class="image-attachment" key={index} title={image.name}>
+              <img src={image.data_url} alt={`Image #${index + 1}: ${image.name}`} />
+              <button class="image-remove" title="Remove image / Удалить изображение" onClick={() => setImages(previous => previous.filter(item => item !== image))}>×</button>
+            </div>)}
+          </div> : null}
           {attachments.length > 0 ? (
             <div class="chips">
               {attachments.map((file) => (
@@ -399,9 +431,14 @@ export function App() {
               setText((event.target as HTMLTextAreaElement).value)
               setSelected(0)
             }}
+            onPaste={event => {
+              const files = Array.from(event.clipboardData?.files || []).filter(file => file.type.startsWith("image/"))
+              if (files.length) { event.preventDefault(); void attachImages(files) }
+            }}
             onKeyDown={onKeyDown}
           />
           <div class="toolbar">
+            <button class="icon" title="Attach images / Прикрепить изображения" disabled={busy || loadingImages} onClick={() => imagePicker.current?.click()}>▧</button>
             <button class="icon" title="Attach files by name" disabled={busy} onClick={() => post({ type: "pickFiles" })}><Icon name="add" /></button>
             <button class="pill" title="Change models" disabled={busy} onClick={() => runCommand("models")}>{state.info.model || "Model"}</button>
             <button class="pill" title="Reasoning effort" disabled={busy} onClick={() => runCommand("effort")}>{effort}</button>
@@ -414,7 +451,7 @@ export function App() {
             {state.running ? (
               <button class="send" title="Stop" onClick={() => post({ type: "cancel" })}><Icon name="stop" /></button>
             ) : (
-              <button class="send" title="Send" disabled={busy || !text.trim()} onClick={submit}><Icon name="arrowUp" /></button>
+              <button class="send" title="Send" disabled={busy || loadingImages || (!text.trim() && !images.length)} onClick={submit}><Icon name="arrowUp" /></button>
             )}
           </div>
         </div>

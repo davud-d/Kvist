@@ -217,8 +217,8 @@ export function App(props: AppProps) {
   const submit = useCallback((raw: string, shown: string = raw) => {
     const text = raw.trim()
     if (!text) return
-    setHistory((old) => [...old, text])
-    void addInputHistory(props.command, props.workspace, text)
+    setHistory((old) => [...old, shown])
+    void addInputHistory(props.command, props.workspace, shown)
     if (text.startsWith("/")) {
       // The reply of a command hangs off its echo, as in Claude Code.
       if (props.skin === "claude") dispatch({ type: "echo", text })

@@ -441,6 +441,8 @@ def build_role_system_prompt(
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"
+    from kernel.vision import vision_instruction
+    base = f"{base}\n\n{vision_instruction(self)}"
     project = workspace_instructions_context(self.executor.workspace, role)
     return f"{base}\n\n{project}" if project else base
 

@@ -613,3 +613,10 @@ Each component keeps its tests next to it (`kernel/tests/`, `frontends/*/tests/`
 - [`frontends/zed/README.md`](frontends/zed/README.md) — Zed external agent ([RU](frontends/zed/README.ru.md));
 - [`scripts/installer/README.md`](scripts/installer/README.md) — installers ([RU](scripts/installer/README.ru.md));
 - [`LICENSE`](LICENSE) — MIT license.
+
+### Images and Vision
+
+Paste or attach images in the GUI, web app, VS Code / JetBrains panels, or use
+`Ctrl+V` and `/image PATH` in the terminal. Zed is excluded. The core describes
+images with the provider’s smart model, or `AGENT_VISION_MODEL` when set.
+See [image input, supported formats and frontend API](docs/vision.md).

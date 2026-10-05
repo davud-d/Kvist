@@ -327,7 +327,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             `style-src ${webview.cspSource}`,
             `script-src 'nonce-${nonce}'`,
             `font-src ${webview.cspSource}`,
-            `img-src ${webview.cspSource}`,
+            `img-src ${webview.cspSource} data:`,
         ].join('; ');
         return `<!DOCTYPE html>
 <html lang="en">

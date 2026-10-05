@@ -18,7 +18,7 @@ from .protocol import WEB_PROTOCOL_VERSION
 from .security import BrowserAuth, BrowserSession, redact
 
 
-MAX_BODY = 2 * 1024 * 1024
+MAX_BODY = 30 * 1024 * 1024
 API_PREFIX = f"/api/v{WEB_PROTOCOL_VERSION}"
 
 
@@ -242,6 +242,10 @@ class ControllerHandler(BaseHTTPRequestHandler):
 
     def _asset(self, name: str) -> None:
         root = client_root().resolve()
+        if name == "utils/image-attachments.js" and not (root / name).exists():
+            import kernel
+            root = Path(kernel.__file__).resolve().parent.parent / "frontends/gui/electron/renderer"
+            name = "image-attachments.js"
         try:
             target = (root / unquote(name)).resolve(strict=True)
         except OSError:

@@ -440,6 +440,8 @@ class InteractiveScreen:
         self._saved_accept_handler: Any = None
         self._handler_is_installed = False
         self._pastes = PasteStore()
+        from kernel.image_input import ImageLabels
+        self._images = ImageLabels()
         self._original_app = session.app
         self._original_layout = session.layout
 
@@ -768,6 +770,17 @@ class InteractiveScreen:
 
     def _accept_input(self, buffer: Any) -> bool:
         value = buffer.document.text.strip()
+        if value.startswith("/image "):
+            from kernel.image_input import path_image
+            try:
+                image = path_image(value[7:])
+                if image is None:
+                    raise ValueError("Expected an image file / Укажите файл изображения")
+                buffer.text = self._images.add(image)
+                buffer.cursor_position = len(buffer.text)
+            except (OSError, ValueError) as error:
+                self._append_formatted([("", f"{error}\n")])
+            return True
         if not value:
             # Never wake the main loop for an empty line: it has nothing to run
             # and would only print a validation message. Returning False lets
@@ -792,10 +805,11 @@ class InteractiveScreen:
             loop = app.loop if app is not None else None
         except RuntimeError:
             loop = None
+        payload = self._images.pack(self._pastes.expand(value))
         if loop is not None and loop.is_running():
-            loop.call_soon(self._input_queue.put, self._pastes.expand(value))
+            loop.call_soon(self._input_queue.put, payload)
         else:
-            self._input_queue.put(self._pastes.expand(value))
+            self._input_queue.put(payload)
         self.invalidate()
         # Buffer.validate_and_handle appends to history, then resets the
         # buffer when the accept handler returns False.
@@ -1563,12 +1577,43 @@ class InteractiveScreen:
 
             event.current_buffer.insert_text("\n")
 
+        @bindings.add("c-v", filter=buffer_focused & ~choosing)
+        def paste_image(event: Any) -> None:
+            from kernel.image_input import clipboard_image
+            try:
+                current = event.current_buffer
+                current.insert_text(self._images.add(clipboard_image(), current.text))
+            except (OSError, ValueError) as error:
+                self._append_formatted([("", f"{error}\n")])
+
+        @bindings.add(
+            Keys.Backspace,
+            filter=buffer_focused & Condition(lambda: bool(re.search(
+                r"\[Image #\d+\]$",
+                self.session.default_buffer.text[:self.session.default_buffer.cursor_position],
+            ))),
+        )
+        def delete_image_label(event: Any) -> None:
+            current = event.current_buffer
+            match = re.search(r"\[Image #\d+\]$", current.text[:current.cursor_position])
+            if match:
+                current.delete_before_cursor(count=len(match[0]))
+
         @bindings.add(Keys.BracketedPaste, filter=buffer_focused & ~choosing)
         def paste(event: Any) -> None:
             # prompt_toolkit's own handler inserts the text as it is; a large
             # paste becomes a label that _accept_input expands on submit, and
             # pasting the same text again replaces that label with the text.
             current = event.current_buffer
+            from kernel.image_input import path_image
+            try:
+                image = path_image(event.data)
+                if image is not None:
+                    current.insert_text(self._images.add(image, current.text))
+                    return
+            except (OSError, ValueError) as error:
+                self._append_formatted([("", f"{error}\n")])
+                return
             if is_large_paste(event.data):
                 repeated = self._pastes.find_repeated_label(current.text, event.data)
                 if repeated is None:

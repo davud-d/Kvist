@@ -236,6 +236,8 @@ class LocalAgent:
         self.client = client
         self.executor = executor
         self.config = config or AgentConfig()
+        from kernel.vision import describe_images
+        self.executor.image_reader = lambda images: describe_images(self, images, self._state.user_goal)
         self._cache: dict[str, str] = {}
         self._state = RunState()
         # Set from any thread (e.g. a transport reader) to stop the current
@@ -555,13 +557,19 @@ class LocalAgent:
         """Clear a pending cancellation so it cannot leak into the next turn."""
         self._cancel_event.clear()
 
-    def run(self, user_goal: str, routed_role: str | None = None) -> str:
+    def run(self, user_goal: str, routed_role: str | None = None, *, images: list[dict] | None = None) -> str:
         refusal = self._refuse_closed_session()
         if refusal is not None:
             return refusal
-        self._journal.begin_turn(user_goal)
+        from kernel.vision import unpack_goal, validate_images
+        user_goal, embedded = unpack_goal(user_goal)
+        if images is not None and embedded:
+            raise ValueError("Pass images either in the goal envelope or as an argument")
+        attachments = validate_images(images) if images is not None else embedded
+        labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
+        self._journal.begin_turn(f"{user_goal} {labels}".strip())
         try:
-            return self._run_turn(user_goal, routed_role)
+            return self._run_turn(user_goal, routed_role, attachments)
         finally:
             self._journal.end_turn()
 
@@ -582,7 +590,7 @@ class LocalAgent:
         self._ui.print_final(reply, [], outcome="closed")
         return reply
 
-    def _run_turn(self, user_goal: str, routed_role: str | None) -> str:
+    def _run_turn(self, user_goal: str, routed_role: str | None, images: list[dict] | None = None) -> str:
         # Cleared before routing so a cancel requested during a previous turn
         # never aborts this one's setup.
         self._reset_cancel()
@@ -616,8 +624,11 @@ class LocalAgent:
         # ── Chat mode: lightweight path, no JSON protocol ────────
         if self._state.current_agent_role == "chat":
             try:
+                from kernel.vision import prepare_goal
+                user_goal = prepare_goal(self, user_goal, images or [])
+                self._state.user_goal = user_goal
                 result = self._run_chat(user_goal)
-            except ChatRequestCancelled:
+            except (ChatRequestCancelled, InterruptedError):
                 self._add_to_session_history(
                     user_goal,
                     "chat",
@@ -636,13 +647,21 @@ class LocalAgent:
         # window where neither exists.
         self._run_id = uuid.uuid4().hex
         self._pending_action = None
-        self._begin_run(user_goal, self._run_id)
+        pending_goal = user_goal
+        if images:
+            pending_goal += "\n[Image analysis pending. If resuming without image descriptions, ask the user to reattach the images.]"
+        self._begin_run(pending_goal, self._run_id)
         try:
+            if images:
+                from kernel.vision import prepare_goal
+                user_goal = prepare_goal(self, user_goal, images)
+                self._state.user_goal = user_goal
+                self._begin_run(user_goal, self._run_id)
             if not self._state.selected_action_model:
                 self._select_action_model_for_run()
             self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
             self._ui.print_sandbox_notice(self.executor.sandbox_note)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, InterruptedError):
             return self._report_stop_before_loop(user_goal)
         result = self._run_loop(user_goal, start_step=1)
         self._record_run_turn(user_goal, result)

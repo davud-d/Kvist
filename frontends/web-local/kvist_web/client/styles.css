@@ -1602,3 +1602,12 @@ a:hover {
     bottom: 14px;
   }
 }
+
+.image-attachments { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 0; }
+.image-attachments[hidden] { display: none; }
+.image-attachment { position: relative; width: 88px; height: 88px; border: 1px solid #74747b66; border-radius: 10px; overflow: hidden; }
+.image-attachment img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.image-attachment .image-remove { position: absolute; top: 3px; right: 3px; width: 23px; height: 23px; padding: 0; border: 0; border-radius: 50%; color: white; background: #222d; cursor: pointer; opacity: 0; }
+.image-attachment:hover .image-remove, .image-attachment:focus-within .image-remove { opacity: 1; }
+.image-attach-button { border: 0; background: transparent; color: inherit; font-size: 22px; cursor: pointer; padding: 4px 10px; }
+@media (hover: none) { .image-attachment .image-remove { opacity: 1; } }

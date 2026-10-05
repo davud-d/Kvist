@@ -1724,7 +1724,8 @@ class _AnthropicCompletionsNamespace:
                 if role == "system":
                     system = str(item.get("content", ""))
                 else:
-                    user_messages.append({"role": role, "content": str(item.get("content", ""))})
+                    from kernel.vision import anthropic_content
+                    user_messages.append({"role": role, "content": anthropic_content(item.get("content", ""))})
 
         if not user_messages:
             # If all messages were system, create a minimal user message

@@ -1,3 +1,4 @@
+import { clipboardImage, pathImage, packImages, type ImageAttachment } from "../images.js"
 import { Box, Text, useInput, usePaste } from "ink"
 import { useWindowSize } from "./window-size.js"
 import { useReducer, useRef, type ReactNode } from "react"
@@ -73,6 +74,9 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
   // re-renders, so the source of truth is a ref, not the render's closure.
   const model = useRef<Model>({ editor: emptyEditor, recall: -1, pick: 0, draft: "" })
   const pastes = useRef(emptyPasteStore())
+  const images = useRef(new Map<number, ImageAttachment>())
+  const imageError = useRef("")
+  const nextImage = useRef(1)
   const [, redraw] = useReducer((n: number) => n + 1, 0)
   const update = (patch: Partial<Model>) => {
     Object.assign(model.current, patch)
@@ -91,15 +95,40 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
   // Editing a recalled entry makes it the new text; the next Up starts from the newest entry again.
   const change = (next: Editor) => update({ editor: next, pick: 0, recall: next.text === model.current.editor.text ? model.current.recall : -1 })
 
+  const attach = (getImage: () => ImageAttachment | null): boolean => {
+    try {
+      const item = getImage()
+      if (!item) return false
+      const retained = new Set([...model.current.editor.text.matchAll(/\[Image #(\d+)\]/g)].map(match => Number(match[1])))
+      for (const id of images.current.keys()) if (!retained.has(id)) images.current.delete(id)
+      if (images.current.size >= 8) throw new Error("Up to 8 images / Не больше 8 изображений")
+      const id = nextImage.current++
+      images.current.set(id, item)
+      imageError.current = ""
+      change(insert(model.current.editor, `[Image #${id}]`, true))
+    } catch (error) { imageError.current = String(error); redraw() }
+    return true
+  }
+
   const submit = (text: string) => {
     update({ editor: emptyEditor, recall: -1, pick: 0, draft: "" })
     const expanded = expandPastes(pastes.current, text)
     pastes.current = emptyPasteStore()
-    onSubmit(expanded, text)
+    const payload = packImages(expanded, images.current)
+    images.current.clear()
+    nextImage.current = 1
+    imageError.current = ""
+    onSubmit(payload, text)
   }
 
   const enter = (text: string, selected: number) => {
     if (mask) return submit(text)
+    if (text.startsWith("/image ")) {
+      const path = text.slice(7)
+      change(emptyEditor)
+      attach(() => { const result = pathImage(path); if (!result) throw new Error("Expected an image file / Укажите файл изображения"); return result })
+      return
+    }
     const action = resolveEnter(text, selected)
     if (action.kind === "fill") return change({ text: action.text, cursor: action.text.length })
     submit(action.text)
@@ -108,6 +137,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
   usePaste(
     (text) => {
       const current = model.current.editor
+      if (!mask && attach(() => pathImage(text))) return
       if (mask || !isLargePaste(text)) return change(insert(current, text, !mask))
       // The same text pasted again replaces its label with the text.
       const repeated = findRepeatedLabel(pastes.current, current.text, text)
@@ -120,6 +150,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
 
   useInput(
     (input, key) => {
+      if (!mask && key.ctrl && input === "v") { attach(clipboardImage); return }
       const { editor: current, recall, pick: picked } = model.current
       const shown = mask ? [] : suggest(current.text)
       const selected = Math.min(picked, Math.max(0, shown.length - 1))
@@ -152,7 +183,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
         const text = next < 0 ? draft : (history[history.length - 1 - next] ?? "")
         return update({ recall: next, draft, editor: { text, cursor: text.length } })
       }
-      const label = key.backspace ? labelLengthBefore(current.text, current.cursor) : 0
+      const label = key.backspace ? (/\[Image #\d+\]$/.exec(current.text.slice(0, current.cursor))?.[0].length || labelLengthBefore(current.text, current.cursor)) : 0
       if (label) {
         const start = current.cursor - label
         return change({ text: current.text.slice(0, start) + current.text.slice(current.cursor), cursor: start })
@@ -173,7 +204,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
     </Text>
   )
 
-  const pasteHint = !mask && active && /\[Pasted text #\d+ /.test(editor.text) ? (
+  const pasteHint = imageError.current ? <Text color={color.faint}>{imageError.current}</Text> : !mask && active && /\[Pasted text #\d+ /.test(editor.text) ? (
     <Text color={color.faint}>  paste again to expand</Text>
   ) : null
 

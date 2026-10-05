@@ -25,6 +25,7 @@ class AgentConfig:
     # model for the active provider, so it is the default rather than a
     # fourth model id the user has to set explicitly.
     title_model: str = ""
+    vision_model: str = ""
     max_steps: int = 150
     stagnation_limit: int = 6
     max_consecutive_errors: int = 6

@@ -50,3 +50,24 @@ test("Alt+Enter and Shift+Enter add a line instead of submitting", async () => {
   assert.match(shown, /one/)
   assert.match(shown, /two/)
 })
+
+test("a file image becomes a label and travels as pixels only when submitted", async () => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import("node:fs")
+  const { tmpdir } = await import("node:os")
+  const { join } = await import("node:path")
+  const folder = mkdtempSync(join(tmpdir(), "kvist-images-"))
+  try {
+    const path = join(folder, "screen.png")
+    writeFileSync(path, Buffer.from("89504e470d0a1a0a", "hex"))
+    const labelled = await typeKeys([], `/image ${path}`, "\r")
+    assert.match(labelled.shown, /\[Image #1\]/)
+    assert.deepEqual(labelled.submitted, [])
+    const sent = await typeKeys([], `/image ${path}`, "\r", " explain", "\r")
+    const envelope = JSON.parse(sent.submitted[0]!)
+    assert.equal(envelope.type, "kvist-image-goal")
+    assert.equal(envelope.images.length, 1)
+    assert.match(envelope.images[0].data_url, /^data:image\/png;base64,/)
+    const removed = await typeKeys([], `/image ${path}`, "\r", "\x7f", "hello", "\r")
+    assert.deepEqual(removed.submitted, ["hello"])
+  } finally { rmSync(folder, { recursive: true, force: true }) }
+})

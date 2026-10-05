@@ -1,5 +1,6 @@
+import { mountImageAttachments } from "./utils/image-attachments.js";
 import { api } from '/assets/utils/api.js';
-import { state, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
+import { state, subscribe, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
 import { renderNavigation } from '/assets/features/navigation.js';
 import { applyLive, isCurrentSelection, loadDiff, openSession, recoverSelected, selectionSnapshot, setAgentState } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
@@ -204,12 +205,17 @@ function connectEvents() {
         return; state.transport = 'reconnecting'; renderConnection(); probeBrowserSession(source, generation); };
 }
 const form = $('#composer'), prompt = $('#prompt');
+const imageAttachments = mountImageAttachments(form, prompt, form.querySelector('.composer-controls'), message => toast(message, true));
+let imageSelection = keyOf(state.selected || state.workspace);
+subscribe(() => { const next = keyOf(state.selected || state.workspace); if (next !== imageSelection && !sending) imageAttachments.clear(); imageSelection = next; });
 form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (sending || busy(state.execution))
         return;
+    await imageAttachments.ready();
+    if (sending || busy(state.execution)) return;
     const text = prompt.value.trim();
-    if (!text)
+    if (!text && !imageAttachments.count())
         return;
     sending = true;
     $('#send-button').disabled = true;
@@ -226,7 +232,8 @@ form.addEventListener('submit', async (event) => {
         const snapshot = selectionSnapshot();
         if (!snapshot)
             return;
-        await api.send(snapshot.selection, text);
+        await api.send(snapshot.selection, imageAttachments.pack(text));
+        imageAttachments.clear();
         drafts.delete(keyOf(snapshot.selection));
         if (isCurrentSelection(snapshot)) {
             prompt.value = '';
