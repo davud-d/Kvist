@@ -5,7 +5,7 @@ import { renderNavigation } from '/assets/features/navigation.js';
 import { applyLive, isCurrentSelection, loadDiff, openSession, recoverSelected, selectionSnapshot, setAgentState } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
-import { $, icons, toast, closeModal, trapFocus, installGlow } from '/assets/utils/ui.js';
+import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
 import { configureConnections, handleConnectionLog, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
 import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
@@ -358,5 +358,4 @@ document.addEventListener('kvist:navigation-refresh', scheduleRefresh);
 document.addEventListener('kvist:view-open', event => { if (event.detail === 'diff')
     loadDiff(); });
 icons();
-installGlow();
 bootstrap();

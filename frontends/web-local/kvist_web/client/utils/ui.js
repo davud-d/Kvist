@@ -61,36 +61,6 @@ export function trapFocus(event, container) {
         first.focus();
     }
 }
-export function installGlow() {
-    const glow = $('#cursor-glow'), media = matchMedia('(prefers-reduced-motion: reduce)'), fine = matchMedia('(pointer: fine)');
-    let frame = 0, x = 0, y = 0, tx = 0, ty = 0, initialized = false;
-    const stop = () => { cancelAnimationFrame(frame); frame = 0; glow.classList.remove('active'); };
-    const paint = () => {
-        x += (tx - x) * .18;
-        y += (ty - y) * .18;
-        glow.style.transform = `translate3d(${x}px,${y}px,0)`;
-        frame = Math.abs(tx - x) + Math.abs(ty - y) > .5 ? requestAnimationFrame(paint) : 0;
-    };
-    window.addEventListener('pointermove', event => {
-        if (media.matches || !fine.matches)
-            return;
-        tx = event.clientX;
-        ty = event.clientY;
-        if (!initialized) {
-            x = tx;
-            y = ty;
-            initialized = true;
-        }
-        glow.classList.add('active');
-        if (!frame)
-            frame = requestAnimationFrame(paint);
-    }, { passive: true });
-    window.addEventListener('blur', stop);
-    document.addEventListener('mouseleave', stop);
-    media.addEventListener('change', stop);
-    document.addEventListener('visibilitychange', () => { if (document.hidden)
-        stop(); });
-}
 // Tiny deliberately bounded Markdown renderer. Untrusted HTML never enters the DOM.
 export function markdown(node, text) {
     node.replaceChildren();

@@ -107,7 +107,10 @@ await page.route('**/api/v1/**', async (route) => {
         return json({ general: true, credentials: [{ id: 'test_api_key', label: 'Test API key', present: true }] });
     throw new Error(`Unhandled test route ${path}`);
 });
-const check = async (name, fn) => { await fn(); checks.push(name); console.log('PASS', name); };
+const check = async (name, fn) => {
+    try { await fn(); checks.push(name); console.log('PASS', name); }
+    finally { await page.setViewportSize({ width: 1440, height: 900 }); }
+};
 const shot = async (name) => { await page.waitForTimeout(180); await page.screenshot({ path: `${output}/screenshots/${name}.png` }); };
 const select = async (title) => page.getByRole('button', { name: new RegExp('^' + title + ' ·') }).click();
 const emit = async (event, session = 'review', durable = false) => { await page.evaluate(envelope => window.__sources.at(-1).emit(envelope), { id: ++cursor, server_id: 'local', workspace: f.workspace, session, event, durable }); };
@@ -171,7 +174,9 @@ try {
                 await shot(`viewport-${width}x${height}-${Math.round(zoom * 100)}`);
             }
         await page.setViewportSize({ width: 390, height: 844 });
-        assert(await page.locator('#sidebar').isHidden());
+        // The drawer slides off-canvas with a transform, so "hidden" means its right edge reached x <= 0.
+        const sidebarRight = () => page.evaluate(() => document.querySelector('#sidebar').getBoundingClientRect().right);
+        await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().right <= 0);
         await page.locator('#toggle-sidebar').click();
         assert(await page.locator('#sidebar').isVisible());
         await shot('mobile-sidebar');
@@ -181,27 +186,10 @@ try {
         await page.keyboard.press('Escape');
         await shot('mobile');
         await page.setViewportSize({ width: 1440, height: 900 });
+        assert((await sidebarRight()) > 0);
         await page.locator('#toggle-sidebar').click();
         await shot('collapsed-sidebar');
         await page.locator('#toggle-sidebar').click();
-    });
-    await check('Cursor glow CPU/task profile and reduced motion', async () => {
-        const cdp = await context.newCDPSession(page);
-        await cdp.send('Performance.enable');
-        const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m => [m.name, m.value]));
-        const start = await metrics(), t = Date.now();
-        for (let i = 0; i < 100; i++)
-            await page.mouse.move(250 + i * 9, 350 + Math.sin(i / 8) * 140);
-        await page.waitForTimeout(300);
-        const end = await metrics();
-        const result = { wallMs: Date.now() - t, taskMs: (end.TaskDuration - start.TaskDuration) * 1000, layoutMs: (end.LayoutDuration - start.LayoutDuration) * 1000, recalcMs: (end.RecalcStyleDuration - start.RecalcStyleDuration) * 1000, heapBytes: end.JSHeapUsedSize };
-        await writeFile(output + '/performance.json', JSON.stringify(result, null, 2));
-        console.log('PERFORMANCE', result);
-        assert(await page.locator('#cursor-glow').evaluate(n => n.classList.contains('active')));
-        await shot('cursor-glow');
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        assert(await page.locator('#cursor-glow').isHidden());
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
     });
     await check('Late histories cannot overwrite the selected session', async () => {
         historyDelay = 180;

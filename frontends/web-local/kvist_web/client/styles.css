@@ -113,31 +113,8 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
-/* Cursor glow - restrained, only on pointer fine */
-#cursor-glow {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 420px;
-  height: 420px;
-  margin: -210px 0 0 -210px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 1;
-  background: radial-gradient(circle, rgba(95, 164, 252, 0.12), rgba(79, 209, 232, 0.06) 50%, transparent 70%);
-  filter: blur(28px);
-  mix-blend-mode: screen;
-  opacity: 0;
-  transition: opacity 400ms;
-  will-change: transform;
-}
-
-#cursor-glow.active {
-  opacity: 1;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  #cursor-glow, * {
+  * {
     animation: none !important;
     transition-duration: 0.01ms !important;
   }

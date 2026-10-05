@@ -53,7 +53,7 @@
 - client/features/blocks.js, чистая функция reduce(blocks, event) без dom и без глобального состояния.
 - через неё идут и живой sse, и восстановление из /api/v1/history.
 - в reducer живут: склейка stream_chunk и reasoning_chunk (append=true добавляет дельту, append=false или отсутствие поля заменяет текст, stream_commit ставит финальный), связь по call_id, группы по batch_id, секунды reasoning, дедупликация по seq.
-- тесты: node --test, tests/client/blocks.test.mjs, без браузера. кейсы: дельты стрима, снимок при append=false, дельты reasoning, commit. сценарий стрима в redesign.mjs остаётся.
+- тесты: node --test, frontends/web-local/tests/client/blocks.test.mjs, без браузера. кейсы: дельты стрима, снимок при append=false, дельты reasoning, commit. сценарий стрима в redesign.mjs остаётся.
 - client/features/feed.js рисует блоки по ключу блока и обновляет только изменённые.
 
 ## нижняя строка
@@ -73,11 +73,11 @@
 - строки +++ и --- не красить как add и del.
 - если report не похож на diff (повреждённый журнал, текстовое сообщение), показать как notice. пустой: "no changes yet".
 - пейджинг 1000 строк оставить, на файл.
-- тесты node --test на parseDiff.
+- тесты node --test на parseDiff: frontends/web-local/tests/client/diff.test.mjs.
 
 ## белка
 - шаг выполняется только по прямой команде, после просмотра кадров. до этого не начинать.
-- источник: 6 png в frontends/tui/ink/ui/skins/claude-code/mascot/frames/ (путь проверить), 2 fps в tui. для веба нужен один png-спрайт на 6 кадров, показ 64px.
+- источник: 6 png в frontends/tui/ink/mascot/frames/ (frame_1.png ... frame_6.png), 2 fps в tui. для веба нужен один png-спрайт на 6 кадров, показ 64px.
 
 ## порядок работ
 после каждого шага: тесты, дифф, остановка до ответа.
