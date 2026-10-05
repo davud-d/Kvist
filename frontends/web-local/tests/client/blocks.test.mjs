@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initialState, reduce, TOOL_NAMES } from '../../kvist_web/client/features/blocks.js';
+import { initialState, reduce, reducesLive, TOOL_NAMES } from '../../kvist_web/client/features/blocks.js';
 
 // Fixtures follow the to_dict() output of kernel/frontend_protocol.py (class line in each comment).
 const env = (event, seq, ts) => ({ ...(seq != null && { seq }), ...(ts != null && { ts }), event });
@@ -225,6 +225,43 @@ test('seq: seen and older seq are ignored, seq-less events are never deduplicate
     assert.equal(s.blocks.length, 3);
     s = fold([env(message('two'), 6)], s);
     assert.equal(s.blocks.length, 4);
+});
+
+test('seq 0 is applied, a repeat of it is a duplicate, and the next seq follows', () => {
+    // The journal numbers its first record 0 (a journal_notice before the first turn).
+    let s = fold([env({ type: 'journal_notice', omitted_turns: 2 }, 0)]);
+    assert.equal(s.blocks.length, 1);
+    assert.equal(s.lastSeq, 0);
+    s = fold([env({ type: 'journal_notice', omitted_turns: 2 }, 0)], s);
+    assert.equal(s.blocks.length, 1);
+    s = fold([env(message('first'), 1)], s);
+    assert.deepEqual([s.blocks.length, s.lastSeq], [2, 1]);
+});
+
+test('a chunk after the commit of its stream is ignored, for the answer and for reasoning', () => {
+    let s = fold([env(streamStart('a')), env(streamChunk('a', 'Hel', true)), env(streamCommit('a', 'Hello'))]);
+    const committed = s;
+    s = fold([env(streamChunk('a', 'late', true)), env(streamChunk('a', 'Snapshot', false))], s);
+    assert.deepEqual(s, committed);
+    assert.deepEqual([s.blocks[0].text, s.blocks[0].streaming], ['Hello', false]);
+
+    s = fold([env(reasoningStart('r')), env(reasoningChunk('r', 'think', true)), env(reasoningCommit('r', 2))]);
+    const sealed = s;
+    s = fold([env(reasoningChunk('r', ' more', true)), env(reasoningChunk('r', 'rewritten', false))], s);
+    assert.deepEqual(s, sealed);
+});
+
+test('reducesLive keeps transient live events, stream_start and hello, and drops other durable ones', () => {
+    const live = (event, durable) => ({ event, durable });
+    assert.equal(reducesLive(live(streamChunk('a', 'x', true), false)), true);
+    assert.equal(reducesLive(live({ type: 'action_output', step: 1, output: 'x', call_id: 'c' }, false)), true);
+    assert.equal(reducesLive(live(streamStart('a'), true)), true);
+    assert.equal(reducesLive(live({ type: 'hello' }, true)), true);
+    for (const event of [message('m'), streamCommit('a', 'x'), step(1, 'c', 'read_file'), result(1, 'c', 'read_file'), final('end'), reasoningCommit('a', 1)]) {
+        assert.equal(reducesLive(live(event, true)), false, event.type);
+    }
+    assert.equal(reducesLive(live(message('m'))), true, 'an envelope without durable is not a durable one');
+    assert.equal(reducesLive(undefined), true);
 });
 
 for (const [name, events] of Object.entries(SCENARIOS)) {

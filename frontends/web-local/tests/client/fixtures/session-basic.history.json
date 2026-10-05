@@ -1,0 +1,226 @@
+{
+ "session": "chat-20261006-021101",
+ "events": [
+  {
+   "seq": 1,
+   "turn": 1,
+   "ts": 1791231062.054,
+   "event": {
+    "type": "user",
+    "text": "Say hello and tell me what Kvist is."
+   }
+  },
+  {
+   "seq": 2,
+   "turn": 1,
+   "ts": 1791231062.055,
+   "event": {
+    "type": "route",
+    "role": "chat",
+    "source": "llm"
+   }
+  },
+  {
+   "seq": 3,
+   "turn": 1,
+   "ts": 1791231062.352,
+   "event": {
+    "type": "stream_start",
+    "stream_id": "e99874068ac54901a32ba9da505bee9f"
+   }
+  },
+  {
+   "seq": 4,
+   "turn": 1,
+   "ts": 1791231062.353,
+   "event": {
+    "type": "stream_commit",
+    "stream_id": "e99874068ac54901a32ba9da505bee9f",
+    "text": "Sure. Kvist keeps the conversation in one place, and a streamed answer arrives in small pieces."
+   }
+  },
+  {
+   "seq": 5,
+   "turn": 1,
+   "ts": 1791231062.37,
+   "event": {
+    "type": "usage",
+    "input_tokens": 7306,
+    "output_tokens": 20,
+    "model": "fixture-fast",
+    "kind": "turn",
+    "step": 0,
+    "context_tokens": 7306,
+    "context_limit": 217600
+   }
+  },
+  {
+   "seq": 6,
+   "turn": 1,
+   "ts": 1791231062.37,
+   "event": {
+    "type": "turn_end"
+   }
+  },
+  {
+   "seq": 7,
+   "turn": 2,
+   "ts": 1791231062.501,
+   "event": {
+    "type": "user",
+    "text": "Read notes.txt and echo a line"
+   }
+  },
+  {
+   "seq": 8,
+   "turn": 2,
+   "ts": 1791231062.502,
+   "event": {
+    "type": "route",
+    "role": "coder",
+    "source": "llm"
+   }
+  },
+  {
+   "seq": 9,
+   "turn": 2,
+   "ts": 1791231062.537,
+   "event": {
+    "type": "step",
+    "step": 1,
+    "plan_step": "inspect",
+    "thought": "",
+    "user_message": "Looking at the notes.",
+    "action_type": "read_file",
+    "action_args": {
+     "path": "notes.txt"
+    },
+    "reasoning_seconds": 0,
+    "action_description": "reads notes.txt",
+    "call_id": "call_203415dd2dca",
+    "batch_id": "326b978eb372"
+   }
+  },
+  {
+   "seq": 10,
+   "turn": 2,
+   "ts": 1791231062.539,
+   "event": {
+    "type": "action_result",
+    "step": 1,
+    "action_type": "read_file",
+    "ok": true,
+    "summary": "Read 2 lines",
+    "output": "",
+    "exit_code": null,
+    "path": null,
+    "first_line": null,
+    "call_id": "call_203415dd2dca",
+    "batch_id": "326b978eb372"
+   }
+  },
+  {
+   "seq": 11,
+   "turn": 2,
+   "ts": 1791231062.54,
+   "event": {
+    "type": "step",
+    "step": 2,
+    "plan_step": "inspect",
+    "thought": "",
+    "user_message": "",
+    "action_type": "run_shell",
+    "action_args": {
+     "command": [
+      "echo",
+      "fixture-output"
+     ]
+    },
+    "reasoning_seconds": 0,
+    "action_description": "runs echo fixture-output",
+    "call_id": "call_b01c55575fc5",
+    "batch_id": "326b978eb372"
+   }
+  },
+  {
+   "seq": 12,
+   "turn": 2,
+   "ts": 1791231062.597,
+   "event": {
+    "type": "action_result",
+    "step": 2,
+    "action_type": "run_shell",
+    "ok": true,
+    "summary": "Command exited with code 0",
+    "output": "fixture-output",
+    "exit_code": 0,
+    "path": null,
+    "first_line": null,
+    "call_id": "call_b01c55575fc5",
+    "batch_id": "326b978eb372"
+   }
+  },
+  {
+   "seq": 13,
+   "turn": 2,
+   "ts": 1791231062.645,
+   "event": {
+    "type": "step",
+    "step": 3,
+    "plan_step": "done",
+    "thought": "",
+    "user_message": "Done.",
+    "action_type": "final_answer",
+    "action_args": {
+     "message": "The notes file says: fixture notes.",
+     "outcome": "no_change_needed"
+    },
+    "reasoning_seconds": 0,
+    "action_description": "answers",
+    "call_id": "call_aa6d6eb055c9",
+    "batch_id": "0edcb20b38ca"
+   }
+  },
+  {
+   "seq": 14,
+   "turn": 2,
+   "ts": 1791231062.662,
+   "event": {
+    "type": "final",
+    "message": "The notes file says: fixture notes.",
+    "user_messages": [
+     "Looking at the notes.",
+     "Done."
+    ],
+    "outcome": "done"
+   }
+  },
+  {
+   "seq": 15,
+   "turn": 2,
+   "ts": 1791231062.679,
+   "event": {
+    "type": "usage",
+    "input_tokens": 28957,
+    "output_tokens": 141,
+    "model": "fixture-fast",
+    "kind": "turn",
+    "step": 0,
+    "context_tokens": 14657,
+    "context_limit": 217600
+   }
+  },
+  {
+   "seq": 16,
+   "turn": 2,
+   "ts": 1791231062.68,
+   "event": {
+    "type": "turn_end"
+   }
+  }
+ ],
+ "has_more": false,
+ "total_events": 16,
+ "skipped_lines": 0,
+ "journal_bytes": 3004
+}

@@ -30,6 +30,11 @@ export const TOOL_NAMES = Object.freeze(Object.fromEntries(Object.entries(NAMES)
 
 // An answer of its own follows these, so a call row would only repeat it (session.js:59).
 const TERMINAL_ACTIONS = new Set(['final_answer', 'report_to_user', 'refuse']);
+// Live envelopes the client reduces itself: everything transient, plus stream_start (it reserves the row
+// early) and hello. Every other durable event reaches the feed through the journal, whose seq deduplicates
+// it; reducing its live copy as well would show it twice (session.js applyLive).
+const LIVE_DURABLE = new Set(['stream_start', 'hello']);
+export const reducesLive = envelope => envelope?.durable !== true || LIVE_DURABLE.has(envelope.event?.type);
 // Known events that never reach the feed or meta.
 const DROPPED = new Set(['live_start', 'live_stop', 'debug', 'manifest', 'connection.log']);
 
@@ -41,7 +46,7 @@ export function initialState() {
             session: null, session_title: null, route: null, status: null, closed: null, turn_end: null,
             agent: null, unknown: {},
         },
-        lastSeq: 0, nextId: 1,
+        lastSeq: -1, nextId: 1,
         index: { streams: {}, calls: {}, batches: {} },
         stale: {},
     };
@@ -93,6 +98,8 @@ function streamStart(s, e, env) {
 const chunk = prefix => (s, e) => {
     const key = `${prefix}:${e.stream_id}`, id = look(s, 'streams', key);
     if (!id) return s;
+    // A committed block is final: a chunk that arrives after its commit (live events overtaken by the journal) is late.
+    if (!s.blocks[at(s, id)].streaming) return s;
     const delta = e.append === true;
     if (delta && s.stale[key]) return s;
     return setStale(patch(s, id, b => ({ ...b, text: delta ? b.text + (e.text || '') : e.text || '' })), key, false);
