@@ -99,18 +99,18 @@ svg {
 :root {
   color-scheme: dark;
 
-  --bg-0: hsl(215 18% 9%);
-  --bg-1: hsl(215 16% 12%);
-  --bg-2: hsl(215 15% 16%);
-  --line: hsl(215 14% 20%);
-  --line-strong: hsl(215 14% 28%);
-  --text: hsl(215 15% 90%);
-  --text-2: hsl(215 10% 68%);
-  --text-3: hsl(215 8% 58%);
-  --accent: hsl(195 80% 60%);
-  --ok: hsl(145 50% 55%);
-  --warn: hsl(38 85% 60%);
-  --err: hsl(355 80% 66%);
+  --bg-0: oklch(19.9% 0.011 260.7);
+  --bg-1: oklch(23.3% 0.011 254.1);
+  --bg-2: oklch(27.5% 0.015 256.8);
+  --line: oklch(31.5% 0.017 255.6);
+  --line-strong: oklch(56% 0.022 253.5);
+  --text: oklch(92.1% 0.006 255.5);
+  --text-2: oklch(74.2% 0.016 257.2);
+  --text-3: oklch(65.7% 0.017 257.2);
+  --accent: oklch(76% 0.12 224);
+  --ok: oklch(74% 0.14 150);
+  --warn: oklch(74% 0.14 95);
+  --err: oklch(74% 0.14 22);
 
   --sidebar: 248px;
   --header: 40px;
@@ -687,7 +687,7 @@ svg {
 /* Composer */
 .composer {
   background: var(--bg-1);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-input);
   overflow: hidden;
 }
@@ -895,7 +895,7 @@ svg {
   margin-right: 8px;
   max-width: 100%;
   background: var(--bg-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r);
   padding: 4px 8px;
 }
@@ -991,7 +991,7 @@ svg {
 .form-grid select {
   width: 100%;
   background: var(--bg-2);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-input);
   padding: 6px 8px;
 }
