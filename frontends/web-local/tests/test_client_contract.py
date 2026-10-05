@@ -53,6 +53,7 @@ def test_ui_uses_one_versioned_api_adapter_without_backend_internals():
 def test_client_recovers_durable_events_without_second_transcript_or_stale_sse_cursor():
     app = (CLIENT / "app.js").read_text(encoding="utf-8")
     session = (CLIENT / "features" / "session.js").read_text(encoding="utf-8")
+    blocks = (CLIENT / "features" / "blocks.js").read_text(encoding="utf-8")
     api = (CLIENT / "utils" / "api.js").read_text(encoding="utf-8")
     docs = (CLIENT.parents[1] / "API.md").read_text(encoding="utf-8")
 
@@ -60,10 +61,11 @@ def test_client_recovers_durable_events_without_second_transcript_or_stale_sse_c
     # second transcript. stream_start is deliberately idempotent so cumulative
     # transient chunks still have an immediate target.
     assert "const durable = envelope.durable === true" in session
-    assert re.search(r'if \(!durable \|\| event.type === "stream_start"\)\s+applyEvent\(event\)', session)
+    assert re.search(r"if \(reducesLive\(envelope\)\)\s+applyEvent\(event, \{ ts: envelope.ts \}\)", session)
+    assert "const LIVE_DURABLE = new Set(['stream_start', 'hello'])" in blocks
     assert "activeRecovery.dirty = true" in session
     assert "while (recovery.dirty && currentSelectionMatches(selection, generation))" in session
-    assert "streamNodes.has(event.stream_id)" in session
+    assert "look(s, 'streams', key)" in blocks and "env.seq == null" in blocks
     assert "agent.process_exited" in session and "agent.state_changed" in session
 
     # Live IDs have an epoch separate from the durable per-session sequence.

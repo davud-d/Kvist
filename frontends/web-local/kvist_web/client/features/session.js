@@ -1,14 +1,17 @@
 import { api } from "/assets/utils/api.js";
 import { state, sessionOf, update, keyOf, busy, stateLabel } from "/assets/state/store.js";
 import { $, el, markdown, toast } from "/assets/utils/ui.js";
-import { actionLabel, renderInspector, scheduleInspector } from "/assets/features/views.js";
+import { renderInspector, scheduleInspector } from "/assets/features/views.js";
 import { configuredModel } from '/assets/features/configuration.js';
+import { initialState, reduce, reducesLive } from '/assets/features/blocks.js';
+import { createFeed } from '/assets/features/feed.js';
 export { renderInspector } from "/assets/features/views.js";
 const conversation = document.querySelector("#conversation"), empty = document.querySelector("#empty-state");
 const composer = document.querySelector("#composer"), pending = document.querySelector("#pending-input");
 const title = document.querySelector("#session-title"), path = document.querySelector("#session-path");
 const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
-const streamNodes = new Map();
+// The open session's feed: the reducer state is the single source of what the conversation shows.
+let feedState = initialState(), feed = createFeed(conversation);
 let selectionGeneration = 0;
 let activeRecovery = null;
 function sameSelection(left, right) {
@@ -24,100 +27,21 @@ function currentSelectionMatches(selection, generation) {
     return generation === selectionGeneration && sameSelection(selection, state.selected);
 }
 let followTail = true, paintFrame = 0;
-const pendingStreams = new Map(), tools = new Map();
+function paintFeed() {
+    feed.render(feedState);
+    if (conversation.children.length)
+        empty.hidden = true;
+}
 function queuePaint() {
     if (paintFrame)
         return;
     paintFrame = requestAnimationFrame(() => {
         paintFrame = 0;
-        for (const [body, text] of pendingStreams)
-            body.textContent = text;
-        pendingStreams.clear();
+        paintFeed();
         if (followTail)
             conversation.scrollTop = conversation.scrollHeight;
         $('#jump-latest').hidden = followTail;
     });
-}
-function message(role, text, cls = "") {
-    const row = el('article', `message ${role === 'You' ? 'user' : ''} ${cls}`);
-    const label = el('div', 'message-role');
-    if (role === 'Kvist') {
-        const mark = el('img');
-        mark.src = '/assets/kvist-mark.svg';
-        mark.alt = '';
-        label.append(mark);
-    }
-    label.append(document.createTextNode(role));
-    const body = el('div', 'message-body');
-    markdown(body, text);
-    row.append(label, body);
-    conversation.append(row);
-    empty.hidden = true;
-    return body;
-}
-// An answer of its own follows these, so a call row would only repeat it.
-const TERMINAL_ACTIONS = new Set(['final_answer', 'report_to_user', 'refuse']);
-
-// What the person is told an action is, never the protocol's own name.
-const TOOL_NAMES = {
-    read_file: 'Read', read_multiple_files: 'Read',
-    write_file: 'Edit', append_file: 'Edit', replace_in_file: 'Edit',
-    list_dir: 'List', list_tree: 'List',
-    find_files: 'Search', search_code: 'Search',
-    git_status: 'Bash', git_diff: 'Bash', run_shell: 'Bash',
-    web_search: 'Search the web', fetch_url: 'Fetch', delegate_task: 'Task',
-    offer_plan: 'Plan', propose_plan: 'Plan', end_session: 'Close session',
-};
-
-// argv arrives as a list; a comma-joined default toString is not a command.
-const TARGET_KEYS = ['path', 'command', 'query', 'pattern', 'url', 'dir', 'directory'];
-function actionTarget(action, args) {
-    if (action === 'git_status') return 'git status';
-    if (action === 'git_diff') return `git diff ${args.path || ''}`.trim();
-    for (const key of TARGET_KEYS) {
-        const value = args[key];
-        if (typeof value === 'string' && value) return value;
-        if (Array.isArray(value) && value.length) return value.map(String).join(' ');
-    }
-    const paths = args.paths;
-    if (Array.isArray(paths) && paths.length) return paths.map(String).join(', ');
-    return '';
-}
-
-function tool(event) {
-    if (TERMINAL_ACTIONS.has(event.action_type)) return;
-
-    const key = event.call_id || `step:${event.step}`;
-    let row = tools.get(key);
-    if (!row) {
-        row = el('details', 'tool tool-running');
-        const summary = el('summary');
-        summary.append(el('span', 'tool-label'), el('span', 'tool-target'), el('span', 'tool-status'));
-        row.append(summary, el('pre'));
-        tools.set(key, row);
-        conversation.append(row);
-    }
-    const summary = row.querySelector('summary');
-    const args = event.action_args || {};
-    const target = actionTarget(event.action_type, args);
-    summary.querySelector('.tool-label').textContent = TOOL_NAMES[event.action_type] || event.action_type;
-    summary.querySelector('.tool-target').textContent = target ? `(${target})` : '';
-
-    // A step only announces the call; the result arrives as action_result/action_output.
-    if (event.type === 'step') {
-        summary.querySelector('.tool-status').textContent = '';
-        empty.hidden = true;
-        return;
-    }
-
-    row.classList.remove('tool-running');
-    const failed = event.ok === false || (typeof event.exit_code === 'number' && event.exit_code !== 0);
-    row.classList.toggle('tool-failed', failed);
-    summary.querySelector('.tool-status').textContent = failed
-        ? (typeof event.exit_code === 'number' && event.exit_code !== 0 ? `exit ${event.exit_code}` : 'failed')
-        : '';
-    row.querySelector('pre').textContent = event.output || '(no output)';
-    empty.hidden = true;
 }
 export function renderMetadata() {
     $('#model-label').textContent = state.model || configuredModel();
@@ -130,7 +54,8 @@ function rememberEvent(event) {
     // A compliant producer never includes a secret's existing value, but keep
     // browser state safe if an older/third-party producer gets that wrong.
     const value = event.type === "input_request" && event.kind === "secret" ? { ...event, current_value: "" } : event;
-    if (['stream_chunk', 'status', 'reasoning_chunk'].includes(event.type))
+    // stream_start arrives live and again from the journal; no view reads it.
+    if (['stream_chunk', 'status', 'reasoning_chunk', 'stream_start'].includes(event.type))
         return;
     if (event.type === 'action_output') {
         const previous = state.events.findLastIndex(e => e.type === 'action_output' && e.call_id === event.call_id && e.step === event.step);
@@ -171,17 +96,14 @@ function reconcileAgentState(event) {
         setAgentState(Number(event.code) === 0 ? "finished" : "failed");
     }
 }
-export function applyEvent(event, { initial = false, durableReplay = false } = {}) {
+// envelope: {seq?, ts?} of the journal record the event came from; a live event has neither seq nor
+// a journal copy yet, so the reducer never deduplicates it.
+export function applyEvent(event, { initial = false, durableReplay = false, seq, ts } = {}) {
     if (!event || typeof event.type !== "string")
         return;
     const kind = event.type;
-    const knownStream = kind === "stream_start" && typeof event.stream_id === "string" && streamNodes.has(event.stream_id);
-    if (!knownStream)
-        rememberEvent(event);
-    // The live stream may reserve its row before the journal returns the user
-    // message. At the durable start record, place that same row in journal order.
-    if (knownStream && durableReplay)
-        conversation.append(streamNodes.get(event.stream_id).closest('.message'));
+    rememberEvent(event);
+    feedState = reduce(feedState, { ...(seq != null && { seq }), ...(ts != null && { ts }), event });
     if (kind === 'hello') {
         state.hello = event;
         state.model = event.models?.fast || state.model;
@@ -205,53 +127,15 @@ export function applyEvent(event, { initial = false, durableReplay = false } = {
             state.model = event.model;
         renderMetadata();
     }
-    else if (kind === "user") {
-        tools.clear();
-        message("You", event.text || "");
-    }
-    else if (kind === "message" || kind === "plan")
-        message("Kvist", event.markdown || "");
-    else if (kind === "final")
-        message("Kvist", event.message || "");
-    else if (kind === "stream_start" && !knownStream) {
-        const body = message("Kvist", "");
-        if (typeof event.stream_id === "string")
-            streamNodes.set(event.stream_id, body);
-    }
-    else if (kind === "stream_chunk") {
-        const body = streamNodes.get(event.stream_id);
-        if (body) {
-            // append=true carries a delta; append=false or absent (older cores) a full snapshot.
-            pendingStreams.set(body, event.append === true ? (pendingStreams.get(body) ?? body.textContent) + (event.text || "") : event.text || "");
-            queuePaint();
-        }
-    }
-    else if (kind === "stream_commit") {
-        const body = streamNodes.get(event.stream_id);
-        if (body) {
-            pendingStreams.delete(body);
-            markdown(body, event.text || "");
-        }
-        else {
-            const committed = message("Kvist", event.text || "");
-            streamNodes.set(event.stream_id, committed);
-        }
-    }
-    else if (kind === "step" || kind === "action_result")
-        tool(event);
-    else if (kind === "error")
-        message("Error", event.message || "Kvist failed", "error");
     else if (kind === "input_request" && !initial)
         showPending(event);
-    else if (kind === 'action_output') {
-        const details = tools.get(event.call_id || `step:${event.step}`);
-        if (details)
-            details.querySelector('pre').textContent = event.output || '';
-    }
-    else if (kind === 'turn_end' || kind === 'error')
+    else if (kind === 'turn_end')
         pending.hidden = true;
     if (!initial)
         reconcileAgentState(event);
+    // Streamed text and replayed records are painted once per frame; everything else shows at once.
+    if (!initial && kind !== 'stream_chunk' && !durableReplay)
+        paintFeed();
     if (!initial)
         queuePaint();
     scheduleInspector();
@@ -261,10 +145,9 @@ export async function openSession(serverId, workspace, session) {
         state.drafts.set(keyOf(state.selected), $('#prompt').value);
     const generation = ++selectionGeneration;
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
-    pendingStreams.clear();
-    tools.clear();
+    feedState = initialState();
+    feed = createFeed(conversation);
     followTail = true;
-    streamNodes.clear();
     conversation.replaceChildren();
     empty.hidden = true;
     $('#prompt').value = state.drafts.get(keyOf(state.selected)) || '';
@@ -297,6 +180,7 @@ export async function openSession(serverId, workspace, session) {
     if (!currentSelectionMatches(selection, generation))
         return false;
     $('#history-status').hidden = true;
+    paintFeed();
     empty.hidden = conversation.children.length > 0;
     const latest = sessionOf();
     setAgentState(latest?.execution || 'idle');
@@ -351,7 +235,7 @@ async function replayDurable(selection, generation, options = {}) {
             state.eventSeq = record.seq;
             cursor = record.seq;
             count += 1;
-            applyEvent(record.event, { ...options, durableReplay: true });
+            applyEvent(record.event, { ...options, durableReplay: true, seq: record.seq, ts: record.ts });
         }
         if (!history.has_more || !(history.events || []).length)
             return count;
@@ -367,16 +251,25 @@ export function applyLive(envelope) {
         return;
     const event = envelope.event;
     const durable = envelope.durable === true;
-    // stream_start reserves one DOM row so transient cumulative chunks can be
-    // painted immediately. Its later durable replay is idempotent by stream_id.
-    if (!durable || event.type === "stream_start")
-        applyEvent(event);
-    else if (event.type === "hello")
-        applyEvent(event);
+    // stream_start reserves one row so transient cumulative chunks can be painted immediately.
+    // Its later durable replay moves that row into journal order (reducer, by stream_id).
+    if (reducesLive(envelope))
+        applyEvent(event, { ts: envelope.ts });
     else
         reconcileAgentState(event);
     if (durable)
         recoverSelected().catch(() => { });
+}
+// The broker epoch changed or a remote connection dropped live events: open streams cannot be
+// continued from deltas until a snapshot or the commit arrives (reducer, stream.reset).
+export function resetLive() {
+    feedState = reduce(feedState, { event: { type: 'stream.reset' } });
+}
+// A navigation refresh newer than everything the feed has seen shows no pending request:
+// inputs the journal never closed (no answer record) are over.
+export function closeStaleInputs(lastEventId) {
+    if (lastEventId >= feedState.lastSeq)
+        feedState = reduce(feedState, { event: { type: 'client.inputs_closed' } });
 }
 export function setAgentState(value) {
     const stateValue = typeof value === 'string' && value ? value : 'idle';
@@ -496,8 +389,15 @@ async function respond(event, response) {
     }
     if (!isCurrentSelection(snapshot))
         return;
+    feedState = reduce(feedState, { event: { type: 'client.input_answered', request_id: event.request_id, summary: answerSummary(event, response) } });
     pending.hidden = true;
     setAgentState("running");
+}
+// What the person answered, for the record of the request; a secret's value is never kept.
+function answerSummary(event, response) {
+    if (typeof response.approved === 'boolean')
+        return response.approved ? 'Allowed' : 'Denied';
+    return event.kind === 'secret' ? '' : String(response.value ?? '');
 }
 let readTimer;
 export function scheduleRead() {

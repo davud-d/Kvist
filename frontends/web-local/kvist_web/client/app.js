@@ -2,7 +2,7 @@ import { mountImageAttachments } from "./utils/image-attachments.js";
 import { api } from '/assets/utils/api.js';
 import { state, subscribe, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
 import { renderNavigation } from '/assets/features/navigation.js';
-import { applyLive, isCurrentSelection, loadDiff, openSession, recoverSelected, selectionSnapshot, setAgentState } from '/assets/features/session.js';
+import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, selectionSnapshot, setAgentState } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
@@ -24,6 +24,8 @@ export async function refresh() {
     if (item) {
         setAgentState(item.execution);
         $('#session-title').textContent = item.title || item.name;
+        if (!item.pending_input)
+            closeStaleInputs(item.last_event_id);
     }
     return true;
 }
@@ -158,6 +160,7 @@ function recovered() { recoverSelected().then(count => { if (count)
     toast(`Connected · recovered ${count} events`); }).catch(error => toast(`Recovery paused: ${error.message}`, true)); refresh().catch(() => { }); }
 function resetLiveStream(source, generation, envelope) {
     const event = envelope.event || {};
+    resetLive();
     if (event.remote !== true) {
         state.liveCursor = Number(envelope.id) || 0;
         state.liveEpoch = event.epoch || '';

@@ -1,8 +1,9 @@
 import { state } from '/assets/state/store.js';
 import { $, el, showOverlay, hideOverlay } from '/assets/utils/ui.js';
+import { TOOL_NAMES } from '/assets/features/blocks.js';
 export const actionLabel = event => {
-    const names = { read_file: 'Reading a file', read_multiple_files: 'Reading files', list_dir: 'Browsing files', list_tree: 'Browsing workspace', find_files: 'Finding files', search_code: 'Searching code', write_file: 'Writing a file', append_file: 'Updating a file', replace_in_file: 'Editing a file', run_shell: event.type === 'action_result' ? 'Command finished' : 'Running a command', git_status: 'Checking repository', git_diff: 'Reviewing changes', web_search: 'Searching the web', fetch_url: 'Reading a web page', delegate_task: 'Delegating work', final_answer: 'Preparing response', report_to_user: 'Preparing report', refuse: 'Task declined' };
-    return names[event.action_type] || ({ turn_end: event.stopped_by_user ? 'Agent stopped' : 'Turn finished', input_request: 'Waiting for your input', error: 'An error occurred', agent_process_exited: 'Agent stopped' }[event.type] || 'Agent activity');
+    const names = Object.hasOwn(TOOL_NAMES, event.action_type) ? TOOL_NAMES[event.action_type] : null;
+    return (event.type === 'action_result' ? names?.done : names?.doing) || ({ turn_end: event.stopped_by_user ? 'Agent stopped' : 'Turn finished', input_request: 'Waiting for your input', error: 'An error occurred', agent_process_exited: 'Agent stopped' }[event.type] || 'Agent activity');
 };
 export function openView(tab) {
     state.inspectorTab = tab;

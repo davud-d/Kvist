@@ -167,6 +167,15 @@ test('turn_end and command_result close inputs that never got an answer', () => 
     assert.equal(s.blocks[1].answered.closed, true);
 });
 
+test('client.inputs_closed closes unanswered inputs only and touches nothing else', () => {
+    let s = fold([env(input('r1')), env(input('r2')), env({ type: 'client.input_answered', request_id: 'r1', summary: 'Allowed' })]);
+    const before = s.meta;
+    s = fold([env({ type: 'client.inputs_closed' })], s);
+    assert.deepEqual(s.blocks.map(b => b.answered), [{ summary: 'Allowed' }, { summary: '', closed: true }]);
+    assert.equal(s.meta, before);
+    assert.equal(fold([env({ type: 'client.inputs_closed' })], s), s);
+});
+
 test('text events: message, final, plan', () => {
     const s = fold([env(message('m')), env(final('f')), env({ type: 'plan', markdown: 'p' })]);
     assert.deepEqual(s.blocks.map(b => [b.kind, b.source, b.text, !!b.plan]), [

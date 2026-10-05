@@ -7,7 +7,7 @@
 // which is not a journal seq, so they enter without seq and are never deduplicated.
 // Inputs without seq: status, live_start, live_stop, debug, stream_chunk and
 // action_output (transient, session_events.py:62-65), live copies of durable events,
-// stream.reset, agent.*, connection.* and the synthetic client.input_answered.
+// stream.reset, agent.*, connection.* and the synthetic client.input_answered and client.inputs_closed.
 
 // One name table for tools. `label` is the short row name, `doing`/`done` the activity wording.
 const NAMES = {
@@ -207,6 +207,8 @@ const HANDLERS = {
     action_output: actionOutput,
     input_request: inputRequest,
     'client.input_answered': inputAnswered,
+    // Synthetic: the client saw that the session has no pending input (a fresh /navigation); no fields.
+    'client.inputs_closed': closeInputs,
     // frontend_protocol.py:479-485
     error: (s, e) => notice(s, 'error', 'error', e.message || ''),
     // frontend_protocol.py:165-171
