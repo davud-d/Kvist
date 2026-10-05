@@ -84,6 +84,8 @@ kvist_web = [
     "client/features/blocks.js",
     "client/utils/ui.js",
     "client/kvist-mark.svg",
+    "client/fonts/JetBrainsMono.woff2",
+    "client/fonts/OFL.txt",
 ]
 "kernel.prompts.system" = ["*.txt"]
 "kernel.prompts.styles" = ["*.txt"]

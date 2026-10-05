@@ -1,7 +1,10 @@
+import http.client
 import re
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
-from kvist_web.http_api import _api_route, client_root
+from kvist_web.http_api import ControllerHTTPServer, _api_route, client_root
 
 
 CLIENT = client_root()
@@ -87,3 +90,31 @@ def test_client_pending_input_and_navigation_stay_protocol_driven_and_session_sc
     assert "inboxItems" in navigation and 'openPalette("inbox", paletteChoice)' in app
     assert 'mode === "inbox" ? inboxItems()' in palette
     assert "const generation = ++navigationGeneration" in app
+
+
+def test_mono_font_is_self_hosted_and_served_as_woff2():
+    css = (CLIENT / "styles.css").read_text(encoding="utf-8")
+    assert "font-display: swap" in css and '"JetBrains Mono"' in css
+    assert not re.search(r"https?:|//", css.replace("/*", "").replace("*/", ""))
+
+    server = ControllerHTTPServer(("127.0.0.1", 0), SimpleNamespace(), admin_token="test")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+        connection.request("GET", "/assets/fonts/JetBrainsMono.woff2")
+        font = connection.getresponse()
+        body = font.read()
+        assert font.status == 200
+        assert font.getheader("Content-Type") == "font/woff2"
+        assert body[:4] == b"wOF2"
+        # The license ships in the wheel but only whitelisted suffixes are served.
+        connection.request("GET", "/assets/fonts/OFL.txt")
+        license_response = connection.getresponse()
+        license_response.read()
+        assert license_response.status == 404
+        connection.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
