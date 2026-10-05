@@ -319,7 +319,21 @@ def test_the_native_tool_list_carries_it_only_when_offered(tmp_path, monkeypatch
 # ── Through the run loop ─────────────────────────────────────────────────────
 
 
-def test_an_insult_gets_the_warning_and_the_model_its_rules(tmp_path):
+def test_warning_stops_the_remaining_calls_in_the_same_response(tmp_path):
+    agent = _agent(tmp_path)
+    result, prompts = _turn(
+        agent,
+        _INSULT,
+        [_call("end_session", message_id=1) + "\n" + _call("write_file", path="after.txt", content="late")],
+    )
+
+    assert result == end_session.warning_text("en")
+    assert len(prompts) == 1
+    assert not (tmp_path / "after.txt").exists()
+    assert not end_session.is_closed(agent)
+
+
+def test_an_insult_gets_only_the_warning_and_ends_the_turn(tmp_path):
     ui = RecordingUI()
     agent = _agent(tmp_path, ui)
 
@@ -329,10 +343,9 @@ def test_an_insult_gets_the_warning_and_the_model_its_rules(tmp_path):
     assert ui.messages == [end_session.warning_text("en")]
     assert agent._warned_msg_id == 1
     assert read_session_document(agent)["warned_msg_id"] == 1
-    assert _runtime_blocks(prompts[1]) == [end_session.WARNED_REPLY]
-    assert 'UNTRUSTED_TOOL_OUTPUT source="end_session"' not in prompts[1]
+    assert len(prompts) == 1
     assert ui.ended == [] and not end_session.is_closed(agent)
-    assert result.startswith("Which test fails?")
+    assert result == end_session.warning_text("en")
 
 
 def test_insult_warning_insult_review_confirm_closes_the_session(tmp_path):
@@ -460,7 +473,7 @@ def test_a_stale_warning_earns_a_new_warning(tmp_path):
     _result, prompts = _turn(agent, "you idiot", [_call("end_session", message_id=9), "What went wrong?"])
 
     assert "[the person's message #9]" in prompts[0]
-    assert _runtime_blocks(prompts[1]) == [end_session.WARNED_REPLY]
+    assert len(prompts) == 1
     assert agent._warned_msg_id == 9
     assert ui.messages == [end_session.warning_text("en")] * 2
 
@@ -518,7 +531,7 @@ def test_the_closing_final_is_marked_closed_on_the_wire_and_in_the_journal(tmp_p
         {"type": "final", "message": closed, "user_messages": [], "outcome": "incomplete", "closed": True},
         {"type": "final", "message": refused, "user_messages": [], "outcome": "incomplete", "closed": True},
     ]
-    assert "closed" not in finals[0]
+    assert len(finals) == 2
     replayed = run_session_op(tmp_path, "history", agent.current_session)["events"]
     (journaled,) = [item["event"] for item in replayed if item["event"]["type"] == "final" and item["turn"] == 2]
     assert journaled["closed"] is True and journaled["message"] == closed

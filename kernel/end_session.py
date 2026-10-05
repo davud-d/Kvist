@@ -63,8 +63,14 @@ _SCHEMA_LINE = (
 )
 
 WARNED_REPLY = (
-    "Warning shown to the person. Carry on with the task. Do not apologize. Do not bring up the warning "
-    "or the tool yourself. If the person asks directly, answer truthfully in one sentence and return to "
+    "Warning shown to the person; this conversation is still open. This call only warned, it did not "
+    "complete the closing procedure. This turn is over: send no further text or calls. "
+    "On a NEW message that "
+    "personally insults you or another person, call end_session again with that NEW message's id, "
+    "even if it repeats the same insult. The runtime will return a review or a fresh warning. "
+    "Do not replace that call with a verbal refusal or a request for a task. Keeping the warning "
+    "out of your prose does not prohibit calling the tool again. "
+    "If the person asks directly, answer truthfully in one sentence and return to "
     "the work. If they answer the question, work on the answer. If they apologize, one word of "
     "acknowledgement at most, then the work."
 )
@@ -511,4 +517,3 @@ def _decide(agent: Any, confirm: bool, reason: str) -> Outcome:
         log={"answer": "closed", **decision},
         final_message=closed_text(language),
     )
-

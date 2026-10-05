@@ -107,4 +107,6 @@ def test_end_session_block_is_the_agreed_text():
     text = _PROMPT_FILE.read_text(encoding="utf-8")
     assert text.startswith("end_session: closes this conversation for good when the person insults you or people. Rare.")
     assert "The tool speaks." in text
-    assert text.rstrip().endswith("The call returns the rules; then you confirm or decline.")
+    assert "The first call shows a warning and ends your turn; send nothing after it." in text
+    assert "call end_session again with that NEW message's id" in text
+    assert text.rstrip().endswith("If it returns a warning, the same rule applies to subsequent messages.")
