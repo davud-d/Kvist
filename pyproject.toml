@@ -81,6 +81,7 @@ kvist_web = [
     "client/features/connections.js",
     "client/features/configuration.js",
     "client/features/views.js",
+    "client/features/blocks.js",
     "client/utils/ui.js",
     "client/kvist-mark.svg",
 ]
