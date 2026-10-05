@@ -10,7 +10,7 @@ const output = process.env.KVIST_QA_OUTPUT || '/tmp/kvist-web-qa';
 await mkdir(output + '/screenshots', { recursive: true });
 const browser = await chromium.launch({ headless: true, ...((process.env.CHROMIUM_EXECUTABLE || process.argv[3]) ? { executablePath: process.env.CHROMIUM_EXECUTABLE || process.argv[3] } : {}) });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-const page = await context.newPage(), errors = [], checks = [], requests = [];
+const page = await context.newPage(), errors = [], checks = [], requests = [], trace = [], started = Date.now();
 page.on('pageerror', e => errors.push(e.message));
 const f = fixture();
 let cursor = 0, failSend = false, trust = false, expired = false, historyDelay = 0, createDelay = 0, connectFail = false, connectLogDelay = 0;
@@ -24,6 +24,7 @@ await page.addInitScript(() => {
 });
 await page.route('**/api/v1/**', async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace('/api/v1', ''), body = request.method() === 'POST' ? request.postDataJSON() : null;
+    trace.push({ ms: Date.now() - started, method: request.method(), path });
     if (body)
         requests.push({ path, body });
     const json = value => route.fulfill({ json: value });
@@ -107,11 +108,24 @@ await page.route('**/api/v1/**', async (route) => {
         return json({ general: true, credentials: [{ id: 'test_api_key', label: 'Test API key', present: true }] });
     throw new Error(`Unhandled test route ${path}`);
 });
+// KVIST_ONLY is a regular expression over scenario names; it runs a subset, e.g. in a repeat loop.
+const only = process.env.KVIST_ONLY ? new RegExp(process.env.KVIST_ONLY) : null;
 const check = async (name, fn) => {
+    if (only && !only.test(name))
+        return;
     try { await fn(); checks.push(name); console.log('PASS', name); }
     finally { await page.setViewportSize({ width: 1440, height: 900 }); }
 };
 const shot = async (name) => { await page.waitForTimeout(180); await page.screenshot({ path: `${output}/screenshots/${name}.png` }); };
+// Opens the connect dialog and waits until its alias response is handled: the dialog re-renders
+// #server-fields when /ssh-aliases returns, which adds #ssh-alias-picker and replaces every input.
+const openConnectDialog = async () => {
+    await page.locator('#server-switcher').click();
+    const aliases = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/api/v1/ssh-aliases'));
+    await page.getByRole('button', {name:'＋ Connect server',exact:true}).click();
+    await aliases;
+    await page.locator('#server-fields #ssh-alias-picker').waitFor();
+};
 const select = async (title) => page.getByRole('button', { name: new RegExp('^' + title + ' ·') }).click();
 const emit = async (event, session = 'review', durable = false) => { await page.evaluate(envelope => window.__sources.at(-1).emit(envelope), { id: ++cursor, server_id: 'local', workspace: f.workspace, session, event, durable }); };
 const durable = async (event, session = 'review') => { const list = f.histories[session]; list.push({ seq: list.length + 1, turn: 2, ts: 1780000100, event }); const item = f.sessions.find(s => s.name === session); if (item) {
@@ -279,8 +293,7 @@ try {
         assert.equal(requests.filter(r => r.path === '/send').at(-1).body.text, 'Send while creating');
     });
     await check('Failed SSH connection is actionable and retry keeps identity', async () => {
-        await page.locator('#server-switcher').click();
-        await page.getByRole('button', {name:'＋ Connect server',exact:true}).click();
+        await openConnectDialog();
         await page.getByLabel('SSH alias', {exact:true}).fill('rejected-key-host');
         connectFail = true;
         await page.getByRole('button', {name:'Connect',exact:true}).click();
@@ -296,8 +309,7 @@ try {
     });
     await check('Connection logs stream before completion and stay until acknowledged', async () => {
         await page.setViewportSize({width:1440,height:900});
-        await page.locator('#server-switcher').click();
-        await page.getByRole('button',{name:'＋ Connect server',exact:true}).click();
+        await openConnectDialog();
         await page.getByLabel('SSH alias',{exact:true}).fill('setup-logs-host');
         connectLogDelay = 1600;
         await page.getByRole('button',{name:'Connect',exact:true}).click();
@@ -328,5 +340,6 @@ try {
     console.log(`PASS ${checks.length} browser scenarios`);
 }
 finally {
+    await writeFile(output + '/trace.json', JSON.stringify({ trace, errors }, null, 2));
     await browser.close();
 }
