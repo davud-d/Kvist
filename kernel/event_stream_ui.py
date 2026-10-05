@@ -253,8 +253,13 @@ class EventStreamUI:
         stream_id = uuid.uuid4().hex
         self._channel.emit(StreamStartEvent(stream_id))
         last = ""
+        last_reasoning = ""
         reasoning_start: float | None = None
         reasoning_committed = False
+
+        def tail(previous: str, current: str) -> str:
+            """Return the append-only delta, or the snapshot if text rewound."""
+            return current[len(previous) :] if current.startswith(previous) else current
 
         def commit_reasoning() -> None:
             nonlocal reasoning_committed
@@ -265,21 +270,28 @@ class EventStreamUI:
             self._channel.emit(ReasoningCommitEvent(stream_id, duration))
 
         def reasoning(message: str) -> None:
-            nonlocal reasoning_start
+            nonlocal reasoning_start, last_reasoning
             if reasoning_committed:
                 return
             if reasoning_start is None:
                 reasoning_start = time.monotonic()
                 self._channel.emit(ReasoningStartEvent(stream_id))
-            self._channel.emit(ReasoningChunkEvent(stream_id, redact_text(message)))
+            previous = last_reasoning
+            redacted = redact_text(message)
+            append = redacted.startswith(previous)
+            last_reasoning = redacted
+            self._channel.emit(ReasoningChunkEvent(stream_id, tail(previous, redacted), append=append))
 
         def update(message: str) -> None:
             nonlocal last
             # The first answer token means thinking is over: seal the reasoning
             # block so its text never leaks into the answer stream.
             commit_reasoning()
-            last = message
-            self._channel.emit(StreamChunkEvent(stream_id, redact_text(message)))
+            redacted = redact_text(message)
+            delta = tail(last, redacted)
+            append = redacted.startswith(last)
+            last = redacted
+            self._channel.emit(StreamChunkEvent(stream_id, delta, append=append))
 
         update.reasoning = reasoning
         try:

@@ -100,6 +100,56 @@ test("a later, unrelated step is unaffected by an earlier reasoning_commit once 
   assert.deepEqual(state.items.map((i) => i.kind), ["thought", "plan", "thought"])
 })
 
+test("stream_chunk with append=true appends deltas, preventing quadratic memory growth", () => {
+  const state = feed(
+    { type: "stream_start", stream_id: "s" },
+    { type: "stream_chunk", stream_id: "s", text: "Hello", append: true },
+    { type: "stream_chunk", stream_id: "s", text: " ", append: true },
+    { type: "stream_chunk", stream_id: "s", text: "world", append: true },
+  )
+  assert.equal(state.live?.answer, "Hello world")
+  const done = reduce(state, { type: "event", event: { type: "stream_commit", stream_id: "s", text: "Hello world" } })
+  assert.equal(done.items[0]?.kind === "answer" && done.items[0].text, "Hello world")
+})
+
+test("stream_chunk with append=false replaces the answer (backward compatibility)", () => {
+  const state = feed(
+    { type: "stream_start", stream_id: "s" },
+    { type: "stream_chunk", stream_id: "s", text: "Hel", append: false },
+    { type: "stream_chunk", stream_id: "s", text: "Hello", append: false },
+  )
+  assert.equal(state.live?.answer, "Hello")
+})
+
+test("reasoning_chunk with append=true appends deltas", () => {
+  const state = feed(
+    { type: "reasoning_start", stream_id: "r" },
+    { type: "reasoning_chunk", stream_id: "r", text: "Let me", append: true },
+    { type: "reasoning_chunk", stream_id: "r", text: " think", append: true },
+    { type: "reasoning_chunk", stream_id: "r", text: " about it", append: true },
+  )
+  assert.equal(state.live?.reasoning, "Let me think about it")
+})
+
+test("reasoning_chunk with append=false replaces the reasoning (backward compatibility)", () => {
+  const state = feed(
+    { type: "reasoning_start", stream_id: "r" },
+    { type: "reasoning_chunk", stream_id: "r", text: "partial", append: false },
+    { type: "reasoning_chunk", stream_id: "r", text: "complete thought", append: false },
+  )
+  assert.equal(state.live?.reasoning, "complete thought")
+})
+
+test("long streaming with deltas uses linear memory: 10,000 chunks build one final string", () => {
+  let state = initialState()
+  state = reduce(state, { type: "event", event: { type: "stream_start", stream_id: "long" } })
+  for (let i = 0; i < 10_000; i++) {
+    state = reduce(state, { type: "event", event: { type: "stream_chunk", stream_id: "long", text: "x", append: true } })
+  }
+  assert.equal(state.live?.answer.length, 10_000)
+  assert.equal(state.live?.answer, "x".repeat(10_000))
+})
+
 test("a response's words are shown once as a say line before its calls, reads included", () => {
   const write = feed(stepEvent("write_file", { path: "a.py" }, { user_message: "Writing the fix" }))
   assert.deepEqual(write.items.map((i) => i.kind), ["say"])

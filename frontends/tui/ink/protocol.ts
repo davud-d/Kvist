@@ -48,10 +48,10 @@ export type CoreEvent =
   | { type: "route"; role: string; source?: string }
   | { type: "sandbox_notice"; note: string }
   | { type: "stream_start"; stream_id: string }
-  | { type: "stream_chunk"; stream_id: string; text: string }
+  | { type: "stream_chunk"; stream_id: string; text: string; append?: boolean }
   | { type: "stream_commit"; stream_id: string; text: string }
   | { type: "reasoning_start"; stream_id: string }
-  | { type: "reasoning_chunk"; stream_id: string; text: string }
+  | { type: "reasoning_chunk"; stream_id: string; text: string; append?: boolean }
   | { type: "reasoning_commit"; stream_id: string; duration_seconds: number }
   | { type: "message"; markdown: string }
   // `closed`: end_session's closing words or a closed session's reply, shown as an ordinary message.

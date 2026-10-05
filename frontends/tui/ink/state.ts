@@ -453,14 +453,20 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return push(state, (id) => ({ id, kind: "note", tone: "info", text: event.note }))
     case "stream_start":
       return { ...state, live: ensureLive(state, event.stream_id) }
-    case "stream_chunk":
-      return { ...state, live: { ...ensureLive(state, event.stream_id), answer: event.text } }
+    case "stream_chunk": {
+      const current = ensureLive(state, event.stream_id)
+      const answer = event.append === false ? event.text : current.answer + event.text
+      return { ...state, live: { ...current, answer } }
+    }
     case "stream_commit":
       return commitLive(state, event.text)
     case "reasoning_start":
       return { ...state, live: { ...ensureLive(state, event.stream_id), thinking: true, thinkingSince: now } }
-    case "reasoning_chunk":
-      return { ...state, live: { ...ensureLive(state, event.stream_id), thinking: true, reasoning: event.text } }
+    case "reasoning_chunk": {
+      const current = ensureLive(state, event.stream_id)
+      const reasoning = event.append === false ? event.text : current.reasoning + event.text
+      return { ...state, live: { ...current, thinking: true, reasoning } }
+    }
     case "reasoning_commit": {
       const current = ensureLive(state, event.stream_id)
       const next = { ...state, live: { ...current, thinking: false, thinkingSince: null, reasoning: "" } }

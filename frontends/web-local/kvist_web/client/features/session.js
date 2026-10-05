@@ -221,7 +221,8 @@ export function applyEvent(event, { initial = false, durableReplay = false } = {
     else if (kind === "stream_chunk") {
         const body = streamNodes.get(event.stream_id);
         if (body) {
-            pendingStreams.set(body, event.text || "");
+            // append=true carries a delta; append=false or absent (older cores) a full snapshot.
+            pendingStreams.set(body, event.append === true ? (pendingStreams.get(body) ?? body.textContent) + (event.text || "") : event.text || "");
             queuePaint();
         }
     }

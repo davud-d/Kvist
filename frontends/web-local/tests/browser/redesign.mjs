@@ -226,6 +226,22 @@ try {
         assert.match(messages.at(-1), /Ordered reply/);
         await durable({ type: 'stream_commit', stream_id: 'ordered-stream', text: 'Ordered reply' });
     });
+    await check('Stream chunks append deltas, replace on append=false, and commit sets the final text', async () => {
+        const lastMessage = async () => (await page.locator('.message').allTextContents()).at(-1);
+        await durable({ type: 'stream_start', stream_id: 'delta-stream' });
+        await emit({ type: 'stream_chunk', stream_id: 'delta-stream', text: 'Hello ', append: true });
+        await emit({ type: 'stream_chunk', stream_id: 'delta-stream', text: 'world', append: true });
+        await page.waitForTimeout(120);
+        assert.match(await lastMessage(), /Hello world$/);
+        await emit({ type: 'stream_chunk', stream_id: 'delta-stream', text: 'Rewritten', append: false });
+        await page.waitForTimeout(120);
+        const rewritten = await lastMessage();
+        assert.match(rewritten, /Rewritten$/);
+        assert.doesNotMatch(rewritten, /Hello/);
+        await durable({ type: 'stream_commit', stream_id: 'delta-stream', text: 'Final text' });
+        await page.waitForTimeout(120);
+        assert.match(await lastMessage(), /Final text$/);
+    });
     await check('Untrusted Markdown stays text and safe links', async () => {
         await durable({ type: 'message', markdown: '<img src=x onerror=alert(1)> **safe** [unsafe](javascript:alert(1))' });
         await page.waitForTimeout(100);

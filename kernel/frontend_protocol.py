@@ -219,10 +219,19 @@ class StreamStartEvent:
 class StreamChunkEvent:
     stream_id: str
     text: str
+    # True means ``text`` is the next bytes to append to the live answer. Older
+    # events omitted it and carried a cumulative snapshot in ``text``.
+    append: bool = True
     type: ClassVar[str] = "stream_chunk"
 
     def to_dict(self) -> dict:
-        return {"type": self.type, "stream_id": self.stream_id, "text": self.text}
+        return {
+            "type": self.type,
+            "stream_id": self.stream_id,
+            "text": self.text,
+            "append": self.append,
+        }
+
 
 
 @dataclass(slots=True)
@@ -251,10 +260,18 @@ class ReasoningStartEvent:
 class ReasoningChunkEvent:
     stream_id: str
     text: str
+    # True means ``text`` is the next bytes to append to the live reasoning.
+    # Older events omitted it and carried a cumulative snapshot in ``text``.
+    append: bool = True
     type: ClassVar[str] = "reasoning_chunk"
 
     def to_dict(self) -> dict:
-        return {"type": self.type, "stream_id": self.stream_id, "text": self.text}
+        return {
+            "type": self.type,
+            "stream_id": self.stream_id,
+            "text": self.text,
+            "append": self.append,
+        }
 
 
 @dataclass(slots=True)
