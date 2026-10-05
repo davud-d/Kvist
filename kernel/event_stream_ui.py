@@ -48,9 +48,15 @@ class EventStreamUI:
     not a terminal.
     """
 
-    def __init__(self, channel: FrontendChannel) -> None:
+    def __init__(
+        self, channel: FrontendChannel, new_stream_id: Callable[[], str] | None = None
+    ) -> None:
         self._channel = channel
         self.verbose = False
+        # JournalingUI replaces the source so its journal copy of a stream
+        # carries the id the live copy already sent.
+        self._new_stream_id = new_stream_id or (lambda: uuid.uuid4().hex)
+        self.last_stream_id = ""
         # The action loop streams no answer, so its reasoning has no stream of
         # its own: one is opened when the first thought arrives and sealed when
         # the model starts writing the action.
@@ -88,11 +94,15 @@ class EventStreamUI:
             # sends its reasoning in one piece after thinking silently showed
             # "thought for 0 s" for minutes of work.
             started = self._call_started or time.monotonic()
-            self._loop_reasoning = (uuid.uuid4().hex, started)
+            self._loop_reasoning = (self._open_stream_id(), started)
             self._channel.emit(ReasoningStartEvent(self._loop_reasoning[0]))
         self._channel.emit(
             ReasoningChunkEvent(self._loop_reasoning[0], redact_text(text))
         )
+
+    def _open_stream_id(self) -> str:
+        self.last_stream_id = self._new_stream_id()
+        return self.last_stream_id
 
     def end_thinking(self) -> None:
         if self._loop_reasoning is None:
@@ -250,7 +260,7 @@ class EventStreamUI:
 
     @contextlib.contextmanager
     def live_markdown(self) -> Iterator[Callable[[str], None]]:
-        stream_id = uuid.uuid4().hex
+        stream_id = self._open_stream_id()
         self._channel.emit(StreamStartEvent(stream_id))
         last = ""
         last_reasoning = ""
