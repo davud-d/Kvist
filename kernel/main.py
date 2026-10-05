@@ -838,7 +838,7 @@ def launch_tui(args: argparse.Namespace) -> int | None:
 
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
-        env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file)}
+        env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file), "KVIST_COMMAND_FRONTEND": "ink"}
         try:
             code = subprocess.call(command, env=env)
         except KeyboardInterrupt:

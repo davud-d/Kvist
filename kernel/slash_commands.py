@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 
 from prompt_toolkit.auto_suggest import AutoSuggest, Suggestion
 from prompt_toolkit.buffer import Buffer
@@ -82,6 +83,60 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         aliases=("exit", "quit"),
     ),
 )
+
+
+def slash_commands_context() -> str:
+    """Shared command reference for roles answering questions about Kvist."""
+    ink = os.getenv("KVIST_COMMAND_FRONTEND") == "ink"
+    classic_only = {"commands", "status", "permissions", "diff", "bug"}
+    rows = []
+    for command in SLASH_COMMANDS:
+        if ink and command.name in classic_only:
+            continue
+        if ink:
+            aliases = ("exit", "quit") if command.name == "bye" else ()
+        else:
+            aliases = command.aliases
+        names = ", ".join(f"/{name}" for name in (command.name, *aliases))
+        description = "Show commands and keys" if ink and command.name == "help" else command.description
+        rows.append(f"- {names}: {description}")
+    if ink:
+        rows.extend([
+            "- /rename <name>: Set the active session's title",
+            "- /copy: Copy the last answer to the clipboard",
+            "- /debug: Show or hide debug events",
+            "- /clear: Clear the screen",
+        ])
+    return (
+        "== KVIST COMMAND REFERENCE ==\n\n"
+        "These are Kvist input commands, entered by the user in the command input, "
+        "not shell commands. This reference is available when the user asks how "
+        "to use Kvist or which command performs an operation. Suggest the relevant "
+        "command and its effect; match the detail to the question without assuming "
+        "the user is a beginner. Do not add an unsolicited tutorial. Describing a "
+        "command does not execute it or change your role's capabilities. Frontends "
+        "may expose these operations through menus instead.\n\n"
+        "COMMAND SYNTAX: Use only the command names and aliases listed below. "
+        "Do not invent slash commands, flags, subcommands or arguments from their "
+        "descriptions or from other assistants' conventions. When frontend details "
+        "are unknown, recommend the bare command. /role, /models, /provider, "
+        "/effort, /style and /settings-api open selection/configuration dialogs; "
+        "describe the choice to make in that dialog separately from the command. "
+        "Some frontends also accept inline selections, but that syntax is not "
+        "portable: do not assume it is available. /role offers auto, coder, reader, "
+        "devops, chat and universal. Known portable argument forms are "
+        "/verbose true|false, /strime true|false (custom providers only), "
+        + ("" if ink else "/permissions <shell command> (explain its permission decision, not execute it), /bug <report text>, ")
+        + "where supported in the list below. Angle-bracket text denotes a placeholder; "
+        "true|false denotes alternatives, not literal input. For other argument "
+        "forms, consult verified frontend help rather than guessing. If an "
+        "operation is absent from this reference, say that its command is not "
+        "documented here and point to /help. The reference does not reveal "
+        "the active role, provider, models, permission rules or other live settings; "
+        "use runtime information if supplied, otherwise say that these settings "
+        "are unknown. Never recommend a command absent from the list below.\n\n"
+        + "\n".join(rows)
+    )
 
 
 # The completion popup is intentionally styled like a compact command palette:

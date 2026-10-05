@@ -270,6 +270,25 @@ def test_apply_strime_mode_rejects_builtin_provider():
     assert agent.config.stream is True
 
 
+def test_ink_model_reference_matches_frontend_commands(monkeypatch):
+    import re
+    from pathlib import Path
+    from kernel.slash_commands import slash_commands_context
+
+    monkeypatch.setenv("KVIST_COMMAND_FRONTEND", "ink")
+    context = slash_commands_context()
+    source = (Path(__file__).resolve().parents[2] / "frontends/tui/ink/commands.ts").read_text()
+    frontend_names = set(re.findall(r'name: "([\w-]+)"', source))
+    rows = context.split("\n\n")[-1]
+    reference_names = {
+        name for row in rows.splitlines()
+        for name in re.findall(r"/([\w-]+)", row.split(":", 1)[0])
+    }
+    assert reference_names == frontend_names | {"bye", "exit"}
+    for unavailable in ("/status", "/permissions", "/commands", "/diff", "/bug"):
+        assert unavailable not in context
+
+
 def test_prompt_session_uses_vertical_styled_command_menu():
     try:
         session = main._get_session()

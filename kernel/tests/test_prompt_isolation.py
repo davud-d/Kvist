@@ -78,6 +78,32 @@ def test_constitution_precedes_every_acting_role(tmp_path):
         assert constitution not in _load_role_prompt(role)
 
 
+@pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "report", "universal"])
+def test_roles_receive_current_command_reference(tmp_path, role):
+    from kernel.slash_commands import SLASH_COMMANDS
+
+    agent = SimpleNamespace(
+        executor=SimpleNamespace(workspace=tmp_path),
+        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5"),
+        _session_styles={},
+        _ui=SimpleNamespace(),
+        _state=SimpleNamespace(current_agent_role=role, plan_phase="", read_only_goal=False),
+    )
+    built = (build_report_system_prompt(agent) if role == "report"
+             else build_role_system_prompt(agent, role))
+    for command in SLASH_COMMANDS:
+        assert f"/{command.name}:" in built or f"/{command.name}," in built
+        assert command.description in built
+        for alias in command.aliases:
+            assert f"/{alias}" in built
+    assert "without assuming the user is a beginner" in built
+    assert "Describing a command does not execute it" in built
+    assert "Do not invent slash commands, flags, subcommands or arguments" in built
+    assert "When frontend details are unknown, recommend the bare command" in built
+    assert "/role offers auto, coder, reader, devops, chat and universal" in built
+    assert "reference does not reveal the active role" in built
+
+
 def _report_agent(workspace, agents_style):
     return SimpleNamespace(
         executor=SimpleNamespace(workspace=workspace),

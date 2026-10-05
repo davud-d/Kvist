@@ -434,7 +434,8 @@ def build_role_system_prompt(
         role_prompt = end_session.offer_in_prompt(role_prompt, role)
     if native_tools:
         role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())
-    base = f"{_load_constitution()}\n\n{role_prompt}"
+    from kernel.slash_commands import slash_commands_context
+    base = f"{_load_constitution()}\n\n{role_prompt}\n\n{slash_commands_context()}"
     if plan_mode.offer_available(self) or self._state.plan_phase:
         base = f"{base}\n\n{_load_plan_mode_section()}"
     style = _style_context(self, role)
@@ -453,7 +454,8 @@ def build_report_system_prompt(self) -> str:
     has to survive into it. The workspace instruction file stays out, because
     the report prompt carries none of the rules that bound it.
     """
-    base = f"{_load_constitution()}\n\n{_load_role_prompt('report')}"
+    from kernel.slash_commands import slash_commands_context
+    base = f"{_load_constitution()}\n\n{_load_role_prompt('report')}\n\n{slash_commands_context()}"
     style = _style_context(self, "report")
     return f"{base}\n\n{style}" if style else base
 
