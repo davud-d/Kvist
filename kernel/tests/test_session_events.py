@@ -9,7 +9,9 @@ from pathlib import Path
 import pytest
 
 from kernel import session_events
+from kernel.event_stream_ui import EventStreamUI
 from kernel.executor import ExecutionResult
+from kernel.frontend_protocol import FrontendChannel
 from kernel.session_events import JOURNAL_SUFFIX, SessionJournal
 from kernel.session_store import run_session_op
 from kernel.tests.conftest import FakeLLMClient, requires_posix
@@ -172,6 +174,69 @@ def test_thoughts_are_journaled_as_their_last_snapshot(tmp_path):
     ]
     assert events[2]["text"] == "first idea, refined"
     assert events[1]["stream_id"] == events[2]["stream_id"] == events[3]["stream_id"]
+
+
+def _live_and_journaled(tmp_path, play):
+    """Run ``play(ui)`` on a JournalingUI over a real EventStreamUI; return both outputs."""
+    path = tmp_path / ".kvist" / "sessions" / "s.events.jsonl"
+    channel = FrontendChannel()
+    journal = SessionJournal(tmp_path, lambda: path, print)
+    ui = session_events.JournalingUI(EventStreamUI(channel), journal)
+
+    journal.begin_turn("go")
+    play(ui)
+    journal.end_turn()
+
+    live = [event.to_dict() for event in channel.drain()]
+    journaled = [entry["event"] for entry in session_events.read_history(path, tmp_path)["events"]]
+    return live, journaled
+
+
+def _stream_ids(events: list[dict], *kinds: str) -> list[str]:
+    return [event["stream_id"] for event in events if event["type"] in kinds]
+
+
+def test_journal_reuses_the_live_stream_id_of_each_answer(tmp_path):
+    def play(ui):
+        for answer in ("first", "second"):
+            with ui.live_markdown() as update:
+                update(answer)
+
+    live, journaled = _live_and_journaled(tmp_path, play)
+
+    live_ids = _stream_ids(live, "stream_start")
+    assert len(set(live_ids)) == 2
+    assert _stream_ids(journaled, "stream_start") == live_ids
+    assert _stream_ids(journaled, "stream_commit") == live_ids
+
+
+def test_journal_reuses_the_live_stream_id_of_streamed_reasoning(tmp_path):
+    def play(ui):
+        for answer in ("first", "second"):
+            with ui.live_markdown() as update:
+                update.reasoning(f"thinking about {answer}")
+                update(answer)
+
+    live, journaled = _live_and_journaled(tmp_path, play)
+
+    live_ids = _stream_ids(live, "reasoning_commit")
+    assert len(set(live_ids)) == 2
+    assert _stream_ids(journaled, "reasoning_commit") == live_ids
+    assert _stream_ids(journaled, "stream_start") == _stream_ids(live, "stream_start")
+
+
+def test_journal_reuses_the_live_stream_id_of_action_loop_reasoning(tmp_path):
+    def play(ui):
+        for thought in ("first idea", "second idea"):
+            ui.set_thinking("")
+            ui.set_thinking(thought)
+            ui.end_thinking()
+
+    live, journaled = _live_and_journaled(tmp_path, play)
+
+    live_ids = _stream_ids(live, "reasoning_commit")
+    assert len(set(live_ids)) == 2
+    assert _stream_ids(journaled, "reasoning_commit") == live_ids
 
 
 class _Quiet:

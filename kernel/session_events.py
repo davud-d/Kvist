@@ -20,6 +20,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -489,7 +490,14 @@ class JournalingUI:
 
     def __init__(self, ui: Any, journal: SessionJournal) -> None:
         object.__setattr__(self, "_ui", ui)
-        object.__setattr__(self, "_events", EventStreamUI(journal))
+        object.__setattr__(self, "_events", EventStreamUI(journal, self._live_stream_id))
+
+    def _live_stream_id(self) -> str:
+        # The journal copy of a stream opens right after the live copy, so the
+        # live UI's last id is the one its frontend already holds. A UI that
+        # sends no stream ids (the classic terminal) leaves the journal its own.
+        live_id = getattr(self._ui, "last_stream_id", "")
+        return live_id or uuid.uuid4().hex
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._ui, name)
@@ -534,8 +542,8 @@ class JournalingUI:
         self._forward("print_usage", usage)
 
     def set_thinking(self, text: str) -> None:
-        self._events.set_thinking(text)
         self._forward("set_thinking", text)
+        self._events.set_thinking(text)
 
     def end_thinking(self) -> None:
         self._events.end_thinking()
@@ -565,7 +573,7 @@ class JournalingUI:
 
     @contextlib.contextmanager
     def live_markdown(self) -> Iterator[Callable[[str], None]]:
-        with self._events.live_markdown() as record, self._ui.live_markdown() as show:
+        with self._ui.live_markdown() as show, self._events.live_markdown() as record:
             show_reasoning = getattr(show, "reasoning", None)
 
             def update(message: str) -> None:
