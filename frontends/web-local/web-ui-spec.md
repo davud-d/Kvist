@@ -50,7 +50,7 @@
 - таблица имён инструментов одна, в blocks.js. дубли из session.js (62-70) и views.js (4) убрать.
 
 ## reducer
-- client/features/blocks.js, чистая функция reduce(blocks, event) без dom и без глобального состояния.
+- client/features/blocks.js, чистая функция reduce(state, envelope) без dom, без глобального состояния, без часов и случайности. envelope: {seq?, ts?, durable?, event}.
 - через неё идут и живой sse, и восстановление из /api/v1/history.
 - в reducer живут: склейка stream_chunk и reasoning_chunk (append=true добавляет дельту, append=false или отсутствие поля заменяет текст, stream_commit ставит финальный), связь по call_id, группы по batch_id, секунды reasoning, дедупликация по seq.
 - тесты: node --test, frontends/web-local/tests/client/blocks.test.mjs, без браузера. кейсы: дельты стрима, снимок при append=false, дельты reasoning, commit. сценарий стрима в redesign.mjs остаётся.
@@ -83,8 +83,8 @@
 после каждого шага: тесты, дифф, остановка до ответа.
 0. база: сверка спеки с кодом, ветка web-redesign, классификация красных сценариев.
 1. токены и css: новый :root, удаление эффектов, раскладка, js не менять.
-2. blocks.js, тесты, переключение старого рендера на reducer без смены вида.
-3. feed.js: блоки user, text, tool, reasoning, notice, input.
+2. blocks.js и тесты. только reducer, без dom; session.js, views.js, app.js и styles.css не меняются.
+3. feed.js: переключение отрисовки на reducer, блоки user, text, tool, reasoning, notice, input.
 4. сайдбар и индикаторы.
 5. поле ввода и нижняя строка.
 6. diff.js.
