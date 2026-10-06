@@ -1,110 +1,254 @@
 import { el, markdown } from '/assets/utils/ui.js';
 import { TOOL_NAMES } from '/assets/features/blocks.js';
+import { callSeconds, formatDuration, groupStatus, toolStatus, toolTarget } from '/assets/features/format.js';
 
-// Draws the blocks of a reducer state into one container. A row is created once per block (per call for a
-// tool block) and redrawn only when its block object is not the one drawn last: the reducer replaces an
-// object whenever it changes it, so an unchanged block keeps its identity.
-// Draws what the feed showed before the reducer: the person's messages, answers, tool calls and errors.
-// Reasoning, input, notices other than errors and the meta state have no row yet.
+// Draws the blocks of a reducer state into one container. A row is created once per block and redrawn only
+// when its block object is not the one drawn last: the reducer replaces an object whenever it changes it, so
+// an unchanged block keeps its identity. Event text (tool output, reasoning, errors) always goes in through
+// textContent. What the person opened or closed is kept here, by block key, never in the reducer.
+// Input blocks and the meta state have no row here.
 
-// argv arrives as a list; a comma-joined default toString is not a command.
-const TARGET_KEYS = ['path', 'command', 'query', 'pattern', 'url', 'dir', 'directory'];
-function actionTarget(action, args) {
-    if (action === 'git_status') return 'git status';
-    if (action === 'git_diff') return `git diff ${args.path || ''}`.trim();
-    for (const key of TARGET_KEYS) {
-        const value = args[key];
-        if (typeof value === 'string' && value) return value;
-        if (Array.isArray(value) && value.length) return value.map(String).join(' ');
-    }
-    const paths = args.paths;
-    if (Array.isArray(paths) && paths.length) return paths.map(String).join(', ');
-    return '';
-}
+const now = () => Date.now() / 1000;
 
-function messageRow(role, cls) {
-    const node = el('article', `message ${role === 'You' ? 'user' : ''} ${cls}`);
+function messageRow(block) {
+    const node = el('article', `message ${block.kind === 'user' ? 'user' : ''}`);
     const label = el('div', 'message-role');
-    if (role === 'Kvist') {
+    if (block.kind === 'text') {
         const mark = el('img');
         mark.src = '/assets/kvist-mark.svg';
         mark.alt = '';
         label.append(mark);
     }
-    label.append(document.createTextNode(role));
+    label.append(document.createTextNode(block.kind === 'user' ? 'You' : 'Kvist'));
+    node.append(label);
+    if (block.plan) node.append(el('div', 'message-label', 'plan'));
     const body = el('div', 'message-body');
-    node.append(label, body);
+    node.append(body);
     return { node, body, text: null, streaming: null };
 }
 
-// [role, class, text] of a block that is a message row, or null.
-function messageOf(block) {
-    if (block.kind === 'user') return ['You', '', block.text];
-    if (block.kind === 'text') return ['Kvist', '', block.text];
-    if (block.kind === 'notice' && block.source === 'error') return ['Error', 'error', block.text || 'Kvist failed'];
-    return null;
-}
-
-function drawMessage(row, text, streaming) {
-    if (row.text === text && row.streaming === streaming) return;
+function drawMessage(row, block) {
+    const streaming = block.streaming === true;
+    if (row.text === block.text && row.streaming === streaming) return;
     // The answer is plain text while it streams and markdown once it is final.
-    if (streaming) row.body.textContent = text;
-    else markdown(row.body, text);
-    row.text = text;
+    if (streaming) row.body.textContent = block.text;
+    else markdown(row.body, block.text);
+    row.text = block.text;
     row.streaming = streaming;
 }
 
-function toolRow() {
+// The text of a notice block, or null when it has no row: connection.* belong to the footer.
+function noticeText(block) {
+    const { omitted_turns: turns, omitted_events: events } = block.data;
+    switch (block.source) {
+    case 'error': return block.text || 'Kvist failed';
+    case 'sandbox_notice': return block.text || null;
+    case 'session_ended': return block.text || 'Session ended';
+    case 'journal_notice': {
+        const parts = [];
+        if (turns) parts.push(`${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown`);
+        if (events) parts.push(`${events} ${events === 1 ? 'event' : 'events'} of this turn not recorded`);
+        return parts.join(', ') || 'Part of the history was left out';
+    }
+    default: return null;
+    }
+}
+
+function noticeRow() {
+    const node = el('div', 'notice');
+    const text = el('span', 'notice-text');
+    node.append(text);
+    return { node, text, drawn: null };
+}
+
+function drawNotice(row, block) {
+    row.node.classList.toggle('notice-error', block.level === 'error');
+    row.text.textContent = noticeText(block);
+}
+
+// A details element whose open state the person owns once they have toggled it: click covers the mouse,
+// Enter and Space on the focused summary (they fire a click on it), and nothing else changes `open`.
+function expandable(feed, key, node, summary, canToggle = () => true) {
+    summary.addEventListener('click', event => {
+        if (!canToggle()) event.preventDefault();
+        else feed.userOpen.set(key, !node.open);
+    });
+}
+
+// The default applies only when it changes, so an event never closes what the person opened.
+function applyOpen(feed, key, row, wanted) {
+    if (feed.userOpen.has(key)) {
+        if (row.node.open !== feed.userOpen.get(key)) row.node.open = feed.userOpen.get(key);
+        return;
+    }
+    if (row.defaultOpen === wanted) return;
+    row.defaultOpen = wanted;
+    row.node.open = wanted;
+}
+
+function callRow(feed, key) {
     const node = el('details', 'tool tool-running');
     const summary = el('summary');
-    summary.append(el('span', 'tool-label'), el('span', 'tool-target'), el('span', 'tool-status'));
-    node.append(summary, el('pre'));
-    return {
-        node, label: summary.children[0], target: summary.children[1], status: summary.children[2], output: node.lastChild,
-    };
+    const label = el('span', 'tool-label'), target = el('span', 'tool-target');
+    const status = el('span', 'tool-status'), time = el('span', 'tool-time');
+    summary.append(label, target, status, time);
+    const output = el('pre');
+    node.append(summary, output);
+    expandable(feed, key, node, summary);
+    return { node, label, target, status, time, output, key, drawn: null, defaultOpen: false };
 }
 
-function drawTool(row, call) {
-    const running = call.status === 'running', failed = call.status === 'failed';
-    // The result event carries no arguments, so a finished row shows only the targets that need none.
-    const target = actionTarget(call.actionType, running ? call.args : {});
+function drawCall(feed, row, call) {
+    const state = toolStatus(call), running = state === 'running', failed = state === 'failed';
+    const seconds = callSeconds(call);
     row.label.textContent = TOOL_NAMES[call.actionType]?.label || call.actionType;
-    row.target.textContent = target ? `(${target})` : '';
+    row.target.textContent = toolTarget(call);
     row.node.classList.toggle('tool-running', running);
     row.node.classList.toggle('tool-failed', failed);
-    row.status.textContent = failed ? (typeof call.exitCode === 'number' && call.exitCode !== 0 ? `exit ${call.exitCode}` : 'failed') : '';
-    row.output.textContent = running ? call.output : call.output || '(no output)';
+    row.status.textContent = failed ? (Number.isInteger(call.exitCode) && call.exitCode !== 0 ? `exit ${call.exitCode}` : 'failed') : '';
+    row.time.textContent = !running && seconds !== null ? formatDuration(seconds) : '';
+    row.output.textContent = running ? call.output : call.output || call.summary || '(no output)';
+    applyOpen(feed, row.key, row, failed && call.output !== '');
 }
 
-// The rows a state shows, in order: [key, kind, drawn object].
+// One block of calls: a lone call is a plain row, two or more sit under a "N calls" header.
+function toolBlockRow(feed, blockId) {
+    const node = el('div', 'tool-block');
+    return { node, blockId, calls: new Map(), group: null, drawn: null };
+}
+
+function groupParts(feed, row) {
+    const node = el('details', 'tool tool-group tool-running');
+    const summary = el('summary');
+    const label = el('span', 'tool-label'), time = el('span', 'tool-time');
+    summary.append(label, el('span', 'tool-target'), time);
+    const body = el('div', 'tool-group-body');
+    node.append(summary, body);
+    expandable(feed, row.blockId, node, summary);
+    return { node, label, time, body, defaultOpen: false };
+}
+
+function drawToolBlock(feed, row, block) {
+    if (block.calls.length > 1 && !row.group) {
+        row.group = groupParts(feed, row);
+        row.group.body.append(...Array.from(row.calls.values(), item => item.node));
+        row.node.append(row.group.node);
+    }
+    const parent = row.group ? row.group.body : row.node;
+    for (const call of block.calls) {
+        let item = row.calls.get(call.key);
+        if (!item) {
+            item = callRow(feed, `${row.blockId}:${call.key}`);
+            row.calls.set(call.key, item);
+            parent.append(item.node);
+        }
+        if (item.drawn === call) continue;
+        drawCall(feed, item, call);
+        item.drawn = call;
+    }
+    if (!row.group) return;
+    const group = row.group, state = groupStatus(block.calls), running = state === 'running';
+    group.label.textContent = `${block.calls.length} calls`;
+    group.node.classList.toggle('tool-running', running);
+    group.node.classList.toggle('tool-failed', state === 'failed');
+    const starts = block.calls.map(call => call.startedAt).filter(Number.isFinite);
+    const ends = block.calls.map(call => call.endedAt).filter(Number.isFinite);
+    const seconds = !running && starts.length && ends.length ? callSeconds({ startedAt: Math.min(...starts), endedAt: Math.max(...ends) }) : null;
+    group.time.textContent = seconds === null ? '' : formatDuration(seconds);
+    applyOpen(feed, row.blockId, group, !(state === 'ok' && block.turnEnded === true));
+}
+
+function reasoningRow(feed, key) {
+    const node = el('details', 'reasoning');
+    const summary = el('summary'), label = el('span', 'reasoning-label');
+    summary.append(label);
+    const body = el('div', 'reasoning-body');
+    node.append(summary, body);
+    const row = { node, summary, label, body, text: null, block: null, seenAt: now(), drawn: null };
+    expandable(feed, key, node, summary, () => row.text !== '');
+    return row;
+}
+
+// "thinking 12s" while the thought streams, "thought for 12s" after. The elapsed time runs from the
+// envelope ts of reasoning_start, or from the moment the row first appeared when the event had none.
+function drawReasoningLabel(row) {
+    const block = row.block;
+    if (block.streaming) {
+        const since = Number.isFinite(block.startedAt) ? block.startedAt : row.seenAt;
+        row.label.textContent = `thinking ${formatDuration(Math.max(0, now() - since))}`;
+        return;
+    }
+    row.label.textContent = block.seconds > 0 ? `thought for ${formatDuration(block.seconds)}` : 'thought';
+}
+
+function drawReasoning(row, block) {
+    row.block = block;
+    const text = block.text.trim() === '' ? '' : block.text;
+    if (row.text !== text) {
+        row.body.textContent = text;
+        row.text = text;
+        row.node.classList.toggle('reasoning-empty', text === '');
+        // Nothing to open: the row leaves the tab order and stays closed.
+        row.summary.tabIndex = text === '' ? -1 : 0;
+        if (text === '') row.node.open = false;
+    }
+    drawReasoningLabel(row);
+}
+
+function messageOf(block) {
+    return block.kind === 'user' || block.kind === 'text';
+}
+
+// The rows a state shows, in order: [key, kind, block].
 function rowsOf(blocks) {
     const list = [];
     for (const block of blocks) {
-        if (block.kind === 'tool') {
-            for (const call of block.calls) list.push([`${block.id}:${call.key}`, 'tool', call]);
-        } else if (messageOf(block)) list.push([block.id, 'message', block]);
+        if (block.kind === 'tool' || block.kind === 'reasoning') list.push([block.id, block.kind, block]);
+        else if (messageOf(block)) list.push([block.id, 'message', block]);
+        else if (block.kind === 'notice' && noticeText(block) !== null) list.push([block.id, 'notice', block]);
     }
     return list;
 }
 
+const ROWS = {
+    message: { create: (feed, key, block) => messageRow(block), draw: (feed, row, block) => drawMessage(row, block) },
+    notice: { create: () => noticeRow(), draw: (feed, row, block) => drawNotice(row, block) },
+    tool: { create: (feed, key) => toolBlockRow(feed, key), draw: drawToolBlock },
+    reasoning: { create: reasoningRow, draw: (feed, row, block) => drawReasoning(row, block) },
+};
+
 export function createFeed(container) {
     const rows = new Map();
+    const feed = { userOpen: new Map() };
+    let timer = 0;
+    // One timer per feed, alive only while a thought streams; it redraws the labels of those rows.
+    const tick = () => {
+        let streaming = false;
+        for (const row of rows.values()) {
+            if (row.block?.streaming !== true) continue;
+            streaming = true;
+            drawReasoningLabel(row);
+        }
+        if (!streaming || !container.isConnected) stop();
+    };
+    const stop = () => { clearInterval(timer); timer = 0; };
     return {
         render(state) {
             const seen = new Set();
             let next = container.firstChild;
-            for (const [key, kind, drawn] of rowsOf(state.blocks)) {
+            let streaming = false;
+            for (const [key, kind, block] of rowsOf(state.blocks)) {
                 let row = rows.get(key);
                 if (!row) {
-                    row = { ...(kind === 'tool' ? toolRow() : messageRow(...messageOf(drawn))), drawn: null };
+                    row = ROWS[kind].create(feed, key, block);
                     rows.set(key, row);
                 }
                 seen.add(key);
-                if (row.drawn !== drawn) {
-                    if (kind === 'tool') drawTool(row, drawn);
-                    else drawMessage(row, messageOf(drawn)[2], drawn.streaming === true);
-                    row.drawn = drawn;
+                if (row.drawn !== block) {
+                    ROWS[kind].draw(feed, row, block);
+                    row.drawn = block;
                 }
+                if (kind === 'reasoning' && block.streaming) streaming = true;
                 if (row.node === next) next = next.nextSibling;
                 else container.insertBefore(row.node, next);
             }
@@ -112,7 +256,13 @@ export function createFeed(container) {
                 if (seen.has(key)) continue;
                 row.node.remove();
                 rows.delete(key);
+                for (const item of row.calls?.values() ?? []) feed.userOpen.delete(item.key);
+                feed.userOpen.delete(key);
             }
+            if (streaming && !timer) timer = setInterval(tick, 1000);
+            else if (!streaming && timer) stop();
         },
+        // Called before the container is reused for another session.
+        destroy: stop,
     };
 }

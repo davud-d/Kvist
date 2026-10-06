@@ -260,17 +260,72 @@ test('a chunk after the commit of its stream is ignored, for the answer and for 
     assert.deepEqual(s, sealed);
 });
 
-test('reducesLive keeps transient live events, stream_start and hello, and drops other durable ones', () => {
+test('reducesLive keeps transient live events, stream_start, reasoning_* and hello, and drops other durable ones', () => {
     const live = (event, durable) => ({ event, durable });
     assert.equal(reducesLive(live(streamChunk('a', 'x', true), false)), true);
     assert.equal(reducesLive(live({ type: 'action_output', step: 1, output: 'x', call_id: 'c' }, false)), true);
     assert.equal(reducesLive(live(streamStart('a'), true)), true);
     assert.equal(reducesLive(live({ type: 'hello' }, true)), true);
-    for (const event of [message('m'), streamCommit('a', 'x'), step(1, 'c', 'read_file'), result(1, 'c', 'read_file'), final('end'), reasoningCommit('a', 1)]) {
+    // The journal writes a thought only when it ends, so its live copy is the only "thinking" there is.
+    for (const event of [reasoningStart('a'), reasoningChunk('a', 'x', true), reasoningCommit('a', 1)]) {
+        assert.equal(reducesLive(live(event, true)), true, event.type);
+    }
+    for (const event of [message('m'), streamCommit('a', 'x'), step(1, 'c', 'read_file'), result(1, 'c', 'read_file'), final('end')]) {
         assert.equal(reducesLive(live(event, true)), false, event.type);
     }
     assert.equal(reducesLive(live(message('m'))), true, 'an envelope without durable is not a durable one');
     assert.equal(reducesLive(undefined), true);
+});
+
+test('a thought streams live, then the journal triple finds it, places it in order and changes nothing else', () => {
+    // live: no seq, the broker ts; journal: seq, the record ts
+    let s = fold([env(reasoningStart('a'), null, 500.5), env(reasoningChunk('a', 'th', true)), env(reasoningChunk('a', 'ink', true))]);
+    assert.deepEqual([s.blocks[0].text, s.blocks[0].streaming, s.blocks[0].startedAt], ['think', true, 500.5]);
+    s = fold([env(reasoningCommit('a', 3), null, 504)], s);
+    assert.deepEqual([s.blocks[0].streaming, s.blocks[0].seconds], [false, 3]);
+    // journal replay: an earlier record first, then the triple written at commit time
+    s = fold([env(user('go'), 1, 499), env(reasoningStart('a'), 2, 504), env(reasoningChunk('a', 'think'), 3, 504), env(reasoningCommit('a', 3), 4, 504)], s);
+    assert.deepEqual(kinds(s), ['user', 'reasoning']);
+    assert.deepEqual([s.blocks[1].text, s.blocks[1].streaming, s.blocks[1].seconds, s.blocks[1].startedAt], ['think', false, 3, 500.5]);
+});
+
+test('a journal snapshot that overtakes the live deltas leaves the final text, not a doubled one', () => {
+    let s = fold([env(reasoningStart('a'), null, 10), env(reasoningChunk('a', 'ab', true))]);
+    s = fold(seqd([reasoningStart('a'), reasoningChunk('a', 'abc'), reasoningCommit('a', 1)]), s);
+    s = fold([env(reasoningChunk('a', 'c', true))], s); // a live delta that arrives late
+    assert.equal(s.blocks.length, 1);
+    assert.deepEqual([s.blocks[0].text, s.blocks[0].streaming], ['abc', false]);
+});
+
+test('tool: a call keeps the ts of its step and of its result; a ts that is not a time is no time', () => {
+    let s = fold([env(step(1, 'c1', 'run_shell', {}, 'b1'), 1, 100), env(step(2, 'c2', 'read_file', {}, 'b1'), 2, 0)]);
+    const calls = () => s.blocks[0].calls;
+    assert.deepEqual(calls().map(c => [c.startedAt, c.endedAt]), [[100, null], [null, null]]);
+    s = fold([env(result(1, 'c1', 'run_shell'), 3, 112.5), env(result(2, 'c2', 'read_file'), 4)], s);
+    assert.deepEqual(calls().map(c => [c.startedAt, c.endedAt]), [[100, 112.5], [null, null]]);
+    // a result alone opens a call that has no start
+    s = fold([env(result(3, 'c3', 'git_status'), 5, 120)], s);
+    assert.deepEqual([s.blocks.at(-1).calls[0].startedAt, s.blocks.at(-1).calls[0].endedAt], [null, 120]);
+    // a second event of the same step does not move the start
+    s = fold([env(step(1, 'c1', 'run_shell', { command: ['ls'] }), 6, 130)], s);
+    assert.equal(calls()[0].startedAt, 100);
+});
+
+test('turn_end and the exit of the agent process mark the tool blocks of the turn final', () => {
+    let s = fold([env(user('go')), env(step(1, 'c1', 'read_file')), env(result(1, 'c1', 'read_file')), env(message('mid'))]);
+    assert.equal(s.blocks.find(b => b.kind === 'tool').turnEnded, undefined);
+    const before = s.blocks;
+    s = fold([env({ type: 'turn_end' })], s);
+    assert.deepEqual(s.blocks.map(b => b.turnEnded), [undefined, true, undefined]);
+    assert.equal(s.blocks[0], before[0], 'blocks that are not tools keep their identity');
+    const ended = s.blocks[1];
+    s = fold([env({ type: 'turn_end' })], s);
+    assert.equal(s.blocks[1], ended, 'a block that is final is not replaced again');
+    // the next turn opens a block that is not final, and a process exit closes it
+    s = fold([env(user('again')), env(step(1, 'c9', 'run_shell'))], s);
+    assert.equal(s.blocks.at(-1).turnEnded, undefined);
+    s = fold([env({ type: 'agent.process_exited', code: 1 })], s);
+    assert.equal(s.blocks.at(-1).turnEnded, true);
 });
 
 for (const [name, events] of Object.entries(SCENARIOS)) {

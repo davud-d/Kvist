@@ -59,10 +59,11 @@ def test_client_recovers_durable_events_without_second_transcript_or_stale_sse_c
 
     # A journal-backed event wakes recovery rather than being rendered as a
     # second transcript. stream_start is deliberately idempotent so cumulative
-    # transient chunks still have an immediate target.
+    # transient chunks still have an immediate target; reasoning_* are taken live
+    # too, because the journal writes a thought only once it has ended.
     assert "const durable = envelope.durable === true" in session
     assert re.search(r"if \(reducesLive\(envelope\)\)\s+applyEvent\(event, \{ ts: envelope.ts \}\)", session)
-    assert "const LIVE_DURABLE = new Set(['stream_start', 'hello'])" in blocks
+    assert "const LIVE_DURABLE = new Set(['stream_start', 'reasoning_start', 'reasoning_chunk', 'reasoning_commit', 'hello'])" in blocks
     assert "activeRecovery.dirty = true" in session
     assert "while (recovery.dirty && currentSelectionMatches(selection, generation))" in session
     assert "look(s, 'streams', key)" in blocks and "env.seq == null" in blocks

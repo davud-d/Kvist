@@ -54,8 +54,8 @@ function rememberEvent(event) {
     // A compliant producer never includes a secret's existing value, but keep
     // browser state safe if an older/third-party producer gets that wrong.
     const value = event.type === "input_request" && event.kind === "secret" ? { ...event, current_value: "" } : event;
-    // stream_start arrives live and again from the journal; no view reads it.
-    if (['stream_chunk', 'status', 'reasoning_chunk', 'stream_start'].includes(event.type))
+    // The reducer takes these live and again from the journal; no view reads them.
+    if (['stream_chunk', 'status', 'reasoning_chunk', 'stream_start', 'reasoning_start', 'reasoning_commit'].includes(event.type))
         return;
     if (event.type === 'action_output') {
         const previous = state.events.findLastIndex(e => e.type === 'action_output' && e.call_id === event.call_id && e.step === event.step);
@@ -146,6 +146,7 @@ export async function openSession(serverId, workspace, session) {
     const generation = ++selectionGeneration;
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
     feedState = initialState();
+    feed.destroy();
     feed = createFeed(conversation);
     followTail = true;
     conversation.replaceChildren();

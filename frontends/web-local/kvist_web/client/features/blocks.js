@@ -30,10 +30,11 @@ export const TOOL_NAMES = Object.freeze(Object.fromEntries(Object.entries(NAMES)
 
 // An answer of its own follows these, so a call row would only repeat it (session.js:59).
 const TERMINAL_ACTIONS = new Set(['final_answer', 'report_to_user', 'refuse']);
-// Live envelopes the client reduces itself: everything transient, plus stream_start (it reserves the row
-// early) and hello. Every other durable event reaches the feed through the journal, whose seq deduplicates
+// Live envelopes the client reduces itself: everything transient, plus stream_start and reasoning_* (the
+// journal writes a thought only when it ends, so without the live copy there is no "thinking" row while it
+// streams) and hello. Every other durable event reaches the feed through the journal, whose seq deduplicates
 // it; reducing its live copy as well would show it twice (session.js applyLive).
-const LIVE_DURABLE = new Set(['stream_start', 'hello']);
+const LIVE_DURABLE = new Set(['stream_start', 'reasoning_start', 'reasoning_chunk', 'reasoning_commit', 'hello']);
 export const reducesLive = envelope => envelope?.durable !== true || LIVE_DURABLE.has(envelope.event?.type);
 // Known events that never reach the feed or meta.
 const DROPPED = new Set(['live_start', 'live_stop', 'debug', 'manifest', 'connection.log']);
@@ -70,6 +71,11 @@ function patch(s, id, fn) {
     blocks[i] = fn(blocks[i]);
     return { ...s, blocks };
 }
+// Moves a block to the end: a live row reserved early takes its place in journal order.
+function toEnd(s, id) {
+    const i = at(s, id);
+    return { ...s, blocks: [...s.blocks.slice(0, i), ...s.blocks.slice(i + 1), s.blocks[i]] };
+}
 const notice = (s, source, level, text = '', data = {}) => add(s, { kind: 'notice', source, level, text, data })[0];
 const text = (s, block) => add(s, { kind: 'text', ...block })[0];
 const num = (value, fallback = null) => (typeof value === 'number' ? value : fallback);
@@ -78,6 +84,12 @@ const num = (value, fallback = null) => (typeof value === 'number' ? value : fal
 function closeInputs(s) {
     if (!s.blocks.some(b => b.kind === 'input' && b.answered === null)) return s;
     return { ...s, blocks: s.blocks.map(b => (b.kind === 'input' && b.answered === null ? { ...b, answered: { summary: '', closed: true } } : b)) };
+}
+
+// A turn that ends leaves its tool blocks final, which is what lets the feed fold a finished group.
+function endTurn(s) {
+    if (!s.blocks.some(b => b.kind === 'tool' && !b.turnEnded)) return s;
+    return { ...s, blocks: s.blocks.map(b => (b.kind === 'tool' && !b.turnEnded ? { ...b, turnEnded: true } : b)) };
 }
 
 // stream_* (text) and reasoning_* share chunk logic; only the key prefix differs.
@@ -91,8 +103,7 @@ function streamStart(s, e, env) {
     }
     if (env.seq == null) return s;
     // The live row was reserved early; its durable start places it in journal order (session.js:183).
-    const i = at(s, id);
-    return { ...s, blocks: [...s.blocks.slice(0, i), ...s.blocks.slice(i + 1), s.blocks[i]] };
+    return toEnd(s, id);
 }
 // frontend_protocol.py:218-233 and 259-274; append absent = cumulative snapshot (older cores, journal)
 const chunk = prefix => (s, e) => {
@@ -116,7 +127,9 @@ function streamCommit(s, e) {
 // frontend_protocol.py:247-256; startedAt is the envelope ts, the renderer ticks while streaming
 function reasoningStart(s, e, env) {
     const key = `r:${e.stream_id}`;
-    if (typeof e.stream_id !== 'string' || look(s, 'streams', key)) return s;
+    if (typeof e.stream_id !== 'string') return s;
+    const known = look(s, 'streams', key);
+    if (known) return env.seq == null ? s : toEnd(s, known);
     const [next, id] = add(s, { kind: 'reasoning', streamId: e.stream_id, text: '', streaming: true, startedAt: num(env.ts), seconds: null });
     return reg(next, 'streams', key, id);
 }
@@ -140,8 +153,10 @@ const callKey = e => e.call_id || `step:${e.step}`;
 const newCall = e => ({
     key: callKey(e), callId: e.call_id || '', step: e.step, actionType: e.action_type, args: e.action_args || {},
     description: e.action_description || '', userMessage: e.user_message || '', status: 'running', ok: null,
-    output: '', summary: '', exitCode: null, path: null, firstLine: null,
+    output: '', summary: '', exitCode: null, path: null, firstLine: null, startedAt: null, endedAt: null,
 });
+// The envelope ts when it is a time: the journal writes 0.0 for a record whose ts it could not parse.
+const stamp = env => (Number.isFinite(env.ts) && env.ts > 0 ? env.ts : null);
 // A known call is updated in place; a new one joins the block of its batch_id or opens its own.
 function upsertCall(s, e, change) {
     const key = callKey(e), known = look(s, 'calls', key);
@@ -155,16 +170,18 @@ function upsertCall(s, e, change) {
     }
     return reg(next, 'calls', key, id);
 }
-const step = (s, e) => TERMINAL_ACTIONS.has(e.action_type) ? s : upsertCall(s, e, c => ({
+const step = (s, e, env) => TERMINAL_ACTIONS.has(e.action_type) ? s : upsertCall(s, e, c => ({
     ...c, actionType: e.action_type, args: e.action_args || c.args,
     description: e.action_description || c.description, userMessage: e.user_message || c.userMessage,
+    startedAt: c.startedAt ?? stamp(env),
 }));
-const actionResult = (s, e) => {
+const actionResult = (s, e, env) => {
     if (TERMINAL_ACTIONS.has(e.action_type)) return s;
     const code = num(e.exit_code), failed = e.ok === false || (code !== null && code !== 0);
     return upsertCall(s, e, c => ({
         ...c, actionType: e.action_type || c.actionType, status: failed ? 'failed' : 'ok', ok: e.ok ?? null,
         output: e.output || '', summary: e.summary || '', exitCode: code, path: e.path ?? null, firstLine: num(e.first_line),
+        endedAt: stamp(env),
     }));
 };
 // A rolling snapshot, not a delta; a finished call keeps its final output.
@@ -249,11 +266,11 @@ const HANDLERS = {
     // frontend_protocol.py:447-461
     route: (s, e) => meta(s, { route: { role: e.role, source: e.source } }),
     // event_stdio.py:406, 528; session_events.py:356-359
-    turn_end: (s, e) => closeInputs(meta(s, { turn_end: { stopped_by_user: e.stopped_by_user === true } })),
+    turn_end: (s, e) => endTurn(closeInputs(meta(s, { turn_end: { stopped_by_user: e.stopped_by_user === true } }))),
     // processes.py:348 (raw value; the sidebar state is derived elsewhere)
     'agent.state_changed': (s, e) => meta(s, { agent: { state: e.state ?? null, code: null } }),
     // processes.py:322
-    'agent.process_exited': (s, e) => closeInputs(meta(s, { agent: { state: null, code: num(e.code) } })),
+    'agent.process_exited': (s, e) => endTurn(closeInputs(meta(s, { agent: { state: null, code: num(e.code) } }))),
 };
 
 export function reduce(state, envelope) {

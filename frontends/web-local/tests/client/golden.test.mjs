@@ -18,11 +18,13 @@ const liveClient = envelopes => fromLive(envelopes).filter(reducesLive);
 
 // Excluded from every comparison:
 //  - block ids (b1, b2, ...): they count blocks, and the live path has fewer;
-//  - startedAt: the envelope timestamp, which differs between the live envelope and the journal record;
+//  - startedAt and endedAt (of a block and of its calls): the envelope timestamp, which differs between the
+//    live envelope and the journal record;
 //  - user blocks on the live side: the core writes the `user` record only into the journal, so a live
 //    stream never contains one (session_events.py begin_turn);
 //  - meta: usage is summed per event live but written once per turn in the journal, hello and route are live-only state.
-const comparable = state => state.blocks.filter(b => b.kind !== 'user').map(({ id, startedAt, ...rest }) => rest);
+const withoutCallTimes = ({ calls, ...rest }) => (calls ? { ...rest, calls: calls.map(({ startedAt, endedAt, ...call }) => call) } : rest);
+const comparable = state => state.blocks.filter(b => b.kind !== 'user').map(({ id, startedAt, ...rest }) => withoutCallTimes(rest));
 
 test('the fixtures are what the core wrote: two turns, a stream, a two-call batch with output, an answer', () => {
     const types = events => events.map(e => e.type);
