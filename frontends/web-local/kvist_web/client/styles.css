@@ -1564,10 +1564,13 @@ svg {
   }
 }
 
+/* Below the column width the rows fill the box: the gutter goes to the right only, so the text keeps the
+   left edge of the input. */
 @media (max-width: 800px) {
   .conversation {
     padding-left: 16px;
     padding-right: 16px;
+    scrollbar-gutter: stable;
   }
 
   .composer-area {

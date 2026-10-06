@@ -396,10 +396,12 @@ try {
         const narrow = await measure();
         assert.deepEqual(narrow.padding, ['16px', '16px']);
         assert(narrow.row[1] <= 790 - 32 && narrow.scroll, JSON.stringify(narrow));
+        assert.equal(narrow.row[0], narrow.field[0], `790: the text keeps the left edge of the input ${JSON.stringify(narrow)}`);
         await page.setViewportSize({ width: 390, height: 844 });
         const phone = await measure();
         assert.deepEqual(phone.padding, ['16px', '16px']);
-        assert(phone.scroll && phone.row[0] >= 16 && phone.row[0] + phone.row[1] <= 390 - 16 + 1, JSON.stringify(phone));
+        assert(phone.scroll && phone.row[0] + phone.row[1] <= 390 - 16 + 1, JSON.stringify(phone));
+        assert.equal(phone.row[0], phone.field[0], `390: the text keeps the left edge of the input ${JSON.stringify(phone)}`);
         await page.setViewportSize({ width: 1440, height: 900 });
         await shot('column');
     });
