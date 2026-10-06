@@ -54,6 +54,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 a:focus-visible,
+summary:focus-visible,
 [tabindex="0"]:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -169,22 +170,30 @@ svg {
   min-height: 0;
 }
 
+/* The scroll box spans the main column, so its scrollbar sits at the window edge, and the rows are the
+   760px column. A max-width on the box itself counted its padding (border-box) and its scrollbar, which
+   left 712px of text. Both gutters are reserved so the column stays centered under the input. */
 .conversation {
   height: 100%;
   overflow: auto;
   overscroll-behavior: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: stable both-edges;
   padding: 20px 24px;
-  max-width: var(--content-max);
-  margin: 0 auto;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
 
+.conversation > * {
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* The input has no scrollbar: its max-width is the column plus the padding it counts. */
 .composer-area {
   flex-shrink: 0;
   padding: 8px 24px 10px;
-  max-width: var(--content-max);
+  max-width: calc(var(--content-max) + 48px);
   margin: 0 auto;
   width: 100%;
 }
@@ -469,7 +478,7 @@ svg {
 
 /* Conversation */
 .message {
-  margin: 0 0 18px;
+  margin-bottom: 18px;
   content-visibility: auto;
   contain-intrinsic-size: auto 80px;
 }
@@ -488,6 +497,17 @@ svg {
   line-height: 1.55;
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+.conversation > :not(.message) + .message {
+  margin-top: 12px;
+}
+
+.message-label {
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .message.user .message-body {
@@ -547,11 +567,8 @@ svg {
   font-size: inherit;
 }
 
-.message.error .message-body {
-  color: var(--err);
-}
-
-/* Tool rows: status mark, action, target, result */
+/* Tool rows: status mark, action, target, exit code, time. Marks use child selectors: a group's status
+   must not reach the rows inside it. */
 .tool {
   margin: 0;
   content-visibility: auto;
@@ -569,12 +586,17 @@ svg {
   gap: 8px;
 }
 
+.conversation .tool summary {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
 .tool summary::-webkit-details-marker,
 .tool summary::marker {
   display: none;
 }
 
-.tool summary::before {
+.tool > summary::before {
   content: '\2713';
   color: var(--ok);
   width: 12px;
@@ -583,17 +605,17 @@ svg {
   font-size: 12px;
 }
 
-.tool-running summary::before {
+.tool-running > summary::before {
   content: '';
-  height: 10px;
-  width: 10px;
+  box-sizing: border-box;
+  height: 12px;
   border-radius: 50%;
   border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
   border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
 
-.tool.tool-failed summary::before {
+.tool.tool-failed > summary::before {
   content: '\2715';
   color: var(--err);
 }
@@ -604,7 +626,7 @@ svg {
 }
 
 .tool-label {
-  font-weight: 600;
+  flex: none;
 }
 
 .tool-target {
@@ -613,21 +635,27 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--mono);
-  font-size: 12.5px;
   color: var(--text-3);
 }
 
 .tool-status {
+  flex: none;
   color: var(--err);
   font-size: 12px;
 }
 
-.tool-status:empty {
+.tool-time {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.tool-status:empty,
+.tool-time:empty {
   display: none;
 }
 
-.tool[open] summary {
+.tool[open] > summary {
   color: var(--text);
 }
 
@@ -643,6 +671,83 @@ svg {
   font-family: var(--mono);
   font-size: 12.5px;
   line-height: 1.5;
+}
+
+.tool-group-body {
+  padding-left: 20px;
+}
+
+/* A thought: one line, opened to read it. The text sits under the label column of the tool rows. */
+.reasoning summary {
+  cursor: pointer;
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  padding-left: 20px;
+  list-style: none;
+  user-select: none;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.reasoning summary::-webkit-details-marker,
+.reasoning summary::marker {
+  display: none;
+}
+
+.reasoning-empty summary {
+  cursor: default;
+}
+
+.reasoning[open] > summary {
+  color: var(--text-2);
+}
+
+.reasoning-body {
+  max-height: 320px;
+  overflow: auto;
+  margin: 2px 0 6px;
+  padding-left: 20px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Notices: errors, sandbox and journal facts, session end. */
+.notice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.notice::before {
+  content: '';
+  width: 12px;
+  flex: none;
+  text-align: center;
+}
+
+.notice-error {
+  color: var(--err);
+}
+
+.notice-error::before {
+  content: '\2715';
+}
+
+.notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .empty-state {
@@ -1440,14 +1545,6 @@ svg {
     padding: 0 8px;
   }
 
-  .conversation {
-    padding: 16px 14px;
-  }
-
-  .composer-area {
-    padding: 8px 14px 10px;
-  }
-
   .pending-input {
     width: calc(100% - 28px);
   }
@@ -1464,6 +1561,18 @@ svg {
     left: 14px;
     right: 14px;
     bottom: 14px;
+  }
+}
+
+@media (max-width: 800px) {
+  .conversation {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .composer-area {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
 
