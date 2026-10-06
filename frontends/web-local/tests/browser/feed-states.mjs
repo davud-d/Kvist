@@ -1,13 +1,15 @@
 // Feed row states: feeds prepared event sequences through blocks.js and feed.js, imported in the page from
 // the asset server (/assets/features/*.js), and takes a screenshot of each state at 1440x900 and 390x844.
 // PLAYWRIGHT_MODULE=... CHROMIUM_EXECUTABLE=... KVIST_WEB_URL=http://127.0.0.1:PORT node .../feed-states.mjs
-// KVIST_SHOTS sets the screenshot directory (default /tmp/kvist-shots/3b).
+// KVIST_SHOTS sets the screenshot directory (default /tmp/kvist-shots/3d); the input states go to its input/
+// directory unless KVIST_SHOTS_INPUT says otherwise.
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { inflateSync } from 'node:zlib';
 import { fixture } from './fixtures.mjs';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || process.argv[2] || 'playwright');
 const base = process.env.KVIST_WEB_URL || 'http://127.0.0.1:9672';
-const shots = process.env.KVIST_SHOTS || '/tmp/kvist-shots/3b';
+const shots = process.env.KVIST_SHOTS || '/tmp/kvist-shots/3d';
 await mkdir(shots, { recursive: true });
 const browser = await chromium.launch({ headless: true, ...((process.env.CHROMIUM_EXECUTABLE || process.argv[3]) ? { executablePath: process.env.CHROMIUM_EXECUTABLE || process.argv[3] } : {}) });
 const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
@@ -59,6 +61,19 @@ const SCENARIOS = {
         result(1, 'c1', 'read_file', { output: 'a' }, T0 + 1), result(2, 'c2', 'search_code', { output: 'b' }, T0 + 2), result(3, 'c3', 'run_shell', { exit_code: 0, output: 'clean' }, T0 + 3), turnEnd(T0 + 4)],
     'batch-open': () => [user('Look around.'), step(1, 'c1', 'read_file', { path: 'src/a.ts' }, 'b1', T0), step(2, 'c2', 'search_code', { query: 'recover' }, 'b1', T0), step(3, 'c3', 'run_shell', { command: ['git', 'status'] }, 'b1', T0),
         result(1, 'c1', 'read_file', { output: 'a' }, T0 + 1), result(2, 'c2', 'search_code', { ok: false, output: 'no rg' }, T0 + 2)],
+    // one call with output and one without; 1.9s, 2s and a failed 0.3s call for the time rule
+    'rows-output': () => [user('Look.'), step(1, 'c1', 'read_file', { path: 'src/a.ts' }, '', T0), result(1, 'c1', 'read_file', { output: 'export {};' }, T0 + 5),
+        step(2, 'c2', 'run_shell', { command: ['mkdir', 'out'] }, '', T0 + 5), result(2, 'c2', 'run_shell', { exit_code: 0 }, T0 + 5.3)],
+    'times': () => [user('Time.'), step(1, 'c1', 'read_file', { path: 'src/a.ts' }, '', T0), result(1, 'c1', 'read_file', { output: 'a' }, T0 + 1.9),
+        step(2, 'c2', 'read_file', { path: 'src/b.ts' }, '', T0 + 10), result(2, 'c2', 'read_file', { output: 'b' }, T0 + 12),
+        step(3, 'c3', 'run_shell', { command: ['false'] }, '', T0 + 20), result(3, 'c3', 'run_shell', { ok: false, exit_code: 1 }, T0 + 20.3)],
+    'group-fast': () => [user('Quick.'), step(1, 'c1', 'read_file', { path: 'src/a.ts' }, 'bq', T0), step(2, 'c2', 'search_code', { query: 'x' }, 'bq', T0),
+        result(1, 'c1', 'read_file', { output: 'a' }, T0 + 0.4), result(2, 'c2', 'search_code', { output: 'b' }, T0 + 0.8), turnEnd(T0 + 1)],
+    'group-failed': () => [user('Look around.'), step(1, 'c1', 'read_file', { path: 'src/a.ts' }, 'bf', T0), step(2, 'c2', 'read_file', { path: 'src/b.ts' }, 'bf', T0), step(3, 'c3', 'search_code', { query: 'recover' }, 'bf', T0), step(4, 'c4', 'run_shell', { command: ['git', 'status'] }, 'bf', T0),
+        result(1, 'c1', 'read_file', { output: 'a' }, T0 + 0.2), result(2, 'c2', 'read_file', { output: 'b' }, T0 + 0.4), result(3, 'c3', 'search_code', { ok: false, output: 'no rg' }, T0 + 0.6), result(4, 'c4', 'run_shell', { exit_code: 0, output: 'clean' }, T0 + 1.5), turnEnd(T0 + 2)],
+    'group-many-names': () => [user('Everything.'), ...[['read_file', { path: 'a.ts' }], ['list_dir', { path: 'src' }], ['search_code', { query: 'x' }], ['run_shell', { command: ['ls'] }], ['web_search', { query: 'y' }], ['fetch_url', { url: 'https://example.com' }],
+        ['delegate_task', { task: 'z' }], ['write_file', { path: 'b.ts' }], ['find_files', { pattern: '*.ts' }], ['read_multiple_files', { paths: ['a.ts'] }], ['git_status', {}]]
+        .flatMap(([type, args], i) => [step(i + 1, `m${i}`, type, args, 'bm', T0), result(i + 1, `m${i}`, type, { output: 'ok' }, T0 + 3)]), turnEnd(T0 + 4)],
     'reasoning-streaming': now => [user('Think about it.'), rec({ type: 'reasoning_start', stream_id: 's1' }, now - 5), rec({ type: 'reasoning_chunk', stream_id: 's1', text: 'The cursor is saved before the reconnect, so', append: true }, now - 4)],
     'reasoning-done': () => [user('Think about it.'), rec({ type: 'reasoning_start', stream_id: 's1' }), rec({ type: 'reasoning_chunk', stream_id: 's1', text: 'The cursor is saved before the reconnect,\nso the replay starts after it.' }), rec({ type: 'reasoning_commit', stream_id: 's1', duration_seconds: 12 }), rec({ type: 'message', markdown: 'Done thinking.' })],
     'plan': () => [user('Plan it.'), rec({ type: 'plan', markdown: '1. Save the cursor\n2. Replay missed events\n3. Verify with tests' })],
@@ -101,14 +116,48 @@ const rows = () => page.evaluate(() => [...document.querySelectorAll('#feed-unde
 // The computed color a design token paints, to compare with what a row really uses.
 const token = name => page.evaluate(name => { const n = document.createElement('i'); n.style.color = `var(--${name})`; document.body.append(n); const c = getComputedStyle(n).color; n.remove(); return c; }, name);
 const colorOf = (selector, pseudo) => page.locator(selector).first().evaluate((n, pseudo) => getComputedStyle(n, pseudo || null).color, pseudo);
+// A screenshot taken right after a viewport change can catch the sidebar rows unpainted: they are
+// content-visibility: auto, and the browser decides again whether they are skipped one frame after the
+// resize. Waiting for the loaded navigation and two frames makes every screenshot show the whole sidebar.
+// The same holds for the content of a freshly drawn tool row, which is content-visibility: auto as well.
+const frames = target => target.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+const settled = async target => {
+    await target.locator('#navigation .nav-title').first().waitFor();
+    await frames(target);
+};
 const shot = async name => {
+    await settled(page);
     await page.screenshot({ path: `${shots}/${name}-1440x900.png` });
     await page.setViewportSize({ width: 390, height: 844 });
+    await settled(page);
     await page.screenshot({ path: `${shots}/${name}-390x844.png` });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name}: horizontal scroll at 390px`);
     await page.setViewportSize({ width: 1440, height: 900 });
 };
 const check = async (name, fn) => { await fn(); checks.push(name); console.log('PASS', name); };
+// The sRGB value of a design token as the canvas rasterizes it, to find the token's color in a screenshot.
+const rgbOf = name => page.evaluate(name => { const c = document.createElement('canvas'); c.width = c.height = 1; const g = c.getContext('2d'); g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim(); g.fillRect(0, 0, 1, 1); return [...g.getImageData(0, 0, 1, 1).data].slice(0, 3); }, name);
+// Decodes the 8-bit, non-interlaced PNG that page.screenshot returns into { at(x, y) -> [r, g, b] }.
+function decodePng(buffer) {
+    let offset = 8, width = 0, height = 0, channels = 0;
+    const parts = [];
+    while (offset < buffer.length) {
+        const length = buffer.readUInt32BE(offset), type = buffer.toString('latin1', offset + 4, offset + 8), data = buffer.subarray(offset + 8, offset + 8 + length);
+        if (type === 'IHDR') { width = data.readUInt32BE(0); height = data.readUInt32BE(4); channels = data[9] === 6 ? 4 : 3; assert.deepEqual([data[8], data[12]], [8, 0], 'PNG is 8-bit and not interlaced'); }
+        if (type === 'IDAT') parts.push(data);
+        offset += length + 12;
+    }
+    const raw = inflateSync(Buffer.concat(parts)), stride = width * channels, out = Buffer.alloc(stride * height);
+    for (let y = 0; y < height; y++) {
+        const filter = raw[y * (stride + 1)], line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+        for (let x = 0; x < stride; x++) {
+            const a = x >= channels ? out[y * stride + x - channels] : 0, b = y ? out[(y - 1) * stride + x] : 0, c = x >= channels && y ? out[(y - 1) * stride + x - channels] : 0;
+            const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+            out[y * stride + x] = (line[x] + [0, a, b, (a + b) >> 1, pa <= pb && pa <= pc ? a : pb <= pc ? b : c][filter]) & 255;
+        }
+    }
+    return { width, height, at: (x, y) => [...out.subarray(y * stride + x * channels, y * stride + x * channels + 3)] };
+}
 
 try {
     await check('tool running: ring, name, target, no time', async () => {
@@ -153,9 +202,9 @@ try {
         await shot('tool-failed');
     });
 
-    await check('tool ok with output: opens on click, max-height 320px with scroll, sub-second time', async () => {
+    await check('tool ok with output: opens on click, max-height 320px with scroll, no time under 2s', async () => {
         await show('tool-ok-output');
-        assert.equal(await page.locator('.tool-time').textContent(), '0.4s');
+        assert.equal(await page.locator('.tool-time').textContent(), '', 'a 0.4s call shows no time');
         await page.locator('.tool summary').first().click();
         const pre = page.locator('.tool pre').first();
         assert(await pre.isVisible());
@@ -216,7 +265,7 @@ try {
         await page.locator('.tool-group > summary').click();
         assert.equal(await page.locator('.tool-group > .tool-group-body > .tool').count(), 3);
         const indent = await page.evaluate(() => { const g = document.querySelector('.tool-group > summary').getBoundingClientRect(), c = document.querySelector('.tool-group-body > .tool > summary').getBoundingClientRect(); return c.x - g.x; });
-        assert.equal(indent, 20, 'the calls are indented under the group row');
+        assert.equal(indent, 16, 'the calls are indented 16px under the group row');
         await shot('batch-folded-opened');
     });
 
@@ -230,6 +279,144 @@ try {
         // all ok but the turn goes on: still open
         await push([result(3, 'c3', 'run_shell', { exit_code: 0, output: 'clean' }, T0 + 3)]);
         assert.equal(await page.locator('.tool-group').evaluate(n => n.classList.contains('tool-failed')), true, 'a failed call fails the group');
+    });
+
+    await check('tool rows: a chevron, hover fill and pointer only when the call has output to open', async () => {
+        await show('rows-output');
+        const summaries = page.locator('#feed-under-test .tool > summary');
+        const look = () => summaries.evaluateAll(list => list.map(n => ({ chevrons: n.querySelectorAll('.chevron').length, cursor: getComputedStyle(n).cursor, tab: n.tabIndex, fill: getComputedStyle(n).backgroundColor, label: n.querySelector('.tool-label').getBoundingClientRect().x, isStatic: n.parentElement.classList.contains('tool-static') })));
+        const [withOutput, plain] = await look();
+        assert.deepEqual([withOutput.chevrons, withOutput.cursor, withOutput.tab, withOutput.isStatic], [1, 'pointer', 0, false]);
+        assert.deepEqual([plain.chevrons, plain.tab, plain.isStatic], [0, -1, true]);
+        assert.notEqual(plain.cursor, 'pointer', 'a row without output is not clickable');
+        assert.equal(plain.label, withOutput.label, 'the labels of both rows stand in one column');
+        await page.mouse.move(700, 500);
+        assert.equal((await look())[0].fill, 'rgba(0, 0, 0, 0)', 'no fill without the pointer');
+        await summaries.nth(0).hover();
+        assert.equal((await look())[0].fill, await token('bg-2'), 'a row with output is filled with --bg-2 under the pointer');
+        await summaries.nth(1).hover();
+        assert.equal((await look())[1].fill, 'rgba(0, 0, 0, 0)', 'a row without output is not filled under the pointer');
+        await summaries.nth(1).click();
+        assert.equal(await page.locator('#feed-under-test .tool').nth(1).evaluate(n => n.open), false, 'a row without output does not open');
+        assert.equal(await page.locator('#feed-under-test .tool').nth(1).locator('.chevron').count(), 0);
+        const turn = () => page.locator('#feed-under-test .tool .chevron').first().evaluate(n => getComputedStyle(n).transform);
+        assert.equal(await turn(), 'none');
+        await summaries.nth(0).click();
+        assert.equal(await turn(), 'matrix(0, 1, -1, 0, 0, 0)', 'the chevron turns a quarter when the row opens');
+        await page.mouse.move(700, 500);
+        await shot('rows-output');
+    });
+
+    await check('tool time: shown from 2s and for a failed call, hidden for a faster success', async () => {
+        await show('times');
+        assert.deepEqual(await page.locator('#feed-under-test .tool-time').allTextContents(), ['', '2s', '0.3s'], '1.9s ok, 2s ok, 0.3s failed');
+        assert.equal(await page.locator('#feed-under-test .tool-time').nth(2).isVisible(), true);
+        assert.equal(await page.locator('#feed-under-test .tool-status').nth(2).textContent(), 'exit 1');
+        await shot('times');
+    });
+
+    await check('group header: status, chevron, "N calls" in --text-2 at 400, the distinct names in --text-3', async () => {
+        await show('batch-folded');
+        const head = page.locator('.tool-group > summary');
+        const at = await head.evaluate(n => { const x = s => n.querySelector(s).getBoundingClientRect().x, r = n.getBoundingClientRect(); return { mark: getComputedStyle(n, '::before').content, chevron: x('.chevron') - r.x, label: x('.tool-label') - r.x, target: x('.tool-target') - r.x, cursor: getComputedStyle(n).cursor }; });
+        assert.equal(at.mark, '"✓"');
+        assert(at.chevron >= 6 + 12 + 8 && at.chevron < at.label && at.label < at.target, `status, chevron, text, names in that order: ${JSON.stringify(at)}`);
+        assert.equal(at.cursor, 'pointer');
+        assert.equal(await page.locator('.tool-group > summary .tool-label').textContent(), '3 calls');
+        assert.equal(await colorOf('.tool-group > summary .tool-label'), await token('text-2'));
+        assert.equal(await page.locator('.tool-group > summary .tool-label').evaluate(n => getComputedStyle(n).fontWeight), '400');
+        assert.equal(await page.locator('.tool-group > summary .tool-text').textContent(), 'Read, Search, Bash');
+        assert.equal(await colorOf('.tool-group > summary .tool-text'), await token('text-3'));
+        const turn = () => page.locator('.tool-group > summary > .chevron').evaluate(n => getComputedStyle(n).transform);
+        assert.equal(await turn(), 'none');
+        await head.click();
+        assert.equal(await turn(), 'matrix(0, 1, -1, 0, 0, 0)');
+        await head.hover();
+        assert.equal(await head.evaluate(n => getComputedStyle(n).backgroundColor), await token('bg-2'));
+        await page.mouse.move(700, 500);
+        await shot('group-opened');
+        await head.click();
+        await page.mouse.move(700, 500);
+        await shot('group-folded');
+    });
+
+    await check('group header: the same names are listed once, a long list is cut with an ellipsis, the full list is the title', async () => {
+        await show('group-many-names');
+        const names = 'Read, List, Search, Bash, Search the web, Fetch, Task, Edit';
+        assert.equal(await page.locator('.tool-group > summary .tool-label').textContent(), '11 calls');
+        assert.equal(await page.locator('.tool-group > summary .tool-text').textContent(), names);
+        assert.equal(await page.locator('.tool-group > summary .tool-target').getAttribute('title'), names);
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert(await page.locator('.tool-group > summary .tool-text').evaluate(n => n.scrollWidth > n.clientWidth && getComputedStyle(n).textOverflow === 'ellipsis'), 'the names are cut at 390px');
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await shot('group-many-names');
+    });
+
+    await check('group with a failed call: "4 calls, 1 failed" with the count in --err, a cross, open, its time shown', async () => {
+        await show('group-failed');
+        const label = page.locator('.tool-group > summary .tool-label');
+        assert.equal(await label.textContent(), '4 calls, 1 failed');
+        assert.equal(await page.locator('.tool-failed-count').textContent(), '1 failed');
+        assert.equal(await colorOf('.tool-failed-count'), await token('err'));
+        assert.equal(await colorOf('.tool-group > summary .tool-label'), await token('text-2'), 'the rest of the text stays --text-2');
+        assert.equal(await page.locator('.tool-group > summary .tool-text').textContent(), 'Read, Search, Bash', 'Read is listed once');
+        assert.equal(await page.locator('.tool-group').evaluate(n => getComputedStyle(n.querySelector('summary'), '::before').content), '"✕"');
+        assert.equal(await page.locator('.tool-group').evaluate(n => n.open), true, 'a failed group is open');
+        assert.equal(await page.locator('.tool-group > summary .tool-time').textContent(), '1s', 'a failed group shows its time under 2s (1.5s, floored by formatDuration)');
+        await show('group-fast');
+        assert.equal(await page.locator('.tool-group > summary .tool-label').textContent(), '2 calls');
+        assert.equal(await page.locator('.tool-failed-count').count(), 0, 'no failed part without a failed call');
+        assert.equal(await page.locator('.tool-group > summary .tool-time').textContent(), '', 'an ok group under 2s shows no time');
+        await show('group-failed');
+        await shot('group-failed');
+    });
+
+    // The ring is 2px --accent inside the summary: it must be whole on all four sides, inside every ancestor
+    // that clips (content-visibility on the tool row cut it to a line over the output block), and the
+    // screenshot must show the accent color in the middle of each side.
+    await check('keyboard focus ring: a full 2px --accent ring on a tool row, a group and reasoning, no horizontal scroll', async () => {
+        const accent = await rgbOf('accent');
+        const subjects = [
+            ['tool row with output', () => show('tool-ok-output'), '#feed-under-test .tool > summary'],
+            ['group', () => show('batch-folded'), '#feed-under-test .tool-group > summary'],
+            ['reasoning', () => show('reasoning-done'), '#feed-under-test .reasoning > summary'],
+        ];
+        for (const [name, arrange, selector] of subjects) {
+            await arrange();
+            const summary = page.locator(selector).first();
+            await summary.focus();
+            await page.keyboard.press('Shift+Tab');
+            await page.keyboard.press('Tab');
+            assert(await summary.evaluate(n => n === document.activeElement && n.matches(':focus-visible')), `${name}: keyboard focus is on the summary`);
+            await frames(page);
+            const ring = await summary.evaluate(n => {
+                const s = getComputedStyle(n), r = n.getBoundingClientRect(), grow = parseFloat(s.outlineOffset) + parseFloat(s.outlineWidth);
+                const outer = { left: r.left - grow, top: r.top - grow, right: r.right + grow, bottom: r.bottom + grow };
+                const clips = [];
+                for (let a = n.parentElement; a; a = a.parentElement) {
+                    const c = getComputedStyle(a);
+                    if (c.overflowX === 'visible' && c.overflowY === 'visible' && !/paint|strict|content/.test(c.contain) && c.contentVisibility === 'visible') continue;
+                    const b = a.getBoundingClientRect();
+                    clips.push({ clip: a.className || a.tagName, inside: outer.left >= b.left - 0.01 && outer.right <= b.right + 0.01 && outer.top >= b.top - 0.01 && outer.bottom <= b.bottom + 0.01 });
+                }
+                return { style: s.outlineStyle, width: s.outlineWidth, color: s.outlineColor, radius: s.borderTopLeftRadius, outer, clips, viewport: outer.left >= 0 && outer.top >= 0 && outer.right <= innerWidth && outer.bottom <= innerHeight };
+            });
+            assert.deepEqual([ring.style, ring.width, ring.color, ring.radius], ['solid', '2px', await token('accent'), '4px'], `${name}: ${JSON.stringify(ring)}`);
+            assert(ring.clips.length > 0 && ring.clips.every(c => c.inside) && ring.viewport, `${name}: the ring is inside what clips it ${JSON.stringify(ring.clips)}`);
+            const box = await summary.boundingBox(), x = Math.round(box.x), y = Math.round(box.y), w = Math.round(box.width), h = Math.round(box.height);
+            const png = decodePng(await page.screenshot({ clip: { x, y, width: w, height: h } }));
+            const sides = { top: [w >> 1, 1], bottom: [w >> 1, h - 2], left: [1, h >> 1], right: [w - 2, h >> 1] };
+            for (const [side, [px, py]] of Object.entries(sides)) {
+                const found = png.at(px, py);
+                assert(found.every((value, i) => Math.abs(value - accent[i]) <= 4), `${name}: the ${side} side of the ring is ${found}, not the accent ${accent}`);
+            }
+            for (const [width, height] of [[390, 844], [1280, 720], [1440, 900]]) {
+                await page.setViewportSize({ width, height });
+                assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name}: horizontal scroll of the page at ${width}px`);
+                assert(await page.locator('#feed-under-test').evaluate(n => n.scrollWidth <= n.clientWidth), `${name}: horizontal scroll of the feed at ${width}px`);
+            }
+            await shot(`focus-ring-${name.replaceAll(' ', '-')}`);
+        }
     });
 
     await check('reasoning streaming: "thinking Ns" in sans 13px --text-3, ticks once a second, one timer', async () => {
@@ -381,6 +568,10 @@ try {
     await check('the person keeps the last word: a row they opened and closed does not reopen when the default changes', async () => {
         await show('tool-running');
         const row = page.locator('#feed-under-test .tool').first();
+        // a running call with no output has nothing to open; once its output streams in, it does
+        await row.locator('summary').click();
+        assert.equal(await row.evaluate(n => n.open), false);
+        await push([rec({ type: 'action_output', call_id: 'c1', output: 'building…' }, T0 + 1)]);
         await row.locator('summary').click();
         assert.equal(await row.evaluate(n => n.open), true);
         await row.locator('summary').click();
@@ -449,7 +640,7 @@ try {
     // --- input: the pinned panel and the answered rows, in the real app page ---------------------------
     // The panel is built by session.js, so these scenarios run on the app itself with the API mocked as in
     // redesign.mjs: a durable input_request reaches the page as a live envelope and then through the journal.
-    const inputShots = process.env.KVIST_SHOTS_INPUT || '/tmp/kvist-shots/3c';
+    const inputShots = process.env.KVIST_SHOTS_INPUT || `${shots}/input`;
     await mkdir(inputShots, { recursive: true });
     const SECRET = 'hunter2-SECRET-value';
     const app = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
@@ -498,8 +689,10 @@ try {
     const answered = text => app.locator('#conversation .answer', { hasText: text });
     const edges = () => app.evaluate(() => { const p = document.querySelector('#pending-input').getBoundingClientRect(), c = document.querySelector('#composer').getBoundingClientRect(); return { panel: [Math.round(p.x), Math.round(p.width), Math.round(p.bottom)], composer: [Math.round(c.x), Math.round(c.width), Math.round(c.top)] }; });
     const inputShot = async name => {
+        await settled(app);
         await app.screenshot({ path: `${inputShots}/${name}-1440x900.png` });
         await app.setViewportSize({ width: 390, height: 844 });
+        await settled(app);
         await app.screenshot({ path: `${inputShots}/${name}-390x844.png` });
         assert(await app.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name}: horizontal scroll at 390px`);
         await app.setViewportSize({ width: 1440, height: 900 });
