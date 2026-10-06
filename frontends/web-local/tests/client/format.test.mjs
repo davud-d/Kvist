@@ -35,45 +35,72 @@ test('formatDuration: a missing or negative duration is empty', () => {
     for (const value of [-1, -0.001, NaN, Infinity, undefined, null, '5']) assert.equal(formatDuration(value), '', String(value));
 });
 
-test('toolTarget: the path, the command or the query of the call', () => {
-    assert.equal(toolTarget({ actionType: 'read_file', args: { path: 'src/a.ts' } }), 'src/a.ts');
-    assert.equal(toolTarget({ actionType: 'run_shell', args: { command: 'npm test' } }), 'npm test');
-    assert.equal(toolTarget({ actionType: 'search_code', args: { query: 'recover' } }), 'recover');
-    assert.equal(toolTarget({ actionType: 'fetch_url', args: { url: 'https://example.test/a' } }), 'https://example.test/a');
+const target = (actionType, args = {}, extra = {}) => toolTarget({ actionType, args, ...extra });
+const text = (actionType, args, extra) => { const t = target(actionType, args, extra); assert.equal(t.dir, ''); return t.name; };
+
+test('toolTarget: a path splits at its last slash, nothing is cut', () => {
+    assert.deepEqual(target('read_file', { path: 'src/a.ts' }), { dir: 'src/', name: 'a.ts', full: 'src/a.ts' });
+    assert.deepEqual(target('read_file', { path: '/abs/dir/file.js' }), { dir: '/abs/dir/', name: 'file.js', full: '/abs/dir/file.js' });
+    assert.deepEqual(target('read_file', { path: '/etc' }), { dir: '/', name: 'etc', full: '/etc' });
+    assert.deepEqual(target('list_dir', { path: 'src/features/' }), { dir: 'src/', name: 'features/', full: 'src/features/' });
+    assert.deepEqual(target('fetch_url', { url: 'https://example.test/a' }), { dir: 'https://example.test/', name: 'a', full: 'https://example.test/a' });
+});
+
+test('toolTarget: a long path keeps its file and its parent whole, the whole path is in full', () => {
+    const path = `${'very-long-directory-name/'.repeat(8)}parent/module.ts`;
+    const t = target('read_file', { path });
+    assert.equal(t.dir + t.name, path);
+    assert.equal(t.name, 'module.ts');
+    assert(t.dir.endsWith('/parent/'));
+    assert.equal(t.full, path);
+    assert(path.length > 80, 'a path is not cut to 80 characters, the row cuts its head by width');
+});
+
+test('toolTarget: a command, a query or a bare name has no dir and is cut from the end', () => {
+    assert.equal(text('run_shell', { command: 'npm test' }), 'npm test');
+    assert.equal(text('run_shell', { command: 'ls /tmp' }), 'ls /tmp', 'a command that names a path is still a command');
+    assert.equal(text('search_code', { query: 'recover' }), 'recover');
+    assert.equal(text('read_file', { path: 'README' }), 'README');
+    assert.equal(text('run_shell', { command: '/' }), '/');
+    assert.equal(text('run_shell', {}), '');
 });
 
 test('toolTarget: argv lists are joined, several paths are comma separated', () => {
-    assert.equal(toolTarget({ actionType: 'run_shell', args: { command: ['npm', 'run', 'test'] } }), 'npm run test');
-    assert.equal(toolTarget({ actionType: 'read_multiple_files', args: { paths: ['a.ts', 'b.ts'] } }), 'a.ts, b.ts');
+    assert.equal(text('run_shell', { command: ['npm', 'run', 'test'] }), 'npm run test');
+    assert.equal(text('read_multiple_files', { paths: ['a.ts', 'b.ts'] }), 'a.ts, b.ts');
 });
 
 test('toolTarget: git calls name themselves', () => {
-    assert.equal(toolTarget({ actionType: 'git_status', args: {} }), 'git status');
-    assert.equal(toolTarget({ actionType: 'git_diff', args: {} }), 'git diff');
-    assert.equal(toolTarget({ actionType: 'git_diff', args: { path: 'a.ts' } }), 'git diff a.ts');
+    assert.equal(text('git_status', {}), 'git status');
+    assert.equal(text('git_diff', {}), 'git diff');
+    assert.equal(text('git_diff', { path: 'a.ts' }), 'git diff a.ts');
 });
 
 test('toolTarget: a call that lost its arguments falls back to the path of its result', () => {
-    assert.equal(toolTarget({ actionType: 'replace_in_file', args: {}, path: 'src/recovery.ts' }), 'src/recovery.ts');
-    assert.equal(toolTarget({ actionType: 'run_shell', args: {} }), '');
+    assert.deepEqual(target('replace_in_file', {}, { path: 'src/recovery.ts' }), { dir: 'src/', name: 'recovery.ts', full: 'src/recovery.ts' });
+    assert.equal(target('run_shell', {}).full, '');
 });
 
 test('toolTarget: only the first non-empty line, whitespace collapsed', () => {
-    assert.equal(toolTarget({ actionType: 'run_shell', args: { command: 'python - <<EOF\nprint(1)\nEOF' } }), 'python - <<EOF');
-    assert.equal(toolTarget({ actionType: 'run_shell', args: { command: '\n\n  ls   -la\t/tmp\r\nrm x' } }), 'ls -la /tmp');
+    assert.equal(text('run_shell', { command: 'python - <<EOF\nprint(1)\nEOF' }), 'python - <<EOF');
+    assert.equal(text('run_shell', { command: '\n\n  ls   -la\t/tmp\r\nrm x' }), 'ls -la /tmp');
 });
 
-test('toolTarget: at most 80 characters, the cut ends in an ellipsis', () => {
-    const at80 = 'a'.repeat(80), at81 = 'a'.repeat(81);
-    assert.equal(toolTarget({ actionType: 'read_file', args: { path: at80 } }), at80);
-    const cut = toolTarget({ actionType: 'read_file', args: { path: at81 } });
-    assert.equal(cut, `${'a'.repeat(79)}…`);
-    assert.equal(Array.from(cut).length, 80);
+test('toolTarget: a command is at most 80 characters, the cut ends in an ellipsis and keeps the full line', () => {
+    const at80 = 'a b'.repeat(26) + 'ab', at81 = at80 + 'c';
+    assert.equal(Array.from(at80).length, 80);
+    assert.equal(text('run_shell', { command: at80 }), at80);
+    const t = target('run_shell', { command: at81 });
+    assert.equal(t.name, `${at81.slice(0, 79)}…`);
+    assert.equal(Array.from(t.name).length, 80);
+    assert.equal(t.full, at81);
 });
 
 test('toolTarget: the cut does not split a surrogate pair', () => {
-    const cut = toolTarget({ actionType: 'run_shell', args: { command: '😀'.repeat(90) } });
-    assert.equal(cut, `${'😀'.repeat(79)}…`);
+    const cut = text('run_shell', { command: '😀 '.repeat(90) });
+    assert.equal(Array.from(cut).length, 80);
+    assert(cut.endsWith('…'));
+    assert(!/[\ud800-\udbff]…$/.test(cut));
 });
 
 test('toolStatus: running until a result arrives, then ok or failed', () => {

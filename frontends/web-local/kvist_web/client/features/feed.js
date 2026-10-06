@@ -90,19 +90,29 @@ function callRow(feed, key) {
     const node = el('details', 'tool tool-running');
     const summary = el('summary');
     const label = el('span', 'tool-label'), target = el('span', 'tool-target');
+    const dir = el('span', 'tool-dir'), file = el('span', 'tool-file'), text = el('span', 'tool-text');
+    // The directory sits in a bdi so its slashes keep their place while the row cuts it from the left.
+    const dirText = el('bdi');
+    dir.append(dirText);
+    target.append(dir, file, text);
     const status = el('span', 'tool-status'), time = el('span', 'tool-time');
     summary.append(label, target, status, time);
     const output = el('pre');
     node.append(summary, output);
     expandable(feed, key, node, summary);
-    return { node, label, target, status, time, output, key, drawn: null, defaultOpen: false };
+    return { node, label, target, dir, dirText, file, text, status, time, output, key, drawn: null, defaultOpen: false };
 }
 
 function drawCall(feed, row, call) {
     const state = toolStatus(call), running = state === 'running', failed = state === 'failed';
     const seconds = callSeconds(call);
     row.label.textContent = TOOL_NAMES[call.actionType]?.label || call.actionType;
-    row.target.textContent = toolTarget(call);
+    // A path shows its directory cut from the left and its file whole; any other target is cut from the end.
+    const { dir, name, full } = toolTarget(call);
+    row.dirText.textContent = dir;
+    row.file.textContent = dir ? name : '';
+    row.text.textContent = dir ? '' : name;
+    row.target.title = full;
     row.node.classList.toggle('tool-running', running);
     row.node.classList.toggle('tool-failed', failed);
     row.status.textContent = failed ? (Number.isInteger(call.exitCode) && call.exitCode !== 0 ? `exit ${call.exitCode}` : 'failed') : '';
@@ -158,10 +168,27 @@ function drawToolBlock(feed, row, block) {
     applyOpen(feed, row.blockId, group, !(state === 'ok' && block.turnEnded === true));
 }
 
+// A 10px chevron that turns when the row opens; it is the mark of a row that has something to open.
+function chevron() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    svg.setAttribute('viewBox', '0 0 10 10');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'chevron');
+    path.setAttribute('d', 'M3 1.5 6.5 5 3 8.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.4');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+}
+
 function reasoningRow(feed, key) {
     const node = el('details', 'reasoning');
     const summary = el('summary'), label = el('span', 'reasoning-label');
-    summary.append(label);
+    summary.append(chevron(), label);
     const body = el('div', 'reasoning-body');
     node.append(summary, body);
     const row = { node, summary, label, body, text: null, block: null, seenAt: now(), drawn: null };

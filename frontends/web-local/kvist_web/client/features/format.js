@@ -28,12 +28,26 @@ function rawTarget({ actionType, args = {}, path }) {
     return typeof path === 'string' ? path : '';
 }
 
-// The path or the first line of the command, on one line and at most 80 characters.
-export function toolTarget(call) {
-    const line = rawTarget(call).split(/\r?\n/).find(part => part.trim()) ?? '';
-    const text = line.replace(/\s+/g, ' ').trim();
+// One line of text: the first non-empty line, whitespace collapsed.
+export function oneLine(text) {
+    return (String(text).split(/\r?\n/).find(part => part.trim()) ?? '').replace(/\s+/g, ' ').trim();
+}
+
+// Tail cut to `limit` characters with an ellipsis; never splits a surrogate pair.
+export function cutTail(text, limit = TARGET_LIMIT) {
     const chars = Array.from(text);
-    return chars.length > TARGET_LIMIT ? `${chars.slice(0, TARGET_LIMIT - 1).join('')}…` : text;
+    return chars.length > limit ? `${chars.slice(0, limit - 1).join('')}…` : text;
+}
+
+// The target of a call as { dir, name, full }. A path (a "/" and no spaces) is split at its last "/": dir
+// is the directories with their trailing "/", name the file (or the last directory), and neither is cut
+// here, so the row can drop the head of the directory by width and keep the file and its parent. Anything
+// else, a command or a query, has dir '' and name cut to 80 characters from the end. full is the whole line.
+export function toolTarget(call) {
+    const full = oneLine(rawTarget(call));
+    const cut = full.slice(0, -1).lastIndexOf('/');
+    if (!full.includes('/') || full.includes(' ') || cut < 0) return { dir: '', name: cutTail(full), full };
+    return { dir: full.slice(0, cut + 1), name: full.slice(cut + 1), full };
 }
 
 // running, ok or failed. A result with ok:false or a non-zero exit code is failed whatever status says.

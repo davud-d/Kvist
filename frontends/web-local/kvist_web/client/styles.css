@@ -627,15 +627,41 @@ svg {
 
 .tool-label {
   flex: none;
+  color: var(--text);
+  font-weight: 500;
 }
 
+/* The target: a path keeps its file name whole and drops the head of its directory when the row is
+   narrow (direction: rtl puts the ellipsis on the left, the bdi keeps the slashes in order); a command or
+   a query is cut from the end. */
 .tool-target {
   flex: 1;
   min-width: 0;
+  display: flex;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-3);
+}
+
+.tool-dir,
+.tool-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-dir {
+  direction: rtl;
+  text-align: left;
+}
+
+.tool-file {
+  flex: none;
+}
+
+.tool-file:empty,
+.tool-text:empty {
+  display: none;
 }
 
 .tool-status {
@@ -677,18 +703,33 @@ svg {
   padding-left: 20px;
 }
 
-/* A thought: one line, opened to read it. The text sits under the label column of the tool rows. */
+/* A thought: one line in the interface font, opened to read it. The chevron takes the 12px of the status
+   mark of a tool row, so the text sits under the labels of the tool rows. */
 .reasoning summary {
   cursor: pointer;
   min-height: 24px;
   display: flex;
   align-items: center;
-  padding-left: 20px;
+  gap: 8px;
   list-style: none;
   user-select: none;
   color: var(--text-3);
-  font-family: var(--mono);
-  font-size: 12.5px;
+  font-size: 13px;
+}
+
+.chevron {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin: 0 1px;
+}
+
+.reasoning[open] .chevron {
+  transform: rotate(90deg);
+}
+
+.reasoning-empty .chevron {
+  visibility: hidden;
 }
 
 .reasoning summary::-webkit-details-marker,
@@ -700,18 +741,13 @@ svg {
   cursor: default;
 }
 
-.reasoning[open] > summary {
-  color: var(--text-2);
-}
-
 .reasoning-body {
   max-height: 320px;
   overflow: auto;
   margin: 2px 0 6px;
   padding-left: 20px;
-  color: var(--text-3);
-  font-family: var(--mono);
-  font-size: 12.5px;
+  color: var(--text-2);
+  font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;

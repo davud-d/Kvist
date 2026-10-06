@@ -124,17 +124,17 @@ try {
         await shot('tool-running');
     });
 
-    await check('tool ok: check, label --text-2, target --text-3 and kept, time 12s, closed', async () => {
+    await check('tool ok: check, label --text at 500, target --text-3 and kept, time 12s, closed', async () => {
         await show('tool-ok');
         const summary = page.locator('.tool summary').first();
         assert.equal(await summary.evaluate(n => getComputedStyle(n, '::before').content), '"✓"');
         assert.equal(await page.locator('.tool-target').textContent(), 'npm test', 'the target stays after the result');
         assert.equal(await page.locator('.tool-time').textContent(), '12s');
         assert.equal(await page.locator('.tool-status').evaluate(n => getComputedStyle(n).display), 'none', 'exit 0 shows no code');
-        assert.equal(await colorOf('.tool-label'), await token('text-2'));
+        assert.equal(await colorOf('.tool-label'), await token('text'));
         assert.equal(await colorOf('.tool-target'), await token('text-3'));
         const font = await page.locator('.tool-label').evaluate(n => { const s = getComputedStyle(n); return [s.fontFamily.split(',')[0], s.fontSize, s.fontWeight]; });
-        assert.deepEqual(font, ['"JetBrains Mono"', '12.5px', '400']);
+        assert.deepEqual(font, ['"JetBrains Mono"', '12.5px', '500']);
         assert.equal(await page.locator('.tool').first().evaluate(n => n.open), false);
         assert.equal(await summary.evaluate(n => n.getBoundingClientRect().height), 24);
         assert.equal(await page.locator('.tool pre').first().isVisible(), false, 'the output is hidden while closed');
@@ -165,16 +165,44 @@ try {
         await shot('tool-ok-output-open');
     });
 
-    await check('long target: cut to 80 characters with an ellipsis, and by the width of the row', async () => {
+    await check('long path: the head of the directory is cut by width, the file and its parent stay whole, the full path is the title', async () => {
         await show('tool-long-target');
-        const text = await page.locator('.tool-target').textContent();
-        assert.equal(Array.from(text).length, 80);
-        assert(text.endsWith('…'));
-        await page.setViewportSize({ width: 390, height: 844 });
-        assert(await page.locator('.tool-target').evaluate(n => n.scrollWidth > n.clientWidth && getComputedStyle(n).textOverflow === 'ellipsis'));
+        const parts = async () => page.locator('.tool-target').evaluate(n => {
+            const dir = n.querySelector('.tool-dir'), file = n.querySelector('.tool-file'), dirBox = dir.getBoundingClientRect(), fileBox = file.getBoundingClientRect(), box = n.getBoundingClientRect();
+            return { file: file.textContent, fileWhole: file.scrollWidth <= Math.ceil(fileBox.width), dirCut: dir.scrollWidth > dir.clientWidth, overflow: getComputedStyle(dir).textOverflow, direction: getComputedStyle(dir).direction,
+                dirText: dir.textContent, title: n.title, fits: fileBox.right <= box.right + 0.5 && dirBox.left >= box.left - 0.5, tail: dir.querySelector('bdi').textContent.endsWith('/') };
+        });
+        for (const width of [1440, 390]) {
+            await page.setViewportSize({ width, height: 900 });
+            const p = await parts();
+            assert.equal(p.file, 'module.ts');
+            assert(p.fileWhole && p.fits && p.tail, `${width}: ${JSON.stringify(p)}`);
+            assert.equal(p.title, LONG_PATH);
+            assert.equal(p.dirText, LONG_PATH.slice(0, LONG_PATH.lastIndexOf('/') + 1));
+            assert.deepEqual([p.dirCut, p.overflow, p.direction], [true, 'ellipsis', 'rtl'], `${width}: the directory is cut`);
+        }
+        // the visible part of the directory is its tail: the last pixels of the directory text show the parent
+        const visibleParent = await page.locator('.tool-dir').evaluate(n => { const r = document.createRange(); r.selectNodeContents(n.querySelector('bdi')); const b = r.getBoundingClientRect(), box = n.getBoundingClientRect(); return b.right <= box.right + 0.5 && b.left < box.left; });
+        assert(visibleParent, 'the directory text overflows on the left, not on the right');
         assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         await page.setViewportSize({ width: 1440, height: 900 });
         await shot('tool-long-target');
+    });
+
+    await check('long command: cut to 80 characters from the end with an ellipsis, the full line is the title', async () => {
+        seq = 0;
+        await reset();
+        const command = `npm run build -- ${'--flag-with-a-long-name '.repeat(8)}done`;
+        await push([user('x'), step(1, 'c1', 'run_shell', { command: ['bash', '-c', command] }, '', T0), result(1, 'c1', 'run_shell', { exit_code: 0 }, T0 + 1)]);
+        const text = await page.locator('.tool-text').textContent();
+        assert.equal(Array.from(text).length, 80);
+        assert(text.endsWith('…') && text.startsWith('bash -c npm run build'));
+        assert.equal(await page.locator('.tool-dir').evaluate(n => n.textContent), '');
+        assert.equal(await page.locator('.tool-target').getAttribute('title'), `bash -c ${command}`.replace(/\s+/g, ' ').trim());
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert(await page.locator('.tool-text').evaluate(n => n.scrollWidth > n.clientWidth && getComputedStyle(n).textOverflow === 'ellipsis'));
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await shot('tool-long-command');
     });
 
     await check('batch of three: one "3 calls" row, folded when all ok and the turn ended', async () => {
@@ -204,7 +232,7 @@ try {
         assert.equal(await page.locator('.tool-group').evaluate(n => n.classList.contains('tool-failed')), true, 'a failed call fails the group');
     });
 
-    await check('reasoning streaming: "thinking Ns" mono --text-3, ticks once a second, one timer', async () => {
+    await check('reasoning streaming: "thinking Ns" in sans 13px --text-3, ticks once a second, one timer', async () => {
         const now = Date.now() / 1000;
         await reset();
         const baseline = await timers();
@@ -213,7 +241,7 @@ try {
         const first = await label.textContent();
         assert.match(first, /^thinking [5-6]s$/);
         assert.equal(await colorOf('.reasoning summary'), await token('text-3'));
-        assert.equal(await page.locator('.reasoning summary').evaluate(n => getComputedStyle(n).fontFamily.split(',')[0]), '"JetBrains Mono"');
+        assert.deepEqual(await page.locator('.reasoning summary').evaluate(n => { const s = getComputedStyle(n); return [s.fontFamily.includes('Mono'), s.fontSize]; }), [false, '13px']);
         assert.equal(await timers() - baseline, 1);
         await page.waitForTimeout(2300);
         const later = Number((await label.textContent()).match(/\d+/)[0]);
@@ -234,9 +262,21 @@ try {
         assert.deepEqual(await rows(), ['message user', 'reasoning', 'message ']);
         assert.equal(await page.locator('.reasoning-label').textContent(), 'thought for 12s');
         assert.equal(await page.locator('.reasoning').evaluate(n => n.open), false);
+        const chevron = () => page.locator('.reasoning .chevron').evaluate(n => { const s = getComputedStyle(n), b = n.getBoundingClientRect(); return { w: b.width, h: b.height, transform: s.transform, color: s.color, visibility: s.visibility, stroke: n.querySelector('path').getAttribute('stroke') }; });
+        const closed = await chevron();
+        assert.deepEqual([closed.w, closed.h, closed.transform, closed.stroke], [10, 10, 'none', 'currentColor']);
+        assert.equal(closed.color, await token('text-3'));
         await page.locator('.reasoning summary').click();
         assert.match(await page.locator('.reasoning-body').textContent(), /replay starts after it\./);
         assert(await page.locator('.reasoning-body').isVisible());
+        assert.equal((await chevron()).transform, 'matrix(0, 1, -1, 0, 0, 0)', 'the chevron turns a quarter when the row opens');
+        const body = await page.locator('.reasoning-body').evaluate(n => { const s = getComputedStyle(n); return { color: s.color, mono: s.fontFamily.includes('Mono'), size: s.fontSize, left: n.getBoundingClientRect().x }; });
+        assert.equal(body.color, await token('text-2'));
+        assert.deepEqual([body.mono, body.size], [false, '13px']);
+        // the summary starts at the left edge of the other blocks and the body sits under the text of the summary
+        const edges = await page.evaluate(() => { const box = document.querySelector('#feed-under-test').getBoundingClientRect(), user = document.querySelector('.message.user').getBoundingClientRect(), chevron = document.querySelector('.reasoning .chevron').getBoundingClientRect(), label = document.querySelector('.reasoning-label').getBoundingClientRect(), body = document.querySelector('.reasoning-body').getBoundingClientRect(); return { user: user.x, chevron: chevron.x - 1, label: label.x, body: body.x + 20 }; });
+        assert.equal(edges.chevron, edges.user, 'the summary starts at the left edge of the column');
+        assert.equal(edges.body, edges.label, 'the body sits under the text of the summary');
         await shot('reasoning-done');
     });
 
