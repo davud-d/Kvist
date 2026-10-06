@@ -127,6 +127,7 @@ svg {
   --content-max: 760px;
   --r: 4px;
   --r-input: 6px;
+  --row-pad: 6px;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -567,23 +568,40 @@ svg {
   font-size: inherit;
 }
 
-/* Tool rows: status mark, action, target, exit code, time. Marks use child selectors: a group's status
-   must not reach the rows inside it. */
+/* Tool rows: status mark, chevron, action, target, exit code, time. Marks use child selectors: a group's
+   status must not reach the rows inside it. The row box is --row-pad wider than the column on both sides
+   and its summary pads the same amount, so the content keeps the column edge while the hover fill and the
+   focus ring sit inside the box: content-visibility clips everything outside it. */
 .tool {
-  margin: 0;
+  margin: 0 calc(-1 * var(--row-pad));
   content-visibility: auto;
   contain-intrinsic-size: auto 24px;
 }
 
 .tool summary {
-  cursor: pointer;
   color: var(--text-2);
   min-height: 24px;
+  padding: 0 var(--row-pad);
+  border-radius: var(--r);
   user-select: none;
   list-style: none;
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* A call with no output has nothing to open: no chevron, no hover, no pointer. Its label keeps the column
+   of the rows that have one (the chevron's 10px, its 1px margins and the 8px gap). */
+.tool:not(.tool-static) > summary {
+  cursor: pointer;
+}
+
+.tool:not(.tool-static) > summary:hover {
+  background: var(--bg-2);
+}
+
+.tool-static > summary .tool-label {
+  margin-left: 20px;
 }
 
 .conversation .tool summary {
@@ -685,10 +703,19 @@ svg {
   color: var(--text);
 }
 
+.tool-group > summary .tool-label {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.tool-failed-count {
+  color: var(--err);
+}
+
 .tool pre {
   max-height: 320px;
   overflow: auto;
-  margin: 2px 0 6px;
+  margin: 2px var(--row-pad) 6px;
   padding: 8px 12px;
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -699,24 +726,14 @@ svg {
   line-height: 1.5;
 }
 
+/* The group's box is wider than the column by --row-pad per side; the body is back on the column edges,
+   and the calls under it are indented 16px from the group's content. */
 .tool-group-body {
-  padding-left: 20px;
+  margin: 0 var(--row-pad);
+  padding-left: 16px;
 }
 
-/* A thought: one line in the interface font, opened to read it. The chevron takes the 12px of the status
-   mark of a tool row, so the text sits under the labels of the tool rows. */
-.reasoning summary {
-  cursor: pointer;
-  min-height: 24px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  list-style: none;
-  user-select: none;
-  color: var(--text-3);
-  font-size: 13px;
-}
-
+/* The one chevron of reasoning, tool rows and groups: it turns a quarter when its row opens. */
 .chevron {
   flex: none;
   width: 10px;
@@ -724,8 +741,32 @@ svg {
   margin: 0 1px;
 }
 
-.reasoning[open] .chevron {
+details[open] > summary > .chevron {
   transform: rotate(90deg);
+}
+
+/* Keyboard focus is a 2px ring inside the summary: outside it, the paint containment of the tool row and
+   the output block under it cut the ring to a line. */
+.tool > summary:focus-visible,
+.reasoning > summary:focus-visible {
+  outline-offset: -2px;
+}
+
+/* A thought: one line in the interface font, opened to read it. The summary pads and overhangs the column
+   like a tool row, so the chevron stands where the status mark of a tool row does. */
+.reasoning summary {
+  cursor: pointer;
+  min-height: 24px;
+  margin: 0 calc(-1 * var(--row-pad));
+  padding: 0 var(--row-pad);
+  border-radius: var(--r);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  user-select: none;
+  color: var(--text-3);
+  font-size: 13px;
 }
 
 .reasoning-empty .chevron {

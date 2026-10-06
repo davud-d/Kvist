@@ -87,9 +87,39 @@ function applyOpen(feed, key, row, wanted) {
     row.node.open = wanted;
 }
 
+// A 10px chevron that turns when the row opens; it is the mark of a row that has something to open.
+function chevron() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    svg.setAttribute('viewBox', '0 0 10 10');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'chevron');
+    path.setAttribute('d', 'M3 1.5 6.5 5 3 8.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.4');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+}
+
+const SLOW_CALL_MS = 2000;
+
+// A time is shown for a call that took 2s or more and for one that failed; a fast success has nothing to add.
+function durationText(seconds, failed) {
+    if (seconds === null || (!failed && Math.round(seconds * 1000) < SLOW_CALL_MS)) return '';
+    return formatDuration(seconds);
+}
+
+const callName = call => TOOL_NAMES[call.actionType]?.label || call.actionType;
+
+// A call row starts static (no chevron, not focusable, not clickable); drawCall turns it into a details
+// row once the call has an output or a summary to show.
 function callRow(feed, key) {
-    const node = el('details', 'tool tool-running');
+    const node = el('details', 'tool tool-running tool-static');
     const summary = el('summary');
+    summary.tabIndex = -1;
     const label = el('span', 'tool-label'), target = el('span', 'tool-target');
     const dir = el('span', 'tool-dir'), file = el('span', 'tool-file'), text = el('span', 'tool-text');
     // The directory sits in a bdi so its slashes keep their place while the row cuts it from the left.
@@ -100,14 +130,15 @@ function callRow(feed, key) {
     summary.append(label, target, status, time);
     const output = el('pre');
     node.append(summary, output);
-    expandable(feed, key, node, summary);
-    return { node, label, target, dir, dirText, file, text, status, time, output, key, drawn: null, defaultOpen: false };
+    const row = { node, summary, chevron: chevron(), label, target, dir, dirText, file, text, status, time, output, key, drawn: null, defaultOpen: false, canOpen: false };
+    expandable(feed, key, node, summary, () => row.canOpen);
+    return row;
 }
 
 function drawCall(feed, row, call) {
     const state = toolStatus(call), running = state === 'running', failed = state === 'failed';
     const seconds = callSeconds(call);
-    row.label.textContent = TOOL_NAMES[call.actionType]?.label || call.actionType;
+    row.label.textContent = callName(call);
     // A path shows its directory cut from the left and its file whole; any other target is cut from the end.
     const { dir, name, full } = toolTarget(call);
     row.dirText.textContent = dir;
@@ -117,8 +148,17 @@ function drawCall(feed, row, call) {
     row.node.classList.toggle('tool-running', running);
     row.node.classList.toggle('tool-failed', failed);
     row.status.textContent = failed ? (Number.isInteger(call.exitCode) && call.exitCode !== 0 ? `exit ${call.exitCode}` : 'failed') : '';
-    row.time.textContent = !running && seconds !== null ? formatDuration(seconds) : '';
-    row.output.textContent = running ? call.output : call.output || call.summary || '(no output)';
+    row.time.textContent = running ? '' : durationText(seconds, failed);
+    const output = running ? call.output : call.output || call.summary;
+    row.output.textContent = output;
+    const canOpen = output !== '';
+    if (canOpen !== row.canOpen) {
+        row.canOpen = canOpen;
+        row.node.classList.toggle('tool-static', !canOpen);
+        row.summary.tabIndex = canOpen ? 0 : -1;
+        if (canOpen) row.summary.insertBefore(row.chevron, row.label);
+        else row.chevron.remove();
+    }
     applyOpen(feed, row.key, row, failed && call.output !== '');
 }
 
@@ -131,12 +171,22 @@ function toolBlockRow(feed, blockId) {
 function groupParts(feed, row) {
     const node = el('details', 'tool tool-group tool-running');
     const summary = el('summary');
-    const label = el('span', 'tool-label'), time = el('span', 'tool-time');
-    summary.append(label, el('span', 'tool-target'), time);
+    const label = el('span', 'tool-label'), target = el('span', 'tool-target'), names = el('span', 'tool-text'), time = el('span', 'tool-time');
+    target.append(names);
+    summary.append(chevron(), label, target, time);
     const body = el('div', 'tool-group-body');
     node.append(summary, body);
     expandable(feed, row.blockId, node, summary);
-    return { node, label, time, body, defaultOpen: false };
+    return { node, label, target, names, time, body, defaultOpen: false };
+}
+
+// "3 calls" or "3 calls, 1 failed" with the failed count in the error color, then the distinct action names.
+function drawGroupHeader(group, calls, failed) {
+    group.label.textContent = `${calls.length} calls`;
+    if (failed) group.label.append(', ', el('span', 'tool-failed-count', `${failed} failed`));
+    const names = Array.from(new Set(calls.map(callName))).join(', ');
+    group.names.textContent = names;
+    group.target.title = names;
 }
 
 function drawToolBlock(feed, row, block) {
@@ -159,31 +209,14 @@ function drawToolBlock(feed, row, block) {
     }
     if (!row.group) return;
     const group = row.group, state = groupStatus(block.calls), running = state === 'running';
-    group.label.textContent = `${block.calls.length} calls`;
+    drawGroupHeader(group, block.calls, block.calls.filter(call => toolStatus(call) === 'failed').length);
     group.node.classList.toggle('tool-running', running);
     group.node.classList.toggle('tool-failed', state === 'failed');
     const starts = block.calls.map(call => call.startedAt).filter(Number.isFinite);
     const ends = block.calls.map(call => call.endedAt).filter(Number.isFinite);
     const seconds = !running && starts.length && ends.length ? callSeconds({ startedAt: Math.min(...starts), endedAt: Math.max(...ends) }) : null;
-    group.time.textContent = seconds === null ? '' : formatDuration(seconds);
+    group.time.textContent = durationText(seconds, state === 'failed');
     applyOpen(feed, row.blockId, group, !(state === 'ok' && block.turnEnded === true));
-}
-
-// A 10px chevron that turns when the row opens; it is the mark of a row that has something to open.
-function chevron() {
-    const ns = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
-    svg.setAttribute('viewBox', '0 0 10 10');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('class', 'chevron');
-    path.setAttribute('d', 'M3 1.5 6.5 5 3 8.5');
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', 'currentColor');
-    path.setAttribute('stroke-width', '1.4');
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
-    svg.append(path);
-    return svg;
 }
 
 function reasoningRow(feed, key) {
