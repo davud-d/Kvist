@@ -5,6 +5,8 @@ import { renderInspector, scheduleInspector } from "/assets/features/views.js";
 import { configuredModel } from '/assets/features/configuration.js';
 import { initialState, reduce, reducesLive } from '/assets/features/blocks.js';
 import { createFeed } from '/assets/features/feed.js';
+import { renderPending } from '/assets/features/pending.js';
+import { answerSummary } from '/assets/features/format.js';
 export { renderInspector } from "/assets/features/views.js";
 const conversation = document.querySelector("#conversation"), empty = document.querySelector("#empty-state");
 const composer = document.querySelector("#composer"), pending = document.querySelector("#pending-input");
@@ -80,19 +82,19 @@ function reconcileAgentState(event) {
         setAgentState("waiting_for_user");
     }
     else if (kind === 'command_result') {
-        pending.hidden = true;
+        hidePending();
         setAgentState('idle');
     }
     else if (kind === "turn_end") {
-        pending.hidden = true;
+        hidePending();
         setAgentState(event.stopped_by_user ? "stopped" : "finished");
     }
     else if (kind === "error") {
-        pending.hidden = true;
+        hidePending();
         setAgentState("failed");
     }
     else if (kind === "agent.process_exited") {
-        pending.hidden = true;
+        hidePending();
         setAgentState(Number(event.code) === 0 ? "finished" : "failed");
     }
 }
@@ -130,7 +132,7 @@ export function applyEvent(event, { initial = false, durableReplay = false, seq,
     else if (kind === "input_request" && !initial)
         showPending(event);
     else if (kind === 'turn_end')
-        pending.hidden = true;
+        hidePending();
     if (!initial)
         reconcileAgentState(event);
     // Streamed text and replayed records are painted once per frame; everything else shows at once.
@@ -158,7 +160,7 @@ export async function openSession(serverId, workspace, session) {
     renderMetadata();
     conversation.hidden = false;
     composer.hidden = false;
-    pending.hidden = true;
+    hidePending();
     const item = sessionOf();
     title.textContent = item?.title || session;
     path.textContent = `${workspace} · ${serverId}`;
@@ -185,7 +187,7 @@ export async function openSession(serverId, workspace, session) {
     empty.hidden = conversation.children.length > 0;
     const latest = sessionOf();
     setAgentState(latest?.execution || 'idle');
-    pending.hidden = true;
+    hidePending();
     if (latest?.pending_input && latest.execution === 'waiting_for_user')
         showPending(latest.pending_input);
     conversation.scrollTop = conversation.scrollHeight;
@@ -269,8 +271,10 @@ export function resetLive() {
 // A navigation refresh newer than everything the feed has seen shows no pending request:
 // inputs the journal never closed (no answer record) are over.
 export function closeStaleInputs(lastEventId) {
-    if (lastEventId >= feedState.lastSeq)
-        feedState = reduce(feedState, { event: { type: 'client.inputs_closed' } });
+    if (lastEventId < feedState.lastSeq)
+        return;
+    feedState = reduce(feedState, { event: { type: 'client.inputs_closed' } });
+    queuePaint();
 }
 export function setAgentState(value) {
     const stateValue = typeof value === 'string' && value ? value : 'idle';
@@ -281,124 +285,45 @@ export function setAgentState(value) {
     $('#send-button').hidden = busy(stateValue);
     $('#prompt').placeholder = busy(stateValue) ? 'Kvist is working. You can draft your next message…' : 'Message Kvist…';
 }
-function appendSubject(subject) {
-    if (!subject || typeof subject !== "object")
-        return;
-    const details = document.createElement("details");
-    details.className = "tool";
-    details.open = true;
-    const summary = document.createElement("summary");
-    const pre = document.createElement("pre");
-    if (subject.kind === "command") {
-        summary.textContent = "Command awaiting approval";
-        pre.textContent = [subject.command, subject.reason].filter(Boolean).join("\n\n") || "No command details were supplied.";
-    }
-    else if (subject.kind === "overwrite") {
-        summary.textContent = subject.path ? `Overwrite ${subject.path}` : "File overwrite awaiting approval";
-        pre.textContent = subject.diff || "No diff details were supplied.";
-    }
-    else {
-        summary.textContent = "Request details";
-        pre.textContent = JSON.stringify(subject, null, 2);
-    }
-    details.append(summary, pre);
-    pending.append(details);
-}
-function pendingField(event) {
-    if (event.kind === "choice" && Array.isArray(event.options) && event.options.length) {
-        const select = document.createElement("select");
-        select.setAttribute("aria-label", event.title || "Choose a response");
-        for (const option of event.options) {
-            const node = document.createElement("option");
-            const value = typeof option === "object" && option ? option.value : option;
-            const label = typeof option === "object" && option ? option.label || option.value : option;
-            node.value = String(value ?? "");
-            node.textContent = String(label ?? value ?? "");
-            if (String(value ?? "") === String(event.current_value || ""))
-                node.selected = true;
-            select.append(node);
-        }
-        return select;
-    }
-    const input = document.createElement("input");
-    input.type = event.kind === "secret" ? "password" : "text";
-    input.autocomplete = "off";
-    input.value = event.kind === "secret" ? "" : event.current_value || "";
-    input.setAttribute("aria-label", event.title || "Response");
-    return input;
+// Removing the controls with the panel also removes what the person typed into them, a secret included.
+function hidePending() {
+    pending.hidden = true;
+    pending.replaceChildren();
 }
 function showPending(event) {
+    const first = renderPending(pending, event, response => respond(event, response));
     pending.hidden = false;
-    pending.replaceChildren();
-    const heading = document.createElement("h3");
-    heading.textContent = event.title || "Kvist needs input";
-    const body = document.createElement("p");
-    body.textContent = event.body || event.help_text || "Review this request before continuing.";
-    pending.append(heading, body);
-    appendSubject(event.subject);
-    if (event.kind === "confirm") {
-        const deny = document.createElement("button");
-        deny.className = "stop-button";
-        deny.textContent = "Deny";
-        const allow = document.createElement("button");
-        allow.className = "primary-button";
-        allow.textContent = "Allow";
-        let remember = null;
-        if (event.remember_pattern) {
-            const label = document.createElement("label");
-            remember = document.createElement("input");
-            remember.type = "checkbox";
-            label.append(remember, document.createTextNode(" Remember this safe approval"));
-            pending.append(label);
-        }
-        deny.onclick = () => respond(event, { approved: false });
-        allow.onclick = () => respond(event, { approved: true, ...(remember?.checked ? { remember: true } : {}) });
-        pending.append(deny, allow);
-        queueMicrotask(() => { if (!document.querySelector(".overlay:not([hidden])"))
-            deny.focus(); });
-        return;
-    }
-    const input = pendingField(event);
-    const send = document.createElement("button");
-    send.className = "primary-button";
-    send.textContent = "Continue";
-    const submit = () => respond(event, { value: input.value });
-    send.onclick = submit;
-    input.addEventListener("keydown", key => { if (key.key === "Enter") {
-        key.preventDefault();
-        submit();
-    } });
-    pending.append(input, send);
-    queueMicrotask(() => { if (!document.querySelector(".overlay:not([hidden])"))
-        input.focus(); });
+    queueMicrotask(() => {
+        const prompt = $('#prompt');
+        // A person who is typing a message keeps the focus; the panel waits for Tab.
+        if (document.querySelector('.overlay:not([hidden])') || (document.activeElement === prompt && prompt.value))
+            return;
+        first.focus();
+    });
 }
 async function respond(event, response) {
     const snapshot = selectionSnapshot();
     if (!snapshot)
         return;
-    for (const button of pending.querySelectorAll('button'))
-        button.disabled = true;
+    const controls = () => pending.querySelectorAll('button, input');
+    for (const control of controls())
+        control.disabled = true;
     try {
         await api.respond(snapshot.selection, { request_id: event.request_id, ...response });
     }
     catch (error) {
         toast(error.message, true);
         if (isCurrentSelection(snapshot))
-            for (const button of pending.querySelectorAll('button'))
-                button.disabled = false;
+            for (const control of controls())
+                control.disabled = false;
         return;
     }
     if (!isCurrentSelection(snapshot))
         return;
     feedState = reduce(feedState, { event: { type: 'client.input_answered', request_id: event.request_id, summary: answerSummary(event, response) } });
-    pending.hidden = true;
+    queuePaint();
+    hidePending();
     setAgentState("running");
-}
-// What the person answered, for the record of the request; a secret's value is never kept.
-function answerSummary(event, response) {
-    if (typeof response.approved === 'boolean')
-        return response.approved ? 'Allowed' : 'Denied';
-    return event.kind === 'secret' ? '' : String(response.value ?? '');
 }
 let readTimer;
 export function scheduleRead() {

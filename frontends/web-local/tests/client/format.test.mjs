@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { callSeconds, formatDuration, groupStatus, toolStatus, toolTarget } from '../../kvist_web/client/features/format.js';
+import { answerSummary, callSeconds, choiceOptions, formatDuration, groupStatus, isDenied, toolStatus, toolTarget } from '../../kvist_web/client/features/format.js';
 
 test('formatDuration: under a second shows tenths, floored', () => {
     assert.equal(formatDuration(0), '0.0s');
@@ -129,4 +129,53 @@ test('callSeconds: needs both timestamps, in order', () => {
     assert.equal(callSeconds({ startedAt: 100, endedAt: null }), null);
     assert.equal(callSeconds({ startedAt: 0, endedAt: 112 }), null, 'ts 0 is the journal parse fallback, not a time');
     assert.equal(callSeconds({ startedAt: 112, endedAt: 100 }), null);
+});
+
+const command = { kind: 'confirm', title: 'Run the test suite?', subject: { kind: 'command', command: 'npm test', reason: 'Verify' } };
+
+test('answerSummary: a command approval reads "approved: run npm test", a refusal "denied: ..."', () => {
+    assert.equal(answerSummary(command, { approved: true }), 'approved: run npm test');
+    assert.equal(answerSummary(command, { approved: true, remember: true }), 'approved: run npm test');
+    assert.equal(answerSummary(command, { approved: false }), 'denied: run npm test');
+    const overwrite = { kind: 'confirm', title: 'Overwrite?', subject: { kind: 'overwrite', path: 'src/a.ts', diff: '+x' } };
+    assert.equal(answerSummary(overwrite, { approved: false }), 'denied: overwrite src/a.ts');
+    assert.equal(answerSummary({ kind: 'confirm', title: 'Continue?' }, { approved: true }), 'approved: Continue?');
+    assert.equal(answerSummary({ kind: 'confirm' }, { approved: true }), 'approved: request');
+});
+
+test('answerSummary: choice shows the label of the option, text shows the text', () => {
+    const choice = { kind: 'choice', title: 'Pick a model', options: ['fast', { value: 's', label: 'smart' }] };
+    assert.equal(answerSummary(choice, { value: 's' }), 'Pick a model: smart');
+    assert.equal(answerSummary(choice, { value: 'fast' }), 'Pick a model: fast');
+    assert.equal(answerSummary({ kind: 'text', title: 'Name' }, { value: 'Ada' }), 'Name: Ada');
+    assert.equal(answerSummary({ kind: 'text', title: 'Name' }, { value: '' }), 'Name: (empty)');
+    assert.equal(answerSummary({ kind: 'text' }, { value: 'x' }), 'answered: x');
+});
+
+test('answerSummary: a secret is never in the summary, whatever the response holds', () => {
+    const summary = answerSummary({ kind: 'secret', title: 'API key' }, { value: 'hunter2-the-secret' });
+    assert.equal(summary, 'secret provided');
+    assert(!summary.includes('hunter2'));
+    assert.equal(answerSummary({ kind: 'secret', title: 'API key', current_value: 'old-secret' }, { approved: true }), 'secret provided');
+});
+
+test('answerSummary: one line of at most 80 characters', () => {
+    const long = answerSummary({ kind: 'text', title: 'T' }, { value: `${'x'.repeat(200)}\nsecond line` });
+    assert.equal(Array.from(long).length, 80);
+    assert(!long.includes('\n'));
+    const multi = { kind: 'confirm', subject: { kind: 'command', command: 'echo a\necho b' } };
+    assert.equal(answerSummary(multi, { approved: true }), 'approved: run echo a');
+});
+
+test('isDenied: only a denied summary gets the cross', () => {
+    assert(isDenied('denied: run npm test'));
+    assert(!isDenied('approved: run npm test'));
+    assert(!isDenied('Name: denied: x'));
+});
+
+test('choiceOptions: bare values and objects become { value, label } strings', () => {
+    assert.deepEqual(choiceOptions({ options: ['a', { value: 'b', label: 'Bee' }, { value: 3 }, null] }),
+        [{ value: 'a', label: 'a' }, { value: 'b', label: 'Bee' }, { value: '3', label: '3' }, { value: '', label: '' }]);
+    assert.deepEqual(choiceOptions({}), []);
+    assert.deepEqual(choiceOptions({ options: null }), []);
 });

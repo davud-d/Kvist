@@ -83,12 +83,15 @@ def test_client_recovers_durable_events_without_second_transcript_or_stale_sse_c
 def test_client_pending_input_and_navigation_stay_protocol_driven_and_session_scoped():
     app = (CLIENT / "app.js").read_text(encoding="utf-8")
     session = (CLIENT / "features" / "session.js").read_text(encoding="utf-8")
+    pending = (CLIENT / "features" / "pending.js").read_text(encoding="utf-8")
     navigation = (CLIENT / "features" / "navigation.js").read_text(encoding="utf-8")
     palette = (CLIENT / "features" / "palette.js").read_text(encoding="utf-8")
 
-    assert 'input.type = event.kind === "secret" ? "password" : "text"' in session
-    assert "event.remember_pattern" in session and "appendSubject(event.subject)" in session
-    assert 'event.kind === "choice"' in session
+    # The panel of a request is built in pending.js; session.js sends the answer.
+    assert "input.type = event.kind === 'secret' ? 'password' : 'text'" in pending
+    assert "event.remember_pattern" in pending and "subjectDetails(event.subject)" in pending
+    assert "event.kind === 'choice'" in pending
+    assert "renderPending(pending, event" in session and "api.respond(snapshot.selection" in session
     assert "selectionSnapshot()" in session and "isCurrentSelection(snapshot)" in session
     assert "inboxItems" in navigation and 'openPalette("inbox", paletteChoice)' in app
     assert 'mode === "inbox" ? inboxItems()' in palette

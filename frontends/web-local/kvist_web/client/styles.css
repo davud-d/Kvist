@@ -1015,18 +1015,18 @@ svg {
   color: var(--err);
 }
 
-/* Pending input */
+/* Pending input: the request is pinned above the input field and has its width and left edge. */
 .pending-input {
   flex-shrink: 0;
   max-height: 35vh;
   overflow: auto;
   margin: 8px auto 0;
   width: calc(100% - 48px);
-  max-width: calc(var(--content-max) - 48px);
+  max-width: var(--content-max);
   padding: 12px;
   background: var(--bg-1);
   border: 1px solid var(--accent);
-  border-radius: var(--r);
+  border-radius: var(--r-input);
 }
 
 .pending-input h3 {
@@ -1037,23 +1037,90 @@ svg {
 
 .pending-input p {
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 13px;
 }
 
-.pending-input input,
-.pending-input select {
-  margin-right: 8px;
-  max-width: 100%;
+.pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pending-input .pending-remember {
+  margin: 0 0 0 auto;
+}
+
+.pending-field {
+  flex: 1;
+  min-width: 0;
   background: var(--bg-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
   padding: 4px 8px;
 }
 
+.pending-choice {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+
+.pending-input .pending-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+  color: var(--text);
+}
+
+.pending-input input[type="radio"],
+.pending-input input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
 .pending-input label {
-  display: block;
-  margin: 8px 0;
   color: var(--text-2);
+}
+
+/* An answered or closed request in the feed: a mark by form, one line of what was answered. */
+.answer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.answer::before {
+  content: '\2713';
+  flex: none;
+  width: 12px;
+  text-align: center;
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.answer-denied::before {
+  content: '\2715';
+  color: var(--err);
+}
+
+.answer-closed {
+  color: var(--text-3);
+}
+
+.answer-closed::before {
+  content: '';
+}
+
+.answer-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* Overlays and dialogs */
@@ -1581,10 +1648,6 @@ svg {
     padding: 0 8px;
   }
 
-  .pending-input {
-    width: calc(100% - 28px);
-  }
-
   .head-actions button span {
     display: none;
   }
@@ -1612,6 +1675,10 @@ svg {
   .composer-area {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  .pending-input {
+    width: calc(100% - 32px);
   }
 }
 

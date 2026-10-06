@@ -1,12 +1,13 @@
 import { el, markdown } from '/assets/utils/ui.js';
 import { TOOL_NAMES } from '/assets/features/blocks.js';
-import { callSeconds, formatDuration, groupStatus, toolStatus, toolTarget } from '/assets/features/format.js';
+import { callSeconds, formatDuration, groupStatus, isDenied, toolStatus, toolTarget } from '/assets/features/format.js';
 
 // Draws the blocks of a reducer state into one container. A row is created once per block and redrawn only
 // when its block object is not the one drawn last: the reducer replaces an object whenever it changes it, so
 // an unchanged block keeps its identity. Event text (tool output, reasoning, errors) always goes in through
 // textContent. What the person opened or closed is kept here, by block key, never in the reducer.
-// Input blocks and the meta state have no row here.
+// An input block has a row only once it is answered or closed: until then the request is the pinned panel
+// above the input field (pending.js). The meta state has no row.
 
 const now = () => Date.now() / 1000;
 
@@ -222,6 +223,23 @@ function drawReasoning(row, block) {
     drawReasoningLabel(row);
 }
 
+// The record of a request: "approved: run npm test" with a check or a cross, or "request closed" for a
+// request that ended without an answer. The summary comes from session.js; a secret's value is not in it.
+function answerRow() {
+    const node = el('div', 'answer');
+    const text = el('span', 'answer-text');
+    node.append(text);
+    return { node, text, drawn: null };
+}
+
+function drawAnswer(row, block) {
+    const closed = block.answered.closed === true;
+    const summary = closed ? 'request closed' : block.answered.summary || 'answered';
+    row.node.classList.toggle('answer-closed', closed);
+    row.node.classList.toggle('answer-denied', !closed && isDenied(summary));
+    row.text.textContent = summary;
+}
+
 function messageOf(block) {
     return block.kind === 'user' || block.kind === 'text';
 }
@@ -233,6 +251,7 @@ function rowsOf(blocks) {
         if (block.kind === 'tool' || block.kind === 'reasoning') list.push([block.id, block.kind, block]);
         else if (messageOf(block)) list.push([block.id, 'message', block]);
         else if (block.kind === 'notice' && noticeText(block) !== null) list.push([block.id, 'notice', block]);
+        else if (block.kind === 'input' && block.answered !== null) list.push([block.id, 'input', block]);
     }
     return list;
 }
@@ -240,6 +259,7 @@ function rowsOf(blocks) {
 const ROWS = {
     message: { create: (feed, key, block) => messageRow(block), draw: (feed, row, block) => drawMessage(row, block) },
     notice: { create: () => noticeRow(), draw: (feed, row, block) => drawNotice(row, block) },
+    input: { create: () => answerRow(), draw: (feed, row, block) => drawAnswer(row, block) },
     tool: { create: (feed, key) => toolBlockRow(feed, key), draw: drawToolBlock },
     reasoning: { create: reasoningRow, draw: (feed, row, block) => drawReasoning(row, block) },
 };

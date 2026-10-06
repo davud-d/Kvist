@@ -69,3 +69,34 @@ export function callSeconds({ startedAt, endedAt }) {
     const valid = value => Number.isFinite(value) && value > 0;
     return valid(startedAt) && valid(endedAt) && endedAt >= startedAt ? endedAt - startedAt : null;
 }
+
+// The options of a choice request as { value, label } strings; an option is a bare value or an object.
+export function choiceOptions(request) {
+    if (!Array.isArray(request.options)) return [];
+    return request.options.map(option => {
+        const value = typeof option === 'object' && option ? option.value : option;
+        const label = typeof option === 'object' && option ? option.label || option.value : option;
+        return { value: String(value ?? ''), label: String(label ?? value ?? '') };
+    });
+}
+
+// What a command or an overwrite asks for, in the words of a sentence: "run npm test", "overwrite src/a.ts".
+function askedFor(request) {
+    const subject = request.subject;
+    if (subject?.kind === 'command' && subject.command) return `run ${oneLine(subject.command)}`;
+    if (subject?.kind === 'overwrite' && subject.path) return `overwrite ${oneLine(subject.path)}`;
+    return oneLine(request.title || '') || 'request';
+}
+
+// One line for the row that replaces an answered request in the feed: "approved: run npm test",
+// "denied: overwrite src/a.ts", "Pick a model: fast". A secret's value never enters it.
+export function answerSummary(request, response) {
+    if (request.kind === 'secret') return 'secret provided';
+    if (typeof response.approved === 'boolean') return cutTail(`${response.approved ? 'approved' : 'denied'}: ${askedFor(request)}`);
+    const value = String(response.value ?? '');
+    const shown = choiceOptions(request).find(option => option.value === value)?.label ?? value;
+    return cutTail(`${oneLine(request.title || '') || 'answered'}: ${oneLine(shown) || '(empty)'}`);
+}
+
+// A denied answer gets a cross instead of a check.
+export const isDenied = summary => summary.startsWith('denied:');
