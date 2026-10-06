@@ -19,6 +19,18 @@ replay, stream epochs, cumulative streaming, pending approvals, background unrea
 selection races, credential renewal, 2,200 messages, 1,200 sessions, 6,000 terminal
 lines and a 5,000-line diff. It does not connect to remote SSH or invoke an LLM.
 
+`feed-states.mjs` feeds prepared event sequences through `blocks.js` and `feed.js`, which it
+imports in the page from the asset server (`/assets/features/*.js`), into a feed container of
+its own. It checks the row states (tool running, ok, failed, opened output, long target, a batch
+folded and open, reasoning streaming and finished, plan, notices, a long user message), event
+text staying text, keyboard opening, the reasoning timer, rows the person opened staying open,
+reduced motion and the 760px column, and writes a screenshot of each state at 1440×900 and
+390×844 to `KVIST_SHOTS` (default `/tmp/kvist-shots/3b`).
+
+```sh
+KVIST_WEB_URL=http://127.0.0.1:9671 node frontends/web-local/tests/browser/feed-states.mjs
+```
+
 `zoom.mjs` uses an isolated temporary Chrome profile and a local test extension to
 call `chrome.tabs.setZoom`, verifies the actual zoom and CSS viewport, and exercises
 100/110/125% on 1280×720, 1440×900, 1920×1080, 2560×1440. The main regression suite
