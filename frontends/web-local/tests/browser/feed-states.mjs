@@ -34,7 +34,7 @@ await page.route('**/api/v1/**', async route => {
     if (path === '/bootstrap') return json({ protocol_version: 1, navigation: f.inbox(), event_stream: { cursor: 0, epoch: 'e' } });
     if (path === '/navigation') return json(f.inbox());
     if (path === '/history') return json({ events: [], has_more: false });
-    if (path === '/configuration') return json({ provider: 'p', setup_required: false, providers: [], custom: [] });
+    if (path === '/configuration') return json({ provider: 'p', setup_required: false, providers: [], custom_providers: [] });
     return json({ ok: true });
 });
 
@@ -445,6 +445,244 @@ try {
         await page.setViewportSize({ width: 1440, height: 900 });
         await shot('column');
     });
+
+    // --- input: the pinned panel and the answered rows, in the real app page ---------------------------
+    // The panel is built by session.js, so these scenarios run on the app itself with the API mocked as in
+    // redesign.mjs: a durable input_request reaches the page as a live envelope and then through the journal.
+    const inputShots = process.env.KVIST_SHOTS_INPUT || '/tmp/kvist-shots/3c';
+    await mkdir(inputShots, { recursive: true });
+    const SECRET = 'hunter2-SECRET-value';
+    const app = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+    const appErrors = [], consoleLines = [], sent = [];
+    app.on('pageerror', e => appErrors.push(e.message));
+    app.on('console', message => consoleLines.push(message.text()));
+    app.on('request', request => sent.push({ method: request.method(), path: new URL(request.url()).pathname, body: request.postData() ?? '', url: request.url() }));
+    const fx = fixture();
+    let cursor = 0;
+    const answers = [];
+    await app.addInitScript(() => {
+        window.__sources = [];
+        window.EventSource = class {
+            constructor(url) { this.url = url; window.__sources.push(this); setTimeout(() => this.onopen?.({}), 0); }
+            close() {}
+            emit(data) { this.onmessage?.({ data: JSON.stringify(data) }); }
+        };
+    });
+    await app.route('**/api/v1/**', async route => {
+        const request = route.request(), url = new URL(request.url()), path = url.pathname.replace('/api/v1', '');
+        const json = value => route.fulfill({ json: value });
+        if (path === '/bootstrap') return json({ protocol_version: 1, navigation: fx.inbox(), event_stream: { cursor, epoch: 'e' } });
+        if (path === '/navigation') return json(fx.inbox());
+        if (path === '/history') {
+            const all = fx.histories[url.searchParams.get('session')] || [], after = Number(url.searchParams.get('after'));
+            const events = all.filter(e => e.seq > after).slice(0, 1000);
+            return json({ events, has_more: events.at(-1)?.seq < all.length });
+        }
+        if (path === '/respond') { answers.push(request.postDataJSON().response); return json({ ok: true }); }
+        if (path === '/configuration') return json({ provider: 'p', setup_required: false, providers: [], custom_providers: [] });
+        return json({ ok: true });
+    });
+    await app.goto(base);
+    await app.locator('#history-status').waitFor({ state: 'hidden' });
+    await app.getByRole('button', { name: /^Improve session recovery ·/ }).click();
+    await app.locator('#history-status').waitFor({ state: 'hidden' });
+    const journal = event => {
+        const list = fx.histories.review;
+        list.push({ seq: list.length + 1, turn: 2, ts: 1780000100, event });
+        fx.sessions.find(s => s.name === 'review').last_event_id = list.length;
+        return app.evaluate(envelope => window.__sources.at(-1).emit(envelope), { id: ++cursor, server_id: 'local', workspace: fx.workspace, session: 'review', event, durable: true });
+    };
+    const request = (id, kind, extra = {}) => ({ type: 'input_request', request_id: id, kind, title: 'Question', body: 'Kvist needs an answer.', options: null, current_value: '', help_text: '', ...extra });
+    const panel = app.locator('#pending-input');
+    const ask = async event => { await journal(event); await panel.waitFor({ state: 'visible' }); };
+    const answered = text => app.locator('#conversation .answer', { hasText: text });
+    const edges = () => app.evaluate(() => { const p = document.querySelector('#pending-input').getBoundingClientRect(), c = document.querySelector('#composer').getBoundingClientRect(); return { panel: [Math.round(p.x), Math.round(p.width), Math.round(p.bottom)], composer: [Math.round(c.x), Math.round(c.width), Math.round(c.top)] }; });
+    const inputShot = async name => {
+        await app.screenshot({ path: `${inputShots}/${name}-1440x900.png` });
+        await app.setViewportSize({ width: 390, height: 844 });
+        await app.screenshot({ path: `${inputShots}/${name}-390x844.png` });
+        assert(await app.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${name}: horizontal scroll at 390px`);
+        await app.setViewportSize({ width: 1440, height: 900 });
+    };
+    const appToken = name => app.evaluate(name => { const n = document.createElement('i'); n.style.color = `var(--${name})`; document.body.append(n); const c = getComputedStyle(n).color; n.remove(); return c; }, name);
+    const focusedId = () => app.evaluate(() => { const n = document.activeElement; return n.id || n.textContent.trim().slice(0, 12) || n.type || n.tagName; });
+    const confirmEvent = (id, extra = {}) => request(id, 'confirm', { title: 'Run the test suite?', subject: { kind: 'command', command: 'npm test', reason: 'Verify the changes' }, remember_pattern: 'npm test', ...extra });
+
+    await check('input pending, confirm: panel pinned above the field with its width and left edge, accent border', async () => {
+        await ask(confirmEvent('c1'));
+        for (const [width, height] of [[1440, 900], [1280, 720], [390, 844], [790, 700]]) {
+            await app.setViewportSize({ width, height });
+            const e = await edges();
+            assert.deepEqual(e.panel.slice(0, 2), e.composer.slice(0, 2), `${width}: the panel has the left edge and width of the input ${JSON.stringify(e)}`);
+            assert(e.panel[2] <= e.composer[2], `${width}: the panel is above the input`);
+        }
+        await app.setViewportSize({ width: 1440, height: 900 });
+        assert.equal((await edges()).panel[1], 760);
+        const box = await panel.evaluate(n => { const s = getComputedStyle(n); return [s.borderTopWidth, s.borderTopStyle, s.borderTopColor, s.borderTopLeftRadius]; });
+        assert.deepEqual(box, ['1px', 'solid', await appToken('accent'), '6px']);
+        assert.equal(await panel.locator('h3').textContent(), 'Run the test suite?');
+        assert.deepEqual(await panel.getByRole('button').allTextContents(), ['Deny', 'Allow']);
+        assert.equal(await panel.getByRole('checkbox').count(), 1);
+        assert.equal(await app.locator('#conversation .answer').count(), 0, 'an unanswered request is not in the feed');
+        assert.equal(await app.locator('#conversation').getByText('Run the test suite?').count(), 0);
+        await inputShot('input-confirm-pending');
+    });
+
+    await check('input pending: the first control has the focus and Tab goes through the panel, then the composer', async () => {
+        const where = () => app.evaluate(() => { const n = document.activeElement; return { name: n.textContent.trim().slice(0, 12) || n.type, panel: !!n.closest('#pending-input'), composer: !!n.closest('#composer') }; });
+        const trail = [await where()];
+        for (let i = 0; i < 3; i++) { await app.keyboard.press('Tab'); trail.push(await where()); }
+        assert.deepEqual(trail.map(t => [t.name, t.panel ? 'panel' : t.composer ? 'composer' : 'elsewhere']),
+            [['Deny', 'panel'], ['Allow', 'panel'], ['checkbox', 'panel'], [trail[3].name, 'composer']]);
+    });
+
+    await check('input answered, confirm: Allow posts the answer, the panel goes, a check row says what was approved', async () => {
+        await app.getByRole('checkbox').check();
+        await app.getByRole('button', { name: 'Allow', exact: true }).click();
+        await panel.waitFor({ state: 'hidden' });
+        assert.equal(await panel.evaluate(n => n.children.length), 0, 'the controls are removed with the panel');
+        assert.deepEqual(answers.at(-1), { request_id: 'c1', approved: true, remember: true });
+        const row = answered('approved: run npm test');
+        await row.waitFor();
+        const look = await row.evaluate(n => { const s = getComputedStyle(n), m = getComputedStyle(n, '::before'); return { color: s.color, size: s.fontSize, mono: s.fontFamily.includes('Mono'), mark: m.content, markColor: m.color }; });
+        assert.deepEqual([look.color, look.size, look.mono, look.mark, look.markColor], [await appToken('text-2'), '13px', false, '"✓"', await appToken('ok')]);
+        await inputShot('input-confirm-answered');
+    });
+
+    await check('input answered, confirm: Deny reads "denied: ..." with a cross and no remember flag', async () => {
+        await ask(confirmEvent('c2', { remember_pattern: null }));
+        assert.equal(await panel.getByRole('checkbox').count(), 0);
+        await app.getByRole('button', { name: 'Deny', exact: true }).click();
+        await panel.waitFor({ state: 'hidden' });
+        assert.deepEqual(answers.at(-1), { request_id: 'c2', approved: false });
+        const row = answered('denied: run npm test');
+        await row.waitFor();
+        assert.equal(await row.evaluate(n => getComputedStyle(n, '::before').content), '"✕"');
+        assert.equal(await row.evaluate(n => getComputedStyle(n, '::before').color), await appToken('err'));
+    });
+
+    await check('input choice: a radio list with the current value checked, Continue sends the choice', async () => {
+        await ask(request('k1', 'choice', { title: 'Pick a model', options: ['fast', { value: 's', label: 'smart' }, 'slow'], current_value: 's' }));
+        assert.equal(await panel.getByRole('radio').count(), 3);
+        assert.equal(await panel.getByRole('radio', { name: 'smart' }).isChecked(), true);
+        assert.equal(await panel.getByRole('radiogroup').count(), 1);
+        assert.equal(await focusedId(), 'radio');
+        await inputShot('input-choice-pending');
+        await panel.getByRole('radio', { name: 'slow' }).check();
+        await panel.getByRole('button', { name: 'Continue' }).click();
+        await panel.waitFor({ state: 'hidden' });
+        assert.deepEqual(answers.at(-1), { request_id: 'k1', value: 'slow' });
+        await answered('Pick a model: slow').waitFor();
+        await ask(request('k2', 'choice', { title: 'Pick again', options: [{ value: 'a', label: 'Alpha' }, { value: 'b', label: 'Beta' }] }));
+        assert.equal(await panel.getByRole('radio', { name: 'Alpha' }).isChecked(), true, 'the first option is checked when there is no current value');
+        await panel.getByRole('radio', { name: 'Beta' }).check();
+        await app.keyboard.press('Tab');
+        await app.keyboard.press('Enter');
+        await panel.waitFor({ state: 'hidden' });
+        assert.deepEqual(answers.at(-1), { request_id: 'k2', value: 'b' });
+        await answered('Pick again: Beta').waitFor();
+        await inputShot('input-choice-answered');
+    });
+
+    await check('input text: a field, Enter sends, the field is cleared', async () => {
+        await ask(request('t1', 'text', { title: 'Branch name', current_value: 'main' }));
+        const field = panel.getByRole('textbox');
+        assert.equal(await field.inputValue(), 'main');
+        assert(await field.evaluate(n => n === document.activeElement));
+        await inputShot('input-text-pending');
+        await field.fill('feature/pinned-panel');
+        await app.keyboard.press('Enter');
+        await panel.waitFor({ state: 'hidden' });
+        assert.deepEqual(answers.at(-1), { request_id: 't1', value: 'feature/pinned-panel' });
+        assert.equal(await panel.locator('input').count(), 0, 'the field is gone with its text');
+        await answered('Branch name: feature/pinned-panel').waitFor();
+        await inputShot('input-text-answered');
+    });
+
+    await check('input secret: a password field, Enter sends, the value is nowhere but in the answer', async () => {
+        await ask(request('s1', 'secret', { title: 'API key' }));
+        const field = panel.locator('input[type=password]');
+        assert.equal(await field.count(), 1);
+        assert(await field.evaluate(n => n === document.activeElement));
+        await inputShot('input-secret-pending');
+        await field.fill(SECRET);
+        await app.keyboard.press('Enter');
+        await panel.waitFor({ state: 'hidden' });
+        assert.deepEqual(answers.at(-1), { request_id: 's1', value: SECRET });
+        await answered('secret provided').waitFor();
+        await journal({ type: 'message', markdown: 'Key saved.' });
+        await app.getByText('Key saved.').waitFor();
+        await inputShot('input-secret-answered');
+
+        // The value was in the POST of the answer and in nothing else.
+        const where = sent.filter(r => r.body.includes(SECRET) || r.url.includes(SECRET));
+        assert.deepEqual(where.map(r => `${r.method} ${r.path}`), ['POST /api/v1/respond']);
+        assert(!consoleLines.some(line => line.includes(SECRET)), 'the value reached console.log');
+        const found = await app.evaluate(async secret => {
+            const html = document.documentElement.outerHTML, values = [...document.querySelectorAll('input, textarea')].map(n => n.value);
+            const { state } = await import('/assets/state/store.js');
+            const seen = new Set(), hits = [];
+            const walk = (value, path) => {
+                if (typeof value === 'string') { if (value.includes(secret)) hits.push(path); return; }
+                if (!value || typeof value !== 'object' || seen.has(value)) return;
+                seen.add(value);
+                if (value instanceof Map) value.forEach((v, k) => { walk(k, `${path}.<key>`); walk(v, `${path}[${String(k)}]`); });
+                else if (value instanceof Set) value.forEach(v => walk(v, `${path}.<set>`));
+                else for (const [k, v] of Object.entries(value)) { walk(k, `${path}.<key>`); walk(v, `${path}.${k}`); }
+            };
+            walk(state, 'state');
+            walk({ local: { ...localStorage }, session: { ...sessionStorage } }, 'storage');
+            return { html: html.includes(secret), values: values.some(v => v.includes(secret)), hits };
+        }, SECRET);
+        assert.deepEqual(found, { html: false, values: false, hits: [] });
+    });
+
+    await check('input secret: a value the producer sent by mistake is not kept either', async () => {
+        await ask(request('s2', 'secret', { title: 'Token', current_value: 'old-existing-secret' }));
+        assert.equal(await panel.locator('input[type=password]').inputValue(), '');
+        await app.getByRole('button', { name: 'Continue' }).click();
+        await panel.waitFor({ state: 'hidden' });
+        assert.deepEqual(answers.at(-1), { request_id: 's2', value: '' });
+        assert.equal(await app.locator('#conversation').evaluate(n => n.innerHTML.includes('old-existing-secret')), false);
+        assert.equal(await app.evaluate(async () => { const { state } = await import('/assets/state/store.js'); return JSON.stringify(state.events).includes('old-existing-secret'); }), false);
+    });
+
+    await check('input closed without an answer: "request closed" in --text-3, no panel left', async () => {
+        await ask(request('x1', 'text', { title: 'Never answered' }));
+        await journal({ type: 'turn_end' });
+        await panel.waitFor({ state: 'hidden' });
+        const row = app.locator('#conversation .answer-closed');
+        await row.waitFor();
+        assert.equal(await row.textContent(), 'request closed');
+        assert.equal(await row.evaluate(n => getComputedStyle(n).color), await appToken('text-3'));
+        assert.equal(await row.evaluate(n => getComputedStyle(n, '::before').content), '""');
+        assert.equal(await app.locator('#conversation').getByText('Never answered').count(), 0);
+        await inputShot('input-closed');
+    });
+
+    await check('input focus: a message being typed keeps the focus, an empty field gives it to the panel', async () => {
+        const prompt = app.locator('#prompt');
+        await prompt.focus();
+        await app.keyboard.type('half a thought');
+        await ask(confirmEvent('f1'));
+        await app.waitForTimeout(120);
+        assert.equal(await app.evaluate(() => document.activeElement.id), 'prompt', 'the panel took the focus from a message being typed');
+        assert.equal(await prompt.inputValue(), 'half a thought');
+        await app.keyboard.press('Shift+Tab');
+        assert.equal(await focusedId(), 'checkbox', 'Shift+Tab from the composer reaches the last control of the panel');
+        await app.getByRole('button', { name: 'Deny', exact: true }).click();
+        await panel.waitFor({ state: 'hidden' });
+        await prompt.fill('');
+        await prompt.focus();
+        await ask(confirmEvent('f2'));
+        await app.waitForTimeout(120);
+        assert.equal(await focusedId(), 'Deny', 'an empty composer does not keep the focus');
+        await app.getByRole('button', { name: 'Allow', exact: true }).click();
+        await panel.waitFor({ state: 'hidden' });
+        await prompt.fill('');
+    });
+
+    assert.deepEqual(appErrors, []);
 
     assert.deepEqual(errors, []);
     console.log(`PASS ${checks.length} feed state scenarios, screenshots in ${shots}`);
