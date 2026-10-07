@@ -1744,11 +1744,9 @@ details[open] > summary > .chevron {
   opacity: 1;
 }
 
-.image-attach-button {
-  color: var(--text-2);
-  font-size: 18px;
-  line-height: 1;
-  padding: 4px 8px;
+/* The module makes the button; app.js adds .icon-button and the paperclip, here is only the inner focus ring. */
+.image-attach-button:focus-visible {
+  outline-offset: -2px;
 }
 
 @media (hover: none) {

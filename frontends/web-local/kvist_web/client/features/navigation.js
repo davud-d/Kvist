@@ -107,7 +107,9 @@ export function renderNavigation(onSelect, onNewSession) {
     if (focused)
         [...nav.querySelectorAll('[data-key]')].find(n => n.dataset.key === focused)?.focus({ preventScroll: true });
     const selected = state.selected || state.workspace;
-    $('#active-server-label').textContent = selected?.serverId === 'local' || !selected ? 'Local' : state.navigation.servers.find(s => s.server.id === selected.serverId)?.server.name || selected.serverId;
+    const label = $('#active-server-label');
+    if (label)
+        label.textContent = selected?.serverId === 'local' || !selected ? 'Local' : state.navigation.servers.find(s => s.server.id === selected.serverId)?.server.name || selected.serverId;
 }
 export function paletteItems() {
     const items = [];

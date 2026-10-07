@@ -6,7 +6,7 @@ import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession,
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
-import { configureConnections, handleConnectionLog, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
+import { configureConnections, handleConnectionLog, mountServerSwitcher, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
 import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
 const SLOW_CONNECT_MS = 1500;
@@ -223,7 +223,20 @@ function connectEvents() {
         return; state.transport = 'reconnecting'; renderConnection(); probeBrowserSession(source, generation); };
 }
 const form = $('#composer'), prompt = $('#prompt');
+mountServerSwitcher(form.querySelector('.composer-controls'));
 const imageAttachments = mountImageAttachments(form, prompt, form.querySelector('.composer-controls'), message => toast(message, true));
+// The module draws its button as a "+"; the client restyles it as an icon button with a paperclip.
+const attach = form.querySelector('.image-attach-button');
+attach.classList.add('icon-button');
+attach.dataset.icon = 'paperclip';
+icons(form);
+// Sending is possible with text or an attachment, and not while a send is in flight.
+function syncSend() {
+    const button = $('#send-button');
+    button.disabled = sending || !(prompt.value.trim() || imageAttachments.count());
+    button.setAttribute('aria-disabled', String(button.disabled));
+}
+new MutationObserver(syncSend).observe(form.querySelector('.image-attachments'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
 let imageSelection = keyOf(state.selected || state.workspace);
 subscribe(() => { const next = keyOf(state.selected || state.workspace); if (next !== imageSelection && !sending) imageAttachments.clear(); imageSelection = next; });
 form.addEventListener('submit', async (event) => {
@@ -236,7 +249,7 @@ form.addEventListener('submit', async (event) => {
     if (!text && !imageAttachments.count())
         return;
     sending = true;
-    $('#send-button').disabled = true;
+    syncSend();
     try {
         if (!(await ensureConfigured())) return;
         if (creatingSession && !(await creatingSession))
@@ -265,10 +278,10 @@ form.addEventListener('submit', async (event) => {
     }
     finally {
         sending = false;
-        $('#send-button').disabled = false;
+        syncSend();
     }
 });
-prompt.addEventListener('input', () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 180)}px`; drafts.set(keyOf(state.selected || state.workspace), prompt.value); });
+prompt.addEventListener('input', () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 180)}px`; drafts.set(keyOf(state.selected || state.workspace), prompt.value); syncSend(); });
 prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
     event.preventDefault();
     form.requestSubmit();
@@ -319,7 +332,6 @@ function command(label) {
 }
 const commands = () => openPalette('commands', paletteChoice);
 $('#search-button').onclick = () => openPalette('search', paletteChoice);
-$('#server-switcher').onclick = showServers;
 $('#new-session').onclick = () => newSession();
 $('#add-workspace').onclick = () => addWorkspace();
 $('#settings-button').onclick = showSettings;
@@ -327,7 +339,6 @@ $('#model-selector').onclick = showModel;
 $('#inbox-button').onclick = () => openPalette("inbox", paletteChoice);
 $('#commands-button').onclick = commands;
 $('#more-tools').onclick = commands;
-$('#composer-tools').onclick = commands;
 $('#context-button').onclick = () => openView('context');
 $('#retry-startup').onclick = bootstrap;
 for (const button of document.querySelectorAll('[data-view]'))

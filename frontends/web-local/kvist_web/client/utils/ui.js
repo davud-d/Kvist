@@ -31,6 +31,7 @@ const paths = {
     more: '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
     'arrow-up': '<path d="M12 20V4 m-6 6 6-6 6 6"/>', close: '<path d="m6 6 12 12 M6 18 18 6"/>',
+    paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L13 2.5a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
 };
 export function icons(root = document) { for (const node of root.querySelectorAll('[data-icon]'))
     node.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[node.dataset.icon] || ''}</svg>`; }

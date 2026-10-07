@@ -1,8 +1,18 @@
 import { api } from '/assets/utils/api.js';
 import { state, serverOf, stateLabel } from '/assets/state/store.js';
-import { $, el, esc, modal, closeModal, toast } from '/assets/utils/ui.js';
+import { $, el, esc, icons, modal, closeModal, toast } from '/assets/utils/ui.js';
+// Remote servers are frozen: the selector in front of the input is not rendered while this is false. The server
+// dialogs below stay; the palette's "Switch server" and "Connect server" still open them.
+export const SHOW_SERVERS = false;
 let handlers = {};
 export function configureConnections(value) { handlers = value; }
+export function mountServerSwitcher(controls) {
+    if (!SHOW_SERVERS)
+        return;
+    controls.insertAdjacentHTML('afterbegin', '<button type="button" id="server-switcher" class="runtime-button" aria-haspopup="dialog"><span data-icon="monitor"></span><span id="active-server-label">Local</span><span data-icon="chevron"></span></button>');
+    icons(controls);
+    $('#server-switcher').onclick = showServers;
+}
 export function showServers() {
     const root = modal('Run with Kvist', '<p>Choose where to work. Each server keeps its own workspaces and sessions.</p><div id="server-list"></div><div class="menu-divider"></div><button id="connect-server" class="quiet-button">＋ Connect server</button>');
     for (const entry of state.navigation.servers) {
