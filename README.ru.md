@@ -212,6 +212,17 @@ python installer\install.py; if ($?) { echo "Install OK" } else { echo "error in
 При первом запуске в терминале выберите провайдера, модели и credentials. Они
 сохраняются в `~/.kvist/config.json`; секреты не выводятся в консоль.
 
+### Веб-клиент
+
+```bash
+kvist-web        # из исходников: .venv/bin/kvist-web
+```
+
+`kvist-web` открывает Kvist в браузере по адресу `http://127.0.0.1:9671` и при первом
+запуске проводит через подключение модели. Рабочей папкой становится каталог, из которого
+вы запустили команду; другую задаёт `kvist-web --workspace /путь/к/проекту`. Установщик
+кладёт команду рядом с `kvist`; подробности в [frontends/web-local/README.md](frontends/web-local/README.md).
+
 ### AnyModel (провайдер по умолчанию)
 
 При пустом конфиге по умолчанию используется [AnyModel](https://anymodel.org).

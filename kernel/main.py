@@ -13,7 +13,14 @@ from kernel.version import kvist_version
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Local AI agent")
+    parser = argparse.ArgumentParser(
+        description="Local AI agent",
+        epilog=(
+            "Web client: run `kvist-web` to open Kvist in the browser "
+            "(http://127.0.0.1:9671). The directory you start it from becomes its "
+            "working folder; `kvist-web --workspace PATH` picks another."
+        ),
+    )
     parser.add_argument(
         "--version",
         action="version",
