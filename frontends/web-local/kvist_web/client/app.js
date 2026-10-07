@@ -414,7 +414,11 @@ else if (item.selection)
 else
     command(item.label); }
 function command(label) {
-    if (label === 'New session')
+    if (label.startsWith('Change '))
+        openChip({ model: 'model', reasoning: 'effort', role: 'role' }[label.slice(7)]);
+    else if (label === 'Providers and keys')
+        showModel();
+    else if (label === 'New session')
         newSession();
     else if (label === 'Show unread' || label === 'Show inbox')
         openPalette("inbox", paletteChoice);
@@ -460,6 +464,9 @@ onSetupRequired((info, serverId) => showSetup(info, serverId, {
 }));
 mountSlash($('.composer-area'), { run: runCommand, all: commands });
 mountChips();
+// A starter fills the input and leaves sending to the person, who sees what goes to the agent.
+for (const starter of document.querySelectorAll('.starter'))
+    starter.onclick = () => { prompt.value = starter.textContent; prompt.dispatchEvent(new Event('input')); prompt.focus(); };
 $('#slash-button').onclick = () => prompt.value && slashQuery(prompt.value) === null ? commands() : openSlash();
 $('#search-button').onclick = () => openPalette('search', paletteChoice);
 $('#new-session').onclick = () => newSession();

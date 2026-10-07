@@ -148,6 +148,7 @@ export function changeEcho(localId, change) {
 export function showPlace(serverId, workspace) {
     const entry = serverId === 'local' ? null : serverOf(serverId);
     path.textContent = workspace;
+    $('#empty-title').textContent = `What should Kvist do in ${workspace.split(/[\\/]/).filter(Boolean).pop() || workspace}?`;
     server.hidden = !entry;
     server.textContent = entry ? entry.server.name : '';
 }
@@ -423,7 +424,7 @@ export function setAgentState(value) {
     // The control that takes the place fades in; the one that leaves is gone at once.
     if (feedReady && busy(stateValue) !== wasBusy)
         appear(busy(stateValue) ? stop : sendButton, { duration: '--dur-fast' });
-    prompt.placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist…';
+    prompt.placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist, or type / for commands';
 }
 // Removing the controls with the panel also removes what the person typed into them, a secret included.
 function hidePending() {

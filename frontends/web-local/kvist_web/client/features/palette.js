@@ -2,7 +2,7 @@ import { inboxItems, paletteItems } from "/assets/features/navigation.js";
 import { hideOverlay, showOverlay } from "/assets/utils/ui.js";
 const overlay = document.querySelector("#palette"), input = document.querySelector("#palette-input"), results = document.querySelector("#palette-results");
 let items = [], index = 0, callback = () => { };
-const commands = ["New session", "Switch session", "Switch workspace", "Switch server", "Connect server", "Add workspace", "Open files", "Open diff", "Open terminal", "Open activity", "Open context", "Open usage", "Show unread", "Stop agent", "Settings"];
+const commands = ["Change model", "Change reasoning", "Change role", "Providers and keys", "New session", "Switch session", "Switch workspace", "Switch server", "Connect server", "Add workspace", "Open files", "Open diff", "Open terminal", "Open activity", "Open context", "Open usage", "Show unread", "Stop agent", "Settings"];
 export function openPalette(mode, onChoose) {
     callback = onChoose;
     input.value = "";

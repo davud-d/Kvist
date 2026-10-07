@@ -577,6 +577,12 @@ svg {
   outline-offset: -2px;
 }
 
+/* The palette's visible door: an icon and "Commands"; on a phone the word goes (the rule for header spans). */
+.commands-head {
+  gap: 4px;
+  padding: 0 8px;
+}
+
 /* Conversation */
 .message {
   margin-bottom: 18px;
@@ -960,28 +966,56 @@ details[open] > summary > .chevron {
   white-space: pre-wrap;
 }
 
+/* An empty session: what to ask, four starters that fill the input, and the "/" hint. */
 .empty-state {
   position: absolute;
-  left: 24px;
-  right: 24px;
-  top: 38%;
-  text-align: center;
-  pointer-events: none;
-  color: var(--text-3);
+  inset: 0;
+  overflow: auto;
+  padding: 18vh 24px 24px;
 }
 
-.empty-state img {
-  width: 32px;
-  height: 32px;
-  opacity: 0.5;
-  margin-bottom: 8px;
+.empty-state > * {
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .empty-state h2 {
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.starters {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.starter {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 10px 4px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
   color: var(--text-2);
-  margin-bottom: 4px;
+}
+
+.starter:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+.empty-hint {
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.empty-hint kbd {
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--text-2);
 }
 
 .history-status,

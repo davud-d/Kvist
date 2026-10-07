@@ -28,7 +28,8 @@ function render() {
     for (const [kind, chip] of Object.entries(chips)) {
         const value = pending?.kind === kind ? pending.value : current[kind];
         chip.querySelector('.chip-value').textContent = label(kind, value);
-        chip.hidden = !value;
+        // Until the configuration arrives there is nothing true to show ("Choose model" would mislead).
+        chip.hidden = !value || !configurationOf() || configurationOf().available === false;
         chip.setAttribute('aria-label', `${NAMES[kind]}: ${label(kind, value)}`);
         chip.classList.toggle('pending', pending?.kind === kind);
         chip.setAttribute('aria-disabled', String(disabled));

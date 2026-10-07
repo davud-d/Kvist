@@ -115,6 +115,33 @@ try {
     await context.close();
     console.log('PASS another provider: DeepSeek with its live list, saved and answering');
   }
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const { base } = await fixture('configured');
+    const { context, page, errors } = await open(base, viewport);
+    const empty = page.locator('#empty-state');
+    await empty.getByRole('heading', { name: 'What should Kvist do in my-project?' }).waitFor();
+    assert.equal(await empty.locator('.starter').count(), 4);
+    assert(await empty.getByText('for commands, such as changing the model.').isVisible());
+    assert.equal(await page.locator('#prompt').getAttribute('placeholder'), 'Message Kvist, or type / for commands');
+    await page.locator('#model-label').getByText('kr/claude-sonnet-4.5', { exact: true }).waitFor();
+    await page.locator('#effort-chip .chip-value').getByText('medium', { exact: true }).waitFor();
+    await shot(page, `empty-session-${viewport.width}`);
+    await empty.getByRole('button', { name: 'Review my uncommitted changes' }).click();
+    assert.equal(await page.locator('#prompt').inputValue(), 'Review my uncommitted changes');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'prompt');
+    assert(await page.locator('#more-tools').isVisible(), 'the palette has a visible button in the header');
+    assert.equal((await page.locator('#more-tools span').isVisible()), viewport.width > 640, 'the word shows where there is room');
+    await page.locator('#more-tools').click();
+    await page.locator('#palette').waitFor();
+    for (const label of ['Change model', 'Change reasoning', 'Change role', 'Providers and keys'])
+      assert(await page.locator('#palette-results .palette-item span', { hasText: label }).first().isVisible(), label);
+    await page.locator('#palette-input').fill('role'); await page.keyboard.press('Enter');
+    await page.locator('#role-chip[aria-expanded="true"]').waitFor();
+    await page.keyboard.press('Escape');
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log(`PASS ${viewport.width}px: empty session with starters and the "/" hint; the header button opens the palette with model, reasoning and role`);
+  }
   {
     const { base } = await fixture('configured');
     const { context, page, errors } = await open(base);
