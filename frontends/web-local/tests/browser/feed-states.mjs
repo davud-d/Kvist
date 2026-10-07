@@ -961,7 +961,7 @@ try {
             await panel.waitFor({ state: 'hidden' });
         }
         await app.waitForTimeout(300);
-        assert.deepEqual(await shown(), { state: 'finished', label: 'Finished', stop: false, send: true });
+        assert.deepEqual(await shown(), { state: 'finished', label: '', stop: false, send: true });
         assert.equal(await app.locator('#prompt').getAttribute('placeholder'), 'Message Kvist…');
     });
 

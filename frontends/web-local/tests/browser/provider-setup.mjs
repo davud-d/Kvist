@@ -68,7 +68,9 @@ try {
  const other=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert.equal(other.provider,'deepseek');
  console.log('PASS Reload preserves configuration; alternative provider saves');
- await page.locator('#server-switcher').click();
+ await page.keyboard.press('Control+k'); // the server selector is not rendered (SHOW_SERVERS is false)
+ await page.locator('#palette-input').fill('Switch server');
+ await page.keyboard.press('Enter');
  await page.getByRole('button',{name:'＋ Connect server',exact:true}).click();
  await page.locator('#ssh-alias-picker option[value="build-box"]').waitFor({state:'attached'});
  await page.locator('#ssh-alias-picker').selectOption('build-box');

@@ -478,6 +478,52 @@ try {
         await shot(page, 'sessions-300');
     });
 
+    await check('group spacing: 12px between the last row of a group and the next header, no margin above the first group', async () => {
+        const { page } = await open();
+        await toggleOf(page, 'quiet').click(); // a collapsed group is a header only: its gap counts too
+        const groups = await page.evaluate(() => [...document.querySelectorAll('.nav-group')].map(group => ({ margin: getComputedStyle(group).marginTop, head: group.querySelector('.nav-group-head').getBoundingClientRect().top, last: group.lastElementChild.getBoundingClientRect().bottom })));
+        assert.equal(groups.length, GROUPS.length);
+        assert.equal(groups[0].margin, '0px', 'the first group has no top margin');
+        for (let i = 1; i < groups.length; i++) {
+            assert.equal(groups[i].margin, '12px', `group ${i}: top margin`);
+            const gap = groups[i].head - groups[i - 1].last;
+            assert(gap >= 12 - 0.01, `group ${i}: ${gap}px between the previous group's last line and its header`);
+        }
+        await shot(page, 'group-spacing');
+    });
+
+    await check('Inbox badge: hidden at 0, the count up to 99, "99+" above', async () => {
+        const { page, model } = await open();
+        const badge = page.locator('#inbox-count');
+        assert.equal(await badge.isHidden(), true, 'hidden at 0');
+        for (const [count, text] of [[3, '3'], [99, '99'], [100, '99+'], [150, '99+']]) {
+            model.nav.inbox = Array.from({ length: count }, (_, i) => ({ title: `Inbox ${i}`, session: `i${i}`, server_id: 'local', workspace: '/work/Kvist', state: 'finished' }));
+            await page.evaluate(() => window.__sources.at(-1).emit({ id: Date.now(), event: { type: 'turn_end' } }));
+            await page.waitForFunction(text => document.querySelector('#inbox-count').textContent === text, text);
+            assert.equal(await badge.isVisible(), true, `${count}: shown`);
+            if (count === 150) await shot(page, 'inbox-150');
+        }
+        model.nav.inbox = [];
+        await page.evaluate(() => window.__sources.at(-1).emit({ id: Date.now(), event: { type: 'turn_end' } }));
+        await badge.waitFor({ state: 'hidden' });
+    });
+
+    await check('running and starting ring: a 2px --accent arc over a 25% track, the arc at least 3:1 against --bg-1', async () => {
+        const { page } = await open();
+        const [accent, bg1] = [await rgbOf(page, 'accent'), await rgbOf(page, 'bg-1')];
+        const lin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+        const lum = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+        const ratio = (Math.max(lum(accent), lum(bg1)) + 0.05) / (Math.min(lum(accent), lum(bg1)) + 0.05);
+        console.log(`ring arc contrast against --bg-1: ${ratio.toFixed(2)}:1`);
+        assert(ratio >= 3, `contrast ${ratio.toFixed(2)}:1`);
+        for (const title of ['Run regression tests', 'Start the build']) {
+            const ring = await rowOf(page, title).locator('.nav-ind').evaluate(n => { const s = getComputedStyle(n, '::before'); return { width: s.borderTopWidth, arc: s.borderTopColor, track: s.borderBottomColor, trackWidth: s.borderBottomWidth }; });
+            assert.deepEqual([ring.width, ring.trackWidth, ring.arc], ['2px', '2px', await tokenColor(page, 'accent')], title);
+            const alpha = /(?:\/|,)\s*([\d.]+)\)$/.exec(ring.track);
+            assert(alpha && Math.abs(Number(alpha[1]) - 0.25) < 0.01, `${title}: the track is ${ring.track}`);
+        }
+    });
+
     await check('no runtime errors on any page', async () => {
         const { page, errors } = await open();
         await toggleOf(page, 'Kvist').click();
