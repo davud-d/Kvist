@@ -154,9 +154,10 @@ test('answerSummary: choice shows the label of the option, text shows the text',
 
 test('answerSummary: a secret is never in the summary, whatever the response holds', () => {
     const summary = answerSummary({ kind: 'secret', title: 'API key' }, { value: 'hunter2-the-secret' });
-    assert.equal(summary, 'secret provided');
+    assert.equal(summary, 'API key: secret provided');
     assert(!summary.includes('hunter2'));
-    assert.equal(answerSummary({ kind: 'secret', title: 'API key', current_value: 'old-secret' }, { approved: true }), 'secret provided');
+    assert.equal(answerSummary({ kind: 'secret', title: 'API key', current_value: 'old-secret' }, { approved: true }), 'API key: secret provided');
+    assert.equal(answerSummary({ kind: 'secret' }, { value: 'x' }), 'Secret: secret provided');
 });
 
 test('answerSummary: one line of at most 80 characters', () => {
