@@ -49,12 +49,32 @@ the group header (24px, name and server 6px apart, shared chevron), the "+" of a
 `hover: none`, and the workspace it creates in), the New session button, collapsing by click, Enter and Space
 with the choice kept in `localStorage` (also with blocked or damaged storage), the indicator of a collapsed
 group, the Tab order, the 2px keyboard focus ring on all four sides, reduced motion, no horizontal scroll at
-1440, 1280 and 390, and the render time of 300 sessions (median of 10 runs, at most 50 ms with
+1440, 1280 and 390, the 12px gap between groups (none above the first), the Inbox badge (hidden at 0, "99+" above
+99), the ring (2px `--accent` arc over a 25% track, at least 3:1 against `--bg-1`), and the render time of 300 sessions (median of 10 runs, at most 50 ms with
 `content-visibility` off). Screenshots at 1440×900 and 390×844 (drawer open) go to `KVIST_SHOTS` (default
 `/tmp/kvist-shots/4`).
 
 ```sh
 KVIST_WEB_URL=http://127.0.0.1:9671 node frontends/web-local/tests/browser/sidebar-states.mjs
+```
+
+`status-states.mjs` runs the app with the API mocked in each scenario's own browser context and checks the
+bottom rows, the header and the composer: with everything in order the status line is empty and takes no room,
+and none of Connecting…, Connected, Idle, Running or Finished is visible in any state; the connection is hidden for
+the first 1.5 s of connecting (from the page start and again from each change of state), then shows a 10px ring
+with its text; reconnecting shows at once; offline and failed show a cross in `--err`; "Needs input" (`--warn`, two
+8px bars) is the only agent state in text and an unknown `execution` is kept, drawn as nothing and warned about once;
+the context figure (absent without data, mono 12px, first, 12px between items); the header's path under the title
+and the server of a remote session beside it; the open tab (`aria-selected`, 2px underline) and its keyboard ring on
+all four sides; the send button (disabled and `aria-disabled` while there is nothing to send, no hover change) and
+the hint against the real keys (Ctrl+Enter sends, Enter only breaks the line); no `#composer-tools`,
+`#server-switcher` or `#active-server-label` node; the paperclip (28px, colors, inner ring, centred); the hint and
+the status line sharing the input's left edge and width; no dot separators; no horizontal scroll at 1440, 1280 and
+390. Screenshots at 1440×900 and 390×844 go to `KVIST_SHOTS` (default `/tmp/kvist-shots/5`). The server dialogs,
+whose selector is not rendered, open from the command palette in the other scenarios.
+
+```sh
+KVIST_WEB_URL=http://127.0.0.1:9671 node frontends/web-local/tests/browser/status-states.mjs
 ```
 
 `zoom.mjs` uses an isolated temporary Chrome profile and a local test extension to
