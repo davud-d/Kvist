@@ -383,3 +383,58 @@ test('TOOL_NAMES merges the row labels and the activity wording', () => {
     assert.equal(TOOL_NAMES.final_answer.doing, 'Preparing response');
     assert.ok(Object.isFrozen(TOOL_NAMES) && Object.isFrozen(TOOL_NAMES.run_shell));
 });
+
+// Local copy of a sent message (blocks.js, before HANDLERS)
+const sent = (local_id, text) => env({ type: 'client.user_sent', local_id, text });
+
+test('a sent message is a user block at once, and the journal record of it merges into that block in place', () => {
+    let s = fold([sent('l1', 'fix the build')]);
+    assert.deepEqual(s.blocks.map(b => [b.kind, b.text, b.local]), [['user', 'fix the build', 'sending']]);
+    const id = s.blocks[0].id;
+    s = fold([env({ type: 'stream_start', stream_id: 'x' }), env(user('fix the build'), 1, 1000)], s);
+    assert.deepEqual(s.blocks.map(b => [b.id, b.kind, b.text, 'local' in b || 'localId' in b]), [[id, 'user', 'fix the build', false], ['b2', 'text', '', false]]);
+});
+
+test('two identical messages in a row are merged in order, one journal record each', () => {
+    let s = fold([sent('l1', 'again'), sent('l2', 'again')]);
+    const [first, second] = s.blocks.map(b => b.id);
+    s = fold([env(user('again'), 1, 1000)], s);
+    assert.deepEqual(s.blocks.map(b => [b.id, b.local]), [[first, undefined], [second, 'sending']]);
+    s = fold([env(user('again'), 2, 1001)], s);
+    assert.deepEqual(s.blocks.map(b => [b.id, b.local]), [[first, undefined], [second, undefined]]);
+    s = fold([env(user('again'), 3, 1002)], s);
+    assert.equal(s.blocks.length, 3, 'a record with no local block waiting is a block of its own');
+});
+
+test('a "sending" block takes the journal record before a "failed" one with the same text', () => {
+    let s = fold([sent('l1', 'same'), env({ type: 'client.user_failed', local_id: 'l1' }), sent('l2', 'same')]);
+    s = fold([env(user('same'), 1, 1000)], s);
+    assert.deepEqual(s.blocks.map(b => b.local), ['failed', undefined]);
+});
+
+test('a refused send is "failed" with its text kept, Retry makes it "sending" again, and a success leaves one block', () => {
+    let s = fold([sent('l1', 'hello'), env({ type: 'client.user_failed', local_id: 'l1' })]);
+    assert.deepEqual(s.blocks.map(b => [b.text, b.local]), [['hello', 'failed']]);
+    s = fold([env({ type: 'client.user_retry', local_id: 'l1' })], s);
+    assert.equal(s.blocks[0].local, 'sending');
+    s = fold([env(user('hello'), 1, 1000)], s);
+    assert.deepEqual(s.blocks.map(b => [b.kind, b.text, b.local]), [['user', 'hello', undefined]]);
+    assert.equal(fold([env({ type: 'client.user_failed', local_id: 'nope' })], s), s, 'an unknown local id changes nothing');
+});
+
+test('a send that never started is removed', () => {
+    const s = fold([sent('l1', 'one'), sent('l2', 'two'), env({ type: 'client.user_unsent', local_id: 'l1' })]);
+    assert.deepEqual(s.blocks.map(b => b.text), ['two']);
+});
+
+test('a local block nobody merged is not in the state a reload builds from the journal', () => {
+    const reloaded = fold(seqd([user('before'), { type: 'turn_end' }]));
+    assert.deepEqual(reloaded.blocks.map(b => [b.kind, b.text, b.local]), [['user', 'before', undefined]]);
+});
+
+test('a block with a local copy equals the same message from the journal alone, apart from the id', () => {
+    const events = seqd([user('hello'), { type: 'final', message: 'hi' }, { type: 'turn_end' }]);
+    const merged = fold(events, fold([sent('l1', 'hello')])), plain = fold(events);
+    const bare = state => state.blocks.map(({ id, ...rest }) => rest);
+    assert.deepEqual(bare(merged), bare(plain));
+});

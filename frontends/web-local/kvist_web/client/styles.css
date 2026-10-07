@@ -614,6 +614,22 @@ svg {
   padding-left: 12px;
 }
 
+/* A message the send did not take: its text stays in the block, the note and Retry sit under it, level with the text. */
+.message-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding-left: 14px;
+  color: var(--err);
+  font-size: 12px;
+}
+
+.message-failed .quiet-button {
+  height: 24px;
+  font-size: 12px;
+}
+
 .message-body p {
   margin: 0 0 10px;
 }

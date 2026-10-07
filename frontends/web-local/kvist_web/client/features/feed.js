@@ -26,10 +26,31 @@ function messageRow(block) {
     if (block.plan) node.append(el('div', 'message-label', 'plan'));
     const body = el('div', 'message-body');
     node.append(body);
-    return { node, body, text: null, streaming: null };
+    return { node, body, text: null, streaming: null, local: '', failed: null, block };
 }
 
-function drawMessage(row, block) {
+// A message the client shows before the journal has it: 'sending' has no look of its own (it is gone within a
+// moment, and a change of the row would flash); 'failed' adds "Not sent" and a Retry button under the text.
+function drawLocal(feed, row, block) {
+    row.block = block;
+    const local = block.local || '';
+    if (row.local === local) return;
+    row.local = local;
+    if (local === 'sending') row.node.setAttribute('aria-busy', 'true');
+    else row.node.removeAttribute('aria-busy');
+    row.failed?.remove();
+    row.failed = null;
+    if (local !== 'failed') return;
+    const retry = el('button', 'quiet-button', 'Retry');
+    retry.type = 'button';
+    retry.onclick = () => feed.onRetry?.(row.block);
+    row.failed = el('div', 'message-failed');
+    row.failed.append(el('span', 'message-failed-text', 'Not sent'), retry);
+    row.node.append(row.failed);
+}
+
+function drawMessage(feed, row, block) {
+    drawLocal(feed, row, block);
     const streaming = block.streaming === true;
     if (row.text === block.text && row.streaming === streaming) return;
     // The answer is plain text while it streams and markdown once it is final.
@@ -291,7 +312,7 @@ function rowsOf(blocks) {
 }
 
 const ROWS = {
-    message: { create: (feed, key, block) => messageRow(block), draw: (feed, row, block) => drawMessage(row, block) },
+    message: { create: (feed, key, block) => messageRow(block), draw: drawMessage },
     notice: { create: () => noticeRow(), draw: (feed, row, block) => drawNotice(row, block) },
     input: { create: () => answerRow(), draw: (feed, row, block) => drawAnswer(row, block) },
     tool: { create: (feed, key) => toolBlockRow(feed, key), draw: drawToolBlock },
@@ -300,9 +321,10 @@ const ROWS = {
 
 const MAX_APPEARING = 5;
 
-export function createFeed(container) {
+// onRetry(block) is called with the user block of a "Not sent" message when its Retry button is pressed.
+export function createFeed(container, { onRetry } = {}) {
     const rows = new Map();
-    const feed = { userOpen: new Map() };
+    const feed = { userOpen: new Map(), onRetry };
     let timer = 0;
     // One timer per feed, alive only while a thought streams; it redraws the labels of those rows.
     const tick = () => {

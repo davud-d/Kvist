@@ -17,8 +17,10 @@ const modelLabel = document.querySelector("#model-label"), modelSelector = docum
 const slot = document.querySelector("#composer-slot"), hint = document.querySelector(".composer-hint");
 const title = document.querySelector("#session-title"), path = document.querySelector("#session-path"), server = document.querySelector("#session-server");
 const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
-// The open session's feed: the reducer state is the single source of what the conversation shows.
-let feedState = initialState(), feed = createFeed(conversation);
+// The open session's feed: the reducer state is the single source of what the conversation shows. Retry on a
+// "Not sent" message is handled by app.js, which owns the sending.
+const feedOptions = { onRetry: block => document.dispatchEvent(new CustomEvent('kvist:retry-send', { detail: { localId: block.localId, text: block.text } })) };
+let feedState = initialState(), feed = createFeed(conversation, feedOptions);
 let selectionGeneration = 0;
 let activeRecovery = null;
 function sameSelection(left, right) {
@@ -101,6 +103,25 @@ function showJump(visible) {
     button.hidden = !visible;
     if (visible)
         appear(button, { rise: 4, translate: 'translateX(-50%)' });
+}
+// A message the person sends is in the feed at once, as "sending", and the journal's record of it merges into
+// that block later (blocks.js). While the session is still opening there is no feed to put it in: null, and the
+// message shows up when the journal has it.
+let echoCount = 0;
+export function echoSent(text) {
+    if (!feedReady)
+        return null;
+    const localId = `local-${++echoCount}`;
+    feedState = reduce(feedState, { event: { type: 'client.user_sent', local_id: localId, text } });
+    followTail = true;
+    paintFeed();
+    conversation.scrollTop = conversation.scrollHeight;
+    return localId;
+}
+// change: 'failed' (refused: "Not sent" with Retry), 'retry' (sending again) or 'unsent' (never started).
+export function changeEcho(localId, change) {
+    feedState = reduce(feedState, { event: { type: `client.user_${change}`, local_id: localId } });
+    queuePaint();
 }
 // Header line under the title: the workspace path, and the server's name beside it unless it is the local one.
 export function showPlace(serverId, workspace) {
@@ -216,7 +237,7 @@ export async function openSession(serverId, workspace, session) {
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
     feedState = initialState();
     feed.destroy();
-    feed = createFeed(conversation);
+    feed = createFeed(conversation, feedOptions);
     followTail = true;
     conversation.replaceChildren();
     empty.hidden = true;

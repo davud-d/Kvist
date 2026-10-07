@@ -90,3 +90,12 @@ test('seq 0 (a journal_notice before the first turn) is applied, not dropped as 
     assert.equal(fold([records[0]], state).blocks.length, state.blocks.length);
     assert.deepEqual(fold(records.slice(0, 3), state), state);
 });
+
+test('a recorded session with a local copy of every message gives the same blocks as the history alone', () => {
+    const bare = state => state.blocks.map(({ id, startedAt, ...rest }) => withoutCallTimes(rest));
+    // The person sends before the journal has the message: the local block is made, then the record arrives.
+    const withEchoes = fromHistory(HISTORY).flatMap((envelope, i) => (envelope.event.type === 'user'
+        ? [{ event: { type: 'client.user_sent', local_id: `l${i}`, text: envelope.event.text } }, envelope]
+        : [envelope]));
+    assert.deepEqual(bare(fold(withEchoes)), bare(fold(fromHistory(HISTORY))));
+});

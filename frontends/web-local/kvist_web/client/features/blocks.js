@@ -7,8 +7,8 @@
 // which is not a journal seq, so they enter without seq and are never deduplicated.
 // Inputs without seq: status, live_start, live_stop, debug, stream_chunk and
 // action_output (transient, session_events.py:62-65), live copies of durable events,
-// stream.reset, agent.*, connection.* and the synthetic client.input_answered, client.inputs_closed and
-// client.session_closed.
+// stream.reset, agent.*, connection.* and the synthetic client.input_answered, client.inputs_closed,
+// client.session_closed and client.user_* (below, before HANDLERS).
 
 // One name table for tools. `label` is the short row name, `doing`/`done` the activity wording.
 const NAMES = {
@@ -205,9 +205,40 @@ function inputAnswered(s, e) {
     return i < 0 ? s : patch(s, s.blocks[i].id, b => ({ ...b, answered: { summary: String(e.summary ?? '') } }));
 }
 
+// Synthetic, created by the client when the person sends (no seq), so the message is in the feed before the
+// journal has it. The block is {kind: 'user', text, local: 'sending' | 'failed', localId}:
+//   {type: 'client.user_sent', local_id, text}   adds it as 'sending'
+//   {type: 'client.user_failed', local_id}       the send was refused: 'failed' ("Not sent", Retry)
+//   {type: 'client.user_retry', local_id}        back to 'sending'
+//   {type: 'client.user_unsent', local_id}       the send never started (the provider is not set up): removed
+// The journal's user record with the same text turns the first such block into the real one in place, with the
+// block id (the feed's row key) unchanged; a 'sending' block goes before a 'failed' one. A block the journal
+// never merged is gone after a reload, like all client state.
+const userSent = (s, e) => add(s, { kind: 'user', text: e.text || '', local: 'sending', localId: e.local_id })[0];
+const localBlock = (s, id) => s.blocks.findIndex(b => b.kind === 'user' && b.local && b.localId === id);
+const setLocal = local => (s, e) => {
+    const i = localBlock(s, e.local_id);
+    return i < 0 ? s : patch(s, s.blocks[i].id, b => ({ ...b, local }));
+};
+const userUnsent = (s, e) => {
+    const i = localBlock(s, e.local_id);
+    return i < 0 ? s : { ...s, blocks: s.blocks.filter((_, at) => at !== i) };
+};
+function journalUser(state, e) {
+    const s = { ...state, index: { ...state.index, calls: {}, batches: {} } }, body = e.text || '';
+    const waiting = local => s.blocks.findIndex(b => b.kind === 'user' && b.local === local && b.text === body);
+    const i = waiting('sending') >= 0 ? waiting('sending') : waiting('failed');
+    if (i < 0) return text(s, { kind: 'user', text: body, ...(e.resumed && { resumed: true }) });
+    return patch(s, s.blocks[i].id, ({ local, localId, ...block }) => ({ ...block, ...(e.resumed && { resumed: true }) }));
+}
+
 const HANDLERS = {
     // session_events.py:315-317 (begin_turn); a new turn restarts step numbering (session.js:209)
-    user: (s, e) => text({ ...s, index: { ...s.index, calls: {}, batches: {} } }, { kind: 'user', text: e.text || '', ...(e.resumed && { resumed: true }) }),
+    user: journalUser,
+    'client.user_sent': userSent,
+    'client.user_failed': setLocal('failed'),
+    'client.user_retry': setLocal('sending'),
+    'client.user_unsent': userUnsent,
     // frontend_protocol.py:200-206
     message: (s, e) => text(s, { source: 'message', text: e.markdown || '' }),
     // frontend_protocol.py:154-162

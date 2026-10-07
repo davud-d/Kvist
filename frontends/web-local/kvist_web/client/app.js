@@ -2,7 +2,7 @@ import { mountImageAttachments } from "./utils/image-attachments.js";
 import { api } from '/assets/utils/api.js';
 import { state, subscribe, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
 import { renderNavigation } from '/assets/features/navigation.js';
-import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, revealFeed, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
+import { applyLive, changeEcho, closeStaleInputs, echoSent, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, revealFeed, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
@@ -289,8 +289,32 @@ form.addEventListener('submit', async (event) => {
         return;
     sending = true;
     syncSend();
+    // The message is in the feed at once, as "sending", once the session it goes to is open. A message with
+    // images has no local copy: the journal appends their [Image #N] labels to the text, so the two could not be
+    // matched. A failed send leaves the text in its block ("Not sent", Retry), not in the input.
+    let echo = null, snapshot = null;
+    const clearInput = () => { prompt.value = ''; prompt.dispatchEvent(new Event('input')); };
+    const echoMessage = () => {
+        echo = imageAttachments.count() ? null : echoSent(text);
+        if (echo)
+            clearInput();
+    };
+    const giveUp = () => {
+        if (!echo)
+            return;
+        changeEcho(echo, 'unsent');
+        prompt.value = text;
+        prompt.dispatchEvent(new Event('input'));
+    };
     try {
-        if (!(await ensureConfigured())) return;
+        if (state.selected && !creatingSession) {
+            snapshot = selectionSnapshot();
+            echoMessage();
+        }
+        if (!(await ensureConfigured())) {
+            giveUp();
+            return;
+        }
         if (creatingSession && !(await creatingSession))
             return;
         if (!state.selected) {
@@ -299,20 +323,48 @@ form.addEventListener('submit', async (event) => {
                 return;
             prompt.value = text;
         }
-        const snapshot = selectionSnapshot();
-        if (!snapshot)
-            return;
+        if (!snapshot) {
+            snapshot = selectionSnapshot();
+            if (!snapshot)
+                return;
+            echoMessage();
+        }
         await api.send(snapshot.selection, imageAttachments.pack(text));
         imageAttachments.clear();
         drafts.delete(keyOf(snapshot.selection));
         if (isCurrentSelection(snapshot)) {
-            prompt.value = '';
-            prompt.dispatchEvent(new Event('input'));
+            if (!echo)
+                clearInput();
             setAgentState('running');
         }
         scheduleRefresh();
     }
     catch (error) {
+        if (echo)
+            changeEcho(echo, 'failed');
+        toast(`Message was not sent. ${error.message}`, true);
+    }
+    finally {
+        sending = false;
+        syncSend();
+    }
+});
+// Retry on a "Not sent" message: the same block goes back to "sending", so a success leaves one message.
+document.addEventListener('kvist:retry-send', async (event) => {
+    const { localId, text } = event.detail, snapshot = selectionSnapshot();
+    if (!snapshot || sending || busy(state.execution))
+        return;
+    sending = true;
+    syncSend();
+    changeEcho(localId, 'retry');
+    try {
+        await api.send(snapshot.selection, text);
+        if (isCurrentSelection(snapshot))
+            setAgentState('running');
+        scheduleRefresh();
+    }
+    catch (error) {
+        changeEcho(localId, 'failed');
         toast(`Message was not sent. ${error.message}`, true);
     }
     finally {
