@@ -17,6 +17,13 @@ const errors = [], checks = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('dialog', dialog => { errors.push(`dialog: ${dialog.message()}`); dialog.dismiss(); });
 const f = fixture();
+// Hover, focus and press colors are transitions of --dur-fast. The scenarios assert end values, so a computed
+// style read first finishes the transitions that are running (motion-states.mjs tests the motion itself).
+const finishTransitionsOnRead = () => {
+    const read = window.getComputedStyle;
+    window.getComputedStyle = (...args) => { for (const a of document.getAnimations()) if (a instanceof CSSTransition) a.finish(); return read.apply(window, args); };
+};
+await page.addInitScript(finishTransitionsOnRead);
 await page.addInitScript(() => {
     window.__sources = [];
     window.EventSource = class {
@@ -116,9 +123,10 @@ const rows = () => page.evaluate(() => [...document.querySelectorAll('#feed-unde
 // The computed color a design token paints, to compare with what a row really uses.
 const token = name => page.evaluate(name => { const n = document.createElement('i'); n.style.color = `var(--${name})`; document.body.append(n); const c = getComputedStyle(n).color; n.remove(); return c; }, name);
 const colorOf = (selector, pseudo) => page.locator(selector).first().evaluate((n, pseudo) => getComputedStyle(n, pseudo || null).color, pseudo);
-// A screenshot taken right after a viewport change can catch the content of a freshly drawn tool row
-// unpainted: tool rows are content-visibility: auto, and the browser decides again whether they are skipped
-// one frame after the resize. Waiting for the loaded navigation and two frames makes every screenshot whole.
+// A screenshot taken right after a viewport change can catch the content of a freshly drawn row unpainted:
+// messages are content-visibility: auto (tool rows were too, until the feed jank fix), and the browser decides
+// again whether they are skipped one frame after the resize. Waiting for the loaded navigation and two frames
+// makes every screenshot whole.
 const frames = target => target.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const settled = async target => {
     await target.locator('#navigation .nav-title').first().waitFor();
@@ -262,7 +270,7 @@ try {
         assert.equal(await page.locator('.tool-group').evaluate(n => getComputedStyle(n.querySelector('summary'), '::before').content), '"✓"');
         await shot('batch-folded');
         await page.locator('.tool-group > summary').click();
-        assert.equal(await page.locator('.tool-group > .tool-group-body > .tool').count(), 3);
+        assert.equal(await page.locator('.tool-group .tool-group-body > .tool').count(), 3);
         const indent = await page.evaluate(() => { const g = document.querySelector('.tool-group > summary').getBoundingClientRect(), c = document.querySelector('.tool-group-body > .tool > summary').getBoundingClientRect(); return c.x - g.x; });
         assert.equal(indent, 16, 'the calls are indented 16px under the group row');
         await shot('batch-folded-opened');
@@ -371,7 +379,7 @@ try {
     });
 
     // The ring is 2px --accent inside the summary: it must be whole on all four sides, inside every ancestor
-    // that clips (content-visibility on the tool row cut it to a line over the output block), and the
+    // that clips (content-visibility on the tool row used to cut it to a line over the output block), and the
     // screenshot must show the accent color in the middle of each side.
     await check('keyboard focus ring: a full 2px --accent ring on a tool row, a group and reasoning, no horizontal scroll', async () => {
         const accent = await rgbOf('accent');
@@ -651,6 +659,7 @@ try {
     const reviewSession = () => fx.sessions.find(s => s.name === 'review');
     let cursor = 0;
     const answers = [];
+    await app.addInitScript(finishTransitionsOnRead);
     await app.addInitScript(() => {
         window.__sources = [];
         window.EventSource = class {

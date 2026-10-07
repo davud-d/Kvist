@@ -55,6 +55,12 @@ const ready = async page => {
     await frames(page);
 };
 const live = [];
+// Hover, focus and press colors are transitions of --dur-fast. The scenarios assert end values, so a computed
+// style read first finishes the transitions that are running (motion-states.mjs tests the motion itself).
+const finishTransitionsOnRead = () => {
+    const read = window.getComputedStyle;
+    window.getComputedStyle = (...args) => { for (const a of document.getAnimations()) if (a instanceof CSSTransition) a.finish(); return read.apply(window, args); };
+};
 // Opens the app in a context of its own (storage included) with the API mocked from `model.nav`.
 async function open({ nav = navigation(), size = { width: 1440, height: 900 }, context: contextOptions = {}, init } = {}) {
     const context = await browser.newContext({ viewport: size, ...contextOptions });
@@ -63,6 +69,7 @@ async function open({ nav = navigation(), size = { width: 1440, height: 900 }, c
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', message => { if (message.type() === 'warning') warnings.push(message.text()); });
     if (init) await page.addInitScript(init);
+    await page.addInitScript(finishTransitionsOnRead);
     await page.addInitScript(() => {
         window.__sources = [];
         window.EventSource = class {

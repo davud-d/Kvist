@@ -77,6 +77,37 @@ whose selector is not rendered, open from the command palette in the other scena
 KVIST_WEB_URL=http://127.0.0.1:9671 node frontends/web-local/tests/browser/status-states.mjs
 ```
 
+`motion-states.mjs` checks the closed session banner and the motion system, with the API mocked in the page by
+`app-mock.mjs` (a model the scenario changes while the page runs: a session closing, a journal growing, a delay on
+every request; `element.animate` is wrapped so every call is recorded). Banner: it replaces the input, hint, paperclip,
+model selector and send button (none of them is in the DOM) in the same slot, to the pixel, with the status line
+kept; it shows live, after a reload, on a closed session opened from the sidebar (before its history arrives), after
+switching away and back, and in a second tab; its button has the focus; Enter starts exactly one session (and not
+with a modifier, composing, a repeat, a dialog, the palette, a question panel or a text field); the notice row of
+session_ended and "thought for 0.0s" are not drawn; the draft is not carried over. Motion: the feed container
+(`#conversation`) has exactly one animation after the first load, a reload, a switch and a new session, none of the blocks
+inside has one, five quick switches never leave more than one; a user message sent live rises 4px and the agent's blocks only fade; nothing
+animates at load, in a hidden tab or with six blocks in one frame; the dialog, the palette, the session tools and the
+sidebar drawer open with an animation and are hidden when the close animation has finished (read in the task of the
+Escape); a call output and a sidebar group grow through `grid-template-rows` without a jump, a failed call and a close do not
+animate and an open row stays open when the feed redraws; the computed transitions and animations of every element and
+pseudo-element touch only color, background-color, border-color, opacity, transform and (on `.fold`) grid-template-rows,
+and nothing sets will-change; the question panel, "Jump to latest", the tab content, the new session row, Send and Stop and
+the banner appear in their own time; with `prefers-reduced-motion` nothing is started and everything shows and hides at
+once. Screenshots at 1440x900 and 390x844 (banner, the switch and a sent message at 0, 80 and 200 ms, the question panel, the
+drawer in mid-transition) go to `KVIST_SHOTS` (default `/tmp/kvist-shots/5c`). The Firefox smoke run needs Playwright's
+Firefox, which is not installed here.
+
+`motion-metrics.mjs` measures the feed flows (send a message, stream 200 chunks, a tool row and a group, thinking to
+done, the question panel, opening an output, closing the session, switching to 300 tool rows), each following the end of
+the feed and with the person scrolled up: the sum and maximum of the layout shifts, the longest frame and the 95th
+percentile of the frame durations, and how far blocks that did not change moved. It prints a table, writes `metrics.json`
+to `KVIST_SHOTS` and never fails on a threshold; the targets (shift sum 0.02, longest frame 100 ms) are ours. A message
+the person sends scrolls the feed to its end by design, so its "moved" figure in the scrolled-up run is that scroll.
+
+`status-states.mjs`, `sidebar-states.mjs` and `feed-states.mjs` finish the running hover, focus and press transitions
+before a computed style is read (they assert end values; the transitions themselves are checked in `motion-states.mjs`).
+
 `zoom.mjs` uses an isolated temporary Chrome profile and a local test extension to
 call `chrome.tabs.setZoom`, verifies the actual zoom and CSS viewport, and exercises
 100/110/125% on 1280×720, 1440×900, 1920×1080, 2560×1440. The main regression suite

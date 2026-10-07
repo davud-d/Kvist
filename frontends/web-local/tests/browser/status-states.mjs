@@ -34,6 +34,12 @@ const ready = async page => {
     await frames(page);
 };
 const live = [];
+// Hover, focus and press colors are transitions of --dur-fast. The scenarios assert end values, so a computed
+// style read first finishes the transitions that are running (motion-states.mjs tests the motion itself).
+const finishTransitionsOnRead = () => {
+    const read = window.getComputedStyle;
+    window.getComputedStyle = (...args) => { for (const a of document.getAnimations()) if (a instanceof CSSTransition) a.finish(); return read.apply(window, args); };
+};
 // Opens the app in a context of its own with the API mocked from `model.nav`. `hold` keeps the event stream from
 // opening (the client stays "connecting"); `history` is the journal of every session.
 async function open({ nav = navigation(), size = { width: 1440, height: 900 }, hold = false, history = [] } = {}) {
@@ -42,6 +48,7 @@ async function open({ nav = navigation(), size = { width: 1440, height: 900 }, h
     live.push(context);
     page.on('pageerror', e => errors.push(e.message));
     page.on('console', message => { if (message.type() === 'warning') warnings.push(message.text()); });
+    await page.addInitScript(finishTransitionsOnRead);
     await page.addInitScript(hold => {
         window.__sources = [];
         window.EventSource = class {
@@ -361,7 +368,10 @@ try {
         assert.equal(requests.filter(r => r.path === '/send').length, 0, 'Enter does not send');
         assert.equal(await page.locator('#prompt').inputValue(), 'hello\n');
         await page.locator('#prompt').press('Control+Enter');
+        // The input is cleared when the message goes into the feed, which is before the request is made.
         await page.waitForFunction(() => document.querySelector('#prompt').value === '');
+        await page.waitForRequest(request => request.url().endsWith('/api/v1/send'));
+        for (let i = 0; i < 50 && !requests.some(r => r.path === '/send'); i++) await page.waitForTimeout(20);
         assert.equal(requests.filter(r => r.path === '/send').length, 1, 'Ctrl+Enter sends');
         assert.equal(requests.find(r => r.path === '/send').body.text.trim(), 'hello');
     });
