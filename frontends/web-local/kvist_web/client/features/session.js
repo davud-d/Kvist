@@ -13,7 +13,7 @@ const conversation = document.querySelector("#conversation"), empty = document.q
 const composer = document.querySelector("#composer"), pending = document.querySelector("#pending-input");
 // The input's parts are kept as references: a closed session takes them out of the DOM (see showClosed).
 const prompt = document.querySelector("#prompt"), sendButton = document.querySelector("#send-button");
-const modelLabel = document.querySelector("#model-label"), modelSelector = document.querySelector("#model-selector");
+const modelLabel = document.querySelector("#model-label");
 const slot = document.querySelector("#composer-slot"), hint = document.querySelector(".composer-hint");
 const title = document.querySelector("#session-title"), path = document.querySelector("#session-path"), server = document.querySelector("#session-server");
 const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
@@ -153,7 +153,7 @@ export function showPlace(serverId, workspace) {
 }
 export function renderMetadata() {
     modelLabel.textContent = state.model || configuredModel();
-    modelSelector.title = state.model ? `Model: ${state.model}` : 'Model and reasoning details';
+    document.dispatchEvent(new CustomEvent('kvist:configuration'));
     const c = state.context;
     $('#context-button').hidden = !c?.context_limit;
     $('#context-button').textContent = c?.context_limit ? `Context ${Math.round(c.context_tokens / c.context_limit * 100)}%` : '';
@@ -224,7 +224,10 @@ export function applyEvent(event, { initial = false, durableReplay = false, seq,
             state.model = event.effects.models?.fast || state.model;
             renderMetadata();
         }
-        if (!initial && !durableReplay) toast(event.message || (event.ok ? 'Configuration updated' : 'Configuration change failed'), !event.ok);
+        if (!initial && !durableReplay) {
+            toast(event.message || (event.ok ? 'Configuration updated' : 'Configuration change failed'), !event.ok);
+            document.dispatchEvent(new CustomEvent('kvist:command-result', { detail: event }));
+        }
     }
     else if (kind === 'usage') {
         state.usage.input += Number(event.input_tokens) || 0;

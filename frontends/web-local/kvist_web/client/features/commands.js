@@ -2,6 +2,7 @@
 export const COMMANDS = [
     { name: 'model', aliases: ['models'], description: 'Change the model for this session and new ones' },
     { name: 'reasoning', aliases: ['effort'], description: 'Change how much the model thinks before it acts' },
+    { name: 'role', description: 'Change what Kvist may do in your workspace' },
     { name: 'new', description: 'Start a new session; this one stays in the sidebar' },
     { name: 'provider', description: 'Add a provider or switch to another one' },
     { name: 'diff', description: 'Show the changes Kvist made in this session' },

@@ -207,7 +207,7 @@ export async function showSettings() {
             return;
         const remotes = state.navigation.servers.filter(e => e.server.kind === 'remote');
         if (!remotes.length) {
-            content.textContent = 'Connect a server from the Local selector to enable configuration sync.';
+            content.textContent = 'No server is connected. Connect one with Connect server in the command palette (Ctrl+K), then sync here.';
             return;
         }
         content.innerHTML = `<form><label>Server <select name="server" aria-label="Server to synchronize">${remotes.map(e => `<option value="${esc(e.server.id)}">${esc(e.server.name)}</option>`).join('')}</select></label><div class="credential-list">${preview.credentials.map(c => `<label><input type="checkbox" name="credential" value="${esc(c.id)}" ${c.present ? '' : 'disabled'}>${esc(c.label)}</label>`).join('')}</div><div class="modal-actions"><button class="primary-button">Synchronize</button></div></form>`;

@@ -14,6 +14,8 @@ const context = await browser.newContext({viewport:{width:1440,height:900}});
 const page = await context.newPage(), errors=[];
 page.on('pageerror', e=>errors.push(e.message));
 await context.route('https://anymodel.org/**', route=>route.fulfill({contentType:'text/html',body:'<title>Registration test</title>Registration page'}));
+// The model chip opens a menu; the provider dialog is its "Providers and keys…" item.
+const openProviders=async()=>{await page.locator('#model-selector').click();await page.getByRole('menuitem',{name:/^Providers and keys/}).click();await page.locator('#provider-form').waitFor();};
 const shot=async name=>{await page.waitForTimeout(240);await page.screenshot({path:`${output}/screenshots/${name}.png`});};
 try {
  await page.goto(base);
@@ -47,17 +49,20 @@ try {
  assert(await page.locator('[name=fast]').isHidden());
  await page.locator('#provider-form summary').click();
  await page.locator('[name=smart]').fill('example/smart');
- await page.locator('[name=effort]').selectOption('high');
  await shot('provider-models');
  await page.getByRole('button',{name:'Save & continue'}).click();
  await page.locator('#modal').waitFor({state:'hidden'});
+ // Reasoning moved from this dialog to its status chip; without a session the chip saves the default.
+ await page.locator('#effort-chip').click();
+ await page.getByRole('menuitemradio',{name:/^high/}).click();
+ await page.locator('.toast').getByText('Reasoning set to high for new sessions.').waitFor();
  const saved=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert.equal(saved.setup_required,false); assert.equal(saved.effort,'high');
  assert(!JSON.stringify(saved).includes('qa-valid-key'));
  console.log('PASS Catalog, selected models, reasoning and durable core save; no secret returned');
  await page.reload(); await page.locator('#app').waitFor();
  assert(await page.locator('#modal').isHidden());
- await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor();
+ await openProviders();
  assert.equal(await page.locator('[data-credential=anymodel_api_key]').inputValue(),'');
  await page.locator('[name=provider]').selectOption('deepseek');
  assert(await page.locator('#registration').isHidden());
@@ -89,7 +94,7 @@ try {
  const other=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert.equal(other.provider,'deepseek');
  assert.equal(other.providers.find(p=>p.id==='deepseek').saved_models.fast,'example/smart');
- await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor();
+ await openProviders();
  await page.locator('#model-note').getByText('2 models available.').waitFor(); // a saved key loads the live list on open
  assert.equal(await page.locator('#model-pick').inputValue(),'example/smart');
  await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({state:'hidden'});
@@ -104,7 +109,7 @@ try {
  await shot('ssh-config-aliases');
  await page.keyboard.press('Escape');
  console.log('PASS Real ~/.ssh/config aliases appear and select a host');
- await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor();
+ await openProviders();
  for (const [width,height] of [[1280,720],[1440,900],[1920,1080],[2560,1440],[640,720]]) {
    await page.setViewportSize({width,height});
    assert(await page.getByRole('button',{name:'Save defaults',exact:true}).isVisible());

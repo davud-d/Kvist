@@ -87,6 +87,7 @@ kvist_web = [
     "client/features/pending.js",
     "client/features/commands.js",
     "client/features/slash.js",
+    "client/features/chips.js",
     "client/utils/ui.js",
     "client/utils/motion.js",
     "client/kvist-mark.svg",

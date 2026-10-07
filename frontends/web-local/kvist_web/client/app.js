@@ -11,6 +11,7 @@ import { configureConnections, handleConnectionLog, mountServerSwitcher, showSer
 import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
 import { parseCommand, slashQuery } from '/assets/features/commands.js';
 import { mountSlash, openSlash, showUnknown } from '/assets/features/slash.js';
+import { mountChips, openChip } from '/assets/features/chips.js';
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
 const SLOW_CONNECT_MS = 1500;
 let navigationGeneration = 0, eventSource = null, eventSourceGeneration = 0, eventProbeTimer = null, refreshTimer = null, sending = false, creatingSession = null;
@@ -438,19 +439,13 @@ function command(label) {
         openView(label.slice(5).toLowerCase());
 }
 const commands = () => openPalette('commands', paletteChoice);
-async function openReasoning() {
-    await showModel();
-    const details = $('#provider-form details');
-    if (!details)
-        return;
-    details.open = true;
-    $('#provider-form [name=effort]').focus();
-}
 function runCommand({ name }) {
-    if (name === 'model' || name === 'provider')
+    if (name === 'provider')
         showModel();
+    else if (name === 'model' || name === 'role')
+        openChip(name);
     else if (name === 'reasoning')
-        openReasoning();
+        openChip('effort');
     else if (name === 'new')
         newSession();
     else if (name === 'stop')
@@ -459,12 +454,12 @@ function runCommand({ name }) {
         openView(name);
 }
 mountSlash($('.composer-area'), { run: runCommand, all: commands });
+mountChips();
 $('#slash-button').onclick = () => prompt.value && slashQuery(prompt.value) === null ? commands() : openSlash();
 $('#search-button').onclick = () => openPalette('search', paletteChoice);
 $('#new-session').onclick = () => newSession();
 $('#add-workspace').onclick = () => addWorkspace();
 $('#settings-button').onclick = showSettings;
-$('#model-selector').onclick = showModel;
 $('#inbox-button').onclick = () => openPalette("inbox", paletteChoice);
 $('#commands-button').onclick = commands;
 $('#more-tools').onclick = commands;

@@ -1,11 +1,21 @@
 import { api } from '/assets/utils/api.js';
-import { state, serverOf, busy } from '/assets/state/store.js';
+import { state, serverOf } from '/assets/state/store.js';
 import { $, esc, modal, closeModal, toast } from '/assets/utils/ui.js';
 
 const configurations = new Map();
 // A closed session takes the input out of the DOM, so the label is kept as a reference.
 const modelLabel = document.querySelector('#model-label');
-const currentServer = () => (state.selected || state.workspace)?.serverId || 'local';
+export const currentServer = () => (state.selected || state.workspace)?.serverId || 'local';
+export const configurationOf = (serverId = currentServer()) => configurations.get(serverId);
+// The status chips redraw from the configuration whenever it is loaded or saved.
+const changed = info => { document.dispatchEvent(new CustomEvent('kvist:configuration')); return info; };
+// Defaults for new sessions, saved by the core's own writers; credentials are left as they are.
+export async function saveDefaults(change, serverId = currentServer()) {
+    const info = configurations.get(serverId), p = [...info.providers, ...info.custom_providers].find(item => item.id === info.provider);
+    const saved = await api.saveConfiguration(serverId, { provider: info.provider, base_url: '', models: { ...p.defaults }, effort: info.effort, role: info.role, credentials: {}, ...change });
+    configurations.set(serverId, saved);
+    return changed(saved);
+}
 export function configuredModel() {
     const info = configurations.get(currentServer());
     if (!info || info.available === false) return 'Choose model';
@@ -19,7 +29,7 @@ export async function refreshConfiguration(serverId = currentServer(), offer = f
         if (!state.model) modelLabel.textContent = configuredModel();
         if (offer && info.setup_required) await showModel(true, info, serverId);
     }
-    return info;
+    return changed(info);
 }
 export async function ensureConfigured() {
     const serverId = currentServer();
@@ -52,14 +62,13 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
         <p id="model-note" class="full" role="status" hidden></p>
         <button id="load-models" type="button" class="quiet-button full">Load available models</button>
         <datalist id="provider-models"></datalist>
-        <details class="full"><summary>Advanced · models, reasoning & endpoint</summary><div class="form-grid"><label id="base-url-field" class="full" hidden>Provider address<input name="base_url" type="url" autocomplete="off"></label><label>Smart model<input name="smart" list="provider-models" placeholder="Same as model"></label><label>Reasoning<select name="effort">${info.effort_levels.map(e => `<option value="${esc(e)}">${e === 'false' ? 'Off' : esc(e)}</option>`).join('')}</select></label></div></details>
+        <details class="full"><summary>Advanced · models & endpoint</summary><div class="form-grid"><label id="base-url-field" class="full" hidden>Provider address<input name="base_url" type="url" autocomplete="off"></label><label class="full">Smart model<input name="smart" list="provider-models" placeholder="Same as model"></label></div></details>
         </div><p id="configuration-status" role="status"></p>
         <p class="menu-caption">New sessions use these defaults. Existing sessions keep their current provider and models.</p>
         ${info.environment_overrides.length ? `<p class="inline-error">Environment overrides take priority: ${info.environment_overrides.map(esc).join(', ')}.</p>` : ''}
-        <div class="modal-actions"><button id="use-session-effort" type="button" class="quiet-button" hidden>Apply reasoning</button><button id="use-session-model" type="button" class="quiet-button" hidden>Use model in this session</button><button id="save-provider" class="primary-button">${firstRun ? 'Save & continue' : 'Save defaults'}</button></div></form>`;
+        <div class="modal-actions"><button id="save-provider" class="primary-button">${firstRun ? 'Save & continue' : 'Save defaults'}</button></div></form>`;
         const form = root.querySelector('form'), provider = form.elements.provider, status = $('#configuration-status');
         provider.value = activeProvider && providers.some(p => p.id === activeProvider) ? activeProvider : info.provider;
-        form.elements.effort.value = info.effort;
         const registration = root.querySelector('#register-anymodel');
         // This URL comes from the core's onboarding constant, not provider metadata.
         const url = new URL(info.registration_url);
@@ -110,15 +119,9 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
             form.elements.smart.value = models.smart === models.fast ? '' : models.smart || '';
             showModels(builtIn());
             if (p.credential_fields.length && p.credential_fields.every(f => f.present)) loadModels();
-            const current = root.querySelector('#use-session-model');
-            current.hidden = !selection || p.id !== activeProvider;
-            const effortButton = root.querySelector('#use-session-effort');
-            effortButton.hidden = current.hidden;
-            effortButton.disabled = busy(state.execution);
-            current.disabled = busy(state.execution);
-            current.title = current.disabled ? 'Wait for the current task to finish' : 'Uses the core’s model command; also saves model defaults';
         };
-        const payload = () => ({ provider: provider.value, base_url: form.elements.base_url.value, models: { fast: form.elements.fast.value.trim(), smart: form.elements.smart.value.trim() || form.elements.fast.value.trim() }, effort: form.elements.effort.value, credentials: Object.fromEntries([...form.querySelectorAll('[data-credential]')].filter(n => n.value.trim()).map(n => [n.dataset.credential, n.value.trim()])) });
+        // Reasoning and role are the status chips' to change; the dialog keeps the saved ones.
+        const payload = () => ({ provider: provider.value, base_url: form.elements.base_url.value, models: { fast: form.elements.fast.value.trim(), smart: form.elements.smart.value.trim() || form.elements.fast.value.trim() }, effort: configurations.get(serverId).effort, credentials: Object.fromEntries([...form.querySelectorAll('[data-credential]')].filter(n => n.value.trim()).map(n => [n.dataset.credential, n.value.trim()])) });
         provider.onchange = renderProvider;
         renderProvider();
         queueMicrotask(() => { if (root.isConnected) (firstRun ? root.querySelector('[data-credential]') : idField.hidden ? pick : form.elements.fast)?.focus(); });
@@ -133,6 +136,7 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
             try {
                 const saved = await api.saveConfiguration(serverId, payload());
                 configurations.set(serverId, saved);
+                changed(saved);
                 form.querySelectorAll('[data-credential]').forEach(n => n.value = '');
                 if (root.isConnected) closeModal();
                 if (!state.model && currentServer() === serverId) modelLabel.textContent = configuredModel();
@@ -141,21 +145,6 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
                 if (root.isConnected) { status.textContent = error.message; status.className = 'inline-error'; buttons.forEach(b => b.disabled = false); }
                 else toast(error.message, true);
             }
-        };
-        root.querySelector('#use-session-effort').onclick = async () => {
-            const button = root.querySelector('#use-session-effort'); button.disabled = true;
-            try { await api.command(selection, 'effort', [form.elements.effort.value]); if (root.isConnected) closeModal(); }
-            catch (error) { if (root.isConnected) { status.textContent = error.message; button.disabled = false; } }
-        };
-        root.querySelector('#use-session-model').onclick = async () => {
-            if (!form.reportValidity()) return;
-            const data = payload(), button = root.querySelector('#use-session-model');
-            button.disabled = true;
-            try {
-                await api.command(selection, 'models', info.model_roles.map(role => data.models[role]));
-                if (root.isConnected) closeModal();
-                toast('Changing model… The core will confirm the result.');
-            } catch (error) { if (root.isConnected) { status.textContent = error.message; button.disabled = false; } }
         };
     } catch (error) {
         if (root.isConnected) root.querySelector('p').textContent = `Could not load configuration. ${error.message}`;

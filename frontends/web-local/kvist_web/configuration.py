@@ -12,9 +12,13 @@ import threading
 from kernel import llm_clients as llm, user_config as config
 from kernel.anymodel_onboarding import ANYMODEL_REGISTER_URL
 from kernel.config_info import build_config_info
+# The manifest's own builders: the status chips need roles and reasoning levels with
+# their descriptions before any core of a session is running.
+from kernel.core_manifest import _effort_levels, _roles
 from kernel.reasoning_effort import EFFORT_LEVELS
 
 _lock = threading.RLock()
+ROLE_CHOICES = frozenset(entry["value"] for entry in _roles())
 
 
 def configuration_info() -> dict:
@@ -41,6 +45,9 @@ def configuration_info() -> dict:
         model_roles=list(llm.MODEL_ROLES),
         effort=config.get_saved_reasoning_effort(),
         effort_levels=list(EFFORT_LEVELS),
+        effort_info=_effort_levels(),
+        role=config.get_saved_role() or "auto",
+        roles=_roles(),
         environment_overrides=[key for key in ("AGENT_LLM_PROVIDER", "AGENT_FAST_MODEL", "AGENT_SMART_MODEL", "AGENT_REASONING_EFFORT") if os.getenv(key)],
     )
     return info
@@ -110,6 +117,9 @@ def save_configuration(payload: dict) -> dict:
         effort = payload.get("effort", config.get_saved_reasoning_effort())
         if effort not in EFFORT_LEVELS:
             raise ValueError("Unknown reasoning level.")
+        role = payload.get("role")
+        if role is not None and role not in ROLE_CHOICES:
+            raise ValueError("Unknown role.")
         credentials, supplied = _credentials(entry, payload)
         required = llm.required_secret_keys_for_provider(provider, tuple(models.values()))
         if not entry["custom"] and any(not credentials.get(key) for key in required):
@@ -140,5 +150,7 @@ def save_configuration(payload: dict) -> dict:
             if payload.get("base_url", "").strip() and entry.get("can_edit_base_url"):
                 config.set_provider_secret(f"{provider}_base_url", payload["base_url"])
         config.save_reasoning_effort(effort)
+        if role is not None:
+            config.save_role_selection(role)
         config.set_provider_secret(config.LLM_PROVIDER_KEY, provider)
         return configuration_info()

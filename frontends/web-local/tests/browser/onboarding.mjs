@@ -45,16 +45,42 @@ try {
     const { base } = await fixture('configured');
     const { context, page, errors } = await open(base);
     await sendTask(page, 'Explain this project');
-    await page.locator('#model-selector').click();
-    await page.locator('#model-note').getByText('3 models available.').waitFor();
-    await page.locator('#model-pick').selectOption('gpt-5.6-luna');
-    await page.getByRole('button', { name: 'Use model in this session' }).click();
+    const model = page.locator('#model-selector');
+    assert.equal(await model.getAttribute('aria-label'), 'Model: kr/claude-sonnet-4.5');
+    await model.click();
+    await page.locator('.chip-menu .menu-head').getByText('AnyModel models. Applies to this session and new ones.').waitFor();
+    await page.getByRole('menuitemradio', { name: /^gpt-5\.6-luna/ }).waitFor();
+    assert.equal(await page.getByRole('menuitemradio', { name: /^kr\/claude-sonnet-4\.5/ }).getAttribute('aria-checked'), 'true');
+    await shot(page, 'model-menu');
+    await page.getByRole('menuitemradio', { name: /^gpt-5\.6-luna/ }).click();
     await page.locator('#model-label').getByText('gpt-5.6-luna', { exact: true }).waitFor({ timeout: 30000 });
     await page.locator('.toast').getByText('Models updated.').waitFor();
+    await page.locator('#model-selector.pending').waitFor({ state: 'detached' });
     await shot(page, 'model-switched');
+    console.log('PASS mid-session model change: the core confirms it and the model chip shows it without a reload');
+
+    for (const [chip, value, toastText] of [['#effort-chip', 'high', /high/i], ['#role-chip', 'reader', /reader/i]]) {
+      await page.locator(chip).click();
+      assert(await page.locator('.chip-menu .menu-desc').first().isVisible(), 'every item has a one-line caption');
+      await page.getByRole('menuitemradio', { name: new RegExp(`^${value}`) }).click();
+      await page.locator(`${chip} .chip-value`).getByText(value, { exact: true }).waitFor();
+      await page.locator('.toast').getByText(toastText).first().waitFor({ timeout: 30000 });
+      await page.locator(`${chip}.pending`).waitFor({ state: 'detached' });
+    }
+    await shot(page, 'chips-changed');
+    const info = await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
+    assert.equal(info.effort, 'high'); assert.equal(info.role, 'reader');
+    console.log('PASS reasoning and role chips change the running session through the core and save the choice');
+
+    // Keyboard: Enter opens on the checked item, arrows move, Escape closes and returns focus.
+    await page.locator('#role-chip').focus(); await page.keyboard.press('Enter');
+    assert.equal(await page.evaluate(() => document.activeElement.getAttribute('aria-checked')), 'true');
+    await page.keyboard.press('ArrowDown'); await page.keyboard.press('Escape');
+    assert(await page.locator('.chip-menu').isHidden());
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'role-chip');
+    console.log('PASS chip menus work from the keyboard');
     assert.deepEqual(errors, []);
     await context.close();
-    console.log('PASS mid-session model change: the core confirms it and the model label shows it without a reload');
   }
   {
     const { base } = await fixture('configured');
@@ -70,9 +96,9 @@ try {
     await page.keyboard.type('mo');
     assert.deepEqual(await menu.locator('.menu-label').allTextContents(), ['/model']);
     await page.keyboard.press('Enter');
-    await page.locator('#provider-form').waitFor();
+    await page.locator('#model-selector[aria-expanded="true"]').waitFor(); // /model opens the model chip's menu
     assert.equal(await prompt.inputValue(), '');
-    await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' });
+    await page.keyboard.press('Escape'); assert(await page.locator('.chip-menu').isHidden());
     console.log('PASS "/" opens the command menu, typing filters it, Enter runs the command');
 
     await prompt.fill('/xyz'); await page.keyboard.press('Control+Enter');
@@ -90,8 +116,8 @@ try {
     await prompt.fill(''); await page.keyboard.insertText('/ьщ');
     assert.deepEqual(await menu.locator('.menu-label').allTextContents(), ['/model']);
     await prompt.fill('/ьщвуд'); await page.keyboard.press('Control+Enter');
-    await page.locator('#provider-form').waitFor();
-    await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' });
+    await page.locator('#model-selector[aria-expanded="true"]').waitFor();
+    await page.keyboard.press('Escape'); assert(await page.locator('.chip-menu').isHidden());
     console.log('PASS a command typed on the Russian layout opens the menu and runs');
 
     await prompt.fill('/tmp/notes is broken');

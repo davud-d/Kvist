@@ -19,7 +19,7 @@ test('slashQuery: a command typed on the Russian layout reads as the Latin keys'
 
 test('matchCommands: filters by the start of a name or an alias', () => {
     assert.deepEqual(matchCommands('').map(c => c.name), COMMANDS.map(c => c.name));
-    assert.deepEqual(matchCommands('r').map(c => c.name), ['reasoning']);
+    assert.deepEqual(matchCommands('r').map(c => c.name), ['reasoning', 'role']);
     assert.deepEqual(matchCommands('eff').map(c => c.name), ['reasoning']);
     assert.deepEqual(matchCommands('xyz'), []);
 });
