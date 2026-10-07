@@ -1,5 +1,5 @@
 import { api } from "/assets/utils/api.js";
-import { state, sessionOf, update, keyOf, busy, stateLabel } from "/assets/state/store.js";
+import { state, serverOf, sessionOf, update, keyOf, busy, stateLabel, execution } from "/assets/state/store.js";
 import { $, el, markdown, toast } from "/assets/utils/ui.js";
 import { renderInspector, scheduleInspector } from "/assets/features/views.js";
 import { configuredModel } from '/assets/features/configuration.js';
@@ -10,7 +10,7 @@ import { answerSummary } from '/assets/features/format.js';
 export { renderInspector } from "/assets/features/views.js";
 const conversation = document.querySelector("#conversation"), empty = document.querySelector("#empty-state");
 const composer = document.querySelector("#composer"), pending = document.querySelector("#pending-input");
-const title = document.querySelector("#session-title"), path = document.querySelector("#session-path");
+const title = document.querySelector("#session-title"), path = document.querySelector("#session-path"), server = document.querySelector("#session-server");
 const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
 // The open session's feed: the reducer state is the single source of what the conversation shows.
 let feedState = initialState(), feed = createFeed(conversation);
@@ -45,11 +45,19 @@ function queuePaint() {
         $('#jump-latest').hidden = followTail;
     });
 }
+// Header line under the title: the workspace path, and the server's name beside it unless it is the local one.
+export function showPlace(serverId, workspace) {
+    const entry = serverId === 'local' ? null : serverOf(serverId);
+    path.textContent = workspace;
+    server.hidden = !entry;
+    server.textContent = entry ? entry.server.name : '';
+}
 export function renderMetadata() {
     $('#model-label').textContent = state.model || configuredModel();
     $('#model-selector').title = state.model ? `Model: ${state.model}` : 'Model and reasoning details';
     const c = state.context;
-    $('#context-button').textContent = c?.context_limit ? `Context ${Math.round(c.context_tokens / c.context_limit * 100)}%` : 'Context —';
+    $('#context-button').hidden = !c?.context_limit;
+    $('#context-button').textContent = c?.context_limit ? `Context ${Math.round(c.context_tokens / c.context_limit * 100)}%` : '';
     $('#context-button').title = c ? `${c.context_tokens.toLocaleString()} / ${c.context_limit?.toLocaleString() || 'unknown'} tokens` : 'Context has not been reported yet';
 }
 function rememberEvent(event) {
@@ -163,8 +171,8 @@ export async function openSession(serverId, workspace, session) {
     hidePending();
     const item = sessionOf();
     title.textContent = item?.title || session;
-    path.textContent = `${workspace} · ${serverId}`;
-    setAgentState(item?.execution || "idle");
+    showPlace(serverId, workspace);
+    setAgentState(item?.execution);
     const selection = { serverId, workspace, session };
     $('#history-status').hidden = false;
     $('#history-status').textContent = 'Loading conversation…';
@@ -276,10 +284,12 @@ export function closeStaleInputs(lastEventId) {
     feedState = reduce(feedState, { event: { type: 'client.inputs_closed' } });
     queuePaint();
 }
+// The status line names only the state that needs the person: the sidebar indicators carry the rest.
 export function setAgentState(value) {
-    const stateValue = typeof value === 'string' && value ? value : 'idle';
+    const stateValue = execution(value), waiting = stateValue === 'waiting_for_user';
     state.execution = stateValue;
-    agentState.textContent = stateLabel(stateValue);
+    agentState.hidden = !waiting;
+    agentState.textContent = waiting ? stateLabel(stateValue) : '';
     agentState.dataset.state = stateValue;
     stop.hidden = !busy(stateValue);
     $('#send-button').hidden = busy(stateValue);

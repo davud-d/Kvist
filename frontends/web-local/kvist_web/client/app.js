@@ -2,17 +2,19 @@ import { mountImageAttachments } from "./utils/image-attachments.js";
 import { api } from '/assets/utils/api.js';
 import { state, subscribe, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
 import { renderNavigation } from '/assets/features/navigation.js';
-import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, selectionSnapshot, setAgentState } from '/assets/features/session.js';
+import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
 import { configureConnections, handleConnectionLog, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
 import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
+const SLOW_CONNECT_MS = 1500;
 let navigationGeneration = 0, eventSource = null, eventSourceGeneration = 0, eventProbeTimer = null, refreshTimer = null, sending = false, creatingSession = null;
+let connectionValue = 'connecting', connectionSince = performance.now(), connectionTimer = null;
 const drafts = state.drafts;
 function paintNavigation() { renderNavigation(selectSession, newSession); renderConnection(); if (!state.selected && state.workspace)
-    $('#session-path').textContent = state.workspace.workspace; }
+    showPlace(state.workspace.serverId, state.workspace.workspace); }
 export async function refresh() {
     const generation = ++navigationGeneration;
     const navigation = await api.navigation();
@@ -101,12 +103,23 @@ function newSession(place) {
     })();
     return creatingSession;
 }
+// The status line speaks only when the connection is not in order. Connecting is not yet a problem for
+// SLOW_CONNECT_MS after the start and after each change of state.
 function renderConnection() {
-    const entry = serverOf((state.selected || state.workspace)?.serverId || 'local');
+    const entry = serverOf((state.selected || state.workspace)?.serverId || 'local'), label = $('#connection-label');
     const value = state.transport !== 'connected' ? state.transport : entry?.connection.state || 'connected';
-    $('#connection-dot').className = `connection-dot ${value}`;
-    $('#connection-label').textContent = stateLabel(value);
-    $('#connection-label').title = entry?.connection.error || 'Connection to Kvist';
+    if (value !== connectionValue) {
+        connectionValue = value;
+        connectionSince = performance.now();
+    }
+    const wait = value === 'connecting' ? SLOW_CONNECT_MS - (performance.now() - connectionSince) : 0;
+    clearTimeout(connectionTimer);
+    if (wait > 0)
+        connectionTimer = setTimeout(renderConnection, wait);
+    label.hidden = value === 'connected' || wait > 0;
+    label.textContent = label.hidden ? '' : stateLabel(value);
+    label.dataset.state = value;
+    label.title = entry?.connection.error || '';
 }
 async function bootstrap() {
     try {
@@ -159,7 +172,7 @@ function probeBrowserSession(source, generation) {
     }, 1200);
 }
 function recovered() { recoverSelected().then(count => { if (count)
-    toast(`Connected · recovered ${count} events`); }).catch(error => toast(`Recovery paused: ${error.message}`, true)); refresh().catch(() => { }); }
+    toast(`Back online, recovered ${count} events`); }).catch(error => toast(`Recovery paused: ${error.message}`, true)); refresh().catch(() => { }); }
 function resetLiveStream(source, generation, envelope) {
     const event = envelope.event || {};
     resetLive();

@@ -521,11 +521,22 @@ svg {
 }
 
 .session-identity p {
+  display: flex;
+  gap: 12px;
   font: 12px/1.25 var(--mono);
   color: var(--text-3);
+}
+
+.session-identity p > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+#session-server {
+  flex: none;
+  max-width: 40%;
 }
 
 .head-actions {
@@ -539,8 +550,8 @@ svg {
   height: 28px;
 }
 
-.head-actions button:hover:not(:disabled) {
-  color: var(--text);
+.head-actions button:focus-visible {
+  outline-offset: -2px;
 }
 
 /* Conversation */
@@ -1049,77 +1060,89 @@ details[open] > summary > .chevron {
   height: 12px;
 }
 
-/* Status line under the composer */
-.metadata {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
+/* Under the input: the send hint, then the status line. Both start at the input's left edge. */
+.composer-hint {
+  margin: 6px 0 0;
   color: var(--text-3);
   font-size: 11px;
-  padding: 6px 2px 0;
 }
 
-.metadata > div {
+/* The status line holds only what needs attention: context use, a connection that is not in order, and
+   an agent waiting for an answer. Each state has a shape beside its text. With nothing to show it is gone. */
+.status-line {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 2px;
+  color: var(--text-3);
+  font: 12px/16px var(--mono);
 }
 
-.metadata button {
+.status-line:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+.status-line button {
   padding: 0;
-  font-family: var(--mono);
-  color: var(--text-2);
-  font-size: 11px;
+  color: var(--text-3);
+  font: inherit;
 }
 
-.metadata button:hover:not(:disabled) {
+.status-line button:hover:not(:disabled) {
   color: var(--text);
   background: transparent;
 }
 
-.composer-hint {
-  white-space: nowrap;
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.metadata-separator {
-  color: var(--line-strong);
-}
-
-.connection-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ok);
-  display: inline-block;
+.status-item::before {
+  content: '';
   flex: none;
+  box-sizing: border-box;
 }
 
-.connection-dot.offline,
-.connection-dot.failed {
-  background: var(--err);
+#connection-label[data-state="connecting"]::before,
+#connection-label[data-state="reconnecting"]::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-3) 30%, transparent);
+  border-top-color: var(--text-3);
+  animation: spin 0.8s linear infinite;
 }
 
-.connection-dot.connecting,
-.connection-dot.reconnecting {
-  background: var(--warn);
-  animation: pulse 1s infinite;
+#connection-label[data-state="offline"],
+#connection-label[data-state="failed"],
+#connection-label[data-state="trust_required"] {
+  color: var(--err);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+#connection-label[data-state="offline"]::before,
+#connection-label[data-state="failed"]::before,
+#connection-label[data-state="trust_required"]::before {
+  content: '\2715';
+  font-size: 10px;
+  line-height: 1;
 }
 
 #agent-state[data-state="waiting_for_user"] {
   color: var(--warn);
 }
 
-#agent-state[data-state="failed"] {
-  color: var(--err);
+#agent-state[data-state="waiting_for_user"]::before {
+  width: 8px;
+  height: 8px;
+  border-left: 2px solid var(--warn);
+  border-right: 2px solid var(--warn);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 /* Pending input: the request is pinned above the input field and has its width and left edge. */
@@ -1355,7 +1378,8 @@ details[open] > summary > .chevron {
 }
 
 .connection-tabs button,
-.view-tabs button[role="tab"] {
+.view-tabs button[role="tab"],
+.head-actions button[data-view] {
   font-size: 12px;
   color: var(--text-2);
   border-radius: 0;
@@ -1364,15 +1388,21 @@ details[open] > summary > .chevron {
 }
 
 .connection-tabs button:hover:not(:disabled),
-.view-tabs button[role="tab"]:hover:not(:disabled) {
+.view-tabs button[role="tab"]:hover:not(:disabled),
+.head-actions button[data-view]:hover:not(:disabled) {
   background: transparent;
   color: var(--text);
 }
 
 .connection-tabs button[aria-selected="true"],
-.view-tabs button[role="tab"][aria-selected="true"] {
+.view-tabs button[role="tab"][aria-selected="true"],
+.head-actions button[data-view][aria-selected="true"] {
   border-bottom-color: var(--accent);
   color: var(--text);
+}
+
+.head-actions button[data-view] {
+  padding: 0 8px;
 }
 
 .inline-error {

@@ -5,8 +5,15 @@ export const actionLabel = event => {
     const names = Object.hasOwn(TOOL_NAMES, event.action_type) ? TOOL_NAMES[event.action_type] : null;
     return (event.type === 'action_result' ? names?.done : names?.doing) || ({ turn_end: event.stopped_by_user ? 'Agent stopped' : 'Turn finished', input_request: 'Waiting for your input', error: 'An error occurred', agent_process_exited: 'Agent stopped' }[event.type] || 'Agent activity');
 };
+// The header's own buttons (Files, Diff, Terminal) mark the view that is open; the other tabs mark none of them.
+function markOpen(tab) {
+    state.openView = tab;
+    for (const button of document.querySelectorAll('[data-view]'))
+        button.setAttribute('aria-selected', String(button.dataset.view === tab));
+}
 export function openView(tab) {
     state.inspectorTab = tab;
+    markOpen(tab);
     showOverlay($('#workspace-view'));
     for (const button of document.querySelectorAll('[data-tab]')) {
         button.setAttribute('aria-selected', String(button.dataset.tab === tab));
@@ -16,7 +23,7 @@ export function openView(tab) {
     queueMicrotask(() => document.querySelector(`[data-tab="${tab}"]`)?.focus());
     document.dispatchEvent(new CustomEvent('kvist:view-open', { detail: tab }));
 }
-export const closeView = () => hideOverlay($('#workspace-view'));
+export const closeView = () => { markOpen(''); hideOverlay($('#workspace-view')); };
 let renderFrame = 0;
 export function scheduleInspector() { if ($('#workspace-view').hidden || renderFrame)
     return; renderFrame = requestAnimationFrame(() => { renderFrame = 0; renderInspector(); }); }
@@ -87,7 +94,7 @@ export function renderInspector() {
     else if (tab === 'terminal') {
         const results = state.events.filter(e => e.action_type === 'run_shell' || e.type === 'action_output');
         const output = results.map(e => e.output || e.action_args?.command || e.summary).filter(Boolean).join('\n\n');
-        target.append(el('p', '', 'Command output · read-only'));
+        target.append(el('p', '', 'Command output, read-only'));
         if (output)
             pagedLines(target, output);
         else

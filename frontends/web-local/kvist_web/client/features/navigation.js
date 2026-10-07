@@ -1,11 +1,9 @@
-import { state, keyOf, stateLabel } from '/assets/state/store.js';
+import { state, keyOf, stateLabel, execution } from '/assets/state/store.js';
 import { $, chevron, el, icons } from '/assets/utils/ui.js';
 const nameOf = path => path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 const COLLAPSED_KEY = 'kvist.nav.collapsed';
 // Indicator kinds, most urgent first; the label is what a screen reader hears in place of the shape.
 const LABELS = { waiting: 'waiting for your answer', failed: 'failed', running: 'running', unread: 'unread' };
-const KNOWN_EXECUTIONS = new Set(['idle', 'finished', 'stopped', 'running', 'starting', 'waiting_for_user', 'failed']);
-const warned = new Set();
 const collapsed = loadCollapsed();
 let lastSignature = '', handlers = [];
 function loadCollapsed() {
@@ -20,16 +18,12 @@ function saveCollapsed() {
     catch (error) { /* blocked storage: the choice lasts until the page reloads */ }
 }
 function indicatorOf(session) {
-    const execution = session.execution || 'idle';
-    if (!KNOWN_EXECUTIONS.has(execution) && !warned.has(execution)) {
-        warned.add(execution);
-        console.warn(`Unknown session execution: ${execution}`);
-    }
-    if (execution === 'waiting_for_user')
+    const value = execution(session.execution);
+    if (value === 'waiting_for_user')
         return 'waiting';
-    if (execution === 'failed')
+    if (value === 'failed')
         return 'failed';
-    if (execution === 'running' || execution === 'starting')
+    if (value === 'running' || value === 'starting')
         return 'running';
     return session.unread ? 'unread' : '';
 }
