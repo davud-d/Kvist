@@ -98,7 +98,9 @@ export function renderNavigation(onSelect, onNewSession) {
     lastSignature = signature;
     const nav = $('#navigation'), focused = document.activeElement?.dataset?.key, scroll = nav.scrollTop;
     const fragment = document.createDocumentFragment();
-    $('#inbox-count').textContent = String(state.navigation.inbox.length);
+    const unread = state.navigation.inbox.length;
+    $('#inbox-count').hidden = !unread;
+    $('#inbox-count').textContent = unread > 99 ? '99+' : String(unread);
     for (const entry of state.navigation.servers)
         for (const workspace of entry.workspaces)
             fragment.append(group(entry, workspace, onSelect, onNewSession));
