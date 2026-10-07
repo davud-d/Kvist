@@ -1,4 +1,4 @@
-import { el, markdown } from '/assets/utils/ui.js';
+import { chevron, el, markdown } from '/assets/utils/ui.js';
 import { TOOL_NAMES } from '/assets/features/blocks.js';
 import { callSeconds, formatDuration, groupStatus, isDenied, toolStatus, toolTarget } from '/assets/features/format.js';
 
@@ -85,23 +85,6 @@ function applyOpen(feed, key, row, wanted) {
     if (row.defaultOpen === wanted) return;
     row.defaultOpen = wanted;
     row.node.open = wanted;
-}
-
-// A 10px chevron that turns when the row opens; it is the mark of a row that has something to open.
-function chevron() {
-    const ns = 'http://www.w3.org/2000/svg';
-    const svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
-    svg.setAttribute('viewBox', '0 0 10 10');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('class', 'chevron');
-    path.setAttribute('d', 'M3 1.5 6.5 5 3 8.5');
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', 'currentColor');
-    path.setAttribute('stroke-width', '1.4');
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
-    svg.append(path);
-    return svg;
 }
 
 const SLOW_CALL_MS = 2000;

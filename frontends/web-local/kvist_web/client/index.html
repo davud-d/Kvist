@@ -10,11 +10,10 @@
   <div id="app" class="app" hidden>
     <button id="sidebar-scrim" class="sidebar-scrim" aria-label="Close sidebar" tabindex="-1"></button>
     <aside id="sidebar" class="sidebar" aria-label="Sessions and workspaces">
-      <header class="sidebar-head"><a class="brand" href="/" aria-label="Kvist home"><img src="/assets/kvist-mark.svg" alt="" width="25" height="25">Kvist</a><button id="search-button" class="icon-button" aria-label="Search sessions and workspaces" title="Quick open · Ctrl/Cmd+P" data-icon="search"></button></header>
-      <button id="workspace-switcher" class="workspace-switcher" aria-haspopup="dialog"><span data-icon="folder"></span><span id="workspace-label">Choose workspace</span><span data-icon="chevron"></span></button>
+      <header class="sidebar-head"><a class="brand" href="/" aria-label="Kvist home"><img src="/assets/kvist-mark.svg" alt="" width="25" height="25">Kvist</a><button id="search-button" class="icon-button" aria-label="Search sessions and workspaces" title="Quick open, Ctrl/Cmd+P" data-icon="search"></button></header>
       <button id="new-session" class="new-session"><span data-icon="plus"></span>New session</button>
       <button id="inbox-button" class="inbox-button"><span data-icon="inbox"></span><span>Inbox</span><span id="inbox-count" class="badge">0</span></button>
-      <div class="section-label">Sessions</div><nav id="navigation" class="navigation" aria-label="Sessions"></nav>
+      <nav id="navigation" class="navigation" aria-label="Sessions"></nav>
       <footer class="sidebar-foot"><button id="add-workspace" class="quiet-button"><span data-icon="folder-plus"></span>Add workspace</button><button id="settings-button" class="quiet-button"><span data-icon="settings"></span>Settings</button><button id="commands-button" class="quiet-button command-hint"><kbd>⌘ / Ctrl K</kbd>Commands</button></footer>
     </aside>
     <main class="main">

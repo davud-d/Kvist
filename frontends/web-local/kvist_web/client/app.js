@@ -11,7 +11,7 @@ import { refreshConfiguration, ensureConfigured } from '/assets/features/configu
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
 let navigationGeneration = 0, eventSource = null, eventSourceGeneration = 0, eventProbeTimer = null, refreshTimer = null, sending = false, creatingSession = null;
 const drafts = state.drafts;
-function paintNavigation() { renderNavigation(selectSession, chooseWorkspace); renderConnection(); if (!state.selected && state.workspace)
+function paintNavigation() { renderNavigation(selectSession, newSession); renderConnection(); if (!state.selected && state.workspace)
     $('#session-path').textContent = state.workspace.workspace; }
 export async function refresh() {
     const generation = ++navigationGeneration;
@@ -60,19 +60,21 @@ function chooseWorkspace(serverId, workspace) {
         return;
     }
     state.workspace = { serverId, workspace };
-    newSession();
+    newSession({ serverId, workspace });
 }
 function chooseServer(serverId) { const entry = serverOf(serverId); const workspace = entry?.workspaces[0]?.path; if (workspace)
     chooseWorkspace(serverId, workspace);
 else
     addWorkspace(serverId); }
 configureConnections({ refresh, chooseServer, chooseWorkspace });
-function newSession() {
+// place is {serverId, workspace}: a group's "+" or a workspace chosen without sessions. Without one the
+// session goes where the selected session is, or into the workspace that holds the unsent draft.
+function newSession(place) {
     // Sending immediately after New session must await the same creation request.
     // Two concurrent auto-name allocations can otherwise collide in the runtime.
     if (creatingSession)
         return creatingSession;
-    const selection = state.workspace || state.selected;
+    const selection = place || state.selected || state.workspace;
     if (!selection?.workspace) {
         showWorkspaces();
         return Promise.resolve(false);
@@ -304,9 +306,8 @@ function command(label) {
 }
 const commands = () => openPalette('commands', paletteChoice);
 $('#search-button').onclick = () => openPalette('search', paletteChoice);
-$('#workspace-switcher').onclick = showWorkspaces;
 $('#server-switcher').onclick = showServers;
-$('#new-session').onclick = newSession;
+$('#new-session').onclick = () => newSession();
 $('#add-workspace').onclick = () => addWorkspace();
 $('#settings-button').onclick = showSettings;
 $('#model-selector').onclick = showModel;

@@ -2,6 +2,22 @@ export const $ = selector => document.querySelector(selector);
 export function el(tag, cls, text) { const node = document.createElement(tag); if (cls)
     node.className = cls; if (text != null)
     node.textContent = text; return node; }
+// The one 10px chevron of feed rows and sidebar groups; its row turns it a quarter when it opens.
+export function chevron() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    svg.setAttribute('viewBox', '0 0 10 10');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'chevron');
+    path.setAttribute('d', 'M3 1.5 6.5 5 3 8.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.4');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+}
 export function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
 const paths = {
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
