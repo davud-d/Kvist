@@ -60,9 +60,10 @@ function showClosed(closed, animate = false) {
         slot.replaceChildren(composer, hint);
         return;
     }
-    const height = slot.getBoundingClientRect().height;
+    const height = slot.getBoundingClientRect().height, field = composer.getBoundingClientRect().height;
     if (height > 0)
         slot.style.minHeight = `${height}px`;
+    banner.style.minHeight = field > 0 ? `${field}px` : '';
     slot.replaceChildren(banner);
     if (animate)
         appear(banner);
@@ -77,14 +78,15 @@ function paintFeed(live = true) {
     if (conversation.children.length)
         empty.hidden = true;
 }
-// The feed container of a session that has just been drawn and scrolled to its end fades in (the empty state
-// does the same when there is no feed); a quick switch cancels the animation still running. The container does
+// The feed container of a session that has just been drawn and scrolled to its end fades in (and so does the
+// empty state when there is no feed); a quick switch cancels the animations still running. The container does
 // not rise: with the 6px rise the longest frame of a switch to 300 tool rows was 66.6 ms in three runs of eight,
 // over the 50 ms line, so only the opacity stays.
-let feedAnimation = null;
+let feedAnimations = [];
 function revealContent() {
-    feedAnimation?.cancel();
-    feedAnimation = appear(empty.hidden ? conversation : empty);
+    for (const animation of feedAnimations)
+        animation?.cancel();
+    feedAnimations = [appear(conversation), empty.hidden ? null : appear(empty)];
 }
 // Following the end of the feed. Within FOLLOW_PX of the bottom it stays at its end as content arrives: a new
 // row scrolls there smoothly, the growth of a streaming row instantly (a smooth scroll per chunk would lag
@@ -252,7 +254,8 @@ export async function openSession(serverId, workspace, session) {
         state.drafts.set(keyOf(state.selected), prompt.value);
     const generation = ++selectionGeneration;
     feedReady = false;
-    feedAnimation?.cancel();
+    for (const animation of feedAnimations)
+        animation?.cancel();
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
     feedState = initialState();
     feed.destroy();

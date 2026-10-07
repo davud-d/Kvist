@@ -372,7 +372,9 @@ document.addEventListener('kvist:retry-send', async (event) => {
         syncSend();
     }
 });
-prompt.addEventListener('input', () => { prompt.style.height = 'auto'; prompt.style.height = `${Math.min(prompt.scrollHeight, 180)}px`; drafts.set(keyOf(state.selected || state.workspace), prompt.value); syncSend(); });
+// The field is 56px (CSS); it grows only once the text overflows it. Setting the height from scrollHeight on every
+// input made it 56px while the app was hidden and 57px once typed in, which moved everything below by 1px.
+prompt.addEventListener('input', () => { prompt.style.height = ''; if (prompt.scrollHeight > prompt.clientHeight) prompt.style.height = `${Math.min(prompt.scrollHeight, 180)}px`; drafts.set(keyOf(state.selected || state.workspace), prompt.value); syncSend(); });
 prompt.addEventListener('keydown', event => { if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !event.isComposing) {
     event.preventDefault();
     form.requestSubmit();
