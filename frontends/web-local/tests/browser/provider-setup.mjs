@@ -86,7 +86,7 @@ try {
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
    await shot(`provider-${width}x${height}`);
  }
- await page.keyboard.press('Escape'); assert(await page.locator('#modal').isHidden());
+ await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' }); // hidden when its 100 ms fade-out has finished
  console.log('PASS 5 viewport sizes, Escape, no clipping');
  assert.deepEqual(errors,[]); console.log('PASS No browser JavaScript errors');
 } finally { await context.request.post(`${base}/api/admin/stop`, {headers:{Authorization:'Bearer qa-only'}}).catch(()=>fixture.kill()); await browser.close(); }
