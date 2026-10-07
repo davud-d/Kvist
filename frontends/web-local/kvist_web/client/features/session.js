@@ -5,6 +5,7 @@ import { renderInspector, scheduleInspector } from "/assets/features/views.js";
 import { configuredModel } from '/assets/features/configuration.js';
 import { initialState, reduce, reducesLive } from '/assets/features/blocks.js';
 import { createFeed } from '/assets/features/feed.js';
+import { appear } from '/assets/utils/motion.js';
 import { renderPending } from '/assets/features/pending.js';
 import { answerSummary } from '/assets/features/format.js';
 export { renderInspector } from "/assets/features/views.js";
@@ -48,7 +49,7 @@ function focusBanner() {
     if (closedShown && !document.querySelector('.overlay:not([hidden])'))
         newButton.focus();
 }
-function showClosed(closed) {
+function showClosed(closed, animate = false) {
     if (closed === closedShown)
         return;
     closedShown = closed;
@@ -61,14 +62,25 @@ function showClosed(closed) {
     if (height > 0)
         slot.style.minHeight = `${height}px`;
     slot.replaceChildren(banner);
+    if (animate)
+        appear(banner);
     focusBanner();
 }
-let followTail = true, paintFrame = 0;
-function paintFeed() {
-    feed.render(feedState);
-    showClosed(feedState.meta.closed !== null);
+// feedReady is false from the moment a session starts opening until its first draw: what is painted before
+// that is the restored session, not something that arrived live, and nothing in it appears.
+let followTail = true, paintFrame = 0, feedReady = false;
+function paintFeed(live = true) {
+    feed.render(feedState, { live: live && feedReady });
+    showClosed(feedState.meta.closed !== null, live && feedReady);
     if (conversation.children.length)
         empty.hidden = true;
+}
+// The feed container of a session that has just been drawn and scrolled to its end fades in and rises 6px
+// (the empty state does the same when there is no feed); a quick switch cancels the animation still running.
+let feedAnimation = null;
+function revealContent() {
+    feedAnimation?.cancel();
+    feedAnimation = appear(empty.hidden ? conversation : empty, { rise: 6 });
 }
 function queuePaint() {
     if (paintFrame)
@@ -78,8 +90,17 @@ function queuePaint() {
         paintFeed();
         if (followTail)
             conversation.scrollTop = conversation.scrollHeight;
-        $('#jump-latest').hidden = followTail;
+        showJump(!followTail);
     });
+}
+// "Latest messages" fades in and rises 4px (it is centred by its own translateX).
+function showJump(visible) {
+    const button = $('#jump-latest');
+    if (button.hidden === !visible)
+        return;
+    button.hidden = !visible;
+    if (visible)
+        appear(button, { rise: 4, translate: 'translateX(-50%)' });
 }
 // Header line under the title: the workspace path, and the server's name beside it unless it is the local one.
 export function showPlace(serverId, workspace) {
@@ -190,6 +211,8 @@ export async function openSession(serverId, workspace, session) {
     if (state.selected)
         state.drafts.set(keyOf(state.selected), prompt.value);
     const generation = ++selectionGeneration;
+    feedReady = false;
+    feedAnimation?.cancel();
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
     feedState = initialState();
     feed.destroy();
@@ -231,7 +254,7 @@ export async function openSession(serverId, workspace, session) {
     if (!currentSelectionMatches(selection, generation))
         return false;
     $('#history-status').hidden = true;
-    paintFeed();
+    paintFeed(false);
     empty.hidden = conversation.children.length > 0;
     const latest = sessionOf();
     setAgentState(latest?.execution || 'idle');
@@ -239,6 +262,10 @@ export async function openSession(serverId, workspace, session) {
     if (latest?.pending_input && latest.execution === 'waiting_for_user')
         showPending(latest.pending_input);
     conversation.scrollTop = conversation.scrollHeight;
+    feedReady = true;
+    // The first session opens while #app is hidden; revealFeed() shows it once the app is.
+    if (!$('#app').hidden)
+        revealContent();
     renderInspector();
     scheduleRead();
     return true;
@@ -248,6 +275,7 @@ export async function openSession(serverId, workspace, session) {
 export function revealFeed() {
     conversation.scrollTop = conversation.scrollHeight;
     focusBanner();
+    revealContent();
 }
 export async function recoverSelected() {
     const snapshot = selectionSnapshot();
@@ -342,8 +370,12 @@ export function setAgentState(value) {
     agentState.hidden = !waiting;
     agentState.textContent = waiting ? stateLabel(stateValue) : '';
     agentState.dataset.state = stateValue;
+    const wasBusy = !stop.hidden;
     stop.hidden = !busy(stateValue);
     sendButton.hidden = busy(stateValue);
+    // The control that takes the place fades in; the one that leaves is gone at once.
+    if (feedReady && busy(stateValue) !== wasBusy)
+        appear(busy(stateValue) ? stop : sendButton, { duration: '--dur-fast' });
     prompt.placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist…';
 }
 // Removing the controls with the panel also removes what the person typed into them, a secret included.
@@ -353,7 +385,10 @@ function hidePending() {
 }
 function showPending(event) {
     const first = renderPending(pending, event, response => respond(event, response));
+    const shown = !pending.hidden;
     pending.hidden = false;
+    if (feedReady && !shown)
+        appear(pending, { rise: 8 });
     queueMicrotask(() => {
         // A person who is typing a message keeps the focus; the panel waits for Tab.
         if (document.querySelector('.overlay:not([hidden])') || (document.activeElement === prompt && prompt.value))
@@ -406,10 +441,10 @@ export function scheduleRead() {
 function canRead() { return !document.hidden && $('#history-status').hidden && !document.querySelector('.overlay:not([hidden])') && conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 60; }
 conversation.addEventListener('scroll', () => {
     followTail = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 60;
-    $('#jump-latest').hidden = followTail;
+    showJump(!followTail);
     scheduleRead();
 }, { passive: true });
-$('#jump-latest').onclick = () => { followTail = true; conversation.scrollTop = conversation.scrollHeight; scheduleRead(); };
+$('#jump-latest').onclick = () => { followTail = true; conversation.scrollTop = conversation.scrollHeight; showJump(false); scheduleRead(); };
 document.addEventListener('visibilitychange', scheduleRead);
 document.addEventListener('kvist:overlay', scheduleRead);
 export async function loadDiff() {

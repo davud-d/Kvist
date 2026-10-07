@@ -1,23 +1,18 @@
 import { inboxItems, paletteItems } from "/assets/features/navigation.js";
+import { hideOverlay, showOverlay } from "/assets/utils/ui.js";
 const overlay = document.querySelector("#palette"), input = document.querySelector("#palette-input"), results = document.querySelector("#palette-results");
 let items = [], index = 0, callback = () => { };
-let previousFocus = null;
 const commands = ["New session", "Switch session", "Switch workspace", "Switch server", "Connect server", "Add workspace", "Open files", "Open diff", "Open terminal", "Open activity", "Open context", "Open usage", "Show unread", "Stop agent", "Settings"];
 export function openPalette(mode, onChoose) {
-    previousFocus = document.activeElement;
     callback = onChoose;
-    overlay.hidden = false;
     input.value = "";
     input.placeholder = mode === "search" ? "Search sessions and workspaces…" : mode === "inbox" ? "Search unread and attention-needed sessions…" : "Type a command or search sessions…";
     items = mode === "search" ? paletteItems() : mode === "inbox" ? inboxItems() : [...commands.map(label => ({ type: "command", label, detail: "Command" })), ...paletteItems()];
-    document.dispatchEvent(new Event("kvist:overlay"));
     index = 0;
     render();
-    queueMicrotask(() => input.focus());
+    showOverlay(overlay);
 }
-export function closePalette() { if (overlay.hidden)
-    return; overlay.hidden = true; if (previousFocus instanceof HTMLElement)
-    previousFocus.focus(); previousFocus = null; document.dispatchEvent(new Event("kvist:overlay")); }
+export function closePalette() { hideOverlay(overlay); }
 function render() {
     const query = input.value.trim().toLowerCase(), filtered = items.filter(item => `${item.label} ${item.detail}`.toLowerCase().includes(query)).slice(0, 40);
     results.replaceChildren();

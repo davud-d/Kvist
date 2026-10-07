@@ -1,4 +1,5 @@
-import { chevron, el, markdown } from '/assets/utils/ui.js';
+import { chevron, el, fold, markdown } from '/assets/utils/ui.js';
+import { appear, canAnimate } from '/assets/utils/motion.js';
 import { TOOL_NAMES } from '/assets/features/blocks.js';
 import { callSeconds, formatDuration, groupStatus, isDenied, toolStatus, toolTarget } from '/assets/features/format.js';
 
@@ -70,10 +71,22 @@ function drawNotice(row, block) {
 
 // A details element whose open state the person owns once they have toggled it: click covers the mouse,
 // Enter and Space on the focused summary (they fire a click on it), and nothing else changes `open`.
-function expandable(feed, key, node, summary, canToggle = () => true) {
+// A person's opening grows the content from 0fr to 1fr: the fold gets .fold-enter before the browser opens the
+// details, and loses it once the details has opened and the 0fr state is computed. Opening by the feed itself
+// (a failed call, a group) has no click and shows at once; closing is always at once.
+function expandable(feed, key, node, summary, fold, canToggle = () => true) {
     summary.addEventListener('click', event => {
-        if (!canToggle()) event.preventDefault();
-        else feed.userOpen.set(key, !node.open);
+        if (!canToggle()) {
+            event.preventDefault();
+            return;
+        }
+        feed.userOpen.set(key, !node.open);
+        fold.classList.toggle('fold-enter', !node.open && canAnimate());
+    });
+    node.addEventListener('toggle', () => {
+        if (!fold.classList.contains('fold-enter')) return;
+        void fold.offsetHeight;
+        fold.classList.remove('fold-enter');
     });
 }
 
@@ -112,10 +125,10 @@ function callRow(feed, key) {
     target.append(dir, file, text);
     const status = el('span', 'tool-status'), time = el('span', 'tool-time');
     summary.append(label, target, status, time);
-    const output = el('pre');
-    node.append(summary, output);
+    const output = el('pre'), content = fold(output);
+    node.append(summary, content);
     const row = { node, summary, chevron: chevron(), label, target, dir, dirText, file, text, status, time, output, key, drawn: null, defaultOpen: false, canOpen: false };
-    expandable(feed, key, node, summary, () => row.canOpen);
+    expandable(feed, key, node, summary, content, () => row.canOpen);
     return row;
 }
 
@@ -158,9 +171,9 @@ function groupParts(feed, row) {
     const label = el('span', 'tool-label'), target = el('span', 'tool-target'), names = el('span', 'tool-text'), time = el('span', 'tool-time');
     target.append(names);
     summary.append(chevron(), label, target, time);
-    const body = el('div', 'tool-group-body');
-    node.append(summary, body);
-    expandable(feed, row.blockId, node, summary);
+    const body = el('div', 'tool-group-body'), content = fold(body);
+    node.append(summary, content);
+    expandable(feed, row.blockId, node, summary, content);
     return { node, label, target, names, time, body, defaultOpen: false };
 }
 
@@ -207,10 +220,10 @@ function reasoningRow(feed, key) {
     const node = el('details', 'reasoning');
     const summary = el('summary'), label = el('span', 'reasoning-label');
     summary.append(chevron(), label);
-    const body = el('div', 'reasoning-body');
-    node.append(summary, body);
+    const body = el('div', 'reasoning-body'), content = fold(body);
+    node.append(summary, content);
     const row = { node, summary, label, body, text: null, block: null, seenAt: now(), drawn: null };
-    expandable(feed, key, node, summary, () => row.text !== '');
+    expandable(feed, key, node, summary, content, () => row.text !== '');
     return row;
 }
 
@@ -285,6 +298,8 @@ const ROWS = {
     reasoning: { create: reasoningRow, draw: (feed, row, block) => drawReasoning(row, block) },
 };
 
+const MAX_APPEARING = 5;
+
 export function createFeed(container) {
     const rows = new Map();
     const feed = { userOpen: new Map() };
@@ -301,8 +316,10 @@ export function createFeed(container) {
     };
     const stop = () => { clearInterval(timer); timer = 0; };
     return {
-        render(state) {
-            const seen = new Set();
+        // live: the blocks this render adds arrived after the first draw. They appear (a user message rises
+        // 4px, the agent's blocks only fade in) unless more than MAX_APPEARING came in one frame.
+        render(state, { live = false } = {}) {
+            const seen = new Set(), added = [];
             let next = container.firstChild;
             let streaming = false;
             for (const [key, kind, block] of rowsOf(state.blocks)) {
@@ -310,6 +327,7 @@ export function createFeed(container) {
                 if (!row) {
                     row = ROWS[kind].create(feed, key, block);
                     rows.set(key, row);
+                    added.push([row.node, block]);
                 }
                 seen.add(key);
                 if (row.drawn !== block) {
@@ -326,6 +344,9 @@ export function createFeed(container) {
                 rows.delete(key);
                 for (const item of row.calls?.values() ?? []) feed.userOpen.delete(item.key);
                 feed.userOpen.delete(key);
+            }
+            if (live && added.length <= MAX_APPEARING) {
+                for (const [node, block] of added) appear(node, block.kind === 'user' ? { rise: 4 } : {});
             }
             if (streaming && !timer) timer = setInterval(tick, 1000);
             else if (!streaming && timer) stop();

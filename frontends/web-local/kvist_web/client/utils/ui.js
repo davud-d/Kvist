@@ -1,3 +1,4 @@
+import { appear, vanish } from '/assets/utils/motion.js';
 export const $ = selector => document.querySelector(selector);
 export function el(tag, cls, text) { const node = document.createElement(tag); if (cls)
     node.className = cls; if (text != null)
@@ -48,21 +49,78 @@ export function toast(message, error = false) {
     stack.append(node);
     setTimeout(() => node.remove(), error ? 9000 : 4500);
 }
-const focusOwners = new Map();
-export function showOverlay(node) { if (node.hidden)
-    focusOwners.set(node, document.activeElement); node.hidden = false; document.dispatchEvent(new Event('kvist:overlay')); queueMicrotask(() => node.querySelector('input,button,select,[tabindex="0"]')?.focus()); }
-export function hideOverlay(node) { if (node.hidden)
-    return; node.hidden = true; const owner = focusOwners.get(node); if (owner?.isConnected)
-    owner.focus(); focusOwners.delete(node); document.dispatchEvent(new Event('kvist:overlay')); }
-export function closeModal() { hideOverlay($('#modal')); $('#modal').replaceChildren(); }
+// A block that opens and closes in place: its content sits in .fold-inner under a grid row that grows from 0fr
+// to 1fr (styles.css), the one size animation besides the sidebar group.
+export function fold(content) {
+    const outer = el('div', 'fold'), inner = el('div', 'fold-inner');
+    inner.append(content);
+    outer.append(inner);
+    return outer;
+}
+const focusOwners = new Map(), closing = new Map();
+const isClosed = node => node.hidden || closing.has(node);
+// An overlay that was closed (or is fading out) fades in with its card rising 8px; showing one that is
+// already open, as a tab switch does, animates nothing.
+export function showOverlay(node) {
+    const opening = isClosed(node), fade = closing.get(node);
+    if (fade) {
+        closing.delete(node);
+        fade.cancel();
+    }
+    if (node.hidden)
+        focusOwners.set(node, document.activeElement);
+    node.hidden = false;
+    if (opening) {
+        appear(node);
+        const card = node.firstElementChild;
+        if (card)
+            appear(card, { rise: 8 });
+    }
+    document.dispatchEvent(new Event('kvist:overlay'));
+    queueMicrotask(() => node.querySelector('input,button,select,[tabindex="0"]')?.focus());
+}
+// The overlay fades out and is hidden when the animation has finished, not on a timer; `after` runs then, and
+// not at all when the overlay was reopened meanwhile. With motion off it is hidden at once.
+export function hideOverlay(node, after) {
+    if (node.hidden) {
+        after?.();
+        return;
+    }
+    if (closing.has(node))
+        return;
+    const owner = focusOwners.get(node);
+    if (owner?.isConnected)
+        owner.focus();
+    focusOwners.delete(node);
+    const done = () => {
+        closing.delete(node);
+        node.hidden = true;
+        document.dispatchEvent(new Event('kvist:overlay'));
+        after?.();
+    };
+    const fade = vanish(node);
+    if (!fade) {
+        done();
+        return;
+    }
+    closing.set(node, fade);
+    fade.finished.then(() => { fade.cancel(); done(); }).catch(error => {
+        if (error.name !== 'AbortError')
+            throw error; // only showOverlay cancelling the fade-out is expected here
+    });
+}
+export function closeModal() { hideOverlay($('#modal'), () => $('#modal').replaceChildren()); }
 export function modal(title, content, actions = '') {
     $('#toasts').querySelectorAll('.toast:not(.error)').forEach(node => node.remove());
-    const root = $('#modal');
+    const root = $('#modal'), opening = isClosed(root);
     showOverlay(root);
     root.innerHTML = `<section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><h2 id="modal-title">${esc(title)}</h2><button class="icon-button" data-close aria-label="Close dialog" data-icon="close"></button></header>${content}${actions}</section>`;
     root.querySelector('[data-close]').onclick = closeModal;
     icons(root);
-    return root.querySelector('.modal-card');
+    const card = root.querySelector('.modal-card');
+    if (opening)
+        appear(card, { rise: 8 });
+    return card;
 }
 export function trapFocus(event, container) {
     const nodes = [...container.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]')].filter(n => n.getClientRects().length);

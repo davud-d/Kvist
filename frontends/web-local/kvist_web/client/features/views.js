@@ -1,5 +1,6 @@
 import { state } from '/assets/state/store.js';
 import { $, el, showOverlay, hideOverlay } from '/assets/utils/ui.js';
+import { appear } from '/assets/utils/motion.js';
 import { TOOL_NAMES } from '/assets/features/blocks.js';
 export const actionLabel = event => {
     const names = Object.hasOwn(TOOL_NAMES, event.action_type) ? TOOL_NAMES[event.action_type] : null;
@@ -11,9 +12,14 @@ function markOpen(tab) {
     for (const button of document.querySelectorAll('[data-view]'))
         button.setAttribute('aria-selected', String(button.dataset.view === tab));
 }
+// The tab whose content is on screen: a switch to another tab fades the content in; opening the view does not
+// (the view itself fades in).
+let shownTab = '';
 export function openView(tab) {
     state.inspectorTab = tab;
     markOpen(tab);
+    if ($('#workspace-view').hidden)
+        shownTab = tab;
     showOverlay($('#workspace-view'));
     for (const button of document.querySelectorAll('[data-tab]')) {
         button.setAttribute('aria-selected', String(button.dataset.tab === tab));
@@ -48,6 +54,10 @@ export function renderInspector() {
         return;
     const target = $('#inspector-content'), oldScroll = target.scrollTop, tab = state.inspectorTab;
     target.replaceChildren();
+    if (tab !== shownTab) {
+        shownTab = tab;
+        appear(target, { duration: '--dur-fast' });
+    }
     if (!state.selected) {
         target.append(el('p', 'view-empty', 'Select a session to see its ' + tab + '.'));
         return;

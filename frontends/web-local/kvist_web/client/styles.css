@@ -40,6 +40,23 @@ button {
   gap: 8px;
 }
 
+/* Motion. Hover, focus and press change only color, background-color, border-color and opacity, in --dur-fast.
+   The rest of the motion is opacity and transform from motion.js, plus two grid-template-rows growths (.fold). */
+button,
+summary,
+a,
+input,
+textarea,
+select,
+.composer,
+.pending-input {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+}
+
 button:hover:not(:disabled) {
   background: var(--bg-2);
 }
@@ -128,6 +145,10 @@ svg {
   --r: 4px;
   --r-input: 6px;
   --row-pad: 6px;
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
+  --ease: cubic-bezier(.2, .8, .2, 1);
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
 }
@@ -816,6 +837,24 @@ svg {
   width: 10px;
   height: 10px;
   margin: 0 1px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+/* The content of a row that opens in place (a call's output, a group's calls, a thought) and of a sidebar group:
+   a grid row that grows from 0fr to 1fr when the person opens it. Closing is at once. */
+.fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-base) var(--ease);
+}
+
+.fold-enter {
+  grid-template-rows: 0fr;
+}
+
+.fold-inner {
+  min-height: 0;
+  overflow: hidden;
 }
 
 details[open] > summary > .chevron {
@@ -1040,8 +1079,19 @@ details[open] > summary > .chevron {
   flex-shrink: 0;
 }
 
+.send-button {
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
 .send-button:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent) 85%, var(--text));
+}
+
+.send-button:active:not(:disabled) {
+  transform: scale(.96);
 }
 
 .stop-button {

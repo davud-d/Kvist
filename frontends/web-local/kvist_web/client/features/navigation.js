@@ -1,11 +1,26 @@
 import { state, keyOf, stateLabel, execution } from '/assets/state/store.js';
-import { $, chevron, el, icons } from '/assets/utils/ui.js';
+import { $, chevron, el, fold, icons } from '/assets/utils/ui.js';
+import { appear, canAnimate } from '/assets/utils/motion.js';
 const nameOf = path => path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 const COLLAPSED_KEY = 'kvist.nav.collapsed';
 // Indicator kinds, most urgent first; the label is what a screen reader hears in place of the shape.
 const LABELS = { waiting: 'waiting for your answer', failed: 'failed', running: 'running', unread: 'unread' };
 const collapsed = loadCollapsed();
-let lastSignature = '', handlers = [];
+let lastSignature = '', handlers = [], expanding = '', known = null;
+// A session that appears after the first render fades in. `known` holds the keys of every session seen so far,
+// not only the drawn ones, so a group the person opens again animates no row.
+function appearNewRows(nav) {
+    const keys = new Set();
+    for (const entry of state.navigation.servers)
+        for (const workspace of entry.workspaces)
+            for (const session of workspace.sessions?.session_items || [])
+                keys.add(keyOf({ serverId: entry.server.id, workspace: workspace.path, session: session.name }));
+    if (known)
+        for (const row of nav.querySelectorAll('.nav-session'))
+            if (!known.has(row.dataset.key))
+                appear(row);
+    known = keys;
+}
 function loadCollapsed() {
     try {
         const keys = JSON.parse(localStorage.getItem(COLLAPSED_KEY));
@@ -64,7 +79,9 @@ function group(entry, workspace, onSelect, onNewSession) {
             toggle.append(indicator(kind));
     }
     toggle.onclick = () => {
-        if (!collapsed.delete(key))
+        if (collapsed.delete(key))
+            expanding = key;
+        else
             collapsed.add(key);
         saveCollapsed();
         renderNavigation(...handlers);
@@ -84,10 +101,16 @@ function group(entry, workspace, onSelect, onNewSession) {
     node.append(head);
     if (closed)
         return node;
+    const rows = el('div');
     if (!sessions.length)
-        node.append(el('div', 'menu-caption', entry.connection.state === 'connected' ? 'No sessions yet' : stateLabel(entry.connection.state)));
+        rows.append(el('div', 'menu-caption', entry.connection.state === 'connected' ? 'No sessions yet' : stateLabel(entry.connection.state)));
     for (const session of sessions)
-        node.append(sessionRow(entry, workspace, session, onSelect));
+        rows.append(sessionRow(entry, workspace, session, onSelect));
+    const content = fold(rows);
+    // A group the person has just opened grows from 0fr to 1fr; renderNavigation lifts .fold-enter once it is in the DOM.
+    if (key === expanding && canAnimate())
+        content.classList.add('fold-enter');
+    node.append(content);
     return node;
 }
 export function renderNavigation(onSelect, onNewSession) {
@@ -106,6 +129,13 @@ export function renderNavigation(onSelect, onNewSession) {
             fragment.append(group(entry, workspace, onSelect, onNewSession));
     nav.replaceChildren(fragment);
     nav.scrollTop = scroll;
+    const entering = nav.querySelector('.fold-enter');
+    if (entering) {
+        void entering.offsetHeight;
+        entering.classList.remove('fold-enter');
+    }
+    expanding = '';
+    appearNewRows(nav);
     if (focused)
         [...nav.querySelectorAll('[data-key]')].find(n => n.dataset.key === focused)?.focus({ preventScroll: true });
     const selected = state.selected || state.workspace;

@@ -86,6 +86,7 @@ kvist_web = [
     "client/features/format.js",
     "client/features/pending.js",
     "client/utils/ui.js",
+    "client/utils/motion.js",
     "client/kvist-mark.svg",
     "client/fonts/JetBrainsMono.woff2",
     "client/fonts/OFL.txt",

@@ -6,6 +6,7 @@ import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession,
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
+import { appear, slide, vanish } from '/assets/utils/motion.js';
 import { configureConnections, handleConnectionLog, mountServerSwitcher, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
 import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
@@ -33,8 +34,46 @@ export async function refresh() {
 }
 function scheduleRefresh() { if (refreshTimer)
     return; refreshTimer = setTimeout(() => { refreshTimer = null; refresh().catch(() => { }); }, 120); }
+// The drawer (a narrow window) slides in over the main column and its scrim fades in; leaving takes --dur-fast
+// and the class goes when the animations have finished, not on a timer. With motion off it is at once.
+let drawerAnimations = [], drawerClosing = false;
+function resetDrawer() {
+    for (const animation of drawerAnimations)
+        animation.cancel();
+    drawerAnimations = [];
+    drawerClosing = false;
+}
+function setDrawer(open) {
+    const app = $('#app');
+    resetDrawer();
+    if (open) {
+        app.classList.add('sidebar-open');
+        drawerAnimations = [slide($('#sidebar'), 'translateX(-100%)'), appear($('#sidebar-scrim'))].filter(Boolean);
+        return;
+    }
+    if (!app.classList.contains('sidebar-open'))
+        return;
+    const leaving = [slide($('#sidebar'), 'translateX(-100%)', { out: true }), vanish($('#sidebar-scrim'))].filter(Boolean);
+    if (!leaving.length) {
+        app.classList.remove('sidebar-open');
+        return;
+    }
+    drawerAnimations = leaving;
+    drawerClosing = true;
+    Promise.all(leaving.map(animation => animation.finished)).then(() => {
+        for (const animation of leaving)
+            animation.cancel();
+        app.classList.remove('sidebar-open');
+        drawerAnimations = [];
+        drawerClosing = false;
+    }).catch(error => {
+        if (error.name !== 'AbortError')
+            throw error; // only setDrawer cancelling the animations is expected here
+    });
+}
+const drawerOpen = () => $('#app').classList.contains('sidebar-open') && !drawerClosing;
 function collapseMobile() { if (matchMedia('(max-width:1000px)').matches)
-    $('#app').classList.remove('sidebar-open'); }
+    setDrawer(false); }
 async function selectSession(serverId, workspace, session) {
     refreshConfiguration(serverId).catch(() => {});
     state.workspace = { serverId, workspace };
@@ -343,11 +382,18 @@ $('#context-button').onclick = () => openView('context');
 $('#retry-startup').onclick = bootstrap;
 for (const button of document.querySelectorAll('[data-view]'))
     button.onclick = () => openView(button.dataset.view);
-function toggleSidebar() { const app = $('#app'), small = matchMedia('(max-width:1000px)').matches; app.classList.toggle(small ? 'sidebar-open' : 'sidebar-collapsed'); $('#toggle-sidebar').setAttribute('aria-expanded', String(small ? app.classList.contains('sidebar-open') : !app.classList.contains('sidebar-collapsed'))); }
+function toggleSidebar() {
+    const app = $('#app'), small = matchMedia('(max-width:1000px)').matches;
+    if (small)
+        setDrawer(!drawerOpen());
+    else
+        app.classList.toggle('sidebar-collapsed');
+    $('#toggle-sidebar').setAttribute('aria-expanded', String(small ? drawerOpen() : !app.classList.contains('sidebar-collapsed')));
+}
 $('#toggle-sidebar').onclick = toggleSidebar;
 $('#sidebar-scrim').onclick = toggleSidebar;
 const smallMedia = matchMedia('(max-width:1000px)');
-smallMedia.addEventListener('change', () => { $('#app').classList.remove('sidebar-open'); $('#toggle-sidebar').setAttribute('aria-expanded', String(!smallMedia.matches && !$('#app').classList.contains('sidebar-collapsed'))); });
+smallMedia.addEventListener('change', () => { resetDrawer(); $('#app').classList.remove('sidebar-open'); $('#toggle-sidebar').setAttribute('aria-expanded', String(!smallMedia.matches && !$('#app').classList.contains('sidebar-collapsed'))); });
 $('#toggle-sidebar').setAttribute('aria-expanded', String(!smallMedia.matches));
 document.addEventListener('keydown', event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
