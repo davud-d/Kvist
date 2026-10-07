@@ -35,10 +35,26 @@ the app page with a navigation mock that reports the session as the server does 
 command block and its reason line, the remember flag, the composer placeholder, the secret answer row and
 the agent state for every request kind. Every screenshot waits for the
 loaded sidebar and two frames, because a shot taken right after a viewport change can catch the
-`content-visibility: auto` sidebar rows unpainted.
+`content-visibility: auto` content of a tool row unpainted.
 
 ```sh
 KVIST_WEB_URL=http://127.0.0.1:9671 node frontends/web-local/tests/browser/feed-states.mjs
+```
+
+`sidebar-states.mjs` runs the app with the API mocked in each of its own browser contexts and checks the
+sidebar: no workspace dropdown and no "Sessions" caption, the 28px row and its 14px indicator slot, one shape
+and one aria-label for every `execution` value and for unread (waiting over failed over running over unread,
+an unknown value drawn empty and warned about once), the weight-600 title of an unread running session,
+the group header (24px, name and server 6px apart, shared chevron), the "+" of a group (hover, focus and
+`hover: none`, and the workspace it creates in), the New session button, collapsing by click, Enter and Space
+with the choice kept in `localStorage` (also with blocked or damaged storage), the indicator of a collapsed
+group, the Tab order, the 2px keyboard focus ring on all four sides, reduced motion, no horizontal scroll at
+1440, 1280 and 390, and the render time of 300 sessions (median of 10 runs, at most 50 ms with
+`content-visibility` off). Screenshots at 1440×900 and 390×844 (drawer open) go to `KVIST_SHOTS` (default
+`/tmp/kvist-shots/4`).
+
+```sh
+KVIST_WEB_URL=http://127.0.0.1:9671 node frontends/web-local/tests/browser/sidebar-states.mjs
 ```
 
 `zoom.mjs` uses an isolated temporary Chrome profile and a local test extension to

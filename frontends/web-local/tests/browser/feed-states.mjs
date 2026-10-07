@@ -116,10 +116,9 @@ const rows = () => page.evaluate(() => [...document.querySelectorAll('#feed-unde
 // The computed color a design token paints, to compare with what a row really uses.
 const token = name => page.evaluate(name => { const n = document.createElement('i'); n.style.color = `var(--${name})`; document.body.append(n); const c = getComputedStyle(n).color; n.remove(); return c; }, name);
 const colorOf = (selector, pseudo) => page.locator(selector).first().evaluate((n, pseudo) => getComputedStyle(n, pseudo || null).color, pseudo);
-// A screenshot taken right after a viewport change can catch the sidebar rows unpainted: they are
-// content-visibility: auto, and the browser decides again whether they are skipped one frame after the
-// resize. Waiting for the loaded navigation and two frames makes every screenshot show the whole sidebar.
-// The same holds for the content of a freshly drawn tool row, which is content-visibility: auto as well.
+// A screenshot taken right after a viewport change can catch the content of a freshly drawn tool row
+// unpainted: tool rows are content-visibility: auto, and the browser decides again whether they are skipped
+// one frame after the resize. Waiting for the loaded navigation and two frames makes every screenshot whole.
 const frames = target => target.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 const settled = async target => {
     await target.locator('#navigation .nav-title').first().waitFor();
@@ -677,7 +676,7 @@ try {
     });
     await app.goto(base);
     await app.locator('#history-status').waitFor({ state: 'hidden' });
-    await app.getByRole('button', { name: /^Improve session recovery ·/ }).click();
+    await app.getByRole('button', { name: /^Improve session recovery,/ }).click();
     await app.locator('#history-status').waitFor({ state: 'hidden' });
     const journal = event => {
         const list = fx.histories.review;
