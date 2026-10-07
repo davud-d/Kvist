@@ -25,11 +25,15 @@ its own. It checks the row states (tool running, ok, failed, opened output, long
 folded and open, reasoning streaming and finished, plan, notices, a long user message), event
 text staying text, keyboard opening, the reasoning timer, rows the person opened staying open,
 reduced motion and the 760px column, and writes a screenshot of each state at 1440×900 and
-390×844 to `KVIST_SHOTS` (default `/tmp/kvist-shots/3d`; the input states go to its `input/`
+390×844 to `KVIST_SHOTS` (default `/tmp/kvist-shots/3e`; the input states go to its `input/`
 directory unless `KVIST_SHOTS_INPUT` says otherwise). Rows without output have no chevron, hover
 or pointer; calls show a time from 2 s or when they failed; a group shows its distinct action names
 and its failed count; the keyboard focus ring is checked on a tool row, a group and reasoning against
-every clipping ancestor and in the screenshot pixels on all four sides. Every screenshot waits for the
+every clipping ancestor and in the screenshot pixels on all four sides. The pinned input panel runs in
+the app page with a navigation mock that reports the session as the server does (waiting with its
+`pending_input` while a request is open); its checks cover the panel border against focus-within, the
+command block and its reason line, the remember flag, the composer placeholder, the secret answer row and
+the agent state for every request kind. Every screenshot waits for the
 loaded sidebar and two frames, because a shot taken right after a viewport change can catch the
 `content-visibility: auto` sidebar rows unpainted.
 
