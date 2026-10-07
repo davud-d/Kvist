@@ -211,8 +211,10 @@ svg {
   margin-right: auto;
 }
 
-/* The input has no scrollbar: its max-width is the column plus the padding it counts. */
+/* The input has no scrollbar: its max-width is the column plus the padding it counts. It anchors the menus
+   that open above the input. */
 .composer-area {
+  position: relative;
   flex-shrink: 0;
   padding: 8px 24px 10px;
   max-width: calc(var(--content-max) + 48px);
@@ -1141,6 +1143,112 @@ details[open] > summary > .chevron {
   color: var(--text-3);
   font-size: 11px;
   line-height: 16px;
+}
+
+.slash-button {
+  font: 14px/1 var(--mono);
+}
+
+/* Menus above the input: the "/" commands and the status chips. No shadow; the border separates. */
+.popover {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  z-index: 30;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+  max-height: min(420px, 60dvh);
+  overflow: auto;
+}
+
+.slash-menu {
+  left: 24px;
+  right: 24px;
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 0 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item.active,
+.menu-item:hover {
+  background: var(--bg-2);
+}
+
+.menu-label {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-menu .menu-label {
+  font: 12.5px/20px var(--mono);
+}
+
+.menu-desc {
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-state {
+  padding: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.menu-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+@media (max-width: 800px) {
+  .slash-menu {
+    left: 16px;
+    right: 16px;
+  }
+}
+
+/* On a phone the description goes under the name and may wrap. */
+@media (max-width: 640px) {
+  .menu-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .menu-desc {
+    white-space: normal;
+  }
+}
+
+.link-button {
+  padding: 0;
+  color: var(--text-2);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
 }
 
 /* A closed conversation: the banner has the input's width, left edge and border, and at least its height. */

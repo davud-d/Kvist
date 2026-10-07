@@ -142,7 +142,10 @@ fake (keys starting with `qa-valid` work, `qa-empty-catalog-key` gives an empty 
 `qa-offline` cannot reach the provider; HTTP(S)_PROXY points at a dead port, so nothing leaves
 the machine). It checks what only the real core shows: a mid-session model change reaches the
 model label without a reload (`command_result` is published as transient, because the core writes
-it outside the session journal).
+it outside the session journal); "/" opens the command menu, typing filters it and Enter runs a
+command, an unknown command shows a hint, keeps the text and sends nothing (no request reaches
+`/api/v1/send`), a command typed on the Russian layout ("/ьщвуд") runs as "/model", a path such as
+"/tmp/notes" is an ordinary message, and the "/" button opens the menu or, beside other text, the palette.
 
 ```sh
 node frontends/web-local/tests/browser/onboarding.mjs

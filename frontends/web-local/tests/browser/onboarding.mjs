@@ -56,6 +56,56 @@ try {
     await context.close();
     console.log('PASS mid-session model change: the core confirms it and the model label shows it without a reload');
   }
+  {
+    const { base } = await fixture('configured');
+    const { context, page, errors } = await open(base);
+    const sends = [];
+    page.on('request', request => { if (request.url().includes('/api/v1/send')) sends.push(request.postData()); });
+    const prompt = page.locator('#prompt'), menu = page.locator('#slash-menu');
+    await prompt.click(); await page.keyboard.type('/');
+    await menu.waitFor();
+    assert.equal(await prompt.getAttribute('aria-expanded'), 'true');
+    assert.deepEqual((await menu.locator('.menu-label').allTextContents()).slice(0, 2), ['/model', '/reasoning']);
+    await shot(page, 'slash-menu');
+    await page.keyboard.type('mo');
+    assert.deepEqual(await menu.locator('.menu-label').allTextContents(), ['/model']);
+    await page.keyboard.press('Enter');
+    await page.locator('#provider-form').waitFor();
+    assert.equal(await prompt.inputValue(), '');
+    await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' });
+    console.log('PASS "/" opens the command menu, typing filters it, Enter runs the command');
+
+    await prompt.fill('/xyz'); await page.keyboard.press('Control+Enter');
+    await menu.getByText('Unknown command /xyz. Nothing was sent. Type / to see the commands.').waitFor();
+    assert.equal(await prompt.inputValue(), '/xyz');
+    await shot(page, 'slash-unknown');
+    await prompt.fill('/modelz please'); await page.keyboard.press('Control+Enter');
+    await menu.getByText('Unknown command /modelz.', { exact: false }).waitFor();
+    await page.keyboard.press('Escape');
+    assert(await menu.isHidden());
+    assert.equal(await prompt.inputValue(), '/modelz please');
+    console.log('PASS an unknown command shows a hint, keeps the text and sends nothing');
+
+    // A Russian layout gives Cyrillic letters on the command keys: "/ьщвуд" is "/model".
+    await prompt.fill(''); await page.keyboard.insertText('/ьщ');
+    assert.deepEqual(await menu.locator('.menu-label').allTextContents(), ['/model']);
+    await prompt.fill('/ьщвуд'); await page.keyboard.press('Control+Enter');
+    await page.locator('#provider-form').waitFor();
+    await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' });
+    console.log('PASS a command typed on the Russian layout opens the menu and runs');
+
+    await prompt.fill('/tmp/notes is broken');
+    assert(await menu.isHidden());
+    await page.locator('#slash-button').click();
+    await page.locator('#palette').waitFor();
+    await page.keyboard.press('Escape');
+    await prompt.fill(''); await page.locator('#slash-button').click();
+    assert.equal(await prompt.inputValue(), '/'); await menu.waitFor();
+    console.log('PASS a path is no command; the "/" button opens the menu on an empty input and the palette otherwise');
+    assert.deepEqual(sends, [], 'no command reached the agent');
+    assert.deepEqual(errors, []);
+    await context.close();
+  }
 } finally {
   await browser.close();
   for (const child of fixtures) child.kill();

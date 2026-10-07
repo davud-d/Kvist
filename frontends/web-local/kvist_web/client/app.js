@@ -9,6 +9,8 @@ import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
 import { appear, slide, vanish } from '/assets/utils/motion.js';
 import { configureConnections, handleConnectionLog, mountServerSwitcher, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
 import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
+import { parseCommand, slashQuery } from '/assets/features/commands.js';
+import { mountSlash, openSlash, showUnknown } from '/assets/features/slash.js';
 const NAVIGATION_EVENT_TYPES = new Set(['turn_end', 'error', 'input_request', 'session_title', 'agent.state_changed', 'agent.process_exited', 'connection.state_changed', 'connection.lost', 'connection.restored']);
 const SLOW_CONNECT_MS = 1500;
 let navigationGeneration = 0, eventSource = null, eventSourceGeneration = 0, eventProbeTimer = null, refreshTimer = null, sending = false, creatingSession = null;
@@ -280,6 +282,18 @@ let imageSelection = keyOf(state.selected || state.workspace);
 subscribe(() => { const next = keyOf(state.selected || state.workspace); if (next !== imageSelection && !sending) imageAttachments.clear(); imageSelection = next; });
 form.addEventListener('submit', async (event) => {
     event.preventDefault();
+    // "/word" is a command, never a task for the agent; /stop must work while the agent is busy.
+    const typed = parseCommand(prompt.value);
+    if (typed?.command) {
+        prompt.value = '';
+        prompt.dispatchEvent(new Event('input'));
+        runCommand(typed.command);
+    }
+    if (typed) {
+        if (typed.unknown)
+            showUnknown(typed.unknown);
+        return;
+    }
     if (sending || busy(state.execution))
         return;
     await imageAttachments.ready();
@@ -424,6 +438,28 @@ function command(label) {
         openView(label.slice(5).toLowerCase());
 }
 const commands = () => openPalette('commands', paletteChoice);
+async function openReasoning() {
+    await showModel();
+    const details = $('#provider-form details');
+    if (!details)
+        return;
+    details.open = true;
+    $('#provider-form [name=effort]').focus();
+}
+function runCommand({ name }) {
+    if (name === 'model' || name === 'provider')
+        showModel();
+    else if (name === 'reasoning')
+        openReasoning();
+    else if (name === 'new')
+        newSession();
+    else if (name === 'stop')
+        command('Stop agent');
+    else
+        openView(name);
+}
+mountSlash($('.composer-area'), { run: runCommand, all: commands });
+$('#slash-button').onclick = () => prompt.value && slashQuery(prompt.value) === null ? commands() : openSlash();
 $('#search-button').onclick = () => openPalette('search', paletteChoice);
 $('#new-session').onclick = () => newSession();
 $('#add-workspace').onclick = () => addWorkspace();
