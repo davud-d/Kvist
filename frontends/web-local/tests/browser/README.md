@@ -135,3 +135,15 @@ node frontends/web-local/tests/browser/provider-setup.mjs
 
 It accepts the same Playwright/Chromium arguments as the other scripts.
 `KVIST_TEST_PYTHON` overrides the default `.venv/bin/python` fixture interpreter.
+
+`onboarding.mjs` starts `core_server.py` once per scenario: the real controller and real core
+processes on a temporary home and workspace, with only the model provider replaced by a loopback
+fake (keys starting with `qa-valid` work, `qa-empty-catalog-key` gives an empty model list,
+`qa-offline` cannot reach the provider; HTTP(S)_PROXY points at a dead port, so nothing leaves
+the machine). It checks what only the real core shows: a mid-session model change reaches the
+model label without a reload (`command_result` is published as transient, because the core writes
+it outside the session journal).
+
+```sh
+node frontends/web-local/tests/browser/onboarding.mjs
+```
