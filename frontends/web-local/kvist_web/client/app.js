@@ -2,7 +2,7 @@ import { mountImageAttachments } from "./utils/image-attachments.js";
 import { api } from '/assets/utils/api.js';
 import { state, subscribe, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
 import { renderNavigation } from '/assets/features/navigation.js';
-import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
+import { applyLive, closeStaleInputs, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, revealFeed, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
@@ -89,7 +89,7 @@ function newSession(place) {
             const value = await api.createSession(target);
             await refresh();
             await selectSession(target.serverId, target.workspace, value.active_session);
-            $('#prompt').focus();
+            prompt.focus();
             return true;
         }
         catch (error) {
@@ -142,6 +142,7 @@ async function bootstrap() {
         // quick New session / Send can race the initial session selection.
         $('#startup').hidden = true;
         $('#app').hidden = false;
+        revealFeed();
         await refreshConfiguration(undefined, true);
     }
     catch (error) {
@@ -222,7 +223,7 @@ function connectEvents() {
     source.onerror = () => { if (source !== eventSource)
         return; state.transport = 'reconnecting'; renderConnection(); probeBrowserSession(source, generation); };
 }
-const form = $('#composer'), prompt = $('#prompt');
+const form = $('#composer'), prompt = $('#prompt'), sendButton = $('#send-button');
 mountServerSwitcher(form.querySelector('.composer-controls'));
 const imageAttachments = mountImageAttachments(form, prompt, form.querySelector('.composer-controls'), message => toast(message, true));
 // The module draws its button as a "+"; the client restyles it as an icon button with a paperclip.
@@ -232,9 +233,8 @@ attach.dataset.icon = 'paperclip';
 icons(form);
 // Sending is possible with text or an attachment, and not while a send is in flight.
 function syncSend() {
-    const button = $('#send-button');
-    button.disabled = sending || !(prompt.value.trim() || imageAttachments.count());
-    button.setAttribute('aria-disabled', String(button.disabled));
+    sendButton.disabled = sending || !(prompt.value.trim() || imageAttachments.count());
+    sendButton.setAttribute('aria-disabled', String(sendButton.disabled));
 }
 new MutationObserver(syncSend).observe(form.querySelector('.image-attachments'), { childList: true, attributes: true, attributeFilter: ['hidden'] });
 let imageSelection = keyOf(state.selected || state.workspace);
@@ -379,6 +379,17 @@ document.addEventListener('keydown', event => {
         if (active)
             trapFocus(event, active);
     }
+});
+// A closed session has only its banner. Enter with nothing focused starts the next session; a focused button
+// takes its own Enter, and a repeated key (held down) never starts a second session.
+document.addEventListener('kvist:new-session', () => newSession());
+document.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' || event.repeat || event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey)
+        return;
+    if (!$('.closed-banner') || document.activeElement !== document.body || document.querySelector('.overlay:not([hidden])') || !$('#pending-input').hidden)
+        return;
+    event.preventDefault();
+    newSession();
 });
 $('#modal').addEventListener('mousedown', event => { if (event.target === event.currentTarget)
     closeModal(); });

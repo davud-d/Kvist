@@ -1060,11 +1060,45 @@ details[open] > summary > .chevron {
   height: 12px;
 }
 
+/* The input and its hint share one slot; a closed session puts the banner in it. The slot is as tall as the
+   input with its hint (98px field, 6px gap, 16px hint line), so the banner changes nothing around it. */
+.composer-slot {
+  min-height: 120px;
+}
+
 /* Under the input: the send hint, then the status line. Both start at the input's left edge. */
 .composer-hint {
   margin: 6px 0 0;
   color: var(--text-3);
   font-size: 11px;
+  line-height: 16px;
+}
+
+/* A closed conversation: the banner has the input's width, left edge and border, and at least its height. */
+.closed-banner {
+  min-height: 98px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-input);
+  color: var(--text-2);
+}
+
+.closed-new {
+  height: 28px;
+  padding: 0 12px;
+  flex: none;
+  background: var(--bg-2);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.closed-new:hover:not(:disabled) {
+  background: var(--line);
 }
 
 /* The status line holds only what needs attention: context use, a connection that is not in order, and

@@ -10,6 +10,10 @@ import { answerSummary } from '/assets/features/format.js';
 export { renderInspector } from "/assets/features/views.js";
 const conversation = document.querySelector("#conversation"), empty = document.querySelector("#empty-state");
 const composer = document.querySelector("#composer"), pending = document.querySelector("#pending-input");
+// The input's parts are kept as references: a closed session takes them out of the DOM (see showClosed).
+const prompt = document.querySelector("#prompt"), sendButton = document.querySelector("#send-button");
+const modelLabel = document.querySelector("#model-label"), modelSelector = document.querySelector("#model-selector");
+const slot = document.querySelector("#composer-slot"), hint = document.querySelector(".composer-hint");
 const title = document.querySelector("#session-title"), path = document.querySelector("#session-path"), server = document.querySelector("#session-server");
 const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
 // The open session's feed: the reducer state is the single source of what the conversation shows.
@@ -28,9 +32,41 @@ export function isCurrentSelection(snapshot) {
 function currentSelectionMatches(selection, generation) {
     return generation === selectionGeneration && sameSelection(selection, state.selected);
 }
+// A closed session has no input: the banner takes the place of the field and its hint, at the same size
+// (the slot keeps the height the input had), and the status line below stays. The unsent draft stays in
+// state.drafts under this session's key; it is never carried into the next session.
+const banner = el('div', 'closed-banner'), newButton = el('button', 'closed-new', 'New session');
+banner.setAttribute('role', 'status');
+newButton.type = 'button';
+newButton.onclick = () => document.dispatchEvent(new Event('kvist:new-session'));
+// A held Enter would repeat the click; one press is one new session.
+newButton.addEventListener('keydown', event => { if (event.key === 'Enter' && event.repeat)
+    event.preventDefault(); });
+banner.append(el('span', 'closed-text', 'This conversation has ended'), newButton);
+let closedShown = false;
+function focusBanner() {
+    if (closedShown && !document.querySelector('.overlay:not([hidden])'))
+        newButton.focus();
+}
+function showClosed(closed) {
+    if (closed === closedShown)
+        return;
+    closedShown = closed;
+    if (!closed) {
+        slot.style.minHeight = '';
+        slot.replaceChildren(composer, hint);
+        return;
+    }
+    const height = slot.getBoundingClientRect().height;
+    if (height > 0)
+        slot.style.minHeight = `${height}px`;
+    slot.replaceChildren(banner);
+    focusBanner();
+}
 let followTail = true, paintFrame = 0;
 function paintFeed() {
     feed.render(feedState);
+    showClosed(feedState.meta.closed !== null);
     if (conversation.children.length)
         empty.hidden = true;
 }
@@ -53,8 +89,8 @@ export function showPlace(serverId, workspace) {
     server.textContent = entry ? entry.server.name : '';
 }
 export function renderMetadata() {
-    $('#model-label').textContent = state.model || configuredModel();
-    $('#model-selector').title = state.model ? `Model: ${state.model}` : 'Model and reasoning details';
+    modelLabel.textContent = state.model || configuredModel();
+    modelSelector.title = state.model ? `Model: ${state.model}` : 'Model and reasoning details';
     const c = state.context;
     $('#context-button').hidden = !c?.context_limit;
     $('#context-button').textContent = c?.context_limit ? `Context ${Math.round(c.context_tokens / c.context_limit * 100)}%` : '';
@@ -152,7 +188,7 @@ export function applyEvent(event, { initial = false, durableReplay = false, seq,
 }
 export async function openSession(serverId, workspace, session) {
     if (state.selected)
-        state.drafts.set(keyOf(state.selected), $('#prompt').value);
+        state.drafts.set(keyOf(state.selected), prompt.value);
     const generation = ++selectionGeneration;
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
     feedState = initialState();
@@ -161,8 +197,8 @@ export async function openSession(serverId, workspace, session) {
     followTail = true;
     conversation.replaceChildren();
     empty.hidden = true;
-    $('#prompt').value = state.drafts.get(keyOf(state.selected)) || '';
-    $('#prompt').dispatchEvent(new Event('input'));
+    prompt.value = state.drafts.get(keyOf(state.selected)) || '';
+    prompt.dispatchEvent(new Event('input'));
     state.hello = state.modelInfo.get(keyOf(state.selected)) || null;
     state.model = state.hello?.models?.fast || '';
     renderMetadata();
@@ -170,6 +206,10 @@ export async function openSession(serverId, workspace, session) {
     composer.hidden = false;
     hidePending();
     const item = sessionOf();
+    // Navigation already knows a closed session; the history page confirms it, so the banner is there before the feed is.
+    if (item?.closed === true)
+        feedState = reduce(feedState, { event: { type: 'client.session_closed' } });
+    showClosed(feedState.meta.closed !== null);
     title.textContent = item?.title || session;
     showPlace(serverId, workspace);
     setAgentState(item?.execution);
@@ -202,6 +242,12 @@ export async function openSession(serverId, workspace, session) {
     renderInspector();
     scheduleRead();
     return true;
+}
+// The first session opens while the app is still hidden, where nothing has a size: the feed is placed at its
+// end and the banner takes the focus once the app is shown.
+export function revealFeed() {
+    conversation.scrollTop = conversation.scrollHeight;
+    focusBanner();
 }
 export async function recoverSelected() {
     const snapshot = selectionSnapshot();
@@ -248,6 +294,11 @@ async function replayDurable(selection, generation, options = {}) {
             count += 1;
             applyEvent(record.event, { ...options, durableReplay: true, seq: record.seq, ts: record.ts });
         }
+        // The history page says so even when the journal lost the session_ended record to its size cap.
+        if (history.closed === true && feedState.meta.closed === null) {
+            feedState = reduce(feedState, { event: { type: 'client.session_closed' } });
+            queuePaint();
+        }
         if (!history.has_more || !(history.events || []).length)
             return count;
     }
@@ -292,8 +343,8 @@ export function setAgentState(value) {
     agentState.textContent = waiting ? stateLabel(stateValue) : '';
     agentState.dataset.state = stateValue;
     stop.hidden = !busy(stateValue);
-    $('#send-button').hidden = busy(stateValue);
-    $('#prompt').placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist…';
+    sendButton.hidden = busy(stateValue);
+    prompt.placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist…';
 }
 // Removing the controls with the panel also removes what the person typed into them, a secret included.
 function hidePending() {
@@ -304,7 +355,6 @@ function showPending(event) {
     const first = renderPending(pending, event, response => respond(event, response));
     pending.hidden = false;
     queueMicrotask(() => {
-        const prompt = $('#prompt');
         // A person who is typing a message keeps the focus; the panel waits for Tab.
         if (document.querySelector('.overlay:not([hidden])') || (document.activeElement === prompt && prompt.value))
             return;

@@ -3,6 +3,8 @@ import { state, serverOf, busy } from '/assets/state/store.js';
 import { $, esc, modal, closeModal, toast } from '/assets/utils/ui.js';
 
 const configurations = new Map();
+// A closed session takes the input out of the DOM, so the label is kept as a reference.
+const modelLabel = document.querySelector('#model-label');
 const currentServer = () => (state.selected || state.workspace)?.serverId || 'local';
 export function configuredModel() {
     const info = configurations.get(currentServer());
@@ -14,7 +16,7 @@ export async function refreshConfiguration(serverId = currentServer(), offer = f
     const info = await api.configuration(serverId);
     configurations.set(serverId, info);
     if (serverId === currentServer()) {
-        if (!state.model) $('#model-label').textContent = configuredModel();
+        if (!state.model) modelLabel.textContent = configuredModel();
         if (offer && info.setup_required) await showModel(true, info, serverId);
     }
     return info;
@@ -112,7 +114,7 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
                 configurations.set(serverId, saved);
                 form.querySelectorAll('[data-credential]').forEach(n => n.value = '');
                 if (root.isConnected) closeModal();
-                if (!state.model && currentServer() === serverId) $('#model-label').textContent = configuredModel();
+                if (!state.model && currentServer() === serverId) modelLabel.textContent = configuredModel();
                 toast(firstRun ? 'Provider connected. You can send your first message.' : 'Defaults saved for new sessions.');
             } catch (error) {
                 if (root.isConnected) { status.textContent = error.message; status.className = 'inline-error'; buttons.forEach(b => b.disabled = false); }

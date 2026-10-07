@@ -38,13 +38,14 @@ function drawMessage(row, block) {
     row.streaming = streaming;
 }
 
-// The text of a notice block, or null when it has no row: connection.* belong to the footer.
+// The text of a notice block, or null when it has no row: connection.* belong to the footer, and a closed
+// session is the banner in the input's place (session.js).
 function noticeText(block) {
     const { omitted_turns: turns, omitted_events: events } = block.data;
     switch (block.source) {
     case 'error': return block.text || 'Kvist failed';
     case 'sandbox_notice': return block.text || null;
-    case 'session_ended': return block.text || 'Session ended';
+    case 'session_ended': return null;
     case 'journal_notice': {
         const parts = [];
         if (turns) parts.push(`${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown`);
@@ -260,10 +261,14 @@ function messageOf(block) {
     return block.kind === 'user' || block.kind === 'text';
 }
 
+// A thought that ended in under a second with nothing to read says nothing ("thought for 0.0s").
+const emptyThought = block => block.kind === 'reasoning' && !block.streaming && block.text.trim() === '' && !(block.seconds >= 1);
+
 // The rows a state shows, in order: [key, kind, block].
 function rowsOf(blocks) {
     const list = [];
     for (const block of blocks) {
+        if (emptyThought(block)) continue;
         if (block.kind === 'tool' || block.kind === 'reasoning') list.push([block.id, block.kind, block]);
         else if (messageOf(block)) list.push([block.id, 'message', block]);
         else if (block.kind === 'notice' && noticeText(block) !== null) list.push([block.id, 'notice', block]);
