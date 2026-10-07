@@ -283,7 +283,7 @@ export function setAgentState(value) {
     agentState.dataset.state = stateValue;
     stop.hidden = !busy(stateValue);
     $('#send-button').hidden = busy(stateValue);
-    $('#prompt').placeholder = busy(stateValue) ? 'Kvist is working. You can draft your next message…' : 'Message Kvist…';
+    $('#prompt').placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist…';
 }
 // Removing the controls with the panel also removes what the person typed into them, a secret included.
 function hidePending() {

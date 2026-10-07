@@ -89,9 +89,10 @@ function askedFor(request) {
 }
 
 // One line for the row that replaces an answered request in the feed: "approved: run npm test",
-// "denied: overwrite src/a.ts", "Pick a model: fast". A secret's value never enters it.
+// "denied: overwrite src/a.ts", "Pick a model: fast", "API key: secret provided". A secret's value never
+// enters it.
 export function answerSummary(request, response) {
-    if (request.kind === 'secret') return 'secret provided';
+    if (request.kind === 'secret') return cutTail(`${oneLine(request.title || '') || 'Secret'}: secret provided`);
     if (typeof response.approved === 'boolean') return cutTail(`${response.approved ? 'approved' : 'denied'}: ${askedFor(request)}`);
     const value = String(response.value ?? '');
     const shown = choiceOptions(request).find(option => option.value === value)?.label ?? value;

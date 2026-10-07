@@ -1070,6 +1070,11 @@ details[open] > summary > .chevron {
   border-radius: var(--r-input);
 }
 
+/* The focused control carries the accent ring; the panel border steps back so there is one accent, not two. */
+.pending-input:focus-within {
+  border-color: var(--line-strong);
+}
+
 .pending-input h3 {
   font-size: 13px;
   font-weight: 600;
@@ -1089,7 +1094,15 @@ details[open] > summary > .chevron {
 }
 
 .pending-input .pending-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 0 0 auto;
+}
+
+/* The reason of a command, under its block. */
+.pending-input .pending-reason {
+  margin: 0 var(--row-pad) 4px;
 }
 
 .pending-field {
@@ -1120,6 +1133,11 @@ details[open] > summary > .chevron {
 .pending-input input[type="checkbox"] {
   accent-color: var(--accent);
   margin: 0;
+}
+
+.pending-input input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
 }
 
 .pending-input label {

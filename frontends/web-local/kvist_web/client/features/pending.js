@@ -5,14 +5,17 @@ import { choiceOptions } from '/assets/features/format.js';
 // of the request and the controls of its kind. Tab goes through the controls in DOM order, then on to the
 // composer. All request text goes in through textContent.
 
-// The command or the file a request is about, opened so the person can read it before answering.
+// The command or the file a request is about, opened so the person can read it before answering. The
+// reason of a command goes under its block as a line of text, not into the block.
 function subjectDetails(subject) {
     if (!subject || typeof subject !== 'object') return null;
     const details = el('details', 'tool'), summary = el('summary'), pre = el('pre');
+    let reason = '';
     details.open = true;
     if (subject.kind === 'command') {
         summary.textContent = 'Command awaiting approval';
-        pre.textContent = [subject.command, subject.reason].filter(Boolean).join('\n\n') || 'No command details were supplied.';
+        pre.textContent = subject.command || 'No command details were supplied.';
+        reason = subject.reason || '';
     } else if (subject.kind === 'overwrite') {
         summary.textContent = subject.path ? `Overwrite ${subject.path}` : 'File overwrite awaiting approval';
         pre.textContent = subject.diff || 'No diff details were supplied.';
@@ -21,6 +24,7 @@ function subjectDetails(subject) {
         pre.textContent = JSON.stringify(subject, null, 2);
     }
     details.append(summary, pre);
+    if (reason) details.append(el('p', 'pending-reason', reason));
     return details;
 }
 
@@ -63,7 +67,9 @@ function textField(event) {
 export function renderPending(panel, event, respond) {
     const title = el('h3', '', event.title || 'Kvist needs input');
     title.id = 'pending-title';
-    panel.replaceChildren(title, el('p', '', event.body || event.help_text || 'Review this request before continuing.'));
+    panel.replaceChildren(title);
+    const text = event.body || event.help_text;
+    if (text) panel.append(el('p', '', text));
     const subject = subjectDetails(event.subject);
     if (subject) panel.append(subject);
     const actions = el('div', 'pending-actions');
@@ -76,7 +82,7 @@ export function renderPending(panel, event, respond) {
         if (remember) {
             remember.type = 'checkbox';
             const label = el('label', 'pending-remember');
-            label.append(remember, document.createTextNode(' Remember this safe approval'));
+            label.append(remember, el('span', '', 'Remember this safe approval'));
             actions.append(label);
         }
         panel.append(actions);
