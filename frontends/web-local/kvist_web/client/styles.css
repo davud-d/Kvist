@@ -685,11 +685,10 @@ svg {
 /* Tool rows: status mark, chevron, action, target, exit code, time. Marks use child selectors: a group's
    status must not reach the rows inside it. The row box is --row-pad wider than the column on both sides
    and its summary pads the same amount, so the content keeps the column edge while the hover fill and the
-   focus ring sit inside the box: content-visibility clips everything outside it. */
+   focus ring sit inside the box. A row is not content-visibility: auto: skipped rows are 24px in the estimate and
+   taller when drawn, and scrolling 300 of them moved the scroll height by 7174px in 27 steps. */
 .tool {
   margin: 0 calc(-1 * var(--row-pad));
-  content-visibility: auto;
-  contain-intrinsic-size: auto 24px;
 }
 
 .tool summary {
@@ -1002,9 +1001,12 @@ details[open] > summary > .chevron {
   color: var(--text-2);
 }
 
+/* One line on --bg-2, no border or shadow: the fill alone separates it from the feed. */
 .jump-latest {
   bottom: 8px;
   padding: 4px 12px;
+  border: 0;
+  white-space: nowrap;
 }
 
 /* Composer */

@@ -5,7 +5,7 @@ import { renderInspector, scheduleInspector } from "/assets/features/views.js";
 import { configuredModel } from '/assets/features/configuration.js';
 import { initialState, reduce, reducesLive } from '/assets/features/blocks.js';
 import { createFeed } from '/assets/features/feed.js';
-import { appear } from '/assets/utils/motion.js';
+import { appear, canAnimate } from '/assets/utils/motion.js';
 import { renderPending } from '/assets/features/pending.js';
 import { answerSummary } from '/assets/features/format.js';
 export { renderInspector } from "/assets/features/views.js";
@@ -77,12 +77,28 @@ function paintFeed(live = true) {
     if (conversation.children.length)
         empty.hidden = true;
 }
-// The feed container of a session that has just been drawn and scrolled to its end fades in and rises 6px
-// (the empty state does the same when there is no feed); a quick switch cancels the animation still running.
+// The feed container of a session that has just been drawn and scrolled to its end fades in (the empty state
+// does the same when there is no feed); a quick switch cancels the animation still running. The container does
+// not rise: with the 6px rise the longest frame of a switch to 300 tool rows was 66.6 ms in three runs of eight,
+// over the 50 ms line, so only the opacity stays.
 let feedAnimation = null;
 function revealContent() {
     feedAnimation?.cancel();
-    feedAnimation = appear(empty.hidden ? conversation : empty, { rise: 6 });
+    feedAnimation = appear(empty.hidden ? conversation : empty);
+}
+// Following the end of the feed. Within FOLLOW_PX of the bottom it stays at its end as content arrives: a new
+// row scrolls there smoothly, the growth of a streaming row instantly (a smooth scroll per chunk would lag
+// behind the text). Higher up the feed does not move and the "Jump to latest" button shows. `autoScroll` marks a
+// smooth scroll this client started, which must not be mistaken for the person scrolling away.
+const FOLLOW_PX = 80;
+let autoScroll = false, drawnRows = 0;
+const gapToEnd = () => conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight;
+function scrollToEnd(smooth) {
+    autoScroll = smooth && canAnimate() && gapToEnd() > 1;
+    if (autoScroll)
+        conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' });
+    else
+        conversation.scrollTop = conversation.scrollHeight;
 }
 function queuePaint() {
     if (paintFrame)
@@ -90,12 +106,14 @@ function queuePaint() {
     paintFrame = requestAnimationFrame(() => {
         paintFrame = 0;
         paintFeed();
+        const rows = conversation.children.length, added = rows !== drawnRows;
+        drawnRows = rows;
         if (followTail)
-            conversation.scrollTop = conversation.scrollHeight;
+            scrollToEnd(added);
         showJump(!followTail);
     });
 }
-// "Latest messages" fades in and rises 4px (it is centred by its own translateX).
+// "Jump to latest" fades in and rises 4px (it is centred by its own translateX).
 function showJump(visible) {
     const button = $('#jump-latest');
     if (button.hidden === !visible)
@@ -115,7 +133,8 @@ export function echoSent(text) {
     feedState = reduce(feedState, { event: { type: 'client.user_sent', local_id: localId, text } });
     followTail = true;
     paintFeed();
-    conversation.scrollTop = conversation.scrollHeight;
+    drawnRows = conversation.children.length;
+    scrollToEnd(true);
     return localId;
 }
 // change: 'failed' (refused: "Not sent" with Retry), 'retry' (sending again) or 'unsent' (never started).
@@ -282,7 +301,8 @@ export async function openSession(serverId, workspace, session) {
     hidePending();
     if (latest?.pending_input && latest.execution === 'waiting_for_user')
         showPending(latest.pending_input);
-    conversation.scrollTop = conversation.scrollHeight;
+    scrollToEnd(false);
+    drawnRows = conversation.children.length;
     feedReady = true;
     // The first session opens while #app is hidden; revealFeed() shows it once the app is.
     if (!$('#app').hidden)
@@ -461,11 +481,26 @@ export function scheduleRead() {
 }
 function canRead() { return !document.hidden && $('#history-status').hidden && !document.querySelector('.overlay:not([hidden])') && conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 60; }
 conversation.addEventListener('scroll', () => {
-    followTail = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 60;
+    if (autoScroll)
+        autoScroll = gapToEnd() > 1;
+    else
+        followTail = gapToEnd() <= FOLLOW_PX;
     showJump(!followTail);
     scheduleRead();
 }, { passive: true });
-$('#jump-latest').onclick = () => { followTail = true; conversation.scrollTop = conversation.scrollHeight; showJump(false); scheduleRead(); };
+// A skipped message (content-visibility: auto) is 80px in the estimate, so the end a smooth scroll was aimed at
+// can be nearer than the real one; if the feed is still being followed, it finishes the way instantly. Only a
+// scroll this client started is finished: the end of the person's own scroll never moves the feed.
+conversation.addEventListener('scrollend', () => {
+    const ours = autoScroll;
+    autoScroll = false;
+    if (ours && followTail && gapToEnd() > 1)
+        scrollToEnd(false);
+});
+// The person taking the scroll over (wheel, touch, keys) ends the smooth scroll this client started.
+for (const type of ['wheel', 'touchstart', 'keydown'])
+    conversation.addEventListener(type, () => { autoScroll = false; }, { passive: true });
+$('#jump-latest').onclick = () => { followTail = true; scrollToEnd(true); showJump(false); scheduleRead(); };
 document.addEventListener('visibilitychange', scheduleRead);
 document.addEventListener('kvist:overlay', scheduleRead);
 export async function loadDiff() {

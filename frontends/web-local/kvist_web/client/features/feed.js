@@ -53,9 +53,9 @@ function drawMessage(feed, row, block) {
     drawLocal(feed, row, block);
     const streaming = block.streaming === true;
     if (row.text === block.text && row.streaming === streaming) return;
-    // The answer is plain text while it streams and markdown once it is final.
-    if (streaming) row.body.textContent = block.text;
-    else markdown(row.body, block.text);
+    // The answer is drawn by the markdown renderer while it streams, as it is when final: the commit then
+    // changes no height (plain text while streaming grew by 207px at 1440px when the markdown replaced it).
+    markdown(row.body, block.text);
     row.text = block.text;
     row.streaming = streaming;
 }
