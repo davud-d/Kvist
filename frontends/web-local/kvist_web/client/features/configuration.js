@@ -47,8 +47,10 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
         <label class="full">Provider<select name="provider">${options}</select></label>
         <div id="registration" class="full" hidden><p>Start with AnyModel: register, create an API key, then paste it below. You can also choose another provider above.</p><a id="register-anymodel" class="primary-button" target="_blank" rel="noopener noreferrer">Open AnyModel registration ↗</a></div>
         <div id="provider-credentials" class="full"></div>
+        <label id="model-pick-field" class="full">Model<select id="model-pick"></select></label>
+        <label id="model-id-field" class="full">Model ID<input name="fast" required autocomplete="off" placeholder="Enter the model ID from your provider"></label>
+        <p id="model-note" class="full" role="status" hidden></p>
         <button id="load-models" type="button" class="quiet-button full">Load available models</button>
-        <label class="full">Model<input name="fast" list="provider-models" required autocomplete="off" placeholder="Choose or enter a model ID"></label>
         <datalist id="provider-models"></datalist>
         <details class="full"><summary>Advanced · models, reasoning & endpoint</summary><div class="form-grid"><label id="base-url-field" class="full" hidden>Provider address<input name="base_url" type="url" autocomplete="off"></label><label>Smart model<input name="smart" list="provider-models" placeholder="Same as model"></label><label>Reasoning<select name="effort">${info.effort_levels.map(e => `<option value="${esc(e)}">${e === 'false' ? 'Off' : esc(e)}</option>`).join('')}</select></label></div></details>
         </div><p id="configuration-status" role="status"></p>
@@ -64,6 +66,36 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
         if (url.protocol === 'https:') registration.href = url.href;
         let catalogGeneration = 0;
         const selectedProvider = () => providers.find(p => p.id === provider.value);
+        const pick = root.querySelector('#model-pick'), note = root.querySelector('#model-note'), idField = root.querySelector('#model-id-field');
+        const builtIn = () => (selectedProvider().options || []).map(m => typeof m === 'string' ? { value: m } : m);
+        // Like the terminal's /models picker: the live catalog when it loads, else the provider's
+        // built-in options; typing an ID is the fallback when neither gives a list.
+        const showModels = (models, text = '') => {
+            const value = form.elements.fast.value;
+            pick.innerHTML = models.map(m => `<option value="${esc(m.value)}">${esc(m.label || m.value)}</option>`).join('') + '<option value="">Other model ID…</option>';
+            pick.value = models.some(m => m.value === value) ? value : '';
+            root.querySelector('#model-pick-field').hidden = !models.length;
+            idField.hidden = pick.value !== '';
+            root.querySelector('#provider-models').innerHTML = models.map(m => `<option value="${esc(m.value)}"></option>`).join('');
+            note.textContent = text;
+            note.hidden = !text;
+        };
+        pick.onchange = () => {
+            form.elements.fast.value = pick.value;
+            idField.hidden = pick.value !== '';
+            if (!pick.value) form.elements.fast.focus();
+        };
+        const loadModels = async () => {
+            const generation = ++catalogGeneration, button = root.querySelector('#load-models');
+            button.disabled = true;
+            note.textContent = 'Loading models from the provider…';
+            note.hidden = false;
+            try {
+                const { models } = await api.modelCatalog(serverId, payload());
+                if (root.isConnected && generation === catalogGeneration) showModels(models.map(value => ({ value })), models.length ? `${models.length} models available.` : 'The provider returned no model list. Enter the model ID.');
+            } catch (error) { if (root.isConnected && generation === catalogGeneration) showModels(builtIn(), `${error.message} You can also enter the model ID.`); }
+            finally { button.disabled = false; }
+        };
         const renderProvider = () => {
             catalogGeneration++;
             const p = selectedProvider();
@@ -76,7 +108,8 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
             const models = activeProvider === p.id && state.hello?.models ? state.hello.models : p.defaults;
             form.elements.fast.value = models.fast || '';
             form.elements.smart.value = models.smart === models.fast ? '' : models.smart || '';
-            root.querySelector('#provider-models').innerHTML = (p.options || []).map(m => `<option value="${esc(typeof m === 'string' ? m : m.value || m.id || '')}"></option>`).join('');
+            showModels(builtIn());
+            if (p.credential_fields.length && p.credential_fields.every(f => f.present)) loadModels();
             const current = root.querySelector('#use-session-model');
             current.hidden = !selection || p.id !== activeProvider;
             const effortButton = root.querySelector('#use-session-effort');
@@ -88,21 +121,9 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
         const payload = () => ({ provider: provider.value, base_url: form.elements.base_url.value, models: { fast: form.elements.fast.value.trim(), smart: form.elements.smart.value.trim() || form.elements.fast.value.trim() }, effort: form.elements.effort.value, credentials: Object.fromEntries([...form.querySelectorAll('[data-credential]')].filter(n => n.value.trim()).map(n => [n.dataset.credential, n.value.trim()])) });
         provider.onchange = renderProvider;
         renderProvider();
-        queueMicrotask(() => { if (root.isConnected) (firstRun ? root.querySelector('[data-credential]') : form.elements.fast)?.focus(); });
-        root.querySelector('#load-models').onclick = async () => {
-            const generation = ++catalogGeneration, button = root.querySelector('#load-models');
-            button.disabled = true;
-            status.className = '';
-            status.textContent = 'Loading models from the provider…';
-            try {
-                const result = await api.modelCatalog(serverId, payload());
-                if (!root.isConnected || generation !== catalogGeneration) return;
-                root.querySelector('#provider-models').innerHTML = result.models.map(m => `<option value="${esc(m)}"></option>`).join('');
-                status.textContent = result.models.length ? `${result.models.length} models available. Choose a model below.` : 'No catalog returned. Enter the model ID from your provider.';
-                form.elements.fast.focus();
-            } catch (error) { if (root.isConnected && generation === catalogGeneration) status.textContent = error.message; }
-            finally { button.disabled = false; }
-        };
+        queueMicrotask(() => { if (root.isConnected) (firstRun ? root.querySelector('[data-credential]') : idField.hidden ? pick : form.elements.fast)?.focus(); });
+        root.querySelector('#load-models').onclick = loadModels;
+        root.querySelector('#provider-credentials').onchange = event => { if (event.target.value.trim()) loadModels(); };
         form.onsubmit = async event => {
             event.preventDefault();
             const buttons = [...form.querySelectorAll('button')];

@@ -41,8 +41,10 @@ try {
  console.log('PASS Invalid key is rejected before saving');
  await page.locator('[data-credential=anymodel_api_key]').fill('qa-valid-key');
  await page.getByRole('button',{name:'Load available models'}).click();
- await page.getByText('2 models available. Choose a model below.').waitFor();
+ await page.locator('#model-note').getByText('2 models available.').waitFor();
  assert.equal(await page.locator('#provider-models option').count(),2);
+ assert.equal(await page.locator('#model-pick').inputValue(),'example/fast');
+ assert(await page.locator('[name=fast]').isHidden());
  await page.locator('#provider-form summary').click();
  await page.locator('[name=smart]').fill('example/smart');
  await page.locator('[name=effort]').selectOption('high');
@@ -59,15 +61,39 @@ try {
  assert.equal(await page.locator('[data-credential=anymodel_api_key]').inputValue(),'');
  await page.locator('[name=provider]').selectOption('deepseek');
  assert(await page.locator('#registration').isHidden());
- await page.locator('[data-credential=deepseek_api_key]').fill('qa-valid-key');
- await page.locator('[name=fast]').fill('deepseek-chat');
- await page.locator('#provider-form summary').click();
- await page.locator('[name=smart]').fill('deepseek-chat');
+ // Before a key: the core's built-in DeepSeek options, in a list rather than a text field.
+ assert(await page.locator('#model-pick').isVisible());
+ assert((await page.locator('#model-pick option').allTextContents()).includes('DeepSeek V4 Pro'));
+ assert(await page.locator('[name=fast]').isHidden());
+ await shot('deepseek-built-in-models');
+ const key=page.locator('[data-credential=deepseek_api_key]');
+ await key.fill('qa-empty-catalog-key'); await key.blur();
+ await page.locator('#model-note').getByText('The provider returned no model list. Enter the model ID.').waitFor();
+ assert(await page.locator('#model-pick-field').isHidden());
+ assert(await page.locator('[name=fast]').isVisible());
+ await shot('deepseek-empty-catalog');
+ await key.fill('qa-wrong-key'); await key.blur();
+ await page.locator('#model-note').getByText(/Could not load models\..*You can also enter the model ID\./).waitFor();
+ assert(await page.locator('#model-pick').isVisible());
+ await key.fill('qa-valid-key'); await key.blur();
+ await page.locator('#model-note').getByText('2 models available.').waitFor();
+ assert.deepEqual(await page.locator('#model-pick option').allTextContents(),['example/fast','example/smart','Other model ID…']);
+ await page.locator('#model-pick').selectOption('');
+ assert(await page.locator('[name=fast]').isVisible());
+ assert.equal(await page.evaluate(()=>document.activeElement?.name),'fast');
+ await page.locator('#model-pick').selectOption('example/smart');
+ assert(await page.locator('[name=fast]').isHidden());
+ await shot('deepseek-live-models');
  await page.getByRole('button',{name:'Save defaults',exact:true}).click();
  await page.locator('#modal').waitFor({state:'hidden'});
  const other=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert.equal(other.provider,'deepseek');
- console.log('PASS Reload preserves configuration; alternative provider saves');
+ assert.equal(other.providers.find(p=>p.id==='deepseek').saved_models.fast,'example/smart');
+ await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor();
+ await page.locator('#model-note').getByText('2 models available.').waitFor(); // a saved key loads the live list on open
+ assert.equal(await page.locator('#model-pick').inputValue(),'example/smart');
+ await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({state:'hidden'});
+ console.log('PASS Reload preserves configuration; DeepSeek model list: built-in, live, empty gives a field, choice saved');
  await page.keyboard.press('Control+k'); // the server selector is not rendered (SHOW_SERVERS is false)
  await page.locator('#palette-input').fill('Switch server');
  await page.keyboard.press('Enter');

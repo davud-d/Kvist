@@ -123,7 +123,10 @@ creates a temporary home directory. HTTP, CSRF and Python configuration storage
 are real; only external provider catalog/key-validation requests are stubbed.
 It exercises blank startup, AnyModel registration in a new browser tab, invalid
 key refusal without persistence, model catalog, reasoning, durable saved defaults,
-alternative provider selection, SSH config aliases and five viewport sizes.
+alternative provider selection, SSH config aliases and five viewport sizes. The model
+is a list, as in the terminal's `/models`: DeepSeek shows its built-in options before a
+key, the live catalog once a key is typed or saved, "Other model ID…" and an empty or
+failed catalog give the text field, and the chosen model is selected again on reopen.
 The user's credentials and SSH config are never modified. Run from the repo root:
 
 ```sh

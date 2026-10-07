@@ -20,6 +20,8 @@ def serve(root):
         return {}
 
     def catalog(provider, credentials, **kwargs):
+        if any(v == 'qa-empty-catalog-key' for v in credentials.values()):
+            return [], None
         if not any(v == 'qa-valid-key' for v in credentials.values()):
             return [], 'invalid key'
         return ['example/fast', 'example/smart'], None
