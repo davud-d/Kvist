@@ -90,6 +90,12 @@ the submitted response is never included in an event DTO.
 - `GET /api/v1/changes?server=&workspace=&session=` → session diff report.
 - `GET /api/v1/config-sync` → non-secret configuration and selectable credential
   metadata. Credential values are never returned.
+- `GET /api/v1/configuration?server=` → the core's provider catalog and saved
+  defaults: providers with credential presence (never values), `setup_required`,
+  `registration_url` (the core's AnyModel registration address), `effort`,
+  `effort_levels`, `effort_info` and `roles` (values with the core's descriptions),
+  the saved `role`, and `recommended_models` (per provider, in order: the first one
+  the live catalog offers is the first run's preselected model).
 
 ## Mutation endpoints
 
@@ -105,6 +111,13 @@ the submitted response is never included in an event DTO.
 - `POST /api/v1/read` — monotonically advance `last_read_event_id`.
 - `POST /api/v1/config-sync` — sync general settings and only the explicitly
   selected credential ids.
+- `POST /api/v1/configuration` — check supplied credentials and save provider,
+  models, `effort` and an optional `role` through the core's writers.
+- `POST /api/v1/configuration/models` — the provider's live model list for saved
+  or supplied credentials, saving nothing. A typed AnyModel key is checked first, so
+  a refused key and an unreachable AnyModel give different messages.
+- `POST /api/v1/command` — `models`, `effort` or `role` for an idle session's
+  running core; the answer arrives as a transient `command_result` event.
 
 The backend layers behind this contract are `WebController` → `Runtime`
 (`LocalRuntime` or `RemoteRuntime`) → core/bridge. Replacing everything under

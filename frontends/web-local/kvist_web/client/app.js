@@ -8,7 +8,8 @@ import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
 import { appear, slide, vanish } from '/assets/utils/motion.js';
 import { configureConnections, handleConnectionLog, mountServerSwitcher, showServers, showServerModal, showWorkspaces, addWorkspace, showModel, showSettings } from '/assets/features/connections.js';
-import { refreshConfiguration, ensureConfigured } from '/assets/features/configuration.js';
+import { refreshConfiguration, ensureConfigured, onSetupRequired } from '/assets/features/configuration.js';
+import { showSetup } from '/assets/features/setup.js';
 import { parseCommand, slashQuery } from '/assets/features/commands.js';
 import { mountSlash, openSlash, showUnknown } from '/assets/features/slash.js';
 import { mountChips, openChip } from '/assets/features/chips.js';
@@ -453,6 +454,10 @@ function runCommand({ name }) {
     else
         openView(name);
 }
+onSetupRequired((info, serverId) => showSetup(info, serverId, {
+    folder: addWorkspace,
+    done: () => { prompt.focus(); refreshConfiguration(serverId).catch(error => toast(error.message, true)); },
+}));
 mountSlash($('.composer-area'), { run: runCommand, all: commands });
 mountChips();
 $('#slash-button').onclick = () => prompt.value && slashQuery(prompt.value) === null ? commands() : openSlash();

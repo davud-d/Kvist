@@ -13,8 +13,8 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_EXE
 const fixtures = [];
 
 // One isolated controller per scenario: a fresh temporary HOME and workspace.
-async function fixture(setup = 'blank') {
-  const child = spawn(process.env.KVIST_TEST_PYTHON || '.venv/bin/python', [fileURLToPath(new URL('./core_server.py', import.meta.url))], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, KVIST_FIXTURE_SETUP: setup } });
+async function fixture(setup = 'blank', env = {}) {
+  const child = spawn(process.env.KVIST_TEST_PYTHON || '.venv/bin/python', [fileURLToPath(new URL('./core_server.py', import.meta.url))], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, KVIST_FIXTURE_SETUP: setup, ...env } });
   fixtures.push(child);
   const [base, home] = await new Promise((resolve, reject) => {
     let text = '';
@@ -39,8 +39,82 @@ async function sendTask(page, text) {
   await page.locator('#stop-agent').waitFor({ state: 'hidden', timeout: 30000 });
 }
 const shot = (page, name) => page.screenshot({ path: `${output}/screenshots/onboarding-${name}.png` });
+// A paste: the text lands in the focused field and the field gets its paste event.
+async function paste(page, locator, text) {
+  await locator.focus();
+  await page.keyboard.insertText(text);
+  await locator.dispatchEvent('paste');
+}
 
 try {
+  // The first run. One action is one click, one paste, one typed text or one key press.
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    const { base } = await fixture('blank', { KVIST_FIXTURE_DEFAULT_MODELS: 'missing/model,gpt-5.6-luna' });
+    const { context, page, errors } = await open(base, viewport);
+    await page.getByRole('heading', { name: 'Connect a model' }).waitFor();
+    assert.match(await page.locator('.setup-path').textContent(), /my-project$/, 'the working folder is on screen before Start');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'setup-key');
+    await shot(page, `first-run-${viewport.width}`);
+    await paste(page, page.locator('#setup-key'), 'qa-valid-key');                       // 1
+    await page.getByText('The key works. 3 models available.').waitFor();
+    assert.equal(await page.locator('#setup-model').inputValue(), 'gpt-5.6-luna', 'the first default the catalog offers');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'setup-start');
+    await shot(page, `first-run-ready-${viewport.width}`);
+    await page.keyboard.press('Enter');                                                  // 2
+    await page.locator('.setup').waitFor({ state: 'detached' });
+    await page.keyboard.insertText('Explain this project');                              // 3
+    await page.keyboard.press('Control+Enter');                                          // 4
+    await page.getByText('a sample project with one README file').first().waitFor({ timeout: 60000 });
+    assert.equal(await page.locator('#model-label').textContent(), 'gpt-5.6-luna');
+    await shot(page, `first-task-${viewport.width}`);
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log(`PASS ${viewport.width}px: key to first task in 4 actions with a default model: paste, Start, type, send`);
+  }
+  {
+    const { base } = await fixture('blank');
+    const { context, page, errors } = await open(base);
+    await page.addInitScript(() => { window.open = () => null; });
+    await page.reload(); await page.getByRole('heading', { name: 'Connect a model' }).waitFor();
+    await page.getByRole('button', { name: 'Create an AnyModel account' }).click();
+    await page.getByText('Your browser blocked the new tab.', { exact: false }).waitFor();
+    assert.equal(await page.getByRole('link', { name: 'anymodel.org/app/register' }).getAttribute('href'), 'https://anymodel.org/app/register');
+    await shot(page, 'first-run-tab-blocked');
+    console.log('PASS a blocked registration tab gives the address as a link');
+
+    const key = page.locator('#setup-key'), start = page.getByRole('button', { name: 'Start' });
+    await paste(page, key, 'qa-offline');
+    await page.getByText("Couldn't reach AnyModel. Check your connection, then try again.").waitFor();
+    await key.fill(''); await paste(page, key, 'qa-wrong');
+    await page.getByText('AnyModel did not accept this key. Copy it again from your AnyModel account.').waitFor();
+    assert(await start.isDisabled());
+    console.log('PASS an unreachable AnyModel and a refused key are told apart; nothing can start');
+
+    await key.fill(''); await paste(page, key, 'qa-empty-catalog-key');
+    await page.getByText('The key works. AnyModel returned no model list, so enter the model ID.').waitFor();
+    assert(await page.locator('#setup-model-field').isHidden());
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'setup-id');
+    await shot(page, 'first-run-empty-catalog');
+    await page.keyboard.insertText('kr/claude-sonnet-4.5');
+    assert(await start.isEnabled());
+    console.log('PASS an empty model list gives a model ID field');
+
+    await page.getByRole('button', { name: 'I have another provider' }).click();
+    await page.locator('#setup-provider').selectOption('deepseek');
+    assert((await page.locator('#setup-model option').allTextContents()).includes('DeepSeek V4 Pro'), 'built-in options before a key');
+    await paste(page, page.locator('#setup-key'), 'qa-valid-key');
+    await page.getByText('The key works. 3 models available.').waitFor();
+    await page.locator('#setup-model').selectOption('ds-web/deepseek-v4-pro');
+    await shot(page, 'first-run-other');
+    await start.click();
+    await page.locator('.setup').waitFor({ state: 'detached' });
+    await sendTask(page, 'Explain this project');
+    const info = await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
+    assert.equal(info.provider, 'deepseek'); assert.equal(info.setup_required, false);
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log('PASS another provider: DeepSeek with its live list, saved and answering');
+  }
   {
     const { base } = await fixture('configured');
     const { context, page, errors } = await open(base);

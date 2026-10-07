@@ -121,7 +121,7 @@ this is separate evidence from fixture-driven UI tests.
 `provider-setup.mjs` starts `setup_server.py` on an ephemeral loopback port and
 creates a temporary home directory. HTTP, CSRF and Python configuration storage
 are real; only external provider catalog/key-validation requests are stubbed.
-It exercises blank startup, AnyModel registration in a new browser tab, invalid
+It exercises blank startup on the first-run screen, AnyModel registration in a new browser tab, invalid
 key refusal without persistence, model catalog, reasoning, durable saved defaults,
 alternative provider selection, SSH config aliases and five viewport sizes. The model
 is a list, as in the terminal's `/models`: DeepSeek shows its built-in options before a
@@ -140,7 +140,10 @@ It accepts the same Playwright/Chromium arguments as the other scripts.
 processes on a temporary home and workspace, with only the model provider replaced by a loopback
 fake (keys starting with `qa-valid` work, `qa-empty-catalog-key` gives an empty model list,
 `qa-offline` cannot reach the provider; HTTP(S)_PROXY points at a dead port, so nothing leaves
-the machine). It checks what only the real core shows: a mid-session model change reaches the
+the machine). It checks the first run on a blank home at 1440x900 and 390x844 (the working folder on screen, key
+to first task in four actions when a default model is in the catalog: paste, Start, type, send), a
+blocked registration tab, an unreachable AnyModel, a refused key, an empty model list and the
+other-provider path with DeepSeek, and what only the real core shows: a mid-session model change reaches the
 model chip without a reload (`command_result` is published as transient, because the core writes
 it outside the session journal); the reasoning and role chips change the running session through the
 core's `effort` and `role` commands and the core saves the choice; chip menus open on the checked item and

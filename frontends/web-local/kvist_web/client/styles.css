@@ -1129,6 +1129,151 @@ details[open] > summary > .chevron {
   font: 14px/1 var(--mono);
 }
 
+/* First run (setup.js): the screen takes the main column; the feed and the input wait behind it. */
+.main.setup-open > :not(.session-head, .setup) {
+  display: none;
+}
+
+.setup {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12vh 24px 48px;
+}
+
+.setup > * {
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.setup h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  outline: none;
+}
+
+.setup-lede,
+.setup-place {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.setup-path {
+  font: 12.5px var(--mono);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.setup-form {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setup-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.setup-steps.single {
+  padding-left: 0;
+  list-style: none;
+}
+
+.setup-steps li::marker {
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.setup-step {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.setup-register {
+  border: 1px solid var(--line-strong);
+  padding: 6px 12px;
+  color: var(--text);
+}
+
+/* The one large control of the screen: the key is what the person came with. */
+.setup-key {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 15px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-input);
+}
+
+.setup-key:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.setup-key[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.setup-field select,
+.setup-field input {
+  height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+}
+
+.setup-note {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.setup-note.ok::before {
+  content: "✓ ";
+  color: var(--ok);
+}
+
+.setup-note.error {
+  color: var(--err);
+}
+
+.setup-note.error::before {
+  content: "✕ ";
+}
+
+.setup-note.busy::before {
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: -1px;
+}
+
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
 /* Status chips: model, reasoning, role. Names hide on a phone; the menu header says what each changes. */
 .chip {
   height: 28px;
@@ -1173,7 +1318,8 @@ details[open] > summary > .chevron {
 }
 
 .chip.pending .chip-value::before,
-.menu-state.busy::before {
+.menu-state.busy::before,
+.setup-note.busy::before {
   content: "";
   width: 10px;
   height: 10px;
@@ -1228,6 +1374,10 @@ details[open] > summary > .chevron {
 }
 
 @media (max-width: 640px) {
+  .setup {
+    padding: 32px 16px;
+  }
+
   .chip-name {
     display: none;
   }

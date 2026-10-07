@@ -5,7 +5,8 @@ HTTP(S)_PROXY at a dead port, so nothing leaves the machine. Keys starting with
 `qa-valid` work, `qa-empty-catalog-key` works with an empty model list, `qa-offline`
 cannot reach the provider, anything else is refused. KVIST_FIXTURE_SETUP=configured
 saves AnyModel with `qa-valid-key` and the first catalog model before the controller
-starts; the default is a blank start. Prints the controller URL, then the HOME path.
+starts; the default is a blank start. KVIST_FIXTURE_DEFAULT_MODELS (comma-separated) stands in
+for the AnyModel default model list. Prints the controller URL, then the HOME path.
 """
 import json
 import os
@@ -117,6 +118,10 @@ def serve(root: Path) -> None:
         return {}
 
     anymodel_pricing.fetch_model_coefficients = verify
+    from kvist_web import configuration
+    # Stands in for the owner's list in kernel/anymodel_onboarding.py, which is empty until chosen.
+    if os.environ.get('KVIST_FIXTURE_DEFAULT_MODELS'):
+        configuration.ANYMODEL_DEFAULT_MODELS = tuple(os.environ['KVIST_FIXTURE_DEFAULT_MODELS'].split(','))
     from kvist_web.controller import WebController
     from kvist_web.http_api import ControllerHTTPServer
     from kvist_web.storage import WebStateStore

@@ -27,26 +27,27 @@ export async function refreshConfiguration(serverId = currentServer(), offer = f
     configurations.set(serverId, info);
     if (serverId === currentServer()) {
         if (!state.model) modelLabel.textContent = configuredModel();
-        if (offer && info.setup_required) await showModel(true, info, serverId);
+        if (offer && info.setup_required) setupRequired(info, serverId);
     }
     return changed(info);
 }
+// While no provider works the first-run screen (setup.js) takes the main column; app.js wires it.
+let setupRequired = () => { };
+export const onSetupRequired = handler => { setupRequired = handler; };
 export async function ensureConfigured() {
     const serverId = currentServer();
     const info = await refreshConfiguration(serverId);
     if (!info.setup_required) return true;
-    await showModel(true, info, serverId);
+    setupRequired(info, serverId);
     return false;
 }
-export async function showModel(firstRun = false, cached = null, serverId = currentServer()) {
-    // onclick passes a MouseEvent; only an explicit boolean means onboarding.
-    firstRun = firstRun === true;
-    const serverName = serverOf(serverId)?.server.name || serverId;
-    const selection = state.selected?.serverId === serverId ? { ...state.selected } : null;
-    const activeProvider = selection ? state.hello?.provider : null;
-    const root = modal(firstRun ? 'Connect a model provider' : 'Model & provider', '<p role="status">Loading Python core configuration…</p>');
+// Providers, keys and per-role models of a server; the first run has its own screen (setup.js).
+export async function showModel() {
+    const serverId = currentServer(), serverName = serverOf(serverId)?.server.name || serverId;
+    const activeProvider = state.selected?.serverId === serverId ? state.hello?.provider : null;
+    const root = modal('Model & provider', '<p role="status">Loading Python core configuration…</p>');
     try {
-        const info = cached || await api.configuration(serverId);
+        const info = await api.configuration(serverId);
         if (!root.isConnected) return;
         if (info.available === false) throw new Error(info.reason);
         configurations.set(serverId, info);
@@ -66,7 +67,7 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
         </div><p id="configuration-status" role="status"></p>
         <p class="menu-caption">New sessions use these defaults. Existing sessions keep their current provider and models.</p>
         ${info.environment_overrides.length ? `<p class="inline-error">Environment overrides take priority: ${info.environment_overrides.map(esc).join(', ')}.</p>` : ''}
-        <div class="modal-actions"><button id="save-provider" class="primary-button">${firstRun ? 'Save & continue' : 'Save defaults'}</button></div></form>`;
+        <div class="modal-actions"><button id="save-provider" class="primary-button">Save defaults</button></div></form>`;
         const form = root.querySelector('form'), provider = form.elements.provider, status = $('#configuration-status');
         provider.value = activeProvider && providers.some(p => p.id === activeProvider) ? activeProvider : info.provider;
         const registration = root.querySelector('#register-anymodel');
@@ -124,7 +125,7 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
         const payload = () => ({ provider: provider.value, base_url: form.elements.base_url.value, models: { fast: form.elements.fast.value.trim(), smart: form.elements.smart.value.trim() || form.elements.fast.value.trim() }, effort: configurations.get(serverId).effort, credentials: Object.fromEntries([...form.querySelectorAll('[data-credential]')].filter(n => n.value.trim()).map(n => [n.dataset.credential, n.value.trim()])) });
         provider.onchange = renderProvider;
         renderProvider();
-        queueMicrotask(() => { if (root.isConnected) (firstRun ? root.querySelector('[data-credential]') : idField.hidden ? pick : form.elements.fast)?.focus(); });
+        queueMicrotask(() => { if (root.isConnected) (idField.hidden ? pick : form.elements.fast).focus(); });
         root.querySelector('#load-models').onclick = loadModels;
         root.querySelector('#provider-credentials').onchange = event => { if (event.target.value.trim()) loadModels(); };
         form.onsubmit = async event => {
@@ -140,7 +141,7 @@ export async function showModel(firstRun = false, cached = null, serverId = curr
                 form.querySelectorAll('[data-credential]').forEach(n => n.value = '');
                 if (root.isConnected) closeModal();
                 if (!state.model && currentServer() === serverId) modelLabel.textContent = configuredModel();
-                toast(firstRun ? 'Provider connected. You can send your first message.' : 'Defaults saved for new sessions.');
+                toast('Defaults saved for new sessions.');
             } catch (error) {
                 if (root.isConnected) { status.textContent = error.message; status.className = 'inline-error'; buttons.forEach(b => b.disabled = false); }
                 else toast(error.message, true);

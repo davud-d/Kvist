@@ -31,6 +31,11 @@ from kernel.user_config import set_provider_secret
 
 ANYMODEL_REGISTER_URL = "https://anymodel.org/app/register"
 ANYMODEL_API_KEY_KEY = "anymodel_api_key"
+# The model a first run starts with: the first of these ids that the live catalog
+# offers is preselected, so a new user goes from key to first task without choosing.
+# The ids are the project owner's choice; while the tuple is empty, or none of its
+# ids is in the catalog, a first run asks for a model.
+ANYMODEL_DEFAULT_MODELS: tuple[str, ...] = ()
 
 _OAUTH_FLAG_ENV = "AGENT_ANYMODEL_OAUTH"
 

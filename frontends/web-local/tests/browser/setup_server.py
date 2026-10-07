@@ -16,7 +16,7 @@ def serve(root):
 
     def verify(key, **kwargs):
         if key != 'qa-valid-key':
-            raise ValueError('invalid test key')
+            raise anymodel_pricing.AnyModelAuthError('invalid test key')
         return {}
 
     def catalog(provider, credentials, **kwargs):
