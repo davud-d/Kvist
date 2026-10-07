@@ -1,0 +1,493 @@
+/* Onboarding prototype: the new parts only. The client's styles.css is loaded first and owns the tokens;
+   this file keeps its rules: tokens only, no shadows, gradients, blur or text-transform. */
+
+/* The prototype has no font server; the mono stack falls back to the system face. */
+
+/* Screen 1: first run */
+.setup {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12vh 24px 48px;
+}
+
+.setup > * {
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.setup h2 {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.setup-lede {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.setup-form {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.setup-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.setup-steps li::marker {
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.setup-step-title {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.setup-register {
+  border: 1px solid var(--line-strong);
+  padding: 6px 12px;
+  color: var(--text);
+}
+
+/* The one large control of the screen: the key is what the person came with. */
+.setup-key {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 15px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-input);
+  outline: none;
+}
+
+.setup-key:focus-visible,
+.setup-key:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.setup-key[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.setup-field select,
+.setup-field input {
+  height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--bg-1);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+}
+
+.setup-note {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.setup-note[data-tone]::before {
+  display: inline-block;
+  margin-right: 8px;
+}
+
+.setup-note[data-tone="ok"]::before { content: "✓"; color: var(--ok); }
+.setup-note[data-tone="err"] { color: var(--err); }
+.setup-note[data-tone="err"]::before { content: "✕"; }
+.setup-note[data-tone="busy"]::before { vertical-align: -1px; }
+.setup-note[data-tone="busy"]::before,
+.chip.pending .chip-value::before,
+.menu-state[data-tone="busy"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: proto-spin 0.8s linear infinite;
+}
+
+@keyframes proto-spin { to { transform: rotate(360deg); } }
+
+.setup-note button,
+.menu-state button {
+  padding: 0;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.link-button {
+  padding: 4px 0;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+/* Screen 2: the empty session */
+.session-empty {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 18vh 24px 24px;
+}
+
+.session-empty > * {
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.session-empty h2 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.starters {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.starter {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 10px 4px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.starter:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.session-empty-hint {
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.session-empty-hint kbd {
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--text-2);
+}
+
+/* Screen 3: chips in the input's bottom row */
+.proto-composer-area {
+  position: relative;
+}
+
+.chips {
+  flex: 1;
+  min-width: 0;
+}
+
+.chip {
+  height: 28px;
+  min-width: 0;
+  padding: 0 6px 0 8px;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.chip-name {
+  color: var(--text-3);
+}
+
+.chip-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip {
+  flex: none;
+}
+
+#chip-model {
+  flex: 0 1 auto;
+}
+
+#chip-model .chip-value {
+  max-width: 180px;
+}
+
+.chip svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
+}
+
+.chip[aria-expanded="true"] {
+  background: var(--bg-2);
+}
+
+.chip[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.proto-slash {
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+/* Menus open upward from the input, as wide as their content allows. */
+.chip-menu,
+.slash-menu {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  z-index: 30;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+  max-height: min(420px, 60dvh);
+  overflow: auto;
+}
+
+.chip-menu {
+  width: min(420px, calc(100% - 48px));
+}
+
+.slash-menu {
+  left: 24px;
+  right: 24px;
+}
+
+.menu-head {
+  padding: 6px 8px 4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.menu-filter {
+  display: block;
+  width: calc(100% - 8px);
+  margin: 2px 4px 4px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-size: 12.5px;
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 0 8px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  justify-content: stretch;
+  align-items: start;
+}
+
+.menu-item.active,
+.menu-item:hover:not(:disabled) {
+  background: var(--bg-2);
+}
+
+.menu-check {
+  grid-row: 1 / 3;
+  color: var(--accent);
+  line-height: 20px;
+}
+
+.menu-label {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-desc {
+  grid-column: 2;
+  font-size: 12px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+
+.menu-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.menu-state[data-tone="err"] {
+  color: var(--err);
+}
+
+.slash-menu .menu-item {
+  grid-template-columns: 120px minmax(0, 1fr);
+}
+
+.slash-menu .menu-label {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.slash-menu .menu-desc {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 12.5px;
+  line-height: 20px;
+}
+
+.slash-menu .menu-foot {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* Screen 5: dialogs */
+.proto-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.proto-modal-head h2 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.proto-modal .setup-form {
+  margin-top: 0;
+}
+
+.proto-modal .modal-actions {
+  margin-top: 4px;
+}
+
+/* A sent message in the prototype feed. */
+.proto-user {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+  margin-bottom: 16px;
+}
+
+.proto-reply {
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+@media (max-width: 640px) {
+  .setup {
+    padding: 32px 16px 32px;
+  }
+
+  .session-empty {
+    padding: 10vh 16px 16px;
+  }
+
+  /* Values only: the menu header names what each chip changes. */
+  .chip-name {
+    display: none;
+  }
+
+  #chip-model .chip-value {
+    max-width: 96px;
+  }
+
+  .chip-menu,
+  .slash-menu {
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+
+  /* The core's descriptions are up to 62 characters; on a phone they wrap instead of losing their end. */
+  .menu-desc {
+    white-space: normal;
+  }
+
+  .slash-menu .menu-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .slash-menu .menu-desc {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+}
+
+/* A toast sits above the input instead of over the chips and the send button. */
+.toasts {
+  bottom: 150px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-note[data-tone="busy"]::before,
+  .chip.pending .chip-value::before,
+  .menu-state[data-tone="busy"]::before {
+    animation: none;
+  }
+}
