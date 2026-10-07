@@ -4,7 +4,8 @@
 // It accepts the same Playwright/Chromium arguments and variables as the other scripts.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || process.argv[2] || 'playwright');
 const output = process.env.KVIST_QA_OUTPUT || '/tmp/kvist-web-qa';
@@ -14,14 +15,16 @@ const fixtures = [];
 
 // One isolated controller per scenario: a fresh temporary HOME and workspace.
 async function fixture(setup = 'blank', env = {}) {
-  const child = spawn(process.env.KVIST_TEST_PYTHON || '.venv/bin/python', [fileURLToPath(new URL('./core_server.py', import.meta.url))], { stdio: ['ignore', 'pipe', 'inherit'], env: { ...process.env, KVIST_FIXTURE_SETUP: setup, ...env } });
+  const child = spawn(process.env.KVIST_TEST_PYTHON || '.venv/bin/python', [fileURLToPath(new URL('./core_server.py', import.meta.url))], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, KVIST_FIXTURE_SETUP: setup, ...env } });
   fixtures.push(child);
+  // Everything the controller and its cores print, for the key leak check.
+  const out = { text: '' };
+  child.stderr.on('data', data => { out.text += data; });
   const [base, home] = await new Promise((resolve, reject) => {
-    let text = '';
-    child.once('exit', code => reject(new Error(`Fixture exited: ${code}`)));
-    child.stdout.on('data', data => { text += data; const lines = text.split('\n'); if (lines.length > 2) resolve(lines.slice(0, 2)); });
+    child.once('exit', code => reject(new Error(`Fixture exited: ${code}\n${out.text}`)));
+    child.stdout.on('data', data => { out.text += data; const lines = out.text.split('\n'); if (lines.length > 2) resolve(lines.slice(0, 2)); });
   });
-  return { base, home, child };
+  return { base, home, child, out };
 }
 async function open(base, viewport = { width: 1440, height: 900 }) {
   const context = await browser.newContext({ viewport });
@@ -114,6 +117,71 @@ try {
     assert.deepEqual(errors, []);
     await context.close();
     console.log('PASS another provider: DeepSeek with its live list, saved and answering');
+  }
+  {
+    // The key leak check: a unique test key through a refused key, the first run, a task, a reload, the
+    // provider dialog and a model change. The key may be in two places only: the bodies of the requests that
+    // carry it to this server's configuration endpoints, and the core's own config file.
+    const secret = `qa-valid-leak-${Math.random().toString(36).slice(2)}`, wrong = `qa-wrong-leak-${Math.random().toString(36).slice(2)}`;
+    const { base, home, out } = await fixture('blank', { KVIST_FIXTURE_DEFAULT_MODELS: 'gpt-5.6-luna' });
+    const { context, page, errors } = await open(base);
+    const seen = [], consoleText = [], carriers = new Set();
+    page.on('console', message => consoleText.push(message.text()));
+    context.on('request', request => {
+      seen.push(request.url());
+      for (const value of [secret, wrong])
+        if ((request.postData() || '').includes(value)) carriers.add(new URL(request.url()).pathname);
+    });
+    const key = page.locator('#setup-key');
+    await paste(page, key, wrong);
+    await page.getByText('AnyModel did not accept this key.', { exact: false }).waitFor();
+    assert.equal(await key.getAttribute('type'), 'password');
+    assert.equal(await key.getAttribute('name'), null, 'no name: a native form submit could not carry the key');
+    assert.equal(await key.getAttribute('autocomplete'), 'off');
+    await key.fill(''); await paste(page, key, secret);
+    await page.getByText('The key works.', { exact: false }).waitFor();
+    await page.keyboard.press('Enter');
+    await page.locator('.setup').waitFor({ state: 'detached' });
+    const kept = () => page.evaluate(async () => JSON.stringify({
+      url: location.href, local: { ...localStorage }, session: { ...sessionStorage }, cookie: document.cookie,
+      databases: indexedDB.databases ? await indexedDB.databases() : [],
+      dom: document.documentElement.outerHTML, values: [...document.querySelectorAll('input, textarea, select')].map(n => n.value),
+    }));
+    for (const value of [secret, wrong]) assert(!(await kept()).includes(value), 'not in the URL, storage, cookies or the DOM after Start');
+    await sendTask(page, 'Explain this project');
+    await page.reload(); await page.locator('#app').waitFor();
+    await page.locator('#model-selector').click();
+    await page.getByRole('menuitem', { name: /^Providers and keys/ }).click();
+    await page.locator('#provider-form').waitFor();
+    assert.equal(await page.locator('[data-credential=anymodel_api_key]').inputValue(), '');
+    await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' });
+    await page.locator('#model-selector').click();
+    await page.getByRole('menuitemradio', { name: /^kr\/claude-sonnet-4\.5/ }).click();
+    await page.locator('.toast').getByText('Models updated.').waitFor({ timeout: 30000 }).catch(() => { });
+    for (const value of [secret, wrong]) {
+      assert(!(await kept()).includes(value), 'not in the page after a reload, the dialog or a model change');
+      assert(!seen.some(url => url.includes(value)), 'not in any request URL');
+      assert(!consoleText.some(text => text.includes(value)), 'not in the console');
+      assert(!out.text.includes(value), "not in the controller's or the cores' output");
+    }
+    assert.deepEqual([...carriers].sort(), ['/api/v1/configuration', '/api/v1/configuration/models']);
+    for (const path of ['/api/v1/configuration?server=local', '/api/v1/navigation'])
+      assert(!(await (await context.request.get(`${base}${path}`)).text()).includes(secret), path);
+    // Files: the journal, the session documents, logs; only the core's config file (and its recovery copy) holds it.
+    const root = dirname(home), holders = [];
+    async function walk(directory) {
+      for (const entry of await readdir(directory, { withFileTypes: true })) {
+        const file = join(directory, entry.name);
+        if (entry.isDirectory()) await walk(file);
+        else if ((await readFile(file)).includes(secret)) holders.push(relative(root, file));
+      }
+    }
+    await walk(root);
+    assert(holders.includes('home/.kvist/config.json'), `the walk reaches the core's config file: ${holders}`);
+    assert.deepEqual(holders.filter(file => !/^home\/\.kvist\/config\.json(\.bak)?$/.test(file)), [], `only the core's config holds the key: ${holders}`);
+    assert.deepEqual(errors, []);
+    await context.close();
+    console.log("PASS the key leaks nowhere: not in URLs, storage, cookies, the DOM, the console, the server's output, the journal or logs");
   }
   for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
     const { base } = await fixture('configured');

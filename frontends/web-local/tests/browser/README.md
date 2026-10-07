@@ -143,7 +143,10 @@ fake (keys starting with `qa-valid` work, `qa-empty-catalog-key` gives an empty 
 the machine). It checks the first run on a blank home at 1440x900 and 390x844 (the working folder on screen, key
 to first task in four actions when a default model is in the catalog: paste, Start, type, send), a
 blocked registration tab, an unreachable AnyModel, a refused key, an empty model list and the
-other-provider path with DeepSeek, and what only the real core shows: a mid-session model change reaches the
+other-provider path with DeepSeek, a key leak check (a unique test key through a refused key, the first
+run, a task, a reload, the provider dialog and a model change is never in a URL, storage, cookies, the
+DOM, the console, the controller's and cores' output, the journal or a log, and of all files only the
+core's config holds it), and what only the real core shows: a mid-session model change reaches the
 model chip without a reload (`command_result` is published as transient, because the core writes
 it outside the session journal); the reasoning and role chips change the running session through the
 core's `effort` and `role` commands and the core saves the choice; chip menus open on the checked item and
