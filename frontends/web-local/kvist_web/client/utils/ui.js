@@ -1,7 +1,24 @@
+import { appear, vanish } from '/assets/utils/motion.js';
 export const $ = selector => document.querySelector(selector);
 export function el(tag, cls, text) { const node = document.createElement(tag); if (cls)
     node.className = cls; if (text != null)
     node.textContent = text; return node; }
+// The one 10px chevron of feed rows and sidebar groups; its row turns it a quarter when it opens.
+export function chevron() {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'), path = document.createElementNS(ns, 'path');
+    svg.setAttribute('viewBox', '0 0 10 10');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'chevron');
+    path.setAttribute('d', 'M3 1.5 6.5 5 3 8.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.4');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+}
 export function esc(value) { return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char])); }
 const paths = {
     search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/>',
@@ -15,6 +32,7 @@ const paths = {
     more: '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
     'arrow-up': '<path d="M12 20V4 m-6 6 6-6 6 6"/>', close: '<path d="m6 6 12 12 M6 18 18 6"/>',
+    paperclip: '<path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5L13 2.5a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
 };
 export function icons(root = document) { for (const node of root.querySelectorAll('[data-icon]'))
     node.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[node.dataset.icon] || ''}</svg>`; }
@@ -31,21 +49,78 @@ export function toast(message, error = false) {
     stack.append(node);
     setTimeout(() => node.remove(), error ? 9000 : 4500);
 }
-const focusOwners = new Map();
-export function showOverlay(node) { if (node.hidden)
-    focusOwners.set(node, document.activeElement); node.hidden = false; document.dispatchEvent(new Event('kvist:overlay')); queueMicrotask(() => node.querySelector('input,button,select,[tabindex="0"]')?.focus()); }
-export function hideOverlay(node) { if (node.hidden)
-    return; node.hidden = true; const owner = focusOwners.get(node); if (owner?.isConnected)
-    owner.focus(); focusOwners.delete(node); document.dispatchEvent(new Event('kvist:overlay')); }
-export function closeModal() { hideOverlay($('#modal')); $('#modal').replaceChildren(); }
+// A block that opens and closes in place: its content sits in .fold-inner under a grid row that grows from 0fr
+// to 1fr (styles.css), the one size animation besides the sidebar group.
+export function fold(content) {
+    const outer = el('div', 'fold'), inner = el('div', 'fold-inner');
+    inner.append(content);
+    outer.append(inner);
+    return outer;
+}
+const focusOwners = new Map(), closing = new Map();
+const isClosed = node => node.hidden || closing.has(node);
+// An overlay that was closed (or is fading out) fades in with its card rising 8px; showing one that is
+// already open, as a tab switch does, animates nothing.
+export function showOverlay(node) {
+    const opening = isClosed(node), fade = closing.get(node);
+    if (fade) {
+        closing.delete(node);
+        fade.cancel();
+    }
+    if (node.hidden)
+        focusOwners.set(node, document.activeElement);
+    node.hidden = false;
+    if (opening) {
+        appear(node);
+        const card = node.firstElementChild;
+        if (card)
+            appear(card, { rise: 8 });
+    }
+    document.dispatchEvent(new Event('kvist:overlay'));
+    queueMicrotask(() => node.querySelector('input,button,select,[tabindex="0"]')?.focus());
+}
+// The overlay fades out and is hidden when the animation has finished, not on a timer; `after` runs then, and
+// not at all when the overlay was reopened meanwhile. With motion off it is hidden at once.
+export function hideOverlay(node, after) {
+    if (node.hidden) {
+        after?.();
+        return;
+    }
+    if (closing.has(node))
+        return;
+    const owner = focusOwners.get(node);
+    if (owner?.isConnected)
+        owner.focus();
+    focusOwners.delete(node);
+    const done = () => {
+        closing.delete(node);
+        node.hidden = true;
+        document.dispatchEvent(new Event('kvist:overlay'));
+        after?.();
+    };
+    const fade = vanish(node);
+    if (!fade) {
+        done();
+        return;
+    }
+    closing.set(node, fade);
+    fade.finished.then(() => { fade.cancel(); done(); }).catch(error => {
+        if (error.name !== 'AbortError')
+            throw error; // only showOverlay cancelling the fade-out is expected here
+    });
+}
+export function closeModal() { hideOverlay($('#modal'), () => $('#modal').replaceChildren()); }
 export function modal(title, content, actions = '') {
     $('#toasts').querySelectorAll('.toast:not(.error)').forEach(node => node.remove());
-    const root = $('#modal');
+    const root = $('#modal'), opening = isClosed(root);
     showOverlay(root);
     root.innerHTML = `<section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"><header class="modal-head"><h2 id="modal-title">${esc(title)}</h2><button class="icon-button" data-close aria-label="Close dialog" data-icon="close"></button></header>${content}${actions}</section>`;
     root.querySelector('[data-close]').onclick = closeModal;
     icons(root);
-    return root.querySelector('.modal-card');
+    const card = root.querySelector('.modal-card');
+    if (opening)
+        appear(card, { rise: 8 });
+    return card;
 }
 export function trapFocus(event, container) {
     const nodes = [...container.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex="0"]')].filter(n => n.getClientRects().length);
@@ -60,36 +135,6 @@ export function trapFocus(event, container) {
         event.preventDefault();
         first.focus();
     }
-}
-export function installGlow() {
-    const glow = $('#cursor-glow'), media = matchMedia('(prefers-reduced-motion: reduce)'), fine = matchMedia('(pointer: fine)');
-    let frame = 0, x = 0, y = 0, tx = 0, ty = 0, initialized = false;
-    const stop = () => { cancelAnimationFrame(frame); frame = 0; glow.classList.remove('active'); };
-    const paint = () => {
-        x += (tx - x) * .18;
-        y += (ty - y) * .18;
-        glow.style.transform = `translate3d(${x}px,${y}px,0)`;
-        frame = Math.abs(tx - x) + Math.abs(ty - y) > .5 ? requestAnimationFrame(paint) : 0;
-    };
-    window.addEventListener('pointermove', event => {
-        if (media.matches || !fine.matches)
-            return;
-        tx = event.clientX;
-        ty = event.clientY;
-        if (!initialized) {
-            x = tx;
-            y = ty;
-            initialized = true;
-        }
-        glow.classList.add('active');
-        if (!frame)
-            frame = requestAnimationFrame(paint);
-    }, { passive: true });
-    window.addEventListener('blur', stop);
-    document.addEventListener('mouseleave', stop);
-    media.addEventListener('change', stop);
-    document.addEventListener('visibilitychange', () => { if (document.hidden)
-        stop(); });
 }
 // Tiny deliberately bounded Markdown renderer. Untrusted HTML never enters the DOM.
 export function markdown(node, text) {

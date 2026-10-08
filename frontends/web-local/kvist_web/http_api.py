@@ -20,6 +20,8 @@ from .security import BrowserAuth, BrowserSession, redact
 
 MAX_BODY = 30 * 1024 * 1024
 API_PREFIX = f"/api/v{WEB_PROTOCOL_VERSION}"
+# Python before 3.14 knows .woff2 only through the system mime.types, which may be absent.
+mimetypes.add_type("font/woff2", ".woff2")
 
 
 def client_root() -> Path:
@@ -251,7 +253,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
         except OSError:
             self._error(HTTPStatus.NOT_FOUND, "Not found.")
             return
-        if root not in target.parents or target.suffix not in {".js", ".css", ".svg", ".png"}:
+        if root not in target.parents or target.suffix not in {".js", ".css", ".svg", ".png", ".woff2"}:
             self._error(HTTPStatus.NOT_FOUND, "Not found.")
             return
         content = target.read_bytes()

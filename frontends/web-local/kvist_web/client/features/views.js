@@ -1,11 +1,25 @@
 import { state } from '/assets/state/store.js';
 import { $, el, showOverlay, hideOverlay } from '/assets/utils/ui.js';
+import { appear } from '/assets/utils/motion.js';
+import { TOOL_NAMES } from '/assets/features/blocks.js';
 export const actionLabel = event => {
-    const names = { read_file: 'Reading a file', read_multiple_files: 'Reading files', list_dir: 'Browsing files', list_tree: 'Browsing workspace', find_files: 'Finding files', search_code: 'Searching code', write_file: 'Writing a file', append_file: 'Updating a file', replace_in_file: 'Editing a file', run_shell: event.type === 'action_result' ? 'Command finished' : 'Running a command', git_status: 'Checking repository', git_diff: 'Reviewing changes', web_search: 'Searching the web', fetch_url: 'Reading a web page', delegate_task: 'Delegating work', final_answer: 'Preparing response', report_to_user: 'Preparing report', refuse: 'Task declined' };
-    return names[event.action_type] || ({ turn_end: event.stopped_by_user ? 'Agent stopped' : 'Turn finished', input_request: 'Waiting for your input', error: 'An error occurred', agent_process_exited: 'Agent stopped' }[event.type] || 'Agent activity');
+    const names = Object.hasOwn(TOOL_NAMES, event.action_type) ? TOOL_NAMES[event.action_type] : null;
+    return (event.type === 'action_result' ? names?.done : names?.doing) || ({ turn_end: event.stopped_by_user ? 'Agent stopped' : 'Turn finished', input_request: 'Waiting for your input', error: 'An error occurred', agent_process_exited: 'Agent stopped' }[event.type] || 'Agent activity');
 };
+// The header's own buttons (Files, Diff, Terminal) mark the view that is open; the other tabs mark none of them.
+function markOpen(tab) {
+    state.openView = tab;
+    for (const button of document.querySelectorAll('[data-view]'))
+        button.setAttribute('aria-selected', String(button.dataset.view === tab));
+}
+// The tab whose content is on screen: a switch to another tab fades the content in; opening the view does not
+// (the view itself fades in).
+let shownTab = '';
 export function openView(tab) {
     state.inspectorTab = tab;
+    markOpen(tab);
+    if ($('#workspace-view').hidden)
+        shownTab = tab;
     showOverlay($('#workspace-view'));
     for (const button of document.querySelectorAll('[data-tab]')) {
         button.setAttribute('aria-selected', String(button.dataset.tab === tab));
@@ -15,7 +29,7 @@ export function openView(tab) {
     queueMicrotask(() => document.querySelector(`[data-tab="${tab}"]`)?.focus());
     document.dispatchEvent(new CustomEvent('kvist:view-open', { detail: tab }));
 }
-export const closeView = () => hideOverlay($('#workspace-view'));
+export const closeView = () => { markOpen(''); hideOverlay($('#workspace-view')); };
 let renderFrame = 0;
 export function scheduleInspector() { if ($('#workspace-view').hidden || renderFrame)
     return; renderFrame = requestAnimationFrame(() => { renderFrame = 0; renderInspector(); }); }
@@ -40,6 +54,10 @@ export function renderInspector() {
         return;
     const target = $('#inspector-content'), oldScroll = target.scrollTop, tab = state.inspectorTab;
     target.replaceChildren();
+    if (tab !== shownTab) {
+        shownTab = tab;
+        appear(target, { duration: '--dur-fast' });
+    }
     if (!state.selected) {
         target.append(el('p', 'view-empty', 'Select a session to see its ' + tab + '.'));
         return;
@@ -86,7 +104,7 @@ export function renderInspector() {
     else if (tab === 'terminal') {
         const results = state.events.filter(e => e.action_type === 'run_shell' || e.type === 'action_output');
         const output = results.map(e => e.output || e.action_args?.command || e.summary).filter(Boolean).join('\n\n');
-        target.append(el('p', '', 'Command output · read-only'));
+        target.append(el('p', '', 'Command output, read-only'));
         if (output)
             pagedLines(target, output);
         else

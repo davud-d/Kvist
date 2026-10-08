@@ -1,0 +1,35 @@
+/* The state index page only. */
+.states-page {
+  overflow: auto;
+}
+
+.states-page main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+.states-page h1 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.states-page h2 {
+  font-size: 14px;
+  margin: 24px 0 6px;
+  color: var(--text-2);
+}
+
+.states-page p {
+  color: var(--text-2);
+}
+
+.states-page ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.states-page code {
+  font-family: var(--mono);
+  font-size: 12px;
+}

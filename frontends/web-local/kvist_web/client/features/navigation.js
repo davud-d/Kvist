@@ -1,49 +1,147 @@
-import { state, keyOf, stateLabel } from '/assets/state/store.js';
-import { $, el } from '/assets/utils/ui.js';
+import { state, keyOf, stateLabel, execution } from '/assets/state/store.js';
+import { $, chevron, el, fold, icons } from '/assets/utils/ui.js';
+import { appear, canAnimate } from '/assets/utils/motion.js';
 const nameOf = path => path.split(/[\\/]/).filter(Boolean).at(-1) || path;
-let lastSignature = '';
-export function renderNavigation(onSelect, onWorkspace) {
-    const signature = JSON.stringify([state.navigation, state.selected, state.workspace]);
+const COLLAPSED_KEY = 'kvist.nav.collapsed';
+// Indicator kinds, most urgent first; the label is what a screen reader hears in place of the shape.
+const LABELS = { waiting: 'waiting for your answer', failed: 'failed', running: 'running', unread: 'unread' };
+const collapsed = loadCollapsed();
+let lastSignature = '', handlers = [], expanding = '', known = null;
+// A session that appears after the first render fades in. `known` holds the keys of every session seen so far,
+// not only the drawn ones, so a group the person opens again animates no row.
+function appearNewRows(nav) {
+    const keys = new Set();
+    for (const entry of state.navigation.servers)
+        for (const workspace of entry.workspaces)
+            for (const session of workspace.sessions?.session_items || [])
+                keys.add(keyOf({ serverId: entry.server.id, workspace: workspace.path, session: session.name }));
+    if (known)
+        for (const row of nav.querySelectorAll('.nav-session'))
+            if (!known.has(row.dataset.key))
+                appear(row);
+    known = keys;
+}
+function loadCollapsed() {
+    try {
+        const keys = JSON.parse(localStorage.getItem(COLLAPSED_KEY));
+        return new Set(Array.isArray(keys) ? keys : []);
+    }
+    catch (error) { return new Set(); } // blocked or corrupt storage: every group starts open
+}
+function saveCollapsed() {
+    try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed])); }
+    catch (error) { /* blocked storage: the choice lasts until the page reloads */ }
+}
+function indicatorOf(session) {
+    const value = execution(session.execution);
+    if (value === 'waiting_for_user')
+        return 'waiting';
+    if (value === 'failed')
+        return 'failed';
+    if (value === 'running' || value === 'starting')
+        return 'running';
+    return session.unread ? 'unread' : '';
+}
+function indicator(kind) {
+    const node = el('span', `nav-ind${kind ? ' ind-' + kind : ''}`);
+    if (kind) {
+        node.setAttribute('role', 'img');
+        node.setAttribute('aria-label', LABELS[kind]);
+    }
+    return node;
+}
+function sessionRow(entry, workspace, session, onSelect) {
+    const selection = { serverId: entry.server.id, workspace: workspace.path, session: session.name }, selected = keyOf(selection) === keyOf(state.selected);
+    const kind = indicatorOf(session), title = session.title || session.name;
+    const button = el('button', `nav-session${selected ? ' active' : ''}${kind === 'running' && session.unread ? ' unread-running' : ''}`);
+    button.dataset.key = keyOf(selection);
+    button.setAttribute('aria-current', selected ? 'page' : 'false');
+    button.title = `${title}, ${stateLabel(session.execution || 'idle')}${session.unread ? ', Unread' : ''}`;
+    button.setAttribute('aria-label', button.title);
+    button.append(el('span', 'nav-title', title), indicator(kind));
+    button.onclick = () => onSelect(entry.server.id, workspace.path, session.name);
+    return button;
+}
+function group(entry, workspace, onSelect, onNewSession) {
+    const key = keyOf({ serverId: entry.server.id, workspace: workspace.path }), closed = collapsed.has(key), name = nameOf(workspace.path);
+    const sessions = workspace.sessions?.session_items || [];
+    const node = el('section', 'nav-group'), head = el('div', 'nav-group-head'), toggle = el('button', 'nav-group-toggle'), label = el('span', 'nav-group-label');
+    toggle.dataset.key = `group:${key}`;
+    toggle.title = workspace.path;
+    toggle.setAttribute('aria-expanded', String(!closed));
+    label.append(el('span', 'nav-group-name', name));
+    if (entry.server.id !== 'local')
+        label.append(el('span', 'nav-group-server', entry.server.name));
+    toggle.append(chevron(), label);
+    if (closed) {
+        const kinds = sessions.map(indicatorOf), kind = Object.keys(LABELS).find(item => kinds.includes(item));
+        if (kind)
+            toggle.append(indicator(kind));
+    }
+    toggle.onclick = () => {
+        if (collapsed.delete(key))
+            expanding = key;
+        else
+            collapsed.add(key);
+        saveCollapsed();
+        renderNavigation(...handlers);
+    };
+    head.append(toggle);
+    if (entry.connection.state === 'connected') {
+        const add = el('button', 'nav-group-add');
+        add.dataset.key = `new:${key}`;
+        add.append(el('span'));
+        add.firstChild.dataset.icon = 'plus';
+        add.title = `New session in ${name}`;
+        add.setAttribute('aria-label', add.title);
+        add.onclick = () => onNewSession({ serverId: entry.server.id, workspace: workspace.path });
+        icons(add);
+        head.append(add);
+    }
+    node.append(head);
+    if (closed)
+        return node;
+    const rows = el('div');
+    if (!sessions.length)
+        rows.append(el('div', 'menu-caption', entry.connection.state === 'connected' ? 'No sessions yet' : stateLabel(entry.connection.state)));
+    for (const session of sessions)
+        rows.append(sessionRow(entry, workspace, session, onSelect));
+    const content = fold(rows);
+    // A group the person has just opened grows from 0fr to 1fr; renderNavigation lifts .fold-enter once it is in the DOM.
+    if (key === expanding && canAnimate())
+        content.classList.add('fold-enter');
+    node.append(content);
+    return node;
+}
+export function renderNavigation(onSelect, onNewSession) {
+    handlers = [onSelect, onNewSession];
+    const signature = JSON.stringify([state.navigation, state.selected, [...collapsed]]);
     if (signature === lastSignature)
         return;
     lastSignature = signature;
     const nav = $('#navigation'), focused = document.activeElement?.dataset?.key, scroll = nav.scrollTop;
     const fragment = document.createDocumentFragment();
-    $('#inbox-count').textContent = String(state.navigation.inbox.length);
+    const unread = state.navigation.inbox.length;
+    $('#inbox-count').hidden = !unread;
+    $('#inbox-count').textContent = unread > 99 ? '99+' : String(unread);
     for (const entry of state.navigation.servers)
-        for (const workspace of entry.workspaces) {
-            const group = el('section', 'nav-group'), heading = el('button', 'nav-workspace-head');
-            heading.append(el('span', '', `${nameOf(workspace.path)}${entry.server.id === 'local' ? '' : ' · ' + entry.server.name}`));
-            heading.title = workspace.path;
-            heading.onclick = () => onWorkspace?.(entry.server.id, workspace.path);
-            group.append(heading);
-            const sessions = workspace.sessions?.session_items || [];
-            if (!sessions.length)
-                group.append(el('div', 'menu-caption', entry.connection.state === 'connected' ? 'No sessions yet' : stateLabel(entry.connection.state)));
-            for (const session of sessions) {
-                const selection = { serverId: entry.server.id, workspace: workspace.path, session: session.name }, selected = keyOf(selection) === keyOf(state.selected);
-                const button = el('button', `nav-session${selected ? ' active' : ''}`), execution = session.execution || 'idle';
-                const indicator = ['running', 'starting', 'waiting_for_user', 'failed'].includes(execution) ? execution : session.unread ? 'unread' : execution;
-                button.dataset.key = keyOf(selection);
-                button.setAttribute('aria-current', selected ? 'page' : 'false');
-                button.title = `${session.title || session.name} · ${stateLabel(execution)}${session.unread ? ' · Unread' : ''}`;
-                button.setAttribute('aria-label', button.title);
-                const dot = el('span', `status-dot ${indicator}`);
-                dot.setAttribute('aria-hidden', 'true');
-                button.append(el('span', 'nav-title', session.title || session.name), dot);
-                button.onclick = () => onSelect(entry.server.id, workspace.path, session.name);
-                group.append(button);
-            }
-            fragment.append(group);
-        }
+        for (const workspace of entry.workspaces)
+            fragment.append(group(entry, workspace, onSelect, onNewSession));
     nav.replaceChildren(fragment);
     nav.scrollTop = scroll;
+    const entering = nav.querySelector('.fold-enter');
+    if (entering) {
+        void entering.offsetHeight;
+        entering.classList.remove('fold-enter');
+    }
+    expanding = '';
+    appearNewRows(nav);
     if (focused)
         [...nav.querySelectorAll('[data-key]')].find(n => n.dataset.key === focused)?.focus({ preventScroll: true });
     const selected = state.selected || state.workspace;
-    $('#workspace-label').textContent = selected ? nameOf(selected.workspace) : 'Choose workspace';
-    $('#workspace-switcher').title = selected?.workspace || 'Switch workspace';
-    $('#active-server-label').textContent = selected?.serverId === 'local' || !selected ? 'Local' : state.navigation.servers.find(s => s.server.id === selected.serverId)?.server.name || selected.serverId;
+    const label = $('#active-server-label');
+    if (label)
+        label.textContent = selected?.serverId === 'local' || !selected ? 'Local' : state.navigation.servers.find(s => s.server.id === selected.serverId)?.server.name || selected.serverId;
 }
 export function paletteItems() {
     const items = [];
@@ -55,4 +153,4 @@ export function paletteItems() {
         }
     return items;
 }
-export function inboxItems() { return (state.navigation.inbox || []).map(item => ({ type: 'inbox', label: item.title || item.session, detail: `${item.server_name || item.server_id} · ${stateLabel(item.state)}`, selection: { serverId: item.server_id, workspace: item.workspace, session: item.session } })); }
+export function inboxItems() { return (state.navigation.inbox || []).map(item => ({ type: 'inbox', label: item.title || item.session, detail: `${item.server_name || item.server_id}, ${stateLabel(item.state)}`, selection: { serverId: item.server_id, workspace: item.workspace, session: item.session } })); }

@@ -10,11 +10,15 @@ import os
 import threading
 
 from kernel import llm_clients as llm, user_config as config
-from kernel.anymodel_onboarding import ANYMODEL_REGISTER_URL
+from kernel.anymodel_onboarding import ANYMODEL_DEFAULT_MODELS, ANYMODEL_REGISTER_URL
 from kernel.config_info import build_config_info
+# The manifest's own builders: the status chips need roles and reasoning levels with
+# their descriptions before any core of a session is running.
+from kernel.core_manifest import _effort_levels, _roles
 from kernel.reasoning_effort import EFFORT_LEVELS
 
 _lock = threading.RLock()
+ROLE_CHOICES = frozenset(entry["value"] for entry in _roles())
 
 
 def configuration_info() -> dict:
@@ -38,9 +42,13 @@ def configuration_info() -> dict:
         provider=provider,
         setup_required=not selected or not selected["has_credentials"] or any(not v for v in selected["defaults"].values()),
         registration_url=ANYMODEL_REGISTER_URL,
+        recommended_models={llm.DEFAULT_BLANK_START_PROVIDER: list(ANYMODEL_DEFAULT_MODELS)},
         model_roles=list(llm.MODEL_ROLES),
         effort=config.get_saved_reasoning_effort(),
         effort_levels=list(EFFORT_LEVELS),
+        effort_info=_effort_levels(),
+        role=config.get_saved_role() or "auto",
+        roles=_roles(),
         environment_overrides=[key for key in ("AGENT_LLM_PROVIDER", "AGENT_FAST_MODEL", "AGENT_SMART_MODEL", "AGENT_REASONING_EFFORT") if os.getenv(key)],
     )
     return info
@@ -82,11 +90,25 @@ def _credentials(entry: dict, payload: dict) -> tuple[dict, dict]:
     return values, supplied
 
 
+def _verify_anymodel_key(key: str) -> None:
+    """Tell a refused AnyModel key from an unreachable AnyModel; the first run shows the message as is."""
+    from kernel.providers.anymodel_pricing import AnyModelAuthError, AnyModelUnavailableError, fetch_model_coefficients
+
+    try:
+        fetch_model_coefficients(key, force_refresh=True)
+    except AnyModelAuthError as error:
+        raise ValueError("AnyModel did not accept this key. Copy it again from your AnyModel account.") from error
+    except AnyModelUnavailableError as error:
+        raise ValueError("Couldn't reach AnyModel. Check your connection, then try again.") from error
+
+
 def model_catalog(payload: dict) -> dict:
     entry = _provider(payload)
-    credentials, _ = _credentials(entry, payload)
+    credentials, supplied = _credentials(entry, payload)
     if not entry["custom"] and not any(credentials.get(f["id"]) for f in entry["credential_fields"]):
         raise ValueError("Enter an API key to load models.")
+    if entry["id"] == llm.DEFAULT_BLANK_START_PROVIDER and supplied:
+        _verify_anymodel_key(credentials["anymodel_api_key"])
     models, error = llm.fetch_available_models(entry["id"], credentials, force_refresh=True)
     if error:
         # Provider errors can contain request bodies; don't send raw exceptions
@@ -110,6 +132,9 @@ def save_configuration(payload: dict) -> dict:
         effort = payload.get("effort", config.get_saved_reasoning_effort())
         if effort not in EFFORT_LEVELS:
             raise ValueError("Unknown reasoning level.")
+        role = payload.get("role")
+        if role is not None and role not in ROLE_CHOICES:
+            raise ValueError("Unknown role.")
         credentials, supplied = _credentials(entry, payload)
         required = llm.required_secret_keys_for_provider(provider, tuple(models.values()))
         if not entry["custom"] and any(not credentials.get(key) for key in required):
@@ -140,5 +165,7 @@ def save_configuration(payload: dict) -> dict:
             if payload.get("base_url", "").strip() and entry.get("can_edit_base_url"):
                 config.set_provider_secret(f"{provider}_base_url", payload["base_url"])
         config.save_reasoning_effort(effort)
+        if role is not None:
+            config.save_role_selection(role)
         config.set_provider_secret(config.LLM_PROVIDER_KEY, provider)
         return configuration_info()

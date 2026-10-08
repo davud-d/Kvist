@@ -1,0 +1,550 @@
+[
+ {
+  "id": 1,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "agent.state_changed",
+   "state": "starting"
+  },
+  "ts": 1791231061.262248,
+  "durable": false
+ },
+ {
+  "id": 2,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "hello",
+   "protocol_version": 1,
+   "provider": "openai",
+   "models": {
+    "fast": "fixture-fast",
+    "smart": "fixture-smart"
+   },
+   "role": "auto",
+   "approval_mode": "ask",
+   "session": "chat-20261006-021101",
+   "has_checkpoint": false,
+   "effort": "medium",
+   "commands": [
+    "bug",
+    "change-api",
+    "changes",
+    "commit-message",
+    "del-provider",
+    "effort",
+    "full-reset",
+    "models",
+    "new",
+    "provider",
+    "rename",
+    "resume",
+    "revert",
+    "role",
+    "session",
+    "settings-api",
+    "strime",
+    "style",
+    "verbose"
+   ],
+   "kvist_version": "0.1.0b1"
+  },
+  "ts": 1791231061.992822,
+  "durable": true
+ },
+ {
+  "id": 3,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "agent.state_changed",
+   "state": "running"
+  },
+  "ts": 1791231061.993029,
+  "durable": false
+ },
+ {
+  "id": 4,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "route",
+   "role": "chat",
+   "source": "llm"
+  },
+  "ts": 1791231062.0554516,
+  "durable": true
+ },
+ {
+  "id": 5,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "stream_start",
+   "stream_id": "e99874068ac54901a32ba9da505bee9f"
+  },
+  "ts": 1791231062.352149,
+  "durable": true
+ },
+ {
+  "id": 6,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "stream_chunk",
+   "stream_id": "e99874068ac54901a32ba9da505bee9f",
+   "text": "Sure. Kvist keeps the co",
+   "append": true
+  },
+  "ts": 1791231062.3530214,
+  "durable": false
+ },
+ {
+  "id": 7,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "stream_chunk",
+   "stream_id": "e99874068ac54901a32ba9da505bee9f",
+   "text": "nversation in one place, and a streamed answer arrives in small pieces.",
+   "append": true
+  },
+  "ts": 1791231062.3530462,
+  "durable": false
+ },
+ {
+  "id": 8,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "stream_commit",
+   "stream_id": "e99874068ac54901a32ba9da505bee9f",
+   "text": "Sure. Kvist keeps the conversation in one place, and a streamed answer arrives in small pieces."
+  },
+  "ts": 1791231062.3538148,
+  "durable": true
+ },
+ {
+  "id": 9,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "usage",
+   "input_tokens": 7306,
+   "output_tokens": 20,
+   "model": "fixture-fast",
+   "kind": "chat",
+   "step": 0,
+   "context_tokens": 7306,
+   "context_limit": 217600
+  },
+  "ts": 1791231062.3555677,
+  "durable": true
+ },
+ {
+  "id": 10,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "turn_end"
+  },
+  "ts": 1791231062.4057436,
+  "durable": true
+ },
+ {
+  "id": 11,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "agent.state_changed",
+   "state": "running"
+  },
+  "ts": 1791231062.4378617,
+  "durable": false
+ },
+ {
+  "id": 12,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "route",
+   "role": "coder",
+   "source": "llm"
+  },
+  "ts": 1791231062.5028586,
+  "durable": true
+ },
+ {
+  "id": 13,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "live_start"
+  },
+  "ts": 1791231062.5197425,
+  "durable": false
+ },
+ {
+  "id": 14,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "debug",
+   "message": "[tokens] step=1 kind=step input=14300 (system=13654, prompt=646), chars=63241"
+  },
+  "ts": 1791231062.5298235,
+  "durable": false
+ },
+ {
+  "id": 15,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "usage",
+   "input_tokens": 14300,
+   "output_tokens": 83,
+   "model": "fixture-fast",
+   "kind": "step",
+   "step": 1,
+   "context_tokens": 14300,
+   "context_limit": 217600
+  },
+  "ts": 1791231062.537149,
+  "durable": true
+ },
+ {
+  "id": 16,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "step",
+   "step": 1,
+   "plan_step": "inspect",
+   "thought": "",
+   "user_message": "Looking at the notes.",
+   "action_type": "read_file",
+   "action_args": {
+    "path": "notes.txt"
+   },
+   "reasoning_seconds": 0,
+   "action_description": "reads notes.txt",
+   "call_id": "call_203415dd2dca",
+   "batch_id": "326b978eb372"
+  },
+  "ts": 1791231062.5380826,
+  "durable": true
+ },
+ {
+  "id": 17,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "status",
+   "user_message": "reads notes.txt",
+   "status": "executing action",
+   "step": 1,
+   "progress": 0,
+   "plan_step": "inspect",
+   "is_error": false
+  },
+  "ts": 1791231062.5381043,
+  "durable": false
+ },
+ {
+  "id": 18,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "debug",
+   "message": "Result: OK. ok: read file notes.txt. Progress: 15%. Stagnation: 0."
+  },
+  "ts": 1791231062.5392067,
+  "durable": false
+ },
+ {
+  "id": 19,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "action_result",
+   "step": 1,
+   "action_type": "read_file",
+   "ok": true,
+   "summary": "Read 2 lines",
+   "output": "",
+   "exit_code": null,
+   "path": null,
+   "first_line": null,
+   "call_id": "call_203415dd2dca",
+   "batch_id": "326b978eb372"
+  },
+  "ts": 1791231062.5400407,
+  "durable": true
+ },
+ {
+  "id": 20,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "status",
+   "user_message": "reads notes.txt",
+   "status": "continuing",
+   "step": 1,
+   "progress": 15,
+   "plan_step": "inspect",
+   "is_error": false
+  },
+  "ts": 1791231062.5400667,
+  "durable": false
+ },
+ {
+  "id": 21,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "step",
+   "step": 2,
+   "plan_step": "inspect",
+   "thought": "",
+   "user_message": "",
+   "action_type": "run_shell",
+   "action_args": {
+    "command": [
+     "echo",
+     "fixture-output"
+    ]
+   },
+   "reasoning_seconds": 0,
+   "action_description": "runs echo fixture-output",
+   "call_id": "call_b01c55575fc5",
+   "batch_id": "326b978eb372"
+  },
+  "ts": 1791231062.540885,
+  "durable": true
+ },
+ {
+  "id": 22,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "status",
+   "user_message": "runs echo fixture-output",
+   "status": "executing action",
+   "step": 2,
+   "progress": 15,
+   "plan_step": "inspect",
+   "is_error": false
+  },
+  "ts": 1791231062.5409548,
+  "durable": false
+ },
+ {
+  "id": 23,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "action_output",
+   "step": 2,
+   "output": "fixture-output\n",
+   "call_id": "call_b01c55575fc5"
+  },
+  "ts": 1791231062.5957863,
+  "durable": false
+ },
+ {
+  "id": 24,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "debug",
+   "message": "Result: OK. ok: executed shell command echo fixture-output. Progress: 15%. Stagnation: 0."
+  },
+  "ts": 1791231062.596808,
+  "durable": false
+ },
+ {
+  "id": 25,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "action_result",
+   "step": 2,
+   "action_type": "run_shell",
+   "ok": true,
+   "summary": "Command exited with code 0",
+   "output": "fixture-output",
+   "exit_code": 0,
+   "path": null,
+   "first_line": null,
+   "call_id": "call_b01c55575fc5",
+   "batch_id": "326b978eb372"
+  },
+  "ts": 1791231062.5977216,
+  "durable": true
+ },
+ {
+  "id": 26,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "status",
+   "user_message": "runs echo fixture-output",
+   "status": "continuing",
+   "step": 2,
+   "progress": 15,
+   "plan_step": "inspect",
+   "is_error": false
+  },
+  "ts": 1791231062.5977912,
+  "durable": false
+ },
+ {
+  "id": 27,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "debug",
+   "message": "[tokens] step=3 kind=step input=14657 (system=13654, prompt=1003), chars=64558"
+  },
+  "ts": 1791231062.6372914,
+  "durable": false
+ },
+ {
+  "id": 28,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "usage",
+   "input_tokens": 14657,
+   "output_tokens": 58,
+   "model": "fixture-fast",
+   "kind": "step",
+   "step": 3,
+   "context_tokens": 14657,
+   "context_limit": 217600
+  },
+  "ts": 1791231062.6448097,
+  "durable": true
+ },
+ {
+  "id": 29,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "step",
+   "step": 3,
+   "plan_step": "done",
+   "thought": "",
+   "user_message": "Done.",
+   "action_type": "final_answer",
+   "action_args": {
+    "message": "The notes file says: fixture notes.",
+    "outcome": "no_change_needed"
+   },
+   "reasoning_seconds": 0,
+   "action_description": "answers",
+   "call_id": "call_aa6d6eb055c9",
+   "batch_id": "0edcb20b38ca"
+  },
+  "ts": 1791231062.6457748,
+  "durable": true
+ },
+ {
+  "id": 30,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "status",
+   "user_message": "answers",
+   "status": "executing action",
+   "step": 3,
+   "progress": 15,
+   "plan_step": "done",
+   "is_error": false
+  },
+  "ts": 1791231062.6457925,
+  "durable": false
+ },
+ {
+  "id": 31,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "debug",
+   "message": "Result: final answer at step 3"
+  },
+  "ts": 1791231062.6462698,
+  "durable": false
+ },
+ {
+  "id": 32,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "live_stop"
+  },
+  "ts": 1791231062.6462872,
+  "durable": false
+ },
+ {
+  "id": 33,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "final",
+   "message": "The notes file says: fixture notes.",
+   "user_messages": [
+    "Looking at the notes.",
+    "Done."
+   ],
+   "outcome": "done"
+  },
+  "ts": 1791231062.6635118,
+  "durable": true
+ },
+ {
+  "id": 34,
+  "server_id": "local",
+  "workspace": "/work/fixture",
+  "session": "chat-20261006-021101",
+  "event": {
+   "type": "turn_end"
+  },
+  "ts": 1791231062.713573,
+  "durable": true
+ }
+]

@@ -18,10 +18,13 @@ from .security import redact
 
 _LOG = logging.getLogger("kvist.web.process")
 
-# These are the core events deliberately omitted by SessionJournal. Every
+# These are the core events the session journal never holds: the ones
+# SessionJournal deliberately omits, and command_result, which stdio-multi
+# writes straight to stdout after a command (kernel/event_stdio.py). Every
 # other raw core event is meaningful for a reconnecting frontend and is marked
 # durable on the live envelope; the durable sequence itself remains owned by
-# the core journal.
+# the core journal. A client applies a durable event from the journal, so an
+# event marked durable that the journal never writes would never be applied.
 _TRANSIENT_CORE_EVENTS = frozenset(
     {
         "status",
@@ -30,6 +33,7 @@ _TRANSIENT_CORE_EVENTS = frozenset(
         "debug",
         "stream_chunk",
         "action_output",
+        "command_result",
     }
 )
 
@@ -128,15 +132,17 @@ class SessionProcess:
     def command(self, name: str, args: list[str]) -> None:
         from kernel.llm_clients import MODEL_ROLES
         from kernel.reasoning_effort import EFFORT_LEVELS
+        from kvist_web.configuration import ROLE_CHOICES
 
         if not isinstance(args, list) or not all(isinstance(v, str) and v.strip() for v in args):
             raise ValueError("Command arguments must be nonempty text.")
         if not ((name == "models" and len(args) == len(MODEL_ROLES)) or
-                (name == "effort" and len(args) == 1 and args[0] in EFFORT_LEVELS)):
-            raise ValueError("Only model and reasoning changes are supported here.")
+                (name == "effort" and len(args) == 1 and args[0] in EFFORT_LEVELS) or
+                (name == "role" and len(args) == 1 and args[0] in ROLE_CHOICES)):
+            raise ValueError("Only model, reasoning and role changes are supported here.")
         with self._state_lock:
             if self._snapshot.state not in {ExecutionState.IDLE, ExecutionState.FINISHED, ExecutionState.STOPPED}:
-                raise ValueError("Wait for the current task to finish before changing models.")
+                raise ValueError("Wait for the current task to finish before changing this.")
             self._snapshot.state = ExecutionState.RUNNING
             self._command_in_flight = True
             try:

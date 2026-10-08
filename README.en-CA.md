@@ -182,6 +182,17 @@ The first interactive launch asks for the provider, models, and credentials and
 saves them in `~/.kvist/config.json` (secrets are not printed). Start a new
 terminal in the project and run Kvist again to reuse that configuration.
 
+### Web client
+
+```bash
+kvist-web        # from a source checkout: .venv/bin/kvist-web
+```
+
+`kvist-web` opens Kvist in the browser at `http://127.0.0.1:9671` and walks a first run
+through connecting a model. The directory you start it from becomes the working folder;
+`kvist-web --workspace /path/to/project` picks another. The installer adds the command
+beside `kvist`; details in [frontends/web-local/README.md](frontends/web-local/README.md).
+
 ### AnyModel (default provider)
 
 A blank config defaults to [AnyModel](https://anymodel.org). If

@@ -16,10 +16,12 @@ def serve(root):
 
     def verify(key, **kwargs):
         if key != 'qa-valid-key':
-            raise ValueError('invalid test key')
+            raise anymodel_pricing.AnyModelAuthError('invalid test key')
         return {}
 
     def catalog(provider, credentials, **kwargs):
+        if any(v == 'qa-empty-catalog-key' for v in credentials.values()):
+            return [], None
         if not any(v == 'qa-valid-key' for v in credentials.values()):
             return [], 'invalid key'
         return ['example/fast', 'example/smart'], None

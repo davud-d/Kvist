@@ -10,7 +10,7 @@ const output = process.env.KVIST_QA_OUTPUT || '/tmp/kvist-web-qa';
 await mkdir(output + '/screenshots', { recursive: true });
 const browser = await chromium.launch({ headless: true, ...((process.env.CHROMIUM_EXECUTABLE || process.argv[3]) ? { executablePath: process.env.CHROMIUM_EXECUTABLE || process.argv[3] } : {}) });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-const page = await context.newPage(), errors = [], checks = [], requests = [];
+const page = await context.newPage(), errors = [], checks = [], requests = [], trace = [], started = Date.now();
 page.on('pageerror', e => errors.push(e.message));
 const f = fixture();
 let cursor = 0, failSend = false, trust = false, expired = false, historyDelay = 0, createDelay = 0, connectFail = false, connectLogDelay = 0;
@@ -24,6 +24,7 @@ await page.addInitScript(() => {
 });
 await page.route('**/api/v1/**', async (route) => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace('/api/v1', ''), body = request.method() === 'POST' ? request.postDataJSON() : null;
+    trace.push({ ms: Date.now() - started, method: request.method(), path });
     if (body)
         requests.push({ path, body });
     const json = value => route.fulfill({ json: value });
@@ -107,9 +108,27 @@ await page.route('**/api/v1/**', async (route) => {
         return json({ general: true, credentials: [{ id: 'test_api_key', label: 'Test API key', present: true }] });
     throw new Error(`Unhandled test route ${path}`);
 });
-const check = async (name, fn) => { await fn(); checks.push(name); console.log('PASS', name); };
+// KVIST_ONLY is a regular expression over scenario names; it runs a subset, e.g. in a repeat loop.
+const only = process.env.KVIST_ONLY ? new RegExp(process.env.KVIST_ONLY) : null;
+const check = async (name, fn) => {
+    if (only && !only.test(name))
+        return;
+    try { await fn(); checks.push(name); console.log('PASS', name); }
+    finally { await page.setViewportSize({ width: 1440, height: 900 }); }
+};
 const shot = async (name) => { await page.waitForTimeout(180); await page.screenshot({ path: `${output}/screenshots/${name}.png` }); };
-const select = async (title) => page.getByRole('button', { name: new RegExp('^' + title + ' ·') }).click();
+// The server selector is not rendered (SHOW_SERVERS is false); the server dialog opens from the command palette.
+const openServers = async () => { await page.keyboard.press('Control+k'); await page.locator('#palette-input').fill('Switch server'); await page.keyboard.press('Enter'); await page.locator('#modal .modal-card').waitFor(); };
+// Opens the connect dialog and waits until its alias response is handled: the dialog re-renders
+// #server-fields when /ssh-aliases returns, which adds #ssh-alias-picker and replaces every input.
+const openConnectDialog = async () => {
+    await openServers();
+    const aliases = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/api/v1/ssh-aliases'));
+    await page.getByRole('button', {name:'＋ Connect server',exact:true}).click();
+    await aliases;
+    await page.locator('#server-fields #ssh-alias-picker').waitFor();
+};
+const select = async (title) => page.getByRole('button', { name: new RegExp('^' + title + ',') }).click();
 const emit = async (event, session = 'review', durable = false) => { await page.evaluate(envelope => window.__sources.at(-1).emit(envelope), { id: ++cursor, server_id: 'local', workspace: f.workspace, session, event, durable }); };
 const durable = async (event, session = 'review') => { const list = f.histories[session]; list.push({ seq: list.length + 1, turn: 2, ts: 1780000100, event }); const item = f.sessions.find(s => s.name === session); if (item) {
     item.last_event_id = list.length;
@@ -123,9 +142,9 @@ try {
     await shot('conversation');
     await check('Context survives report calls; usage totals', async () => { assert.equal(await page.locator('#context-button').textContent(), 'Context 54%'); await page.locator('#context-button').click(); assert.match(await page.locator('#inspector-content').innerText(), /69,120/); await page.getByRole('tab', { name: 'Usage', exact: true }).click(); assert.match(await page.locator('#inspector-content').innerText(), /1,300/); await shot('usage'); await page.keyboard.press('Escape'); assert(await page.locator('#context-button').evaluate(n => n === document.activeElement)); });
     await check('Session switching preserves drafts', async () => { await page.locator('#prompt').fill('draft in review'); await select('Review API boundaries'); await page.locator('#history-status').waitFor({ state: 'hidden' }); assert.match(await page.locator('#conversation').textContent(), /single versioned/); await select('Improve session recovery'); assert.equal(await page.locator('#prompt').inputValue(), 'draft in review'); });
-    await check('Unread requires visible dwell, modal blocks receipt', async () => { f.sessions.find(s => s.name === 'unread').unread = true; await select('Review API boundaries'); await page.locator('#server-switcher').click(); const before = requests.filter(r => r.path === '/read' && r.body.session === 'unread').length; await page.waitForTimeout(1600); assert.equal(requests.filter(r => r.path === '/read' && r.body.session === 'unread').length, before); await page.keyboard.press('Escape'); await page.waitForTimeout(1700); assert(requests.some(r => r.path === '/read' && r.body.session === 'unread' && r.body.seq === 3)); });
-    await check('Runtime selector and remote session', async () => { await page.locator('#server-switcher').click(); assert(await page.getByRole('button', { name: /gpu-box Offline/ }).isVisible()); await shot('server-selector'); await page.getByRole('button', { name: /server-gz8q Connected/ }).click(); await page.locator('#history-status').waitFor({ state: 'hidden' }); assert.equal(await page.locator('#active-server-label').textContent(), 'server-gz8q'); assert.match(await page.locator('#conversation').textContent(), /Remote session history/); await shot('remote'); await page.locator('#server-switcher').click(); await page.getByRole('button', { name: 'Local Connected', exact: true }).click(); });
-    await check('Model control uses core catalog and exposes active-session changes', async () => { await emit({ type: 'hello', models: { fast: 'test-model', smart: 'test-smart' }, provider: 'test-provider', effort: 'high' }); await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor(); assert.equal(await page.locator('[name=fast]').inputValue(), 'test-model'); assert.equal(await page.locator('[name=smart]').inputValue(), 'test-smart'); assert(await page.getByRole('button',{name:'Use model in this session'}).isVisible()); await shot('model'); await page.locator('[name=fast]').fill('test-next'); await page.getByRole('button',{name:'Use model in this session'}).click(); await page.locator('#modal').waitFor({state:'hidden'}); assert(requests.some(r=>r.path==='/command' && r.body.name==='models' && r.body.args[0]==='test-next')); await emit({type:'command_result',name:'models',ok:true,message:'Models updated.',effects:{models:{fast:'test-next',smart:'test-smart'}}}); assert.equal(await page.locator('#model-label').textContent(),'test-next'); });
+    await check('Unread requires visible dwell, modal blocks receipt', async () => { f.sessions.find(s => s.name === 'unread').unread = true; await select('Review API boundaries'); await openServers(); const before = requests.filter(r => r.path === '/read' && r.body.session === 'unread').length; await page.waitForTimeout(1600); assert.equal(requests.filter(r => r.path === '/read' && r.body.session === 'unread').length, before); await page.keyboard.press('Escape'); await page.waitForTimeout(1700); assert(requests.some(r => r.path === '/read' && r.body.session === 'unread' && r.body.seq === 3)); });
+    await check('Runtime selector and remote session', async () => { await openServers(); assert(await page.getByRole('button', { name: /gpu-box Offline/ }).isVisible()); await shot('server-selector'); await page.getByRole('button', { name: /server-gz8q Connected/ }).click(); await page.locator('#history-status').waitFor({ state: 'hidden' }); assert.equal(await page.locator('#session-server').textContent(), 'server-gz8q'); assert.match(await page.locator('#conversation').textContent(), /Remote session history/); await shot('remote'); await openServers(); await page.getByRole('button', { name: 'Local Connected', exact: true }).click(); });
+    await check('Model control uses core catalog and exposes active-session changes', async () => { await emit({ type: 'hello', models: { fast: 'test-model', smart: 'test-smart' }, provider: 'test-provider', effort: 'high' }); await page.locator('#model-selector').click(); assert.equal(await page.getByRole('menuitemradio',{name:/^test-model/}).getAttribute('aria-checked'), 'true'); assert(await page.getByRole('menuitemradio',{name:/^test-smart/}).isVisible()); await shot('model'); await page.getByRole('menuitem',{name:/^Enter a model ID/}).click(); await page.locator('[name=model]').fill('test-next'); await page.getByRole('button',{name:'Use this model'}).click(); await page.locator('#modal').waitFor({state:'hidden'}); assert(requests.some(r=>r.path==='/command' && r.body.name==='models' && r.body.args[0]==='test-next' && r.body.args[1]==='test-smart')); await emit({type:'command_result',name:'models',ok:true,message:'Models updated.',effects:{models:{fast:'test-next',smart:'test-smart'}}}); assert.equal(await page.locator('#model-label').textContent(),'test-next'); });
     await check('All tools open, keyboard tabs, Esc and focus return', async () => {
         for (const tab of ['files', 'diff', 'terminal', 'activity', 'context', 'usage']) {
             await page.keyboard.press('Control+k');
@@ -145,18 +164,19 @@ try {
             if (tab === 'terminal')
                 assert.match(await page.locator('#inspector-content').innerText(), /24 tests passed/);
             await page.keyboard.press('Escape');
-            assert(await page.locator('#workspace-view').isHidden());
+            // The view fades out for --dur-fast and is hidden when that animation has finished.
+            await page.locator('#workspace-view').waitFor({ state: 'hidden' });
         }
     });
     await check('Command palette search and workspace selection', async () => { await page.keyboard.press('Control+k'); await shot('command-palette'); await page.keyboard.press('Escape'); await page.keyboard.press('Control+p'); await page.locator('#palette-input').fill('no-such-session'); assert.match(await page.locator('#palette-results').innerText(), /No matching/); await page.locator('#palette-input').fill('Review API'); await page.keyboard.press('Enter'); assert.equal(await page.locator('#session-title').textContent(), 'Review API boundaries'); });
-    await check('Waiting approval / error UI', async () => { await select('Update configuration'); await page.getByRole('button', { name: 'Allow', exact: true }).waitFor(); assert.equal(await page.locator('#agent-state').textContent(), 'Needs input'); await shot('waiting'); await page.getByRole('button', { name: 'Allow', exact: true }).click(); assert(requests.some(r => r.path === '/respond' && r.body.response.request_id === 'approval-1')); await select('Inspect unavailable workspace'); await page.locator('.message.error').waitFor(); await shot('error'); });
-    await check('New session, composer, failed send preserves draft, send and stop', async () => { await page.locator('#new-session').click(); await page.waitForFunction(() => document.querySelector('#session-title').textContent === 'New session'); await shot('empty'); failSend = true; await page.locator('#prompt').fill('A test task'); await page.keyboard.press('Control+Enter'); await page.waitForTimeout(80); assert.equal(await page.locator('#prompt').inputValue(), 'A test task'); failSend = false; await page.keyboard.press('Control+Enter'); await page.locator('#stop-agent').waitFor(); assert.equal(await page.locator('#prompt').inputValue(), ''); await page.locator('#stop-agent').click(); await page.waitForTimeout(220); assert.equal(await page.locator('#agent-state').textContent(), 'Stopped'); });
+    await check('Waiting approval / error UI', async () => { await select('Update configuration'); await page.getByRole('button', { name: 'Allow', exact: true }).waitFor(); assert.equal(await page.locator('#agent-state').textContent(), 'Needs input'); await shot('waiting'); await page.getByRole('button', { name: 'Allow', exact: true }).click(); assert(requests.some(r => r.path === '/respond' && r.body.response.request_id === 'approval-1')); await select('Inspect unavailable workspace'); const notice = page.locator('#conversation .notice-error'); await notice.waitFor(); assert.match(await notice.textContent(), /The workspace is unavailable/); assert.equal(await page.locator('#conversation .message.error').count(), 0); await shot('error'); });
+    await check('New session, composer, failed send keeps the text in its block, Retry, send and stop', async () => { await page.locator('#new-session').click(); await page.waitForFunction(() => document.querySelector('#session-title').textContent === 'New session'); await shot('empty'); failSend = true; await page.locator('#prompt').fill('A test task'); await page.keyboard.press('Control+Enter'); await page.waitForTimeout(80); assert.equal(await page.locator('#prompt').inputValue(), '', 'the text is in its block, not back in the input'); assert.match(await page.locator('.message.user').last().innerText(), /A test task[\s\S]*Not sent[\s\S]*Retry/); failSend = false; await page.locator('.message-failed button').click(); await page.locator('#stop-agent').waitFor(); assert.equal(await page.locator('.message.user').count(), 1, 'a retry that succeeds leaves one message'); assert.equal(await page.locator('#prompt').inputValue(), ''); await page.locator('#stop-agent').click(); await page.waitForTimeout(220); assert.deepEqual(await page.locator('#agent-state').evaluate(n => [n.dataset.state, n.textContent, n.hidden]), ['stopped', '', true]); });
     await check('Streaming coalesces and durable commit does not duplicate', async () => { await select('Improve session recovery'); await durable({ type: 'stream_start', stream_id: 'live-2' }); await page.waitForTimeout(60); const before = await page.locator('.message').count(); await page.evaluate(() => { window.__mutations = 0; window.__observer = new MutationObserver(r => window.__mutations += r.length); window.__observer.observe(document.querySelector('#conversation'), { childList: true, subtree: true }); }); await page.evaluate(({ cursor, workspace }) => { for (let i = 0; i < 2000; i++)
         window.__sources.at(-1).emit({ id: cursor + i, server_id: 'local', workspace, session: 'review', event: { type: 'stream_chunk', stream_id: 'live-2', text: 'Streaming ' + i }, durable: false }); }, { cursor, workspace: f.workspace }); await page.waitForTimeout(80); assert.match(await page.locator('#conversation').textContent(), /Streaming 1999/); assert.equal(await page.locator('.message').count(), before); assert(await page.evaluate(() => window.__mutations) < 20); await shot('running'); await durable({ type: 'stream_commit', stream_id: 'live-2', text: 'Streaming **finished**.' }); await page.waitForTimeout(80); assert.equal(await page.locator('.message').count(), before); await page.evaluate(() => window.__observer.disconnect()); });
-    await check('Background completion gets unread and recovers on selection', async () => { await durable({ type: 'stream_commit', stream_id: 'background-stream', text: 'Background tests finished.' }, 'running'); f.sessions.find(s => s.name === 'running').execution = 'finished'; await durable({ type: 'turn_end' }, 'running'); await page.waitForTimeout(250); assert(await page.getByRole('button', { name: /Run regression tests.*Unread/ }).locator('.unread').isVisible()); await shot('background-unread'); await select('Run regression tests'); await page.locator('#history-status').waitFor({ state: 'hidden' }); assert.match(await page.locator('#conversation').textContent(), /Background tests finished/); await page.waitForTimeout(1650); assert(!f.sessions.find(s => s.name === 'running').unread); });
+    await check('Background completion gets unread and recovers on selection', async () => { await durable({ type: 'stream_commit', stream_id: 'background-stream', text: 'Background tests finished.' }, 'running'); f.sessions.find(s => s.name === 'running').execution = 'finished'; await durable({ type: 'turn_end' }, 'running'); await page.waitForTimeout(250); assert(await page.getByRole('button', { name: /Run regression tests.*Unread/ }).locator('.ind-unread').isVisible()); await shot('background-unread'); await select('Run regression tests'); await page.locator('#history-status').waitFor({ state: 'hidden' }); assert.match(await page.locator('#conversation').textContent(), /Background tests finished/); await page.waitForTimeout(1650); assert(!f.sessions.find(s => s.name === 'running').unread); });
     await check('Reconnect keeps transcript and recovers actual missed events', async () => { await select('Improve session recovery'); const text = await page.locator('#conversation').textContent(); await page.evaluate(() => window.__sources.at(-1).onerror({})); assert.equal(await page.locator('#connection-label').textContent(), 'Reconnecting…'); assert.equal(await page.locator('#conversation').textContent(), text); await shot('reconnecting'); f.histories.review.push({ seq: f.histories.review.length + 1, turn: 2, event: { type: 'message', markdown: 'Recovered result' } }); await page.evaluate(() => window.__sources.at(-1).onopen({})); await page.getByText('Recovered result', { exact: true }).waitFor(); assert.match(await page.locator('#toasts').innerText(), /recovered 1 events/); });
     await check('Remote stream reset does not replace controller epoch', async () => { await emit({ type: 'stream.reset', remote: true, epoch: 'remote-epoch' }); assert.match(await page.evaluate(() => window.__sources.at(-1).url), /epoch=test-epoch/); await emit({ type: 'stream.reset', epoch: 'next-epoch' }); await page.waitForTimeout(50); assert.match(await page.evaluate(() => window.__sources.at(-1).url), /epoch=next-epoch/); });
-    await check('Connection dialog methods, trust flow and workspace destination', async () => { await page.locator('#server-switcher').click(); await page.getByRole('button', { name: '＋ Connect server', exact: true }).click(); await shot('connect-ssh-config'); await page.getByRole('tab', { name: 'Manual', exact: true }).click(); await page.getByLabel('Host', { exact: true }).fill('new-host'); await page.getByLabel('Username', { exact: true }).fill('developer'); await page.getByLabel('Password', { exact: true }).fill('test-only'); await shot('connect-manual'); trust = true; await page.getByRole('button', { name: 'Connect', exact: true }).click(); await page.getByRole('button', { name: 'Trust and connect' }).waitFor(); await shot('host-trust'); await page.getByRole('button', { name: 'Trust and connect' }).click(); await page.getByRole('button',{name:'Open workspace',exact:true}).click(); await page.getByLabel('Absolute directory path').waitFor(); assert(requests.some(r => r.path === '/servers/connect' && r.body.fingerprint === 'SHA256:test-fingerprint')); await page.keyboard.press('Escape'); await page.locator('#server-switcher').click(); await page.getByRole('button', { name: '＋ Connect server', exact: true }).click(); await page.getByRole('tab', { name: 'SSH key', exact: true }).click(); assert(await page.getByLabel('Private key path').isVisible()); await shot('connect-key'); await page.keyboard.press('Escape'); });
+    await check('Connection dialog methods, trust flow and workspace destination', async () => { await openServers(); await page.getByRole('button', { name: '＋ Connect server', exact: true }).click(); await shot('connect-ssh-config'); await page.getByRole('tab', { name: 'Manual', exact: true }).click(); await page.getByLabel('Host', { exact: true }).fill('new-host'); await page.getByLabel('Username', { exact: true }).fill('developer'); await page.getByLabel('Password', { exact: true }).fill('test-only'); await shot('connect-manual'); trust = true; await page.getByRole('button', { name: 'Connect', exact: true }).click(); await page.getByRole('button', { name: 'Trust and connect' }).waitFor(); await shot('host-trust'); await page.getByRole('button', { name: 'Trust and connect' }).click(); await page.getByRole('button',{name:'Open workspace',exact:true}).click(); await page.getByLabel('Absolute directory path').waitFor(); assert(requests.some(r => r.path === '/servers/connect' && r.body.fingerprint === 'SHA256:test-fingerprint')); await page.keyboard.press('Escape'); await openServers(); await page.getByRole('button', { name: '＋ Connect server', exact: true }).click(); await page.getByRole('tab', { name: 'SSH key', exact: true }).click(); assert(await page.getByLabel('Private key path').isVisible()); await shot('connect-key'); await page.keyboard.press('Escape'); });
     await check('Long conversation and scroll-aware unread', async () => { await select('Long conversation'); await page.locator('#history-status').waitFor({ state: 'hidden' }); assert.equal(await page.locator('#conversation .message').count(), 2200); await page.locator('#conversation').evaluate(n => n.scrollTop = 0); await page.waitForTimeout(70); assert(await page.locator('#jump-latest').isVisible()); await shot('long-conversation'); await page.locator('#jump-latest').click(); });
     await select('Improve session recovery');
     await check('Responsive viewports and zoom-equivalent CSS viewports', async () => {
@@ -171,37 +191,22 @@ try {
                 await shot(`viewport-${width}x${height}-${Math.round(zoom * 100)}`);
             }
         await page.setViewportSize({ width: 390, height: 844 });
-        assert(await page.locator('#sidebar').isHidden());
+        // The drawer slides off-canvas with a transform, so "hidden" means its right edge reached x <= 0.
+        const sidebarRight = () => page.evaluate(() => document.querySelector('#sidebar').getBoundingClientRect().right);
+        await page.waitForFunction(() => document.querySelector('#sidebar').getBoundingClientRect().right <= 0);
         await page.locator('#toggle-sidebar').click();
         assert(await page.locator('#sidebar').isVisible());
         await shot('mobile-sidebar');
         await page.keyboard.press('Escape');
-        await page.locator('#server-switcher').click();
+        await openServers();
         await shot('mobile-selector');
         await page.keyboard.press('Escape');
         await shot('mobile');
         await page.setViewportSize({ width: 1440, height: 900 });
+        assert((await sidebarRight()) > 0);
         await page.locator('#toggle-sidebar').click();
         await shot('collapsed-sidebar');
         await page.locator('#toggle-sidebar').click();
-    });
-    await check('Cursor glow CPU/task profile and reduced motion', async () => {
-        const cdp = await context.newCDPSession(page);
-        await cdp.send('Performance.enable');
-        const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(m => [m.name, m.value]));
-        const start = await metrics(), t = Date.now();
-        for (let i = 0; i < 100; i++)
-            await page.mouse.move(250 + i * 9, 350 + Math.sin(i / 8) * 140);
-        await page.waitForTimeout(300);
-        const end = await metrics();
-        const result = { wallMs: Date.now() - t, taskMs: (end.TaskDuration - start.TaskDuration) * 1000, layoutMs: (end.LayoutDuration - start.LayoutDuration) * 1000, recalcMs: (end.RecalcStyleDuration - start.RecalcStyleDuration) * 1000, heapBytes: end.JSHeapUsedSize };
-        await writeFile(output + '/performance.json', JSON.stringify(result, null, 2));
-        console.log('PERFORMANCE', result);
-        assert(await page.locator('#cursor-glow').evaluate(n => n.classList.contains('active')));
-        await shot('cursor-glow');
-        await page.emulateMedia({ reducedMotion: 'reduce' });
-        assert(await page.locator('#cursor-glow').isHidden());
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
     });
     await check('Late histories cannot overwrite the selected session', async () => {
         historyDelay = 180;
@@ -291,8 +296,7 @@ try {
         assert.equal(requests.filter(r => r.path === '/send').at(-1).body.text, 'Send while creating');
     });
     await check('Failed SSH connection is actionable and retry keeps identity', async () => {
-        await page.locator('#server-switcher').click();
-        await page.getByRole('button', {name:'＋ Connect server',exact:true}).click();
+        await openConnectDialog();
         await page.getByLabel('SSH alias', {exact:true}).fill('rejected-key-host');
         connectFail = true;
         await page.getByRole('button', {name:'Connect',exact:true}).click();
@@ -308,8 +312,7 @@ try {
     });
     await check('Connection logs stream before completion and stay until acknowledged', async () => {
         await page.setViewportSize({width:1440,height:900});
-        await page.locator('#server-switcher').click();
-        await page.getByRole('button',{name:'＋ Connect server',exact:true}).click();
+        await openConnectDialog();
         await page.getByLabel('SSH alias',{exact:true}).fill('setup-logs-host');
         connectLogDelay = 1600;
         await page.getByRole('button',{name:'Connect',exact:true}).click();
@@ -340,5 +343,6 @@ try {
     console.log(`PASS ${checks.length} browser scenarios`);
 }
 finally {
+    await writeFile(output + '/trace.json', JSON.stringify({ trace, errors }, null, 2));
     await browser.close();
 }

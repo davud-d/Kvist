@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Kvist onboarding prototype</title>
+  <!-- The client's own stylesheet, unchanged; proto.css adds only the new parts. -->
+  <link rel="stylesheet" href="../../../frontends/web-local/kvist_web/client/styles.css">
+  <link rel="stylesheet" href="proto.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <aside id="sidebar" class="sidebar" aria-label="Sessions and workspaces">
+      <header class="sidebar-head"><span class="brand"><img src="../../../frontends/web-local/kvist_web/client/kvist-mark.svg" alt="" width="25" height="25">Kvist</span></header>
+      <button id="new-session" class="new-session"><span data-icon="plus"></span>New session</button>
+      <nav class="navigation" aria-label="Sessions"><div class="nav-group-label">my-project</div><p id="nav-empty" class="nav-empty">No sessions yet</p></nav>
+      <footer class="sidebar-foot"><button class="quiet-button">Add workspace</button><button class="quiet-button" id="sidebar-commands"><kbd>Ctrl K</kbd>Commands</button></footer>
+    </aside>
+    <main class="main">
+      <header class="session-head"><button id="toggle-sidebar" class="icon-button" aria-label="Toggle sidebar" data-icon="sidebar"></button><div class="session-identity"><h1 id="session-title">New session</h1><p><span id="session-path">~/code/my-project</span></p></div></header>
+
+      <!-- Screen 1: first run. Shown instead of the conversation while no provider works. -->
+      <section id="setup" class="setup" aria-labelledby="setup-title" hidden>
+        <h2 id="setup-title">Connect a model</h2>
+        <p class="setup-lede">Kvist sends your tasks to a language model. AnyModel gives you one key for many models.</p>
+
+        <form id="setup-anymodel" class="setup-form" autocomplete="off" novalidate>
+          <ol class="setup-steps">
+            <li>
+              <p class="setup-step-title">Get a key</p>
+              <button type="button" id="register" class="quiet-button setup-register">Create an AnyModel account</button>
+              <p id="register-note" class="setup-note" role="status" hidden></p>
+            </li>
+            <li>
+              <label class="setup-step-title" for="anymodel-key">Paste the key</label>
+              <input id="anymodel-key" class="setup-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your AnyModel key">
+              <p id="key-status" class="setup-note" role="status" hidden></p>
+            </li>
+          </ol>
+          <label id="anymodel-model-field" class="setup-field" hidden>Model<select id="anymodel-model"></select></label>
+          <div class="setup-actions">
+            <button type="submit" id="start" class="primary-button" disabled>Start</button>
+            <button type="button" id="other-provider" class="link-button">I have another provider</button>
+          </div>
+        </form>
+
+        <form id="setup-other" class="setup-form" autocomplete="off" novalidate hidden>
+          <label class="setup-field">Provider<select id="other-provider-select"></select></label>
+          <label class="setup-field" for="other-key"><span id="other-key-label">API key</span><input id="other-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your key"></label>
+          <p id="other-key-status" class="setup-note" role="status" hidden></p>
+          <label id="other-model-field" class="setup-field">Model<select id="other-model"></select></label>
+          <label id="other-model-id-field" class="setup-field" hidden>Model ID<input id="other-model-id" autocomplete="off" placeholder="Enter the model ID from your provider"></label>
+          <div class="setup-actions">
+            <button type="submit" id="other-start" class="primary-button" disabled>Start</button>
+            <button type="button" id="back-anymodel" class="link-button">Use AnyModel instead</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Screen 2: the empty session. -->
+      <div id="session" class="conversation-wrap" hidden>
+        <section id="conversation" class="conversation" aria-label="Conversation" tabindex="0"></section>
+        <section id="empty" class="session-empty" aria-labelledby="empty-title">
+          <h2 id="empty-title">What should Kvist do in my-project?</h2>
+          <div class="starters" role="list">
+            <button role="listitem" class="starter" data-text="Explain how this project is organized">Explain how this project is organized</button>
+            <button role="listitem" class="starter" data-text="Find and fix a failing test">Find and fix a failing test</button>
+            <button role="listitem" class="starter" data-text="Review my uncommitted changes">Review my uncommitted changes</button>
+            <button role="listitem" class="starter" data-text="Add a README section that explains how to run it">Add a README section on how to run it</button>
+          </div>
+          <p class="session-empty-hint">Type <kbd>/</kbd> for commands, such as changing the model.</p>
+        </section>
+      </div>
+
+      <!-- Screens 3 and 4: the input with its status chips, menus and the command menu. -->
+      <div id="composer-area" class="composer-area proto-composer-area" hidden>
+        <div id="chip-menu" class="chip-menu" role="menu" hidden></div>
+        <div id="slash-menu" class="slash-menu" role="listbox" aria-label="Commands" hidden></div>
+        <form id="composer" class="composer">
+          <label class="sr-only" for="prompt">Message Kvist</label>
+          <textarea id="prompt" rows="2" placeholder="Message Kvist, or type / for commands" spellcheck="false" role="combobox" aria-expanded="false" aria-controls="slash-menu" aria-autocomplete="list"></textarea>
+          <div class="composer-foot">
+            <div class="composer-controls chips">
+              <button type="button" class="icon-button" aria-label="Attach images" data-icon="paperclip"></button>
+              <button type="button" id="slash-button" class="icon-button proto-slash" aria-label="Commands" title="Commands (/)">/</button>
+              <button type="button" class="chip" id="chip-model" aria-haspopup="menu" aria-expanded="false"><span class="chip-name">Model</span><span class="chip-value"></span></button>
+              <button type="button" class="chip" id="chip-effort" aria-haspopup="menu" aria-expanded="false"><span class="chip-name">Reasoning</span><span class="chip-value"></span></button>
+              <button type="button" class="chip" id="chip-role" aria-haspopup="menu" aria-expanded="false"><span class="chip-name">Role</span><span class="chip-value"></span></button>
+            </div>
+            <div class="composer-controls"><button id="send-button" type="submit" class="send-button" aria-label="Send message" title="Send, Ctrl+Enter" data-icon="arrow-up" disabled aria-disabled="true"></button></div>
+          </div>
+        </form>
+        <p class="composer-hint">Ctrl+Enter to send</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- Screen 5: add or switch a provider, as a dialog over the session. -->
+  <div id="modal" class="overlay" hidden>
+    <section class="modal-card proto-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <header class="proto-modal-head"><h2 id="modal-title">Add a provider</h2><button type="button" id="modal-close" class="icon-button" aria-label="Close" data-icon="close"></button></header>
+      <div id="modal-body"></div>
+    </section>
+  </div>
+
+  <div id="palette" class="overlay" hidden><section class="palette" role="dialog" aria-modal="true" aria-label="Command palette"><div class="palette-search"><input id="palette-input" aria-label="Search commands" autocomplete="off" placeholder="Type a command…"></div><div id="palette-results" class="palette-results"></div><footer><span>↑ ↓ to move</span><span>Enter to run, Esc to close</span></footer></section></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <script src="fixture.js"></script>
+  <script src="proto.js"></script>
+</body>
+</html>

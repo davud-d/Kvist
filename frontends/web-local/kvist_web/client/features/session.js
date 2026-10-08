@@ -1,14 +1,26 @@
 import { api } from "/assets/utils/api.js";
-import { state, sessionOf, update, keyOf, busy, stateLabel } from "/assets/state/store.js";
+import { state, serverOf, sessionOf, update, keyOf, busy, stateLabel, execution } from "/assets/state/store.js";
 import { $, el, markdown, toast } from "/assets/utils/ui.js";
-import { actionLabel, renderInspector, scheduleInspector } from "/assets/features/views.js";
+import { renderInspector, scheduleInspector } from "/assets/features/views.js";
 import { configuredModel } from '/assets/features/configuration.js';
+import { initialState, reduce, reducesLive } from '/assets/features/blocks.js';
+import { createFeed } from '/assets/features/feed.js';
+import { appear, canAnimate } from '/assets/utils/motion.js';
+import { renderPending } from '/assets/features/pending.js';
+import { answerSummary } from '/assets/features/format.js';
 export { renderInspector } from "/assets/features/views.js";
 const conversation = document.querySelector("#conversation"), empty = document.querySelector("#empty-state");
 const composer = document.querySelector("#composer"), pending = document.querySelector("#pending-input");
-const title = document.querySelector("#session-title"), path = document.querySelector("#session-path");
+// The input's parts are kept as references: a closed session takes them out of the DOM (see showClosed).
+const prompt = document.querySelector("#prompt"), sendButton = document.querySelector("#send-button");
+const modelLabel = document.querySelector("#model-label");
+const slot = document.querySelector("#composer-slot"), hint = document.querySelector(".composer-hint");
+const title = document.querySelector("#session-title"), path = document.querySelector("#session-path"), server = document.querySelector("#session-server");
 const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
-const streamNodes = new Map();
+// The open session's feed: the reducer state is the single source of what the conversation shows. Retry on a
+// "Not sent" message is handled by app.js, which owns the sending.
+const feedOptions = { onRetry: block => document.dispatchEvent(new CustomEvent('kvist:retry-send', { detail: { localId: block.localId, text: block.text } })) };
+let feedState = initialState(), feed = createFeed(conversation, feedOptions);
 let selectionGeneration = 0;
 let activeRecovery = null;
 function sameSelection(left, right) {
@@ -23,114 +35,137 @@ export function isCurrentSelection(snapshot) {
 function currentSelectionMatches(selection, generation) {
     return generation === selectionGeneration && sameSelection(selection, state.selected);
 }
-let followTail = true, paintFrame = 0;
-const pendingStreams = new Map(), tools = new Map();
+// A closed session has no input: the banner takes the place of the field and its hint, at the same size
+// (the slot keeps the height the input had), and the status line below stays. The unsent draft stays in
+// state.drafts under this session's key; it is never carried into the next session.
+const banner = el('div', 'closed-banner'), newButton = el('button', 'closed-new', 'New session');
+banner.setAttribute('role', 'status');
+newButton.type = 'button';
+newButton.onclick = () => document.dispatchEvent(new Event('kvist:new-session'));
+// A held Enter would repeat the click; one press is one new session.
+newButton.addEventListener('keydown', event => { if (event.key === 'Enter' && event.repeat)
+    event.preventDefault(); });
+banner.append(el('span', 'closed-text', 'This conversation has ended'), newButton);
+let closedShown = false;
+function focusBanner() {
+    if (closedShown && !document.querySelector('.overlay:not([hidden])'))
+        newButton.focus();
+}
+function showClosed(closed, animate = false) {
+    if (closed === closedShown)
+        return;
+    closedShown = closed;
+    if (!closed) {
+        slot.style.minHeight = '';
+        slot.replaceChildren(composer, hint);
+        return;
+    }
+    const height = slot.getBoundingClientRect().height, field = composer.getBoundingClientRect().height;
+    if (height > 0)
+        slot.style.minHeight = `${height}px`;
+    banner.style.minHeight = field > 0 ? `${field}px` : '';
+    slot.replaceChildren(banner);
+    if (animate)
+        appear(banner);
+    focusBanner();
+}
+// feedReady is false from the moment a session starts opening until its first draw: what is painted before
+// that is the restored session, not something that arrived live, and nothing in it appears.
+let followTail = true, paintFrame = 0, feedReady = false;
+function paintFeed(live = true) {
+    feed.render(feedState, { live: live && feedReady });
+    showClosed(feedState.meta.closed !== null, live && feedReady);
+    if (conversation.children.length)
+        empty.hidden = true;
+}
+// The feed container of a session that has just been drawn and scrolled to its end fades in (and so does the
+// empty state when there is no feed); a quick switch cancels the animations still running. The container does
+// not rise: with the 6px rise the longest frame of a switch to 300 tool rows was 66.6 ms in three runs of eight,
+// over the 50 ms line, so only the opacity stays.
+let feedAnimations = [];
+function revealContent() {
+    for (const animation of feedAnimations)
+        animation?.cancel();
+    feedAnimations = [appear(conversation), empty.hidden ? null : appear(empty)];
+}
+// Following the end of the feed. Within FOLLOW_PX of the bottom it stays at its end as content arrives: a new
+// row scrolls there smoothly, the growth of a streaming row instantly (a smooth scroll per chunk would lag
+// behind the text). Higher up the feed does not move and the "Jump to latest" button shows. `autoScroll` marks a
+// smooth scroll this client started, which must not be mistaken for the person scrolling away.
+const FOLLOW_PX = 80;
+let autoScroll = false, drawnRows = 0;
+const gapToEnd = () => conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight;
+function scrollToEnd(smooth) {
+    autoScroll = smooth && canAnimate() && gapToEnd() > 1;
+    if (autoScroll)
+        conversation.scrollTo({ top: conversation.scrollHeight, behavior: 'smooth' });
+    else
+        conversation.scrollTop = conversation.scrollHeight;
+}
 function queuePaint() {
     if (paintFrame)
         return;
     paintFrame = requestAnimationFrame(() => {
         paintFrame = 0;
-        for (const [body, text] of pendingStreams)
-            body.textContent = text;
-        pendingStreams.clear();
+        paintFeed();
+        const rows = conversation.children.length, added = rows !== drawnRows;
+        drawnRows = rows;
         if (followTail)
-            conversation.scrollTop = conversation.scrollHeight;
-        $('#jump-latest').hidden = followTail;
+            scrollToEnd(added);
+        showJump(!followTail);
     });
 }
-function message(role, text, cls = "") {
-    const row = el('article', `message ${role === 'You' ? 'user' : ''} ${cls}`);
-    const label = el('div', 'message-role');
-    if (role === 'Kvist') {
-        const mark = el('img');
-        mark.src = '/assets/kvist-mark.svg';
-        mark.alt = '';
-        label.append(mark);
-    }
-    label.append(document.createTextNode(role));
-    const body = el('div', 'message-body');
-    markdown(body, text);
-    row.append(label, body);
-    conversation.append(row);
-    empty.hidden = true;
-    return body;
-}
-// An answer of its own follows these, so a call row would only repeat it.
-const TERMINAL_ACTIONS = new Set(['final_answer', 'report_to_user', 'refuse']);
-
-// What the person is told an action is, never the protocol's own name.
-const TOOL_NAMES = {
-    read_file: 'Read', read_multiple_files: 'Read',
-    write_file: 'Edit', append_file: 'Edit', replace_in_file: 'Edit',
-    list_dir: 'List', list_tree: 'List',
-    find_files: 'Search', search_code: 'Search',
-    git_status: 'Bash', git_diff: 'Bash', run_shell: 'Bash',
-    web_search: 'Search the web', fetch_url: 'Fetch', delegate_task: 'Task',
-    offer_plan: 'Plan', propose_plan: 'Plan', end_session: 'Close session',
-};
-
-// argv arrives as a list; a comma-joined default toString is not a command.
-const TARGET_KEYS = ['path', 'command', 'query', 'pattern', 'url', 'dir', 'directory'];
-function actionTarget(action, args) {
-    if (action === 'git_status') return 'git status';
-    if (action === 'git_diff') return `git diff ${args.path || ''}`.trim();
-    for (const key of TARGET_KEYS) {
-        const value = args[key];
-        if (typeof value === 'string' && value) return value;
-        if (Array.isArray(value) && value.length) return value.map(String).join(' ');
-    }
-    const paths = args.paths;
-    if (Array.isArray(paths) && paths.length) return paths.map(String).join(', ');
-    return '';
-}
-
-function tool(event) {
-    if (TERMINAL_ACTIONS.has(event.action_type)) return;
-
-    const key = event.call_id || `step:${event.step}`;
-    let row = tools.get(key);
-    if (!row) {
-        row = el('details', 'tool tool-running');
-        const summary = el('summary');
-        summary.append(el('span', 'tool-label'), el('span', 'tool-target'), el('span', 'tool-status'));
-        row.append(summary, el('pre'));
-        tools.set(key, row);
-        conversation.append(row);
-    }
-    const summary = row.querySelector('summary');
-    const args = event.action_args || {};
-    const target = actionTarget(event.action_type, args);
-    summary.querySelector('.tool-label').textContent = TOOL_NAMES[event.action_type] || event.action_type;
-    summary.querySelector('.tool-target').textContent = target ? `(${target})` : '';
-
-    // A step only announces the call; the result arrives as action_result/action_output.
-    if (event.type === 'step') {
-        summary.querySelector('.tool-status').textContent = '';
-        empty.hidden = true;
+// "Jump to latest" fades in and rises 4px (it is centred by its own translateX).
+function showJump(visible) {
+    const button = $('#jump-latest');
+    if (button.hidden === !visible)
         return;
-    }
-
-    row.classList.remove('tool-running');
-    const failed = event.ok === false || (typeof event.exit_code === 'number' && event.exit_code !== 0);
-    row.classList.toggle('tool-failed', failed);
-    summary.querySelector('.tool-status').textContent = failed
-        ? (typeof event.exit_code === 'number' && event.exit_code !== 0 ? `exit ${event.exit_code}` : 'failed')
-        : '';
-    row.querySelector('pre').textContent = event.output || '(no output)';
-    empty.hidden = true;
+    button.hidden = !visible;
+    if (visible)
+        appear(button, { rise: 4, translate: 'translateX(-50%)' });
+}
+// A message the person sends is in the feed at once, as "sending", and the journal's record of it merges into
+// that block later (blocks.js). While the session is still opening there is no feed to put it in: null, and the
+// message shows up when the journal has it.
+let echoCount = 0;
+export function echoSent(text) {
+    if (!feedReady)
+        return null;
+    const localId = `local-${++echoCount}`;
+    feedState = reduce(feedState, { event: { type: 'client.user_sent', local_id: localId, text } });
+    followTail = true;
+    paintFeed();
+    drawnRows = conversation.children.length;
+    scrollToEnd(true);
+    return localId;
+}
+// change: 'failed' (refused: "Not sent" with Retry), 'retry' (sending again) or 'unsent' (never started).
+export function changeEcho(localId, change) {
+    feedState = reduce(feedState, { event: { type: `client.user_${change}`, local_id: localId } });
+    queuePaint();
+}
+// Header line under the title: the workspace path, and the server's name beside it unless it is the local one.
+export function showPlace(serverId, workspace) {
+    const entry = serverId === 'local' ? null : serverOf(serverId);
+    path.textContent = workspace;
+    $('#empty-title').textContent = `What should Kvist do in ${workspace.split(/[\\/]/).filter(Boolean).pop() || workspace}?`;
+    server.hidden = !entry;
+    server.textContent = entry ? entry.server.name : '';
 }
 export function renderMetadata() {
-    $('#model-label').textContent = state.model || configuredModel();
-    $('#model-selector').title = state.model ? `Model: ${state.model}` : 'Model and reasoning details';
+    modelLabel.textContent = state.model || configuredModel();
+    document.dispatchEvent(new CustomEvent('kvist:configuration'));
     const c = state.context;
-    $('#context-button').textContent = c?.context_limit ? `Context ${Math.round(c.context_tokens / c.context_limit * 100)}%` : 'Context —';
+    $('#context-button').hidden = !c?.context_limit;
+    $('#context-button').textContent = c?.context_limit ? `Context ${Math.round(c.context_tokens / c.context_limit * 100)}%` : '';
     $('#context-button').title = c ? `${c.context_tokens.toLocaleString()} / ${c.context_limit?.toLocaleString() || 'unknown'} tokens` : 'Context has not been reported yet';
 }
 function rememberEvent(event) {
     // A compliant producer never includes a secret's existing value, but keep
     // browser state safe if an older/third-party producer gets that wrong.
     const value = event.type === "input_request" && event.kind === "secret" ? { ...event, current_value: "" } : event;
-    if (['stream_chunk', 'status', 'reasoning_chunk'].includes(event.type))
+    // The reducer takes these live and again from the journal; no view reads them.
+    if (['stream_chunk', 'status', 'reasoning_chunk', 'stream_start', 'reasoning_start', 'reasoning_commit'].includes(event.type))
         return;
     if (event.type === 'action_output') {
         const previous = state.events.findLastIndex(e => e.type === 'action_output' && e.call_id === event.call_id && e.step === event.step);
@@ -155,33 +190,30 @@ function reconcileAgentState(event) {
         setAgentState("waiting_for_user");
     }
     else if (kind === 'command_result') {
-        pending.hidden = true;
+        hidePending();
         setAgentState('idle');
     }
     else if (kind === "turn_end") {
-        pending.hidden = true;
+        hidePending();
         setAgentState(event.stopped_by_user ? "stopped" : "finished");
     }
     else if (kind === "error") {
-        pending.hidden = true;
+        hidePending();
         setAgentState("failed");
     }
     else if (kind === "agent.process_exited") {
-        pending.hidden = true;
+        hidePending();
         setAgentState(Number(event.code) === 0 ? "finished" : "failed");
     }
 }
-export function applyEvent(event, { initial = false, durableReplay = false } = {}) {
+// envelope: {seq?, ts?} of the journal record the event came from; a live event has neither seq nor
+// a journal copy yet, so the reducer never deduplicates it.
+export function applyEvent(event, { initial = false, durableReplay = false, seq, ts } = {}) {
     if (!event || typeof event.type !== "string")
         return;
     const kind = event.type;
-    const knownStream = kind === "stream_start" && typeof event.stream_id === "string" && streamNodes.has(event.stream_id);
-    if (!knownStream)
-        rememberEvent(event);
-    // The live stream may reserve its row before the journal returns the user
-    // message. At the durable start record, place that same row in journal order.
-    if (knownStream && durableReplay)
-        conversation.append(streamNodes.get(event.stream_id).closest('.message'));
+    rememberEvent(event);
+    feedState = reduce(feedState, { ...(seq != null && { seq }), ...(ts != null && { ts }), event });
     if (kind === 'hello') {
         state.hello = event;
         state.model = event.models?.fast || state.model;
@@ -193,7 +225,10 @@ export function applyEvent(event, { initial = false, durableReplay = false } = {
             state.model = event.effects.models?.fast || state.model;
             renderMetadata();
         }
-        if (!initial && !durableReplay) toast(event.message || (event.ok ? 'Configuration updated' : 'Configuration change failed'), !event.ok);
+        if (!initial && !durableReplay) {
+            toast(event.message || (event.ok ? 'Configuration updated' : 'Configuration change failed'), !event.ok);
+            document.dispatchEvent(new CustomEvent('kvist:command-result', { detail: event }));
+        }
     }
     else if (kind === 'usage') {
         state.usage.input += Number(event.input_tokens) || 0;
@@ -205,80 +240,49 @@ export function applyEvent(event, { initial = false, durableReplay = false } = {
             state.model = event.model;
         renderMetadata();
     }
-    else if (kind === "user") {
-        tools.clear();
-        message("You", event.text || "");
-    }
-    else if (kind === "message" || kind === "plan")
-        message("Kvist", event.markdown || "");
-    else if (kind === "final")
-        message("Kvist", event.message || "");
-    else if (kind === "stream_start" && !knownStream) {
-        const body = message("Kvist", "");
-        if (typeof event.stream_id === "string")
-            streamNodes.set(event.stream_id, body);
-    }
-    else if (kind === "stream_chunk") {
-        const body = streamNodes.get(event.stream_id);
-        if (body) {
-            // append=true carries a delta; append=false or absent (older cores) a full snapshot.
-            pendingStreams.set(body, event.append === true ? (pendingStreams.get(body) ?? body.textContent) + (event.text || "") : event.text || "");
-            queuePaint();
-        }
-    }
-    else if (kind === "stream_commit") {
-        const body = streamNodes.get(event.stream_id);
-        if (body) {
-            pendingStreams.delete(body);
-            markdown(body, event.text || "");
-        }
-        else {
-            const committed = message("Kvist", event.text || "");
-            streamNodes.set(event.stream_id, committed);
-        }
-    }
-    else if (kind === "step" || kind === "action_result")
-        tool(event);
-    else if (kind === "error")
-        message("Error", event.message || "Kvist failed", "error");
     else if (kind === "input_request" && !initial)
         showPending(event);
-    else if (kind === 'action_output') {
-        const details = tools.get(event.call_id || `step:${event.step}`);
-        if (details)
-            details.querySelector('pre').textContent = event.output || '';
-    }
-    else if (kind === 'turn_end' || kind === 'error')
-        pending.hidden = true;
+    else if (kind === 'turn_end')
+        hidePending();
     if (!initial)
         reconcileAgentState(event);
+    // Streamed text and replayed records are painted once per frame; everything else shows at once.
+    if (!initial && kind !== 'stream_chunk' && !durableReplay)
+        paintFeed();
     if (!initial)
         queuePaint();
     scheduleInspector();
 }
 export async function openSession(serverId, workspace, session) {
     if (state.selected)
-        state.drafts.set(keyOf(state.selected), $('#prompt').value);
+        state.drafts.set(keyOf(state.selected), prompt.value);
     const generation = ++selectionGeneration;
+    feedReady = false;
+    for (const animation of feedAnimations)
+        animation?.cancel();
     update(s => { s.selected = { serverId, workspace, session }; s.events = []; s.eventSeq = 0; s.diffReport = ""; s.usage = { input: 0, output: 0, calls: 0 }; s.context = null; s.model = ""; s.hello = null; });
-    pendingStreams.clear();
-    tools.clear();
+    feedState = initialState();
+    feed.destroy();
+    feed = createFeed(conversation, feedOptions);
     followTail = true;
-    streamNodes.clear();
     conversation.replaceChildren();
     empty.hidden = true;
-    $('#prompt').value = state.drafts.get(keyOf(state.selected)) || '';
-    $('#prompt').dispatchEvent(new Event('input'));
+    prompt.value = state.drafts.get(keyOf(state.selected)) || '';
+    prompt.dispatchEvent(new Event('input'));
     state.hello = state.modelInfo.get(keyOf(state.selected)) || null;
     state.model = state.hello?.models?.fast || '';
     renderMetadata();
     conversation.hidden = false;
     composer.hidden = false;
-    pending.hidden = true;
+    hidePending();
     const item = sessionOf();
+    // Navigation already knows a closed session; the history page confirms it, so the banner is there before the feed is.
+    if (item?.closed === true)
+        feedState = reduce(feedState, { event: { type: 'client.session_closed' } });
+    showClosed(feedState.meta.closed !== null);
     title.textContent = item?.title || session;
-    path.textContent = `${workspace} · ${serverId}`;
-    setAgentState(item?.execution || "idle");
+    showPlace(serverId, workspace);
+    setAgentState(item?.execution);
     const selection = { serverId, workspace, session };
     $('#history-status').hidden = false;
     $('#history-status').textContent = 'Loading conversation…';
@@ -297,16 +301,29 @@ export async function openSession(serverId, workspace, session) {
     if (!currentSelectionMatches(selection, generation))
         return false;
     $('#history-status').hidden = true;
+    paintFeed(false);
     empty.hidden = conversation.children.length > 0;
     const latest = sessionOf();
     setAgentState(latest?.execution || 'idle');
-    pending.hidden = true;
+    hidePending();
     if (latest?.pending_input && latest.execution === 'waiting_for_user')
         showPending(latest.pending_input);
-    conversation.scrollTop = conversation.scrollHeight;
+    scrollToEnd(false);
+    drawnRows = conversation.children.length;
+    feedReady = true;
+    // The first session opens while #app is hidden; revealFeed() shows it once the app is.
+    if (!$('#app').hidden)
+        revealContent();
     renderInspector();
     scheduleRead();
     return true;
+}
+// The first session opens while the app is still hidden, where nothing has a size: the feed is placed at its
+// end and the banner takes the focus once the app is shown.
+export function revealFeed() {
+    conversation.scrollTop = conversation.scrollHeight;
+    focusBanner();
+    revealContent();
 }
 export async function recoverSelected() {
     const snapshot = selectionSnapshot();
@@ -351,7 +368,12 @@ async function replayDurable(selection, generation, options = {}) {
             state.eventSeq = record.seq;
             cursor = record.seq;
             count += 1;
-            applyEvent(record.event, { ...options, durableReplay: true });
+            applyEvent(record.event, { ...options, durableReplay: true, seq: record.seq, ts: record.ts });
+        }
+        // The history page says so even when the journal lost the session_ended record to its size cap.
+        if (history.closed === true && feedState.meta.closed === null) {
+            feedState = reduce(feedState, { event: { type: 'client.session_closed' } });
+            queuePaint();
         }
         if (!history.has_more || !(history.events || []).length)
             return count;
@@ -367,136 +389,83 @@ export function applyLive(envelope) {
         return;
     const event = envelope.event;
     const durable = envelope.durable === true;
-    // stream_start reserves one DOM row so transient cumulative chunks can be
-    // painted immediately. Its later durable replay is idempotent by stream_id.
-    if (!durable || event.type === "stream_start")
-        applyEvent(event);
-    else if (event.type === "hello")
-        applyEvent(event);
+    // stream_start reserves one row so transient cumulative chunks can be painted immediately.
+    // Its later durable replay moves that row into journal order (reducer, by stream_id).
+    if (reducesLive(envelope))
+        applyEvent(event, { ts: envelope.ts });
     else
         reconcileAgentState(event);
     if (durable)
         recoverSelected().catch(() => { });
 }
-export function setAgentState(value) {
-    const stateValue = typeof value === 'string' && value ? value : 'idle';
-    state.execution = stateValue;
-    agentState.textContent = stateLabel(stateValue);
-    agentState.dataset.state = stateValue;
-    stop.hidden = !busy(stateValue);
-    $('#send-button').hidden = busy(stateValue);
-    $('#prompt').placeholder = busy(stateValue) ? 'Kvist is working. You can draft your next message…' : 'Message Kvist…';
+// The broker epoch changed or a remote connection dropped live events: open streams cannot be
+// continued from deltas until a snapshot or the commit arrives (reducer, stream.reset).
+export function resetLive() {
+    feedState = reduce(feedState, { event: { type: 'stream.reset' } });
 }
-function appendSubject(subject) {
-    if (!subject || typeof subject !== "object")
+// A navigation refresh newer than everything the feed has seen shows no pending request:
+// inputs the journal never closed (no answer record) are over.
+export function closeStaleInputs(lastEventId) {
+    if (lastEventId < feedState.lastSeq)
         return;
-    const details = document.createElement("details");
-    details.className = "tool";
-    details.open = true;
-    const summary = document.createElement("summary");
-    const pre = document.createElement("pre");
-    if (subject.kind === "command") {
-        summary.textContent = "Command awaiting approval";
-        pre.textContent = [subject.command, subject.reason].filter(Boolean).join("\n\n") || "No command details were supplied.";
-    }
-    else if (subject.kind === "overwrite") {
-        summary.textContent = subject.path ? `Overwrite ${subject.path}` : "File overwrite awaiting approval";
-        pre.textContent = subject.diff || "No diff details were supplied.";
-    }
-    else {
-        summary.textContent = "Request details";
-        pre.textContent = JSON.stringify(subject, null, 2);
-    }
-    details.append(summary, pre);
-    pending.append(details);
+    feedState = reduce(feedState, { event: { type: 'client.inputs_closed' } });
+    queuePaint();
 }
-function pendingField(event) {
-    if (event.kind === "choice" && Array.isArray(event.options) && event.options.length) {
-        const select = document.createElement("select");
-        select.setAttribute("aria-label", event.title || "Choose a response");
-        for (const option of event.options) {
-            const node = document.createElement("option");
-            const value = typeof option === "object" && option ? option.value : option;
-            const label = typeof option === "object" && option ? option.label || option.value : option;
-            node.value = String(value ?? "");
-            node.textContent = String(label ?? value ?? "");
-            if (String(value ?? "") === String(event.current_value || ""))
-                node.selected = true;
-            select.append(node);
-        }
-        return select;
-    }
-    const input = document.createElement("input");
-    input.type = event.kind === "secret" ? "password" : "text";
-    input.autocomplete = "off";
-    input.value = event.kind === "secret" ? "" : event.current_value || "";
-    input.setAttribute("aria-label", event.title || "Response");
-    return input;
+// The status line names only the state that needs the person: the sidebar indicators carry the rest.
+export function setAgentState(value) {
+    const stateValue = execution(value), waiting = stateValue === 'waiting_for_user';
+    state.execution = stateValue;
+    agentState.hidden = !waiting;
+    agentState.textContent = waiting ? stateLabel(stateValue) : '';
+    agentState.dataset.state = stateValue;
+    const wasBusy = !stop.hidden;
+    stop.hidden = !busy(stateValue);
+    sendButton.hidden = busy(stateValue);
+    // The control that takes the place fades in; the one that leaves is gone at once.
+    if (feedReady && busy(stateValue) !== wasBusy)
+        appear(busy(stateValue) ? stop : sendButton, { duration: '--dur-fast' });
+    prompt.placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist, or type / for commands';
+}
+// Removing the controls with the panel also removes what the person typed into them, a secret included.
+function hidePending() {
+    pending.hidden = true;
+    pending.replaceChildren();
 }
 function showPending(event) {
+    const first = renderPending(pending, event, response => respond(event, response));
+    const shown = !pending.hidden;
     pending.hidden = false;
-    pending.replaceChildren();
-    const heading = document.createElement("h3");
-    heading.textContent = event.title || "Kvist needs input";
-    const body = document.createElement("p");
-    body.textContent = event.body || event.help_text || "Review this request before continuing.";
-    pending.append(heading, body);
-    appendSubject(event.subject);
-    if (event.kind === "confirm") {
-        const deny = document.createElement("button");
-        deny.className = "stop-button";
-        deny.textContent = "Deny";
-        const allow = document.createElement("button");
-        allow.className = "primary-button";
-        allow.textContent = "Allow";
-        let remember = null;
-        if (event.remember_pattern) {
-            const label = document.createElement("label");
-            remember = document.createElement("input");
-            remember.type = "checkbox";
-            label.append(remember, document.createTextNode(" Remember this safe approval"));
-            pending.append(label);
-        }
-        deny.onclick = () => respond(event, { approved: false });
-        allow.onclick = () => respond(event, { approved: true, ...(remember?.checked ? { remember: true } : {}) });
-        pending.append(deny, allow);
-        queueMicrotask(() => { if (!document.querySelector(".overlay:not([hidden])"))
-            deny.focus(); });
-        return;
-    }
-    const input = pendingField(event);
-    const send = document.createElement("button");
-    send.className = "primary-button";
-    send.textContent = "Continue";
-    const submit = () => respond(event, { value: input.value });
-    send.onclick = submit;
-    input.addEventListener("keydown", key => { if (key.key === "Enter") {
-        key.preventDefault();
-        submit();
-    } });
-    pending.append(input, send);
-    queueMicrotask(() => { if (!document.querySelector(".overlay:not([hidden])"))
-        input.focus(); });
+    if (feedReady && !shown)
+        appear(pending, { rise: 8 });
+    queueMicrotask(() => {
+        // A person who is typing a message keeps the focus; the panel waits for Tab.
+        if (document.querySelector('.overlay:not([hidden])') || (document.activeElement === prompt && prompt.value))
+            return;
+        first.focus();
+    });
 }
 async function respond(event, response) {
     const snapshot = selectionSnapshot();
     if (!snapshot)
         return;
-    for (const button of pending.querySelectorAll('button'))
-        button.disabled = true;
+    const controls = () => pending.querySelectorAll('button, input');
+    for (const control of controls())
+        control.disabled = true;
     try {
         await api.respond(snapshot.selection, { request_id: event.request_id, ...response });
     }
     catch (error) {
         toast(error.message, true);
         if (isCurrentSelection(snapshot))
-            for (const button of pending.querySelectorAll('button'))
-                button.disabled = false;
+            for (const control of controls())
+                control.disabled = false;
         return;
     }
     if (!isCurrentSelection(snapshot))
         return;
-    pending.hidden = true;
+    feedState = reduce(feedState, { event: { type: 'client.input_answered', request_id: event.request_id, summary: answerSummary(event, response) } });
+    queuePaint();
+    hidePending();
     setAgentState("running");
 }
 let readTimer;
@@ -519,11 +488,26 @@ export function scheduleRead() {
 }
 function canRead() { return !document.hidden && $('#history-status').hidden && !document.querySelector('.overlay:not([hidden])') && conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 60; }
 conversation.addEventListener('scroll', () => {
-    followTail = conversation.scrollHeight - conversation.scrollTop - conversation.clientHeight < 60;
-    $('#jump-latest').hidden = followTail;
+    if (autoScroll)
+        autoScroll = gapToEnd() > 1;
+    else
+        followTail = gapToEnd() <= FOLLOW_PX;
+    showJump(!followTail);
     scheduleRead();
 }, { passive: true });
-$('#jump-latest').onclick = () => { followTail = true; conversation.scrollTop = conversation.scrollHeight; scheduleRead(); };
+// A skipped message (content-visibility: auto) is 80px in the estimate, so the end a smooth scroll was aimed at
+// can be nearer than the real one; if the feed is still being followed, it finishes the way instantly. Only a
+// scroll this client started is finished: the end of the person's own scroll never moves the feed.
+conversation.addEventListener('scrollend', () => {
+    const ours = autoScroll;
+    autoScroll = false;
+    if (ours && followTail && gapToEnd() > 1)
+        scrollToEnd(false);
+});
+// The person taking the scroll over (wheel, touch, keys) ends the smooth scroll this client started.
+for (const type of ['wheel', 'touchstart', 'keydown'])
+    conversation.addEventListener(type, () => { autoScroll = false; }, { passive: true });
+$('#jump-latest').onclick = () => { followTail = true; scrollToEnd(true); showJump(false); scheduleRead(); };
 document.addEventListener('visibilitychange', scheduleRead);
 document.addEventListener('kvist:overlay', scheduleRead);
 export async function loadDiff() {

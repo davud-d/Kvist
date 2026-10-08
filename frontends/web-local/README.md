@@ -170,7 +170,7 @@ and workspaces. Read receipts advance only after viewing the conversation tail.
 The frontend remains native ES modules without a build step or runtime UI
 framework. `features/connections.js` owns server/workspace dialogs,
 `features/views.js` owns temporary session tools, and `utils/ui.js` provides shared
-accessible controls, safe Markdown and the cursor glow. The transport adapter
+accessible controls and safe Markdown. The transport adapter
 retains the v1 API and now renews expired browser credentials without reloading.
 
 The composer opens `features/configuration.js`: provider/model discovery and

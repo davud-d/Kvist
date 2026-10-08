@@ -14,61 +14,94 @@ const context = await browser.newContext({viewport:{width:1440,height:900}});
 const page = await context.newPage(), errors=[];
 page.on('pageerror', e=>errors.push(e.message));
 await context.route('https://anymodel.org/**', route=>route.fulfill({contentType:'text/html',body:'<title>Registration test</title>Registration page'}));
+// The model chip opens a menu; the provider dialog is its "Providers and keys…" item.
+const openProviders=async()=>{await page.locator('#model-selector').click();await page.getByRole('menuitem',{name:/^Providers and keys/}).click();await page.locator('#provider-form').waitFor();};
 const shot=async name=>{await page.waitForTimeout(240);await page.screenshot({path:`${output}/screenshots/${name}.png`});};
 try {
  await page.goto(base);
  assert.equal(await page.title(),'Kvist');
- await page.getByRole('heading',{name:'Connect a model provider'}).waitFor();
- await page.locator('#provider-form').waitFor();
+ // The first run is a screen in the main column (setup.js), not a dialog.
+ await page.getByRole('heading',{name:'Connect a model'}).waitFor();
  await shot('first-run-anymodel');
- assert.equal(await page.locator('[name=provider]').inputValue(),'anymodel');
- assert(await page.getByRole('link',{name:'Open AnyModel registration'}).isVisible());
+ assert(await page.locator('#modal').isHidden());
+ assert(await page.locator('#prompt').isHidden(), 'the input waits behind the first run');
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'setup-key');
  const popupPromise=page.waitForEvent('popup');
- await page.getByRole('link',{name:'Open AnyModel registration'}).click();
+ await page.getByRole('button',{name:'Create an AnyModel account'}).click();
  const popup=await popupPromise; await popup.waitForLoadState();
  assert.equal(popup.url(),'https://anymodel.org/app/register'); await popup.close();
+ await page.getByText('Registration opened in a new tab.',{exact:false}).waitFor();
  console.log('PASS Blank start and registration in browser tab');
  const noCsrf=await context.request.post(`${base}/api/v1/configuration`,{data:{provider:'anymodel'}});
  assert.equal(noCsrf.status(),403);
  console.log('PASS Configuration mutation rejects missing CSRF');
- await page.locator('[data-credential=anymodel_api_key]').fill('qa-invalid-key');
- await page.locator('[name=fast]').fill('example/fast');
- await page.getByRole('button',{name:'Save & continue'}).click();
- await page.getByText(/AnyModel could not verify this key/).waitFor();
+ const setupKey=page.locator('#setup-key'), start=page.getByRole('button',{name:'Start'});
+ await setupKey.fill('qa-invalid-key'); await setupKey.press('Enter');
+ await page.getByText('AnyModel did not accept this key. Copy it again from your AnyModel account.').waitFor();
+ assert.equal(await setupKey.getAttribute('aria-invalid'),'true'); assert(await start.isDisabled());
  const info=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert(info.setup_required);
  await shot('first-run-invalid-key');
  console.log('PASS Invalid key is rejected before saving');
- await page.locator('[data-credential=anymodel_api_key]').fill('qa-valid-key');
- await page.getByRole('button',{name:'Load available models'}).click();
- await page.getByText('2 models available. Choose a model below.').waitFor();
- assert.equal(await page.locator('#provider-models option').count(),2);
- await page.locator('#provider-form summary').click();
- await page.locator('[name=smart]').fill('example/smart');
- await page.locator('[name=effort]').selectOption('high');
+ await setupKey.fill('qa-valid-key'); await setupKey.press('Enter');
+ await page.getByText('The key works. 2 models available.').waitFor();
+ assert(await start.isDisabled(), 'no default model for AnyModel yet: the person chooses one');
+ await page.locator('#setup-model').selectOption('example/fast');
+ assert(await start.isEnabled());
  await shot('provider-models');
- await page.getByRole('button',{name:'Save & continue'}).click();
- await page.locator('#modal').waitFor({state:'hidden'});
+ await start.click();
+ await page.locator('.setup').waitFor({state:'detached'});
+ assert.equal(await page.evaluate(()=>document.activeElement.id),'prompt');
+ // Reasoning moved from this dialog to its status chip; without a session the chip saves the default.
+ await page.locator('#effort-chip').click();
+ await page.getByRole('menuitemradio',{name:/^high/}).click();
+ await page.locator('.toast').getByText('Reasoning set to high for new sessions.').waitFor();
  const saved=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert.equal(saved.setup_required,false); assert.equal(saved.effort,'high');
  assert(!JSON.stringify(saved).includes('qa-valid-key'));
  console.log('PASS Catalog, selected models, reasoning and durable core save; no secret returned');
  await page.reload(); await page.locator('#app').waitFor();
  assert(await page.locator('#modal').isHidden());
- await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor();
+ await openProviders();
  assert.equal(await page.locator('[data-credential=anymodel_api_key]').inputValue(),'');
  await page.locator('[name=provider]').selectOption('deepseek');
  assert(await page.locator('#registration').isHidden());
- await page.locator('[data-credential=deepseek_api_key]').fill('qa-valid-key');
- await page.locator('[name=fast]').fill('deepseek-chat');
- await page.locator('#provider-form summary').click();
- await page.locator('[name=smart]').fill('deepseek-chat');
+ // Before a key: the core's built-in DeepSeek options, in a list rather than a text field.
+ assert(await page.locator('#model-pick').isVisible());
+ assert((await page.locator('#model-pick option').allTextContents()).includes('DeepSeek V4 Pro'));
+ assert(await page.locator('[name=fast]').isHidden());
+ await shot('deepseek-built-in-models');
+ const key=page.locator('[data-credential=deepseek_api_key]');
+ await key.fill('qa-empty-catalog-key'); await key.blur();
+ await page.locator('#model-note').getByText('The provider returned no model list. Enter the model ID.').waitFor();
+ assert(await page.locator('#model-pick-field').isHidden());
+ assert(await page.locator('[name=fast]').isVisible());
+ await shot('deepseek-empty-catalog');
+ await key.fill('qa-wrong-key'); await key.blur();
+ await page.locator('#model-note').getByText(/Could not load models\..*You can also enter the model ID\./).waitFor();
+ assert(await page.locator('#model-pick').isVisible());
+ await key.fill('qa-valid-key'); await key.blur();
+ await page.locator('#model-note').getByText('2 models available.').waitFor();
+ assert.deepEqual(await page.locator('#model-pick option').allTextContents(),['example/fast','example/smart','Other model ID…']);
+ await page.locator('#model-pick').selectOption('');
+ assert(await page.locator('[name=fast]').isVisible());
+ assert.equal(await page.evaluate(()=>document.activeElement?.name),'fast');
+ await page.locator('#model-pick').selectOption('example/smart');
+ assert(await page.locator('[name=fast]').isHidden());
+ await shot('deepseek-live-models');
  await page.getByRole('button',{name:'Save defaults',exact:true}).click();
  await page.locator('#modal').waitFor({state:'hidden'});
  const other=await (await context.request.get(`${base}/api/v1/configuration?server=local`)).json();
  assert.equal(other.provider,'deepseek');
- console.log('PASS Reload preserves configuration; alternative provider saves');
- await page.locator('#server-switcher').click();
+ assert.equal(other.providers.find(p=>p.id==='deepseek').saved_models.fast,'example/smart');
+ await openProviders();
+ await page.locator('#model-note').getByText('2 models available.').waitFor(); // a saved key loads the live list on open
+ assert.equal(await page.locator('#model-pick').inputValue(),'example/smart');
+ await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({state:'hidden'});
+ console.log('PASS Reload preserves configuration; DeepSeek model list: built-in, live, empty gives a field, choice saved');
+ await page.keyboard.press('Control+k'); // the server selector is not rendered (SHOW_SERVERS is false)
+ await page.locator('#palette-input').fill('Switch server');
+ await page.keyboard.press('Enter');
  await page.getByRole('button',{name:'＋ Connect server',exact:true}).click();
  await page.locator('#ssh-alias-picker option[value="build-box"]').waitFor({state:'attached'});
  await page.locator('#ssh-alias-picker').selectOption('build-box');
@@ -76,7 +109,7 @@ try {
  await shot('ssh-config-aliases');
  await page.keyboard.press('Escape');
  console.log('PASS Real ~/.ssh/config aliases appear and select a host');
- await page.locator('#model-selector').click(); await page.locator('#provider-form').waitFor();
+ await openProviders();
  for (const [width,height] of [[1280,720],[1440,900],[1920,1080],[2560,1440],[640,720]]) {
    await page.setViewportSize({width,height});
    assert(await page.getByRole('button',{name:'Save defaults',exact:true}).isVisible());
@@ -84,7 +117,7 @@ try {
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
    await shot(`provider-${width}x${height}`);
  }
- await page.keyboard.press('Escape'); assert(await page.locator('#modal').isHidden());
+ await page.keyboard.press('Escape'); await page.locator('#modal').waitFor({ state: 'hidden' }); // hidden when its 100 ms fade-out has finished
  console.log('PASS 5 viewport sizes, Escape, no clipping');
  assert.deepEqual(errors,[]); console.log('PASS No browser JavaScript errors');
 } finally { await context.request.post(`${base}/api/admin/stop`, {headers:{Authorization:'Bearer qa-only'}}).catch(()=>fixture.kill()); await browser.close(); }

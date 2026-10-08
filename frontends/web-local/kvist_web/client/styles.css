@@ -1,61 +1,8 @@
-/* Kvist Web — Modern developer tool with restrained glassmorphism
- *
- * Design principles:
- * - Terminal frontend UX as reference: dense, hierarchical, readable
- * - Moderate glass effects only on elevated surfaces
- * - Information flow: user → Kvist → tools → diff → status
- * - Developer tool, not mobile OS
- */
+/* Kvist Web: flat dark UI. Every color comes from the tokens in :root;
+   the rest of the file uses var(--token), transparent, currentColor or
+   color-mix(in srgb, var(--token) N%, transparent). */
 
-:root {
-  color-scheme: dark;
-
-  /* Base colors - lighter for better visibility */
-  --bg: #0a0d12;
-  --bg-subtle: radial-gradient(circle at 50% 20%, rgba(50, 150, 240, 0.05), transparent 60%), #0a0d12;
-
-  /* Surfaces with hierarchy - better contrast */
-  --surface-0: #0d1218;
-  --surface-1: #12181f;
-  --surface-2: #181f28;
-  --surface-3: #1e2531;
-
-  /* Glass for key surfaces only */
-  --glass-bg: rgba(24, 31, 40, 0.85);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-border-strong: rgba(255, 255, 255, 0.15);
-
-  /* Interactive states */
-  --hover: rgba(255, 255, 255, 0.04);
-  --active: rgba(255, 255, 255, 0.08);
-
-  /* Accent colors */
-  --blue: #5fa4fc;
-  --blue-dim: rgba(95, 164, 252, 0.15);
-  --cyan: #4fd1e8;
-  --green: #6dd89a;
-  --amber: #f0b454;
-  --red: #ff6572;
-
-  /* Text hierarchy - higher contrast */
-  --text: #edf1f5;
-  --text-dim: #a8b3c1;
-  --text-dimmer: #7a8694;
-
-  /* Spacing and sizing */
-  --sidebar: 260px;
-  --header: 60px;
-  --content-max: 860px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 18px;
-
-  /* Typography */
-  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
-  --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
-}
-
+/* Reset */
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -66,10 +13,14 @@ html, body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--bg-subtle);
+  background: var(--bg-0);
   color: var(--text);
   font: 13px/1.5 var(--sans);
   -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, p {
+  margin: 0;
 }
 
 button, input, select, textarea {
@@ -81,22 +32,33 @@ button {
   cursor: pointer;
   background: transparent;
   border: 0;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  border-radius: var(--r);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: background 140ms, transform 100ms;
+}
+
+/* Motion. Hover, focus and press change only color, background-color, border-color and opacity, in --dur-fast.
+   The rest of the motion is opacity and transform from motion.js, plus two grid-template-rows growths (.fold). */
+button,
+summary,
+a,
+input,
+textarea,
+select,
+.composer,
+.pending-input {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
 }
 
 button:hover:not(:disabled) {
-  background: var(--hover);
-}
-
-button:active:not(:disabled) {
-  background: var(--active);
-  transform: scale(0.98);
+  background: var(--bg-2);
 }
 
 button:disabled {
@@ -108,39 +70,87 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--blue);
-  outline-offset: 2px;
+a:focus-visible,
+summary:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
-/* Cursor glow - restrained, only on pointer fine */
-#cursor-glow {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 420px;
-  height: 420px;
-  margin: -210px 0 0 -210px;
-  border-radius: 50%;
-  pointer-events: none;
-  z-index: 1;
-  background: radial-gradient(circle, rgba(95, 164, 252, 0.12), rgba(79, 209, 232, 0.06) 50%, transparent 70%);
-  filter: blur(28px);
-  mix-blend-mode: screen;
-  opacity: 0;
-  transition: opacity 400ms;
-  will-change: transform;
+a {
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
-#cursor-glow.active {
-  opacity: 1;
+kbd {
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  #cursor-glow, * {
-    animation: none !important;
-    transition-duration: 0.01ms !important;
-  }
+svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  display: block;
+}
+
+[data-icon] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* One variable file (wght 400-600), subset to latin, cyrillic, punctuation and box drawing. */
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono.woff2") format("woff2");
+  font-weight: 400 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  --bg-0: oklch(19.9% 0.011 260.7);
+  --bg-1: oklch(23.3% 0.011 254.1);
+  --bg-2: oklch(27.5% 0.015 256.8);
+  --line: oklch(31.5% 0.017 255.6);
+  --line-strong: oklch(56% 0.022 253.5);
+  --text: oklch(92.1% 0.006 255.5);
+  --text-2: oklch(74.2% 0.016 257.2);
+  --text-3: oklch(65.7% 0.017 257.2);
+  --accent: oklch(76% 0.12 224);
+  --ok: oklch(74% 0.14 150);
+  --warn: oklch(74% 0.14 95);
+  --err: oklch(74% 0.14 22);
+
+  --sidebar: 248px;
+  --header: 40px;
+  --content-max: 760px;
+  --r: 4px;
+  --r-input: 6px;
+  --row-pad: 6px;
+  --dur-fast: 100ms;
+  --dur-base: 160ms;
+  --dur-slow: 240ms;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 /* Layout */
@@ -149,306 +159,26 @@ a:focus-visible {
   height: 100dvh;
   display: grid;
   grid-template-columns: var(--sidebar) minmax(0, 1fr);
-  transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .app.sidebar-collapsed {
   grid-template-columns: 0 minmax(0, 1fr);
 }
 
-/* The scrim is a grid child; without this it claims the first column and
-   pushes the sidebar and main area out of their tracks. */
+/* The scrim is a grid child; it only exists while the sidebar is a drawer. */
 .sidebar-scrim {
   display: none;
 }
 
-/* Sidebar */
 .sidebar {
-  background: var(--surface-0);
-  border-right: 1px solid var(--glass-border);
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
 }
 
-.sidebar-head {
-  height: var(--header);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--glass-border);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-decoration: none;
-  color: var(--text);
-  font-weight: 600;
-  font-size: 17px;
-  letter-spacing: -0.01em;
-}
-
-.brand img {
-  width: 24px;
-  height: 24px;
-}
-
-.icon-button {
-  width: 32px;
-  height: 32px;
-  padding: 7px;
-  flex-shrink: 0;
-  color: var(--text-dim);
-}
-
-.icon-button:hover:not(:disabled) {
-  color: var(--text);
-}
-
-/* Workspace switcher */
-.workspace-switcher {
-  margin: 14px 12px 10px;
-  justify-content: flex-start;
-  background: var(--surface-1);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
-  padding: 10px 12px;
-  color: var(--text-dim);
-}
-
-#workspace-label {
-  flex: 1;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--text);
-  font-weight: 500;
-}
-
-/* New session - accent button */
-.new-session {
-  margin: 0 12px 10px;
-  background: var(--blue-dim);
-  border: 1px solid rgba(95, 164, 252, 0.3);
-  border-radius: var(--radius-md);
-  color: var(--blue);
-  justify-content: flex-start;
-  padding: 10px 12px;
-  font-weight: 600;
-}
-
-.new-session:hover:not(:disabled) {
-  background: rgba(95, 164, 252, 0.22);
-  border-color: var(--blue);
-}
-
-.inbox-button {
-  margin: 0 12px 14px;
-  justify-content: flex-start;
-  padding: 9px 12px;
-  color: var(--text-dim);
-}
-
-.badge {
-  margin-left: auto;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--blue);
-  background: var(--blue-dim);
-  border-radius: 5px;
-  padding: 1px 7px;
-  min-width: 18px;
-  text-align: center;
-}
-
-.section-label {
-  color: var(--text-dimmer);
-  padding: 18px 20px 7px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-/* Navigation */
-.navigation {
-  flex: 1;
-  overflow: auto;
-  padding: 0 8px 16px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--glass-border) transparent;
-}
-
-.navigation::-webkit-scrollbar {
-  width: 5px;
-}
-
-.navigation::-webkit-scrollbar-thumb {
-  background: var(--glass-border);
-  border-radius: 3px;
-}
-
-.nav-group {
-  margin-bottom: 10px;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 100px;
-}
-
-.nav-workspace-head {
-  width: 100%;
-  justify-content: flex-start;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dimmer);
-  padding: 7px 12px;
-  text-align: left;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.nav-workspace-head span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Session items - compact like terminal */
-.nav-session {
-  width: 100%;
-  display: flex;
-  gap: 10px;
-  justify-content: flex-start;
-  text-align: left;
-  padding: 9px 12px;
-  color: var(--text-dim);
-  position: relative;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 40px;
-  border-radius: var(--radius-sm);
-  margin-bottom: 2px;
-}
-
-.nav-session:hover:not(.active) {
-  background: var(--hover);
-  color: var(--text);
-}
-
-.nav-session.active {
-  background: var(--surface-2);
-  color: var(--text);
-}
-
-.nav-session.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 9px;
-  bottom: 9px;
-  width: 2px;
-  background: var(--blue);
-  border-radius: 2px;
-}
-
-.nav-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-weight: 500;
-}
-
-/* Status dots - clear states */
-.status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: none;
-  background: var(--text-dimmer);
-  opacity: 0.4;
-}
-
-.status-dot.unread {
-  background: var(--blue);
-  opacity: 1;
-  box-shadow: 0 0 6px var(--blue);
-}
-
-.status-dot.running,
-.status-dot.starting {
-  width: 10px;
-  height: 10px;
-  border: 2px solid rgba(95, 164, 252, 0.5);
-  border-top-color: var(--blue);
-  animation: spin 0.7s linear infinite;
-  background: none;
-  opacity: 1;
-}
-
-.status-dot.waiting_for_user {
-  background: var(--amber);
-  opacity: 1;
-  box-shadow: 0 0 6px var(--amber);
-}
-
-.status-dot.failed {
-  background: var(--red);
-  opacity: 1;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* Sidebar footer */
-.sidebar-foot {
-  padding: 10px 12px;
-  border-top: 1px solid var(--glass-border);
-  background: var(--surface-0);
-}
-
-.quiet-button {
-  color: var(--text-dim);
-  justify-content: flex-start;
-  border-radius: var(--radius-sm);
-}
-
-.sidebar-foot .quiet-button {
-  width: 100%;
-  padding: 9px 10px;
-  white-space: nowrap;
-  font-size: 13px;
-}
-
-.quiet-button:hover:not(:disabled) {
-  color: var(--text);
-  background: var(--hover);
-}
-
-.command-hint {
-  font-size: 11px;
-  margin-top: 8px;
-  color: var(--text-dimmer);
-  text-align: center;
-}
-
-.command-hint kbd {
-  display: inline-block;
-  padding: 2px 5px;
-  font-size: 10px;
-  font-family: var(--mono);
-  color: var(--text-dim);
-  background: var(--surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: 4px;
-}
-
-/* Main area */
 .main {
   min-width: 0;
   min-height: 0;
@@ -456,19 +186,347 @@ a:focus-visible {
   flex-direction: column;
 }
 
-/* Session header - glass only here */
+.conversation-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The scroll box spans the main column, so its scrollbar sits at the window edge, and the rows are the
+   760px column. A max-width on the box itself counted its padding (border-box) and its scrollbar, which
+   left 712px of text. Both gutters are reserved so the column stays centered under the input. */
+.conversation {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  padding: 20px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.conversation > * {
+  max-width: var(--content-max);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* The input has no scrollbar: its max-width is the column plus the padding it counts. It anchors the menus
+   that open above the input. */
+.composer-area {
+  position: relative;
+  flex-shrink: 0;
+  padding: 8px 24px 10px;
+  max-width: calc(var(--content-max) + 48px);
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Sidebar */
+.sidebar-head,
 .session-head {
   height: var(--header);
   flex-shrink: 0;
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
-  border-bottom: 1px solid var(--glass-border);
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 24px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid var(--line);
+}
+
+.sidebar-head {
+  justify-content: space-between;
+  padding: 0 12px 0 16px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.brand img {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  flex-shrink: 0;
+  color: var(--text-2);
+}
+
+.icon-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.new-session,
+.inbox-button {
+  height: 28px;
+  margin: 2px 8px 0;
+  justify-content: flex-start;
+  padding: 0 8px;
+  color: var(--text-2);
+}
+
+.new-session {
+  margin-top: 8px;
+}
+
+.new-session:hover:not(:disabled),
+.inbox-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.badge {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: var(--r);
+  padding: 0 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.navigation {
+  flex: 1;
+  overflow: auto;
+  padding: 0 8px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.nav-group:not(:first-child) {
+  margin-top: 12px;
+}
+
+/* Group header: the toggle takes the width, the "+" button sits at the right and shows on hover and focus. */
+.nav-group-head {
+  display: flex;
+  align-items: center;
+  height: 24px;
+}
+
+.nav-group-toggle {
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+  justify-content: flex-start;
+  font-size: 11px;
+  color: var(--text-3);
+  padding: 0 8px;
+  text-align: left;
+}
+
+.nav-group-toggle[aria-expanded="true"] > .chevron {
+  transform: rotate(90deg);
+}
+
+.nav-group-label {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.nav-group-name,
+.nav-group-server {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-group-name {
+  font-weight: 600;
+}
+
+.nav-group-toggle > .nav-ind {
+  margin-left: auto;
+}
+
+.nav-group-add {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--text-3);
+  opacity: 0;
+}
+
+.nav-group-add svg {
+  width: 12px;
+  height: 12px;
+}
+
+.nav-group-head:hover .nav-group-add,
+.nav-group-head:focus-within .nav-group-add {
+  opacity: 1;
+}
+
+.nav-group-add:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.nav-session {
+  width: 100%;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  text-align: left;
+  padding: 0 4px 0 8px;
+  color: var(--text-2);
+  position: relative;
+}
+
+/* Keyboard focus is a 2px ring inside the row, so neighbouring rows and the list edge never cut it. */
+.nav-session:focus-visible,
+.nav-group-toggle:focus-visible,
+.nav-group-add:focus-visible {
+  outline-offset: -2px;
+}
+
+.nav-session:hover:not(.active),
+.nav-session.active {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+.nav-session.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--accent);
+}
+
+.nav-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-session.unread-running .nav-title {
+  font-weight: 600;
+}
+
+/* Indicator slot: 14px at the right edge of a session row, and of a collapsed group's header. Every state
+   has its own shape, so the color is never the only signal; idle, finished and stopped leave it empty. */
+.nav-ind {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+.nav-ind::before,
+.nav-ind::after {
+  content: '';
+  position: absolute;
+}
+
+.ind-waiting::before,
+.ind-waiting::after {
+  top: 3px;
+  width: 2px;
+  height: 8px;
+  background: var(--warn);
+}
+
+.ind-waiting::before {
+  left: 4px;
+}
+
+.ind-waiting::after {
+  left: 8px;
+}
+
+.ind-failed::before,
+.ind-failed::after {
+  top: 6px;
+  left: 2.5px;
+  width: 9px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--err);
+}
+
+.ind-failed::before {
+  transform: rotate(45deg);
+}
+
+.ind-failed::after {
+  transform: rotate(-45deg);
+}
+
+.ind-running::before {
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+
+.ind-unread::before {
+  top: 4px;
+  left: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.sidebar-foot {
+  padding: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.quiet-button {
+  color: var(--text-2);
+  justify-content: flex-start;
+}
+
+.sidebar-foot .quiet-button {
+  width: 100%;
+  height: 28px;
+  white-space: nowrap;
+}
+
+.quiet-button:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.command-hint {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.command-hint kbd {
+  color: var(--text-3);
+}
+
+/* Session header */
+.session-head {
+  gap: 8px;
+  padding: 0 12px;
 }
 
 .session-identity {
@@ -477,118 +535,107 @@ a:focus-visible {
 }
 
 .session-identity h1 {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 1.4;
-  margin: 0;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session-identity p {
-  font-size: 11px;
-  color: var(--text-dimmer);
-  margin: 2px 0 0;
+  display: flex;
+  gap: 12px;
+  font: 12px/1.25 var(--mono);
+  color: var(--text-3);
+}
+
+.session-identity p > span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+#session-server {
+  flex: none;
+  max-width: 40%;
+}
+
 .head-actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
 .head-actions button {
   font-size: 12px;
-  color: var(--text-dim);
-  padding: 7px 11px;
+  color: var(--text-2);
+  height: 28px;
 }
 
-.head-actions button:hover:not(:disabled) {
-  color: var(--text);
+.head-actions button:focus-visible {
+  outline-offset: -2px;
 }
 
-/* Conversation - terminal-like density */
-.conversation-wrap {
-  position: relative;
-  flex: 1;
-  min-height: 0;
+/* The palette's visible door: an icon and "Commands"; on a phone the word goes (the rule for header spans). */
+.commands-head {
+  gap: 4px;
+  padding: 0 8px;
 }
 
-.conversation {
-  height: 100%;
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-gutter: stable;
-  padding: 24px;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--glass-border) transparent;
-}
-
-.conversation::-webkit-scrollbar {
-  width: 7px;
-}
-
-.conversation::-webkit-scrollbar-thumb {
-  background: var(--glass-border);
-  border-radius: 4px;
-}
-
-/* Messages - compact like terminal output */
+/* Conversation */
 .message {
-  margin: 0 0 22px;
+  margin-bottom: 18px;
   content-visibility: auto;
-  contain-intrinsic-size: auto 100px;
-  animation: appear 160ms ease-out;
+  contain-intrinsic-size: auto 80px;
 }
 
-@keyframes appear {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
+/* Blocks carry no avatar or caption; screen readers still get the speaker. */
 .message-role {
-  font-size: 12px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 9px;
-}
-
-.message-role img {
-  width: 20px;
-  height: 20px;
-}
-
-.message.user .message-role {
-  color: var(--text-dim);
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 
 .message-body {
   font-size: 14px;
-  line-height: 1.65;
+  line-height: 1.55;
   overflow-wrap: anywhere;
   min-width: 0;
 }
 
-/* User message - subtle card */
+.conversation > :not(.message) + .message {
+  margin-top: 12px;
+}
+
+.message-label {
+  margin-bottom: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .message.user .message-body {
-  background: var(--surface-1);
-  border-left: 2px solid rgba(95, 164, 252, 0.6);
-  border-radius: var(--radius-md);
-  padding: 12px 16px;
-  color: #d8dfe7;
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+}
+
+/* A message the send did not take: its text stays in the block, the note and Retry sit under it, level with the text. */
+.message-failed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding-left: 14px;
+  color: var(--err);
+  font-size: 12px;
+}
+
+.message-failed .quiet-button {
+  height: 24px;
+  font-size: 12px;
 }
 
 .message-body p {
@@ -601,68 +648,86 @@ a:focus-visible {
 
 .message-body h2,
 .message-body h3 {
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.5;
-  margin: 14px 0 8px;
+  margin: 14px 0 6px;
   font-weight: 600;
 }
 
 .message-body ul,
 .message-body ol {
-  margin: 10px 0;
+  margin: 8px 0;
   padding-left: 20px;
 }
 
 .message-body li {
-  margin: 6px 0;
+  margin: 4px 0;
 }
 
 .message-body code {
   font-family: var(--mono);
-  font-size: 0.9em;
-  background: var(--surface-2);
-  padding: 2px 5px;
-  border-radius: 4px;
+  font-size: 12.5px;
+  background: var(--bg-2);
+  padding: 1px 4px;
+  border-radius: var(--r);
 }
 
 .message-body pre {
   font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
-  background: var(--surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  padding: 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 10px 12px;
   overflow-x: auto;
-  margin: 10px 0;
+  margin: 8px 0;
 }
 
 .message-body pre code {
   padding: 0;
   background: none;
+  font-size: inherit;
 }
 
-.message.error .message-body {
-  color: var(--red);
-}
-
-/* Tool events - compact inline like terminal */
+/* Tool rows: status mark, chevron, action, target, exit code, time. Marks use child selectors: a group's
+   status must not reach the rows inside it. The row box is --row-pad wider than the column on both sides
+   and its summary pads the same amount, so the content keeps the column edge while the hover fill and the
+   focus ring sit inside the box. A row is not content-visibility: auto: skipped rows are 24px in the estimate and
+   taller when drawn, and scrolling 300 of them moved the scroll height by 7174px in 27 steps. */
 .tool {
-  margin: 2px 0;
-  content-visibility: auto;
-  contain-intrinsic-size: auto 26px;
+  margin: 0 calc(-1 * var(--row-pad));
 }
 
 .tool summary {
-  cursor: pointer;
-  color: var(--text-dim);
-  padding: 4px 0;
-  font-size: 13px;
+  color: var(--text-2);
+  min-height: 24px;
+  padding: 0 var(--row-pad);
+  border-radius: var(--r);
   user-select: none;
   list-style: none;
   display: flex;
-  align-items: baseline;
-  gap: 2px;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A call with no output has nothing to open: no chevron, no hover, no pointer. Its label keeps the column
+   of the rows that have one (the chevron's 10px, its 1px margins and the 8px gap). */
+.tool:not(.tool-static) > summary {
+  cursor: pointer;
+}
+
+.tool:not(.tool-static) > summary:hover {
+  background: var(--bg-2);
+}
+
+.tool-static > summary .tool-label {
+  margin-left: 20px;
+}
+
+.conversation .tool summary {
+  font-family: var(--mono);
+  font-size: 12.5px;
 }
 
 .tool summary::-webkit-details-marker,
@@ -670,174 +735,326 @@ a:focus-visible {
   display: none;
 }
 
-.tool summary::before {
-  content: '●';
-  color: var(--blue);
-  font-weight: bold;
-  margin-right: 8px;
-  font-size: 10px;
+.tool > summary::before {
+  content: '\2713';
+  color: var(--ok);
+  width: 12px;
+  flex: none;
+  text-align: center;
+  font-size: 12px;
 }
 
-/* A call that has not reported yet: the row is live, so it reads as activity. */
-.tool-running summary::before {
-  content: '◐';
-  color: var(--amber);
-  animation: tool-spin 1s steps(4) infinite;
+.tool-running > summary::before {
+  content: '';
+  box-sizing: border-box;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
 }
 
-@keyframes tool-spin {
-  to { transform: rotate(360deg); }
+.tool.tool-failed > summary::before {
+  content: '\2715';
+  color: var(--err);
 }
 
-.tool-running .tool-target {
-  color: var(--amber);
-  opacity: 1;
+/* The approval dialog reuses .tool for its details; it has no result to mark. */
+.pending-input .tool summary::before {
+  content: none;
 }
 
 .tool-label {
-  font-weight: 600;
-  color: inherit;
-}
-
-.tool-target {
-  color: inherit;
-  font-family: var(--mono);
-  font-size: 12px;
-  opacity: 0.8;
-}
-
-.tool-status {
-  color: var(--red);
+  flex: none;
+  color: var(--text);
   font-weight: 500;
-  font-size: 12px;
-  margin-left: 8px;
 }
 
-.tool-status:empty {
+/* The target: a path keeps its file name whole and drops the head of its directory when the row is
+   narrow (direction: rtl puts the ellipsis on the left, the bdi keeps the slashes in order); a command or
+   a query is cut from the end. */
+.tool-target {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+
+.tool-dir,
+.tool-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tool-dir {
+  direction: rtl;
+  text-align: left;
+}
+
+.tool-file {
+  flex: none;
+}
+
+.tool-file:empty,
+.tool-text:empty {
   display: none;
 }
 
-.tool.tool-failed summary::before {
-  color: var(--red);
+.tool-status {
+  flex: none;
+  color: var(--err);
+  font-size: 12px;
 }
 
-.tool.tool-failed summary {
-  color: var(--red);
+.tool-time {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
 }
 
-.tool[open] summary {
+.tool-status:empty,
+.tool-time:empty {
+  display: none;
+}
+
+.tool[open] > summary {
   color: var(--text);
-  margin-bottom: 6px;
+}
+
+.tool-group > summary .tool-label {
+  color: var(--text-2);
+  font-weight: 400;
+}
+
+.tool-failed-count {
+  color: var(--err);
 }
 
 .tool pre {
-  max-height: 400px;
+  max-height: 320px;
   overflow: auto;
-  margin: 0 0 4px 0;
+  margin: 2px var(--row-pad) 6px;
   padding: 8px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  color: var(--text-dim);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* The group's box is wider than the column by --row-pad per side; the body is back on the column edges,
+   and the calls under it are indented 16px from the group's content. */
+.tool-group-body {
+  margin: 0 var(--row-pad);
+  padding-left: 16px;
+}
+
+/* The one chevron of reasoning, tool rows and groups: it turns a quarter when its row opens. */
+.chevron {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin: 0 1px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+/* The content of a row that opens in place (a call's output, a group's calls, a thought) and of a sidebar group:
+   a grid row that grows from 0fr to 1fr when the person opens it. Closing is at once. */
+.fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--dur-base) var(--ease);
+}
+
+.fold-enter {
+  grid-template-rows: 0fr;
+}
+
+.fold-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+details[open] > summary > .chevron {
+  transform: rotate(90deg);
+}
+
+/* Keyboard focus is a 2px ring inside the summary: outside it, the paint containment of the tool row and
+   the output block under it cut the ring to a line. */
+.tool > summary:focus-visible,
+.reasoning > summary:focus-visible {
+  outline-offset: -2px;
+}
+
+/* A thought: one line in the interface font, opened to read it. The summary pads and overhangs the column
+   like a tool row, so the chevron stands where the status mark of a tool row does. */
+.reasoning summary {
+  cursor: pointer;
+  min-height: 24px;
+  margin: 0 calc(-1 * var(--row-pad));
+  padding: 0 var(--row-pad);
+  border-radius: var(--r);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  user-select: none;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.reasoning-empty .chevron {
+  visibility: hidden;
+}
+
+.reasoning summary::-webkit-details-marker,
+.reasoning summary::marker {
+  display: none;
+}
+
+.reasoning-empty summary {
+  cursor: default;
+}
+
+.reasoning-body {
+  max-height: 320px;
+  overflow: auto;
+  margin: 2px 0 6px;
+  padding-left: 20px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Notices: errors, sandbox and journal facts, session end. */
+.notice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text-3);
+  font-family: var(--mono);
   font-size: 12px;
   line-height: 1.5;
 }
 
-/* Empty state */
-.empty-state {
-  position: absolute;
-  left: 24px;
-  right: 24px;
-  top: 38%;
+.notice::before {
+  content: '';
+  width: 12px;
+  flex: none;
   text-align: center;
-  pointer-events: none;
-  color: var(--text-dimmer);
 }
 
-.empty-state img {
-  width: 40px;
-  height: 40px;
-  opacity: 0.5;
-  margin-bottom: 12px;
+.notice-error {
+  color: var(--err);
+}
+
+.notice-error::before {
+  content: '\2715';
+}
+
+.notice-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* An empty session: what to ask, four starters that fill the input, and the "/" hint. */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 18vh 24px 24px;
+}
+
+.empty-state > * {
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .empty-state h2 {
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text-dim);
-  margin: 0 0 6px;
+  font-size: 16px;
+  margin-bottom: 12px;
 }
 
-.empty-state p {
-  font-size: 13px;
-  margin: 0;
+.starters {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
 }
 
-/* Floating UI elements */
-.history-status {
-  position: absolute;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  backdrop-filter: blur(20px) saturate(160%);
-  border: 1px solid var(--glass-border-strong);
-  border-radius: var(--radius-lg);
-  padding: 9px 16px;
-  max-width: 85%;
-  color: var(--text-dim);
+.starter {
+  justify-content: flex-start;
+  text-align: left;
+  padding: 10px 4px;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-2);
+}
+
+.starter:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+.empty-hint {
+  margin-top: 12px;
+  color: var(--text-3);
   font-size: 12px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-  z-index: 10;
 }
 
+.empty-hint kbd {
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  color: var(--text-2);
+}
+
+.history-status,
 .jump-latest {
   position: absolute;
-  bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid var(--glass-border-strong);
-  border-radius: var(--radius-lg);
-  padding: 7px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
   font-size: 12px;
-  font-weight: 500;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   z-index: 10;
 }
 
-.jump-latest:hover {
-  background: var(--surface-2);
-  transform: translateX(-50%) translateY(-2px);
+.history-status {
+  top: 8px;
+  padding: 6px 12px;
+  max-width: 85%;
+  color: var(--text-2);
 }
 
-/* Composer - restrained glass */
-.composer-area {
-  flex-shrink: 0;
-  padding: 12px 24px 14px;
-  max-width: var(--content-max);
-  margin: 0 auto;
-  width: 100%;
+/* One line on --bg-2, no border or shadow: the fill alone separates it from the feed. */
+.jump-latest {
+  bottom: 8px;
+  padding: 4px 12px;
+  border: 0;
+  white-space: nowrap;
 }
 
+/* Composer */
 .composer {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(32px) saturate(170%);
-  backdrop-filter: blur(32px) saturate(170%);
-  border: 1px solid var(--glass-border-strong);
-  border-radius: var(--radius-xl);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-  transition: border-color 160ms, box-shadow 160ms;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-input);
   overflow: hidden;
 }
 
 .composer:focus-within {
-  border-color: rgba(95, 164, 252, 0.5);
-  box-shadow: 0 0 0 3px rgba(95, 164, 252, 0.08), 0 4px 20px rgba(0, 0, 0, 0.2);
+  border-color: var(--accent);
 }
 
 .composer textarea {
@@ -847,44 +1064,39 @@ a:focus-visible {
   resize: none;
   outline: none;
   width: 100%;
-  min-height: 64px;
+  height: 56px;
+  min-height: 56px;
   max-height: 180px;
-  padding: 15px 16px 8px;
+  padding: 10px 12px 4px;
   font-size: 14px;
   line-height: 1.55;
 }
 
 .composer textarea::placeholder {
-  color: var(--text-dimmer);
+  color: var(--text-3);
 }
 
 .composer-foot {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px 10px;
+  gap: 8px;
+  padding: 4px 8px 8px;
 }
 
 .composer-controls {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   min-width: 0;
 }
 
 .runtime-button {
-  background: var(--surface-1);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
   font-size: 12px;
-  height: 32px;
+  height: 28px;
   max-width: 200px;
-  padding: 0 11px;
-}
-
-.runtime-button:hover:not(:disabled) {
-  background: var(--surface-2);
+  padding: 0 8px;
+  color: var(--text-2);
 }
 
 #active-server-label {
@@ -893,119 +1105,528 @@ a:focus-visible {
   text-overflow: ellipsis;
 }
 
-.model-button {
-  color: var(--text-dim);
-  font-size: 12px;
-  max-width: 200px;
-  padding: 0 10px;
-}
-
-.model-button span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.model-button svg {
-  width: 13px;
-}
-
-/* Send button - accent */
 .send-button {
-  background: var(--blue);
-  color: #0a0d12;
-  width: 36px;
-  height: 36px;
-  border-radius: var(--radius-md);
-  margin-left: 6px;
+  background: var(--accent);
+  color: var(--bg-0);
+  width: 28px;
+  height: 28px;
+  padding: 0;
   flex-shrink: 0;
 }
 
+.send-button {
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease);
+}
+
 .send-button:hover:not(:disabled) {
-  background: #73b8ff;
-  transform: scale(1.02);
+  background: color-mix(in srgb, var(--accent) 85%, var(--text));
 }
 
 .send-button:active:not(:disabled) {
-  transform: scale(0.96);
+  transform: scale(.96);
 }
 
 .stop-button {
-  background: rgba(255, 101, 114, 0.12);
-  color: var(--red);
-  padding: 7px 12px;
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(255, 101, 114, 0.25);
+  height: 28px;
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--err);
   font-weight: 500;
 }
 
 .stop-button:hover:not(:disabled) {
-  background: rgba(255, 101, 114, 0.2);
-  border-color: var(--red);
+  background: color-mix(in srgb, var(--err) 22%, transparent);
 }
 
 .stop-button svg {
   width: 12px;
+  height: 12px;
 }
 
-/* Metadata - compact status line */
-.metadata {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  color: var(--text-dimmer);
+/* The input and its hint share one slot; a closed session puts the banner in it. The slot is as tall as the
+   input with its hint (98px field, 6px gap, 16px hint line), so the banner changes nothing around it. */
+.composer-slot {
+  min-height: 120px;
+}
+
+/* Under the input: the send hint, then the status line. Both start at the input's left edge. */
+.composer-hint {
+  margin: 6px 0 0;
+  color: var(--text-3);
   font-size: 11px;
-  padding: 8px 2px 0;
-  min-height: 28px;
+  line-height: 16px;
 }
 
-.metadata > div {
+.slash-button {
+  font: 14px/1 var(--mono);
+}
+
+/* First run (setup.js): the screen takes the main column; the feed and the input wait behind it. */
+.main.setup-open > :not(.session-head, .setup) {
+  display: none;
+}
+
+.setup {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12vh 24px 48px;
+}
+
+.setup > * {
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.setup h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  outline: none;
+}
+
+.setup-lede,
+.setup-place {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.setup-path {
+  font: 12.5px var(--mono);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.setup-form {
+  margin-top: 28px;
   display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.metadata button {
-  padding: 0;
-  color: var(--text-dim);
-  font-size: 11px;
+.setup-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.metadata button:hover:not(:disabled) {
+.setup-steps.single {
+  padding-left: 0;
+  list-style: none;
+}
+
+.setup-steps li::marker {
+  color: var(--text-3);
+  font-weight: 600;
+}
+
+.setup-step {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.setup-register {
+  border: 1px solid var(--line-strong);
+  padding: 6px 12px;
   color: var(--text);
 }
 
-.composer-hint {
-  font-size: 10px;
-  white-space: nowrap;
+/* The one large control of the screen: the key is what the person came with. */
+.setup-key {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  font-size: 15px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-input);
 }
 
-.metadata-separator {
-  opacity: 0.4;
+.setup-key:focus-visible {
+  outline: none;
+  border-color: var(--accent);
 }
 
-.connection-dot {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--green);
+.setup-key[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.setup-field select,
+.setup-field input {
+  height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+}
+
+.setup-note {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.setup-note.ok::before {
+  content: "✓ ";
+  color: var(--ok);
+}
+
+.setup-note.error {
+  color: var(--err);
+}
+
+.setup-note.error::before {
+  content: "✕ ";
+}
+
+.setup-note.busy::before {
   display: inline-block;
+  margin-right: 8px;
+  vertical-align: -1px;
+}
+
+.setup-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Status chips: model, reasoning, role. Names hide on a phone; the menu header says what each changes. */
+.chip {
+  height: 28px;
+  min-width: 0;
   flex: none;
+  padding: 0 6px 0 8px;
+  gap: 4px;
+  font-size: 12px;
 }
 
-.connection-dot.offline,
-.connection-dot.failed {
-  background: var(--red);
+#model-selector {
+  flex: 0 1 auto;
 }
 
-.connection-dot.connecting,
-.connection-dot.reconnecting {
-  background: var(--amber);
-  animation: pulse 1s infinite;
+.chip-name {
+  color: var(--text-3);
+}
+
+.chip-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chip svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-3);
+}
+
+.chip[aria-expanded="true"] {
+  background: var(--bg-2);
+}
+
+.chip[aria-disabled="true"] {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.chip.pending .chip-value::before,
+.menu-state.busy::before,
+.setup-note.busy::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+
+.chip-menu {
+  width: min(420px, calc(100% - 48px));
+}
+
+.chip-menu .menu-item {
+  grid-template-columns: 16px minmax(0, 1fr);
+}
+
+.chip-menu .menu-desc {
+  grid-column: 2;
+}
+
+.menu-check {
+  grid-row: 1 / 3;
+  color: var(--accent);
+}
+
+.menu-head {
+  padding: 6px 8px 4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.menu-state.error {
+  color: var(--err);
+}
+
+.chip-menu hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 4px 0;
+}
+
+.menu-filter {
+  width: calc(100% - 8px);
+  margin: 2px 4px 4px;
+  height: 30px;
+  padding: 0 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+@media (max-width: 640px) {
+  .setup {
+    padding: 32px 16px;
+  }
+
+  .chip-name {
+    display: none;
+  }
+
+  #model-selector .chip-value {
+    max-width: 96px;
+  }
+
+  .chip-menu {
+    left: 16px;
+    right: 16px;
+    width: auto;
+  }
+}
+
+/* Menus above the input: the "/" commands and the status chips. No shadow; the border separates. */
+.popover {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  z-index: 30;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+  max-height: min(420px, 60dvh);
+  overflow: auto;
+}
+
+.slash-menu {
+  left: 24px;
+  right: 24px;
+}
+
+.menu-item {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 0 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r);
+  text-align: left;
+  cursor: pointer;
+}
+
+.menu-item.active,
+.menu-item:hover {
+  background: var(--bg-2);
+}
+
+.menu-label {
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.slash-menu .menu-label {
+  font: 12.5px/20px var(--mono);
+}
+
+.menu-desc {
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.menu-state {
+  padding: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.menu-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+@media (max-width: 800px) {
+  .slash-menu {
+    left: 16px;
+    right: 16px;
+  }
+}
+
+/* On a phone the description goes under the name and may wrap. */
+@media (max-width: 640px) {
+  .menu-item {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .menu-desc {
+    white-space: normal;
+  }
+}
+
+.link-button {
+  padding: 0;
+  color: var(--text-2);
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.link-button:hover:not(:disabled) {
+  background: transparent;
+  color: var(--text);
+}
+
+/* A closed conversation: the banner has the input's width, left edge and border, and at least its height. */
+.closed-banner {
+  min-height: 98px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-input);
+  color: var(--text-2);
+}
+
+.closed-new {
+  height: 28px;
+  padding: 0 12px;
+  flex: none;
+  background: var(--bg-2);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.closed-new:hover:not(:disabled) {
+  background: var(--line);
+}
+
+/* The status line holds only what needs attention: context use, a connection that is not in order, and
+   an agent waiting for an answer. Each state has a shape beside its text. With nothing to show it is gone. */
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 2px;
+  color: var(--text-3);
+  font: 12px/16px var(--mono);
+}
+
+.status-line:not(:has(> :not([hidden]))) {
+  display: none;
+}
+
+.status-line button {
+  padding: 0;
+  color: var(--text-3);
+  font: inherit;
+}
+
+.status-line button:hover:not(:disabled) {
+  color: var(--text);
+  background: transparent;
+}
+
+.status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-item::before {
+  content: '';
+  flex: none;
+  box-sizing: border-box;
+}
+
+#connection-label[data-state="connecting"]::before,
+#connection-label[data-state="reconnecting"]::before {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-3) 30%, transparent);
+  border-top-color: var(--text-3);
+  animation: spin 0.8s linear infinite;
+}
+
+#connection-label[data-state="offline"],
+#connection-label[data-state="failed"],
+#connection-label[data-state="trust_required"] {
+  color: var(--err);
+}
+
+#connection-label[data-state="offline"]::before,
+#connection-label[data-state="failed"]::before,
+#connection-label[data-state="trust_required"]::before {
+  content: '\2715';
+  font-size: 10px;
+  line-height: 1;
+}
+
+#agent-state[data-state="waiting_for_user"] {
+  color: var(--warn);
+}
+
+#agent-state[data-state="waiting_for_user"]::before {
+  width: 8px;
+  height: 8px;
+  border-left: 2px solid var(--warn);
+  border-right: 2px solid var(--warn);
 }
 
 @keyframes pulse {
@@ -1013,152 +1634,195 @@ a:focus-visible {
   50% { opacity: 0.4; }
 }
 
-#agent-state[data-state="running"],
-#agent-state[data-state="starting"] {
-  color: var(--blue);
-}
-
-#agent-state[data-state="waiting_for_user"] {
-  color: var(--amber);
-}
-
-#agent-state[data-state="failed"] {
-  color: var(--red);
-}
-
-/* Pending input */
+/* Pending input: the request is pinned above the input field and has its width and left edge. */
 .pending-input {
   flex-shrink: 0;
   max-height: 35vh;
   overflow: auto;
-  margin: 10px auto 0;
+  margin: 8px auto 0;
+  width: calc(100% - 48px);
   max-width: var(--content-max);
-  padding: 14px 16px;
-  background: rgba(240, 180, 84, 0.08);
-  border-left: 2px solid var(--amber);
-  border-radius: var(--radius-md);
-  border: 1px solid rgba(240, 180, 84, 0.15);
+  padding: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-input);
+}
+
+/* The focused control carries the accent ring; the panel border steps back so there is one accent, not two. */
+.pending-input:focus-within {
+  border-color: var(--line-strong);
 }
 
 .pending-input h3 {
   font-size: 13px;
   font-weight: 600;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
 .pending-input p {
-  color: var(--text-dim);
-  font-size: 12px;
+  color: var(--text-2);
+  font-size: 13px;
 }
 
-.pending-input input,
-.pending-input select {
-  margin-right: 8px;
-  max-width: 100%;
-  background: var(--surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  padding: 7px 10px;
+.pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.pending-input .pending-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 0 auto;
+}
+
+/* The reason of a command, under its block. */
+.pending-input .pending-reason {
+  margin: 0 var(--row-pad) 4px;
+}
+
+.pending-field {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  padding: 4px 8px;
+}
+
+.pending-choice {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+
+.pending-input .pending-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 4px 0;
+  color: var(--text);
+}
+
+.pending-input input[type="radio"],
+.pending-input input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+.pending-input input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
 }
 
 .pending-input label {
-  display: block;
-  margin: 10px 0;
-  color: var(--text-dim);
+  color: var(--text-2);
 }
 
-/* Overlays */
+/* An answered or closed request in the feed: a mark by form, one line of what was answered. */
+.answer {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.answer::before {
+  content: '\2713';
+  flex: none;
+  width: 12px;
+  text-align: center;
+  color: var(--ok);
+  font-size: 12px;
+}
+
+.answer-denied::before {
+  content: '\2715';
+  color: var(--err);
+}
+
+.answer-closed {
+  color: var(--text-3);
+}
+
+.answer-closed::before {
+  content: '';
+}
+
+.answer-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Overlays and dialogs */
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(6, 7, 8, 0.8);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
+  background: color-mix(in srgb, var(--bg-0) 80%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
   z-index: 100;
-  animation: fade-in 160ms;
 }
 
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-/* Modal cards */
 .modal-card,
 .palette,
 .workspace-view {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  backdrop-filter: blur(40px) saturate(180%);
-  border: 1px solid var(--glass-border-strong);
-  border-radius: var(--radius-xl);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  animation: modal-appear 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
   max-height: calc(100dvh - 48px);
   overflow: auto;
 }
 
-@keyframes modal-appear {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
 .modal-card {
   width: min(480px, 100%);
-  padding: 20px;
+  padding: 16px;
 }
 
 .modal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   gap: 12px;
 }
 
 .modal-head h2 {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
-  margin: 0;
 }
 
 .modal-card p {
-  font-size: 13px;
-  color: var(--text-dim);
-  line-height: 1.6;
+  color: var(--text-2);
+  line-height: 1.55;
 }
 
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 18px;
+  margin-top: 16px;
 }
 
 .primary-button {
-  background: var(--blue);
-  color: #0a0d12;
+  background: var(--text);
+  color: var(--bg-0);
   font-weight: 600;
-  padding: 9px 20px;
-  border-radius: var(--radius-sm);
+  padding: 6px 16px;
 }
 
 .primary-button:hover:not(:disabled) {
-  background: #73b8ff;
-  transform: translateY(-1px);
+  background: var(--text-2);
 }
 
-/* Forms */
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 100px;
@@ -1168,10 +1832,9 @@ a:focus-visible {
 .form-grid label {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
   font-size: 12px;
-  font-weight: 500;
-  color: var(--text-dim);
+  color: var(--text-2);
 }
 
 .form-grid .full {
@@ -1181,77 +1844,78 @@ a:focus-visible {
 .form-grid input,
 .form-grid select {
   width: 100%;
-  background: var(--surface-2);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-sm);
-  padding: 9px 10px;
-  transition: all 160ms;
+  background: var(--bg-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-input);
+  padding: 6px 8px;
 }
 
 .form-grid input:focus,
 .form-grid select:focus {
-  border-color: var(--blue);
-  box-shadow: 0 0 0 2px var(--blue-dim);
-  background: var(--surface-1);
+  border-color: var(--accent);
 }
 
 .form-grid input::placeholder {
-  color: var(--text-dimmer);
+  color: var(--text-3);
 }
 
-/* Connection tabs */
 .connection-tabs {
   display: flex;
-  border-bottom: 1px solid var(--glass-border);
-  gap: 10px;
-  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
-.connection-tabs button {
+.connection-tabs button,
+.view-tabs button[role="tab"],
+.head-actions button[data-view] {
   font-size: 12px;
-  font-weight: 500;
-  color: var(--text-dim);
+  color: var(--text-2);
   border-radius: 0;
   border-bottom: 2px solid transparent;
-  padding: 10px 6px;
+  padding: 6px;
 }
 
-.connection-tabs button[aria-selected="true"] {
-  border-bottom-color: var(--blue);
+.connection-tabs button:hover:not(:disabled),
+.view-tabs button[role="tab"]:hover:not(:disabled),
+.head-actions button[data-view]:hover:not(:disabled) {
+  background: transparent;
   color: var(--text);
 }
 
-/* Error states */
+.connection-tabs button[aria-selected="true"],
+.view-tabs button[role="tab"][aria-selected="true"],
+.head-actions button[data-view][aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.head-actions button[data-view] {
+  padding: 0 8px;
+}
+
 .inline-error {
-  color: var(--red);
+  color: var(--err);
   font-size: 12px;
   margin-top: 12px;
-  padding: 10px;
-  background: rgba(255, 101, 114, 0.08);
-  border: 1px solid rgba(255, 101, 114, 0.2);
-  border-radius: var(--radius-sm);
+  padding: 8px;
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  border-radius: var(--r);
 }
 
 .inline-error details {
-  margin-top: 6px;
-  color: var(--text-dim);
+  margin-top: 4px;
+  color: var(--text-2);
   font-size: 11px;
 }
 
-/* Server/workspace rows */
 .server-row,
 .workspace-row {
   width: 100%;
   justify-content: space-between;
   text-align: left;
-  padding: 10px;
+  padding: 8px;
   gap: 12px;
-  border-radius: var(--radius-sm);
-}
-
-.server-row:hover:not(.selected),
-.workspace-row:hover {
-  background: var(--hover);
 }
 
 .server-row > span:first-child,
@@ -1263,27 +1927,25 @@ a:focus-visible {
 
 .server-row small,
 .workspace-row small {
-  color: var(--text-dimmer);
+  color: var(--text-3);
   font-size: 11px;
   flex: none;
 }
 
 .server-row.selected {
-  background: var(--surface-2);
+  background: var(--bg-2);
 }
 
 .menu-divider {
-  border-top: 1px solid var(--glass-border);
-  margin: 10px 0;
+  border-top: 1px solid var(--line);
+  margin: 8px 0;
 }
 
 .menu-caption {
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-dimmer);
-  padding: 6px 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
+  color: var(--text-3);
+  padding: 4px 8px;
 }
 
 .workspace-row {
@@ -1294,10 +1956,10 @@ a:focus-visible {
   display: block;
   white-space: normal;
   overflow-wrap: anywhere;
-  margin-top: 3px;
+  margin-top: 2px;
 }
 
-/* Palette */
+/* Command palette */
 .palette {
   width: min(620px, 100%);
   align-self: flex-start;
@@ -1306,11 +1968,11 @@ a:focus-visible {
 
 .palette-search {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--glass-border);
-  color: var(--text-dimmer);
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-3);
 }
 
 .palette input {
@@ -1318,36 +1980,30 @@ a:focus-visible {
   border: 0;
   background: none;
   outline: none;
-  padding: 10px 0;
+  padding: 8px 0;
   font-size: 14px;
 }
 
 .palette input::placeholder {
-  color: var(--text-dimmer);
+  color: var(--text-3);
 }
 
 .palette-results {
   max-height: min(420px, 55vh);
   overflow: auto;
-  padding: 6px;
+  padding: 4px;
 }
 
 .palette-item {
   width: 100%;
   justify-content: space-between;
   text-align: left;
-  padding: 10px;
-  gap: 20px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-}
-
-.palette-item:hover {
-  background: var(--hover);
+  padding: 6px 8px;
+  gap: 16px;
 }
 
 .palette-item.selected {
-  background: var(--surface-2);
+  background: var(--bg-2);
 }
 
 .palette-item span {
@@ -1357,24 +2013,23 @@ a:focus-visible {
 }
 
 .palette-item small {
-  color: var(--text-dimmer);
+  color: var(--text-3);
   font-size: 11px;
   flex-shrink: 0;
 }
 
 .palette footer {
-  padding: 10px 14px;
-  border-top: 1px solid var(--glass-border);
+  padding: 8px 12px;
+  border-top: 1px solid var(--line);
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: var(--text-dimmer);
+  color: var(--text-3);
 }
 
-/* Workspace view */
+/* Session tools: files, diff, terminal, activity */
 .workspace-view {
   width: min(1100px, calc(100% - 48px));
-  max-height: calc(100dvh - 48px);
   display: flex;
   flex-direction: column;
 }
@@ -1383,8 +2038,8 @@ a:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
-  border-bottom: 1px solid var(--glass-border);
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 
@@ -1393,70 +2048,109 @@ a:focus-visible {
   gap: 4px;
 }
 
-.view-tabs button[role="tab"] {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-dim);
-  padding: 7px 14px;
-  border-radius: var(--radius-sm);
-}
-
-.view-tabs button[role="tab"]:hover:not([aria-selected="true"]) {
-  color: var(--text);
-  background: var(--hover);
-}
-
-.view-tabs button[role="tab"][aria-selected="true"] {
-  color: var(--text);
-  background: var(--surface-2);
-}
-
 .view-content {
   flex: 1;
   overflow: auto;
-  padding: 20px;
+  padding: 16px;
+}
+
+.view-empty {
+  color: var(--text-3);
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-item {
+  padding: 2px 0;
+  color: var(--text-2);
+}
+
+.file-row summary {
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  padding: 4px 0;
+}
+
+.file-row pre,
+.terminal-view,
+.connection-log {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.connection-log {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  background: var(--bg-0);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.connection-log-caption,
+.connection-stage {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 8px 0 4px;
+}
+
+.diff-line {
+  display: block;
+}
+
+.diff-line.add {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+
+.diff-line.remove {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+}
+
+.diff-line.hunk {
+  color: var(--text-3);
+}
+
+.load-more {
+  margin-top: 8px;
+  color: var(--text-2);
 }
 
 /* Toasts */
+/* Above the input area (its field, hint and status line), so a toast never covers the chips or Send. */
 .toasts {
   position: fixed;
-  bottom: 24px;
+  bottom: 150px;
   right: 24px;
   z-index: 200;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   max-width: 380px;
 }
 
 .toast {
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(32px) saturate(170%);
-  backdrop-filter: blur(32px) saturate(170%);
-  border: 1px solid var(--glass-border-strong);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 8px 12px;
   display: flex;
   align-items: center;
   gap: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  animation: toast-appear 180ms;
-}
-
-@keyframes toast-appear {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
 }
 
 .toast.error {
-  border-color: var(--red);
-  background: rgba(255, 101, 114, 0.12);
+  border-color: var(--err);
 }
 
 .toast span {
@@ -1473,69 +2167,86 @@ a:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 20px;
+  gap: 16px;
   text-align: center;
 }
 
 .startup img {
-  width: 44px;
-  height: 44px;
-  opacity: 0.7;
+  width: 36px;
+  height: 36px;
   animation: pulse 2s infinite;
 }
 
 .startup strong {
   display: block;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .startup p {
-  font-size: 13px;
-  color: var(--text-dim);
-  margin: 0;
+  color: var(--text-2);
 }
 
-/* SVG icons */
-svg {
-  width: 17px;
-  height: 17px;
-  flex: none;
+/* Image attachments: the module lives in the Electron renderer, only its styling is here. */
+.image-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.image-attachments[hidden] {
+  display: none;
+}
+
+.image-attachment {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+
+.image-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
   display: block;
 }
 
-[data-icon] {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-}
-
-/* Links */
-a {
-  color: var(--blue);
-  text-decoration: none;
-}
-
-a:hover {
-  color: #73b8ff;
-}
-
-/* Utilities */
-.sr-only {
+.image-attachment .image-remove {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg-0) 85%, transparent);
+  opacity: 0;
 }
 
-[hidden] {
-  display: none !important;
+.image-attachment:hover .image-remove,
+.image-attachment:focus-within .image-remove {
+  opacity: 1;
 }
 
-/* Responsive */
+/* The module makes the button; app.js adds .icon-button and the paperclip, here is only the inner focus ring. */
+.image-attach-button:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (hover: none) {
+  .image-attachment .image-remove,
+  .nav-group-add {
+    opacity: 1;
+  }
+}
+
+/* Narrow screens: the sidebar becomes a drawer over the main column. */
 @media (max-width: 1000px) {
   .app {
     grid-template-columns: 1fr;
@@ -1547,8 +2258,8 @@ a:hover {
     top: 0;
     bottom: 0;
     z-index: 50;
+    width: min(var(--sidebar), 100% - 48px);
     transform: translateX(-100%);
-    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .app.sidebar-open .sidebar {
@@ -1556,36 +2267,29 @@ a:hover {
   }
 
   .sidebar-scrim {
+    display: block;
     position: fixed;
     inset: 0;
-    background: rgba(6, 7, 8, 0.7);
-    -webkit-backdrop-filter: blur(8px);
-    backdrop-filter: blur(8px);
+    border-radius: 0;
     z-index: 40;
     opacity: 0;
     pointer-events: none;
-    transition: opacity 220ms;
+  }
+
+  .sidebar-scrim,
+  .sidebar-scrim:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--bg-0) 70%, transparent);
   }
 
   .app.sidebar-open .sidebar-scrim {
     opacity: 1;
     pointer-events: auto;
   }
-
-  .composer-area,
-  .conversation {
-    margin-left: 14px;
-    margin-right: 14px;
-  }
 }
 
 @media (max-width: 640px) {
-  :root {
-    --sidebar: 100%;
-  }
-
   .session-head {
-    padding: 0 14px;
+    padding: 0 8px;
   }
 
   .head-actions button span {
@@ -1599,15 +2303,31 @@ a:hover {
   .toasts {
     left: 14px;
     right: 14px;
-    bottom: 14px;
   }
 }
 
-.image-attachments { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 0; }
-.image-attachments[hidden] { display: none; }
-.image-attachment { position: relative; width: 88px; height: 88px; border: 1px solid #74747b66; border-radius: 10px; overflow: hidden; }
-.image-attachment img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.image-attachment .image-remove { position: absolute; top: 3px; right: 3px; width: 23px; height: 23px; padding: 0; border: 0; border-radius: 50%; color: white; background: #222d; cursor: pointer; opacity: 0; }
-.image-attachment:hover .image-remove, .image-attachment:focus-within .image-remove { opacity: 1; }
-.image-attach-button { border: 0; background: transparent; color: inherit; font-size: 22px; cursor: pointer; padding: 4px 10px; }
-@media (hover: none) { .image-attachment .image-remove { opacity: 1; } }
+/* Below the column width the rows fill the box: the gutter goes to the right only, so the text keeps the
+   left edge of the input. */
+@media (max-width: 800px) {
+  .conversation {
+    padding-left: 16px;
+    padding-right: 16px;
+    scrollbar-gutter: stable;
+  }
+
+  .composer-area {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .pending-input {
+    width: calc(100% - 32px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
