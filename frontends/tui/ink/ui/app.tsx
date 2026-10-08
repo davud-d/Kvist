@@ -25,6 +25,7 @@ export interface AppProps {
   models?: { fast: string; smart: string }
   role: string
   approvalMode: string
+  resume?: string
   skin: Skin
   // Set for the fullscreen skin, which owns the mouse.
   pointer: Pointer | null
@@ -115,6 +116,7 @@ export function App(props: AppProps) {
     }
     instance.on("event", (event: CoreEvent) => {
       dispatch({ type: "event", event })
+      if (event.type === "hello" && props.resume !== undefined) dispatch({ type: "resume_start" })
       if (event.type === "command_result") void redrawSession(event)
     })
     instance.on("diagnostic", (text: string) => dispatch({ type: "event", event: { type: "debug", message: text.trim() } }))
@@ -124,6 +126,7 @@ export function App(props: AppProps) {
       workspace: props.workspace,
       role: props.role,
       approvalMode: props.approvalMode,
+      resume: props.resume,
       provider: props.provider,
       models: props.models,
     })

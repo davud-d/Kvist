@@ -358,3 +358,13 @@ def test_the_ui_bundle_is_looked_up_under_the_packaged_data_dir(monkeypatch, tmp
     finally:
         monkeypatch.delattr(main.sys, "_MEIPASS", raising=False)
         importlib.reload(main)
+
+
+@pytest.mark.parametrize("resume", [True, "chat-requested"])
+def test_launch_tui_forwards_resume(monkeypatch, tmp_path, resume):
+    entry = tmp_path / "ui.mjs"
+    entry.touch()
+    calls = _make_tty(monkeypatch, entry)
+    main.launch_tui(_tui_args(resume=resume))
+    command = calls[0][0]
+    assert command[command.index("--resume") + 1] == ("" if resume is True else resume)

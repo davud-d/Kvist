@@ -15,6 +15,7 @@ export interface CoreOptions {
   workspace: string
   role: string
   approvalMode: string
+  resume?: string
   provider?: string
   models?: { fast: string; smart: string }
   env?: Record<string, string>
@@ -56,6 +57,7 @@ export function splitLines(buffer: string): { lines: string[]; rest: string } {
 
 function coreArgs(options: CoreOptions): string[] {
   const args = ["--workspace", options.workspace, "--frontend", "stdio-multi"]
+  if (options.resume !== undefined) args.push("--resume", ...(options.resume ? [options.resume] : []))
   if (options.provider) args.push("--provider", options.provider)
   if (options.models) {
     args.push(

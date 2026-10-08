@@ -424,6 +424,9 @@ Per-run stdio overrides include `--provider`, both model flags
 (`--fast-model`, `--smart-model`), `--role`, and
 `--approval-mode ask|deny`. Model overrides are supplied as a complete set.
 `--resume` resumes the active checkpoint without reading a goal line.
+`--resume SESSION_ID` selects a specific session checkpoint in Classic, Ink,
+and stdio frontends. Use the session id (filename without `.json`), not its
+display title. A missing session or checkpoint exits with an error.
 
 ## Electron GUI
 

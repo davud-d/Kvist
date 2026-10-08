@@ -16,6 +16,7 @@ import { SKINS, applySkin } from "./ui/theme.js"
 const { values } = parseArgs({
   options: {
     workspace: { type: "string" },
+    resume: { type: "string" },
     role: { type: "string", default: "auto" },
     provider: { type: "string" },
     "fast-model": { type: "string" },
@@ -46,8 +47,15 @@ const models =
     : undefined
 
 // A launch always opens its own session (UI_API.md §8a).
-const launched = await sessionOp(command, workspace, "launch")
-if (!launched.ok) console.error(`session launch failed: ${launched.error ?? "unknown error"}`)
+const launched = values.resume === undefined
+  ? await sessionOp(command, workspace, "launch")
+  : values.resume
+    ? await sessionOp(command, workspace, "switch", values.resume)
+    : { ok: true }
+if (!launched.ok) {
+  console.error(`session launch failed: ${launched.error ?? "unknown error"}`)
+  process.exit(2)
+}
 
 // The claude skin takes the whole screen and the mouse (see pointer.ts); the ink
 // skin keeps the terminal's scrollback and native selection.
@@ -62,6 +70,7 @@ const app = render(
   <App
     command={command}
     workspace={workspace}
+    resume={values.resume}
     provider={values.provider}
     models={models}
     role={values.role ?? "auto"}

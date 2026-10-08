@@ -138,7 +138,7 @@ def serve_session(
     out_stream,
     in_reader,
     goal: str | None = None,
-    resume: bool = False,
+    resume: bool | str = False,
     routed_role: str | None = None,
     approval_mode: str | None = None,
 ) -> None:
@@ -149,6 +149,8 @@ def serve_session(
     diverge between them. ``goal is None`` reads the goal from ``in_reader``;
     ``resume=True`` continues the active checkpoint instead.
     """
+    if isinstance(resume, str):
+        session.agent.select_resume_session(resume)
     hello = build_session_hello(
         session.agent,
         routed_role=routed_role,
@@ -475,6 +477,7 @@ def serve_session_multi(
     commands: dict[str, CommandHandler] | None = None,
     ui: EventStreamUI | None = None,
     rebuild: Callable[..., tuple] | None = None,
+    resume: bool | str = False,
 ) -> None:
     """Multi-turn stdio lifecycle: one hello, one reader, one run per goal line.
 
@@ -490,6 +493,8 @@ def serve_session_multi(
     ``serve_session`` (single turn) is untouched, so every pre-existing stdio
     frontend keeps its exact behavior.
     """
+    if isinstance(resume, str):
+        session.agent.select_resume_session(resume)
     hello = build_session_hello(
         session.agent,
         routed_role=routed_role,
@@ -500,6 +505,8 @@ def serve_session_multi(
     out_stream.flush()
 
     goal_queue: queue.Queue = queue.Queue()
+    if resume:
+        goal_queue.put(_RESUME)
     gate = _Gate()
     context = CommandContext(session, ui, rebuild, routed_role)
     reader = threading.Thread(
@@ -548,7 +555,7 @@ def launch(
     models_override: dict[str, str] | None = None,
     routed_role: str | None = None,
     approval_mode: str = "ask",
-    resume: bool = False,
+    resume: bool | str = False,
 ) -> None:
     """Run the real Kvist core behind the stdio frontend boundary."""
     source = in_stream if in_stream is not None else sys.stdin
@@ -608,6 +615,7 @@ def launch_multi(
     routed_role: str | None = None,
     approval_mode: str = "ask",
     commands: dict[str, CommandHandler] | None = None,
+    resume: bool | str = False,
 ) -> None:
     """Run the real Kvist core behind the multi-turn stdio frontend boundary.
 
@@ -688,6 +696,7 @@ def launch_multi(
             commands=commands,
             ui=ui,
             rebuild=rebuild,
+            resume=resume,
         )
 
 

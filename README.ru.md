@@ -444,6 +444,10 @@ echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
 `--approval-mode ask|deny`. `--resume` продолжает checkpoint без чтения goal из
 stdin.
 
+`--resume SESSION_ID` продолжает checkpoint конкретной сессии в Classic, Ink
+и stdio. Используйте id (имя файла без `.json`), а не отображаемое название.
+Если сессия или checkpoint отсутствует, команда завершится с ошибкой.
+
 ## Electron GUI
 
 GUI запускает Kvist как дочерний процесс и общается только через stdio-протокол;

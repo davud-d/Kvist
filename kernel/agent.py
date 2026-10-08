@@ -687,6 +687,19 @@ class LocalAgent:
         self._record_run_turn(user_goal, message)
         return message
 
+    def select_resume_session(self, session_id: str) -> None:
+        """Select an explicit checkpoint without falling back to another session."""
+        if not is_valid_session_name(session_id):
+            raise ValueError(f"Invalid session id / Неверный id сессии: {session_id!r}")
+        document = self._read_session_document(session_id)
+        if not document:
+            raise ValueError(f"Unknown session / Сессия не найдена: {session_id!r}")
+        if document.get("closed") is True:
+            raise ValueError(f"Session is closed / Сессия закрыта: {session_id!r}")
+        if self._peek_checkpoint(session_id) is None:
+            raise ValueError(f"No saved checkpoint / Нет checkpoint: {session_id!r}")
+        self.switch_session(session_id)
+
     def resume(self) -> str | None:
         refusal = self._refuse_closed_session()
         if refusal is not None:

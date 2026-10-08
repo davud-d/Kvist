@@ -83,8 +83,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--resume",
-        action="store_true",
-        help="Resume the active session's checkpoint (stdio frontend, no goal).",
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="SESSION_ID",
+        help="Resume a checkpoint, optionally selecting a session by id (not title).",
     )
     parser.add_argument(
         "--session-op",
@@ -834,6 +837,8 @@ def launch_tui(args: argparse.Namespace) -> int | None:
         "--approval-mode", args.approval_mode,
         "--skin", "claude" if (args.frontend or get_saved_frontend()) == "claude" else "ink",
     ]
+    if args.resume:
+        command += ["--resume", str(args.resume) if isinstance(args.resume, str) else ""]
     if args.provider:
         command += ["--provider", args.provider]
     if args.fast_model and args.smart_model:
@@ -3938,8 +3943,9 @@ def main() -> None:
                 routed_role=None if args.role == "auto" else args.role,
                 approval_mode=args.approval_mode,
                 commands=STDIO_COMMANDS,
+                **({"resume": args.resume} if args.resume else {}),
             )
-        except RuntimeError as error:
+        except (RuntimeError, ValueError) as error:
             print(sanitize_display_text(str(error)), file=sys.stderr)
             raise SystemExit(2) from error
         return
@@ -3974,7 +3980,7 @@ def main() -> None:
                 approval_mode=args.approval_mode,
                 resume=args.resume,
             )
-        except RuntimeError as error:
+        except (RuntimeError, ValueError) as error:
             print(sanitize_display_text(str(error)), file=sys.stderr)
             raise SystemExit(2) from error
         return
@@ -4010,13 +4016,21 @@ def main() -> None:
 
     sync_strime_suggestion(config.provider, config.stream)
 
-    # A launch never continues the previous one's conversation. An interrupted
-    # run stays reachable: /resume walks to whichever session holds it.
+    # Only an explicit resume continues a previous launch's conversation.
     from kernel.durable_json import JsonStorageError
 
     try:
-        _, resumable_session = agent.start_fresh_session()
+        if isinstance(args.resume, str):
+            agent.select_resume_session(args.resume)
+            resumable_session = None
+        elif args.resume:
+            resumable_session = None
+        else:
+            _, resumable_session = agent.start_fresh_session()
     except (JsonStorageError, OSError, ValueError) as error:
+        if args.resume:
+            print(sanitize_display_text(str(error)), file=sys.stderr)
+            raise SystemExit(2) from error
         resumable_session = None
         model_warnings.append(
             "Could not start a fresh session "
@@ -4095,8 +4109,12 @@ def main() -> None:
     # persisted session history must not be used for it.
     completed_turns = 0
     try:
+        startup_resume = bool(args.resume)
         while True:
-            if interactive_screen is None:
+            if startup_resume:
+                startup_resume = False
+                user_goal = "/resume"
+            elif interactive_screen is None:
                 user_goal = multiline_input()
             else:
                 # The stored lock decides, so /session, /new and a live close

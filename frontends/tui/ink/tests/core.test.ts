@@ -214,3 +214,24 @@ test("resume answers with the turn's events and turn_end, never command_result",
   assert.equal(session && "session" in session ? session.session : "", "chat-interrupted")
   await core.stop()
 })
+
+for (const resume of ["chat-requested", ""]) {
+  test(`startup resume reaches the core argv (${resume || "latest"})`, async () => {
+    const script = `
+      console.log(JSON.stringify({ type: "hello", protocol_version: 1 }));
+      console.log(JSON.stringify({ type: "debug", message: JSON.stringify(process.argv.slice(1)) }));
+      process.stdin.resume();
+    `
+    const core = new KvistCore({ command: process.execPath, prefixArgs: ["-e", script, "--"] })
+    const { events, until } = collect(core)
+    try {
+      core.start({ ...options, resume })
+      await until("debug")
+      const event = events.find((event) => event.type === "debug") as Extract<CoreEvent, { type: "debug" }>
+      const args = JSON.parse(event.message) as string[]
+      assert.deepEqual(args.slice(args.indexOf("--resume"), args.indexOf("--role")), resume ? ["--resume", resume] : ["--resume"])
+    } finally {
+      await core.stop()
+    }
+  })
+}
