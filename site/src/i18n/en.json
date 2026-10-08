@@ -9,7 +9,7 @@
   },
   "meta": {
     "title": "Kvist — a supervised coding agent for one workspace",
-    "description": "Kvist is a terminal coding agent that works in one project directory. It plans, then emits one JSON action per step through a sandbox that masks secrets, blocks .env, and asks before anything dangerous. Python, MIT, beta.",
+    "description": "Kvist is a terminal coding agent that works in one project directory. It works through tool calling (JSON fallback for models without it) in a sandbox that masks secrets, blocks .env, and asks before anything dangerous. Python, MIT, beta.",
     "ogAlt": "The Kvist wordmark drawn in terminal half-blocks"
   },
   "nav": {
@@ -32,13 +32,13 @@
   },
   "hero": {
     "status": "Beta",
-    "h1": "One workspace. One action per step.",
-    "lede": "Kvist is a terminal coding agent that works in a single project directory. It plans the task, then emits one JSON action at a time — read, edit, run, verify — and feeds the result back before deciding the next one. Every action goes through one executor that can refuse it.",
+    "h1": "One workspace. One gate for every action.",
+    "lede": "Kvist is a terminal coding agent that works in a single project directory. It works through tool calling — read, edit, run, verify — and feeds the results back before deciding the next step. Models without tool calling fall back to JSON. Every action goes through one executor that can refuse it.",
     "cta": "Watch it run",
     "guidesLink": "Browse the guides",
     "repo": "Open the repository",
     "repoHint": "Boarded up until launch.",
-    "note": "The source isn't public yet. Everything below — the run, the twelve guides — is the real interface, recorded end to end, not a mockup. Python 3.11 and 3.12 · Linux and Windows · MIT"
+    "note": "The source isn't public yet. Everything below — the run, the twelve guides — is the real interface, recorded end to end, not a mockup. Python 3.11+ · Linux first, Windows and macOS limited · MIT"
   },
   "demo": {
     "kicker": "Recorded run",
@@ -56,16 +56,16 @@
   },
   "loop": {
     "kicker": "The loop",
-    "h2": "Plan, then one action at a time",
-    "lede": "A request is routed to a role, planned once, and then executed step by step. Each step is a single JSON object: a thought, the plan step it belongs to, and one action. The action set is closed — the model cannot invent a new capability mid-run.",
+    "h2": "Tool calling, a few changes at a time",
+    "lede": "A request is routed to a role and executed step by step through tool calling; a model or provider without it falls back to JSON. In one response the model may ask for any number of reads and searches, which run side by side, up to four at a time. Edits and commands are capped at eight per response and run in order, and a failed one stops the rest. The action set is closed — the model cannot invent a new capability mid-run.",
     "items": [
       {
-        "term": "18 action types",
-        "text": "read_file, write_file, replace_in_file, search_code, run_shell, git_diff, fetch_url, delegate_task, refuse, final_answer and eight more. The list is a Literal in protocol.py, and a test fails the build if the prompts, the parser and the executor drift apart."
+        "term": "21 action types",
+        "text": "read_file, write_file, replace_in_file, search_code, run_shell, git_diff, fetch_url, delegate_task, refuse, final_answer and eleven more. The list is a Literal in protocol.py, and a test fails the build if the prompts, the parser and the executor drift apart."
       },
       {
-        "term": "4 roles plus auto",
-        "text": "coder edits, reader investigates without writing, devops handles services and deployment, chat answers without touching files. Routing tries explicit rules first, then a small model, then keywords — in that order, in English and Russian."
+        "term": "5 roles plus auto",
+        "text": "coder edits, reader investigates without writing, devops handles services and deployment, chat answers without touching files, universal chats and acts as the request needs and is the default when nothing else fits. Routing tries explicit rules first, then a small model, then keywords — in that order, in English and Russian."
       },
       {
         "term": "Untrusted output stays untrusted",
@@ -73,7 +73,7 @@
       },
       {
         "term": "Progress is derived, not declared",
-        "text": "The model does not report a percentage. Progress comes from the plan steps that are actually finished. When the step budget runs out, Kvist asks whether to continue instead of stopping silently."
+        "text": "The model does not report a percentage. Progress is derived from the phase each response is in — inspect, plan, edit, verify — and only moves forward. When the step budget runs out, Kvist asks whether to continue instead of stopping silently."
       }
     ]
   },
@@ -182,10 +182,10 @@
     ],
     "reqTitle": "What it will need",
     "req": [
-      "Python — tested in CI on 3.11 and 3.12",
+      "Python 3.11 or newer — tested in CI on 3.11 and 3.12",
       "A key for one of the supported providers",
       "A terminal, for the configuration and approval prompts",
-      "Linux or Windows; macOS is experimental"
+      "Linux is the main platform; Windows and macOS are limited"
     ],
     "alt": "Running from source will look the same: requirements.txt has nine entries, and main.py --workspace takes it from there."
   },
