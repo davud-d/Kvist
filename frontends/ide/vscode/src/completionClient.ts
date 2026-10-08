@@ -1,7 +1,8 @@
 import type * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
+import { createHash } from 'crypto';
 
-/** The exact wire shape `kvist --complete` reads on stdin (docs/autocomplete-plan.md section 2). */
+/** The wire shape `kvist --complete` reads on stdin. */
 export interface CompletionRequest {
     file_path: string;
     language: string;
@@ -12,18 +13,14 @@ export interface CompletionRequest {
 interface CompletionResponse {
     ok: boolean;
     completion?: string;
+    completions?: string[];
     error?: string;
 }
 
 // A file past this size costs more to serialize and spawn a process for than any
-// completion is worth; the core would truncate its own input anyway (docs/autocomplete-plan.md).
+// completion is worth; the core defensively caps its input as well.
 export const MAX_COMPLETION_BUFFER_CHARS = 500_000;
 
-// How much of the surrounding text anchors the cache key: enough that moving the
-// cursor a few characters away misses (the completion would differ), short enough
-// that retyping the same line after an accepted-then-undone suggestion still hits.
-const CACHE_KEY_PREFIX_CHARS = 80;
-const CACHE_KEY_SUFFIX_CHARS = 50;
 const DEFAULT_CACHE_LIMIT = 50;
 
 export function isDocumentTooLargeForCompletion(fullText: string): boolean {
@@ -31,10 +28,7 @@ export function isDocumentTooLargeForCompletion(fullText: string): boolean {
 }
 
 export function buildCacheKey(filePath: string, prefix: string, suffix: string): string {
-    const prefixTail = prefix.slice(-CACHE_KEY_PREFIX_CHARS);
-    const suffixHead = suffix.slice(0, CACHE_KEY_SUFFIX_CHARS);
-    // NUL cannot appear in editor text, so it safely separates the three parts.
-    return `${filePath}\0${prefixTail}\0${suffixHead}`;
+    return createHash('sha256').update(JSON.stringify([filePath, prefix, suffix])).digest('hex');
 }
 
 /** Builds the wire request from plain values, so the prefix/suffix split and path
@@ -69,12 +63,12 @@ export function parseCompletionResponse(stdout: string): CompletionResponse {
 /** A small recency cache keyed by cursor context: re-triggering at the same
  * position (e.g. after an accepted-then-undone suggestion) answers instantly
  * instead of spawning a process again. */
-export class CompletionCache {
-    private readonly entries = new Map<string, string>();
+export class CompletionCache<T = string> {
+    private readonly entries = new Map<string, T>();
 
     constructor(private readonly limit: number = DEFAULT_CACHE_LIMIT) {}
 
-    get(key: string): string | undefined {
+    get(key: string): T | undefined {
         const value = this.entries.get(key);
         if (value === undefined) {
             return undefined;
@@ -85,7 +79,7 @@ export class CompletionCache {
         return value;
     }
 
-    set(key: string, value: string): void {
+    set(key: string, value: T): void {
         this.entries.delete(key);
         this.entries.set(key, value);
         if (this.entries.size > this.limit) {
@@ -96,136 +90,133 @@ export class CompletionCache {
         }
     }
 
+    recentValues(): T[] {
+        return [...this.entries.values()].reverse();
+    }
+
     get size(): number {
         return this.entries.size;
     }
 }
 
-/**
- * Spawns a fresh `kvist --workspace <dir> --complete` process per completion
- * request (never routed through the long-lived chat core, per
- * docs/autocomplete-plan.md section 1).
- *
- * One instance is shared across every keystroke, so it is deliberately
- * single-flight: a new request always supersedes whatever this instance was
- * still waiting on — matching the editor firing again on every keystroke
- * rather than queuing behind a slow reply.
- */
-export class CompletionClient {
-    private readonly cache = new CompletionCache();
-    private activeChild: ChildProcess | undefined;
-    private debounceTimer: ReturnType<typeof setTimeout> | undefined;
-    private resolvePending: ((completion: string) => void) | undefined;
+/** History is scoped to the binary/workspace/language and exact buffer context.
+ * Matching forward typing consumes a candidate; deleting text restores the anchor. */
+export class CompletionHistory {
+    private readonly cache = new CompletionCache<{
+        scope: string; request: CompletionRequest; candidates: string[];
+    }>();
 
-    constructor(private debounceMs: number) {}
+    get(scope: string, request: CompletionRequest): string[] | undefined {
+        const exact = this.cache.get(this.key(scope, request));
+        if (exact) { return exact.candidates; }
+        for (const entry of this.cache.recentValues()) {
+            const old = entry.request;
+            if (scope !== entry.scope || request.file_path !== old.file_path || request.language !== old.language
+                || request.suffix !== old.suffix || !request.prefix.startsWith(old.prefix)) { continue; }
+            const typed = request.prefix.slice(old.prefix.length);
+            const matching = entry.candidates.filter(value => value.startsWith(typed));
+            if (matching.length) { return matching.map(value => value.slice(typed.length)).filter(Boolean); }
+        }
+        return undefined;
+    }
+
+    set(scope: string, request: CompletionRequest, candidates: string[]): void {
+        this.cache.set(this.key(scope, request), { scope, request: { ...request }, candidates: [...candidates] });
+    }
+
+    private key(scope: string, request: CompletionRequest): string {
+        return JSON.stringify([scope, request.language, buildCacheKey(request.file_path, request.prefix, request.suffix)]);
+    }
+}
+
+export function responseCandidates(response: CompletionResponse): string[] {
+    if (!response.ok) { return []; }
+    const values = Array.isArray(response.completions) ? response.completions : [response.completion];
+    return [...new Set(values.filter((value): value is string => typeof value === 'string' && !!value.trim())
+        .map(value => value.slice(0, 2000)))].slice(0, 3);
+}
+
+/** Single-flight, cancellable completion transport. Cache hits also cancel stale work. */
+export class CompletionClient {
+    private readonly history = new CompletionHistory();
+    private cancelPending: (() => void) | undefined;
+
+    constructor(private debounceMs: number, private readonly spawnProcess: typeof spawn = spawn) {}
 
     setDebounceMs(debounceMs: number): void {
-        this.debounceMs = Math.max(0, debounceMs);
+        this.debounceMs = Number.isFinite(debounceMs) ? Math.max(0, debounceMs) : 2000;
     }
 
     requestCompletion(
         binaryPath: string,
         workspaceDir: string,
         request: CompletionRequest,
-        token: vscode.CancellationToken
-    ): Promise<string> {
-        const cacheKey = buildCacheKey(request.file_path, request.prefix, request.suffix);
-        const cached = this.cache.get(cacheKey);
-        if (cached !== undefined) {
-            return Promise.resolve(cached);
-        }
+        token: vscode.CancellationToken,
+        explicit = false
+    ): Promise<string[]> {
+        this.cancelPending?.();
+        if (token.isCancellationRequested) { return Promise.resolve([]); }
+        const scope = JSON.stringify([binaryPath, workspaceDir]);
+        const cached = this.history.get(scope, request);
+        if (cached !== undefined) { return Promise.resolve(cached); }
 
-        // Only one request is ever in flight on this instance.
-        this.supersedePending();
-
-        return new Promise<string>((resolve) => {
-            if (token.isCancellationRequested) {
-                resolve('');
+        return new Promise<string[]>((resolve) => {
+            let child: ChildProcess | undefined;
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            let subscription: vscode.Disposable | undefined;
+            let done = false;
+            const finish = (values: string[]) => {
+                if (done) { return; }
+                done = true;
+                clearTimeout(timer);
+                clearTimeout(timeout);
+                subscription?.dispose();
+                child?.kill();
+                if (this.cancelPending === cancel) { this.cancelPending = undefined; }
+                resolve(values);
+            };
+            const cancel = () => finish([]);
+            this.cancelPending = cancel;
+            subscription = token.onCancellationRequested(cancel);
+            if (done || token.isCancellationRequested) {
+                subscription.dispose();
+                cancel();
                 return;
             }
-            this.resolvePending = resolve;
-            token.onCancellationRequested(() => this.settle(resolve, ''));
-
-            this.debounceTimer = setTimeout(() => {
-                this.debounceTimer = undefined;
-                if (token.isCancellationRequested) {
-                    this.settle(resolve, '');
-                    return;
+            timer = setTimeout(() => {
+                if (done || token.isCancellationRequested) { cancel(); return; }
+                try {
+                    child = this.spawnProcess(binaryPath, ['--workspace', workspaceDir, '--complete'], {
+                        stdio: ['pipe', 'pipe', 'pipe']
+                    });
+                    timeout = setTimeout(cancel, 4000);
+                    let stdout = '';
+                    child.stdout?.on('data', data => {
+                        stdout += data.toString();
+                        if (stdout.length > 100_000) { cancel(); }
+                    });
+                    // Drain warnings and handle EPIPE if the binary exits before reading stdin.
+                    child.stderr?.resume();
+                    child.stdin?.on('error', cancel);
+                    child.on('error', cancel);
+                    child.on('close', code => {
+                        if (done) { return; }
+                        if (code !== 0) { cancel(); return; }
+                        const response = parseCompletionResponse(stdout);
+                        const values = responseCandidates(response);
+                        if (response.ok) { this.history.set(scope, request, values); }
+                        finish(values);
+                    });
+                    child.stdin?.end(JSON.stringify(request));
+                } catch {
+                    cancel();
                 }
-                this.spawnRequest(binaryPath, workspaceDir, request, cacheKey, resolve);
-            }, this.debounceMs);
+            }, explicit ? 0 : this.debounceMs);
         });
     }
 
-    /** Kills any in-flight process and resolves its promise. Call on extension deactivation. */
     dispose(): void {
-        this.supersedePending();
-    }
-
-    private supersedePending(): void {
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = undefined;
-        }
-        this.activeChild?.kill();
-        this.activeChild = undefined;
-        if (this.resolvePending) {
-            const resolve = this.resolvePending;
-            this.resolvePending = undefined;
-            resolve('');
-        }
-    }
-
-    /** Resolves `resolve` with `value`, but only if it is still the current request —
-     * a slower, already-superseded request's late callback must not resolve twice. */
-    private settle(resolve: (completion: string) => void, value: string): void {
-        if (this.resolvePending !== resolve) {
-            return;
-        }
-        this.resolvePending = undefined;
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = undefined;
-        }
-        this.activeChild?.kill();
-        this.activeChild = undefined;
-        resolve(value);
-    }
-
-    private spawnRequest(
-        binaryPath: string,
-        workspaceDir: string,
-        request: CompletionRequest,
-        cacheKey: string,
-        resolve: (completion: string) => void
-    ): void {
-        const child = spawn(binaryPath, ['--workspace', workspaceDir, '--complete'], {
-            stdio: ['pipe', 'pipe', 'pipe']
-        });
-        this.activeChild = child;
-
-        let stdout = '';
-        child.stdout?.on('data', (data) => {
-            stdout += data.toString();
-        });
-        child.on('error', () => this.settle(resolve, ''));
-        child.on('close', (code) => {
-            if (this.resolvePending !== resolve) {
-                return;
-            }
-            if (code !== 0) {
-                this.settle(resolve, '');
-                return;
-            }
-            const response = parseCompletionResponse(stdout);
-            const completion = response.ok && typeof response.completion === 'string' ? response.completion : '';
-            if (response.ok) {
-                this.cache.set(cacheKey, completion);
-            }
-            this.settle(resolve, completion);
-        });
-
-        child.stdin?.write(JSON.stringify(request));
-        child.stdin?.end();
+        this.cancelPending?.();
     }
 }

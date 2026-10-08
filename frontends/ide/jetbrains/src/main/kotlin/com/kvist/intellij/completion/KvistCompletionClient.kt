@@ -11,12 +11,13 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.progress.EmptyProgressIndicator
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.kvist.intellij.runtime.KvistTarget
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.io.IOException
 import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
-import java.util.Collections
 import kotlin.coroutines.resume
 
 class CompletionRequestException(message: String) : Exception(message)
@@ -38,41 +39,23 @@ data class CompletionPayload(
     }
 }
 
-/**
- * Runs `kvist --workspace <dir> --complete` for one inline-completion request and caches
- * the answer. Modeled on `KvistCommitMessageClient`'s process-handling shape, with two
- * differences a per-keystroke request needs that a per-click one does not: a short
- * timeout, and cancellation driven by the calling coroutine rather than a
- * caller-owned [com.intellij.openapi.progress.ProgressIndicator] — the inline-completion
- * platform API hands every request its own coroutine, cancelled the moment it is
- * superseded by further typing, and that cancellation is what must kill the child process.
- */
+/** Per-request process with bounded history and cooperative cancellation. */
 class KvistCompletionClient {
-    // Keystroke-latency-critical: unlike a commit message (one click, one wait), a stale
-    // answer here is worse than none, and letting requests pile up behind a slow one would
-    // make typing feel laggy. Chosen well above a fast model's typical reply time, well
-    // below where a suggestion would arrive too late to still match the caret position.
     private val timeoutMs = 4_000
+    private val history = CompletionHistory()
 
-    // Bounded so a long editing session cannot grow this without limit; large enough that
-    // retyping over an undo, or revisiting a line, is likely to still hit.
-    private val cache: MutableMap<String, String> = Collections.synchronizedMap(
-        object : LinkedHashMap<String, String>(CACHE_CAPACITY, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>): Boolean {
-                return size > CACHE_CAPACITY
-            }
-        }
-    )
-
-    suspend fun requestCompletion(target: KvistTarget, payload: CompletionPayload): String {
-        cache[cacheKey(payload)]?.let { return it }
-
-        val completion = runCompletionProcess(target, payload)
-        cache[cacheKey(payload)] = completion
-        return completion
+    suspend fun requestCompletion(target: KvistTarget, payload: CompletionPayload): List<String> {
+        val scope = listOf(target.binaryPath.toString(), target.workspace.toString())
+        history.get(scope, payload)?.let { return it }
+        // Cache lookup must happen BEFORE the typing pause, so backspace/undo
+        // can restore known candidates without a model call or another wait.
+        delay(2_000)
+        val completions = withContext(Dispatchers.IO) { runCompletionProcess(target, payload) }
+        history.set(scope, payload, completions)
+        return completions
     }
 
-    private suspend fun runCompletionProcess(target: KvistTarget, payload: CompletionPayload): String {
+    private suspend fun runCompletionProcess(target: KvistTarget, payload: CompletionPayload): List<String> {
         val commandLine = GeneralCommandLine(
             target.binaryPath.toString(), "--workspace", target.workspace.toString(), "--complete"
         ).withCharset(StandardCharsets.UTF_8)
@@ -101,7 +84,10 @@ class KvistCompletionClient {
         if (output.isTimeout) {
             throw CompletionRequestException("Kvist did not answer within ${timeoutMs}ms.")
         }
-        return parseReply(output.stdout)
+        if (output.exitCode != 0) {
+            throw CompletionRequestException("Kvist completion process failed.")
+        }
+        return parseCompletionReply(output.stdout)
     }
 
     /**
@@ -123,36 +109,21 @@ class KvistCompletionClient {
         }
     }
 
-    private fun parseReply(stdout: String): String {
-        val reply = try {
-            JsonParser.parseString(stdout.trim()) as? JsonObject
-        }
-        catch (exception: JsonParseException) {
-            LOG.warn("Unreadable Kvist completion reply: $stdout", exception)
-            null
-        } ?: throw CompletionRequestException("Kvist returned an unreadable reply.")
-
-        val ok = reply.get("ok")?.takeIf { it.isJsonPrimitive }?.asBoolean ?: false
-        if (!ok) {
-            val error = reply.get("error")?.takeIf { it.isJsonPrimitive }?.asString
-            throw CompletionRequestException(error ?: "Kvist could not generate a completion.")
-        }
-        // An empty string is a valid "no suggestion" answer, not a missing field.
-        return reply.get("completion")?.takeIf { it.isJsonPrimitive }?.asString ?: ""
-    }
-
     companion object {
         private val LOG = logger<KvistCompletionClient>()
-        private const val CACHE_CAPACITY = 200
-        private const val PREFIX_TAIL_CHARS = 80
-        private const val SUFFIX_HEAD_CHARS = 50
-
-        private fun cacheKey(payload: CompletionPayload): String {
-            val prefixTail = payload.prefix.takeLast(PREFIX_TAIL_CHARS)
-            val suffixHead = payload.suffix.take(SUFFIX_HEAD_CHARS)
-            val digest = MessageDigest.getInstance("SHA-256")
-                .digest("$prefixTail\u0000$suffixHead".toByteArray(StandardCharsets.UTF_8))
-            return payload.filePath + ":" + digest.joinToString("") { "%02x".format(it) }
-        }
     }
+}
+
+internal fun parseCompletionReply(stdout: String): List<String> {
+    val reply = try {
+        JsonParser.parseString(stdout.trim().lineSequence().last()) as? JsonObject
+    } catch (_: JsonParseException) {
+        null
+    } ?: throw CompletionRequestException("Kvist returned an unreadable reply.")
+    val ok = reply.get("ok")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }?.asBoolean == true
+    if (!ok) throw CompletionRequestException("Kvist could not generate a completion.")
+    val candidates = reply.get("completions")?.takeIf { it.isJsonArray }?.asJsonArray
+        ?.mapNotNull { it.takeIf { value -> value.isJsonPrimitive && value.asJsonPrimitive.isString }?.asString }
+        ?: listOfNotNull(reply.get("completion")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString)
+    return candidates.filter { it.isNotBlank() }.map { it.take(2000) }.distinct().take(3)
 }

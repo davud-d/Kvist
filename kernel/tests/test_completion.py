@@ -231,11 +231,11 @@ def test_cli_prints_json_reply(monkeypatch, capsys, tmp_path):
     from kernel import main
 
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
-    monkeypatch.setattr(completion, "generate_completion", lambda text, workspace: "суффикс")
+    monkeypatch.setattr(completion, "generate_completions", lambda text, workspace: ["суффикс", "другой"])
     main._run_complete_op(argparse.Namespace(workspace=str(tmp_path)))
     out = capsys.readouterr().out
     assert out.isascii()
-    assert json.loads(out) == {"ok": True, "completion": "суффикс"}
+    assert json.loads(out) == {"ok": True, "completion": "суффикс", "completions": ["суффикс", "другой"]}
 
 
 def test_cli_reports_failure_as_json(monkeypatch, capsys, tmp_path):
@@ -247,7 +247,7 @@ def test_cli_reports_failure_as_json(monkeypatch, capsys, tmp_path):
         raise CompletionError("No fast model is configured")
 
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
-    monkeypatch.setattr(completion, "generate_completion", fail)
+    monkeypatch.setattr(completion, "generate_completions", fail)
     with pytest.raises(SystemExit) as exit_info:
         main._run_complete_op(argparse.Namespace(workspace=str(tmp_path)))
     assert exit_info.value.code == 1
@@ -267,3 +267,62 @@ def test_cli_rejects_missing_workspace(monkeypatch, capsys):
         main._run_complete_op(argparse.Namespace(workspace=""))
     assert exit_info.value.code == 1
     assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_completion_ignores_global_reasoning_setting(isolated_home, monkeypatch):
+    _write_config(isolated_home, {
+        "llm_provider": "deepseek", "deepseek_api_key": "sk-test",
+        "llm_models": {"deepseek": {"fast": "deepseek-chat"}},
+        "reasoning_effort": "max",
+    })
+    monkeypatch.setenv("AGENT_REASONING_EFFORT", "high")
+    caller, _ = completion._build_caller()
+    assert caller.config.reasoning_effort == "false"
+
+
+def test_multiple_candidates_in_one_request(tmp_path, fake_caller):
+    fake_caller.content = json.dumps({"completions": ["return a", "return b", "return a", "", 5, "return c", "extra"]})
+    assert completion.generate_completions(_payload(), tmp_path) == ["return a", "return b", "return c"]
+    assert len(fake_caller.requests) == 1
+    assert fake_caller.requests[0]["reasoning_effort"] == "none"
+
+
+@pytest.mark.parametrize("provider, expected", [
+    ("deepseek", {"extra_body": {"thinking": {"type": "disabled"}}}),
+    ("anthropic", {"reasoning_effort": "false"}),
+    ("openrouter", {"extra_body": {"reasoning": {"effort": "none"}}}),
+])
+def test_provider_specific_no_reasoning(provider, expected):
+    client = FakeLLMClient(content='{"completions": []}')
+    caller = completion._ModelCaller(client, AgentConfig(provider=provider), completion._StderrUI())
+    completion._request_candidates(caller, "fast", [])
+    assert all(client.requests[0][key] == value for key, value in expected.items())
+
+
+def test_reasoning_required_model_uses_lowest_accepted_effort():
+    client = FakeLLMClient(content='{"completions": []}')
+    attempts = []
+    def create(**kwargs):
+        attempts.append(kwargs)
+        if kwargs.get("reasoning_effort") != "low":
+            raise ValueError("Unsupported reasoning_effort value")
+        return "response"
+    client.chat.completions.create = create
+    caller = completion._ModelCaller(client, AgentConfig(provider="openai"), completion._StderrUI())
+    assert completion._request_candidates(caller, "fast", []) == "response"
+    assert [a["reasoning_effort"] for a in attempts] == ["none", "minimal", "low"]
+
+
+def test_empty_or_malformed_candidate_envelope_is_not_inserted():
+    assert completion.clean_model_candidates('{"completions": []}', "") == []
+    assert completion.clean_model_candidates('{"completions": ["truncated', "") == []
+    assert completion.clean_model_candidates('{"completions": "wrong type"}', "") == []
+
+
+def test_candidate_preserves_leading_newline_and_indentation():
+    raw = json.dumps({"completions": ["\n    return 1"]})
+    assert completion.clean_model_candidates(raw, "def f():") == ["\n    return 1"]
+
+
+def test_incomplete_multiline_json_is_not_suggested():
+    assert completion.clean_model_candidates('{\n  "completions": ["partial', "") == []

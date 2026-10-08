@@ -26,7 +26,6 @@ from pathlib import Path
 from typing import Any
 
 from kernel.agent_model import (
-    _create_json_completion,
     _format_llm_error,
     _load_role_prompt,
     safe_extract_completion_content,
@@ -44,14 +43,13 @@ from kernel.llm_clients import (
     required_secret_keys_for_provider,
     resolve_models_for_provider,
 )
-from kernel.reasoning_effort import normalize_effort
-from kernel.redaction import defang_prompt_boundary_tags
+from kernel.reasoning_effort import is_reasoning_error, merge_reasoning_kwargs, strip_reasoning_kwargs
+from kernel.redaction import defang_prompt_boundary_tags, redact_value
 from kernel.user_config import (
     ensure_provider_credentials,
     get_custom_provider_by_name,
     get_saved_models,
     get_saved_provider_or_none,
-    get_saved_reasoning_effort,
     load_available_credentials,
 )
 
@@ -96,7 +94,7 @@ class _StderrUI:
 
 @dataclass(slots=True)
 class _ModelCaller:
-    """The three attributes ``_create_json_completion`` reads from an agent."""
+    """Minimal configuration for the standalone completion request."""
 
     client: Any
     config: AgentConfig
@@ -199,7 +197,7 @@ def _strip_echo(text: str, prefix: str) -> str:
 
 
 def clean_model_output(raw: str, prefix: str) -> str:
-    text = raw.strip("\n")
+    text = raw
     fenced = _FENCE_RE.match(text.strip())
     if fenced:
         text = fenced.group(1)
@@ -230,13 +228,6 @@ def _no_interactive_secret(_label: str) -> str:
     return ""
 
 
-def _resolve_reasoning_effort() -> str:
-    override = os.getenv("AGENT_REASONING_EFFORT")
-    if override and override.strip():
-        return normalize_effort(override)
-    return normalize_effort(get_saved_reasoning_effort())
-
-
 def _build_caller() -> tuple[_ModelCaller, str]:
     provider = _resolve_provider()
     models, _warnings = resolve_models_for_provider(provider, _saved_models(provider))
@@ -262,14 +253,73 @@ def _build_caller() -> tuple[_ModelCaller, str]:
         smart_model=model,
         persist_logs=False,
         stream=False,
-        reasoning_effort=_resolve_reasoning_effort(),
+        reasoning_effort="false",
     )
     apply_api_settings(config)
     client = create_llm_client(provider=provider, credentials=credentials)
     return _ModelCaller(client=client, config=config, _ui=_StderrUI()), model
 
 
-def generate_completion(payload_text: str, workspace: Path) -> str:
+def _request_candidates(caller: _ModelCaller, model: str, messages: list[dict]) -> Any:
+    # Completion has its own latency policy, independent of chat's /effort or env.
+    # Omit sampling controls: reasoning-only models often reject temperature.
+    kwargs: dict[str, Any] = {
+        "model": model, "messages": redact_value(messages),
+        "timeout": min(caller.config.api_timeout, 4.0),
+    }
+    merge_reasoning_kwargs(kwargs, caller.config.provider, "false")
+    if kwargs.get("reasoning_effort") == "minimal":
+        kwargs["reasoning_effort"] = "none"
+    while True:
+        try:
+            return caller.client.chat.completions.create(**kwargs)
+        except Exception as error:
+            if not is_reasoning_error(error):
+                raise
+            # A model may require reasoning. Try its lowest supported effort,
+            # and only omit the control if the endpoint rejects it altogether.
+            effort = kwargs.get("reasoning_effort")
+            if effort in ("none", "minimal"):
+                kwargs["reasoning_effort"] = "minimal" if effort == "none" else "low"
+                continue
+            stripped = strip_reasoning_kwargs(kwargs)
+            if stripped == kwargs:
+                raise
+            kwargs = stripped
+
+
+def clean_model_candidates(raw: str, prefix: str) -> list[str]:
+    text = raw.strip()
+    fenced = _FENCE_RE.match(text)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError):
+        # Do not insert a broken protocol object as code. Plain-code replies
+        # remain compatible with older/custom models.
+        if re.match(r'\{\s*"completions?"\s*:', text):
+            return []
+        values = [raw]
+    else:
+        if isinstance(parsed, dict):
+            values = parsed.get("completions", [])
+        else:
+            values = []
+    if not isinstance(values, list):
+        return []
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, str):
+            cleaned = clean_model_output(value, prefix)
+            if cleaned.strip() and cleaned not in result:
+                result.append(cleaned)
+        if len(result) == 3:
+            break
+    return result
+
+
+def generate_completions(payload_text: str, workspace: Path) -> list[str]:
     request = parse_payload(payload_text)
     target_file = _resolve_target_file(workspace, request.file_path)
 
@@ -284,12 +334,16 @@ def generate_completion(payload_text: str, workspace: Path) -> str:
     ]
     provider = caller.config.provider
     try:
-        response = _create_json_completion(caller, model, messages, stream=False, json_mode=False)
+        response = _request_candidates(caller, model, messages)
         raw = safe_extract_completion_content(response, provider, model)
     # Provider SDKs share no exception base class; this is the same boundary
     # call_model draws, and the error is reported, not swallowed.
     except Exception as error:
         raise CompletionError(_format_llm_error(error, provider)) from error
-    if not raw:
-        return ""
-    return clean_model_output(raw, request.prefix[-MAX_PREFIX_CHARS:])
+    return clean_model_candidates(raw or "", request.prefix[-MAX_PREFIX_CHARS:])
+
+
+def generate_completion(payload_text: str, workspace: Path) -> str:
+    """Compatibility helper for callers that need only the first candidate."""
+    candidates = generate_completions(payload_text, workspace)
+    return candidates[0] if candidates else ""

@@ -126,8 +126,9 @@
         },
         "kvist.inlineCompletion.debounceMs": {
           "type": "number",
-          "default": 250,
-          "markdownDescription": "Milliseconds to wait after you stop typing before requesting an inline completion. Lower values feel more responsive but spawn the Kvist core more often."
+          "default": 2000,
+          "minimum": 0,
+          "markdownDescription": "Milliseconds to wait after you stop typing before requesting an inline completion. Cached suggestions return immediately when you undo or delete a typo."
         }
       }
     }

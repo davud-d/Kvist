@@ -16,21 +16,10 @@ import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
-/**
- * Ghost-text inline completion backed by `kvist --complete`. Extends
- * [DebouncedInlineCompletionProvider] rather than [com.intellij.codeInsight.inline.completion.InlineCompletionProvider]
- * directly: the platform base class already gives every request its own coroutine,
- * cancels the previous one the instant a new one supersedes it, and waits
- * [getDebounceDelay] before calling [getSuggestionDebounced] at all — exactly the
- * debounce-and-cancel behavior this feature needs, so there is nothing to hand-roll here.
- */
+/** Ghost text: the client waits only for uncached states and cancels with the editor request. */
 class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
     override val id: InlineCompletionProviderID = InlineCompletionProviderID("Kvist")
 
-    // Suggestion computation is fully cooperative with coroutine cancellation (see
-    // KvistCompletionClient), so the platform's own cancel-on-supersede behavior is
-    // enough: there is nothing project-specific in the cache, so one instance for the
-    // lifetime of this (application-level, platform-owned) provider is enough.
     private val client = KvistCompletionClient()
 
     override fun isEnabled(event: InlineCompletionEvent): Boolean {
@@ -39,7 +28,7 @@ class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
         return documentChange.editor.document.textLength <= MAX_DOCUMENT_CHARS
     }
 
-    override suspend fun getDebounceDelay(request: InlineCompletionRequest): Duration = DEBOUNCE_MS.milliseconds
+    override suspend fun getDebounceDelay(request: InlineCompletionRequest): Duration = 0.milliseconds
 
     override suspend fun getSuggestionDebounced(request: InlineCompletionRequest): InlineCompletionSuggestion {
         val project = request.editor.project ?: return InlineCompletionSuggestion.Empty
@@ -55,7 +44,7 @@ class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
             suffix = document.getText(TextRange(request.startOffset, document.textLength)),
         )
 
-        val completion = try {
+        val completions = try {
             client.requestCompletion(target, payload)
         }
         catch (exception: CancellationException) {
@@ -65,11 +54,11 @@ class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
             LOG.debug("Kvist inline completion failed: ${exception.message}")
             return InlineCompletionSuggestion.Empty
         }
-        if (completion.isEmpty()) return InlineCompletionSuggestion.Empty
+        if (completions.isEmpty()) return InlineCompletionSuggestion.Empty
 
         return InlineCompletionSuggestion {
-            variant {
-                emit(InlineCompletionGrayTextElement(completion))
+            for (completion in completions) {
+                variant { emit(InlineCompletionGrayTextElement(completion)) }
             }
         }
     }
@@ -97,10 +86,6 @@ class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
 
     companion object {
         private val LOG = logger<KvistInlineCompletionProvider>()
-
-        // Idle-typing debounce: fast enough to feel responsive, slow enough that most
-        // keystrokes never spawn a process at all.
-        private const val DEBOUNCE_MS = 300L
 
         // The core defensively caps its own input regardless, but there is no reason to
         // serialize a huge buffer and spawn a process client-side just to have it trimmed.

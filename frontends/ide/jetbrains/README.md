@@ -29,7 +29,9 @@ While it runs, the button shows a spinner; hovering turns it into a red stop squ
 As you type, the editor shows a gray-text ("ghost text") suggestion from `kvist --complete`, accepted with Tab like any other inline completion. Toggle it from **Tools | Kvist Inline Completion**; it is on by default.
 
 - One short-lived `kvist --complete` process per suggestion, independent of the chat tool window's core process: it runs even while an agent turn is in progress, and never waits behind one.
-- The IDE's own debounce-and-cancel mechanism for inline completion providers is reused as-is: a short pause after typing before a request fires, and a further keystroke cancels whatever request is still in flight (and kills its process) instead of queuing behind it.
+- New requests wait for **two seconds without typing**. Further typing cancels the in-flight request and its process. Cache lookup happens before the pause: deleting a typo or undoing restores previous alternatives immediately. Matching forward input consumes the suggestion; unrelated text hides it.
+- One fast-model request prepares up to three alternatives, exposed through the IDE's inline-completion variants. Reasoning is disabled where supported, with minimal/low effort as a fallback. This is independent of chat's reasoning setting.
+- A bounded history includes workspace, binary, language and full buffer context, so another project or changed surrounding code cannot reuse an unrelated suggestion.
 - `prefix`/`suffix` are the live, unsaved buffer split at the caret — never a save to disk first.
 - Only Python and JS/TS variants get their imports resolved into extra context by the core; every other language still gets a plain completion.
 - The bundled binary must be built from a Kvist version that has `--complete`; rebuild it with the scripts below.

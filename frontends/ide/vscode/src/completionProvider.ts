@@ -3,12 +3,12 @@ import { BinaryResolver } from './binaryResolver';
 import { CompletionClient, buildCompletionRequest, isDocumentTooLargeForCompletion } from './completionClient';
 
 const CONFIG_SECTION = 'kvist.inlineCompletion';
-const DEFAULT_DEBOUNCE_MS = 250;
+const DEFAULT_DEBOUNCE_MS = 2000;
 
 /**
  * Inline completion (ghost text) provider. Each request is a fresh, stateless
  * `kvist --complete` process — never the long-lived chat core, so a slow or
- * busy agent run never starves completion (docs/autocomplete-plan.md section 1).
+ * busy agent run never starves completion.
  */
 export class KvistInlineCompletionProvider implements vscode.InlineCompletionItemProvider, vscode.Disposable {
     private readonly binaryResolver: BinaryResolver;
@@ -26,7 +26,7 @@ export class KvistInlineCompletionProvider implements vscode.InlineCompletionIte
     async provideInlineCompletionItems(
         document: vscode.TextDocument,
         position: vscode.Position,
-        _context: vscode.InlineCompletionContext,
+        context: vscode.InlineCompletionContext,
         token: vscode.CancellationToken
     ): Promise<vscode.InlineCompletionItem[] | undefined> {
         if (!this.isEnabled()) {
@@ -54,11 +54,15 @@ export class KvistInlineCompletionProvider implements vscode.InlineCompletionIte
         // The setting can change between requests (a settings.json edit), so re-read
         // it here rather than freezing the value at construction time.
         this.client.setDebounceMs(this.debounceMs());
-        const completion = await this.client.requestCompletion(binaryPath, folder.uri.fsPath, request, token);
-        if (!completion) {
+        const version = document.version;
+        const completions = await this.client.requestCompletion(
+            binaryPath, folder.uri.fsPath, request, token,
+            context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke
+        );
+        if (token.isCancellationRequested || document.version !== version || !completions.length) {
             return undefined;
         }
-        return [new vscode.InlineCompletionItem(completion, new vscode.Range(position, position))];
+        return completions.map(value => new vscode.InlineCompletionItem(value, new vscode.Range(position, position)));
     }
 
     private isEnabled(): boolean {

@@ -262,14 +262,14 @@ def _run_complete_op(args: argparse.Namespace) -> None:
     import json
     from contextlib import redirect_stdout
 
-    from kernel.completion import CompletionError, generate_completion, resolve_workspace_for_completion
+    from kernel.completion import CompletionError, generate_completions, resolve_workspace_for_completion
     from kernel.redaction import sanitize_display_text
 
     payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
         with redirect_stdout(sys.stderr):
             workspace = resolve_workspace_for_completion(args.workspace)
-            completion_text = generate_completion(payload_text, workspace)
+            completions = generate_completions(payload_text, workspace)
     except (CompletionError, RuntimeError, OSError) as error:
         failure = {
             "ok": False,
@@ -277,7 +277,7 @@ def _run_complete_op(args: argparse.Namespace) -> None:
         }
         print(json.dumps(failure))
         raise SystemExit(1) from error
-    print(json.dumps({"ok": True, "completion": completion_text}))
+    print(json.dumps({"ok": True, "completion": completions[0] if completions else "", "completions": completions}))
 
 
 def _run_selection_task_op() -> None:
