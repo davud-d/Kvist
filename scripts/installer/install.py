@@ -124,6 +124,7 @@ def _await_dependencies(component: Component, progresses: dict[str, Progress]) -
         ]
         if not waiting:
             return
+        progresses[component.key].step = f"Waiting for: {', '.join(waiting)}"
         time.sleep(0.1)
 
 
@@ -133,9 +134,11 @@ def _run_component(component: Component, progress: Progress, progresses: dict[st
     stderr is folded into stdout so a single reader drains the child: that is
     both deadlock-free and the order the output was actually produced in.
     """
+    # Include dependency waiting in the component's total elapsed time.
+    progress.started_at = time.monotonic()
     _await_dependencies(component, progresses)
     command = [sys.executable, str(INSTALLER_DIR / component.script)]
-    progress.started_at = time.monotonic()
+    progress.step = "Starting installer"
     progress.state = "running"
     try:
         child = subprocess.Popen(
@@ -224,8 +227,13 @@ class _Panel:
         for component in self._components:
             progress = self._progresses[component.key]
             state = progress.state
-            mark = spinning if state == "running" else _MARKS[state]
-            elapsed = progress.elapsed if state != "running" else time.monotonic() - (progress.started_at or 0.0)
+            active = state not in _TERMINAL_STATES and progress.started_at is not None
+            mark = spinning if active else _MARKS.get(state, " ")
+            elapsed = (
+                time.monotonic() - progress.started_at
+                if active and progress.started_at is not None
+                else progress.elapsed
+            )
             head = f" {mark} {component.label}  {elapsed:5.1f}s  "
             yield Text.assemble(
                 (head, _STYLES[state]),
