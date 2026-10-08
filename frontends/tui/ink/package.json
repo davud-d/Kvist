@@ -9,7 +9,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "esbuild cli.tsx --bundle --platform=node --format=esm --target=node22 --alias:react-devtools-core=./vendor/react-devtools-core.js --banner:js=\"import { createRequire as __kvistRequire } from 'node:module'; const require = __kvistRequire(import.meta.url);\" --outfile=dist-ui/kvist-tui.mjs",
+    "build": "node build.mjs",
     "dev": "tsx cli.tsx",
     "typecheck": "tsc -p . --noEmit",
     "test": "tsx --test tests/*.test.ts tests/*.test.tsx"

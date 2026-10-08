@@ -758,6 +758,7 @@ returns `None` so the launcher continues into the classic terminal in the same
 process. The code carries no choice, so a new interface needs only an entry in
 `FRONTENDS` and a launch branch in `_switch_frontend`.
 Tests: `npm test` in `frontends/tui/ink` (the `tests/*.test.ts[x]` files use `tests/fixtures/fake-core.mjs`, never a real core).
+The bundle is built by `build.mjs` (`npm run build`), not the esbuild CLI, for two memory fixes that tests and `tsx` runs do not get: it defines `process.env.NODE_ENV` as production (React's development build keeps a `performance.measure` entry with the props diff for every render, so every streamed thought chunk stayed in memory) and it swaps Ink's unbounded `measure-text` cache for one capped at 1M characters.
 
 ### IDE chat panel (`frontends/ide/vscode/webview/`, shared with `frontends/ide/jetbrains/`)
 One Preact panel serves both IDEs. VS Code hosts it in a webview view

@@ -455,7 +455,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return { ...state, live: ensureLive(state, event.stream_id) }
     case "stream_chunk": {
       const current = ensureLive(state, event.stream_id)
-      const answer = event.append === false ? event.text : current.answer + event.text
+      const answer = event.append ? current.answer + event.text : event.text
       return { ...state, live: { ...current, answer } }
     }
     case "stream_commit":
@@ -464,7 +464,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return { ...state, live: { ...ensureLive(state, event.stream_id), thinking: true, thinkingSince: now } }
     case "reasoning_chunk": {
       const current = ensureLive(state, event.stream_id)
-      const reasoning = event.append === false ? event.text : current.reasoning + event.text
+      const reasoning = event.append ? current.reasoning + event.text : event.text
       return { ...state, live: { ...current, thinking: true, reasoning } }
     }
     case "reasoning_commit": {
