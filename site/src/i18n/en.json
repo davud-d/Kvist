@@ -38,7 +38,7 @@
     "guidesLink": "Browse the guides",
     "repo": "Open the repository",
     "repoHint": "Boarded up until launch.",
-    "note": "The source isn't public yet. Everything below — the run, the twelve guides — is the real interface, recorded end to end, not a mockup. Python 3.11+ · Linux first, Windows and macOS limited · MIT"
+    "note": "The source isn't public yet. Everything below — the run, the twelve guides — is the real interface, recorded end to end, not a mockup. Python 3.11+ · Linux and Windows · macOS without guarantees · MIT"
   },
   "demo": {
     "kicker": "Recorded run",
@@ -185,7 +185,7 @@
       "Python 3.11 or newer — tested in CI on 3.11 and 3.12",
       "A key for one of the supported providers",
       "A terminal, for the configuration and approval prompts",
-      "Linux is the main platform; Windows and macOS are limited"
+      "Linux is the main platform and Windows works; macOS should start and passes the tests, but there is no guarantee"
     ],
     "alt": "Running from source will look the same: requirements.txt has nine entries, and main.py --workspace takes it from there."
   },
