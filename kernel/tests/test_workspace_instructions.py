@@ -161,7 +161,7 @@ def test_action_model_system_prompt_carries_the_workspace_file(tmp_path):
     captured = {}
 
     class Agent:
-        config = SimpleNamespace(fast_model="fast", smart_model="smart")
+        config = SimpleNamespace(provider="openai", fast_model="fast", smart_model="smart")
         executor = SimpleNamespace(workspace=tmp_path)
         _ui = SimpleNamespace()
         _state = SimpleNamespace(

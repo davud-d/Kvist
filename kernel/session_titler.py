@@ -16,14 +16,10 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
-from kernel.agent_model import (
-    _create_json_completion,
-    _format_llm_error,
-    safe_extract_completion_content,
-)
-from kernel.agent_state import AgentConfig
+if TYPE_CHECKING:
+    from kernel.agent_state import AgentConfig
 
 # How much of the turn feeds the prompt: the user's own words plus a preview
 # of what the agent said, never the run's full tool output or context.
@@ -178,6 +174,13 @@ def generate_session_title(
     reply falls back to ``fallback_session_title(user_goal)``, so a session is
     always left with *some* title once this returns.
     """
+    # Session listings only need display titles, without loading provider SDKs.
+    from kernel.agent_model import (
+        _create_json_completion,
+        _format_llm_error,
+        safe_extract_completion_content,
+    )
+
     fallback = fallback_session_title(user_goal)
     model = config.title_model or config.fast_model
     if not model:

@@ -180,7 +180,9 @@ def test_live_markdown_stream_sequence():
     stream_id = drained[0].stream_id
     assert all(e.stream_id == stream_id for e in drained)
     assert drained[1].text == "a"
-    assert drained[2].text == "ab"
+    assert drained[2].text == "b"
+    assert drained[1].append is True and drained[2].append is True
+    assert drained[1].text + drained[2].text == drained[3].text
     assert drained[3].text == "ab"
 
 

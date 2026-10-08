@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import zipfile
 
 import pytest
@@ -610,7 +611,7 @@ def test_detached_bridge_survives_client_disconnect_and_recovers_events(
     workspace.mkdir()
     SessionStore(workspace).create("remote-task")
     core = make_fake_core(tmp_path)
-    monkeypatch.setenv("KVIST_CORE_COMMAND", str(core))
+    monkeypatch.setattr("kvist_web.processes.core_command", lambda: [sys.executable, str(core)])
     monkeypatch.setenv("KVIST_FAKE_DELAY", "0.45")
 
     app = BridgeApplication(tmp_path / "bridge-workspaces.json")

@@ -104,7 +104,7 @@ def test_read_file_preserves_crlf_instead_of_hiding_it(tmp_path):
 
 
 def test_read_file_range_returns_the_lines_and_the_file_length(tmp_path):
-    (tmp_path / "f.txt").write_text("".join(f"line{n}\n" for n in range(1, 11)), encoding="utf-8")
+    (tmp_path / "f.txt").write_text("".join(f"line{n}\n" for n in range(1, 11)), encoding="utf-8", newline="")
     executor = executor_module.SafeExecutor(str(tmp_path))
 
     data = executor._read_file("f.txt", 3, 5).data
@@ -116,7 +116,7 @@ def test_read_file_range_returns_the_lines_and_the_file_length(tmp_path):
 
 
 def test_read_file_range_clamps_to_the_end_and_defaults_the_start(tmp_path):
-    (tmp_path / "f.txt").write_text("a\nb\nc", encoding="utf-8")
+    (tmp_path / "f.txt").write_text("a\nb\nc", encoding="utf-8", newline="")
     executor = executor_module.SafeExecutor(str(tmp_path))
 
     assert executor._read_file("f.txt", 2, 99).data["content"] == "b\nc"
@@ -137,7 +137,7 @@ def test_read_file_range_counts_lines_by_newline_only_and_keeps_crlf(tmp_path):
 
 
 def test_read_file_range_past_the_end_names_the_file_length(tmp_path):
-    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8")
+    (tmp_path / "f.txt").write_text("a\nb\n", encoding="utf-8", newline="")
     executor = executor_module.SafeExecutor(str(tmp_path))
 
     with pytest.raises(ExecutorError, match="start_line 5 is past the end of f.txt: the file has 2 lines"):
@@ -145,7 +145,7 @@ def test_read_file_range_past_the_end_names_the_file_length(tmp_path):
 
 
 def test_read_file_range_stops_at_the_read_limit_and_says_where(tmp_path):
-    (tmp_path / "f.txt").write_text("12345678\n" * 10, encoding="utf-8")
+    (tmp_path / "f.txt").write_text("12345678\n" * 10, encoding="utf-8", newline="")
     executor = executor_module.SafeExecutor(str(tmp_path))
     executor.max_read_chars = 30
 
@@ -157,7 +157,7 @@ def test_read_file_range_stops_at_the_read_limit_and_says_where(tmp_path):
 
 
 def test_read_file_range_cuts_a_single_line_longer_than_the_limit(tmp_path):
-    (tmp_path / "min.js").write_text("x" * 100 + "\nnext\n", encoding="utf-8")
+    (tmp_path / "min.js").write_text("x" * 100 + "\nnext\n", encoding="utf-8", newline="")
     executor = executor_module.SafeExecutor(str(tmp_path))
     executor.max_read_chars = 40
 

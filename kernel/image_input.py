@@ -8,7 +8,8 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 from kernel.vision import ENVELOPE_TYPE, IMAGE_SUFFIXES, MAX_IMAGE_BYTES, MAX_IMAGES, image_from_bytes
 
@@ -19,7 +20,7 @@ def path_image(text: str) -> dict | None:
         parsed = urlparse(value)
         if parsed.netloc not in ("", "localhost"):
             raise ValueError("Only local image files are supported")
-        value = unquote(parsed.path)
+        value = url2pathname(parsed.path)
     path = Path(value).expanduser()
     if path.suffix.lower() not in IMAGE_SUFFIXES or not path.is_file():
         return None

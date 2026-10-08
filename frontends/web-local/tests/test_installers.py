@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import plistlib
+import shlex
 
 from kvist_web.installers.linux import LinuxInstaller
 from kvist_web.installers.macos import MacOSInstaller
@@ -16,13 +17,14 @@ def test_linux_install_reinstall_and_uninstall(tmp_path):
     assert first.target == second.target
     assert installer.path.read_text() == content
     assert "Restart=on-failure" in content and "--no-open" in content
-    assert f"--workspace {tmp_path}" in content
-    assert f"WorkingDirectory={tmp_path}" in content
+    assert f"--workspace {shlex.quote(str(tmp_path))}" in content
+    assert f"WorkingDirectory={shlex.quote(str(tmp_path))}" in content
     installer.uninstall()
     assert not installer.path.exists()
 
 
-def test_macos_install_reinstall_and_uninstall(tmp_path):
+def test_macos_install_reinstall_and_uninstall(tmp_path, monkeypatch):
+    monkeypatch.setattr("os.getuid", lambda: 501, raising=False)
     commands = []
     installer = MacOSInstaller(["/usr/local/bin/kvist-web"], home=tmp_path, runner=commands.append)
     installer.install()
@@ -32,6 +34,7 @@ def test_macos_install_reinstall_and_uninstall(tmp_path):
     assert "--no-open" in payload["ProgramArguments"]
     assert payload["ProgramArguments"][-2:] == ["--workspace", str(tmp_path)]
     assert payload["WorkingDirectory"] == str(tmp_path)
+    assert commands[-1] == ["launchctl", "bootstrap", "gui/501", str(installer.path)]
     installer.uninstall()
     assert not installer.path.exists()
 

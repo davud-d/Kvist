@@ -170,7 +170,7 @@ def test_real_supervisor_runs_two_sessions_without_switch_stopping_either(
     tmp_path, monkeypatch
 ):
     core = make_fake_core(tmp_path)
-    monkeypatch.setenv("KVIST_CORE_COMMAND", str(core))
+    monkeypatch.setattr("kvist_web.processes.core_command", lambda: [sys.executable, str(core)])
     monkeypatch.setenv("KVIST_FAKE_DELAY", "0.35")
     store = SessionStore(tmp_path)
     store.create("alpha")
@@ -201,7 +201,7 @@ def test_real_supervisor_runs_two_sessions_without_switch_stopping_either(
 
 def test_concurrent_first_send_starts_one_process_per_session(tmp_path, monkeypatch):
     core = make_fake_core(tmp_path)
-    monkeypatch.setenv("KVIST_CORE_COMMAND", str(core))
+    monkeypatch.setattr("kvist_web.processes.core_command", lambda: [sys.executable, str(core)])
     SessionStore(tmp_path).create("alpha")
     runtime = LocalRuntime("local", [str(tmp_path)], EventBroker())
     errors = []
@@ -238,7 +238,7 @@ def test_clean_exit_before_hello_fails_startup_instead_of_looking_running(tmp_pa
         workspace=tmp_path,
         session="one",
         broker=EventBroker(),
-        command=[str(core)],
+        command=[sys.executable, str(core)],
     )
 
     with pytest.raises(RuntimeError, match="before its protocol handshake"):
@@ -259,7 +259,7 @@ def test_clean_exit_after_hello_is_stopped_not_running(tmp_path):
         workspace=tmp_path,
         session="one",
         broker=EventBroker(),
-        command=[str(core)],
+        command=[sys.executable, str(core)],
     )
 
     process.start()

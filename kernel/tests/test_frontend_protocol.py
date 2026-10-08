@@ -137,6 +137,7 @@ def test_reasoning_events_to_dict():
         "type": "reasoning_chunk",
         "stream_id": "s1",
         "text": "think",
+        "append": True,
     }
     assert ReasoningCommitEvent(stream_id="s1", duration_seconds=3.5).to_dict() == {
         "type": "reasoning_commit",
