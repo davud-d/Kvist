@@ -185,7 +185,7 @@
       "Python 3.11 or newer — tested in CI on 3.11 and 3.12",
       "A key for one of the supported providers",
       "A terminal, for the configuration and approval prompts",
-      "Linux is the main platform and Windows works; macOS should start and passes the tests, but there is no guarantee"
+      "Linux is the main platform and Windows works; macOS should start, but there is no guarantee"
     ],
     "alt": "Running from source will look the same: requirements.txt has nine entries, and main.py --workspace takes it from there."
   },
