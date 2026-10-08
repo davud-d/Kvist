@@ -26,6 +26,7 @@ frontends/
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
   ide/jetbrains/        IntelliJ plugin (separate Gradle build)
   zed/                  Zed ACP frontend (acp_frontend, acp_events, acp_stdio) + tests/
+  tray/                 Electron tray icon + read-only mini chat (own package.json, tests/)
 scripts/                installer/ (+ tests/), run_task.py, package_script.py, tests/
 branding/               icons and logos (installer icons, kvist.ico)
 docs/                   UI_API.md (frontend protocol), media/ (README screenshots, video)
@@ -795,6 +796,9 @@ release already holds, so the macOS binaries can lag behind `main`. `platforms.y
 the macOS layout on its mac runner only: a VSIX with the binary, and `install.sh` under the
 system bash. Unit tests fake the platform; Intel Macs, Android Studio (Google's data root),
 notarization and a real IDE run are not covered.
+
+### Tray icon (`tray_link.py`, `tray_bar.py`, `frontends/tray/`)
+One resident Electron process shows every terminal-hosted core's state (amber while a turn runs, green when one finished unseen) as a module **inside the user's status bar**: a bar on Wayland sits on a layer above ordinary windows, so nothing can be drawn over it, and the icon is the bar's own module instead. `tray_bar.install()` runs at every terminal start (`main()`) and adds `custom/kvist` to Waybar or `[module/kvist]` to Polybar after the first left entry. **It must stay idempotent** — a config that already names the module is never edited again (file lock for parallel starts, first version kept as `<file>.kvist-backup`); `uninstall` removes exactly what it added, and `--tray-op disable` calls it. A click runs `--tray-op toggle`; the panel unfolds from the icon, placed against the bar found under the pointer (`hyprctl layers`, the X11 dock window under the pointer, or the work-area strip; the icon position is remembered because window managers warp the pointer). Bars without an adapter get a system tray icon, never both (`status.bars` decides). The panel is a **read-only** mini chat (`--session-op history`; two processes must not share one live session) and its button raises the terminal window by walking the core's process ancestors (`src/focus-window.js`: hyprctl, xdotool + i3-msg, kdotool, osascript, PowerShell). Cores report over loopback TCP with the token from `~/.kvist/tray.json` (wire format: `docs/UI_API.md` §8e); `LocalAgent.run`/`resume` call `TrayLink`, only when `KVIST_TRAY_HOST=1` (set by `main()` for the terminal frontends, inherited by the Ink core). **At most one daemon**: its single-instance lock, a once-per-process spawn flag, and an exit 30 s after the last core leaves. **Tests must never start the real daemon**: `conftest.py` sets `KVIST_TRAY_CMD` to `true` and clears the host marker, because `main()` writes the marker into `os.environ` and a temporary `HOME` gives every daemon its own lock (this once spawned ~50 Electron processes). **On by default; `tray_enabled: false`** in `~/.kvist/config.json` (only the non-default is stored) turns it off. Verified on i3 + Polybar; the Waybar and Hyprland paths are test-covered only. Docs: `frontends/tray/README.md` (+ `.ru.md`). Tests: `kernel/tests/test_tray_link.py`, `test_tray_bar.py`, `npm test` in `frontends/tray`.
 
 ### Zed / ACP frontend (`acp_frontend.py`, `acp_events.py`, `frontends/zed/`)
 Zed reaches coding agents over the **Agent Client Protocol**, so this is an

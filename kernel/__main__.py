@@ -20,6 +20,12 @@ _web_modules = Path(__file__).resolve().parent.parent / "frontends" / "web-local
 if _web_modules.is_dir() and str(_web_modules) not in sys.path:
     sys.path.insert(1, str(_web_modules))
 
+# The status bar keeps these running for as long as it lives; they must not import the core.
+if "--tray-op" in sys.argv and sys.argv[sys.argv.index("--tray-op") + 1 :][:1] in (["bar-stream"], ["toggle"]):
+    from kernel.tray_bar_client import main as _tray_bar_main
+
+    raise SystemExit(_tray_bar_main(sys.argv))
+
 if "--web-controller" in sys.argv:
     sys.argv.remove("--web-controller")
     from kvist_web.cli import main as _web_main

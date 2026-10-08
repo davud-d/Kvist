@@ -353,6 +353,27 @@ def save_frontend(frontend: str, config_path: Path | None = None) -> None:
     _update_user_config(update, config_path)
 
 
+TRAY_ENABLED_KEY = "tray_enabled"
+
+
+def get_tray_enabled(config_path: Path | None = None) -> bool:
+    """Whether terminal cores may start and report to the tray icon (on by default)."""
+    return load_user_config(config_path).get(TRAY_ENABLED_KEY) is not False
+
+
+def save_tray_enabled(enabled: bool, config_path: Path | None = None) -> None:
+    """Persist the tray switch; only the non-default ``false`` is stored."""
+
+    def update(payload: dict[str, object]) -> dict[str, object]:
+        if enabled:
+            payload.pop(TRAY_ENABLED_KEY, None)
+        else:
+            payload[TRAY_ENABLED_KEY] = False
+        return payload
+
+    _update_user_config(update, config_path)
+
+
 def save_role_selection(role: str, config_path: Path | None = None) -> None:
     """Save the role selection. Use 'auto' for automatic role detection."""
     normalized_role = role.strip()

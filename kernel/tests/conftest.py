@@ -184,6 +184,22 @@ def _isolate_home(request, monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _never_start_the_tray(monkeypatch):
+    """Keep any agent a test builds from launching the real tray daemon.
+
+    ``main()`` marks the process as a terminal host in ``os.environ`` itself, so
+    the marker would leak into every later test; each leaked agent would start
+    an Electron process under the test's temporary HOME, where the daemon's
+    single-instance lock does not see the others. The launcher is replaced by
+    a command that exits at once, and the marker is removed after the test.
+    """
+    monkeypatch.setenv("KVIST_TRAY_CMD", json.dumps(["true"]))
+    monkeypatch.delenv("KVIST_TRAY_HOST", raising=False)
+    yield
+    os.environ.pop("KVIST_TRAY_HOST", None)
+
+
+@pytest.fixture(autouse=True)
 def _disable_session_titles(monkeypatch):
     """Keep background session-title generation from firing in ordinary tests.
 

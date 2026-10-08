@@ -108,6 +108,19 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "(input-history-add reads the input from stdin as UTF-8).",
     )
     parser.add_argument(
+        "--tray-op",
+        choices=("enable", "disable", "status", "bar-stream", "toggle"),
+        help="Switch the tray icon on or off (saved in ~/.kvist/config.json, and its status-bar "
+        "module added or removed), print {\"ok\", \"enabled\", \"bars\"} JSON, exit. "
+        "bar-stream and toggle are what the bar module itself runs.",
+    )
+    parser.add_argument(
+        "--bar",
+        choices=("waybar", "polybar"),
+        default="waybar",
+        help="Output format for --tray-op bar-stream.",
+    )
+    parser.add_argument(
         "--session-name",
         help="Session name for --session-op create/switch/delete/history.",
     )
@@ -230,6 +243,36 @@ def _run_session_op(args: argparse.Namespace) -> None:
         print(json.dumps(failure, ensure_ascii=False))
         raise SystemExit(1) from error
     print(json.dumps(payload, ensure_ascii=False))
+
+
+def _run_tray_op(args: argparse.Namespace) -> None:
+    import json
+
+    from kernel import tray_bar
+    from kernel.user_config import get_tray_enabled, save_tray_enabled
+
+    if args.tray_op == "bar-stream":
+        from kernel.tray_bar_client import run_stream
+
+        run_stream(args.bar)
+        return
+    if args.tray_op == "toggle":
+        from kernel.tray_bar_client import send_toggle
+
+        raise SystemExit(0 if send_toggle() else 1)
+    try:
+        if args.tray_op != "status":
+            enabled = args.tray_op == "enable"
+            save_tray_enabled(enabled)
+            if enabled:
+                tray_bar.install()
+            else:
+                tray_bar.uninstall()
+        payload = {"ok": True, "enabled": get_tray_enabled(), "bars": tray_bar.running_integrated_bars()}
+    except (RuntimeError, OSError) as error:
+        print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
+        raise SystemExit(1) from error
+    print(json.dumps(payload))
 
 
 def _run_commit_message_op() -> None:
@@ -415,6 +458,10 @@ if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.session_op:
     _run_session_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.tray_op:
+    _run_tray_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.filters import Condition
@@ -480,6 +527,8 @@ from kernel.agent_logging import (
     list_sessions,
 )
 from kernel.session_titler import session_display_title
+from kernel import tray_bar
+from kernel.tray_link import mark_terminal_host
 from kernel.user_config import (
     ensure_provider_credentials,
     get_custom_providers,
@@ -497,6 +546,7 @@ from kernel.user_config import (
     save_models_for_provider,
     get_saved_role,
     get_saved_frontend,
+    get_tray_enabled,
     save_frontend,
     save_role_selection,
     get_saved_reasoning_effort,
@@ -3985,6 +4035,14 @@ def main() -> None:
             raise SystemExit(2) from error
         return
 
+    # Set before launch_tui so the Ink app's core inherits it through the environment.
+    mark_terminal_host()
+    if get_tray_enabled():
+        # Idempotent: a config that already has the module is not touched again.
+        try:
+            tray_bar.install()
+        except (OSError, ValueError) as error:
+            print(f"Could not add the Kvist icon to the status bar: {error}", file=sys.stderr)
     if (args.frontend or get_saved_frontend()) in TUI_FRONTENDS and not args.no_banner:
         exit_code = launch_tui(args)
         if exit_code is not None:

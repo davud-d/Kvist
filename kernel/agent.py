@@ -138,6 +138,7 @@ from kernel.sandbox import sandbox_network_allowed
 from kernel.self_info import ancestor_chain, describe_host, detect_host
 from kernel.session_events import JournalingUI, SessionJournal
 from kernel.session_titler import generate_session_title
+from kernel.tray_link import TrayLink, is_terminal_host
 from kernel.ui import AgentUI
 from kernel.language_utils import detect_request_language
 from kernel.language_policy import resolve_response_language, response_language_name
@@ -255,6 +256,11 @@ class LocalAgent:
             lambda message: self._ui.debug_print(message),
         )
         self._ui = JournalingUI(ui, self._journal)
+        self._tray = (
+            TrayLink(executor.workspace, lambda: self.current_session, debug=lambda message: self._ui.debug_print(message))
+            if is_terminal_host()
+            else None
+        )
         # Loading tiktoken's rank table costs tens of MiB and is unnecessary
         # for session recovery and chat-only runs. count_tokens initializes it
         # on the first context-budget calculation.
@@ -568,10 +574,12 @@ class LocalAgent:
         attachments = validate_images(images) if images is not None else embedded
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
         self._journal.begin_turn(f"{user_goal} {labels}".strip())
+        self._tray_turn_started()
         try:
             return self._run_turn(user_goal, routed_role, attachments)
         finally:
             self._journal.end_turn()
+            self._tray_turn_finished()
 
     def is_session_closed(self) -> bool:
         """Whether end_session closed the active session, as its stored document says."""
@@ -705,10 +713,20 @@ class LocalAgent:
         if refusal is not None:
             return refusal
         self._journal.begin_turn("", resumed=True)
+        self._tray_turn_started()
         try:
             return self._resume_turn()
         finally:
             self._journal.end_turn()
+            self._tray_turn_finished()
+
+    def _tray_turn_started(self) -> None:
+        if self._tray is not None:
+            self._tray.turn_started()
+
+    def _tray_turn_finished(self) -> None:
+        if self._tray is not None:
+            self._tray.turn_finished()
 
     def _resume_turn(self) -> str | None:
         self._reset_cancel()
