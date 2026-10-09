@@ -764,6 +764,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     stream: the minutes spent writing a whole-file edit are not thinking.
     """
     content: list[str] = []
+    after_calls: list[str] = []
     reasoning: list[str] = []
     echo_reasoning = False
     input_tokens: int | None = None
@@ -800,7 +801,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 first_output = time.monotonic()
                 _seal_thinking(self, reasoning)
             if getattr(delta, "content", None):
-                content.append(delta.content)
+                (after_calls if calls else content).append(delta.content)
             for piece in pieces:
                 _merge_tool_call_delta(calls, piece)
             if calls and time.monotonic() - last_call_push > 0.5:
@@ -818,8 +819,13 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     self._last_reasoning_seconds = _thinking_seconds(
         (first_output or time.monotonic()) - started, bool(reasoning)
     )
+    if after_calls:
+        self._ui.debug_print(
+            f"Dropped {len(''.join(after_calls))} characters the model wrote after its tool call began"
+        )
     return NativeTurn(
         content="".join(content),
+        text_after_calls="".join(after_calls),
         reasoning="".join(reasoning),
         echo_reasoning=echo_reasoning,
         input_tokens=input_tokens,

@@ -221,6 +221,9 @@ class NativeTurn:
     # the dialect (DeepSeek) that requires it back on later requests.
     echo_reasoning: bool = False
     tool_calls: list[ToolCall] = field(default_factory=list)
+    # Text that streamed after the first call began (Claude does this), kept out
+    # of ``content``: it describes a result the model has not been given yet.
+    text_after_calls: str = ""
     # Provider totals include hidden reasoning and tool-schema overhead. None
     # means the provider omitted usage, so the caller must estimate locally.
     input_tokens: int | None = None

@@ -531,3 +531,27 @@ def test_a_temperature_refusal_is_learned_and_the_turn_asked_again(agent_factory
     # The refusal cost a retry of the same turn, not a failed step.
     assert not any("temperature" in error for error in agent._state.error_history)
     assert not any(log.get("status") == "model_error" for log in agent._state.step_logs)
+
+
+def test_text_streamed_after_a_call_began_is_kept_out_of_the_turn_content(agent_factory):
+    agent = agent_factory(max_steps=1)
+    notes: list[str] = []
+    agent._ui.debug_print = notes.append
+
+    def chunk(**delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(**delta))])
+
+    stream = [
+        chunk(content="Creating the page.", tool_calls=None),
+        chunk(content=None, tool_calls=[
+            SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="write_file", arguments="{}"))
+        ]),
+        chunk(content="Done! The page is ready.", tool_calls=None),
+    ]
+
+    turn = agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+
+    assert turn.content == "Creating the page."
+    assert turn.text_after_calls == "Done! The page is ready."
+    assert [c.call_id for c in turn.tool_calls] == ["c1"]
+    assert any("after its tool call began" in note for note in notes)

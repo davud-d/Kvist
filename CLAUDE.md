@@ -331,7 +331,10 @@ argument (`git_status`, `git_diff`) is offered with a required `purpose` ("what 
 call should settle"), dropped by `_arguments` before the action runs: Claude through
 AnyModel loses a call whose argument object is empty — it arrives as a response with
 neither text nor a call — and nine such losses once ended a run on "too many
-consecutive errors". A turn's calls become the
+consecutive errors". Text that streams after the first call began (Claude does this, DeepSeek never) is kept out
+of the turn's content (`NativeTurn.text_after_calls`, a `debug` notice): it describes a result the model
+has not been given, and merged into the opening line it showed "done!" above the `Write` it predicted.
+A turn's calls become the
 JSON protocol's own object and pass `parse_agent_commands`, then run through
 `_run_one_action` like any batch — the guards, gates and journal are shared.
 Every call is answered, including the ones a refusal kept from running (an API
