@@ -33,7 +33,7 @@ def _payload(file_path: str = "main.py", language: str = "python", prefix: str =
 
 @pytest.fixture
 def fake_caller(monkeypatch):
-    client = FakeLLMClient(content="print('hi')")
+    client = FakeLLMClient(content="print('hi')", stream_chunks=["print(", "'hi')"])
     caller = completion._ModelCaller(
         client=client,
         config=AgentConfig(provider="openai", fast_model="gpt-5-mini", stream=False),
@@ -169,7 +169,7 @@ def test_generate_sends_only_project_imports_to_the_model(tmp_path, fake_caller)
 
 
 def test_generate_returns_empty_string_for_empty_model_reply(tmp_path, fake_caller):
-    fake_caller.content = ""
+    fake_caller.stream_chunks = []
     assert generate_completion(_payload(), tmp_path) == ""
 
 
@@ -231,11 +231,11 @@ def test_cli_prints_json_reply(monkeypatch, capsys, tmp_path):
     from kernel import main
 
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
-    monkeypatch.setattr(completion, "generate_completions", lambda text, workspace: ["суффикс", "другой"])
+    monkeypatch.setattr(completion, "generate_completion", lambda text, workspace: "суффикс")
     main._run_complete_op(argparse.Namespace(workspace=str(tmp_path)))
     out = capsys.readouterr().out
     assert out.isascii()
-    assert json.loads(out) == {"ok": True, "completion": "суффикс", "completions": ["суффикс", "другой"]}
+    assert json.loads(out) == {"ok": True, "completion": "суффикс"}
 
 
 def test_cli_reports_failure_as_json(monkeypatch, capsys, tmp_path):
@@ -247,7 +247,7 @@ def test_cli_reports_failure_as_json(monkeypatch, capsys, tmp_path):
         raise CompletionError("No fast model is configured")
 
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
-    monkeypatch.setattr(completion, "generate_completions", fail)
+    monkeypatch.setattr(completion, "generate_completion", fail)
     with pytest.raises(SystemExit) as exit_info:
         main._run_complete_op(argparse.Namespace(workspace=str(tmp_path)))
     assert exit_info.value.code == 1
@@ -280,11 +280,36 @@ def test_completion_ignores_global_reasoning_setting(isolated_home, monkeypatch)
     assert caller.config.reasoning_effort == "false"
 
 
-def test_multiple_candidates_in_one_request(tmp_path, fake_caller):
-    fake_caller.content = json.dumps({"completions": ["return a", "return b", "return a", "", 5, "return c", "extra"]})
-    assert completion.generate_completions(_payload(), tmp_path) == ["return a", "return b", "return c"]
+def test_reply_streams_in_pieces_and_asks_for_no_reasoning(tmp_path, fake_caller):
+    request = completion.parse_payload(_payload())
+    messages = completion.prepare_completion(request, tmp_path)
+    caller, model = completion._build_caller()
+    pieces = list(completion.iter_completion(caller, model, request, messages))
+    assert pieces == ["print(", "'hi')"]
     assert len(fake_caller.requests) == 1
+    assert fake_caller.requests[0]["stream"] is True
     assert fake_caller.requests[0]["reasoning_effort"] == "none"
+
+
+def test_provider_without_streaming_answers_in_one_piece(tmp_path):
+    client = FakeLLMClient(content="return 1")
+    caller = completion._ModelCaller(client, AgentConfig(provider="custom:unverified"), completion._StderrUI())
+    request = completion.parse_payload(_payload())
+    assert list(completion.iter_completion(caller, "m", request, [])) == ["return 1"]
+    assert "stream" not in client.requests[0]
+
+
+def test_stream_stops_when_asked_and_when_the_reply_reaches_the_cap(tmp_path):
+    caller = completion._ModelCaller(
+        FakeLLMClient(stream_chunks=["a", "b", "c"]), AgentConfig(provider="openai"), completion._StderrUI()
+    )
+    request = completion.parse_payload(_payload())
+    stops = iter([False, False, True])
+    assert list(completion.iter_completion(caller, "m", request, [], lambda: next(stops))) == ["a", "b"]
+
+    big = "x" * (MAX_COMPLETION_CHARS + 10)
+    caller.client.stream_chunks = [big, "never read"]
+    assert list(completion.iter_completion(caller, "m", request, [])) == ["x" * MAX_COMPLETION_CHARS]
 
 
 @pytest.mark.parametrize("provider, expected", [
@@ -293,14 +318,14 @@ def test_multiple_candidates_in_one_request(tmp_path, fake_caller):
     ("openrouter", {"extra_body": {"reasoning": {"effort": "none"}}}),
 ])
 def test_provider_specific_no_reasoning(provider, expected):
-    client = FakeLLMClient(content='{"completions": []}')
+    client = FakeLLMClient(content="")
     caller = completion._ModelCaller(client, AgentConfig(provider=provider), completion._StderrUI())
-    completion._request_candidates(caller, "fast", [])
+    completion._request_completion(caller, "fast", [], False)
     assert all(client.requests[0][key] == value for key, value in expected.items())
 
 
 def test_reasoning_required_model_uses_lowest_accepted_effort():
-    client = FakeLLMClient(content='{"completions": []}')
+    client = FakeLLMClient(content="")
     attempts = []
     def create(**kwargs):
         attempts.append(kwargs)
@@ -309,20 +334,34 @@ def test_reasoning_required_model_uses_lowest_accepted_effort():
         return "response"
     client.chat.completions.create = create
     caller = completion._ModelCaller(client, AgentConfig(provider="openai"), completion._StderrUI())
-    assert completion._request_candidates(caller, "fast", []) == "response"
+    assert completion._request_completion(caller, "fast", [], False) == "response"
     assert [a["reasoning_effort"] for a in attempts] == ["none", "minimal", "low"]
 
 
-def test_empty_or_malformed_candidate_envelope_is_not_inserted():
-    assert completion.clean_model_candidates('{"completions": []}', "") == []
-    assert completion.clean_model_candidates('{"completions": ["truncated', "") == []
-    assert completion.clean_model_candidates('{"completions": "wrong type"}', "") == []
+# ── streamed cleanup ─────────────────────────────────────────────────────
 
 
-def test_candidate_preserves_leading_newline_and_indentation():
-    raw = json.dumps({"completions": ["\n    return 1"]})
-    assert completion.clean_model_candidates(raw, "def f():") == ["\n    return 1"]
+def _cleaned_pieces(prefix: str, pieces: list[str]) -> list[str]:
+    cleaner = completion.CompletionStreamCleaner(prefix)
+    return [text for text in [*(cleaner.feed(piece) for piece in pieces), cleaner.finish()] if text]
 
 
-def test_incomplete_multiline_json_is_not_suggested():
-    assert completion.clean_model_candidates('{\n  "completions": ["partial', "") == []
+def test_streamed_text_is_released_as_it_arrives():
+    assert _cleaned_pieces("def f():\n", ["    ret", "urn 1", "\n"]) == ["    ret", "urn 1", "\n"]
+
+
+def test_streamed_echo_of_the_prefix_is_held_until_it_is_recognised():
+    prefix = "def add(a, b):\n    "
+    assert "".join(_cleaned_pieces(prefix, ["def ad", "d(a, b):\n    ", "return a + b"])) == "return a + b"
+
+
+def test_streamed_fence_is_stripped_only_once_complete():
+    assert _cleaned_pieces("", ["```python\n", "return 1", "\n```"]) == ["return 1"]
+
+
+def test_streamed_text_matches_whole_reply_cleaning():
+    prefix = "x = compute(\n"
+    raw = "x = compute(\n    1, 2)"
+    for size in (1, 3, 7, len(raw)):
+        pieces = [raw[i:i + size] for i in range(0, len(raw), size)]
+        assert "".join(_cleaned_pieces(prefix, pieces)) == clean_model_output(raw, prefix)

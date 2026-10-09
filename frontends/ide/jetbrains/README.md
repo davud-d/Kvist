@@ -28,13 +28,13 @@ While it runs, the button shows a spinner; hovering turns it into a red stop squ
 
 As you type, the editor shows a gray-text ("ghost text") suggestion from `kvist --complete`, accepted with Tab like any other inline completion. Toggle it from **Tools | Kvist Inline Completion**; it is on by default.
 
-- One short-lived `kvist --complete` process per suggestion, independent of the chat tool window's core process: it runs even while an agent turn is in progress, and never waits behind one.
-- New requests wait for **two seconds without typing**. Further typing cancels the in-flight request and its process. Cache lookup happens before the pause: deleting a typo or undoing restores previous alternatives immediately. Matching forward input consumes the suggestion; unrelated text hides it.
-- One fast-model request prepares up to three alternatives, exposed through the IDE's inline-completion variants. Reasoning is disabled where supported, with minimal/low effort as a fallback. This is independent of chat's reasoning setting.
+- One long-lived `kvist --complete-server` process per workspace, independent of the chat tool window's core process: it runs even while an agent turn is in progress, and never waits behind one. Interpreter start-up and the provider connection are paid once, not per suggestion.
+- New requests wait for **300 ms without typing**. Further typing cancels the in-flight request inside the core. Cache lookup happens before the pause: deleting a typo or undoing restores the previous suggestion immediately. Matching forward input consumes the suggestion; unrelated text hides it.
+- Each request returns one suggestion. Where the provider supports streaming, the gray text appears as the model writes it. Reasoning is disabled where supported, with minimal/low effort as a fallback. This is independent of chat's reasoning setting.
 - A bounded history includes workspace, binary, language and full buffer context, so another project or changed surrounding code cannot reuse an unrelated suggestion.
 - `prefix`/`suffix` are the live, unsaved buffer split at the caret — never a save to disk first.
 - Only Python and JS/TS variants get their imports resolved into extra context by the core; every other language still gets a plain completion.
-- The bundled binary must be built from a Kvist version that has `--complete`; rebuild it with the scripts below.
+- The bundled binary must be built from a Kvist version that has `--complete-server`; rebuild it with the scripts below.
 
 ## Editor context menu
 

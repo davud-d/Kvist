@@ -38,20 +38,25 @@ The generated message will be inserted into the commit message input box.
 ## Inline completion
 
 Kvist uses your configured fast model and requests disabled reasoning where the
-provider supports it, falling back to minimal/low effort when necessary. One
-request prepares up to three distinct suggestions; use VS Code's inline suggestion
-next/previous commands to cycle them.
+provider supports it, falling back to minimal/low effort when necessary. Each
+request returns one suggestion.
 
-Automatic requests wait for **two seconds without typing** by default
+Requests go to one long-lived `kvist --complete-server` process per workspace,
+independent of the chat core, so a running agent turn never delays completion
+and interpreter start-up and the provider connection are paid once. Where the
+provider supports streaming the core streams the reply; VS Code shows the
+suggestion once it is complete.
+
+Automatic requests wait for **300 ms without typing** by default
 (`kvist.inlineCompletion.debounceMs`). A manual inline-suggestion request skips
 the pause. Matching input consumes the existing suggestion. A typo hides it;
-deleting the typo or undoing restores cached alternatives immediately. History
+deleting the typo or undoing restores the cached suggestion immediately. History
 is bounded and scoped to the workspace, file, language and buffer context.
-Superseded requests are cancelled and late results are discarded.
-
-The updated core returns `completions` plus the legacy first `completion`.
-Rebuild the bundled core to enable multiple alternatives; an older core still
-works with one suggestion. Toggle suggestions with `kvist.inlineCompletion.enabled`.
+A new request, or further typing, cancels the running one in the core, and late
+results are discarded. Toggle suggestions with `kvist.inlineCompletion.enabled`.
+The bundled core must support `--complete-server`; rebuild it if completion
+stays empty after an update. A change of provider or fast model is picked up by
+the next request; a newly entered API key needs a window reload.
 
 ## Requirements
 

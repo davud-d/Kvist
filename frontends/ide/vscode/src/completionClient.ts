@@ -10,14 +10,15 @@ export interface CompletionRequest {
     suffix: string;
 }
 
-interface CompletionResponse {
-    ok: boolean;
-    completion?: string;
-    completions?: string[];
+/** One line of the `kvist --complete-server` reply stream. */
+interface ServerMessage {
+    id: number;
+    delta?: string;
+    done?: boolean;
     error?: string;
 }
 
-// A file past this size costs more to serialize and spawn a process for than any
+// A file past this size costs more to serialize and send than any
 // completion is worth; the core defensively caps its input as well.
 export const MAX_COMPLETION_BUFFER_CHARS = 500_000;
 
@@ -47,22 +48,21 @@ export function buildCompletionRequest(
     };
 }
 
-export function parseCompletionResponse(stdout: string): CompletionResponse {
-    const lastLine = stdout.trim().split('\n').pop() ?? '';
+export function parseServerMessage(line: string): ServerMessage | undefined {
     try {
-        const parsed = JSON.parse(lastLine);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            return { ok: false, error: 'Kvist returned an unreadable reply.' };
+        const parsed = JSON.parse(line);
+        if (typeof parsed === 'object' && parsed !== null && typeof parsed.id === 'number') {
+            return parsed as ServerMessage;
         }
-        return parsed as CompletionResponse;
     } catch {
-        return { ok: false, error: 'Kvist returned an unreadable reply.' };
+        // A stray non-JSON line (a library warning) is not a reply.
     }
+    return undefined;
 }
 
 /** A small recency cache keyed by cursor context: re-triggering at the same
  * position (e.g. after an accepted-then-undone suggestion) answers instantly
- * instead of spawning a process again. */
+ * instead of calling the model again. */
 export class CompletionCache<T = string> {
     private readonly entries = new Map<string, T>();
 
@@ -100,28 +100,29 @@ export class CompletionCache<T = string> {
 }
 
 /** History is scoped to the binary/workspace/language and exact buffer context.
- * Matching forward typing consumes a candidate; deleting text restores the anchor. */
+ * Matching forward typing consumes the suggestion; deleting text restores the anchor. */
 export class CompletionHistory {
     private readonly cache = new CompletionCache<{
-        scope: string; request: CompletionRequest; candidates: string[];
+        scope: string; request: CompletionRequest; completion: string;
     }>();
 
-    get(scope: string, request: CompletionRequest): string[] | undefined {
+    get(scope: string, request: CompletionRequest): string | undefined {
         const exact = this.cache.get(this.key(scope, request));
-        if (exact) { return exact.candidates; }
+        if (exact) { return exact.completion; }
         for (const entry of this.cache.recentValues()) {
             const old = entry.request;
             if (scope !== entry.scope || request.file_path !== old.file_path || request.language !== old.language
                 || request.suffix !== old.suffix || !request.prefix.startsWith(old.prefix)) { continue; }
             const typed = request.prefix.slice(old.prefix.length);
-            const matching = entry.candidates.filter(value => value.startsWith(typed));
-            if (matching.length) { return matching.map(value => value.slice(typed.length)).filter(Boolean); }
+            if (!entry.completion.startsWith(typed)) { continue; }
+            const rest = entry.completion.slice(typed.length);
+            if (rest) { return rest; }
         }
         return undefined;
     }
 
-    set(scope: string, request: CompletionRequest, candidates: string[]): void {
-        this.cache.set(this.key(scope, request), { scope, request: { ...request }, candidates: [...candidates] });
+    set(scope: string, request: CompletionRequest, completion: string): void {
+        this.cache.set(this.key(scope, request), { scope, request: { ...request }, completion });
     }
 
     private key(scope: string, request: CompletionRequest): string {
@@ -129,22 +130,35 @@ export class CompletionHistory {
     }
 }
 
-export function responseCandidates(response: CompletionResponse): string[] {
-    if (!response.ok) { return []; }
-    const values = Array.isArray(response.completions) ? response.completions : [response.completion];
-    return [...new Set(values.filter((value): value is string => typeof value === 'string' && !!value.trim())
-        .map(value => value.slice(0, 2000)))].slice(0, 3);
+const MAX_COMPLETION_CHARS = 2000;
+const REQUEST_TIMEOUT_MS = 6000;
+
+interface PendingRequest {
+    text: string;
+    onDone(text: string): void;
+    onFail(): void;
 }
 
-/** Single-flight, cancellable completion transport. Cache hits also cancel stale work. */
+interface Server {
+    key: string;
+    child: ChildProcess;
+    pending: Map<number, PendingRequest>;
+    buffer: string;
+}
+
+/** Cancellable completion transport over one long-lived `kvist --complete-server`
+ * process per binary/workspace. Starting a process per keystroke paid interpreter
+ * start-up and a new TLS connection each time. Cache hits also cancel stale work. */
 export class CompletionClient {
     private readonly history = new CompletionHistory();
     private cancelPending: (() => void) | undefined;
+    private server: Server | undefined;
+    private nextId = 1;
 
     constructor(private debounceMs: number, private readonly spawnProcess: typeof spawn = spawn) {}
 
     setDebounceMs(debounceMs: number): void {
-        this.debounceMs = Number.isFinite(debounceMs) ? Math.max(0, debounceMs) : 2000;
+        this.debounceMs = Number.isFinite(debounceMs) ? Math.max(0, debounceMs) : 300;
     }
 
     requestCompletion(
@@ -153,30 +167,30 @@ export class CompletionClient {
         request: CompletionRequest,
         token: vscode.CancellationToken,
         explicit = false
-    ): Promise<string[]> {
+    ): Promise<string> {
         this.cancelPending?.();
-        if (token.isCancellationRequested) { return Promise.resolve([]); }
+        if (token.isCancellationRequested) { return Promise.resolve(''); }
         const scope = JSON.stringify([binaryPath, workspaceDir]);
         const cached = this.history.get(scope, request);
         if (cached !== undefined) { return Promise.resolve(cached); }
 
-        return new Promise<string[]>((resolve) => {
-            let child: ChildProcess | undefined;
+        return new Promise<string>((resolve) => {
             let timer: ReturnType<typeof setTimeout> | undefined;
             let timeout: ReturnType<typeof setTimeout> | undefined;
             let subscription: vscode.Disposable | undefined;
+            let sent: { server: Server; id: number } | undefined;
             let done = false;
-            const finish = (values: string[]) => {
+            const finish = (value: string, stopRemote: boolean) => {
                 if (done) { return; }
                 done = true;
                 clearTimeout(timer);
                 clearTimeout(timeout);
                 subscription?.dispose();
-                child?.kill();
+                if (sent) { this.release(sent.server, sent.id, stopRemote); }
                 if (this.cancelPending === cancel) { this.cancelPending = undefined; }
-                resolve(values);
+                resolve(value);
             };
-            const cancel = () => finish([]);
+            const cancel = () => finish('', true);
             this.cancelPending = cancel;
             subscription = token.onCancellationRequested(cancel);
             if (done || token.isCancellationRequested) {
@@ -186,37 +200,77 @@ export class CompletionClient {
             }
             timer = setTimeout(() => {
                 if (done || token.isCancellationRequested) { cancel(); return; }
-                try {
-                    child = this.spawnProcess(binaryPath, ['--workspace', workspaceDir, '--complete'], {
-                        stdio: ['pipe', 'pipe', 'pipe']
-                    });
-                    timeout = setTimeout(cancel, 4000);
-                    let stdout = '';
-                    child.stdout?.on('data', data => {
-                        stdout += data.toString();
-                        if (stdout.length > 100_000) { cancel(); }
-                    });
-                    // Drain warnings and handle EPIPE if the binary exits before reading stdin.
-                    child.stderr?.resume();
-                    child.stdin?.on('error', cancel);
-                    child.on('error', cancel);
-                    child.on('close', code => {
-                        if (done) { return; }
-                        if (code !== 0) { cancel(); return; }
-                        const response = parseCompletionResponse(stdout);
-                        const values = responseCandidates(response);
-                        if (response.ok) { this.history.set(scope, request, values); }
-                        finish(values);
-                    });
-                    child.stdin?.end(JSON.stringify(request));
-                } catch {
-                    cancel();
-                }
+                const server = this.ensureServer(binaryPath, workspaceDir);
+                if (!server) { finish('', false); return; }
+                const id = this.nextId++;
+                sent = { server, id };
+                server.pending.set(id, {
+                    text: '',
+                    onDone: text => {
+                        this.history.set(scope, request, text);
+                        finish(text, false);
+                    },
+                    onFail: () => finish('', false)
+                });
+                timeout = setTimeout(cancel, REQUEST_TIMEOUT_MS);
+                server.child.stdin?.write(JSON.stringify({ id, ...request }) + '\n');
             }, explicit ? 0 : this.debounceMs);
         });
     }
 
     dispose(): void {
         this.cancelPending?.();
+        if (this.server) { this.dropServer(this.server); }
+    }
+
+    private release(server: Server, id: number, stopRemote: boolean): void {
+        if (!server.pending.delete(id) || !stopRemote || this.server !== server) { return; }
+        server.child.stdin?.write(JSON.stringify({ cancel: id }) + '\n');
+    }
+
+    private ensureServer(binaryPath: string, workspaceDir: string): Server | undefined {
+        const key = JSON.stringify([binaryPath, workspaceDir]);
+        if (this.server?.key === key) { return this.server; }
+        if (this.server) { this.dropServer(this.server); }
+        try {
+            const child = this.spawnProcess(binaryPath, ['--workspace', workspaceDir, '--complete-server'], {
+                stdio: ['pipe', 'pipe', 'pipe']
+            });
+            const server: Server = { key, child, pending: new Map(), buffer: '' };
+            child.stdout?.on('data', data => this.receive(server, data.toString()));
+            // Drain warnings and handle EPIPE if the binary exits before reading stdin.
+            child.stderr?.resume();
+            child.stdin?.on('error', () => this.dropServer(server));
+            child.on('error', () => this.dropServer(server));
+            child.on('close', () => this.dropServer(server));
+            this.server = server;
+            return server;
+        } catch {
+            return undefined;
+        }
+    }
+
+    private dropServer(server: Server): void {
+        if (this.server === server) { this.server = undefined; }
+        const pending = [...server.pending.values()];
+        server.pending.clear();
+        server.child.kill();
+        for (const request of pending) { request.onFail(); }
+    }
+
+    private receive(server: Server, chunk: string): void {
+        server.buffer += chunk;
+        const lines = server.buffer.split('\n');
+        server.buffer = lines.pop() ?? '';
+        for (const line of lines) {
+            const message = parseServerMessage(line);
+            const request = message && server.pending.get(message.id);
+            if (!message || !request) { continue; }
+            if (message.error !== undefined) { request.onFail(); }
+            else if (message.done) { request.onDone(request.text); }
+            else if (typeof message.delta === 'string') {
+                request.text = (request.text + message.delta).slice(0, MAX_COMPLETION_CHARS);
+            }
+        }
     }
 }

@@ -7,12 +7,13 @@ class CompletionHistoryTest {
     private val scope = listOf("binary", "project")
     private val anchor = CompletionPayload("a.py", "python", "pri", "")
 
-    @Test fun `typing consumes alternatives and backspace restores them after garbage`() {
+    @Test fun `typing consumes the suggestion and backspace restores it after garbage`() {
         val history = CompletionHistory()
-        history.set(scope, anchor, listOf("nt(foo)", "nt(bar)"))
-        assertEquals(listOf("t(foo)", "t(bar)"), history.get(scope, anchor.copy(prefix = "prin")))
+        history.set(scope, anchor, "nt(foo)")
+        assertEquals("t(foo)", history.get(scope, anchor.copy(prefix = "prin")))
+        assertNull(history.get(scope, anchor.copy(prefix = "print(foo)")))
         assertNull(history.get(scope, anchor.copy(prefix = "prixxx")))
-        assertEquals(listOf("nt(foo)", "nt(bar)"), history.get(scope, anchor))
+        assertEquals("nt(foo)", history.get(scope, anchor))
         assertNull(history.get(listOf("binary", "another project"), anchor))
         assertNull(history.get(scope, anchor.copy(suffix = "changed")))
         assertNull(history.get(scope, anchor.copy(language = "javascript")))
@@ -22,24 +23,29 @@ class CompletionHistoryTest {
         val history = CompletionHistory(2)
         val a = anchor.copy(prefix = "import a\n" + "x".repeat(100))
         val b = a.copy(prefix = "import b\n" + "x".repeat(100))
-        history.set(scope, a, listOf("one"))
+        history.set(scope, a, "one")
         assertNull(history.get(scope, b))
-        history.set(scope, b, listOf("two"))
+        history.set(scope, b, "two")
         history.get(scope, a)
-        history.set(scope, anchor, emptyList())
+        history.set(scope, anchor, "")
         assertNull(history.get(scope, b))
-        assertEquals(listOf("one"), history.get(scope, a))
-        assertEquals(emptyList<String>(), history.get(scope, anchor))
+        assertEquals("one", history.get(scope, a))
+        assertEquals("", history.get(scope, anchor))
     }
 
-    @Test fun `wire supports alternatives and old cores`() {
-        assertEquals(listOf("a", "b"), parseCompletionReply("""{"ok":true,"completions":["a","b","a",4,""]}"""))
-        assertEquals(listOf("old"), parseCompletionReply("""{"ok":true,"completion":"old"}"""))
-        assertEquals(emptyList<String>(), parseCompletionReply("""{"ok":true,"completions":[]}"""))
+    @Test fun `server lines are replies only when they carry a numeric id`() {
+        assertEquals("ret", parseServerLine("""{"id":3,"delta":"ret"}""")!!.get("delta").asString)
+        assertTrue(parseServerLine("""{"id":3,"done":true}""")!!.get("done").asBoolean)
+        assertNull(parseServerLine("a stray warning"))
+        assertNull(parseServerLine("""{"delta":"x"}"""))
+        assertNull(parseServerLine("""{"id":"3"}"""))
+        assertNull(parseServerLine("[1, 2]"))
     }
 
-    @Test(expected = CompletionRequestException::class)
-    fun `invalid reply fails without caching a suggestion`() {
-        parseCompletionReply("not json")
+    @Test fun `request carries the id and the buffer around the caret`() {
+        val json = anchor.toRequest(9)
+        assertEquals(9L, json.get("id").asLong)
+        assertEquals("pri", json.get("prefix").asString)
+        assertEquals("a.py", json.get("file_path").asString)
     }
 }

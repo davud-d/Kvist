@@ -11,9 +11,8 @@ import {
     CompletionCache,
     CompletionHistory,
     CompletionClient,
-    responseCandidates,
     isDocumentTooLargeForCompletion,
-    parseCompletionResponse
+    parseServerMessage
 } from './completionClient';
 
 test('buildCompletionRequest splits the buffer at the cursor offset', () => {
@@ -62,36 +61,17 @@ test('buildCacheKey changes when the near-cursor text changes', () => {
     assert.notEqual(key1, key2);
 });
 
-test('parseCompletionResponse accepts a well-formed ok reply', () => {
-    const response = parseCompletionResponse('{"ok": true, "completion": "return 1"}\n');
-    assert.deepEqual(response, { ok: true, completion: 'return 1' });
+test('parseServerMessage reads deltas, completion and failures', () => {
+    assert.deepEqual(parseServerMessage('{"id": 3, "delta": "ret"}'), { id: 3, delta: 'ret' });
+    assert.deepEqual(parseServerMessage('{"id": 3, "done": true}'), { id: 3, done: true });
+    assert.deepEqual(parseServerMessage('{"id": 4, "error": "No provider"}'), { id: 4, error: 'No provider' });
 });
 
-test('parseCompletionResponse accepts an empty completion as a valid "no suggestion" reply', () => {
-    const response = parseCompletionResponse('{"ok": true, "completion": ""}');
-    assert.deepEqual(response, { ok: true, completion: '' });
-});
-
-test('parseCompletionResponse reads only the last line, ignoring anything printed before it', () => {
-    const response = parseCompletionResponse('some stray warning\n{"ok": true, "completion": "x"}');
-    assert.deepEqual(response, { ok: true, completion: 'x' });
-});
-
-test('parseCompletionResponse reports a failure reply as-is', () => {
-    const response = parseCompletionResponse('{"ok": false, "error": "No provider is configured."}');
-    assert.deepEqual(response, { ok: false, error: 'No provider is configured.' });
-});
-
-test('parseCompletionResponse treats unparsable output as an unreadable reply, never a throw', () => {
-    const response = parseCompletionResponse('not json at all');
-    assert.equal(response.ok, false);
-    assert.equal(typeof response.error, 'string');
-});
-
-test('parseCompletionResponse rejects a JSON array or a bare scalar', () => {
-    assert.equal(parseCompletionResponse('[1, 2, 3]').ok, false);
-    assert.equal(parseCompletionResponse('42').ok, false);
-    assert.equal(parseCompletionResponse('null').ok, false);
+test('parseServerMessage ignores anything that is not a reply with an id, never throws', () => {
+    assert.equal(parseServerMessage('some stray warning'), undefined);
+    assert.equal(parseServerMessage('[1, 2]'), undefined);
+    assert.equal(parseServerMessage('null'), undefined);
+    assert.equal(parseServerMessage('{"delta": "x"}'), undefined);
 });
 
 test('CompletionCache returns what was set', () => {
@@ -128,22 +108,24 @@ test('CompletionCache reading an entry keeps it from being the next eviction', (
 });
 
 
-test('history restores alternatives after a typo, consuming only matching forward input', () => {
+test('history restores the suggestion after a typo, consuming only matching forward input', () => {
     const history = new CompletionHistory();
     const anchor = buildCompletionRequest('a.py', 'python', 'pri', 3);
-    history.set('project A', anchor, ['nt(foo)', 'nt(bar)']);
-    assert.deepEqual(history.get('project A', { ...anchor, prefix: 'prin' }), ['t(foo)', 't(bar)']);
+    history.set('project A', anchor, 'nt(foo)');
+    assert.equal(history.get('project A', { ...anchor, prefix: 'prin' }), 't(foo)');
+    assert.equal(history.get('project A', { ...anchor, prefix: 'print(foo)' }), undefined);
     assert.equal(history.get('project A', { ...anchor, prefix: 'prixxx' }), undefined);
-    assert.deepEqual(history.get('project A', anchor), ['nt(foo)', 'nt(bar)']);
+    assert.equal(history.get('project A', anchor), 'nt(foo)');
     assert.equal(history.get('project B', anchor), undefined);
     assert.equal(history.get('project A', { ...anchor, suffix: 'changed' }), undefined);
     assert.equal(history.get('project A', { ...anchor, language: 'javascript' }), undefined);
 });
 
-test('wire supports old cores and deduplicates candidate lists', () => {
-    assert.deepEqual(responseCandidates({ ok: true, completion: 'old' }), ['old']);
-    assert.deepEqual(responseCandidates({ ok: true, completions: ['a', 'b', 'a', ''] }), ['a', 'b']);
-    assert.deepEqual(responseCandidates({ ok: true, completion: 'old', completions: [] }), []);
+test('history remembers that the model had nothing to add', () => {
+    const history = new CompletionHistory();
+    const anchor = buildCompletionRequest('a.py', 'python', 'x', 1);
+    history.set('scope', anchor, '');
+    assert.equal(history.get('scope', anchor), '');
 });
 
 function mockTimeouts(t: TestContext): void {
@@ -170,78 +152,184 @@ function cancellation() {
 }
 
 function transport() {
-    const children: Array<ChildProcess & { killedByTest: boolean }> = [];
+    const children: Array<ChildProcess & { killedByTest: boolean; written: string[] }> = [];
     const fakeSpawn = (() => {
         const child = Object.assign(new EventEmitter(), {
             stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
-            killedByTest: false,
+            killedByTest: false, written: [] as string[],
             kill() { this.killedByTest = true; return true; }
-        }) as unknown as ChildProcess & { killedByTest: boolean };
+        }) as unknown as ChildProcess & { killedByTest: boolean; written: string[] };
+        child.stdin?.on('data', data => child.written.push(...data.toString().split('\n').filter(Boolean)));
         children.push(child);
         return child;
     }) as typeof spawn;
-    return { children, fakeSpawn, reply(index: number, completions: string[]) {
-        children[index].stdout?.emit('data', Buffer.from(JSON.stringify({ ok: true, completions })));
-        children[index].emit('close', 0);
-    } };
+    const send = (index: number, ...messages: object[]) => {
+        for (const message of messages) {
+            children[index].stdout?.emit('data', Buffer.from(JSON.stringify(message) + '\n'));
+        }
+    };
+    return { children, fakeSpawn, send, requests: (index: number) => children[index].written.map(line => JSON.parse(line)) };
 }
 
-test('two second idle pause resets on edits; cancelled keystrokes never spawn', async t => {
+const flush = () => new Promise(resolve => setImmediate(resolve));
+
+test('pause before a request resets on edits; cancelled keystrokes send nothing', async t => {
     mockTimeouts(t);
     const io = transport();
-    const client = new CompletionClient(2000, io.fakeSpawn);
+    const client = new CompletionClient(300, io.fakeSpawn);
     const request = buildCompletionRequest('a.py', 'python', 'pri', 3);
     const first = cancellation();
     const pending = client.requestCompletion('binary', 'workspace', request, first.token);
-    t.mock.timers.tick(1999);
+    t.mock.timers.tick(299);
     assert.equal(io.children.length, 0);
     first.cancel();
-    assert.deepEqual(await pending, []);
+    assert.equal(await pending, '');
     const second = cancellation();
     const next = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'prin' }, second.token);
-    t.mock.timers.tick(1999);
+    t.mock.timers.tick(299);
     assert.equal(io.children.length, 0);
     t.mock.timers.tick(1);
+    await flush();
     assert.equal(io.children.length, 1);
-    io.reply(0, ['t(foo)', 't(bar)']);
-    assert.deepEqual(await next, ['t(foo)', 't(bar)']);
+    const [sent] = io.requests(0);
+    assert.equal(sent.prefix, 'prin');
+    io.send(0, { id: sent.id, delta: 't(' }, { id: sent.id, delta: 'foo)' }, { id: sent.id, done: true });
+    assert.equal(await next, 't(foo)');
     assert.equal(second.listeners.size, 0);
+    client.dispose();
+});
+
+test('one process serves every request and is started with --complete-server', async t => {
+    mockTimeouts(t);
+    const io = transport();
+    const spawned: string[][] = [];
+    const client = new CompletionClient(0, ((bin: string, args: string[]) => {
+        spawned.push(args);
+        return io.fakeSpawn(bin, args);
+    }) as typeof spawn);
+    const request = buildCompletionRequest('a.py', 'python', 'a', 1);
+    for (const [index, prefix] of ['a', 'ab'].entries()) {
+        const pending = client.requestCompletion('binary', 'workspace', { ...request, prefix }, cancellation().token);
+        t.mock.timers.tick(0);
+        await flush();
+        const sent = io.requests(0)[index];
+        io.send(0, { id: sent.id, delta: 'x' }, { id: sent.id, done: true });
+        assert.equal(await pending, 'x');
+    }
+    assert.equal(io.children.length, 1);
+    assert.deepEqual(spawned, [['--workspace', 'workspace', '--complete-server']]);
+    client.dispose();
+    assert.equal(io.children[0].killedByTest, true);
+});
+
+test('replies split across chunks are reassembled and replies for other ids are ignored', async t => {
+    mockTimeouts(t);
+    const io = transport();
+    const client = new CompletionClient(0, io.fakeSpawn);
+    const pending = client.requestCompletion('binary', 'workspace', buildCompletionRequest('a.py', 'python', 'a', 1), cancellation().token);
+    t.mock.timers.tick(0);
+    await flush();
+    const { id } = io.requests(0)[0];
+    const line = JSON.stringify({ id, delta: 'whole' }) + '\n';
+    io.children[0].stdout?.emit('data', Buffer.from(JSON.stringify({ id: id + 99, delta: 'other' }) + '\n' + line.slice(0, 7)));
+    io.children[0].stdout?.emit('data', Buffer.from(line.slice(7)));
+    io.send(0, { id, done: true });
+    assert.equal(await pending, 'whole');
+    client.dispose();
+});
+
+test('a failure reply or a dying process gives no suggestion and the next request restarts the process', async t => {
+    mockTimeouts(t);
+    const io = transport();
+    const client = new CompletionClient(0, io.fakeSpawn);
+    const request = buildCompletionRequest('a.py', 'python', 'a', 1);
+    const failed = client.requestCompletion('binary', 'workspace', request, cancellation().token);
+    t.mock.timers.tick(0);
+    await flush();
+    io.send(0, { id: io.requests(0)[0].id, error: 'No provider is configured.' });
+    assert.equal(await failed, '');
+
+    const crashed = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'ab' }, cancellation().token);
+    t.mock.timers.tick(0);
+    await flush();
+    io.children[0].emit('close', 1);
+    assert.equal(await crashed, '');
+
+    const again = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'abc' }, cancellation().token);
+    t.mock.timers.tick(0);
+    await flush();
+    assert.equal(io.children.length, 2);
+    io.send(1, { id: io.requests(1)[0].id, done: true });
+    assert.equal(await again, '');
+    client.dispose();
+});
+
+test('cancelling a sent request tells the process to stop it', async t => {
+    mockTimeouts(t);
+    const io = transport();
+    const client = new CompletionClient(0, io.fakeSpawn);
+    const cancelled = cancellation();
+    const pending = client.requestCompletion('binary', 'workspace', buildCompletionRequest('a.py', 'python', 'a', 1), cancelled.token);
+    t.mock.timers.tick(0);
+    await flush();
+    const { id } = io.requests(0)[0];
+    cancelled.cancel();
+    assert.equal(await pending, '');
+    await flush();
+    assert.deepEqual(io.requests(0)[1], { cancel: id });
+    io.send(0, { id, delta: 'late' }, { id, done: true });
     client.dispose();
 });
 
 test('backspace cache hit cancels stale work and late answers cannot replace it', async t => {
     mockTimeouts(t);
     const io = transport();
-    const client = new CompletionClient(2000, io.fakeSpawn);
+    const client = new CompletionClient(0, io.fakeSpawn);
     const request = buildCompletionRequest('a.py', 'python', 'pri', 3);
     const first = client.requestCompletion('binary', 'workspace', request, cancellation().token);
-    t.mock.timers.tick(2000);
-    io.reply(0, ['nt(foo)', 'nt(bar)']);
+    t.mock.timers.tick(0);
+    await flush();
+    io.send(0, { id: io.requests(0)[0].id, delta: 'nt(foo)' }, { id: io.requests(0)[0].id, done: true });
     await first;
     const typo = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'prix' }, cancellation().token);
-    t.mock.timers.tick(2000);
+    t.mock.timers.tick(0);
+    await flush();
+    const typoId = io.requests(0)[1].id;
     const restored = await client.requestCompletion('binary', 'workspace', request, cancellation().token);
-    assert.deepEqual(restored, ['nt(foo)', 'nt(bar)']);
-    assert.deepEqual(await typo, []);
-    assert.equal(io.children[1].killedByTest, true);
-    io.reply(1, ['stale']);
-    assert.deepEqual(await client.requestCompletion('binary', 'workspace', request, cancellation().token), restored);
-    assert.equal(io.children.length, 2);
+    assert.equal(restored, 'nt(foo)');
+    assert.equal(await typo, '');
+    io.send(0, { id: typoId, delta: 'stale' }, { id: typoId, done: true });
+    assert.equal(await client.requestCompletion('binary', 'workspace', request, cancellation().token), restored);
     client.dispose();
 });
 
-test('hung child times out and cancellation before cache lookup returns no items', async t => {
+test('a request that gets no answer times out and cancellation before cache lookup returns nothing', async t => {
     mockTimeouts(t);
     const io = transport();
-    const client = new CompletionClient(2000, io.fakeSpawn);
+    const client = new CompletionClient(300, io.fakeSpawn);
     const request = buildCompletionRequest('a.py', 'python', 'pri', 3);
     const pending = client.requestCompletion('binary', 'workspace', request, cancellation().token);
-    t.mock.timers.tick(2000);
-    t.mock.timers.tick(4000);
-    assert.deepEqual(await pending, []);
-    assert.equal(io.children[0].killedByTest, true);
+    t.mock.timers.tick(300);
+    t.mock.timers.tick(6000);
+    assert.equal(await pending, '');
     const cancelled = cancellation(); cancelled.cancel();
-    assert.deepEqual(await client.requestCompletion('binary', 'workspace', request, cancelled.token), []);
+    assert.equal(await client.requestCompletion('binary', 'workspace', request, cancelled.token), '');
     assert.equal(io.children.length, 1);
+    client.dispose();
+});
+
+test('a different binary or workspace gets its own process and the old one is stopped', async t => {
+    mockTimeouts(t);
+    const io = transport();
+    const client = new CompletionClient(0, io.fakeSpawn);
+    const request = buildCompletionRequest('a.py', 'python', 'a', 1);
+    void client.requestCompletion('binary', 'one', request, cancellation().token);
+    t.mock.timers.tick(0);
+    await flush();
+    void client.requestCompletion('binary', 'two', { ...request, prefix: 'ab' }, cancellation().token);
+    t.mock.timers.tick(0);
+    await flush();
+    assert.equal(io.children.length, 2);
+    assert.equal(io.children[0].killedByTest, true);
     client.dispose();
 });

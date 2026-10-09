@@ -10,17 +10,18 @@ import com.intellij.codeInsight.inline.completion.suggestion.invoke
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.util.TextRange
 import com.kvist.intellij.runtime.KvistLauncher
-import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import java.nio.file.Path
 import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
 
-/** Ghost text: the client waits only for uncached states and cancels with the editor request. */
+/** Ghost text: the suggestion streams in as the model writes it and is cancelled with the editor request. */
 class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
     override val id: InlineCompletionProviderID = InlineCompletionProviderID("Kvist")
 
     private val client = KvistCompletionClient()
+    private val typingPauseMs = 300L
 
     override fun isEnabled(event: InlineCompletionEvent): Boolean {
         if (!KvistCompletionSettings.isEnabled) return false
@@ -44,21 +45,22 @@ class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
             suffix = document.getText(TextRange(request.startOffset, document.textLength)),
         )
 
-        val completions = try {
-            client.requestCompletion(target, payload)
+        client.cached(target, payload)?.let { cached ->
+            if (cached.isBlank()) return InlineCompletionSuggestion.Empty
+            return InlineCompletionSuggestion { variant { emit(InlineCompletionGrayTextElement(cached)) } }
         }
-        catch (exception: CancellationException) {
-            throw exception
-        }
-        catch (exception: CompletionRequestException) {
-            LOG.debug("Kvist inline completion failed: ${exception.message}")
-            return InlineCompletionSuggestion.Empty
-        }
-        if (completions.isEmpty()) return InlineCompletionSuggestion.Empty
+        // Cache lookup must happen BEFORE the typing pause, so backspace/undo
+        // can restore a known suggestion without a model call or another wait.
+        delay(typingPauseMs)
 
         return InlineCompletionSuggestion {
-            for (completion in completions) {
-                variant { emit(InlineCompletionGrayTextElement(completion)) }
+            variant {
+                try {
+                    client.stream(target, payload).collect { emit(InlineCompletionGrayTextElement(it)) }
+                }
+                catch (exception: CompletionRequestException) {
+                    LOG.debug("Kvist inline completion failed: ${exception.message}")
+                }
             }
         }
     }

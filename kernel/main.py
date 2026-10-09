@@ -162,6 +162,12 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "(requires --workspace), print JSON, exit.",
     )
     parser.add_argument(
+        "--complete-server",
+        action="store_true",
+        help="Serve inline code completions over stdin/stdout JSON lines until "
+        "stdin closes (requires --workspace); see kernel/completion_server.py.",
+    )
+    parser.add_argument(
         "--selection-task",
         action="store_true",
         help="Run one model call for an IDE editor action on a selection, from a "
@@ -305,14 +311,14 @@ def _run_complete_op(args: argparse.Namespace) -> None:
     import json
     from contextlib import redirect_stdout
 
-    from kernel.completion import CompletionError, generate_completions, resolve_workspace_for_completion
+    from kernel.completion import CompletionError, generate_completion, resolve_workspace_for_completion
     from kernel.redaction import sanitize_display_text
 
     payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
         with redirect_stdout(sys.stderr):
             workspace = resolve_workspace_for_completion(args.workspace)
-            completions = generate_completions(payload_text, workspace)
+            completion = generate_completion(payload_text, workspace)
     except (CompletionError, RuntimeError, OSError) as error:
         failure = {
             "ok": False,
@@ -320,7 +326,22 @@ def _run_complete_op(args: argparse.Namespace) -> None:
         }
         print(json.dumps(failure))
         raise SystemExit(1) from error
-    print(json.dumps({"ok": True, "completion": completions[0] if completions else "", "completions": completions}))
+    print(json.dumps({"ok": True, "completion": completion}))
+
+
+def _run_complete_server_op(args: argparse.Namespace) -> None:
+    import json
+
+    from kernel.completion import CompletionError, resolve_workspace_for_completion
+    from kernel.completion_server import serve
+    from kernel.redaction import sanitize_display_text
+
+    try:
+        workspace = resolve_workspace_for_completion(args.workspace)
+    except CompletionError as error:
+        print(json.dumps({"ok": False, "error": sanitize_display_text(str(error))}))
+        raise SystemExit(1) from error
+    serve(workspace)
 
 
 def _run_selection_task_op() -> None:
@@ -444,6 +465,11 @@ if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.complete:
     _run_complete_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.complete_server:
+    _run_complete_server_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
 
@@ -3837,6 +3863,10 @@ def main() -> None:
 
     if args.complete:
         _run_complete_op(args)
+        return
+
+    if args.complete_server:
+        _run_complete_server_op(args)
         return
 
     if args.selection_task:

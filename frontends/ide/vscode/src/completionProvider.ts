@@ -3,12 +3,12 @@ import { BinaryResolver } from './binaryResolver';
 import { CompletionClient, buildCompletionRequest, isDocumentTooLargeForCompletion } from './completionClient';
 
 const CONFIG_SECTION = 'kvist.inlineCompletion';
-const DEFAULT_DEBOUNCE_MS = 2000;
+const DEFAULT_DEBOUNCE_MS = 300;
 
 /**
- * Inline completion (ghost text) provider. Each request is a fresh, stateless
- * `kvist --complete` process — never the long-lived chat core, so a slow or
- * busy agent run never starves completion.
+ * Inline completion (ghost text) provider. Requests go to a dedicated
+ * `kvist --complete-server` process — never the chat core, so a slow or busy
+ * agent run never starves completion.
  */
 export class KvistInlineCompletionProvider implements vscode.InlineCompletionItemProvider, vscode.Disposable {
     private readonly binaryResolver: BinaryResolver;
@@ -55,14 +55,14 @@ export class KvistInlineCompletionProvider implements vscode.InlineCompletionIte
         // it here rather than freezing the value at construction time.
         this.client.setDebounceMs(this.debounceMs());
         const version = document.version;
-        const completions = await this.client.requestCompletion(
+        const completion = await this.client.requestCompletion(
             binaryPath, folder.uri.fsPath, request, token,
             context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke
         );
-        if (token.isCancellationRequested || document.version !== version || !completions.length) {
+        if (token.isCancellationRequested || document.version !== version || !completion.trim()) {
             return undefined;
         }
-        return completions.map(value => new vscode.InlineCompletionItem(value, new vscode.Range(position, position)));
+        return [new vscode.InlineCompletionItem(completion, new vscode.Range(position, position))];
     }
 
     private isEnabled(): boolean {

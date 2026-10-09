@@ -23,12 +23,13 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 from kernel.agent_model import (
     _format_llm_error,
     _load_role_prompt,
     safe_extract_completion_content,
+    safe_extract_stream_delta,
 )
 from kernel.agent_state import AgentConfig
 from kernel.api_settings import apply_api_settings
@@ -40,6 +41,7 @@ from kernel.llm_clients import (
     extract_custom_provider_name,
     is_custom_provider,
     normalize_provider,
+    provider_supports_streaming,
     required_secret_keys_for_provider,
     resolve_models_for_provider,
 )
@@ -106,6 +108,10 @@ def parse_payload(raw_text: str) -> CompletionRequest:
         payload = json.loads(raw_text or "null")
     except json.JSONDecodeError as error:
         raise CompletionError(f"Payload is not valid JSON: {error.msg}.") from error
+    return request_from_payload(payload)
+
+
+def request_from_payload(payload: object) -> CompletionRequest:
     if not isinstance(payload, dict):
         raise CompletionError("Payload must be a JSON object.")
 
@@ -228,7 +234,8 @@ def _no_interactive_secret(_label: str) -> str:
     return ""
 
 
-def _build_caller() -> tuple[_ModelCaller, str]:
+def completion_target() -> tuple[str, str]:
+    """Provider and fast model that a completion request would use right now."""
     provider = _resolve_provider()
     models, _warnings = resolve_models_for_provider(provider, _saved_models(provider))
     model = models.get("fast", "")
@@ -236,6 +243,11 @@ def _build_caller() -> tuple[_ModelCaller, str]:
         raise CompletionError(
             "No fast model is configured for this provider. Set one with /models."
         )
+    return provider, model
+
+
+def _build_caller() -> tuple[_ModelCaller, str]:
+    provider, model = completion_target()
 
     credentials = ensure_provider_credentials(
         provider=provider,
@@ -260,13 +272,15 @@ def _build_caller() -> tuple[_ModelCaller, str]:
     return _ModelCaller(client=client, config=config, _ui=_StderrUI()), model
 
 
-def _request_candidates(caller: _ModelCaller, model: str, messages: list[dict]) -> Any:
+def _request_completion(caller: _ModelCaller, model: str, messages: list[dict], stream: bool) -> Any:
     # Completion has its own latency policy, independent of chat's /effort or env.
     # Omit sampling controls: reasoning-only models often reject temperature.
     kwargs: dict[str, Any] = {
         "model": model, "messages": redact_value(messages),
         "timeout": min(caller.config.api_timeout, 4.0),
     }
+    if stream:
+        kwargs["stream"] = True
     merge_reasoning_kwargs(kwargs, caller.config.provider, "false")
     if kwargs.get("reasoning_effort") == "minimal":
         kwargs["reasoning_effort"] = "none"
@@ -288,62 +302,106 @@ def _request_candidates(caller: _ModelCaller, model: str, messages: list[dict]) 
             kwargs = stripped
 
 
-def clean_model_candidates(raw: str, prefix: str) -> list[str]:
-    text = raw.strip()
-    fenced = _FENCE_RE.match(text)
-    if fenced:
-        text = fenced.group(1)
+class CompletionStreamCleaner:
+    """Applies ``clean_model_output`` to a reply that arrives in pieces.
+
+    Cleaning is a function of the whole reply, but a leading echo of the prefix
+    or an opening code fence is only recognisable once enough text has arrived,
+    so output is held back while the reply could still turn out to be either.
+    """
+
+    def __init__(self, prefix: str) -> None:
+        self._prefix = prefix
+        self._echo_starts = (prefix[-80:], prefix.rsplit("\n", 1)[-1])
+        self._raw = ""
+        self.emitted = 0
+
+    def feed(self, piece: str) -> str:
+        self._raw += piece
+        if self._is_undecided():
+            return ""
+        return self._new_text()
+
+    def finish(self) -> str:
+        return self._new_text()
+
+    def _is_undecided(self) -> bool:
+        stripped = self._raw.lstrip()
+        if stripped.startswith("```") or "```".startswith(stripped):
+            return True
+        return any(start.startswith(self._raw) for start in self._echo_starts if start)
+
+    def _new_text(self) -> str:
+        cleaned = clean_model_output(self._raw, self._prefix)
+        fresh = cleaned[self.emitted:]
+        self.emitted = len(cleaned)
+        return fresh
+
+
+def _stream_pieces(stream: Any) -> Iterator[str]:
     try:
-        parsed = json.loads(text)
-    except (ValueError, TypeError):
-        # Do not insert a broken protocol object as code. Plain-code replies
-        # remain compatible with older/custom models.
-        if re.match(r'\{\s*"completions?"\s*:', text):
-            return []
-        values = [raw]
-    else:
-        if isinstance(parsed, dict):
-            values = parsed.get("completions", [])
-        else:
-            values = []
-    if not isinstance(values, list):
-        return []
-    result: list[str] = []
-    for value in values:
-        if isinstance(value, str):
-            cleaned = clean_model_output(value, prefix)
-            if cleaned.strip() and cleaned not in result:
-                result.append(cleaned)
-        if len(result) == 3:
-            break
-    return result
+        for chunk in stream:
+            delta = safe_extract_stream_delta(chunk)
+            piece = getattr(delta, "content", None) if delta is not None else None
+            if piece:
+                yield piece
+    finally:
+        close = getattr(stream, "close", None)
+        if close is not None:
+            close()
 
 
-def generate_completions(payload_text: str, workspace: Path) -> list[str]:
-    request = parse_payload(payload_text)
+def prepare_completion(request: CompletionRequest, workspace: Path) -> list[dict]:
     target_file = _resolve_target_file(workspace, request.file_path)
-
     raw_imports = extract_raw_imports(request.prefix[:IMPORT_SCAN_CHARS], request.language)
     resolved_imports = resolve_project_imports(workspace, target_file, raw_imports, request.language)
-
-    caller, model = _build_caller()
-    system_prompt = _load_role_prompt("complete")
-    messages = [
-        {"role": "system", "content": system_prompt},
+    return [
+        {"role": "system", "content": _load_role_prompt("complete")},
         {"role": "user", "content": build_user_prompt(request, resolved_imports)},
     ]
+
+
+def iter_completion(
+    caller: _ModelCaller,
+    model: str,
+    request: CompletionRequest,
+    messages: list[dict],
+    should_stop: Callable[[], bool] = lambda: False,
+) -> Iterator[str]:
+    """Yield the completion text in pieces as the model produces it.
+
+    Providers without verified streaming answer with one piece. Stops early,
+    closing the provider stream, once ``should_stop`` is true or the reply
+    reaches ``MAX_COMPLETION_CHARS``.
+    """
     provider = caller.config.provider
+    streaming = provider_supports_streaming(provider)
+    cleaner = CompletionStreamCleaner(request.prefix[-MAX_PREFIX_CHARS:])
     try:
-        response = _request_candidates(caller, model, messages)
-        raw = safe_extract_completion_content(response, provider, model)
+        if should_stop():
+            return
+        response = _request_completion(caller, model, messages, streaming)
+        if streaming:
+            pieces = _stream_pieces(response)
+        else:
+            pieces = iter([safe_extract_completion_content(response, provider, model) or ""])
+        for piece in pieces:
+            fresh = cleaner.feed(piece)
+            if fresh:
+                yield fresh
+            if should_stop() or cleaner.emitted >= MAX_COMPLETION_CHARS:
+                return
+        tail = cleaner.finish()
+        if tail:
+            yield tail
     # Provider SDKs share no exception base class; this is the same boundary
     # call_model draws, and the error is reported, not swallowed.
     except Exception as error:
         raise CompletionError(_format_llm_error(error, provider)) from error
-    return clean_model_candidates(raw or "", request.prefix[-MAX_PREFIX_CHARS:])
 
 
 def generate_completion(payload_text: str, workspace: Path) -> str:
-    """Compatibility helper for callers that need only the first candidate."""
-    candidates = generate_completions(payload_text, workspace)
-    return candidates[0] if candidates else ""
+    request = parse_payload(payload_text)
+    messages = prepare_completion(request, workspace)
+    caller, model = _build_caller()
+    return "".join(iter_completion(caller, model, request, messages))
