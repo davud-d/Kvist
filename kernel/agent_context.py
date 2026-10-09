@@ -357,9 +357,7 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         )
         if response_language == "ru":
             language_block += (
-                "- Final message style: short and natural Russian, no template phrases. "
-                "Example: \"Готово, создал `hello.txt` с текстом `Hello`.\" "
-                "Example for a read task: \"В `hello.txt`:\\n\\nHello\"\n"
+                "- Final message style: short and natural Russian, no template phrases.\n"
             )
         cached_suffix = (
             f"{text['dependency_versions']}:\n{dependency_versions}\n\n"
