@@ -271,8 +271,7 @@ Definition of done:
 
 == 12. EXAMPLES ==
 
-Ex1 (plain conversation — no call at all):
-у меня дел нет, есть твои. что делаем?
+Ex1 (plain conversation — no call at all): the whole response is text and nothing else. Its wording is whatever the moment calls for, never a template.
 
 Ex2 (a question about the project — read first, cite lines):
 <tool_call>{"name": "search_code", "arguments": {"query": "def run_shell", "path": "executor.py"}}</tool_call>
