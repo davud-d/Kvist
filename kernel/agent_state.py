@@ -90,6 +90,7 @@ class RunState:
     system_shell: str = ""
     system_project: str = ""
     system_git: str = ""
+    system_workspace: str = ""
     system_sandbox: str = ""
     system_host: str = ""
     user_goal: str = ""

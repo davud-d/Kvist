@@ -1015,7 +1015,9 @@ def _assert_asked_without_the_tool(first, words):
     assert system["role"] == "system" and "end_session" not in system["content"]
     for message in rest:
         assert "end_session" not in message["content"] and "KVIST_RUNTIME" not in message["content"]
-        assert "review" not in message["content"].lower()
+        # The workspace fact carries pytest's tmp dir name, which contains this test's name.
+        without_workspace = re.sub(r"\(Runtime fact: workspace = [^\n]*\)", "", message["content"])
+        assert "review" not in without_workspace.lower()
         assert not re.search(r"message #\d", message["content"])
     assert rest[:-1] == first["messages"][1:-1]
     assert _last_user_text(first).replace("(Runtime fact: this is the person's message #3.)\n\n", "") + (

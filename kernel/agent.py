@@ -129,6 +129,7 @@ from kernel.role_router import RoleRouteResult, resume_role, route_role_decision
 from kernel.system_context import (
     current_os_context,
     current_project_context,
+    current_workspace_context,
     current_sandbox_context,
     current_shell_context,
     current_time_context,
@@ -544,6 +545,7 @@ class LocalAgent:
         self._state.system_shell = current_shell_context()
         self._state.system_project = current_project_context(self.executor.workspace) or ""
         self._state.system_git = self.executor.git_context_summary() or ""
+        self._state.system_workspace = current_workspace_context(self.executor.workspace)
         self._state.system_sandbox = current_sandbox_context(
             self.executor.sandbox_mode, sandbox_network_allowed()
         )
@@ -1163,13 +1165,18 @@ class LocalAgent:
             else ""
         )
         # The number end_session's tag names; only where the tag is offered.
+        workspace_note = (
+            f"(Runtime fact: workspace = {self._state.system_workspace})\n\n"
+            if self._state.system_workspace
+            else ""
+        )
         message_note = (
             f"(Runtime fact: this is the person's message #{self._state.message_id}.)\n\n"
             if offer_tag
             else ""
         )
         return (
-            language_note + model_note + host_note + message_note + self._chat_session_context()
+            language_note + model_note + host_note + workspace_note + message_note + self._chat_session_context()
             + _REPLY_END_NOTE + user_goal
         )
 

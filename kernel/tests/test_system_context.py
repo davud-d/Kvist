@@ -18,3 +18,14 @@ def test_current_shell_context_uses_shell_env(monkeypatch):
 
 def test_current_time_context_returns_key():
     assert "current_time" in system_context.current_time_context()
+
+
+def test_workspace_fact_ignores_kvists_own_files(tmp_path):
+    from kernel.system_context import current_workspace_context
+
+    (tmp_path / ".kvist").mkdir()
+    (tmp_path / "KVIST.md").write_text("x", encoding="utf-8")
+    assert current_workspace_context(tmp_path) == f"{tmp_path.name}, empty, nothing there yet"
+
+    (tmp_path / "main.py").write_text("", encoding="utf-8")
+    assert current_workspace_context(tmp_path) == f"{tmp_path.name}, 1 top-level entries"

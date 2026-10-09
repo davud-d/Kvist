@@ -145,6 +145,22 @@ def identity_fact(provider: str, model: str) -> str:
 AGENT_INSTRUCTIONS_FILE = "KVIST.md"
 CHAT_INSTRUCTIONS_FILE = "KVIST-CHAT.md"
 
+# Files Kvist creates in a workspace on its own at startup: they say nothing
+# about whether the person has put anything there.
+_KVIST_OWN_ENTRIES = frozenset({".kvist", AGENT_INSTRUCTIONS_FILE, CHAT_INSTRUCTIONS_FILE})
+
+
+def current_workspace_context(workspace) -> str:
+    """One line: the folder's name and whether the person has put anything in it.
+
+    Lets a greeting be answered from what is actually there ("an empty folder,
+    probably something from scratch") instead of with a generic offer of help.
+    """
+    root = Path(workspace)
+    entries = [entry for entry in root.iterdir() if entry.name not in _KVIST_OWN_ENTRIES]
+    state = f"{len(entries)} top-level entries" if entries else "empty, nothing there yet"
+    return f"{root.name}, {state}"
+
 # Instructions ride along with every request of a run, so a runaway file would
 # silently eat the context budget. Cut it and say so.
 _MAX_INSTRUCTIONS_CHARS = 24_000
