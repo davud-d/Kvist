@@ -22,6 +22,7 @@ import os
 import re
 import sys
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -67,7 +68,21 @@ MAX_SUFFIX_CHARS = 1_500
 # client already applied — the client's cap is never trusted on its own.
 MAX_RAW_FIELD_CHARS = 200_000
 
-_FENCE_RE = re.compile(r"^```[\w-]*\s*\n(.*?)\n?```\s*$", re.DOTALL)
+# The reply that means "nothing sensible continues here". A bare empty message is
+# not usable: models narrate instead ("I'm returning an empty continuation").
+NO_COMPLETION = "NO_COMPLETION"
+# DeepSeek's tool-call markup (``</｜DSML｜parameter>``) and chat-template tokens
+# leak into the content when the model tries to call a tool it was not given.
+# Plain ``<|`` is not matched: Haskell and Elixir use it as an operator.
+_TOOL_MARKUP_RE = re.compile(
+    r"</?｜|<\|(?:DSML|tool_call|im_start|im_end)|</?(?:UNTRUSTED_TOOL_OUTPUT|PROJECT_INSTRUCTIONS)"
+)
+# The tail of a possible tool-markup tag that has not fully arrived yet.
+_PARTIAL_TAG_RE = re.compile(r"<[/|｜\w]{0,12}$")
+_WORD_AT_END_RE = re.compile(r"[A-Za-z_]\w*$")
+_WORD_AT_START_RE = re.compile(r"[A-Za-z_]\w*")
+_MIN_REWRITE_WORD_CHARS = 4
+_REWRITE_SIMILARITY = 0.8
 
 
 class CompletionError(ValueError):
@@ -186,29 +201,88 @@ def build_user_prompt(request: CompletionRequest, resolved_imports: list[Resolve
     return "\n\n".join(sections)
 
 
+def _echo_candidates(prefix: str) -> tuple[tuple[str, bool], ...]:
+    """Text a model may restate before its continuation, as ``(text, whole_line_above)``."""
+    last_line = prefix.rsplit("\n", 1)[-1]
+    candidates = [(prefix[-80:], False), (last_line, False)]
+    if not last_line.strip():
+        # Cursor on a fresh line: the model may repeat the whole line above it.
+        above = next((line for line in reversed(prefix.splitlines()) if line.strip()), "")
+        candidates.append((above, True))
+    return tuple(candidate for candidate in candidates if candidate[0])
+
+
 def _strip_echo(text: str, prefix: str) -> str:
-    """Drop a leading echo of the prompt's own prefix or its last line.
+    """Drop a leading echo of the prompt's own prefix, its last line, or the
+    non-blank line above a cursor on a new line.
 
     Some models restate a chunk of what they were given before continuing;
     without this the IDE would insert a visible duplicate of code already
-    on screen.
+    on screen. A line above is only dropped when it is repeated whole: a longer
+    line that merely starts like it is new code.
     """
-    tail = prefix[-80:]
-    if tail and text.startswith(tail):
-        return text[len(tail):]
-    last_line = prefix.rsplit("\n", 1)[-1]
-    if last_line and text.startswith(last_line):
-        return text[len(last_line):]
+    for candidate, whole_line_above in _echo_candidates(prefix):
+        if not text.startswith(candidate):
+            continue
+        rest = text[len(candidate):]
+        if whole_line_above and rest.strip():
+            continue
+        return rest
     return text
 
 
-def clean_model_output(raw: str, prefix: str) -> str:
-    text = raw
-    fenced = _FENCE_RE.match(text.strip())
-    if fenced:
-        text = fenced.group(1)
-    text = _strip_echo(text, prefix)
+def _cut_tool_markup(text: str) -> str:
+    match = _TOOL_MARKUP_RE.search(text)
+    return text[:match.start()] if match else text
+
+
+def _unfence(text: str) -> str:
+    """Take the code out of a markdown fence the model added around it.
+
+    The fence may be left open or followed by junk, so only the text up to the
+    closing fence is kept.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return text
+    if "\n" not in stripped:
+        return stripped.strip("`")
+    body = stripped.partition("\n")[2]
+    if body.startswith("```"):
+        return ""
+    closing = body.find("\n```")
+    if closing != -1:
+        return body[:closing]
+    return body[:-3].rstrip("\n") if body.endswith("```") else body
+
+
+def _strip_markup(raw: str, prefix: str) -> str:
+    text = _strip_echo(_unfence(_cut_tool_markup(raw)), prefix)
     return text[:MAX_COMPLETION_CHARS]
+
+
+def _rewrites_word_before_cursor(text: str, prefix: str) -> bool:
+    """True when the reply restates the word being typed in a corrected form.
+
+    A completion can only insert after the cursor; a reply such as
+    ``connection_method`` after ``connecthion_method`` would be pasted as a
+    second, unrelated word.
+    """
+    before = _WORD_AT_END_RE.search(prefix)
+    after = _WORD_AT_START_RE.match(text)
+    if not before or not after:
+        return False
+    typed, replied = before.group(), after.group()
+    if min(len(typed), len(replied)) < _MIN_REWRITE_WORD_CHARS:
+        return False
+    return SequenceMatcher(None, typed, replied).ratio() >= _REWRITE_SIMILARITY
+
+
+def clean_model_output(raw: str, prefix: str) -> str:
+    if NO_COMPLETION in raw:
+        return ""
+    text = _strip_markup(raw, prefix)
+    return "" if _rewrites_word_before_cursor(text, prefix) else text
 
 
 def _resolve_provider() -> str:
@@ -305,14 +379,16 @@ def _request_completion(caller: _ModelCaller, model: str, messages: list[dict], 
 class CompletionStreamCleaner:
     """Applies ``clean_model_output`` to a reply that arrives in pieces.
 
-    Cleaning is a function of the whole reply, but a leading echo of the prefix
-    or an opening code fence is only recognisable once enough text has arrived,
-    so output is held back while the reply could still turn out to be either.
+    Cleaning is a function of the whole reply, but a leading echo of the prefix,
+    an opening code fence, a half-arrived tool-markup tag or the first word
+    (which may rewrite the word before the cursor) is only recognisable once
+    enough text has arrived, so output is held back while the reply could still
+    turn out to be one of them.
     """
 
     def __init__(self, prefix: str) -> None:
         self._prefix = prefix
-        self._echo_starts = (prefix[-80:], prefix.rsplit("\n", 1)[-1])
+        self._echo_starts = tuple(text for text, _ in _echo_candidates(prefix))
         self._raw = ""
         self.emitted = 0
 
@@ -320,21 +396,28 @@ class CompletionStreamCleaner:
         self._raw += piece
         if self._is_undecided():
             return ""
-        return self._new_text()
+        return self._new_text(final=False)
 
     def finish(self) -> str:
-        return self._new_text()
+        return self._new_text(final=True)
 
     def _is_undecided(self) -> bool:
         stripped = self._raw.lstrip()
         if stripped.startswith("```") or "```".startswith(stripped):
             return True
-        return any(start.startswith(self._raw) for start in self._echo_starts if start)
+        if any(start.startswith(self._raw) for start in self._echo_starts):
+            return True
+        # The first word is not known until a character that ends it arrives.
+        return self.emitted == 0 and _WORD_AT_START_RE.fullmatch(_strip_markup(self._raw, self._prefix)) is not None
 
-    def _new_text(self) -> str:
+    def _new_text(self, final: bool) -> str:
         cleaned = clean_model_output(self._raw, self._prefix)
+        if not final:
+            partial_tag = _PARTIAL_TAG_RE.search(cleaned)
+            if partial_tag:
+                cleaned = cleaned[:partial_tag.start()]
         fresh = cleaned[self.emitted:]
-        self.emitted = len(cleaned)
+        self.emitted = max(self.emitted, len(cleaned))
         return fresh
 
 

@@ -301,11 +301,11 @@ def test_provider_without_streaming_answers_in_one_piece(tmp_path):
 
 def test_stream_stops_when_asked_and_when_the_reply_reaches_the_cap(tmp_path):
     caller = completion._ModelCaller(
-        FakeLLMClient(stream_chunks=["a", "b", "c"]), AgentConfig(provider="openai"), completion._StderrUI()
+        FakeLLMClient(stream_chunks=["a(", "b(", "c("]), AgentConfig(provider="openai"), completion._StderrUI()
     )
     request = completion.parse_payload(_payload())
     stops = iter([False, False, True])
-    assert list(completion.iter_completion(caller, "m", request, [], lambda: next(stops))) == ["a", "b"]
+    assert list(completion.iter_completion(caller, "m", request, [], lambda: next(stops))) == ["a(", "b("]
 
     big = "x" * (MAX_COMPLETION_CHARS + 10)
     caller.client.stream_chunks = [big, "never read"]
@@ -365,3 +365,69 @@ def test_streamed_text_matches_whole_reply_cleaning():
     for size in (1, 3, 7, len(raw)):
         pieces = [raw[i:i + size] for i in range(0, len(raw), size)]
         assert "".join(_cleaned_pieces(prefix, pieces)) == clean_model_output(raw, prefix)
+
+
+# ── leaked tool markup, loose fences, rewritten words ────────────────────
+
+_LEAKED = "```python\nconnection_method\n```\n</｜DSML｜parameter>"
+
+
+def test_tool_markup_is_cut_and_what_precedes_it_is_kept():
+    assert clean_model_output("return 1\n</｜DSML｜parameter>", "") == "return 1\n"
+    assert clean_model_output("x = 1<｜DSML｜function_calls>", "") == "x = 1"
+    assert clean_model_output("a <|> b", "") == "a <|> b"  # Haskell operator is code
+
+
+def test_fence_is_stripped_even_with_junk_after_it_or_no_closing_fence():
+    assert clean_model_output("```python\nreturn 1\n```\ntrailing junk", "") == "return 1"
+    assert clean_model_output("```python\nreturn 1\nreturn 2", "") == "return 1\nreturn 2"
+    assert clean_model_output("```\n```", "") == ""
+    assert clean_model_output("```return 1```", "") == "return 1"
+
+
+def test_reply_that_rewrites_the_word_before_the_cursor_is_dropped():
+    assert clean_model_output(_LEAKED, "connecthion_method") == ""
+    assert clean_model_output("connection_pool.get()", "connection") == "_pool.get()"  # plain echo is trimmed
+    assert clean_model_output("nt(foo)", "pri") == "nt(foo)"
+    assert clean_model_output("ue = 1", "self.val") == "ue = 1"
+    assert clean_model_output(" = connection_method", "connecthion_method") == " = connection_method"
+    assert clean_model_output("y", "x") == "y"
+
+
+def test_streamed_reply_with_leaked_markup_inserts_nothing_for_a_rewritten_word():
+    prefix = "connecthion_method"
+    pieces = ["```python", "\nconnection", "_method\n``", "`\n</｜DSML", "｜parameter>"]
+    assert _cleaned_pieces(prefix, pieces) == []
+
+
+def test_streamed_markup_tag_is_never_released_in_part():
+    prefix = "x = 1\n"
+    pieces = ["return 1", "\n<", "/｜DSML", "｜parameter>"]
+    assert "".join(_cleaned_pieces(prefix, pieces)) == "return 1\n"
+
+
+def test_streamed_first_word_is_held_until_it_is_complete():
+    assert _cleaned_pieces("pri", ["n", "t(", "foo)"]) == ["nt(", "foo)"]
+
+
+def test_no_completion_marker_means_nothing_is_inserted_even_amid_narration():
+    assert clean_model_output("NO_COMPLETION", "x = 1\n") == ""
+    assert clean_model_output("The cursor is at the end.\nI'm returning NO_COMPLETION", "x = 1\n") == ""
+    assert _cleaned_pieces("x = 1\n", ["NO_", "COMPLE", "TION"]) == []
+    assert _cleaned_pieces("x = 1\n", ["NO_COMPLETION", "\n"]) == []
+
+
+def test_prompt_defines_the_no_completion_marker():
+    assert completion.NO_COMPLETION in _PROMPT_PATH.read_text(encoding="utf-8")
+
+
+def test_whole_line_above_a_fresh_cursor_is_not_inserted_again():
+    prefix = "import sys\n\nx = args.mode\n"
+    assert clean_model_output("x = args.mode", prefix) == ""
+    assert clean_model_output("x = args.mode\ny = 2", prefix) == "x = args.mode\ny = 2"  # new code after a repeat stays
+    assert clean_model_output("x = args.mode + 1", prefix) == "x = args.mode + 1"  # longer line is new code
+    assert _cleaned_pieces(prefix, ["x = args", ".mode"]) == []
+
+
+def test_wrapper_tags_from_the_prompt_are_cut():
+    assert clean_model_output('= "tcp"\n</UNTRUSTED_TOOL_OUTPUT>', "name") == '= "tcp"\n'
