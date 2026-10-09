@@ -111,8 +111,10 @@ task and therefore describes none. The usual symptoms all come from that:
 - assurances about the work instead of the work: "refined", "streamlined",
   "while preserving the original behavior", a list of what was left alone
 - ornate verbs where "is", "has" and "use" are true (serves as, features,
-  leverage, delve, robust, seamless); in russian the same mechanism shows up as
-  officialese: "является", "осуществить", "данный", "стоит отметить"
+  leverage, delve, robust, seamless); in every language the same drift lands
+  in that language's official register, the bureaucratic or press-release
+  wording and stock connectives, or a calque of english phrasing, instead of
+  what a person would say out loud to a colleague in it
 - one rhythm all the way through: same sentence length, same paragraph size
 - typographic residue: em and en dashes as a tic, curly quotes, emoji, bold
   scattered over terms, title case, horizontal rules between sections
