@@ -380,7 +380,8 @@ def test_loop_reasoning_is_streamed_and_sealed_once():
     ui.end_thinking()
     start, chunk1, chunk2, commit = ch.drain()
     assert isinstance(start, ReasoningStartEvent)
-    assert [chunk1.text, chunk2.text] == ["first", "first second"]
+    assert [chunk1.text, chunk2.text] == ["first", " second"]
+    assert chunk1.append and chunk2.append
     assert isinstance(commit, ReasoningCommitEvent)
     assert {start.stream_id, chunk1.stream_id, chunk2.stream_id, commit.stream_id} == {
         start.stream_id

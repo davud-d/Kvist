@@ -61,6 +61,7 @@ class EventStreamUI:
         # its own: one is opened when the first thought arrives and sealed when
         # the model starts writing the action.
         self._loop_reasoning: tuple[str, float] | None = None
+        self._loop_reasoning_sent = ""
         self._loop_reasoning_reported = False
         self._call_started: float | None = None
         # Live command output arrives from the reader threads of a child
@@ -96,8 +97,13 @@ class EventStreamUI:
             started = self._call_started or time.monotonic()
             self._loop_reasoning = (self._open_stream_id(), started)
             self._channel.emit(ReasoningStartEvent(self._loop_reasoning[0]))
+        redacted = redact_text(text)
+        previous = self._loop_reasoning_sent
+        append = redacted.startswith(previous)
+        self._loop_reasoning_sent = redacted
+        delta = redacted[len(previous) :] if append else redacted
         self._channel.emit(
-            ReasoningChunkEvent(self._loop_reasoning[0], redact_text(text))
+            ReasoningChunkEvent(self._loop_reasoning[0], delta, append=append)
         )
 
     def _open_stream_id(self) -> str:
@@ -109,6 +115,7 @@ class EventStreamUI:
             return
         stream_id, started = self._loop_reasoning
         self._loop_reasoning = None
+        self._loop_reasoning_sent = ""
         self._loop_reasoning_reported = True
         self._channel.emit(ReasoningCommitEvent(stream_id, time.monotonic() - started))
 

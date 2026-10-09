@@ -372,7 +372,9 @@ class SessionJournal:
             elif kind == "reasoning_start":
                 self._reasoning[payload["stream_id"]] = ""
             elif kind == "reasoning_chunk":
-                self._reasoning[payload["stream_id"]] = payload["text"]
+                stream_id = payload["stream_id"]
+                kept = self._reasoning.get(stream_id, "") if payload.get("append") else ""
+                self._reasoning[stream_id] = kept + payload["text"]
             elif kind == "reasoning_commit":
                 self._guarded(lambda: self._write_reasoning(payload))
             else:
