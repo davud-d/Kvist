@@ -178,7 +178,9 @@ jobs:
     needs: [build-windows-binary, build-macos-binary]
     # The macOS job is skipped on most runs, which would skip this one with it.
     if: ${{ !cancelled() && needs.build-windows-binary.result == 'success' }}
-    runs-on: ubuntu-latest
+    # The Linux binary is built here and needs the glibc of the machine it is built on: 22.04's
+    # (2.35) runs on Ubuntu 22.04 and later and Debian 12; ubuntu-latest's did not run on 22.04.
+    runs-on: ubuntu-22.04
     timeout-minutes: 25
     permissions:
       contents: write

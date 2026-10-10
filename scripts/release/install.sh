@@ -499,6 +499,9 @@ bootstrap_screen() {
 		xattr -d com.apple.quarantine "$core" 2>/dev/null || true
 	fi
 	fetch_node
+	# The binary needs the C library of the machine it was built on; say so here, not as a
+	# loader error from inside the temporary folder.
+	"$core" --help >/dev/null 2>&1 || die "the downloaded kvist-core cannot run on this system (a C library older than the one it was built against?); install from source instead (see the README)"
 	# Run from a pipe (`curl | bash`) there is no file to hand over: the script is fetched again.
 	if [[ -f "${BASH_SOURCE[0]:-}" ]]; then
 		script="${BASH_SOURCE[0]}"
