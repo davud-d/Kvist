@@ -404,6 +404,9 @@ def test_launch_and_serve_stdio_emit_identical_session_hello(monkeypatch, tmp_pa
         in_stream=io.StringIO(""), out_stream=out_a, routed_role="chat",
     )
     hello_a = json.loads(out_a.getvalue().splitlines()[0])
+    # Path A's message continued the interrupted task and finished it, so its checkpoint
+    # is gone; path B must meet the same interrupted task, not the leftovers of A.
+    seed._save_checkpoint("interrupted", 2)
 
     # Path B: the builtin-frontend serve_stdio entrypoint over the same core.
     channel = FrontendChannel()

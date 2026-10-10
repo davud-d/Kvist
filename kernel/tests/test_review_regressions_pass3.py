@@ -195,9 +195,13 @@ def test_crashed_run_shell_is_not_replayed_on_resume(tmp_path):
     assert "resume" in payload["result"].lower() or "возобновл" in payload["result"].lower()
 
 
-# --- F2: a new run supersedes the old checkpoint before any tool work ---------
+# --- F2: a run is durable before any tool work --------------------------------
+#
+# A message that arrives while a checkpoint exists continues that task (it is saved as
+# a follow-up); only a message with no checkpoint starts a new run. Both are durable
+# before the first step, so a process that dies in setup loses neither.
 
-_OLD_THEN_NEW_CRASH = r'''
+_CRASH_IN_SETUP = r'''
 import json, os, sys
 from pathlib import Path
 from kernel.agent import LocalAgent
@@ -206,53 +210,70 @@ from kernel.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
-first_action = sys.argv[2]
+message = sys.argv[2]
+interrupted_task_exists = sys.argv[3] == "1"
 agent = LocalAgent(FakeLLMClient(), SafeExecutor(ws),
                    AgentConfig(persist_logs=False, api_request_interval=0, max_steps=6),
                    ui=NullUI())
 agent.new_session("work")
-# An OLD interrupted task leaves a resumable checkpoint.
-agent._run_id = "old-run"
-agent._save_checkpoint("OLD TASK — do the old thing", 5)
+if interrupted_task_exists:
+    agent._run_id = "old-run"
+    agent._save_checkpoint("OLD TASK — do the old thing", 5)
 
-# Start a NEW task; die during setup, before any tool action / checkpoint.
+# Die during setup, before any tool action.
 class Boom(Exception): pass
 def exploding_setup():
     raise Boom("process died before the first step")
 agent._select_action_model_for_run = exploding_setup
 
 try:
-    agent.run("NEW TASK — " + first_action, routed_role="coder")
+    agent.run(message, routed_role="coder")
 except Boom:
     pass
-# Emulate process death before the first step. Report the on-disk checkpoint: it
-# must durably represent NEW (phase=starting), never OLD and never nothing.
 data = agent._peek_checkpoint()
 print(json.dumps({"goal": data and data.get("goal")}))
 '''
 
 
-def _run2(ws, first_action):
+def _crash_in_setup(ws, message, interrupted_task_exists):
     env = os.environ.copy()
     env.update({"AGENT_SANDBOX_MODE": "workspace", "AGENT_SANDBOX_NET": "deny",
                 "AGENT_WRITE_APPROVAL": "0"})
-    return subprocess.run([sys.executable, "-c", _OLD_THEN_NEW_CRASH, str(ws), first_action],
-                          cwd=Path(__file__).parents[2], env=env,
-                          capture_output=True, text=True, timeout=40)
+    return subprocess.run(
+        [sys.executable, "-c", _CRASH_IN_SETUP, str(ws), message, "1" if interrupted_task_exists else "0"],
+        cwd=Path(__file__).parents[2], env=env, capture_output=True, text=True, timeout=40,
+    )
 
 
-@pytest.mark.parametrize("first_action", ["read_file", "run_shell"])
-def test_new_run_durably_supersedes_old_before_its_first_step(tmp_path, first_action):
-    crashed = _run2(tmp_path, first_action)
+def test_a_message_during_an_interrupted_task_is_saved_with_it_before_the_first_step(tmp_path):
+    crashed = _crash_in_setup(tmp_path, "NEW TASK — also do this", interrupted_task_exists=True)
     assert crashed.returncode == 0, crashed.stdout + crashed.stderr
     payload = last_json_line(crashed)
-    # NEW was durably activated before its first step; OLD is gone but NEW is NOT
-    # lost — the durable truth is the NEW run, recoverable by restarting it.
+    assert payload["goal"].startswith("OLD TASK")
+
+    # Durable before any step ran: a fresh process finds the message among the task's follow-ups.
+    resumed = _resume_in_fresh_process(tmp_path)
+    payload = last_json_line(resumed)
+    assert payload["result_none"] is False
+    assert payload["resumed_goal"].startswith("OLD TASK")
+    assert payload["task_updates"] == ["NEW TASK — also do this"]
+
+
+def test_a_new_run_is_durable_before_its_first_step(tmp_path):
+    crashed = _crash_in_setup(tmp_path, "NEW TASK — nothing was interrupted", interrupted_task_exists=False)
+    assert crashed.returncode == 0, crashed.stdout + crashed.stderr
+    payload = last_json_line(crashed)
+    # No step ran, yet the run is recoverable: begin_run wrote it before setup died.
     assert payload["goal"] is not None
     assert payload["goal"].startswith("NEW TASK")
-    assert "OLD TASK" not in payload["goal"]
 
-    # A fresh process resumes NEW (from step 1) and never revives OLD.
+    resumed = _resume_in_fresh_process(tmp_path)
+    payload = last_json_line(resumed)
+    assert payload["result_none"] is False
+    assert payload["resumed_goal"].startswith("NEW TASK")
+
+
+def _resume_in_fresh_process(tmp_path):
     resume_script = (
         "import json,sys\n"
         "from pathlib import Path\n"
@@ -265,17 +286,15 @@ def test_new_run_durably_supersedes_old_before_its_first_step(tmp_path, first_ac
         "a._call_action_model=lambda p: json.dumps({'thought':'t','plan_step':'done',"
         "'progress':100,'user_message':'m','action':{'type':'final_answer','args':{'message':'done'}}})\n"
         "res=a.resume()\n"
-        "print(json.dumps({'resumed_goal': a._state.user_goal, 'result_none': res is None}))\n"
+        "print(json.dumps({'resumed_goal': a._state.user_goal, 'result_none': res is None,"
+        " 'task_updates': a._state.task_updates}))\n"
     )
     env = os.environ.copy()
     env.update({"AGENT_SANDBOX_MODE": "workspace", "AGENT_SANDBOX_NET": "deny",
                 "AGENT_WRITE_APPROVAL": "0"})
-    resumed = subprocess.run([sys.executable, "-c", resume_script, str(tmp_path)],
-                             cwd=Path(__file__).parents[2], env=env,
-                             capture_output=True, text=True, timeout=40)
-    payload = last_json_line(resumed)
-    assert payload["result_none"] is False  # NEW resumed, not "nothing"
-    assert payload["resumed_goal"].startswith("NEW TASK")  # OLD never returned
+    return subprocess.run([sys.executable, "-c", resume_script, str(tmp_path)],
+                          cwd=Path(__file__).parents[2], env=env,
+                          capture_output=True, text=True, timeout=40)
 
 
 # --- F3: recovered write must require fresh verification ----------------------
