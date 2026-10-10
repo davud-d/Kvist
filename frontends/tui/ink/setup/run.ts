@@ -14,7 +14,10 @@ import { parseInput, type InputEvent } from "./keys.js"
 import {
   LOGIN_TIMEOUT_MS,
   configOp,
+  readPlan,
+  runInstall,
   type ConfigInfo,
+  type InstallScript,
   type ListModelsReply,
   type RegistrationReply,
   type SetProviderReply,
@@ -64,6 +67,9 @@ export interface SetupOptions {
   workspace?: string
   // "provider": configure a provider and stop (no folder, no interface).
   scope?: "full" | "provider"
+  // The release installer script: when given, the screen opens with the choice of what to
+  // install and carries on into the setup once it has been installed.
+  install?: InstallScript | null
   stdin?: NodeJS.ReadStream
   stdout?: NodeJS.WriteStream
   env?: NodeJS.ProcessEnv
@@ -115,7 +121,8 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
   const videoCell = ffmpeg && clip ? cell : null
 
   return new Promise((resolve) => {
-    let state: SetupState = initialState(startFolder, home, process.platform === "win32", options.scope ?? "full")
+    const script = options.install ?? null
+    let state: SetupState = initialState(startFolder, home, process.platform === "win32", options.scope ?? "full", script !== null)
     let hits: Hit[] = []
     let painted: string[] | null = null
     let paintedSize = ""
@@ -139,6 +146,8 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
     let pointerShape = "default"
     let finished = false
     let connection: AbortController | null = null
+    // The running installer script; leaving the screen stops it.
+    let installation: AbortController | null = null
     // The running demo video: where it is drawn, the decoder, and the frame on screen.
     let player: { key: string; rect: Rect; width: number; height: number; clip: Clip; pacer: FramePacer } | null = null
     let shownFrame: Buffer | null = null
@@ -240,11 +249,17 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
     const finish = (outcome: Outcome) => {
       if (finished) return
       finished = true
+      installation?.abort()
       restore()
       resolve({ ...outcome, workspace: state.workspace })
     }
 
-    const wantsSpinner = () => state.step === "working" || state.step === "starting" || (state.step === "models" && state.models.status === "loading")
+    const wantsSpinner = () =>
+      state.step === "working" ||
+      state.step === "starting" ||
+      state.step === "installing" ||
+      (state.step === "components" && state.install?.plan === "loading") ||
+      (state.step === "models" && state.models.status === "loading")
 
     const syncSpinner = () => {
       if (wantsSpinner() && !spinnerTimer) {
@@ -279,6 +294,16 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
           connection?.abort()
           connection = null
           return syncSpinner()
+        case "plan":
+          return script ? void readPlan(script).then((reply) => dispatch({ type: "plan", reply })) : undefined
+        case "install": {
+          if (!script) return
+          installation = new AbortController()
+          return void runInstall(script, effect.only, (event) => dispatch({ type: "installEvent", event }), installation.signal).then((reply) => {
+            installation = null
+            dispatch({ type: "installed", reply })
+          })
+        }
         case "listModels":
           return void configOp<ListModelsReply>(command, "list-models", { provider: effect.provider, api_key: effect.key }).then((reply) => dispatch({ type: "models", reply }))
         case "connect": {
@@ -434,6 +459,8 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
     stdout.on("resize", onResize)
 
     void configOp<ConfigInfo>(command, "get-config").then((reply) => dispatch({ type: "catalog", reply }))
+    if (script) run({ type: "plan" })
+    syncSpinner()
     if (still) paint()
     else playIntro()
   })

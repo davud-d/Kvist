@@ -63,6 +63,7 @@ jobs:
             echo "macos=true" >> "$GITHUB_OUTPUT"
           elif ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- \
               frontends/web-local \
+              frontends/tui/ink \
               kernel/__main__.py \
               kvist.spec \
               pyproject.toml \
@@ -105,6 +106,18 @@ jobs:
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
 
+      # The binary carries the terminal UI (the installer and setup screens); kvist.spec bundles it only if built.
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontends/tui/ink/package-lock.json
+
+      - name: Build the terminal UI
+        working-directory: frontends/tui/ink
+        run: npm ci && npm run build
+
       - name: Build binary with PyInstaller
         run: python -m PyInstaller kvist.spec
 
@@ -136,6 +149,18 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
+
+      # The binary carries the terminal UI (the installer and setup screens); kvist.spec bundles it only if built.
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontends/tui/ink/package-lock.json
+
+      - name: Build the terminal UI
+        working-directory: frontends/tui/ink
+        run: npm ci && npm run build
 
       - name: Build binary with PyInstaller
         run: python -m PyInstaller kvist.spec
@@ -172,6 +197,17 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt pyinstaller
+
+      - name: Set up Node.js for the terminal UI
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontends/tui/ink/package-lock.json
+
+      - name: Build the terminal UI
+        working-directory: frontends/tui/ink
+        run: npm ci && npm run build
 
       - name: Build Linux binary with PyInstaller
         run: python -m PyInstaller kvist.spec
@@ -274,11 +310,12 @@ jobs:
           body: |
             Automatically rebuilt from `${{ github.sha }}` on every push to `main`.
 
-            **Install everything in one step** (the `kvist` command, the JetBrains plugin and the VS Code extension, into every IDE found):
+            **Install with one command.** In a terminal it opens an installer screen: tick what to install (the `kvist` command, Node.js for the terminal interface, the JetBrains plugin, the VS Code extension, the PATH line), read exactly which files and commands each choice touches, and the first-run setup follows. No administrator rights are used and no system packages are installed.
 
             ```sh
             # Linux and macOS (macOS is best-effort, see below)
             curl -fsSL https://github.com/${{ github.repository }}/releases/download/latest-plugin-build/install.sh | bash
+            # without the screen (CI, no terminal): KVIST_INSTALL_PLAIN=1 bash install.sh
             ```
 
             ```powershell

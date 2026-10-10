@@ -386,3 +386,145 @@ test("a wide working folder is asked about once, and the safe answer is the firs
   const only = { ...initialState("/home/me", "/home/me", false, "provider"), catalog: "ready" as const, providers }
   assert.equal(send(only, key("enter")).state.step, "provider")
 })
+
+// ---- the installer's steps: what to install, then the setup carries on ----
+
+const plan = {
+  ok: true as const,
+  os: "Linux",
+  arch: "x86_64",
+  shell: "bash",
+  components: [
+    { id: "cli", available: true, targets: ["/h/.local/share/kvist/kvist-core", "/h/.local/bin/kvist"] },
+    { id: "node", available: true, targets: ["https://nodejs.org/dist/v22.23.3/node-v22.23.3-linux-x64.tar.gz", "/h/.local/share/kvist/node"] },
+    { id: "jetbrains", available: false, targets: [] },
+    { id: "vscode", available: true, targets: ["/usr/bin/code --install-extension kvist-vscode.vsix --force"] },
+    { id: "path", available: true, targets: ["/h/.bashrc: export PATH=\"/h/.local/bin:$PATH\""] },
+  ],
+}
+const installing = (): SetupState => send(initialState("/w", "/h", false, "full", true), { type: "plan", reply: plan }).state
+const ticked = (state: SetupState) => state.install!.components.filter((component) => component.checked).map((component) => component.id)
+const space = (): Action => key("char", " ")
+
+test("install: the screen opens on the choice, with everything that exists ticked and what is missing left out", () => {
+  const loading = initialState("/w", "/h", false, "full", true)
+  assert.equal(loading.step, "components")
+  assert.equal(loading.install?.plan, "loading")
+  const state = installing()
+  assert.deepEqual(state.install!.components.map((component) => component.id), ["cli", "node", "jetbrains", "vscode", "path"])
+  assert.deepEqual(ticked(state), ["cli", "node", "vscode", "path"])
+})
+
+test("install: keyboard only — arrows move, space ticks, Enter installs just what is ticked", () => {
+  let state = installing()
+  state = send(state, key("down")).state
+  state = send(state, key("down")).state
+  state = send(state, key("down")).state
+  assert.equal(state.install!.cursor, 3)
+  state = send(state, space()).state
+  assert.deepEqual(ticked(state), ["cli", "node", "path"])
+  const run = send(state, key("enter"))
+  assert.equal(run.state.step, "installing")
+  assert.deepEqual(run.effect, { type: "install", only: ["cli", "node", "path"] })
+})
+
+test("install: mouse only — a click on a row ticks it, a click on Install starts, Quit leaves", () => {
+  let state = installing()
+  state = send(state, { type: "click", target: { kind: "option", index: 4 } }).state
+  assert.deepEqual(ticked(state), ["cli", "node", "vscode"])
+  assert.equal(state.install!.cursor, 4)
+  const run = send(state, { type: "click", target: { kind: "button", id: "primary" } })
+  assert.deepEqual(run.effect, { type: "install", only: ["cli", "node", "vscode"] })
+  const quit = send(installing(), { type: "click", target: { kind: "button", id: "quit" } })
+  assert.deepEqual(quit.effect, { type: "finish", outcome: { kind: "quit" } })
+})
+
+test("install: the program cannot be unticked and a component that is not here cannot be ticked", () => {
+  let state = installing()
+  state = send(state, space()).state
+  assert.ok(ticked(state).includes("cli"))
+  state = send(state, { type: "click", target: { kind: "option", index: 2 } }).state
+  assert.ok(!ticked(state).includes("jetbrains"))
+  // A digit key is a shortcut for the row: 5 is the PATH line.
+  state = send(state, key("char", "5")).state
+  assert.ok(!ticked(state).includes("path"))
+})
+
+test("install: progress events fill the list, and a finished run goes on to the welcome screen", () => {
+  let state = send(installing(), key("enter")).state
+  state = send(state, { type: "installEvent", event: { event: "component", id: "cli", status: "start" } }).state
+  state = send(state, { type: "installEvent", event: { event: "step", message: "Downloading kvist-linux-x64" } }).state
+  assert.equal(state.install!.status.cli, "running")
+  assert.equal(state.install!.message, "Downloading kvist-linux-x64")
+  state = send(state, { type: "installEvent", event: { event: "component", id: "cli", status: "done" } }).state
+  const warning = send(state, { type: "installEvent", event: { event: "warning", message: "could not install the extension into code" } }).state
+  assert.deepEqual(warning.install!.warnings, ["could not install the extension into code"])
+  const welcome = send(state, { type: "installed", reply: { ok: true } }).state
+  assert.equal(welcome.step, "welcome")
+  const scene = renderScene({ state: welcome, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  assert.match(plain(scene.rows.join("\n")), /Installed\./)
+})
+
+test("install: a failed run returns to the choice with the reason, and Ctrl+C leaves from any step", () => {
+  const running = send(installing(), key("enter")).state
+  const failed = send(running, { type: "installed", reply: { ok: false, error: "could not download kvist-linux-x64" } }).state
+  assert.equal(failed.step, "components")
+  assert.equal(failed.install!.error, "could not download kvist-linux-x64")
+  assert.deepEqual(ticked(failed), ["cli", "node", "vscode", "path"])
+  const ctrlC = { type: "input", event: { type: "key", key: "char", text: "c", ctrl: true } } as Action
+  assert.deepEqual(send(running, ctrlC).effect, { type: "finish", outcome: { kind: "quit" } })
+  // Keys during the run do nothing but Ctrl+C.
+  assert.equal(send(running, key("enter")).state.step, "installing")
+})
+
+test("install: a plan that cannot be read says so and offers only Quit", () => {
+  const state = send(initialState("/w", "/h", false, "full", true), { type: "plan", reply: { ok: false, error: "no bash" } }).state
+  assert.equal(state.install!.plan, "failed")
+  assert.equal(send(state, key("enter")).effect, undefined)
+  const scene = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  assert.match(plain(scene.rows.join("\n")), /Could not read the installation plan\. no bash/)
+})
+
+test("install: the choice shows the highlighted component's paths and commands and its rows are click targets", () => {
+  let state = installing()
+  for (let step = 0; step < 3; step++) state = send(state, key("down")).state
+  const scene = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  const text = plain(scene.rows.join("\n"))
+  assert.match(text, /\[x\] {2}Kvist agent/)
+  assert.match(text, /\[ \] {2}JetBrains plugin.*not found here/)
+  assert.match(text, /Runs the editor's own installer:/)
+  assert.match(text, /\/usr\/bin\/code --install-extension kvist-vscode\.vsix --force/)
+  const rows = scene.hits.filter((hit) => hit.target.kind === "option").map((hit) => (hit.target.kind === "option" ? hit.target.index : -1))
+  assert.deepEqual(rows, [0, 1, 2, 3, 4])
+  assert.ok(scene.hits.some((hit) => hit.target.kind === "button" && hit.target.id === "primary"))
+  assert.match(plain(scene.rows.join("\n")), /Space tick/)
+})
+
+test("install: the progress screen lists the chosen components with their state and a bar", () => {
+  let state = send(installing(), key("enter")).state
+  state = send(state, { type: "installEvent", event: { event: "component", id: "cli", status: "done" } }).state
+  state = send(state, { type: "installEvent", event: { event: "component", id: "vscode", status: "start" } }).state
+  const scene = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.4, panel: 1, tick: 3, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  const text = plain(scene.rows.join("\n"))
+  assert.match(text, /✓ {2}Kvist agent\s+done/)
+  assert.match(text, /VS Code extension\s+working/)
+  assert.match(text, /Add to PATH\s+waiting/)
+  assert.match(text, /1\/4/)
+})
+
+test("install: the Russian copy has the same keys as the English one", () => {
+  const ru = stringsFor("ru")
+  assert.deepEqual(Object.keys(ru.componentLabels).sort(), Object.keys(strings.componentLabels).sort())
+  assert.deepEqual(Object.keys(ru.componentActions).sort(), Object.keys(strings.componentActions).sort())
+})
+
+test("install: a long description of what will be done wraps inside the panel", () => {
+  const state = send(installing(), key("down")).state
+  const scene = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  const rows = scene.rows.map(plain)
+  assert.ok(rows.some((row) => row.includes("Downloads a pinned Node.js")))
+  assert.ok(!rows.some((row) => row.includes("unpacks it into:") && row.includes("Downloads a pinned Node.js from nodejs.org, checks")))
+  const panel = scene.panel!
+  const [first] = rows.filter((row) => row.includes("Downloads a pinned"))
+  assert.ok(first!.indexOf("Downloads") + "Downloads a pinned Node.js from nodejs.org, checks its".length < panel.col + panel.width)
+})

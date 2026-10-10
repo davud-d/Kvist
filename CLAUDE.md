@@ -852,6 +852,31 @@ mouse, bracketed paste, row-diff painting) and the effects. Tests: `tests/setup.
   back to `run_login`'s prompts when Node or the bundle is missing. The VS Code extension, the
   JetBrains plugin and the local web have their own first-run screens, and the Electron GUI and
   stdio frontends have no terminal to draw in, so none of them goes through here.
+- **Installer screen** (`curl … | bash`, `scripts/release/install.sh`): the same window, with two
+  steps in front of "welcome": `components` (tick boxes) and `installing` (progress). The screen
+  does no installing itself: `install.sh --plan` prints JSON facts per component (`id`,
+  `available`, `targets` = the paths and commands it would touch), the screen shows them as the
+  warning for the highlighted row, and `install.sh --only <ids> --events` installs and reports
+  one JSON object per line (`step`, `warning`, `error`, `component start|done`, `done`) that
+  fill the progress list (`ops.readPlan`/`runInstall`). Components: `cli`, `node` (pinned
+  version and SHA-256 per OS in the script, never unpacked from an unchecked download), `jetbrains`
+  and `vscode` (unavailable, shown dimmed, when no IDE is found), `path` (one line appended once
+  to the login shell's startup file). `cli` cannot be unticked. Keyboard (↑↓/Tab, Space or X,
+  digits, Enter, Esc, Q) and mouse (a click on a row ticks it, buttons) each work alone; the
+  copy is in `strings.ts` (`componentLabels`, `componentActions`, English and Russian).
+  **Bootstrap**: with a terminal (`/dev/tty` opens; stdin is the script under a pipe) and none of
+  `--only`/`--from`/`--events`/`KVIST_INSTALL_PLAIN`, the script downloads `kvist-<os>-<arch>` and
+  the pinned Node.js into its temporary folder, then runs `kvist-core --installer` with
+  `KVIST_INSTALL_SCRIPT`, `KVIST_INSTALL_CACHE` (assets already fetched: `--cache`),
+  `KVIST_NODE_HOME` and `KVIST_NODE` (`main.find_node`: that, then `node/bin/node` beside the
+  frozen binary, then PATH). `--installer` implies the setup screen, and the Ink app starts on
+  `components` when `KVIST_INSTALL_SCRIPT` is set; after the install it goes on to "welcome".
+  Windows (`install.ps1`) has no screen yet. `KVIST_RELEASE_URL` points the download at a mirror.
+  Release binaries carry the bundle: `plugin-release.yml` builds `frontends/tui/ink` before
+  PyInstaller on all three platforms. Tests: `scripts/tests/test_release_install_sh.py`
+  (plan, `--only`, events, PATH once, node copy), `kernel/tests/test_frontends.py`
+  (`find_node`, `--installer`), `tests/setup.test.ts` (keyboard-only, mouse-only, mixed, failure).
+  The user installs a prebuilt release; `install_cli.py` (a build from source) is the developer path.
 - **A wide folder is asked about once** (`flow.widthWarning`, `folders.breadthOf`): when "Get
   started" is pressed with the home folder, the top of a disk (or the drive list), the folder of all
   homes or Desktop/Documents/Downloads as the workspace, the `broad` step names what Kvist could

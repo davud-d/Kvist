@@ -129,13 +129,26 @@ Anthropic-compatible endpoints from `/provider`.
 
 Every push to `main` rebuilds the rolling
 [release](https://github.com/davud-d/Kvist/releases/tag/latest-plugin-build).
-One script puts the `kvist` command, the JetBrains plugin (into every JetBrains
-IDE found) and the VS Code extension (VS Code, Insiders, VSCodium) where they
-belong. It needs no Python:
+One script puts the `kvist` command, the Node.js its terminal interface runs
+on, the JetBrains plugin (into every JetBrains IDE found) and the VS Code
+extension (VS Code, Insiders, VSCodium) where they belong. It needs no Python
+and no Node.js of its own, and it uses no administrator rights and installs no
+system packages.
+
+In a terminal the script downloads the agent and a pinned Node.js (about
+100 MB, checked against a SHA-256) into a temporary folder and opens an
+installer screen. There you tick what to install, see the exact files and
+commands each item touches, and watch the progress; the first-run setup follows
+in the same window. Everything on it works with the keyboard alone (arrows,
+Space, Enter, Esc), with the mouse alone (click a row to tick it, click the
+buttons), or both. Nothing is written until you press Install.
 
 ```bash
 # Linux and macOS (best-effort)
 curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash
+
+# the same without the screen (CI, no terminal): installs the defaults
+KVIST_INSTALL_PLAIN=1 bash install.sh
 ```
 
 ```powershell

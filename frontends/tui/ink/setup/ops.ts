@@ -58,3 +58,91 @@ export function configOp<T>(command: CoreCommand, op: string, payload: unknown =
     child.stdin.end(JSON.stringify(payload))
   })
 }
+
+// The release installer (scripts/release/install.sh), driven as a child process: `--plan` prints
+// the facts about this machine, `--only … --events` installs and reports one JSON object per line.
+export interface InstallScript {
+  path: string
+  // A folder of assets the bootstrap has already downloaded (`--cache`); the rest is downloaded.
+  cache?: string
+}
+
+export interface PlanComponent {
+  id: string
+  available: boolean
+  // Paths and commands the component would touch or run.
+  targets: string[]
+}
+
+export interface PlanReply {
+  os: string
+  arch: string
+  shell: string
+  components: PlanComponent[]
+}
+
+export type InstallEvent =
+  | { event: "step" | "warning" | "error"; message: string }
+  | { event: "component"; id: string; status: "start" | "done" }
+  | { event: "done" }
+
+export type InstallReply = { ok: true } | { ok: false; error: string }
+
+// The bootstrap that starts the installer screen names the script in KVIST_INSTALL_SCRIPT.
+export function installScriptFromEnv(env: NodeJS.ProcessEnv): InstallScript | null {
+  const path = env.KVIST_INSTALL_SCRIPT
+  if (!path) return null
+  return env.KVIST_INSTALL_CACHE ? { path, cache: env.KVIST_INSTALL_CACHE } : { path }
+}
+
+function scriptArgs(script: InstallScript, rest: string[]): string[] {
+  return [script.path, ...(script.cache ? ["--cache", script.cache] : []), ...rest]
+}
+
+export function readPlan(script: InstallScript): Promise<OpReply<PlanReply>> {
+  return new Promise((resolve) => {
+    let out = ""
+    const child = spawn("bash", scriptArgs(script, ["--plan"]), { stdio: ["ignore", "pipe", "ignore"] })
+    child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()))
+    child.on("error", (error) => resolve({ ok: false, error: error.message }))
+    child.on("close", (code) => {
+      if (code !== 0) return resolve({ ok: false, error: `The installer exited with code ${code}.` })
+      try {
+        resolve({ ok: true, ...(JSON.parse(out) as PlanReply) })
+      } catch {
+        resolve({ ok: false, error: "The installer returned an unreadable plan." })
+      }
+    })
+  })
+}
+
+// Runs the chosen components; resolves when the script ends. A line that is not JSON is ignored.
+export function runInstall(script: InstallScript, only: string[], onEvent: (event: InstallEvent) => void, signal?: AbortSignal): Promise<InstallReply> {
+  return new Promise((resolve) => {
+    let buffer = ""
+    let failure = ""
+    const child = spawn("bash", scriptArgs(script, ["--only", only.join(","), "--events"]), { stdio: ["ignore", "pipe", "ignore"] })
+    signal?.addEventListener("abort", () => child.kill())
+    const take = (line: string) => {
+      let event: InstallEvent
+      try {
+        event = JSON.parse(line) as InstallEvent
+      } catch {
+        return
+      }
+      if (event.event === "error") failure = event.message
+      onEvent(event)
+    }
+    child.stdout.on("data", (chunk: Buffer) => {
+      buffer += chunk.toString()
+      const lines = buffer.split("\n")
+      buffer = lines.pop() ?? ""
+      lines.forEach(take)
+    })
+    child.on("error", (error) => resolve({ ok: false, error: error.message }))
+    child.on("close", (code) => {
+      if (buffer) take(buffer)
+      resolve(code === 0 ? { ok: true } : { ok: false, error: failure || `The installer exited with code ${code}.` })
+    })
+  })
+}

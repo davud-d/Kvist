@@ -226,6 +226,75 @@ function optionRow(index: number, selected: boolean, label: string, blurb: strin
   }
 }
 
+// One tick-box row: the whole row is a click target that flips the box.
+function checkRow(index: number, selected: boolean, checked: boolean, available: boolean, label: string, blurb: string, width: number, labelWidth: number): PanelLine {
+  const head = ` [${checked && available ? "x" : " "}]  ${label.padEnd(labelWidth)}`
+  const body = truncate(blurb, Math.max(0, width - head.length))
+  const tone: Tone = selected ? "primary" : available ? "text" : "dim"
+  return {
+    segments: [
+      { text: head, tone },
+      { text: body, tone: selected ? "primary" : "dim" },
+    ],
+    selected,
+    hit: { kind: "option", index },
+  }
+}
+
+// What the highlighted component would do, as the paths and commands themselves; as many as fit.
+function actionLines(state: SetupState, strings: Strings, width: number, room: number): PanelLine[] {
+  const component = state.install?.components[state.install.cursor]
+  if (!component || !component.available || room < 3) return []
+  const lines = paragraph(strings.componentActions[component.id] ?? strings.installWillDo, width, "warm")
+  const shown = component.targets.slice(0, Math.max(1, room - lines.length))
+  shown.forEach((target) => lines.push(text(`  ${truncate(target, width - 2)}`, "dim")))
+  return lines
+}
+
+function componentLines(input: SceneInput, width: number, room: number): PanelLine[] {
+  const { state, strings } = input
+  const install = state.install
+  const lines: PanelLine[] = [text(strings.installTitle, "title"), ...paragraph(strings.installBody, width, "dim"), blank()]
+  if (!install || install.plan === "loading") return [...lines, text(`${SPINNER[input.tick % SPINNER.length]} ${strings.installLoading}`, "dim")]
+  if (install.plan === "failed") return [...lines, text(`${strings.installPlanFailed} ${install.error}`.trim(), "err"), blank(), buttons(button(strings.quit, "quit", "secondary"))]
+  const labels = install.components.map((component) => strings.componentLabels[component.id]?.[0] ?? component.id)
+  const labelWidth = Math.min(22, Math.max(...labels.map((label) => label.length)) + 2)
+  install.components.forEach((component, index) => {
+    const blurb = component.available ? (strings.componentLabels[component.id]?.[1] ?? "") : strings.installNotFound
+    lines.push(checkRow(index, install.cursor === index, component.checked, component.available, labels[index] ?? component.id, blurb, width, labelWidth))
+  })
+  if (install.error) lines.push(blank(), ...paragraph(`${strings.installFailed} ${install.error}`, width, "err"))
+  const used = lines.length + 3
+  const actions = actionLines(state, strings, width, room - used)
+  if (actions.length) lines.push(blank(), ...actions)
+  lines.push(blank(), buttons(button(strings.install, "primary", "primary"), button(strings.quit, "quit", "secondary")))
+  return lines
+}
+
+function installingLines(input: SceneInput, width: number): PanelLine[] {
+  const { state, strings } = input
+  const install = state.install
+  const spinner = SPINNER[input.tick % SPINNER.length] ?? ""
+  const lines: PanelLine[] = [text(`${spinner} ${strings.installing}`, "title"), blank()]
+  if (!install) return lines
+  const chosen = install.components.filter((component) => install.status[component.id] !== undefined)
+  const labelWidth = Math.min(22, Math.max(...chosen.map((component) => (strings.componentLabels[component.id]?.[0] ?? component.id).length)) + 2)
+  chosen.forEach((component) => {
+    const status = install.status[component.id] ?? "waiting"
+    const mark = status === "done" ? "✓" : status === "failed" ? "✗" : status === "running" ? spinner : "○"
+    const tone: Tone = status === "done" ? "ok" : status === "failed" ? "err" : status === "running" ? "accent" : "dim"
+    const word = { waiting: strings.statusWaiting, running: strings.statusRunning, done: strings.statusDone, failed: strings.statusFailed }[status]
+    lines.push(text(` ${mark}  ${(strings.componentLabels[component.id]?.[0] ?? component.id).padEnd(labelWidth)}${word}`, tone))
+  })
+  const done = chosen.filter((component) => install.status[component.id] === "done").length
+  const barWidth = Math.max(10, Math.min(36, width - 10))
+  const filled = chosen.length ? Math.round((barWidth * done) / chosen.length) : 0
+  lines.push(blank(), text(`${"█".repeat(filled)}${"░".repeat(barWidth - filled)}  ${done}/${chosen.length}`, "accent"))
+  if (install.message) lines.push(text(truncate(install.message, width), "dim"))
+  install.warnings.slice(-2).forEach((warning) => lines.push(...paragraph(`! ${warning}`, width, "warm")))
+  return lines
+}
+
 function providerLines(state: SetupState, strings: Strings, width: number): PanelLine[] {
   const lines: PanelLine[] = [text(strings.providerTitle, "title"), ...paragraph(strings.providerBody, width, "dim"), blank()]
   if (state.catalog === "loading") return [...lines, text(strings.loadingCatalog, "dim")]
@@ -411,10 +480,21 @@ function build(input: SceneInput, width: number, listRows: number): Built {
   const steps = (needsModel ? 4 : 3) - (state.scope === "provider" ? 1 : 0)
   const hintMouse = strings.hintMouse
   switch (state.step) {
+    case "components":
+      return {
+        lines: componentLines(input, width, input.rows - 8),
+        hint: [strings.hintMove, strings.hintToggle, strings.hintInstall, strings.hintQuit, hintMouse].join(" · "),
+        step: 0,
+        steps,
+      }
+    case "installing":
+      return { lines: installingLines(input, width), hint: strings.hintWait, step: 0, steps }
     case "welcome": {
       const full = state.scope === "full"
       const wide = full && breadthOf(state.workspace, state.home) !== null
       const where = `${strings.workingFolder}: ${tail(input.workspace, Math.max(8, width - strings.workingFolder.length - 2))}`
+      // A person who has just installed Kvist is told so once, above the welcome.
+      const installed = state.install ? [text(`✓ ${strings.installedAll}`, "ok")] : []
       const title = text(strings.welcomeTitle, "title")
       const body = paragraph(strings.welcomeBody, width)
       const safe = paragraph(`✓ ${strings.welcomeSafe}`, width, "dim")
@@ -429,8 +509,8 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       // gaps, the description. The buttons and the guarantees stay.
       const room = input.rows - 8
       const candidates: PanelLine[][] = [
-        [title, blank(), ...body, blank(), ...safe, blank(), ...time, blank(), ...folder, ...(folder.length ? [blank()] : []), actions],
-        [title, blank(), ...body, blank(), ...safe, blank(), ...folder, ...(folder.length ? [blank()] : []), actions],
+        [...installed, title, blank(), ...body, blank(), ...safe, blank(), ...time, blank(), ...folder, ...(folder.length ? [blank()] : []), actions],
+        [...installed, title, blank(), ...body, blank(), ...safe, blank(), ...folder, ...(folder.length ? [blank()] : []), actions],
         [title, ...body, ...safe, ...folder, blank(), actions],
         [title, ...safe, ...folder, blank(), actions],
       ]

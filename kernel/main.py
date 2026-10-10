@@ -59,6 +59,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--installer",
+        action="store_true",
+        help=(
+            "Open the installer screen, then the first-run setup. Started by the release "
+            "installer (scripts/release/install.sh), which names itself in KVIST_INSTALL_SCRIPT."
+        ),
+    )
+    parser.add_argument(
         "--frontend",
         choices=("terminal", "tui", "claude", "stdio", "stdio-multi"),
         default=None,
@@ -887,9 +895,27 @@ _TUI_SAVED_NOTICE = {
 
 def needs_setup(args: argparse.Namespace) -> bool:
     """True when the first-run setup screen should open: asked for, or no provider is known yet."""
-    if args.setup:
+    if args.setup or args.installer:
         return True
     return not (args.provider or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider_or_none())
+
+
+def find_node() -> str | None:
+    """The Node.js the terminal interface runs on.
+
+    ``KVIST_NODE`` (the release installer's bootstrap names the one it downloaded) wins, then the
+    ``node`` folder the installer put beside this frozen binary, then ``node`` on PATH.
+    """
+    import shutil
+
+    explicit = os.environ.get("KVIST_NODE")
+    if explicit and os.access(explicit, os.X_OK):
+        return explicit
+    if getattr(sys, "frozen", False):
+        installed = Path(sys.executable).resolve().parent / "node" / "bin" / "node"
+        if installed.is_file() and os.access(installed, os.X_OK):
+            return str(installed)
+    return shutil.which("node")
 
 
 def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: bool = False) -> int | None:
@@ -902,12 +928,11 @@ def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: 
     nothing else (the ACP login): no workspace is resolved and no interface is offered.
     """
     import json
-    import shutil
     import subprocess
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
-    node = shutil.which("node")
+    node = find_node()
     if node is None:
         if not quiet:
             print(
@@ -4165,9 +4190,14 @@ def main() -> None:
         except (OSError, ValueError) as error:
             print(f"Could not add the Kvist icon to the status bar: {error}", file=sys.stderr)
     # An explicit --frontend terminal is respected unless setup itself was asked for.
-    first_run = args.setup or (needs_setup(args) and args.frontend != "terminal")
+    first_run = args.setup or args.installer or (needs_setup(args) and args.frontend != "terminal")
+    if args.installer and not os.environ.get("KVIST_INSTALL_SCRIPT"):
+        print("--installer is started by scripts/release/install.sh, which sets KVIST_INSTALL_SCRIPT.", file=sys.stderr)
+        raise SystemExit(2)
     if (first_run or (args.frontend or get_saved_frontend()) in TUI_FRONTENDS) and not args.no_banner:
-        exit_code = launch_tui(args, quiet=first_run and (args.frontend or get_saved_frontend()) not in TUI_FRONTENDS)
+        # The reason for falling back to the classic terminal is always printed: a machine
+        # without Node.js otherwise opens the old wizard with no hint why.
+        exit_code = launch_tui(args)
         if exit_code is not None:
             raise SystemExit(exit_code)
 

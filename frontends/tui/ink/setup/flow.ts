@@ -2,9 +2,37 @@
 // at most one thing to do come out. Drawing is scene.ts, running the operations is run.ts.
 import { breadthOf, initialFolder, updateFolder, type Breadth, type FolderState, type FolderTarget, type Listing } from "./folders.js"
 import type { InputEvent } from "./keys.js"
-import type { ConfigInfo, ListModelsReply, OpReply, ProviderInfo, RegistrationReply, SetProviderReply } from "./ops.js"
+import type { ConfigInfo, InstallEvent, InstallReply, ListModelsReply, OpReply, PlanReply, ProviderInfo, RegistrationReply, SetProviderReply } from "./ops.js"
 
-export type Step = "welcome" | "broad" | "folder" | "provider" | "key" | "models" | "working" | "interface" | "starting"
+// "components" and "installing" come before "welcome" when the installer started this screen.
+export type Step = "components" | "installing" | "welcome" | "broad" | "folder" | "provider" | "key" | "models" | "working" | "interface" | "starting"
+
+// What the release installer can put on a machine, in the order it is offered. The first one is
+// the program itself and cannot be unticked.
+export const COMPONENT_IDS = ["cli", "node", "jetbrains", "vscode", "path"] as const
+export const REQUIRED_COMPONENT = "cli"
+
+export type ComponentStatus = "waiting" | "running" | "done" | "failed"
+
+export interface Component {
+  id: string
+  available: boolean
+  targets: string[]
+  checked: boolean
+}
+
+export interface InstallState {
+  plan: "loading" | "ready" | "failed"
+  components: Component[]
+  // The highlighted row of the list.
+  cursor: number
+  // Progress of the run, by component id.
+  status: Record<string, ComponentStatus>
+  // The last step the installer reported, and what it warned about.
+  message: string
+  warnings: string[]
+  error: string
+}
 
 // Providers a newcomer is offered, in order; the other 40+ are reached through "More providers".
 export const CURATED_PROVIDERS = ["anymodel", "chatgpt", "openai", "anthropic", "deepseek", "openrouter", "freeflow"] as const
@@ -30,6 +58,8 @@ export type InterfaceId = (typeof INTERFACES)[number]
 export type Outcome = { kind: "frontend"; value: InterfaceId } | { kind: "classic" } | { kind: "quit" } | { kind: "done" }
 
 export type Effect =
+  | { type: "plan" }
+  | { type: "install"; only: string[] }
   | { type: "listModels"; provider: string; key: string }
   | { type: "connect"; provider: string; key: string; model: string }
   | { type: "register"; provider: string }
@@ -53,9 +83,14 @@ export type Action =
   | { type: "registered"; reply: OpReply<RegistrationReply> }
   | { type: "listing"; listing: Listing }
   | { type: "made"; path: string; error?: string }
+  | { type: "plan"; reply: OpReply<PlanReply> }
+  | { type: "installEvent"; event: InstallEvent }
+  | { type: "installed"; reply: InstallReply }
 
 export interface SetupState {
   step: Step
+  // The installation that precedes the setup, or null when the screen starts at "welcome".
+  install: InstallState | null
   // "provider" is for a caller that only wants a provider configured (the ACP login): no working
   // folder, no interface choice.
   scope: "full" | "provider"
@@ -91,9 +126,10 @@ export interface SetupState {
   interfaceIndex: number
 }
 
-export function initialState(workspace = "", home = "", drives = false, scope: "full" | "provider" = "full"): SetupState {
+export function initialState(workspace = "", home = "", drives = false, scope: "full" | "provider" = "full", withInstall = false): SetupState {
   return {
-    step: "welcome",
+    step: withInstall ? "components" : "welcome",
+    install: withInstall ? { plan: "loading", components: [], cursor: 0, status: {}, message: "", warnings: [], error: "" } : null,
     scope,
     workspace,
     home,
@@ -222,8 +258,56 @@ function submitModel(state: SetupState): Update {
   return toWorking(state, { type: "connect", provider: provider.id, key: state.key.trim(), model }, "models")
 }
 
+// The components the run would install: the ones that exist on this machine and are ticked.
+export function chosenComponents(install: InstallState): string[] {
+  return install.components.filter((component) => component.available && component.checked).map((component) => component.id)
+}
+
+function withInstall(state: SetupState, change: Partial<InstallState>): SetupState {
+  return state.install ? { ...state, install: { ...state.install, ...change } } : state
+}
+
+// A tick is flipped by key or click alike; the program itself and what is not here stay as they are.
+function toggleComponent(state: SetupState, index: number): Update {
+  const install = state.install
+  const component = install?.components[index]
+  if (!install || !component) return { state }
+  const moved = withInstall(state, { cursor: index })
+  if (!component.available || component.id === REQUIRED_COMPONENT) return { state: moved }
+  const components = install.components.map((item, at) => (at === index ? { ...item, checked: !item.checked } : item))
+  return { state: withInstall(state, { cursor: index, components }) }
+}
+
+function startInstall(state: SetupState): Update {
+  const install = state.install
+  if (!install || install.plan !== "ready") return { state }
+  const only = chosenComponents(install)
+  if (only.length === 0) return { state }
+  const status: Record<string, ComponentStatus> = {}
+  only.forEach((id) => (status[id] = "waiting"))
+  return { state: { ...withInstall(state, { status, message: "", warnings: [], error: "" }), step: "installing" }, effect: { type: "install", only } }
+}
+
+function onInstallEvent(state: SetupState, event: InstallEvent): SetupState {
+  const install = state.install
+  if (!install) return state
+  switch (event.event) {
+    case "component":
+      return withInstall(state, { status: { ...install.status, [event.id]: event.status === "start" ? "running" : "done" } })
+    case "step":
+      return withInstall(state, { message: event.message })
+    case "warning":
+      return withInstall(state, { warnings: [...install.warnings, event.message] })
+    case "error":
+    case "done":
+      return state
+  }
+}
+
 function back(state: SetupState): Update {
   switch (state.step) {
+    case "components":
+      return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
     case "provider":
       return { state: { ...state, step: "welcome" } }
     case "broad":
@@ -259,6 +343,8 @@ function keepWide(state: SetupState): Update {
 
 function press(state: SetupState, strings: { keyEmpty: string }): Update {
   switch (state.step) {
+    case "components":
+      return startInstall(state)
     case "welcome":
       return { state: { ...state, step: widthWarning(state) ? "broad" : "provider" } }
     // The safe answer to "this folder is wide" is the primary one: pick another.
@@ -272,6 +358,7 @@ function press(state: SetupState, strings: { keyEmpty: string }): Update {
       return state.models.status === "loading" ? { state } : submitModel(state)
     case "interface":
       return { state, effect: { type: "finish", outcome: { kind: "frontend", value: INTERFACES[state.interfaceIndex] ?? "claude" } } }
+    case "installing":
     case "working":
     case "starting":
     case "folder":
@@ -281,6 +368,8 @@ function press(state: SetupState, strings: { keyEmpty: string }): Update {
 
 function move(state: SetupState, delta: number): SetupState {
   switch (state.step) {
+    case "components":
+      return state.install ? withInstall(state, { cursor: wrap(state.install.cursor, delta, state.install.components.length) }) : state
     case "provider":
       return { ...state, providerIndex: wrap(state.providerIndex, delta, providerOptionCount(state)) }
     case "models":
@@ -294,7 +383,7 @@ function move(state: SetupState, delta: number): SetupState {
 
 function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string }): Update {
   if (event.type === "key" && event.ctrl && event.text === "c") return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
-  if (state.step === "starting") return { state }
+  if (state.step === "starting" || state.step === "installing") return { state }
   if (state.step === "working") {
     // The connection is abandoned, not waited for: its answer is ignored when it arrives.
     if (event.type === "key" && event.key === "escape") return { state: { ...state, step: state.returnStep, error: "" }, effect: { type: "cancel" } }
@@ -317,6 +406,12 @@ function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string
     return edited ? { state: { ...state, filter: edited.text, filterCursor: edited.cursor, modelIndex: 0 } } : { state }
   }
   if (event.type === "key" && event.key === "char" && !event.ctrl) {
+    if (state.step === "components") {
+      if (event.text === " " || event.text === "x" || event.text === "X") return toggleComponent(state, state.install?.cursor ?? 0)
+      const number = Number(event.text)
+      if (number >= 1 && number <= (state.install?.components.length ?? 0)) return toggleComponent(state, number - 1)
+      if (event.text === "q" || event.text === "Q") return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
+    }
     if (state.step === "welcome" && (event.text === "q" || event.text === "Q")) return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
     if ((state.step === "welcome" || state.step === "broad") && (event.text === "f" || event.text === "F")) return openFolder(state)
     if (state.step === "broad" && (event.text === "u" || event.text === "U")) return keepWide(state)
@@ -330,7 +425,8 @@ function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string
 }
 
 function onClick(state: SetupState, target: Target, strings: { keyEmpty: string }): Update {
-  if (state.step === "working" || state.step === "starting" || target.kind === "folder") return { state }
+  if (state.step === "working" || state.step === "starting" || state.step === "installing" || target.kind === "folder") return { state }
+  if (state.step === "components" && target.kind === "option") return toggleComponent(state, target.index)
   if (target.kind === "button") {
     switch (target.id) {
       case "primary":
@@ -411,6 +507,23 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
       return { state: { ...state, step: "interface", error: "", connected: state.provider?.label ?? "" } }
     case "registered":
       return action.reply.ok ? { state: { ...state, registration: { opened: action.reply.opened, url: action.reply.url } } } : { state: { ...state, error: action.reply.error } }
+    case "plan": {
+      if (!state.install) return { state }
+      if (!action.reply.ok) return { state: withInstall(state, { plan: "failed", error: action.reply.error }) }
+      const reply = action.reply
+      const components = COMPONENT_IDS.flatMap((id) => {
+        const found = reply.components.find((item) => item.id === id)
+        return found ? [{ id, available: found.available, targets: found.targets, checked: found.available }] : []
+      })
+      return { state: withInstall(state, { plan: "ready", components, cursor: 0, error: "" }) }
+    }
+    case "installEvent":
+      return { state: onInstallEvent(state, action.event) }
+    case "installed":
+      // A run that was abandoned with Ctrl+C has no screen left to update.
+      if (state.step !== "installing") return { state }
+      if (!action.reply.ok) return { state: { ...withInstall(state, { error: action.reply.error, status: {} }), step: "components" } }
+      return { state: { ...state, step: "welcome" } }
     case "listing":
     case "made":
       // Folder answers belong to the chooser, which is not open.

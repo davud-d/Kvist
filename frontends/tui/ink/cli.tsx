@@ -53,8 +53,11 @@ if (!process.stdin.isTTY || !process.stdout.isTTY) {
 
 if (values.setup) {
   const { runSetup } = await import("./setup/run.js")
+  const { installScriptFromEnv } = await import("./setup/ops.js")
   const outcome = await runSetup({
     command: resolveCoreCommand(),
+    // Set by the release installer's bootstrap: the screen then starts with the install choice.
+    install: installScriptFromEnv(process.env),
     workspace: path.resolve(values.workspace ?? process.cwd()),
     scope: values["setup-provider-only"] ? "provider" : "full",
   })

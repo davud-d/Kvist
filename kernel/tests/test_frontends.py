@@ -244,6 +244,55 @@ def test_launch_tui_leaves_setup_out_once_a_provider_is_known(monkeypatch, tmp_p
     assert "--setup" in calls[-1][0]
 
 
+def test_installer_opens_the_setup_screen_even_with_a_provider_saved(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    calls = _make_tty(monkeypatch, entry)
+    monkeypatch.setenv("KVIST_INSTALL_SCRIPT", str(tmp_path / "install.sh"))
+    assert main.launch_tui(_tui_args(installer=True)) == 7
+    command, env = calls[-1]
+    assert "--setup" in command
+    assert env["KVIST_INSTALL_SCRIPT"] == str(tmp_path / "install.sh")
+
+
+def test_find_node_prefers_the_installers_node_then_the_installed_one_then_path(monkeypatch, tmp_path):
+    import shutil
+
+    def executable(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n")
+        path.chmod(0o755)
+        return str(path)
+
+    on_path = executable(tmp_path / "path" / "node")
+    monkeypatch.setattr(shutil, "which", lambda name: on_path if name == "node" else None)
+    monkeypatch.delenv("KVIST_NODE", raising=False)
+    assert main.find_node() == on_path
+
+    installed = executable(tmp_path / "lib" / "node" / "bin" / "node")
+    monkeypatch.setattr(main.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(main.sys, "executable", str(tmp_path / "lib" / "kvist-core"))
+    assert main.find_node() == installed
+
+    named = executable(tmp_path / "bootstrap" / "node")
+    monkeypatch.setenv("KVIST_NODE", named)
+    assert main.find_node() == named
+
+    # A name that is not an executable file is ignored rather than trusted.
+    monkeypatch.setenv("KVIST_NODE", str(tmp_path / "missing"))
+    assert main.find_node() == installed
+
+
+def test_installer_without_its_script_refuses_to_start(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("KVIST_INSTALL_SCRIPT", raising=False)
+    monkeypatch.setattr(main, "_DIRECT_CLI_ARGS", None)
+    monkeypatch.setattr(main.sys, "argv", ["main.py", "--workspace", str(tmp_path), "--installer"])
+    with pytest.raises(SystemExit) as excinfo:
+        main.main()
+    assert excinfo.value.code == 2
+    assert "install.sh" in capsys.readouterr().err
+
+
 def test_setup_asking_for_the_classic_terminal_continues_there_unsaved(monkeypatch, tmp_path):
     entry = tmp_path / "cli.js"
     entry.write_text("")
