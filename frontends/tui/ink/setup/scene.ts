@@ -16,6 +16,7 @@ import {
   type Target,
 } from "./flow.js"
 import type { Strings } from "./strings.js"
+import { videoFit, type CellSize } from "./video.js"
 
 export const MIN_COLS = 50
 export const MIN_ROWS = 20
@@ -84,6 +85,9 @@ export interface SceneInput {
   // "cells" paints the picture as half blocks; "image" leaves the cells under the panel's
   // surroundings empty because a terminal image is showing through them (picture.ts).
   picture: "cells" | "image"
+  // The terminal's cell size in pixels when the demo video can play (an image terminal, a decoder and
+  // the clip are there); it sets the proportions of the video's slot on the interface step.
+  video?: CellSize | null
 }
 
 export interface Rect {
@@ -99,6 +103,8 @@ export interface Scene {
   // The panel's rectangle in cells, or null while it is not shown. `glass` panels let more of
   // the picture through (the folder chooser is large, and the picture is part of why it is there).
   panel: (Rect & { glass: boolean }) | null
+  // The cells the demo video fills, when it is to play on this screen.
+  video?: Rect | null
 }
 
 // Brightness the picture rests at behind the panel: dim enough for text, bright enough to keep the detail.
@@ -255,6 +261,8 @@ interface Built {
   scroll?: { line: number; count: number; total: number; first: number }
   // The line holding a text cursor and its column inside the panel's content, if any.
   caret?: { line: number; column: number }
+  // The first line of the demo video's slot and its size in cells; the lines are blank.
+  video?: { line: number; columns: number; rows: number }
   hint: string
   step: number
   steps: number
@@ -532,9 +540,23 @@ function build(input: SceneInput, width: number, listRows: number): Built {
         lines.push(optionRow(index, state.interfaceIndex === index, label, blurb, "", width, 14))
       })
       // The preview is a luxury of tall windows; the list and the button come first.
-      if (input.rows >= 28) lines.push(blank(), ...previewLines(state.interfaceIndex, strings, width))
+      let video: Built["video"]
+      if (input.rows >= 28) {
+        // Where the demo video can play, its slot is reserved for every interface so the panel does
+        // not change height when the highlight moves; the video itself shows only on the first one.
+        const fit = input.video ? videoFit(width, input.rows - 12 - lines.length, input.video) : null
+        const preview = previewLines(state.interfaceIndex, strings, width)
+        lines.push(blank())
+        if (fit && state.interfaceIndex === 0) {
+          video = { line: lines.length, ...fit }
+          for (let row = 0; row < fit.rows; row++) lines.push(blank())
+        } else {
+          lines.push(...preview)
+          for (let row = preview.length; row < (fit?.rows ?? 0); row++) lines.push(blank())
+        }
+      }
       lines.push(blank(), buttons(button(strings.ready, "primary", "primary")))
-      return { lines, hint: `${strings.hintMove} · ${strings.hintEnter} · ${hintMouse}`, step: steps, steps }
+      return { lines, video, hint: `${strings.hintMove} · ${strings.hintEnter} · ${hintMouse}`, step: steps, steps }
     }
     case "starting":
       return { lines: [text(`${SPINNER[input.tick % SPINNER.length]} ${strings.starting}`, "title")], hint: "", step: steps, steps }
@@ -731,5 +753,7 @@ export function renderScene(input: SceneInput): Scene {
     if (cells) fadePanel(canvas, behind, left, top, panelWidth, height, input.panel)
     else fadeText(canvas, left, top, panelWidth, height, input.panel)
   }
-  return { rows: canvas.toRows(level), hits, panel: panelRect }
+  const slot = built.video
+  const video = slot ? { col: x0 + Math.floor((inner - slot.columns) / 2), row: contentTop + slot.line, width: slot.columns, height: slot.rows } : null
+  return { rows: canvas.toRows(level), hits, panel: panelRect, video }
 }

@@ -3,7 +3,7 @@
 import { homedir } from "node:os"
 
 import type { CoreCommand } from "../core.js"
-import { kittyGraphics, placeRgb } from "../kitty.js"
+import { deleteImage, kittyGraphics, placeRgb, placeRgbAsync } from "../kitty.js"
 import { disableMouse, enableMouse } from "../mouse.js"
 import { probeTerminal } from "../probe.js"
 import { detectColorLevel, type ColorLevel } from "./color.js"
@@ -23,6 +23,7 @@ import { PICTURE_Z, pictureSize, renderPicture } from "./picture.js"
 import { listDirectory, listDrives, makeDirectory } from "./listing.js"
 import { DIMMED, renderScene, sameTarget, type Hit, type Rect } from "./scene.js"
 import { detectLocale, stringsFor } from "./strings.js"
+import { FramePacer, findClip, findFfmpeg, frameSize, startClip, type Clip } from "./video.js"
 
 // How long a lone ESC waits for the rest of a sequence before it counts as the Escape key.
 const ESCAPE_WAIT_MS = 40
@@ -39,6 +40,12 @@ const FRAME_MS = 50
 // A click shows its pressed look for at least this long, so a quick one is still seen.
 const PRESS_MIN_MS = 90
 const PICTURE_ID = 7
+// The demo video is drawn above the cells' backgrounds and below their text, so the blank cells of
+// its slot show it and nothing else on the panel is covered.
+const VIDEO_ID = 8
+const VIDEO_Z = -1
+// A frame is dropped when this much is still waiting to be written to the terminal.
+const VIDEO_BACKLOG_BYTES = 2_000_000
 // How long "Starting Kvist…" stays up before the next interface takes the terminal.
 const STARTING_MS = 450
 
@@ -102,6 +109,10 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
   const reducedMotion = Boolean(env.KVIST_REDUCE_MOTION && env.KVIST_REDUCE_MOTION !== "0")
   // The cell size in pixels sizes the image; a terminal that does not say gets an assumed one.
   const cell = image ? (await probeTerminal(stdin, stdout)).cell : null
+  // The demo video needs the cell size (to keep its proportions), a decoder and the clip.
+  const ffmpeg = image && cell && cell.width > 0 && cell.height > 0 && env.KVIST_SETUP_VIDEO !== "off" ? findFfmpeg(env) : null
+  const clip = ffmpeg ? findClip() : null
+  const videoCell = ffmpeg && clip ? cell : null
 
   return new Promise((resolve) => {
     let state: SetupState = initialState(startFolder, home, process.platform === "win32", options.scope ?? "full")
@@ -128,11 +139,55 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
     let pointerShape = "default"
     let finished = false
     let connection: AbortController | null = null
+    // The running demo video: where it is drawn, the decoder, and the frame on screen.
+    let player: { key: string; rect: Rect; width: number; height: number; clip: Clip; pacer: FramePacer } | null = null
+    let shownFrame: Buffer | null = null
+    // One frame is compressed at a time; a frame that arrives meanwhile is already late.
+    let compressing = false
+
+    const sendFrame = (rgb: Buffer, force = false) => {
+      const current = player
+      if (!current || finished) return
+      const started = performance.now()
+      if (compressing && !force) return
+      if (!force && (!current.pacer.take(started) || stdout.writableLength > VIDEO_BACKLOG_BYTES || (shownFrame && rgb.equals(shownFrame)))) return
+      shownFrame = rgb
+      const { rect, width, height } = current
+      compressing = true
+      void placeRgbAsync(rgb, width, height, { id: VIDEO_ID, columns: rect.width, rows: rect.height, row: rect.row, col: rect.col, z: VIDEO_Z }).then((frame) => {
+        compressing = false
+        // The video may have been stopped or moved while the frame was being compressed.
+        if (player !== current || finished) return
+        stdout.write(`\x1b[?2026h${frame}\x1b[?2026l`)
+        if (!force) current.pacer.record(performance.now() - started)
+      })
+    }
+
+    const stopVideo = () => {
+      if (!player) return
+      player.clip.stop()
+      player = null
+      shownFrame = null
+      stdout.write(deleteImage(VIDEO_ID))
+    }
+
+    // Keeps the video in step with the screen: playing in `rect` while it is there and the panel is
+    // at rest, gone otherwise. `cleared` says a full repaint took the picture off the terminal.
+    const syncVideo = (rect: Rect | null, cleared: boolean) => {
+      const at = videoCell && clip && ffmpeg && rect && !intro && panel >= 1 && !ghost ? rect : null
+      if (!at || !videoCell || !clip || !ffmpeg) return stopVideo()
+      const key = `${at.col},${at.row},${at.width},${at.height}`
+      if (player?.key === key) return cleared && shownFrame ? sendFrame(shownFrame, true) : undefined
+      stopVideo()
+      const size = frameSize({ columns: at.width, rows: at.height }, videoCell)
+      const started = startClip({ ffmpeg, clip, width: size.width, height: size.height, still: reducedMotion, onFrame: sendFrame })
+      player = { key, rect: at, width: size.width, height: size.height, clip: started, pacer: new FramePacer() }
+    }
 
     const paint = () => {
       const cols = stdout.columns ?? 80
       const rows = stdout.rows ?? 24
-      const scene = renderScene({ state, strings, cols, rows, level, brightness, panel, tick, workspace: shortPath(state.workspace, home), hover, pressed, icons, ghost, picture: image ? "image" : "cells" })
+      const scene = renderScene({ state, strings, cols, rows, level, brightness, panel, tick, workspace: shortPath(state.workspace, home), hover, pressed, icons, ghost, picture: image ? "image" : "cells", video: videoCell })
       hits = scene.hits
       if (!ghost) lastPanel = scene.panel
       const size = `${cols}x${rows}`
@@ -155,6 +210,7 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
       painted = scene.rows
       paintedSize = size
       if (out) stdout.write(`\x1b[?2026h${out}\x1b[?2026l`)
+      syncVideo(scene.video ?? null, everything)
     }
 
     // A hand over what can be pressed, where the terminal can change the pointer (OSC 22).
@@ -170,12 +226,14 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
       clearTimeout(escapeTimer)
       clearTimeout(introTimer)
       clearInterval(spinnerTimer)
+      player?.clip.stop()
+      player = null
       stdin.off("data", onData)
       stdout.off("resize", onResize)
       if (stdin.isTTY) stdin.setRawMode(false)
       stdin.pause()
       disableMouse()
-      stdout.write(`${image ? `\x1b_Ga=d,d=I,i=${PICTURE_ID},q=2\x1b\\\x1b]22;default\x1b\\` : ""}\x1b[?2004l\x1b[?25h\x1b[?1049l\x1b[23;0t`)
+      stdout.write(`${image ? `\x1b_Ga=d,d=I,i=${PICTURE_ID},q=2\x1b\\${deleteImage(VIDEO_ID)}\x1b]22;default\x1b\\` : ""}\x1b[?2004l\x1b[?25h\x1b[?1049l\x1b[23;0t`)
       process.off("exit", restore)
     }
 

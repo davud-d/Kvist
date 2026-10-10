@@ -816,6 +816,23 @@ mouse, bracketed paste, row-diff painting) and the effects. Tests: `tests/setup.
   costs ~70 ms to make and ~2 MB to send; frames in motion are sent at half size and the last one
   at full size. A key or click before the panel shows only brings it up; once it is visible the
   key counts as usual.
+- **Demo video** (`setup/video.ts`): on the interface step, with the first interface highlighted,
+  the Claude-style demo plays in the preview slot instead of the three text rows. Not a bundled
+  frame set: a 60 fps screen recording does not compress without a real codec (delta frames with
+  zlib came to 23–75 MB at every tolerance tried), so the clip is an H.264 720p60 file
+  (`frontends/tui/ink/demo/claude-style.mp4`, ~3.6 MB, made by `demo/make_demo.py` from
+  `docs/media/Claude-Code-demo-kvist.mp4`) that `build.mjs` copies beside the bundle
+  (`dist-ui/`, also in `kvist.spec` and the wheel's package data) and the **user's own ffmpeg**
+  decodes. It plays only where an image terminal reported its cell size, `ffmpeg` is on PATH
+  (or `KVIST_FFMPEG`) and the clip is found; otherwise the text preview stays, so nothing
+  depends on it. `KVIST_SETUP_VIDEO=off` disables it; `KVIST_REDUCE_MOTION=1` shows one poster
+  frame (second 28). ffmpeg scales to the slot's pixel size (≤ 960 px wide) with `-re`, frames
+  are deflated on the thread pool (`placeRgbAsync`) and drawn at `z=-1`: above cell
+  backgrounds, below text, so the blank cells of the slot show it. Frames identical to the one
+  on screen are skipped. `FramePacer` sends all 60 fps until a frame averages > 14 ms from
+  taking to written, then holds 30 fps (never back up; a new player starts a new pacer): a
+  12×24 px cell holds 60, 20×40 falls to 30. The slot's rows are reserved for all three
+  interfaces so the panel does not change height when the highlight moves.
 - **Flow**: welcome → provider (curated: AnyModel, ChatGPT, OpenAI, Anthropic, DeepSeek,
   OpenRouter, FreeFlow; "More providers" exits 65 to the classic wizard) → key (masked, last four
   visible; AnyModel's empty Enter opens registration) → model (only for providers without

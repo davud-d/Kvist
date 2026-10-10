@@ -58,7 +58,11 @@ local_hiddenimports = sorted(set(local_hiddenimports) | set(_acp_hiddenimports()
 # it the binary still works and `--frontend tui` falls back to the classic
 # terminal with an explanation.
 _UI_BUNDLE = os.path.join(SPECPATH, 'frontends', 'tui', 'ink', 'dist-ui', 'kvist-tui.mjs')
+# The setup screen's demo clip sits beside it and is optional at run time (no clip, no video).
+_UI_CLIP = os.path.join(SPECPATH, 'frontends', 'tui', 'ink', 'dist-ui', 'claude-style.mp4')
 _ui_datas = [(_UI_BUNDLE, 'frontends/tui/ink/dist-ui')] if os.path.isfile(_UI_BUNDLE) else []
+if _ui_datas and os.path.isfile(_UI_CLIP):
+    _ui_datas.append((_UI_CLIP, 'frontends/tui/ink/dist-ui'))
 
 # Data keeps its path relative to the module that reads it: kernel modules
 # unpack under kernel/, the classic terminal's modules at the top level.

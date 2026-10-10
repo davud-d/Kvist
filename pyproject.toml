@@ -102,4 +102,4 @@ kvist_web = [
 "kernel.prompts.styles.chat" = ["*.txt"]
 "kernel.themes" = ["*.json"]
 "frontends.tui.classic.assets" = ["*.png"]
-"frontends.tui.ink.dist-ui" = ["*.mjs"]
+"frontends.tui.ink.dist-ui" = ["*.mjs", "*.mp4"]

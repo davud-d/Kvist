@@ -1,6 +1,6 @@
 // Bundles the app into dist-ui/kvist-tui.mjs (`npm run build`).
 import { build } from "esbuild"
-import { readFileSync } from "node:fs"
+import { copyFileSync, readFileSync } from "node:fs"
 import { dirname } from "node:path"
 import { pathToFileURL } from "node:url"
 
@@ -62,4 +62,8 @@ export const options = {
   plugins: [boundedInkMeasureCache],
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) await build(options)
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  await build(options)
+  // The setup screen plays this clip beside the bundle (setup/video.ts); the bundle stays one JS file.
+  copyFileSync("demo/claude-style.mp4", "dist-ui/claude-style.mp4")
+}
