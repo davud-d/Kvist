@@ -207,7 +207,7 @@ def test_model_response_finds_json_in_the_middle_of_text():
         "Сначала посмотрю конфиг " + _call("read_file", path="app.conf") + " и потом решу."
     )
 
-    assert response.text == "Сначала посмотрю конфиг\n\nи потом решу."
+    assert response.text == "Сначала посмотрю конфиг"
     assert response.calls[0].arguments == {"path": "app.conf"}
 
 
@@ -225,7 +225,7 @@ def test_model_response_strips_a_markdown_fence_around_the_tag():
         "Смотрю.\n```json\n" + _call("read_file", path="a.py") + "\n```\nДальше по результату."
     )
 
-    assert response.text == "Смотрю.\n\nДальше по результату."
+    assert response.text == "Смотрю."
     assert response.calls[0].name == "read_file"
 
 
@@ -252,7 +252,25 @@ def test_model_response_reads_an_unclosed_tag_to_the_end_of_its_json():
     )
 
     assert response.calls[0].arguments == {"path": "a.py"}
-    assert response.text == "Читаю.\n\nПосле вызова."
+    assert response.text == "Читаю."
+
+
+def test_model_response_drops_a_result_reported_after_the_first_call():
+    response = parse_model_response(
+        "Создам файл и поменяю строку.\n"
+        + _call("write_file", path="a.txt", content="1\n2\n3")
+        + "\nФайл создан, вторая строка заменена. Готово."
+    )
+
+    assert response.text == "Создам файл и поменяю строку."
+    assert [call.name for call in response.calls] == ["write_file"]
+
+
+def test_model_response_without_a_call_keeps_the_whole_text_as_the_answer():
+    response = parse_model_response("Готово: файл создан.")
+
+    assert response.text == "Готово: файл создан."
+    assert response.calls == []
 
 
 def test_model_response_ends_an_unclosed_tag_at_the_next_tag():

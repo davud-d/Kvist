@@ -125,7 +125,7 @@ from kernel.performance_logger import PerfLogger
 from kernel.protocol import Action, AgentCommand
 from kernel.reasoning_effort import merge_reasoning_kwargs
 from kernel.redaction import defang_prompt_boundary_tags, redact_text, redact_value
-from kernel.role_router import RoleRouteResult, resume_role, route_role_decision_with_llm, route_role
+from kernel.role_router import RoleRouteResult, is_bare_continuation, resume_role, route_role_decision_with_llm, route_role
 from kernel.system_context import (
     current_os_context,
     current_project_context,
@@ -573,10 +573,13 @@ class LocalAgent:
         if images is not None and embedded:
             raise ValueError("Pass images either in the goal envelope or as an argument")
         attachments = validate_images(images) if images is not None else embedded
+        active_task = self._peek_checkpoint() is not None
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
         self._journal.begin_turn(f"{user_goal} {labels}".strip())
         self._tray_turn_started()
         try:
+            if active_task:
+                return self._resume_turn(user_goal, attachments)
             return self._run_turn(user_goal, routed_role, attachments)
         finally:
             self._journal.end_turn()
@@ -729,7 +732,7 @@ class LocalAgent:
         if self._tray is not None:
             self._tray.turn_finished()
 
-    def _resume_turn(self) -> str | None:
+    def _resume_turn(self, instruction: str = "", images: list[dict] | None = None) -> str | None:
         self._reset_cancel()
         self._reset_run_state()
         self._follow_checkpoint_to_its_session()
@@ -751,6 +754,25 @@ class LocalAgent:
                 return self._report_ambiguous_resume(pending)
             start_step = reconciliation
 
+        # An explicit continuation authorizes another turn without reviving
+        # the previous turn's stop limits or losing its collected evidence.
+        self._state.consecutive_errors = 0
+        self._state.stagnation_count = 0
+        self._state.parse_errors = 0
+        self._state.step_budget = last_step + self.config.max_steps
+
+        if instruction or images:
+            self._state.message_id = end_session.next_message_id(self, from_person=True)
+            if images:
+                from kernel.vision import prepare_goal
+                instruction = prepare_goal(self, instruction, images)
+            if images or not is_bare_continuation(instruction):
+                self._state.task_updates.append(instruction)
+            self._state.response_language = resolve_response_language(
+                instruction, previous_language=self._last_response_language
+            )
+            self._save_checkpoint(user_goal, start_step - 1)
+
         # Environment facts are recomputed for the current machine rather than
         # restored: run() sets them, resume() must too or the prompt shows blanks.
         self._set_environment_facts()
@@ -758,6 +780,9 @@ class LocalAgent:
         # versions may be stale after an interrupted run.
         self._state.dependency_versions = detect_dependency_versions(self.executor.workspace)
         self.executor.set_active_role(self._state.current_agent_role)
+        notify = getattr(self._ui, "print_route", None)
+        if notify is not None:
+            notify(self._state.current_agent_role, "resume")
         if not self._state.task_language:
             self._state.task_language = detect_request_language(user_goal)
         if self._state.response_language not in ("ru", "en"):
@@ -778,7 +803,7 @@ class LocalAgent:
         if resumed_phase == "starting":
             start_step = 1
         result = self._run_loop(user_goal, start_step=start_step)
-        self._record_run_turn(user_goal, result)
+        self._record_run_turn(instruction or user_goal, result)
         return result
 
     def _follow_checkpoint_to_its_session(self) -> None:

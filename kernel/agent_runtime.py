@@ -91,7 +91,7 @@ _CHANGE_OR_REPRODUCE_ACTIONS = _WRITE_ACTIONS | {"run_shell"}
 # Beyond the file reads, what plan mode still allows: it asks the person and
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
-    "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "refuse",
+    "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "edit_plan", "cancel_plan", "refuse",
 }
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
@@ -461,7 +461,7 @@ def finalize_run(
         ("persist run log", lambda: self._persist_logs(user_goal)),
         ("flush performance log", self._perf_logger.flush),
     ]
-    if task_completed:
+    if task_completed and (not self._state.finished_incomplete or self._state.task_cancelled):
         cleanup_steps.append(("clear completed checkpoint", self._clear_checkpoint))
 
     failures: list[tuple[str, Exception]] = []
@@ -516,6 +516,11 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     # blocking its writes left it with nothing it was allowed to do. Clearing
     # create/modify avoids the runtime demanding a write it will then refuse.
     read_only_goal = self._state.current_agent_role == "reader" or has_no_write_marker(user_goal)
+    for update in self._state.task_updates:
+        if has_no_write_marker(update):
+            read_only_goal = True
+        elif self._state.current_agent_role != "reader" and (_is_modify_goal(update) or _is_create_goal(update)):
+            read_only_goal = False
     # "Don't change files until steps 1-4 are done" orders the work: no change
     # is owed while those stages are open, and writes stay possible after them.
     write_deferred = has_deferred_write_marker(user_goal)
@@ -1185,15 +1190,16 @@ def _run_end_session(self, step: int, command: AgentCommand) -> _ActionOutcome:
 
 
 def _run_plan_action(self, step: int, command: AgentCommand) -> _ActionOutcome:
-    """offer_plan / propose_plan: a dialog with the person instead of an executor call."""
-    run = plan_mode.offer_plan if command.action.type == "offer_plan" else plan_mode.propose_plan
+    """Plan transitions stay in the runtime, away from filesystem execution."""
+    run = getattr(plan_mode, command.action.type)
     result = run(self, command)
     outcome = _finish_action(self, step, command, result.feedback)
     if result.instruction:
         self._state.pending_instruction = result.instruction
     if result.ended:
-        plan = str(command.action.args["plan"]).strip()
-        return _ActionOutcome(finished=True, final_message=plan_mode.ended_message(self._state, plan))
+        self._state.finished_incomplete = True
+        message = result.final_message or plan_mode.ended_message(self._state, str(command.action.args.get("plan", "")))
+        return _ActionOutcome(finished=True, final_message=message)
     return outcome
 
 

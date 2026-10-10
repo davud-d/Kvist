@@ -46,7 +46,7 @@ def test_build_config_info_reports_saved_defaults_and_credentials(isolated_confi
 
     by_id = {provider["id"]: provider for provider in info["providers"]}
     assert set(by_id) == {
-        "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow",
+        "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow", "chatgpt",
     } | set(MANUAL_OPENAI_PROVIDERS)
     assert [p["id"] for p in info["providers"]][:3] == ["anymodel", "openai", "anthropic"]
 

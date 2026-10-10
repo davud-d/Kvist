@@ -1,0 +1,388 @@
+import assert from "node:assert/strict"
+import { test } from "node:test"
+
+import { FRAME_FILL, sampleBackdrop, sampleCells, sampleFramed } from "../setup/backdrop.js"
+import { detectColorLevel, toXterm256 } from "../setup/color.js"
+import { initialState, update, type Action, type SetupState, type Update } from "../setup/flow.js"
+import { parseInput } from "../setup/keys.js"
+import { pictureSize, renderPicture } from "../setup/picture.js"
+import { introFrame, shortPath } from "../setup/run.js"
+import { DIMMED, MIN_COLS, MIN_ROWS, renderScene } from "../setup/scene.js"
+import { detectLocale, stringsFor } from "../setup/strings.js"
+
+const strings = stringsFor("en")
+const plain = (text: string) => text.replace(/\x1b\[[0-9;]*m/g, "")
+
+const providers = ["anymodel", "chatgpt", "openai", "openrouter"].map((id) => ({
+  id,
+  label: id,
+  auth_type: id === "chatgpt" ? ("oauth" as const) : ("api_key" as const),
+  requires_manual_models: id === "anymodel" || id === "openrouter",
+  has_credentials: false,
+}))
+
+const ready = (): SetupState => ({ ...initialState(), catalog: "ready", providers })
+const key = (name: string, text = ""): Action => ({ type: "input", event: { type: "key", key: name as never, text, ctrl: false } })
+const typed = (state: SetupState, text: string) => [...text].reduce((s, ch) => update(s, key("char", ch), strings).state, state)
+const send = (state: SetupState, action: Action): Update => update(state, action, strings)
+
+test("keys: arrows, mouse reports, paste and a split escape sequence", () => {
+  const parsed = parseInput("\x1b[A\x1b[<0;12;5M\x1b[<64;1;1M\x1b[200~sk-abc\n\x1b[201~x")
+  assert.deepEqual(
+    parsed.events.map((event) => (event.type === "key" ? event.key : event.type === "paste" ? `paste:${event.text}` : `${event.kind}:${event.col},${event.row}`)),
+    ["up", "press:11,4", "wheel:0,0", "paste:sk-abc\n", "char"],
+  )
+  // Motion with no button held (35) and with the left one held (32) are both "move".
+  assert.deepEqual(
+    parseInput("\x1b[<35;10;4M\x1b[<32;11;4M").events.map((event) => (event.type === "mouse" ? `${event.kind}:${event.col},${event.row}` : event.type)),
+    ["move:9,3", "move:10,3"],
+  )
+  assert.equal(parseInput("\x1b[").rest, "\x1b[")
+  assert.equal(parseInput("\x1b").rest, "\x1b")
+  assert.equal(parseInput("\x1b", true).events[0]?.type, "key")
+  const ctrl = parseInput("\x03").events[0]
+  assert.ok(ctrl?.type === "key" && ctrl.ctrl && ctrl.text === "c")
+})
+
+test("old-style mouse reports (macOS Terminal.app) are mouse events, not typed characters", () => {
+  // ESC [ M, then button, column and row, each 32 higher than its value (column and row 1-based).
+  const press = `\x1b[M${String.fromCharCode(32)}${String.fromCharCode(32 + 10)}${String.fromCharCode(32 + 4)}`
+  const release = `\x1b[M${String.fromCharCode(35)}${String.fromCharCode(42)}${String.fromCharCode(36)}`
+  const wheel = `\x1b[M${String.fromCharCode(32 + 64)}${String.fromCharCode(33)}${String.fromCharCode(33)}`
+  const parsed = parseInput(`${press}${release}${wheel}x`)
+  assert.deepEqual(
+    parsed.events.map((event) => (event.type === "mouse" ? `${event.kind}:${event.col},${event.row}` : event.type === "key" ? event.text : event.type)),
+    ["press:9,3", "release:9,3", "wheel:0,0", "x"],
+  )
+  assert.equal(parseInput("\x1b[M ").rest, "\x1b[M ")
+})
+
+test("colour level follows the terminal's own statements", () => {
+  assert.equal(detectColorLevel({ COLORTERM: "truecolor", TERM: "xterm" }), "truecolor")
+  assert.equal(detectColorLevel({ TERM: "xterm-256color" }), "256")
+  assert.equal(detectColorLevel({ TERM: "linux" }), "none")
+  assert.equal(detectColorLevel({ COLORTERM: "truecolor", NO_COLOR: "1" }), "none")
+  assert.equal(detectColorLevel({ TERM: "xterm-kitty" }), "truecolor")
+  assert.equal(toXterm256([255, 255, 255]), 231)
+  assert.equal(detectLocale({ LANG: "ru_RU.UTF-8" }), "ru")
+  assert.equal(detectLocale({ LANG: "de_DE.UTF-8" }), "en")
+})
+
+test("the picture covers any window and is cached per size", () => {
+  const grid = sampleBackdrop(100, 60)
+  assert.equal(grid.rgb.length, 100 * 60 * 3)
+  assert.equal(sampleBackdrop(100, 60), grid)
+  // Larger than the source: nearest pixels, no gaps.
+  assert.equal(sampleBackdrop(500, 300).rgb.length, 500 * 300 * 3)
+})
+
+test("the picture sits inside a darker, blurred surround of itself", () => {
+  const framed = sampleFramed(200, 100)
+  assert.equal(framed.rgb.length, 200 * 100 * 3)
+  assert.equal(sampleFramed(200, 100), framed)
+  const sum = (x0: number, x1: number, y: number) => {
+    let total = 0
+    for (let x = x0; x < x1; x++) for (let c = 0; c < 3; c++) total += framed.rgb[(y * 200 + x) * 3 + c]!
+    return total
+  }
+  // Inside the picture (88% of the window) is brighter than the strip left of it.
+  const margin = Math.floor((200 * (1 - FRAME_FILL)) / 2)
+  assert.ok(sum(margin + 10, margin + 30, 50) > sum(0, margin - 4, 50) * 1.2)
+})
+
+test("cells carry a quadrant glyph and two colours that explain the pixels they stand for", () => {
+  const art = sampleCells(40, 12)
+  assert.equal(art.chars.length, 40 * 12)
+  assert.ok(art.chars.every((char) => /^[ ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█]$/.test(char)))
+  assert.equal(sampleCells(40, 12), art)
+  // Two colours at most, so a flat area is one glyph with equal-ish colours and an edge is two.
+  assert.ok(art.chars.some((char) => char !== " " && char !== "█"))
+})
+
+test("a picture size follows the window and never exceeds the source", () => {
+  assert.deepEqual(pictureSize(100, 30, { width: 10, height: 20 }), { width: 1000, height: 600 })
+  const wide = pictureSize(300, 80, { width: 10, height: 20 })
+  assert.equal(wide.width, 1280)
+  assert.equal(wide.height, Math.round(80 * 20 * (1280 / 3000)))
+  assert.deepEqual(pictureSize(80, 24, null), { width: 800, height: 480 })
+})
+
+test("the picture is darkened by the pane only inside the panel", () => {
+  const size = { width: 200, height: 100 }
+  const plainRgb = renderPicture(size, 20, 10, 1, null)
+  const withPane = renderPicture(size, 20, 10, 1, { col: 5, row: 2, width: 10, height: 6, opacity: 1, glass: false })
+  const at = (x: number, y: number) => (y * 200 + x) * 3
+  assert.equal(withPane[at(5, 5)], plainRgb[at(5, 5)])
+  assert.ok(withPane[at(100, 50)]! < 40)
+  // A glass pane keeps more of the picture than a dialog's does.
+  const glass = renderPicture(size, 20, 10, 1, { col: 5, row: 2, width: 10, height: 6, opacity: 1, glass: true })
+  assert.ok(glass[at(100, 50)]! > withPane[at(100, 50)]!)
+  // Brightness scales every pixel.
+  const dim = renderPicture(size, 20, 10, 0.5, null)
+  assert.ok(dim[at(100, 50)]! <= Math.ceil(plainRgb[at(100, 50)]! / 2) + 1)
+})
+
+test("a picture shown as an image leaves the cells around the panel empty", () => {
+  const scene = renderScene({ state: ready(), strings, cols: 80, rows: 24, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "image" })
+  assert.ok(scene.rows.every((row) => !/[▀▄▌▐▘▝▖▗▚▞▛▜▙▟█]/.test(row)))
+  assert.ok(scene.panel && scene.panel.width > 40)
+  assert.ok(scene.rows.some((row) => plain(row).includes("Welcome to Kvist")))
+})
+
+test("a provider with a key leads through the key to the interface choice", () => {
+  let state = send(ready(), key("enter")).state
+  assert.equal(state.step, "provider")
+  state = send(state, key("down")).state // chatgpt
+  state = send(state, key("down")).state // openai
+  const chosen = send(state, key("enter"))
+  assert.equal(chosen.state.step, "key")
+  assert.equal(send(chosen.state, key("enter")).state.error, strings.keyEmpty)
+  const pasted = send(chosen.state, { type: "input", event: { type: "paste", text: " sk-123\n" } }).state
+  assert.equal(pasted.key, "sk-123")
+  const submitted = send(pasted, key("enter"))
+  assert.equal(submitted.state.step, "working")
+  assert.deepEqual(submitted.effect, { type: "connect", provider: "openai", key: "sk-123", model: "" })
+  const failed = send(submitted.state, { type: "connected", reply: { ok: false, error: "bad key" } }).state
+  assert.deepEqual([failed.step, failed.error, failed.key], ["key", "bad key", "sk-123"])
+  const done = send(submitted.state, { type: "connected", reply: { ok: true, provider: "openai", models: {} } }).state
+  assert.equal(done.step, "interface")
+  assert.deepEqual(send(done, key("enter")).effect, { type: "finish", outcome: { kind: "frontend", value: "claude" } })
+})
+
+test("an empty key on AnyModel opens registration instead of complaining", () => {
+  const state = send(send(ready(), key("enter")).state, key("enter")).state
+  assert.equal(state.provider?.id, "anymodel")
+  assert.deepEqual(send(state, key("enter")).effect, { type: "register", provider: "anymodel" })
+  const registered = send(state, { type: "registered", reply: { ok: true, opened: true, url: "https://x" } }).state
+  assert.equal(send(registered, key("enter")).state.error, strings.keyEmpty)
+})
+
+test("a provider without default models picks one from the live catalog or types an id", () => {
+  let state = send(send(ready(), key("enter")).state, key("enter")).state
+  state = typed(state, "sk-any")
+  const listing = send(state, key("enter"))
+  assert.deepEqual(listing.effect, { type: "listModels", provider: "anymodel", key: "sk-any" })
+  state = send(listing.state, { type: "models", reply: { ok: true, provider: "anymodel", models: ["a/one", "b/two", "b/three"] } }).state
+  state = typed(state, "b/")
+  assert.equal(send(state, key("down")).state.modelIndex, 1)
+  const picked = send(send(state, key("down")).state, key("enter"))
+  assert.deepEqual(picked.effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "b/three" })
+  // Nothing matches: what was typed is the id.
+  const custom = typed({ ...state, filter: "", filterCursor: 0 }, "my/model")
+  assert.deepEqual(send(custom, key("enter")).effect, { type: "connect", provider: "anymodel", key: "sk-any", model: "my/model" })
+})
+
+test("an OAuth provider connects without asking for a key", () => {
+  const state = send(send(ready(), key("enter")).state, key("down")).state
+  const chosen = send(state, key("enter"))
+  assert.deepEqual(chosen.effect, { type: "connect", provider: "chatgpt", key: "", model: "" })
+  const failed = send(chosen.state, { type: "connected", reply: { ok: false, error: "closed" } }).state
+  assert.deepEqual([failed.step, failed.error], ["provider", "closed"])
+})
+
+test("More providers hands over to the classic terminal; Ctrl+C and Esc on the first screen quit", () => {
+  let state = send(ready(), key("enter")).state
+  state = send(state, key("up")).state // wraps to the last entry
+  assert.deepEqual(send(state, key("enter")).effect, { type: "finish", outcome: { kind: "classic" } })
+  assert.deepEqual(send(ready(), key("escape")).effect, { type: "finish", outcome: { kind: "quit" } })
+  const interrupt = send(state, { type: "input", event: { type: "key", key: "char", text: "c", ctrl: true } })
+  assert.deepEqual(interrupt.effect, { type: "finish", outcome: { kind: "quit" } })
+  assert.equal(send(send(ready(), key("enter")).state, key("escape")).state.step, "welcome")
+})
+
+test("every frame is exactly as wide as the window and its hit boxes answer clicks", () => {
+  for (const [cols, rows] of [[120, 36], [80, 24], [MIN_COLS, MIN_ROWS], [30, 10]] as const) {
+    const scene = renderScene({ state: send(ready(), key("enter")).state, strings, cols, rows, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+    assert.equal(scene.rows.length, rows)
+    for (const row of scene.rows) assert.equal([...plain(row)].length, cols)
+  }
+  const scene = renderScene({ state: send(ready(), key("enter")).state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  const options = scene.hits.filter((hit) => hit.target.kind === "option")
+  assert.equal(options.length, providers.length + 1)
+  const text = scene.rows.map(plain)
+  assert.match(text[options[1]!.row]!, /chatgpt/)
+})
+
+test("without colour there is no picture, only the panel", () => {
+  const scene = renderScene({ state: ready(), strings, cols: 80, rows: 24, level: "none", brightness: 0.4, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+  assert.ok(scene.rows.every((row) => !/[▀▄▌▐▘▝▖▗▚▞▛▜▙▟█]/.test(row)))
+  assert.ok(scene.rows.some((row) => plain(row).includes("Welcome to Kvist")))
+})
+
+test("the panel fades in: nothing at first, all of it at the end, and the picture rests in between", () => {
+  const at = (panel: number) => renderScene({ state: ready(), strings, cols: 80, rows: 24, level: "truecolor", brightness: 0.55, panel, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.doesNotMatch(at(0), /Welcome to Kvist/)
+  assert.match(at(0.5), /Welcome to Kvist/)
+  assert.match(at(1), /Welcome to Kvist/)
+})
+
+test("the intro lets the picture rest for four seconds before the panel appears, then settles fast", () => {
+  assert.equal(introFrame(0).panel, 0)
+  assert.equal(introFrame(3000).brightness, 1)
+  assert.equal(introFrame(3999).panel, 0)
+  assert.ok(introFrame(4100).panel > 0 && introFrame(4100).panel < 1)
+  const end = introFrame(4300)
+  assert.deepEqual([end.panel, end.brightness, end.done], [1, DIMMED, true])
+})
+
+test("frames in motion are sent smaller", () => {
+  const full = pictureSize(100, 30, { width: 10, height: 20 })
+  const half = pictureSize(100, 30, { width: 10, height: 20 }, 0.5)
+  assert.deepEqual([half.width, half.height], [full.width / 2, full.height / 2])
+})
+
+const toKey = (state: SetupState) => send(send(ready(), key("enter")).state, key("enter")).state
+
+test("a pasted key loses quotes and a Bearer prefix; Tab shows it in clear", () => {
+  let state = send(toKey(ready()), key("down")).state
+  state = send(ready(), key("enter")).state
+  state = send(state, key("down")).state
+  state = send(state, key("down")).state
+  state = send(state, key("down")).state // anthropic
+  state = send(state, key("enter")).state
+  assert.equal(state.provider?.id, "openai" === state.provider?.id ? "openai" : state.provider?.id)
+  const pasted = send(state, { type: "input", event: { type: "paste", text: '"Bearer sk-abc"\n' } }).state
+  assert.equal(pasted.key, "sk-abc")
+  assert.equal(pasted.reveal, false)
+  assert.equal(send(pasted, key("tab")).state.reveal, true)
+})
+
+test("Esc during a connection abandons it and its late answer changes nothing", () => {
+  let state = send(ready(), key("enter")).state
+  state = send(state, key("down")).state
+  state = send(state, key("down")).state
+  state = send(state, key("enter")).state
+  state = typed(state, "sk-1")
+  const connecting = send(state, key("enter"))
+  assert.equal(connecting.state.step, "working")
+  const cancelled = send(connecting.state, key("escape"))
+  assert.deepEqual([cancelled.state.step, cancelled.effect], ["key", { type: "cancel" }])
+  const late = send(cancelled.state, { type: "connected", reply: { ok: true, provider: "openai", models: {} } })
+  assert.equal(late.state.step, "key")
+  // Keys other than Esc are ignored while connecting.
+  assert.equal(send(connecting.state, key("enter")).state.step, "working")
+})
+
+test("a failed connection says what happened and what to do; success is confirmed on the next screen", () => {
+  const base = (): SetupState => ({ ...ready(), step: "working", returnStep: "key", provider: providers[2] as never, key: "sk-1" })
+  const failed = send(base(), { type: "connected", reply: { ok: false, error: "401 unauthorized" } }).state
+  const scene = (state: SetupState, rows = 40) =>
+    renderScene({ state, strings, cols: 100, rows, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  const shown = scene(failed)
+  assert.match(shown, /Could not connect\./)
+  assert.match(shown, /401 unauthorized/)
+  assert.match(shown, /Check the key and try again/)
+  const done = send(base(), { type: "connected", reply: { ok: true, provider: "openai", models: {} } }).state
+  assert.match(scene(done), /Connected to openai\./)
+  // The preview of the highlighted interface appears in a tall window only.
+  assert.match(scene(done, 40), /Ask Kvist, or \/ for commands/)
+  assert.doesNotMatch(scene(done, 24), /Ask Kvist, or \/ for commands/)
+})
+
+test("the first screen names the working folder and a wrong key prefix is noticed", () => {
+  const welcome = renderScene({ state: ready(), strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "~/work/kvist", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.match(welcome, /Working folder: ~\/work\/kvist/)
+  const anthropic = { id: "anthropic", label: "Anthropic", auth_type: "api_key" as const, requires_manual_models: false, has_credentials: false }
+  const state: SetupState = { ...ready(), step: "key", provider: anthropic, key: "sk-live-123", cursor: 11 }
+  const shown = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.match(shown, /Anthropic keys start with sk-ant-/)
+})
+
+test("the home folder is written as a tilde", () => {
+  assert.equal(shortPath("/home/me/work", "/home/me"), "~/work")
+  assert.equal(shortPath("/home/meow", "/home/me"), "/home/meow")
+})
+
+test("a button looks different when pointed at and when held down", () => {
+  const start = { kind: "button", id: "primary" } as const
+  const draw = (hover: typeof start | null, pressed: typeof start | null) =>
+    renderScene({ state: ready(), strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover, pressed, icons: "plain", ghost: null, picture: "cells" })
+  const rest = draw(null, null)
+  const over = draw(start, null)
+  const held = draw(start, start)
+  assert.notDeepEqual(over.rows, rest.rows)
+  assert.notDeepEqual(held.rows, over.rows)
+  assert.notDeepEqual(held.rows, rest.rows)
+  // Only the button's row changes.
+  const changed = rest.rows.flatMap((row, index) => (row === over.rows[index] ? [] : [index]))
+  assert.equal(changed.length, 1)
+  // The text is the same in all three.
+  assert.deepEqual(held.rows.map(plain), rest.rows.map(plain))
+})
+
+test("an option row is tinted when pointed at, also while selected", () => {
+  const state = send(ready(), key("enter")).state
+  const row = { kind: "option", index: 2 } as const
+  const draw = (target: typeof row | null) =>
+    renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover: target, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows
+  assert.notDeepEqual(draw(row), draw(null))
+  const selected = draw({ kind: "option", index: 0 })
+  assert.notDeepEqual(selected, draw(null))
+})
+
+test("a provider-only setup has no folder or interface step and ends with the provider saved", () => {
+  const base: SetupState = { ...initialState("/w", "/h", false, "provider"), catalog: "ready", providers }
+  // F does nothing, and the welcome screen does not offer the folder.
+  assert.equal(send(base, { type: "input", event: { type: "key", key: "char", text: "f", ctrl: false } }).state.step, "welcome")
+  const shown = renderScene({ state: base, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.doesNotMatch(shown, /Working folder/)
+  // Provider, key: two steps.
+  let state = send(send(base, key("enter")).state, key("down")).state
+  state = send(state, key("down")).state
+  state = send(state, key("enter")).state // openai
+  const scene = renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.match(scene, /Step 2 of 2/)
+  const typedKey = typed(state, "sk-1")
+  const connecting = send(typedKey, key("enter")).state
+  const done = send(connecting, { type: "connected", reply: { ok: true, provider: "openai", models: {} } })
+  assert.deepEqual(done.effect, { type: "finish", outcome: { kind: "done" } })
+})
+
+const drawSetup = (state: SetupState, cols = 100, rows = 30, text = strings) =>
+  renderScene({ state, strings: text, cols, rows, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: state.workspace, hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" })
+
+test("the first screen says what Kvist does not do, in a window as small as the minimum", () => {
+  for (const [name, text] of [["en", strings], ["ru", stringsFor("ru")]] as const) {
+    for (const [cols, rows] of [[120, 36], [MIN_COLS, MIN_ROWS]] as const) {
+      const shown = drawSetup(initialState("/work/app", "/home/me"), cols, rows, text).rows.map(plain).join("\n")
+      assert.match(shown, /\.env/, `${name} ${cols}x${rows} names .env`)
+      assert.match(shown, /\/revert/, `${name} ${cols}x${rows} names /revert`)
+      assert.match(shown, name === "en" ? /Get started/ : /Начать/, `${name} ${cols}x${rows} keeps its buttons`)
+    }
+  }
+})
+
+test("a wide working folder is asked about once, and the safe answer is the first one", () => {
+  const at = (workspace: string): SetupState => ({ ...initialState(workspace, "/home/me"), catalog: "ready", providers })
+  // A project folder goes straight on.
+  assert.equal(send(at("/home/me/work/app"), key("enter")).state.step, "provider")
+  // Home stops at a question that names the folder and what Kvist could do in it.
+  const asked = send(at("/home/me"), key("enter")).state
+  assert.equal(asked.step, "broad")
+  const shown = drawSetup(asked).rows.map(plain).join("\n")
+  assert.match(shown, /That is a wide folder/)
+  assert.match(shown, /This is your home folder/)
+  assert.match(shown, /Working folder: \/home\/me/)
+  // Enter opens the chooser; nothing is kept.
+  const choosing = send(asked, key("enter"))
+  assert.equal(choosing.state.step, "folder")
+  assert.deepEqual(choosing.effect, { type: "list", path: "/home/me" })
+  assert.equal(choosing.state.broadAccepted, "")
+  // Esc goes back to the first screen.
+  assert.equal(send(asked, key("escape")).state.step, "welcome")
+  // "Use it anyway", by key or by the button, goes on and is not asked again for that folder.
+  for (const answer of [send(asked, key("char", "u")), send(asked, { type: "click", target: { kind: "button", id: "anyway" } })]) {
+    assert.equal(answer.state.step, "provider")
+    assert.equal(answer.state.broadAccepted, "/home/me")
+    assert.equal(send({ ...answer.state, step: "welcome" }, key("enter")).state.step, "provider")
+  }
+  // Another wide folder is a new question.
+  const root = { ...at("/home/me"), broadAccepted: "/home/me", workspace: "/" }
+  assert.equal(send(root, key("enter")).state.step, "broad")
+  // The hit boxes carry the three buttons.
+  const ids = drawSetup(asked).hits.flatMap((hit) => (hit.target.kind === "button" ? [hit.target.id] : []))
+  assert.deepEqual(ids, ["folder", "anyway", "back"])
+  // A provider-only setup has no folder to warn about.
+  const only = { ...initialState("/home/me", "/home/me", false, "provider"), catalog: "ready" as const, providers }
+  assert.equal(send(only, key("enter")).state.step, "provider")
+})

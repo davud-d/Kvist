@@ -5,6 +5,7 @@ import { useReducer, useRef, type ReactNode } from "react"
 
 import { NAME_WIDTH, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
 import { applyKey, emptyEditor, insert, moveLine, windowLine, type Editor } from "../editor.js"
+import type { Starters } from "../starters.js"
 import { collapsePaste, emptyPasteStore, expandPastes, findRepeatedLabel, isLargePaste, labelLengthBefore } from "../paste.js"
 import { color, currentSkin } from "./theme.js"
 
@@ -13,6 +14,8 @@ interface Props {
   history: readonly string[]
   placeholder?: string
   mask?: boolean
+  // Requests offered while the box is empty, for a person who has not sent one yet.
+  starters?: Starters | null
   // Shown directly under the frame, above the command suggestions.
   caption?: ReactNode
   // `shown` is the line as typed, with paste labels; `text` has the pasted text put back.
@@ -69,7 +72,7 @@ interface Model {
   draft: string
 }
 
-export function InputBox({ active, history, placeholder, mask = false, caption, onSubmit }: Props) {
+export function InputBox({ active, history, placeholder, mask = false, starters = null, caption, onSubmit }: Props) {
   // Several keys can arrive in one stdin chunk and are handled before React
   // re-renders, so the source of truth is a ref, not the render's closure.
   const model = useRef<Model>({ editor: emptyEditor, recall: -1, pick: 0, draft: "" })
@@ -156,6 +159,16 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
       const selected = Math.min(picked, Math.max(0, shown.length - 1))
       // Shift+Enter needs a terminal that reports it (kitty keyboard protocol); Alt+Enter arrives as ESC CR everywhere.
       if (key.return && (key.shift || key.meta) && !mask) return change(insert(current, "\n", true))
+      // An empty box with requests on offer: the arrows choose, Tab or Enter puts the choice in the
+      // box (and a second Enter sends it, so it can be edited first).
+      const offer = !mask && !current.text && starters ? starters.prompts : []
+      if (offer.length) {
+        if (key.upArrow || key.downArrow) return update({ pick: (Math.min(picked, offer.length - 1) + (key.upArrow ? -1 : 1) + offer.length) % offer.length })
+        if (key.tab || key.return) {
+          const text = offer[Math.min(picked, offer.length - 1)]!
+          return change({ text, cursor: text.length })
+        }
+      }
       if (key.return) return enter(current.text, selected)
       // Keystrokes coalesced by a slow link arrive as "text\r" in one chunk.
       if (input.length > 1 && /[\r\n]$/.test(input)) return enter(insert(current, input.replace(/[\r\n]+$/, ""), true).text, selected)
@@ -233,11 +246,31 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
     </>
   )
 
+  const offered = !mask && !editor.text && starters ? starters.prompts.slice(0, visible) : []
+  const startersPick = Math.min(pick, Math.max(0, offered.length - 1))
+  const starterRows =
+    offered.length > 0 && starters ? (
+      <>
+        {visible > offered.length ? (
+          <Text color={color.faint} wrap="truncate-end">  {starters.title}</Text>
+        ) : null}
+        {offered.map((prompt, i) => (
+          <Text key={prompt} color={i === startersPick ? (claude ? color.select : color.accent) : color.dim} wrap="truncate-end">
+            {"  "}{i === startersPick ? "▸" : " "} {prompt}
+          </Text>
+        ))}
+        {visible > offered.length ? (
+          <Text color={color.faint} wrap="truncate-end">  {starters.hint}</Text>
+        ) : null}
+      </>
+    ) : null
+
   // Claude Code lists the commands above the input, which stays where it is.
   if (claude) {
     return (
       <Box flexDirection="column">
         {suggestions}
+        {starterRows}
         <Box borderStyle="single" borderColor={color.rule} borderLeft={false} borderRight={false} paddingLeft={1}>
           <Text color={active ? color.text : color.faint}>❯ </Text>
           {line}
@@ -257,6 +290,7 @@ export function InputBox({ active, history, placeholder, mask = false, caption, 
       {pasteHint}
       {caption}
       {suggestions}
+      {starterRows}
     </Box>
   )
 }

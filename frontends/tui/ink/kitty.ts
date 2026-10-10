@@ -2,6 +2,8 @@
 // rectangle of cells, and take it away. kitty, Ghostty and Konsole speak it. Whether a
 // terminal does is decided from the environment alone (as terminal_image.py does for the
 // classic terminal): asking would mean reading its answer from stdin, which Ink owns.
+import { deflateSync } from "node:zlib"
+
 const CHUNK = 4096
 
 export function kittyGraphics(env: NodeJS.ProcessEnv): boolean {
@@ -42,4 +44,18 @@ export function placeImage(png: string, at: Placement): string {
 // Removes the image and frees its data.
 export function deleteImage(id: number): string {
   return `\x1b_Ga=d,d=I,i=${id},q=2\x1b\\`
+}
+
+// Shows raw RGB pixels (3 bytes each, zlib-compressed on the wire) behind the text: `z` is below
+// the cell backgrounds, so a cell with a colour of its own covers the picture and a cell with
+// none lets it through. Sent under an id that already exists, it replaces that image.
+export function placeRgb(rgb: Uint8Array, width: number, height: number, at: { id: number; columns: number; rows: number; z: number }): string {
+  const data = deflateSync(rgb, { level: 1 }).toString("base64")
+  const chunks = Array.from({ length: Math.ceil(data.length / CHUNK) }, (_, index) => data.slice(index * CHUNK, (index + 1) * CHUNK))
+  const parts = chunks.map((chunk, index) => {
+    const more = index < chunks.length - 1 ? 1 : 0
+    const keys = index === 0 ? `a=T,f=24,s=${width},v=${height},o=z,i=${at.id},p=1,c=${at.columns},r=${at.rows},z=${at.z},C=1,q=2,m=${more}` : `m=${more}`
+    return `\x1b_G${keys};${chunk}\x1b\\`
+  })
+  return `\x1b[1;1H${parts.join("")}`
 }

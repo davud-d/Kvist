@@ -10,6 +10,7 @@ import type { CoreEvent } from "../protocol.js"
 import { contextLabel, englishOnly } from "../format.js"
 import { addInputHistory, inputHistory, sessionHistory } from "../session.js"
 import { answerFromEnd, initialState, reduce } from "../state.js"
+import type { Starters } from "../starters.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./skins/claude-code/claude.js"
 import { ViewContext } from "./context.js"
 import { ClosedBar, InputBox } from "./input.js"
@@ -31,6 +32,8 @@ export interface AppProps {
   pointer: Pointer | null
   // Told the session that is on screen, so the launcher can point back to it on exit.
   onSession?: (name: string) => void
+  // Requests offered to a person who has not sent one yet (null: none).
+  starters?: Starters | null
 }
 
 const STOP_CONFIRM_MS = 3000
@@ -83,6 +86,9 @@ export function App(props: AppProps) {
   const { exit } = useApp()
   const [state, dispatch] = useReducer(reduce, undefined, () => initialState(initialEffort()))
   const [history, setHistory] = useState<string[]>([])
+  // Typed lines of earlier runs are read from the core; starters wait for them so they do not
+  // flash up for a person who already has a history.
+  const [historyRead, setHistoryRead] = useState(false)
   const [stopArmedAt, setStopArmedAt] = useState(0)
   // A first Ctrl+C or Ctrl+D at the idle prompt only warns, naming the key; the ref lets a second press
   // in the same key chunk see it. Only the same key confirms.
@@ -98,7 +104,10 @@ export function App(props: AppProps) {
   const note = useCallback((text: string, tone: "info" | "warn" | "error" = "info") => dispatch({ type: "note", tone, text }), [])
 
   useEffect(() => {
-    void inputHistory(props.command, props.workspace).then((entries) => setHistory((typed) => [...entries, ...typed]))
+    void inputHistory(props.command, props.workspace).then((entries) => {
+      setHistory((typed) => [...entries, ...typed])
+      setHistoryRead(true)
+    })
   }, [props.command, props.workspace])
 
   useEffect(() => {
@@ -337,6 +346,7 @@ export function App(props: AppProps) {
       active={!state.running && !state.command}
       history={history}
       placeholder={state.command ? `running /${state.command}…` : state.running ? "working…" : "Ask Kvist, or / for commands"}
+      starters={historyRead && history.length === 0 && !state.items.some((item) => item.kind === "user") ? props.starters : null}
       caption={caption}
       onSubmit={submit}
     />

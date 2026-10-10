@@ -24,7 +24,8 @@ internal object KvistCli {
 
     // The payload may carry an API key, so it goes to stdin and is never logged.
     fun configOp(target: KvistTarget, op: String, payload: JsonObject): JsonObject {
-        return run(target, listOf("--config-op", op), payload.toString(), CONFIG_OP_TIMEOUT_MS)
+        val timeoutMs = if (op == "set-provider" && payload.get("provider")?.asString == "chatgpt") 190_000 else CONFIG_OP_TIMEOUT_MS
+        return run(target, listOf("--config-op", op), payload.toString(), timeoutMs)
             ?: failure("Kvist returned an unreadable reply.")
     }
 

@@ -37,6 +37,7 @@ export const api = Object.freeze({
     sshAliases: () => get("/ssh-aliases"),
     configuration: serverId => get("/configuration", { server: serverId }),
     saveConfiguration: (serverId, value) => post("/configuration", { ...value, server_id: serverId }),
+    chatgptAuth: (serverId, value) => post("/configuration/chatgpt-auth", { ...value, server_id: serverId }),
     modelCatalog: (serverId, value) => post("/configuration/models", { ...value, server_id: serverId }),
     command: (selection, name, args) => post("/command", { ...ref(selection), name, args }),
     renewSession: async () => {

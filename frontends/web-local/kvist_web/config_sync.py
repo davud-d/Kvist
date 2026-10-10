@@ -8,7 +8,7 @@ from kernel.user_config import load_user_config, save_user_config
 
 
 _SECRET_WORDS = ("api_key", "apikey", "password", "secret", "token")
-_LOCAL_ONLY = {"web_local"}
+_LOCAL_ONLY = {"web_local", "chatgpt_oauth"}
 
 
 def _is_secret(path: tuple[str, ...]) -> bool:
@@ -27,6 +27,8 @@ def sync_preview() -> dict[str, Any]:
     config = load_user_config()
     credentials = []
     for path, value in _walk(config):
+        if path[0] in _LOCAL_ONLY:
+            continue
         if _is_secret(path):
             credentials.append(
                 {
@@ -78,6 +80,8 @@ def _set_path(target: dict[str, Any], path: tuple[str, ...], value: Any) -> None
 
 def _merge(target: dict[str, Any], source: dict[str, Any]) -> None:
     for key, value in source.items():
+        if key in _LOCAL_ONLY:
+            continue
         if isinstance(value, dict) and isinstance(target.get(key), dict):
             _merge(target[key], value)
         else:

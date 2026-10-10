@@ -142,7 +142,7 @@ export function Settings({ config, provider, role, effort, environment, busy, ru
 
       <div class="group-title">Provider</div>
       <div class="group">
-        <Row title={current?.label ?? (provider || "Not set")} hint={current && !current.has_credentials ? "API key is missing" : undefined}>
+        <Row title={current?.label ?? (provider || "Not set")} hint={current && !current.has_credentials ? (current.auth_type === "oauth" ? "Continue with ChatGPT" : "API key is missing") : undefined}>
           <button class="btn" disabled={busy} onClick={() => run("provider")}>Change</button>
         </Row>
         <Row title="Models" hint="Fast and smart">

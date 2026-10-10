@@ -51,6 +51,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Disable the live banner and use the plain terminal interface.",
     )
     parser.add_argument(
+        "--setup",
+        action="store_true",
+        help=(
+            "Open the first-run setup screen (frontends/tui/ink/setup) even when a "
+            "provider is already saved. It opens by itself when none is."
+        ),
+    )
+    parser.add_argument(
         "--frontend",
         choices=("terminal", "tui", "claude", "stdio", "stdio-multi"),
         default=None,
@@ -178,9 +186,13 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         choices=(
             "add-custom-provider",
             "delete-custom-provider",
+            "get-config",
             "set-provider",
             "list-models",
             "open-registration",
+            "chatgpt-login",
+            "chatgpt-logout",
+            "chatgpt-accounts",
             "get-api-settings",
             "update-api-settings",
             "full-reset",
@@ -430,7 +442,7 @@ def _run_list_models_op(raw: object) -> dict:
     api_key = str(raw.get("api_key", "")).strip() if isinstance(raw, dict) else ""
     if not provider:
         raise CustomProviderError("A provider id is required.")
-    if not api_key:
+    if not api_key and normalize_provider(provider) != "chatgpt":
         raise CustomProviderError("An API key is required.")
 
     normalized = normalize_provider(provider)
@@ -859,6 +871,11 @@ _CORE_ENTRY = Path(__file__).resolve().parent / "__main__.py"
 # one travels in the file named by KVIST_SWITCH_FILE, so the code stays the same
 # however many interfaces there are.
 _TUI_SWITCH_CODE = 64
+# Exit code of the setup screen's "More providers": the classic terminal has the whole catalog,
+# so the launcher carries on there without saving an interface.
+_TUI_SETUP_CLASSIC_CODE = 65
+# Exit code of a provider-only setup that saved a provider (the ACP login).
+_TUI_SETUP_DONE_CODE = 66
 # The saved/--frontend values that run the Node app; the value picks its skin.
 TUI_FRONTENDS = ("tui", "claude")
 _TUI_SAVED_NOTICE = {
@@ -868,11 +885,21 @@ _TUI_SAVED_NOTICE = {
 }
 
 
-def launch_tui(args: argparse.Namespace) -> int | None:
+def needs_setup(args: argparse.Namespace) -> bool:
+    """True when the first-run setup screen should open: asked for, or no provider is known yet."""
+    if args.setup:
+        return True
+    return not (args.provider or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider_or_none())
+
+
+def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: bool = False) -> int | None:
     """Run the Ink frontend (``frontends/tui/ink``, bundled to ``dist-ui/kvist-tui.mjs``) with this program as its core.
 
-    Returns the frontend's exit code, or None when it cannot run here so the
-    caller falls back to the classic terminal.
+    With no provider yet it runs the first-run setup screen instead of the agent. Returns the
+    frontend's exit code, or None when it cannot run here so the caller falls back to the
+    classic terminal; ``quiet`` drops the explanation, for a launch that only became a TUI
+    launch because setup was due. ``provider_only`` runs the setup screen for a provider and
+    nothing else (the ACP login): no workspace is resolved and no interface is offered.
     """
     import json
     import shutil
@@ -882,10 +909,11 @@ def launch_tui(args: argparse.Namespace) -> int | None:
         return None
     node = shutil.which("node")
     if node is None:
-        print(
-            "The Ink UI needs Node.js 22 or newer on PATH; using the classic terminal.",
-            file=sys.stderr,
-        )
+        if not quiet:
+            print(
+                "The Ink UI needs Node.js 22 or newer on PATH; using the classic terminal.",
+                file=sys.stderr,
+            )
         return None
     if not _TUI_ENTRY.is_file():
         rebuild = (
@@ -894,17 +922,12 @@ def launch_tui(args: argparse.Namespace) -> int | None:
             if getattr(sys, "frozen", False)
             else "build it with `npm install && npm run build` in frontends/tui/ink"
         )
-        print(f"The Ink UI is not built: {rebuild}. Using the classic terminal.", file=sys.stderr)
-        return None
-    if not (args.provider or os.getenv("AGENT_LLM_PROVIDER") or get_saved_provider_or_none()):
-        print(
-            "The Ink UI cannot configure a provider yet; run the classic "
-            "terminal once (`--frontend terminal`) to set one up.",
-            file=sys.stderr,
-        )
+        if not quiet:
+            print(f"The Ink UI is not built: {rebuild}. Using the classic terminal.", file=sys.stderr)
         return None
 
-    workspace = resolve_workspace_path(args.workspace)
+    # A provider-only setup has no workspace: resolving one would create the default folder.
+    workspace = Path.cwd() if provider_only else resolve_workspace_path(args.workspace)
     core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
     command = [
         node, str(_TUI_ENTRY),
@@ -913,6 +936,10 @@ def launch_tui(args: argparse.Namespace) -> int | None:
         "--approval-mode", args.approval_mode,
         "--skin", "claude" if (args.frontend or get_saved_frontend()) == "claude" else "ink",
     ]
+    if provider_only:
+        command += ["--setup", "--setup-provider-only"]
+    elif needs_setup(args):
+        command.append("--setup")
     if args.resume:
         command += ["--resume", str(args.resume) if isinstance(args.resume, str) else ""]
     if args.provider:
@@ -931,17 +958,56 @@ def launch_tui(args: argparse.Namespace) -> int | None:
             code = subprocess.call(command, env=env)
         except KeyboardInterrupt:
             return 130
+        if code == _TUI_SETUP_CLASSIC_CODE:
+            # The classic terminal works in the folder chosen on the way, if one was.
+            try:
+                folder_lines = switch_file.read_text(encoding="utf-8").split("\n")
+            except OSError:
+                folder_lines = []
+            if len(folder_lines) > 1:
+                _use_setup_folder(folder_lines[1], args)
+            return None
         if code != _TUI_SWITCH_CODE:
             return code
         return _switch_frontend(switch_file, args)
 
 
+def _acp_login(args: argparse.Namespace) -> int:
+    """``--acp --login``: the setup screen where the terminal can show it, else the plain prompts."""
+    from acp_frontend import run_login
+
+    code = launch_tui(args, quiet=True, provider_only=True)
+    if code is None:
+        return run_login()
+    if code == _TUI_SETUP_DONE_CODE:
+        print(f"Provider saved: {get_saved_provider_or_none() or '(unknown)'}", file=sys.stderr)
+        return 0
+    if code == 0:
+        print("No provider selected; nothing was changed.", file=sys.stderr)
+        return 1
+    return code
+
+
+def _use_setup_folder(raw: str, args: argparse.Namespace) -> None:
+    """Make the folder the setup screen's person chose the workspace, if it still is a folder."""
+    folder = raw.strip()
+    if folder and Path(folder).is_dir():
+        args.workspace = folder
+
+
 def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
-    """Apply the interface the Node app asked for and start it; None hands over to the classic terminal."""
+    """Apply the interface the Node app asked for and start it; None hands over to the classic terminal.
+
+    The file holds the interface on its first line and, from the setup screen, the folder to work
+    in on the second.
+    """
     try:
-        chosen = switch_file.read_text(encoding="utf-8").strip().casefold()
+        lines = switch_file.read_text(encoding="utf-8").split("\n")
     except OSError:
         return None
+    chosen = lines[0].strip().casefold()
+    if len(lines) > 1:
+        _use_setup_folder(lines[1], args)
     try:
         save_frontend(chosen)
     except ValueError:
@@ -950,6 +1016,8 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     if chosen not in TUI_FRONTENDS:
         return None
     args.frontend = chosen
+    # Setup has just saved a provider; the interface it chose is the agent itself.
+    args.setup = False
     return launch_tui(args)
 
 
@@ -1646,6 +1714,9 @@ def choose_provider(
         },
     ]
 
+    options.append({"value": "chatgpt", "label": "ChatGPT Plus/Pro",
+                    "description": "Continue with ChatGPT / Войти через ChatGPT"})
+
     # FreeFlow (beta)
     options.append({
         "value": "freeflow",
@@ -1717,6 +1788,10 @@ def change_provider_api_key(
     if ui is None:
         ui = TerminalBannerUI(console=console, verbose=verbose)
     provider = config.provider
+    if provider == "chatgpt":
+        from kernel.providers.chatgpt_auth import account_status, login
+        login(account_id=account_status()["active"] or None)
+        return True
 
     if is_custom_provider(provider):
         name = extract_custom_provider_name(provider)
@@ -3834,10 +3909,10 @@ def main() -> None:
         # ACP owns the working directory (it arrives with session/new), so this
         # path must not resolve or create a default workspace. stdout from here
         # on is the JSON-RPC stream; nothing may print to it.
-        from acp_frontend import run_acp, run_login
+        from acp_frontend import run_acp
 
         if args.login:
-            raise SystemExit(run_login())
+            raise SystemExit(_acp_login(args))
         raise SystemExit(run_acp())
 
     if args.config_info:
@@ -3885,10 +3960,26 @@ def main() -> None:
             if payload_text is None:
                 payload_text = sys.stdin.read()
             raw = _json.loads(payload_text or "null")
-            if args.config_op == "set-provider":
+            if args.config_op == "get-config":
+                payload = build_config_info()
+            elif args.config_op == "set-provider":
                 payload = _run_set_provider_op(raw)
             elif args.config_op == "list-models":
                 payload = _run_list_models_op(raw)
+            elif args.config_op == "chatgpt-login":
+                from kernel.providers.chatgpt_auth import login, account_status
+                request = raw if isinstance(raw, dict) else {}
+                account = request.get("account") or (None if request.get("new") else account_status()["active"])
+                login(account_id=account or None)
+                payload = {"ok": True, **account_status()}
+            elif args.config_op == "chatgpt-logout":
+                from kernel.providers.chatgpt_auth import sign_out
+                payload = sign_out()
+            elif args.config_op == "chatgpt-accounts":
+                from kernel.providers.chatgpt_auth import account_status, select_account
+                if (raw or {}).get("account"):
+                    select_account(raw["account"])
+                payload = {"ok": True, **account_status()}
             elif args.config_op == "open-registration":
                 payload = _run_open_registration_op(raw)
             elif args.config_op == "get-api-settings":
@@ -4073,8 +4164,10 @@ def main() -> None:
             tray_bar.install()
         except (OSError, ValueError) as error:
             print(f"Could not add the Kvist icon to the status bar: {error}", file=sys.stderr)
-    if (args.frontend or get_saved_frontend()) in TUI_FRONTENDS and not args.no_banner:
-        exit_code = launch_tui(args)
+    # An explicit --frontend terminal is respected unless setup itself was asked for.
+    first_run = args.setup or (needs_setup(args) and args.frontend != "terminal")
+    if (first_run or (args.frontend or get_saved_frontend()) in TUI_FRONTENDS) and not args.no_banner:
+        exit_code = launch_tui(args, quiet=first_run and (args.frontend or get_saved_frontend()) not in TUI_FRONTENDS)
         if exit_code is not None:
             raise SystemExit(exit_code)
 

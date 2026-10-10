@@ -26,7 +26,7 @@
   <img alt="VS Code extension" src="https://img.shields.io/badge/VS_Code_Extension-0.1.0-007ACC?style=flat-square&logo=visualstudiocode&logoColor=white">
   <img alt="Local workspace agent" src="https://img.shields.io/badge/Agent-local_workspace-6f42c1?style=flat-square&logo=robotframework&logoColor=white">
   <img alt="Four agent roles plus auto" src="https://img.shields.io/badge/Roles-coder_%7C_reader_%7C_devops_%7C_chat-8A2BE2?style=flat-square">
-  <img alt="Six built-in providers" src="https://img.shields.io/badge/LLM_providers-6_builtin-0A7EA4?style=flat-square">
+  <img alt="Six built-in providers" src="https://img.shields.io/badge/LLM_providers-7_builtin-0A7EA4?style=flat-square">
   <img alt="Seven prompts" src="https://img.shields.io/badge/System_prompts-7-5C2D91?style=flat-square">
   <img alt="NDJSON protocol" src="https://img.shields.io/badge/Protocol-NDJSON_v1-000000?style=flat-square&logo=json&logoColor=white">
   <img alt="Human in the loop" src="https://img.shields.io/badge/Safety-human--in--the--loop-2EA44F?style=flat-square">
@@ -121,7 +121,7 @@ entry, not a plugin — and gets the same agent loop, sessions, confirmations an
 `/commit-message`; what it cannot get is written down in
 [`frontends/zed/README.md`](frontends/zed/README.md).
 
-Built-in providers are OpenAI, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
+Built-in providers are OpenAI, ChatGPT Plus/Pro, Anthropic, DeepSeek, OpenRouter, OmniRoute, and
 FreeFlow LLM (beta). You can also add custom OpenAI-compatible or
 Anthropic-compatible endpoints from `/provider`.
 
@@ -220,6 +220,61 @@ kvist-web        # from a source checkout: .venv/bin/kvist-web
 through connecting a model. The directory you start it from becomes the working folder;
 `kvist-web --workspace /path/to/project` picks another. The installer adds the command
 beside `kvist`; details in [frontends/web-local/README.md](frontends/web-local/README.md).
+
+### ChatGPT Plus/Pro (browser sign-in)
+
+Select **ChatGPT Plus/Pro** with `/provider` (provider ID `chatgpt`), or select it
+in the web or desktop provider settings. **Continue with ChatGPT** opens OpenAI's
+sign-in page in your system browser. Sign in or create an account and authorize
+Kvist to use your ChatGPT plan. An eligible Plus or Pro subscription and explicit
+plan-usage permission are required; no OpenAI API key is needed.
+
+Kvist uses OpenAI's documented open-source Sign in with ChatGPT flow: dynamic
+client registration, authorization code + PKCE, a temporary callback at
+`http://127.0.0.1:<port>/auth/callback`, and verified ID tokens. The listener binds
+only to loopback and stops on success, cancellation, or after three minutes.
+Tokens are saved in the private `chatgpt_oauth` section of `~/.kvist/config.json`
+(atomic writes, `0600` on Unix). Refresh tokens rotate under a cross-process lock.
+Kvist keeps each account/workspace registration separate and does not import
+credentials from Codex or OpenCode. OAuth credentials and the host ID are excluded
+from configuration sync; authenticate separately on each computer. For a remote
+server, sign in on that computer, where its loopback callback is reachable.
+
+The provider calls `https://api.openai.com/v1/responses` with `store=false` and
+`stream=true`, including when Kvist buffers the reply. It supports streaming chat,
+images and Kvist's native tools through a namespace, plus the JSON protocol path.
+Models are loaded using the signed-in account's catalog; the offline suggestion
+is GPT-6.1 Sol. Model availability and actual access remain account-dependent.
+A reply succeeds only after `response.completed`; interrupted/incomplete streams
+and plan-limit failures are surfaced as errors.
+
+Usage counts against your ChatGPT plan or permitted credits. Plus usage limits
+are shared with other apps using the plan; this integration does not provide
+unlimited requests. Review limits, credits permissions, and connected apps at
+[ChatGPT Settings → Usage](https://chatgpt.com/settings/usage). It does not give
+Kvist access to your ChatGPT conversation history.
+
+`/change-api` starts reauthorization for this provider. The web settings also
+support selecting a saved account, adding another, cancelling sign-in, and
+signing out. Headless operations (JSON payload on stdin):
+
+```bash
+python -m kernel --config-op chatgpt-login --config-payload '{}'     # browser sign-in
+python -m kernel --config-op chatgpt-accounts --config-payload '{}'  # identities, no tokens
+# {"new":true} with chatgpt-login adds an account.
+# {"account":"<id>"} selects an existing identity with chatgpt-accounts,
+# or reauthorizes that registration with chatgpt-login.
+python -m kernel --config-op chatgpt-logout --config-payload '{}'    # revoke session
+```
+
+If remote revocation cannot be confirmed, Kvist signs out locally and tells you
+to disconnect the app in ChatGPT Settings. Install the updated dependencies before
+using this provider (`pip install -r requirements.txt`).
+
+Implementation references: [OpenAI registration and sign-in](https://developers.openai.com/siwc/token-sharing-open-source/sign-in),
+[accounts and token renewal](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions),
+[models and inference](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference),
+and [preview restrictions](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 ### AnyModel (default provider)
 

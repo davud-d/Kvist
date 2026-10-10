@@ -111,6 +111,10 @@ configured in-repo.
   Also persists the global `role_selection` and `reasoning_effort` (the
   `/effort` level on the Kvist scale `false|low|medium|high|xhigh|max`, default
   `medium`) preferences.
+  `KVIST_CONFIG_DIR=<folder>` keeps `config.json` there instead of in `~/.kvist` (`user_config.CONFIG_DIR_ENV`).
+  Use it to try a first run; **do not fake `HOME` for that**: the browser opened for the
+  registration page inherits it, so it starts a bare profile, and with no `~/.config/mimeapps.list`
+  the system's default browser silently becomes whichever `.desktop` file sorts first.
 - The `/settings-api` dialog's knobs live in the same file under `api_settings`,
   owned by `api_settings.py` (the table and its validation) with `user_config`
   only storing them: request interval, request timeout, retry count, retry
@@ -282,10 +286,10 @@ not already have, so `agent_runtime.update_progress` derives `RunState.progress`
 the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
 monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of 21 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 23 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
 git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, refuse,
-final_answer, report_to_user, offer_plan, propose_plan, end_session). The parser tolerates fenced code blocks, smart quotes, and surrounding
+final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
 enforced by `kernel/tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
@@ -374,6 +378,14 @@ call), silence in between. The conversation is not checkpointed: a resumed run s
 from the runtime prompt. A mid-run tools rejection (`is_tools_rejection`) raises
 `NativeToolsRejected`, and `_leave_native_tools` continues on the JSON protocol.
 `AGENT_NATIVE_TOOLS=0` skips the probe entirely.
+Two gateway facts about Claude through AnyModel (`cc/`): it returns a call's
+arguments object written twice (`{"ok":true}{"ok":true}`), which made the probe
+fail and every run fall back to the text protocol; `native_tools.decode_arguments`
+accepts an exact repeat and nothing else. And in the text protocol
+`parser.parse_model_response` keeps only the words before the first
+`<tool_call>`: what follows describes a result the model has not been given
+(a run once reported "file created, line replaced" beside its first `write_file`
+and never made the replace).
 
 ### LocalAgent composition pattern (important & non-obvious)
 `agent.py::LocalAgent` is assembled by binding functions from other modules as methods
@@ -419,6 +431,15 @@ this loop check is the only enforcement. The create-goal "write now" nudges and
 `_note_unchanged_run` are off in this phase, a response without calls is not accepted as
 the end (the turn ends with `propose_plan`), and native tool definitions are narrowed per
 turn by `plan_mode.tools_for_phase`. Tests: `kernel/tests/test_plan_mode.py`.
+
+**A task outlives a stop.** A message sent while a checkpoint exists goes to `_resume_turn(instruction, images)`
+instead of starting a new run: the role, plan and collected evidence stay, the stop limits restart
+(`step_budget = last_step + max_steps`), and the message is appended to `RunState.task_updates`
+(kept in the checkpoint and run log, rendered into the prompt as "User follow-ups for this active task")
+unless it is a bare "continue" (`role_router.is_bare_continuation`). Two actions work on it, run by
+`plan_mode` and allowed in every phase: `edit_plan {plan}` replaces the working plan (a draft in
+`planning` still needs `propose_plan` acceptance), and `cancel_plan {reason}` ends the turn, marks
+the task cancelled and lets `finalize_run` clear the checkpoint; edits already made are kept.
 
 ### Closing a conversation (`end_session.py`)
 `end_session` closes a session for good when the person insults the agent or people
@@ -764,6 +785,108 @@ process. The code carries no choice, so a new interface needs only an entry in
 Tests: `npm test` in `frontends/tui/ink` (the `tests/*.test.ts[x]` files use `tests/fixtures/fake-core.mjs`, never a real core).
 The bundle is built by `build.mjs` (`npm run build`), not the esbuild CLI, for two memory fixes that tests and `tsx` runs do not get: it defines `process.env.NODE_ENV` as production (React's development build keeps a `performance.measure` entry with the props diff for every render, so every streamed thought chunk stayed in memory) and it swaps Ink's unbounded `measure-text` cache for one capped at 1M characters.
 
+### First-run setup screen (`frontends/tui/ink/setup/`, same bundle, `--setup`)
+The only frontend the core has for a machine that has no provider yet: the launcher runs
+`node dist-ui/kvist-tui.mjs --setup` instead of the agent when `main.needs_setup` is true (no
+`--provider`, no `AGENT_LLM_PROVIDER`, nothing saved), or whenever `--setup` is given. An explicit
+`--frontend terminal` is respected, and without Node or the bundle (`quiet=True`) the classic
+terminal's own wizard runs as before. Plain TypeScript on a raw TTY, no React/Ink: `flow.ts` is
+a pure state machine (input and operation results in, next state and one effect out), `scene.ts`
+a pure `state → ANSI rows + hit boxes` function, `run.ts` the terminal (alternate screen, SGR
+mouse, bracketed paste, row-diff painting) and the effects. Tests: `tests/setup.test.ts`.
+- **The picture** is `backdrop/kvist-sunset-valley-squirrel-16x9.png`, embedded by
+  `backdrop/make_backdrop.py` into `setup/backdrop-data.ts` as a 1280×720 256-colour palette PNG
+  (~0.7 MB base64: the bundle must stay one self-contained file; any `--source` works). It is
+  shown whole at `FRAME_FILL` (88%) of the window inside a surround that is the same picture
+  enlarged to cover the window, blurred and darkened (`backdrop.sampleFramed`; a 16:9 source
+  needs no crop). Two ways to show it:
+  - **Image** (kitty, Ghostty; not Konsole, whose layering is unconfirmed; `KVIST_SETUP_PICTURE=cells`
+    turns it off): `picture.ts` bakes brightness, the darker middle and the panel's pane into
+    raw RGB, sent with the kitty graphics protocol (`kitty.placeRgb`, below the cell backgrounds,
+    so a highlighted row or button covers it). The cells around the panel stay empty, and the
+    image is re-sent only when brightness, size or the panel's rectangle change. The cell size in
+    pixels comes from `probe.ts`.
+  - **Cells** (everything else): quadrant glyphs, four pixels a cell with two colours chosen by
+    the best two-group split (`backdrop.sampleCells`), so a 120×36 window is 240×72 pixels.
+    Levels from `color.detectColorLevel`: truecolor, xterm-256 (nearest entry), none (`NO_COLOR`,
+    `TERM=linux`/`dumb`: no picture, panel only). Sixel and octant glyphs are not used.
+- **Motion is short and skippable**: the picture rises from black (0.3 s) and rests until 4 s
+  so it can be looked at, then dims to `DIMMED` (0.55, most detail kept) while the panel fades in
+  over 0.25 s (`run.introFrame`). A slow fade reads as a lagging computer, because an image frame
+  costs ~70 ms to make and ~2 MB to send; frames in motion are sent at half size and the last one
+  at full size. A key or click before the panel shows only brings it up; once it is visible the
+  key counts as usual.
+- **Flow**: welcome → provider (curated: AnyModel, ChatGPT, OpenAI, Anthropic, DeepSeek,
+  OpenRouter, FreeFlow; "More providers" exits 65 to the classic wizard) → key (masked, last four
+  visible; AnyModel's empty Enter opens registration) → model (only for providers without
+  defaults: `list-models` catalog, type to filter or use the typed id) → interface (Claude-style
+  first). Operations are `--config-op get-config | list-models | set-provider | open-registration`
+  with the payload on stdin; a failed `set-provider` returns to the screen it came from with the
+  core's own message. Esc goes back one step; Esc on the first screen and Ctrl+C quit with
+  nothing saved.
+- **Exit protocol**: 64 = the chosen interface is in `KVIST_SWITCH_FILE`, the launcher saves it
+  through `_switch_frontend` and starts it (provider is saved by then, so `--setup` is dropped);
+  65 = continue in the classic terminal, nothing saved; 66 = a provider-only setup saved a
+  provider; 0 = quit.
+- **Who opens it**: every terminal-hosted entry that has no first-run of its own: the classic
+  terminal, the Ink interfaces and the bare core (`main()` → `needs_setup` → `launch_tui`), and
+  `kvist --acp --login` (Zed's terminal auth) through `_acp_login`, which runs the same screen
+  with `--setup-provider-only` (no folder, no interface step, no workspace created) and falls
+  back to `run_login`'s prompts when Node or the bundle is missing. The VS Code extension, the
+  JetBrains plugin and the local web have their own first-run screens, and the Electron GUI and
+  stdio frontends have no terminal to draw in, so none of them goes through here.
+- **A wide folder is asked about once** (`flow.widthWarning`, `folders.breadthOf`): when "Get
+  started" is pressed with the home folder, the top of a disk (or the drive list), the folder of all
+  homes or Desktop/Documents/Downloads as the workspace, the `broad` step names what Kvist could
+  read and change there and offers "Choose a folder" (the first answer, so Enter is the safe one),
+  "Use it anyway" (U; remembered in `broadAccepted` for that folder) and Back. The first screen
+  also says in one line what Kvist does not do (no `.env` or SSH keys, asks before risky commands,
+  `/revert`), and in a window too short for all of it drops the time note, then the gaps, then
+  the description, never the buttons.
+- **Small things that matter**: the first screen names the working folder; the key field takes a
+  paste with quotes or `Bearer ` and Tab shows or hides it; a known prefix mismatch (Anthropic
+  `sk-ant-`, OpenRouter `sk-or-`) is a quiet warning, never a block; a failed connection prints
+  "Could not connect.", the core's own words and the next step; Esc cancels a connection in
+  progress (its late answer is ignored) and after 6 s the wait says how long it has been;
+  the last screen confirms "Connected to X." and, in a window of 28+ rows, previews the
+  highlighted interface's prompt; "Starting Kvist…" holds 450 ms so the window does not go blank
+  between interfaces; the model list shows its range (`11–18 of 41`); the terminal title is
+  set and restored; `KVIST_REDUCE_MOTION=1` skips the intro.
+- **Buttons behave like buttons**: the mouse is read in any-motion mode (1003), so a button or a
+  row lights when pointed at; a press shows it sunk (darker, bold text) and nothing happens yet;
+  the action runs on release over the same place (release elsewhere takes it back), held at
+  least 90 ms so a quick click is still seen. The pointer turns into a hand over what can be
+  pressed where the terminal speaks OSC 22 (kitty, Ghostty). Moving the pointer does not end
+  the intro; only a press does.
+- **Working folder chooser** (`setup/folders.ts` state machine, `setup/listing.ts` reads and makes
+  folders, scene in `scene.buildFolder`): the welcome screen's "Working folder" button (or F)
+  swaps the small dialog for a large glass pane, the picture showing through it, with the dialog
+  gliding to the new size in three frames. Rows are "use this folder", the parent and the
+  subfolders (files are only counted; folders with `.git` are marked); the trail above is
+  clickable, places (Home, the start folder, `/`), New folder (Ctrl+N), Hidden (Ctrl+D), typing
+  filters, Backspace/← go up, Enter opens, Tab reaches the buttons. Icons are Nerd Font glyphs
+  where the terminal ships them (kitty, Ghostty, WezTerm; `KVIST_ICONS=nerd|plain` forces it) and
+  plain Unicode elsewhere. The chosen folder travels to the launcher on the second line of
+  `KVIST_SWITCH_FILE` (`_use_setup_folder`) and becomes `--workspace` of the interface that starts.
+- **Platforms**: Linux is exercised for real (pty runs and kitty). Paths in the chooser follow
+  the path's own flavour (`folders.flavour`: `C:\\…` and UNC are Windows, the rest Unix), so both
+  readings are unit-tested on any machine. On Windows (`process.platform`) there is a level above
+  each drive's root: `..` at a root, the Drives place and `Ctrl`-less Backspace/← lead to the
+  list of drives (`DRIVES`, answered by `listing.listDrives`: letters A–Z that answer within
+  1.5 s), and a drive's row enters its root; nothing can be chosen from that list. macOS
+  Terminal.app has no SGR mouse mode, so the old `ESC [ M` reports are parsed too. Not run on
+  macOS or Windows themselves: Windows Terminal (`WT_SESSION` gives truecolor; VT input and mouse
+  are Node's and libuv's doing) and the legacy console (no `TERM`, so no picture).
+- Copy is bilingual (`setup/strings.ts`, locale from `KVIST_LANG`/`LC_ALL`/`LANG`).
+
+**First message suggestions** (`starters.ts`, `InputBox` `starters`): an empty box in either Node
+skin offers three requests chosen from what the folder holds (empty, a project by `.git` or a
+build manifest, other files; Kvist's own `.kvist`/`KVIST.md`/`KVIST-CHAT.md` do not count, as in the
+core's `current_workspace_context`). They are shown only while the session has no request and no
+earlier run left typed history (`history` is read first, so they do not flash); the arrows choose,
+Tab or Enter put the line in the box and a second Enter sends it. Not clickable: the Pointer layer
+only selects text. Copy follows `KVIST_LANG`/`LANG`.
+
 ### IDE chat panel (`frontends/ide/vscode/webview/`, shared with `frontends/ide/jetbrains/`)
 One Preact panel serves both IDEs. VS Code hosts it in a webview view
 (`frontends/ide/vscode/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
@@ -1065,7 +1188,11 @@ every shipped model to have an explicit `MODEL_INPUT_LIMITS` entry — the famil
 fallback is for ids discovered at launch, not for the catalog Kvist controls.
 
 Six core providers (`openai` / `anthropic` / `deepseek` / `freeflow` / `omniroute` /
-`openrouter`) plus a **manual tier** of 36 third-party OpenAI-compatible vendors
+`openrouter`), the OAuth provider `chatgpt` (ChatGPT Plus/Pro: browser sign-in with PKCE and a
+loopback callback, tokens in the private `chatgpt_oauth` section of `config.json`, no API key; calls
+the Responses API with `store=false`; `kernel/providers/chatgpt_auth.py` and `chatgpt_client.py`,
+`--config-op chatgpt-login|chatgpt-logout|chatgpt-accounts`, `auth_type: "oauth"` in the provider
+summary) plus a **manual tier** of 36 third-party OpenAI-compatible vendors
 (`MANUAL_OPENAI_PROVIDERS` in `llm_clients.py`: Qwen, Moonshot/Kimi, Zhipu, Z.ai,
 Xiaomi MiMo + Token Plan, MiniMax, 01.AI, StepFun, SiliconFlow, Baichuan, Qianfan,
 Hunyuan, ModelScope, Mistral, Groq, Together, Fireworks, xAI, Perplexity, Cerebras,

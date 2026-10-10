@@ -51,6 +51,7 @@ _BUILTIN_PROVIDERS = (
     OPENROUTER_PROVIDER,
     OMNIROUTE_PROVIDER,
     FREEFLOW_PROVIDER,
+    "chatgpt",
 ) + tuple(
     provider for provider in MANUAL_OPENAI_PROVIDERS if provider != ANYMODEL_PROVIDER
 )
@@ -70,7 +71,11 @@ def _builtin_summary(provider: str) -> dict[str, Any]:
     required = required_secret_keys_for_provider(normalized, tuple(resolved.values()))
     present = load_available_credentials(required)
     missing = [secret_label_for_key(key) for key in required if key not in present]
+    if normalized == "chatgpt":
+        from kernel.providers.chatgpt_auth import has_credentials
+        missing = [] if has_credentials() else ["Continue with ChatGPT / Войти через ChatGPT"]
     return {
+        "auth_type": "oauth" if normalized == "chatgpt" else "api_key",
         "id": normalized,
         "label": provider_label(normalized),
         "custom": False,

@@ -47,6 +47,7 @@ MODEL_INPUT_LIMITS: dict[str, int] = {
     # developers.openai.com/api/docs/models. The -mini/-nano tiers are handled
     # by a rule, not by entries, so a future "gpt-6-astra-mini" cannot inherit
     # its full-size sibling's limit.
+    "gpt-6.1-sol": 1_050_000 - _OPENAI_OUTPUT_RESERVE,
     "gpt-6-astra": 1_050_000 - _OPENAI_OUTPUT_RESERVE,
     "gpt-5.6-sol": 1_050_000 - _OPENAI_OUTPUT_RESERVE,
     "gpt-5.6-terra": 1_050_000 - _OPENAI_OUTPUT_RESERVE,

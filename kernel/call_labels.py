@@ -34,6 +34,8 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "report_to_user": ("готовит отчёт", "writes the report"),
     "offer_plan": ("предлагает сначала показать план", "offers to show a plan first"),
     "propose_plan": ("предлагает план", "proposes a plan"),
+    "edit_plan": ("изменяет план", "updates the plan"),
+    "cancel_plan": ("отменяет задачу", "cancels the task"),
 }
 
 _IN = {"ru": " в ", "en": " in "}

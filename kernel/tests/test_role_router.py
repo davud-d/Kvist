@@ -1130,6 +1130,24 @@ def test_resume_role_never_overrides_a_non_chat_decision():
     assert role_router.resume_role("continue", "reader", history) == "reader"
 
 
+@pytest.mark.parametrize("goal", [
+    "continue", "Please continue and finish it.", "Okay, carry on!",
+    "продолжай", "продолжи", "Давай продолжай работу.",
+    "Продолжи с места остановки", "продолжай, пожалуйста", "дальше",
+])
+def test_bare_continuation_accepts_short_resume_requests(goal):
+    assert role_router.is_bare_continuation(goal)
+
+
+@pytest.mark.parametrize("goal", [
+    "continue the essay", "continue, but do not modify files",
+    "продолжай, но сначала проверь тесты", "продолжительность работы",
+    "", "write a poem",
+])
+def test_bare_continuation_preserves_new_instructions(goal):
+    assert not role_router.is_bare_continuation(goal)
+
+
 @pytest.mark.parametrize(
     "goal",
     [

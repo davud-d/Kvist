@@ -204,6 +204,9 @@ def reasoning_request_kwargs(provider: str, level: str) -> dict[str, Any]:
     normalized_level = normalize_effort(level)
     normalized_provider = normalize_provider(provider)
 
+    if normalized_provider == "chatgpt":
+        return {"reasoning_effort": "low" if normalized_level == "false" else normalized_level}
+
     if uses_anthropic_protocol(normalized_provider):
         # Consumed by _AnthropicCompletionsNamespace; kept out of the OpenAI
         # namespace so it can never collide with a real Anthropic field.
@@ -348,6 +351,10 @@ def effort_advisory(provider: str, level: str) -> str | None:
     """
     normalized_level = normalize_effort(level)
     normalized_provider = normalize_provider(provider)
+
+    if normalized_provider == "chatgpt":
+        return ("ChatGPT: false uses low reasoning / ChatGPT: false использует low."
+                if normalized_level == "false" else None)
 
     if is_custom_provider(normalized_provider):
         return (

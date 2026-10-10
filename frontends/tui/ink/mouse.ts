@@ -5,7 +5,9 @@
 const CLICKS = "\x1b[?1000h\x1b[?1006h"
 // Also reports the pointer moving with a button held: what a drag selection needs.
 const CLICKS_AND_DRAGS = "\x1b[?1002h\x1b[?1006h"
-const OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1006l"
+// Also reports the pointer moving with no button held: what hover effects need.
+const CLICKS_AND_HOVER = "\x1b[?1003h\x1b[?1006h"
+const OFF = "\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l"
 const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"] as const
 
 let out: NodeJS.WriteStream | null = null
@@ -25,10 +27,10 @@ function onSignal(signal: NodeJS.Signals): void {
   process.kill(process.pid, signal)
 }
 
-export function enableMouse(stream: NodeJS.WriteStream, drags = false): void {
+export function enableMouse(stream: NodeJS.WriteStream, drags = false, hover = false): void {
   if (out || !stream.isTTY) return
   out = stream
-  stream.write(drags ? CLICKS_AND_DRAGS : CLICKS)
+  stream.write(hover ? CLICKS_AND_HOVER : drags ? CLICKS_AND_DRAGS : CLICKS)
   process.on("exit", release)
   for (const signal of SIGNALS) process.on(signal, onSignal)
 }

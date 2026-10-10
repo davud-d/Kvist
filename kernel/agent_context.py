@@ -300,6 +300,9 @@ def _indent_turn_text(text: str) -> str:
 
 
 def build_runtime_prompt(self, user_goal: str, step: int) -> str:
+    if self._state.task_updates:
+        user_goal += "\n\nUser follow-ups for this active task (in order; later instructions take precedence):\n"
+        user_goal += "\n\n".join(self._state.task_updates)
     text = _RUNTIME_TEXT["en"]
     response_language = (
         self._state.response_language

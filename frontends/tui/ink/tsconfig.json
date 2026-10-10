@@ -12,5 +12,5 @@
     "declaration": false,
     "sourceMap": false
   },
-  "include": ["*.ts", "*.tsx", "ui", "vendor"]
+  "include": ["*.ts", "*.tsx", "ui", "vendor", "setup"]
 }

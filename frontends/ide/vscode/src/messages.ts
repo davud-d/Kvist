@@ -5,6 +5,7 @@ export interface ProviderInfo {
     label: string;
     custom: boolean;
     has_credentials: boolean;
+    auth_type?: "oauth" | "api_key";
     requires_manual_models: boolean;
 }
 

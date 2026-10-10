@@ -26,6 +26,8 @@ ActionType = Literal[
     "report_to_user",
     "offer_plan",
     "propose_plan",
+    "edit_plan",
+    "cancel_plan",
     "end_session",
 ]
 

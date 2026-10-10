@@ -267,6 +267,135 @@ def test_local_agent_resume_returns_none_without_checkpoint(agent_factory):
     assert agent_factory().resume() is None
 
 
+@pytest.mark.parametrize("role", ["coder", "reader", "devops", "universal"])
+@pytest.mark.parametrize("continuation", ["продолжай", "Continue"])
+@pytest.mark.parametrize("stopped_by_user", [True, False])
+def test_continue_restores_checkpoint_before_routing_or_reset(
+    agent_factory, role, continuation, stopped_by_user,
+):
+    agent = agent_factory()
+    goal = "Investigate the implementation"
+    agent._state.current_agent_role = role
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "saved-model"
+    agent._state.summary = "Already inspected the implementation"
+    agent._state.approved_plan = "Inspect, then implement the remaining fix"
+    agent._state.files_read = ["implementation.py"]
+    agent._state.recent_result_details = [{"content": "previous file contents"}]
+    agent._save_checkpoint(goal, 4)
+    agent._add_to_session_history(goal, role, "Stopped", stopped_by_user=stopped_by_user)
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Continuation must not route or start a new run")
+
+    agent._choose_role = unexpected
+    agent._begin_run = unexpected
+
+    def resumed_loop(resumed_goal, start_step):
+        assert (resumed_goal, start_step) == (goal, 5)
+        assert agent._state.current_agent_role == role
+        assert agent._state.selected_action_model == "saved-model"
+        assert agent._state.selected_action_role == "smart"
+        assert agent._state.summary == "Already inspected the implementation"
+        assert agent._state.approved_plan == "Inspect, then implement the remaining fix"
+        assert agent._state.files_read == ["implementation.py"]
+        assert agent._state.recent_result_details == [{"content": "previous file contents"}]
+        return "continued"
+
+    agent._run_loop = resumed_loop
+    agent.request_cancel()
+    assert agent.run(continuation, routed_role="chat") == "continued"
+    assert not agent._cancel_event.is_set()
+    assert agent._state.task_updates == []
+
+
+@pytest.mark.parametrize("case", ["no_checkpoint", "other_session"])
+def test_continue_does_not_resume_an_unrelated_task(agent_factory, case):
+    agent = agent_factory()
+    goal = "Previous task"
+    agent._save_checkpoint(goal, 4)
+    agent._add_to_session_history(goal, "coder", "Stopped", stopped_by_user=True)
+    request, role = "continue", None
+    if case == "no_checkpoint":
+        agent._clear_checkpoint()
+    elif case == "other_session":
+        agent.new_session("other")
+
+    agent._run_turn = lambda text, routed, images: (text, routed)
+    assert agent.run(request, routed_role=role) == (request, role)
+
+
+def test_clarification_survives_restart_and_role_switch(agent_factory):
+    agent = agent_factory()
+    agent._state.current_agent_role = "coder"
+    agent._state.files_read = ["implementation.py"]
+    agent._state.recent_result_details = ["Known implementation contents"]
+    agent._save_checkpoint("Fix implementation.py", 4)
+    instruction = "Continue, but do not change files yet; explain the approach."
+
+    def resumed_loop(goal, start_step):
+        assert (goal, start_step) == ("Fix implementation.py", 5)
+        assert agent._state.current_agent_role == "coder"
+        assert agent._state.task_updates == [instruction]
+        prompt = agent._build_runtime_prompt(goal, start_step)
+        assert instruction in prompt
+        assert "Known implementation contents" in prompt
+        return "Approach explained"
+
+    agent._run_loop = resumed_loop
+    assert agent.run(instruction, routed_role="universal") == "Approach explained"
+    restarted = agent_factory()
+    assert restarted._load_checkpoint() == ("Fix implementation.py", 4)
+    assert restarted._state.task_updates == [instruction]
+    assert restarted._state.files_read == ["implementation.py"]
+    assert restarted._session_history[-1]["goal"] == instruction
+
+
+def test_continue_after_crash_restores_checkpoint_without_history(agent_factory):
+    agent = agent_factory()
+    agent._save_checkpoint("Interrupted task", 2)
+    agent._run_loop = lambda goal, start_step: (goal, start_step)
+    assert agent.run("continue") == ("Interrupted task", 3)
+
+
+def test_continue_after_step_limit_gets_another_turn_without_losing_evidence(agent_factory):
+    agent = agent_factory(max_steps=5)
+    agent._state.files_read = ["client.py"]
+    agent._state.consecutive_errors = 5
+    agent._state.stagnation_count = 10
+    agent._save_checkpoint("Fix client.py", 5)
+
+    def resumed_loop(goal, start_step):
+        assert start_step == 6
+        assert agent._state.step_budget == 10
+        assert agent._state.consecutive_errors == 0
+        assert agent._state.stagnation_count == 0
+        assert agent._state.files_read == ["client.py"]
+        return "continued"
+
+    agent._run_loop = resumed_loop
+    assert agent.run("Continue") == "continued"
+
+
+def test_followup_to_starting_checkpoint_preserves_the_original_role(agent_factory):
+    agent = agent_factory()
+    agent._state.current_agent_role = "universal"
+    agent._begin_run("Original task", "original-run")
+    agent._run_loop = lambda goal, start_step: (goal, start_step, agent._state.current_agent_role)
+    assert agent.run("One clarification", routed_role="chat") == ("Original task", 1, "universal")
+    assert agent._run_id == "original-run"
+
+
+def test_continue_uses_pending_action_reconciliation(agent_factory):
+    agent = agent_factory()
+    agent._save_checkpoint("Interrupted task", 2, pending_action={"type": "run_shell"})
+    agent._reconcile_pending_action = lambda pending: None
+    agent._report_ambiguous_resume = lambda pending: "Cannot safely replay shell action"
+    agent._run_loop = lambda *args, **kwargs: pytest.fail("Ambiguous action must stop recovery")
+    assert agent.run("continue") == "Cannot safely replay shell action"
+    assert agent._peek_checkpoint() is not None
+
+
 def test_local_agent_resume_repopulates_environment_context(agent_factory):
     agent = agent_factory(persist_logs=True)
     agent._save_checkpoint("do the task", 2)

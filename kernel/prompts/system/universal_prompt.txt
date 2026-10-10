@@ -44,7 +44,7 @@ The runtime tracks the phase and the progress itself, from what your calls did. 
 
 == 3. ALLOWED ACTIONS ==
 
-refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, offer_plan, propose_plan.
+refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan.
 
 This list mirrors the tools the runtime runs. No others. No invention. No renaming. There is no finishing tool: a response without a tool call ends your turn.
 
@@ -68,6 +68,8 @@ fetch_url: {"url": "<https>", "max_chars": 12000, "extract_mode": "text"} — ma
 delegate_task: {"target_role": "coder|devops|chat", "task": "<str>", "commands": ["<str>",...]} — commands optional; use only when a sub-task clearly belongs to another role
 offer_plan: {"reason": "<str>"} — ask the person whether to show a plan before any change; see PLAN MODE
 propose_plan: {"plan": "<str>"} — plan mode only: the plan for the person's decision; see PLAN MODE
+edit_plan: {"plan": "<str>"} — explicitly revise the active plan; preserve task context and evidence
+cancel_plan: {"reason": "<str>"} — cancel the active task on the person's request; ends the turn without undoing edits
 
 No extra keys. No renamed keys. No type changes. Empty schema → empty args object.
 

@@ -66,7 +66,7 @@ def test_resolve_startup_role_never_persists_an_explicit_override(monkeypatch):
 def test_main_resolves_role_from_the_saved_preference_before_launching_the_tui(monkeypatch, tmp_path):
     captured = {}
 
-    def fake_launch_tui(args):
+    def fake_launch_tui(args, quiet=False):
         captured["role"] = args.role
         return 0
 
@@ -87,7 +87,7 @@ def test_main_resolves_role_from_the_saved_preference_before_launching_the_tui(m
 def test_main_lets_an_explicit_role_override_the_saved_preference(monkeypatch, tmp_path):
     captured = {}
 
-    def fake_launch_tui(args):
+    def fake_launch_tui(args, quiet=False):
         captured["role"] = args.role
         return 0
 
@@ -215,19 +215,70 @@ def test_launch_tui_falls_back_without_a_tty(monkeypatch, tmp_path):
     assert calls == []
 
 
-def test_launch_tui_falls_back_when_not_built_or_no_provider(monkeypatch, tmp_path, capsys):
+def test_launch_tui_falls_back_when_not_built(monkeypatch, tmp_path, capsys):
     calls = _make_tty(monkeypatch, tmp_path / "missing.js")
     assert main.launch_tui(_tui_args()) is None
     assert "npm install && npm run build" in capsys.readouterr().err
+    assert main.launch_tui(_tui_args(), quiet=True) is None
+    assert capsys.readouterr().err == ""
+    assert calls == []
 
+
+def test_launch_tui_opens_setup_when_no_provider_is_saved(monkeypatch, tmp_path):
     entry = tmp_path / "cli.js"
     entry.write_text("")
-    monkeypatch.setattr(main, "_TUI_ENTRY", entry)
+    calls = _make_tty(monkeypatch, entry)
     monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)
     monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: None)
-    assert main.launch_tui(_tui_args()) is None
-    assert "provider" in capsys.readouterr().err
-    assert calls == []
+    assert main.launch_tui(_tui_args()) == 7
+    assert "--setup" in calls[-1][0]
+
+
+def test_launch_tui_leaves_setup_out_once_a_provider_is_known(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    calls = _make_tty(monkeypatch, entry)
+    main.launch_tui(_tui_args())
+    assert "--setup" not in calls[-1][0]
+    main.launch_tui(_tui_args(setup=True))
+    assert "--setup" in calls[-1][0]
+
+
+def test_setup_asking_for_the_classic_terminal_continues_there_unsaved(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    _make_tty(monkeypatch, entry)
+    monkeypatch.setattr(subprocess, "call", lambda command, env: main._TUI_SETUP_CLASSIC_CODE)
+    assert main.launch_tui(_tui_args(setup=True)) is None
+    assert saved == []
+
+
+def test_setup_choice_is_saved_and_the_agent_starts_without_setup(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    _make_tty(monkeypatch, entry)
+    monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: None)
+    launches = []
+
+    def finish_setup_then_quit(command, env):
+        launches.append(command)
+        if len(launches) == 1:
+            Path(env["KVIST_SWITCH_FILE"]).write_text("claude\n", encoding="utf-8")
+            # Setup has saved a provider by the time it asks for the switch.
+            monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "anymodel")
+            return main._TUI_SWITCH_CODE
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", finish_setup_then_quit)
+    assert main.launch_tui(_tui_args(setup=False)) == 0
+    assert saved == ["claude"]
+    assert ["--setup" in command for command in launches] == [True, False]
+    assert launches[1][launches[1].index("--skin") + 1] == "claude"
 
 
 def test_launch_tui_hands_node_the_core_command_and_returns_its_exit_code(monkeypatch, tmp_path):
@@ -368,3 +419,102 @@ def test_launch_tui_forwards_resume(monkeypatch, tmp_path, resume):
     main.launch_tui(_tui_args(resume=resume))
     command = calls[0][0]
     assert command[command.index("--resume") + 1] == ("" if resume is True else resume)
+
+
+def test_setup_folder_choice_becomes_the_workspace(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    chosen = tmp_path / "project"
+    chosen.mkdir()
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    _make_tty(monkeypatch, entry)
+    launches = []
+
+    def finish_setup_in_a_folder(command, env):
+        launches.append(command)
+        if len(launches) == 1:
+            Path(env["KVIST_SWITCH_FILE"]).write_text(f"claude\n{chosen}\n", encoding="utf-8")
+            return main._TUI_SWITCH_CODE
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", finish_setup_in_a_folder)
+    assert main.launch_tui(_tui_args(setup=True)) == 0
+    # The interface keeps its case-folded name and the folder keeps its own spelling.
+    assert saved == ["claude"]
+    assert launches[1][launches[1].index("--workspace") + 1] == str(chosen)
+
+
+def test_setup_folder_that_is_gone_is_ignored(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    monkeypatch.setattr(main, "save_frontend", lambda value: None)
+    _make_tty(monkeypatch, entry)
+    launches = []
+
+    def choose(command, env):
+        launches.append(command)
+        if len(launches) == 1:
+            Path(env["KVIST_SWITCH_FILE"]).write_text(f"claude\n{tmp_path / 'deleted'}\n", encoding="utf-8")
+            return main._TUI_SWITCH_CODE
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", choose)
+    main.launch_tui(_tui_args(setup=True))
+    assert launches[1][launches[1].index("--workspace") + 1] == "ws"
+
+
+def test_classic_handover_keeps_the_chosen_folder(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    chosen = tmp_path / "project"
+    chosen.mkdir()
+    _make_tty(monkeypatch, entry)
+
+    def classic(command, env):
+        Path(env["KVIST_SWITCH_FILE"]).write_text(f"\n{chosen}\n", encoding="utf-8")
+        return main._TUI_SETUP_CLASSIC_CODE
+
+    monkeypatch.setattr(subprocess, "call", classic)
+    args = _tui_args(setup=True)
+    assert main.launch_tui(args) is None
+    assert args.workspace == str(chosen)
+
+
+def test_provider_only_setup_resolves_no_workspace_and_asks_for_no_interface(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    calls = _make_tty(monkeypatch, entry)
+    monkeypatch.setattr(main, "resolve_workspace_path", lambda raw: pytest.fail("a workspace was resolved"))
+    assert main.launch_tui(_tui_args(workspace=None), provider_only=True) == 7
+    command = calls[-1][0]
+    assert "--setup" in command and "--setup-provider-only" in command
+
+
+def _acp_args():
+    return main._build_cli_parser().parse_args(["--acp", "--login"])
+
+
+def _fake_login(monkeypatch, result):
+    import types
+
+    monkeypatch.setitem(sys.modules, "acp_frontend", types.SimpleNamespace(run_login=lambda: result))
+
+
+def test_acp_login_uses_the_plain_prompts_when_the_setup_screen_cannot_run(monkeypatch):
+    _fake_login(monkeypatch, 5)
+    monkeypatch.setattr(main, "launch_tui", lambda args, **kwargs: None)
+    assert main._acp_login(_acp_args()) == 5
+
+
+def test_acp_login_reports_what_the_setup_screen_did(monkeypatch, capsys):
+    _fake_login(monkeypatch, 5)
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "deepseek")
+    monkeypatch.setattr(main, "launch_tui", lambda args, **kwargs: main._TUI_SETUP_DONE_CODE)
+    assert main._acp_login(_acp_args()) == 0
+    assert "Provider saved: deepseek" in capsys.readouterr().err
+    monkeypatch.setattr(main, "launch_tui", lambda args, **kwargs: 0)
+    assert main._acp_login(_acp_args()) == 1
+    assert "nothing was changed" in capsys.readouterr().err
+    monkeypatch.setattr(main, "launch_tui", lambda args, **kwargs: 3)
+    assert main._acp_login(_acp_args()) == 3

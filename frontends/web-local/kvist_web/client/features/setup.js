@@ -2,6 +2,7 @@
 // path (account in a new tab, paste the key, it is checked at once, a model is offered, Start); another provider
 // is the second. The key lives only in its password field and in the requests to this server: it is never in a
 // URL (the field has no name, so even a native form submit could not carry it), in storage or in the DOM after Start.
+import { chatgptControls } from '/assets/features/configuration.js';
 import { api } from '/assets/utils/api.js';
 import { state, subscribe } from '/assets/state/store.js';
 import { esc } from '/assets/utils/ui.js';
@@ -13,6 +14,7 @@ const html = path => `<h2 id="setup-title" tabindex="-1">Connect a model</h2>
 <p class="setup-place">Kvist will work in <span class="setup-path">${esc(path)}</span> <button type="button" class="link-button" id="setup-folder">Choose another folder</button></p>
 <form class="setup-form" autocomplete="off" novalidate>
 <label class="setup-field" id="setup-provider-field" hidden>Provider<select id="setup-provider"></select></label>
+<div id="setup-chatgpt" hidden></div>
 <ol class="setup-steps">
 <li id="setup-register-step"><p class="setup-step">Get a key</p><button type="button" class="quiet-button setup-register" id="setup-register">Create an AnyModel account</button><p class="setup-note" id="setup-register-note" role="status" hidden></p></li>
 <li><label class="setup-step" for="setup-key" id="setup-key-label">Paste the key</label><input id="setup-key" class="setup-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your AnyModel key"><p class="setup-note" id="setup-key-note" role="status" hidden></p></li>
@@ -63,7 +65,8 @@ export function showSetup(info, serverId, { done, folder }) {
     let anymodel = true, generation = 0, checked = false;
     const provider = () => providers.find(p => p.id === (anymodel ? 'anymodel' : providerSelect.value));
     const model = () => select.closest('label').hidden || select.value === '*' ? id.value.trim() : select.value;
-    const sync = () => { start.disabled = !key.value.trim() || !model() || (!$('#setup-base-field').hidden && !$('#setup-base').value.trim()); };
+    let oauthConnected = false;
+    const sync = () => { start.disabled = !(provider().auth_type === 'oauth' ? oauthConnected : key.value.trim()) || !model() || (!$('#setup-base-field').hidden && !$('#setup-base').value.trim()); };
     const unsubscribe = subscribe(() => { if (section) $('.setup-path').textContent = state.workspace?.workspace || ''; else unsubscribe?.(); });
     function showModels(models) {
         const p = provider(), list = models.map(m => typeof m === 'string' ? { value: m } : m);
@@ -108,6 +111,18 @@ export function showSetup(info, serverId, { done, folder }) {
         key.value = '';
         id.value = '';
         note(keyNote, '');
+        const oauth = p.auth_type === 'oauth';
+        oauthConnected = p.has_credentials;
+        $('#setup-chatgpt').hidden = !oauth;
+        section.querySelector('.setup-steps').hidden = oauth;
+        if (oauth) chatgptControls($('#setup-chatgpt'), serverId, async ready => {
+            oauthConnected = ready !== false;
+            if (oauthConnected) {
+                try { const { models } = await api.modelCatalog(serverId, { provider: p.id, credentials: {} }); showModels(models); }
+                catch (error) { note(keyNote, error.message, 'error'); }
+            }
+            sync();
+        });
         $('#setup-provider-field').hidden = anymodel;
         $('#setup-register-step').hidden = !anymodel;
         section.querySelector('.setup-steps').classList.toggle('single', !anymodel);
@@ -148,7 +163,7 @@ export function showSetup(info, serverId, { done, folder }) {
         start.disabled = true;
         start.textContent = 'Saving…';
         try {
-            const saved = await api.saveConfiguration(serverId, { provider: p.id, base_url: $('#setup-base').value, models: { fast: chosen, smart: chosen }, effort: info.effort, credentials: { [p.credential_fields[0]?.id]: key.value.trim() } });
+            const saved = await api.saveConfiguration(serverId, { provider: p.id, base_url: $('#setup-base').value, models: { fast: chosen, smart: chosen }, effort: info.effort, credentials: p.auth_type === 'oauth' ? {} : { [p.credential_fields[0]?.id]: key.value.trim() } });
             key.value = '';
             hideSetup();
             done(saved);

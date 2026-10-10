@@ -54,6 +54,7 @@ from kernel.native_tools import (
     NativeTurn,
     ToolCall,
     compact_history,
+    decode_arguments,
     native_role_prompt,
 )
 from kernel.reasoning_effort import (
@@ -591,7 +592,7 @@ def _probe_native_tools(self, model: str) -> bool | None:
     if getattr(function, "name", "") != "ping":
         return False
     try:
-        arguments = json.loads(getattr(function, "arguments", "") or "{}")
+        arguments = decode_arguments(getattr(function, "arguments", ""))
     except json.JSONDecodeError:
         return False
     return isinstance(arguments, dict)

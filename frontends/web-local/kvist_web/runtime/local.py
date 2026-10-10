@@ -105,9 +105,9 @@ class LocalRuntime(Runtime):
         return self.supervisor.snapshots()
 
     def configuration(self, operation: str, payload: dict | None = None) -> dict:
-        from ..configuration import configuration_info, model_catalog, save_configuration
+        from ..configuration import configuration_info, model_catalog, save_configuration, chatgpt_authorization
 
-        handlers = {"info": lambda _: configuration_info(), "models": model_catalog, "save": save_configuration}
+        handlers = {"info": lambda _: configuration_info(), "models": model_catalog, "save": save_configuration, "chatgpt-auth": chatgpt_authorization}
         if operation not in handlers:
             raise ValueError("Unknown configuration operation.")
         return handlers[operation](payload or {})

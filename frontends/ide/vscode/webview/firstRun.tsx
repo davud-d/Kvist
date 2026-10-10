@@ -8,6 +8,7 @@ import type { ProviderInfo } from "../src/messages"
 const BLURBS: Record<string, string> = {
   anymodel: "Kvist's own default router",
   openai: "GPT-5.6 and friends",
+  chatgpt: "Use your ChatGPT Plus or Pro plan",
   anthropic: "Claude, direct from Anthropic",
   deepseek: "DeepSeek V4, strong and inexpensive",
   openrouter: "One key, many models",
@@ -53,6 +54,7 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
   // A router/gateway provider has no default model list; the id typed or picked here is
   // used for both roles (fast/smart), tuneable per role later from Settings.
   const needsModel = provider?.requires_manual_models === true
+  const oauth = provider?.auth_type === "oauth"
   const canRegister = providerId === REGISTERABLE_PROVIDER
   const models = modelList.provider === providerId ? modelList : null
 
@@ -68,7 +70,7 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
 
   function onSubmit(event: Event): void {
     event.preventDefault()
-    if (!providerId || !apiKey.trim() || (needsModel && !model.trim()) || busy) return
+    if (!providerId || (!oauth && !apiKey.trim()) || (needsModel && !model.trim()) || busy) return
     submit(providerId, apiKey.trim(), model.trim())
   }
 
@@ -106,7 +108,9 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
       ) : null}
 
       <form class="first-run-form" onSubmit={onSubmit}>
-        <input
+        {oauth ? (
+          <div class="row-hint">Sign in in your browser to use your ChatGPT plan in Kvist. Manage limits at chatgpt.com/settings/usage.</div>
+        ) : <input
           class="field"
           type="password"
           autofocus
@@ -114,7 +118,7 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
           placeholder={provider ? `${provider.label} API key` : "API key"}
           value={apiKey}
           onInput={(event) => setApiKey((event.target as HTMLInputElement).value)}
-        />
+        />}
         {needsModel ? (
           <>
             <div class="first-run-model-row">
@@ -147,8 +151,8 @@ export function FirstRun({ logoUrl, providers, busy, error, submit, modelList, o
           </>
         ) : null}
         {error ? <div class="failure">{error}</div> : null}
-        <button class="btn primary first-run-submit" type="submit" disabled={busy || !apiKey.trim() || (needsModel && !model.trim())}>
-          {busy ? "Connecting…" : "Continue"}
+        <button class="btn primary first-run-submit" type="submit" disabled={busy || (!oauth && !apiKey.trim()) || (needsModel && !model.trim())}>
+          {busy ? "Connecting…" : oauth ? "Continue with ChatGPT" : "Continue"}
         </button>
       </form>
     </div>

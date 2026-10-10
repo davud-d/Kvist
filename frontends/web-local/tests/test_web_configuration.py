@@ -217,3 +217,37 @@ def test_bridge_rejects_model_command_after_shutdown_gate(tmp_path):
     }, BRIDGE_PROTOCOL_VERSION))
     assert not response.ok
     assert 'restarting' in response.error
+
+
+def test_chatgpt_cannot_be_saved_before_browser_signin():
+    with pytest.raises(ValueError, match='Continue with ChatGPT'):
+        service.save_configuration(payload(provider='chatgpt', credentials={}, models={'fast': 'gpt-6.1-sol', 'smart': 'gpt-6.1-sol'}))
+    assert user_config.load_user_config() == {}
+
+
+def test_chatgpt_saved_credentials_never_leave_core(monkeypatch):
+    from kernel.providers import chatgpt_auth as auth
+    record = auth._token_record({'access_token': 'private-access', 'refresh_token': 'private-refresh',
+        'id_token': 'private-id', 'expires_in': 3600, 'token_type': 'Bearer', 'scope': auth.SCOPES},
+        {'client_id': 'oaiapp_test', 'subject': 'subject', 'email': 'user@example.test'})
+    user_config.save_user_config({auth.STORE_KEY: {'active': 'account', 'host_id': 'host', 'accounts': {'account': record}}})
+    monkeypatch.setattr(service.llm, 'fetch_available_models', lambda *a, **k: (['gpt-6.1-sol'], None))
+    assert service.model_catalog({'provider': 'chatgpt', 'credentials': {}}) == {'models': ['gpt-6.1-sol']}
+    info = service.save_configuration(payload(provider='chatgpt', credentials={}, models={'fast': 'gpt-6.1-sol', 'smart': 'gpt-6.1-sol'}))
+    assert not info['setup_required']
+    entry = next(p for p in info['providers'] if p['id'] == 'chatgpt')
+    assert entry['credential_fields'] == [] and entry['auth_type'] == 'oauth'
+    assert 'private-' not in json.dumps(info)
+    assert 'private-' not in json.dumps(service.chatgpt_authorization({'operation': 'status'}))
+
+
+def test_chatgpt_registration_is_never_synchronized():
+    from kvist_web.config_sync import sync_preview, build_sync_payload, apply_sync_payload
+    original = {'host_id': 'local-host', 'active': 'local', 'accounts': {'local': {'access_token': 'private-token', 'client_id': 'private-client'}}}
+    user_config.save_user_config({'chatgpt_oauth': original, 'openai_api_key': 'api-fixture'})
+    assert not any(field['id'].startswith('chatgpt_oauth') for field in sync_preview()['credentials'])
+    outgoing = build_sync_payload(['chatgpt_oauth.accounts.local.access_token'])
+    assert 'chatgpt_oauth' not in outgoing['general']
+    assert 'chatgpt_oauth' not in outgoing['secrets']
+    apply_sync_payload({'general': {'chatgpt_oauth': {'host_id': 'wrong-host'}}, 'secrets': {'chatgpt_oauth': {'access_token': 'wrong-token'}}})
+    assert user_config.load_user_config()['chatgpt_oauth'] == original

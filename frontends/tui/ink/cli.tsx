@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { render } from "ink"
+import { writeFileSync } from "node:fs"
 import path from "node:path"
 import { parseArgs } from "node:util"
 
@@ -9,9 +10,17 @@ import { kittyGraphics } from "./kitty.js"
 import { probeTerminal } from "./probe.js"
 import { Pointer } from "./pointer.js"
 import { sessionOp } from "./session.js"
+import { starterSet } from "./starters.js"
 import { routeWarningsToLog } from "./warnings.js"
 import { App } from "./ui/app.js"
 import { SKINS, applySkin } from "./ui/theme.js"
+
+// Exit codes the launcher (kernel/main.py) reads: 64 applies the interface written to
+// KVIST_SWITCH_FILE, 65 carries on in the classic terminal.
+const SETUP_SWITCH_CODE = 64
+const SETUP_CLASSIC_CODE = 65
+// A provider-only setup that saved a provider.
+const SETUP_DONE_CODE = 66
 
 const { values } = parseArgs({
   options: {
@@ -23,6 +32,10 @@ const { values } = parseArgs({
     "smart-model": { type: "string" },
     "approval-mode": { type: "string", default: "ask" },
     skin: { type: "string", default: "ink" },
+    // First-run setup instead of the agent: the launcher passes it when no provider is saved.
+    setup: { type: "boolean", default: false },
+    // With --setup: only configure a provider (the ACP login), no folder and no interface choice.
+    "setup-provider-only": { type: "boolean", default: false },
   },
 })
 
@@ -36,6 +49,30 @@ applySkin(skin)
 if (!process.stdin.isTTY || !process.stdout.isTTY) {
   console.error("kvist-tui needs an interactive terminal.")
   process.exit(2)
+}
+
+if (values.setup) {
+  const { runSetup } = await import("./setup/run.js")
+  const outcome = await runSetup({
+    command: resolveCoreCommand(),
+    workspace: path.resolve(values.workspace ?? process.cwd()),
+    scope: values["setup-provider-only"] ? "provider" : "full",
+  })
+  if (outcome.kind === "done") process.exit(SETUP_DONE_CODE)
+  if (outcome.kind === "frontend") {
+    // The launcher saves the choice and starts that interface; without one there is nobody to tell.
+    const target = process.env.KVIST_SWITCH_FILE
+    if (!target) {
+      console.log(`Setup finished. Start Kvist again to use the '${outcome.value}' interface.`)
+      process.exit(0)
+    }
+    // The interface on the first line, the folder to work in on the second.
+    writeFileSync(target, `${outcome.value}\n${outcome.workspace}\n`, "utf8")
+    process.exit(SETUP_SWITCH_CODE)
+  }
+  // The classic terminal has the full provider catalog; 0 is the person leaving.
+  if (outcome.kind === "classic" && process.env.KVIST_SWITCH_FILE) writeFileSync(process.env.KVIST_SWITCH_FILE, `\n${outcome.workspace}\n`, "utf8")
+  process.exit(outcome.kind === "classic" ? SETUP_CLASSIC_CODE : 0)
 }
 
 const workspace = path.resolve(values.workspace ?? process.cwd())
@@ -77,6 +114,7 @@ const app = render(
     approvalMode={values["approval-mode"] ?? "ask"}
     skin={skin}
     pointer={pointer}
+    starters={values.resume === undefined ? starterSet(workspace) : null}
     onSession={(name) => (lastSession = name)}
   />,
   pointer

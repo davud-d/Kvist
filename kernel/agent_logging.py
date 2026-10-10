@@ -420,6 +420,9 @@ def begin_run(self, user_goal: str, run_id: str) -> None:
         "phase": "starting",
         "step": 0,
         "pending_action": None,
+        "current_agent_role": self._state.current_agent_role,
+        "selected_action_role": self._state.selected_action_role,
+        "selected_action_model": self._state.selected_action_model,
     }
     _write_json_object(
         get_state_path(self, session),
@@ -669,6 +672,7 @@ def persist_logs(self, user_goal: str) -> None:
         "selected_action_model": self._state.selected_action_model,
         "plan_phase": self._state.plan_phase,
         "approved_plan": self._state.approved_plan,
+        "task_updates": self._state.task_updates,
         "status": self._state.run_status,
         "progress": self._state.progress,
         "summary": self._state.summary,
@@ -730,6 +734,7 @@ def save_checkpoint(
         "phase": "executing",
         "plan_phase": self._state.plan_phase,
         "approved_plan": self._state.approved_plan,
+        "task_updates": self._state.task_updates,
         # A mutating action that is about to run is recorded here BEFORE it
         # executes, so a crash in the mutation window is reconciled on resume
         # instead of blindly replayed. Cleared (None) on the post-action save.
@@ -824,6 +829,7 @@ def load_checkpoint(self) -> tuple[str, int] | None:
 
     self._state.plan_phase = str(data.get("plan_phase") or "")
     self._state.approved_plan = str(data.get("approved_plan") or "")
+    self._state.task_updates = list(data.get("task_updates") or [])
     self._state.progress = data.get("progress", 0)
     self._state.current_agent_role = str(data.get("current_agent_role") or "coder")
     self._state.task_language = str(data.get("task_language") or "")

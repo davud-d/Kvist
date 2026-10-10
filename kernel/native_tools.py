@@ -175,6 +175,17 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         {"plan": {"type": "string", "description": "Short Markdown: goal, key changes, how you will verify, assumptions."}},
         ("plan",),
     ),
+    "edit_plan": ToolSpec(
+        "Replace the active plan to incorporate the person's clarification. Keep completed work and evidence. "
+        "During plan mode the revised plan still needs propose_plan approval before writes.",
+        {"plan": {"type": "string", "description": "Revised Markdown plan, including completed and remaining work."}},
+        ("plan",),
+    ),
+    "cancel_plan": ToolSpec(
+        "Cancel the active task only when the person asks to cancel or replace it. Ends the turn; does not undo edits.",
+        {"reason": {"type": "string", "description": "Why the person cancelled the task, in their language."}},
+        ("reason",),
+    ),
     # Never in a role prompt's ALLOWED ACTIONS: the runtime adds it only where
     # end_session.available holds. Two forms share one flat schema, because a
     # oneOf is not accepted by every provider's tool validator.
@@ -312,9 +323,26 @@ def calls_from_turn(turn: NativeTurn) -> list[ToolCallRequest]:
     return [_call_request(call, number) for number, call in enumerate(turn.tool_calls, start=1)]
 
 
+def decode_arguments(raw: str) -> Any:
+    """The JSON value of a call's arguments, tolerating one gateway quirk.
+
+    AnyModel's Claude routes return the arguments object written twice
+    (``{"ok":true}{"ok":true}``). Only an exact repeat is accepted; any other
+    text after the first value is still an error.
+    """
+    text = (raw or "{}").strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as error:
+        first, end = json.JSONDecoder().raw_decode(text) if text.startswith("{") else (None, 0)
+        if end and text[end:].strip() in ("", text[:end]):
+            return first
+        raise error
+
+
 def _call_request(call: ToolCall, number: int) -> ToolCallRequest:
     try:
-        value = json.loads(call.arguments or "{}")
+        value = decode_arguments(call.arguments)
     except json.JSONDecodeError as error:
         return ToolCallRequest(
             call.call_id, call.name, None, f"Tool call {number} was not run: arguments of {call.name} are not valid JSON ({error})."

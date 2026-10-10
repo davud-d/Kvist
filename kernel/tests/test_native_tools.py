@@ -9,6 +9,7 @@ import pytest
 
 from kernel import agent_model
 from kernel.native_tools import (
+    decode_arguments,
     ACTION_TOOLS,
     ELIDED_OUTPUT,
     OPENING_NOTE,
@@ -62,6 +63,28 @@ def _native_agent(agent_factory, turns: list):
     agent.client = ScriptedClient(turns)
     agent._state.response_language = "en"
     return agent
+
+
+def test_native_plan_tools_update_then_cancel_preserving_file_edits(agent_factory):
+    agent = _native_agent(agent_factory, [
+        _response(calls=[_call("edit", "edit_plan", plan="Revised working plan")]),
+        _response(calls=[_call("cancel", "cancel_plan", reason="The person asked to cancel")]),
+    ])
+    path = agent.executor.workspace / "existing.py"
+    path.write_text("existing edits\n")
+    agent._state.files_changed = ["existing.py"]
+    agent._state.current_agent_role = "coder"
+    agent._save_checkpoint("Fix existing.py", 2)
+
+    assert agent.run("Cancel the current task", routed_role="universal") == "Task cancelled. The person asked to cancel"
+    assert agent._state.approved_plan == "Revised working plan"
+    assert agent._state.files_changed == ["existing.py"]
+    assert path.read_text() == "existing edits\n"
+    assert agent._peek_checkpoint() is None
+    requests = [r for r in agent.client.requests if r["tools"][0]["function"]["name"] != "ping"]
+    names = {t["function"]["name"] for t in requests[0]["tools"]}
+    assert {"edit_plan", "cancel_plan"} <= names
+    assert any(m.get("role") == "tool" and m.get("tool_call_id") == "edit" for m in requests[1]["messages"])
 
 
 def test_silent_thinking_counts_only_when_it_is_long_enough():
@@ -555,3 +578,12 @@ def test_text_streamed_after_a_call_began_is_kept_out_of_the_turn_content(agent_
     assert turn.text_after_calls == "Done! The page is ready."
     assert [c.call_id for c in turn.tool_calls] == ["c1"]
     assert any("after its tool call began" in note for note in notes)
+
+
+def test_decode_arguments_accepts_an_object_the_gateway_wrote_twice():
+    assert decode_arguments('{"ok":true}{"ok":true}') == {"ok": True}
+
+
+def test_decode_arguments_rejects_other_text_after_the_object():
+    with pytest.raises(json.JSONDecodeError):
+        decode_arguments('{"ok":true}{"ok":false}')

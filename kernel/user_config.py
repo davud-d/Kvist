@@ -156,11 +156,24 @@ def get_saved_style(style_type: StyleType, config_path: Path | None = None) -> s
             agent_style = value
     return agent_style if style_type == "agents" else chat_style_for(agent_style)
 
+# A folder to keep the user config in instead of ~/.kvist. It exists so a first run can be tried
+# without pretending to be someone else: replacing HOME also changes where the browser opened for
+# the registration page looks for its profile and default-browser settings.
+CONFIG_DIR_ENV = "KVIST_CONFIG_DIR"
+
+
+def _override_config_path() -> Path | None:
+    raw = os.environ.get(CONFIG_DIR_ENV, "").strip()
+    return Path(raw).expanduser() / USER_CONFIG_FILENAME if raw else None
+
+
 def get_user_config_path() -> Path:
-    return Path.home() / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME
+    return _override_config_path() or Path.home() / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME
 
 
 def _config_path_and_boundary(config_path: Path | None) -> tuple[Path, Path]:
+    if config_path is None:
+        config_path = _override_config_path()
     if config_path is None:
         boundary = Path.home().resolve(strict=True)
         return boundary / USER_CONFIG_DIRNAME / USER_CONFIG_FILENAME, boundary
@@ -490,6 +503,12 @@ def ensure_provider_credentials(
     feedback as `/change-api` already has, instead of silently dropping to
     this primitive fallback.
     """
+    if normalize_provider(provider) == "chatgpt":
+        from kernel.providers.chatgpt_auth import account_status, has_credentials, login
+        if not has_credentials(config_path):
+            login(config_path, account_id=account_status(config_path)["active"] or None)
+        set_provider_secret(LLM_PROVIDER_KEY, "chatgpt", config_path)
+        return {}
     secret_prompt = prompt_secret_fn or prompt_secret
     normalized_provider = normalize_provider(provider)
     payload = load_user_config(config_path)
@@ -619,7 +638,7 @@ def prompt_provider_choice() -> str:
         for slug, config in MANUAL_OPENAI_PROVIDERS.items()
         if slug != ANYMODEL_PROVIDER
     ]
-    options = fixed_options + manual_options
+    options = fixed_options + manual_options + [("chatgpt", "ChatGPT Plus/Pro", {"chatgpt"})]
 
     print("Select LLM provider:")
     for index, (_slug, label, _aliases) in enumerate(options, start=1):

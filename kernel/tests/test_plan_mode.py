@@ -358,6 +358,7 @@ def test_a_turn_ends_on_the_plan_when_nobody_accepts_it(tmp_path, monkeypatch):
     assert _PLAN in result and "not accepted" in result
     assert not (tmp_path / "hello.py").exists()
     assert agent._session_history[-1]["plan_outcome"] == "not_accepted"
+    assert agent._peek_checkpoint() is not None
 
 
 def test_ending_a_planning_turn_without_a_plan_is_not_accepted(tmp_path, monkeypatch):
@@ -384,3 +385,81 @@ def test_the_plan_phase_survives_a_checkpoint(tmp_path):
 
     assert agent._state.plan_phase == PLAN_APPROVED
     assert agent._state.approved_plan == _PLAN
+
+
+@pytest.mark.parametrize("phase", ["", PLAN_APPROVED, PLAN_PLANNING])
+def test_edit_plan_keeps_evidence_and_cannot_unlock_a_draft(tmp_path, phase):
+    agent = _agent(tmp_path)
+    agent._state.plan_phase = phase
+    agent._state.files_changed = ["client.py"]
+    agent._state.verification_evidence = ["pytest passed"]
+    agent._state.recent_result_details = ["Existing contents"]
+    command = make_command("edit_plan", {"plan": "Revised approach"}, plan_step="plan")
+
+    result = plan_mode.edit_plan(agent, command)
+
+    assert result.feedback["ok"]
+    assert not result.ended
+    assert agent._state.approved_plan == "Revised approach"
+    assert agent._state.plan_phase == (PLAN_PLANNING if phase == PLAN_PLANNING else PLAN_APPROVED)
+    assert agent._state.files_changed == ["client.py"]
+    assert agent._state.verification_evidence == ["pytest passed"]
+    assert agent._state.recent_result_details == ["Existing contents"]
+
+
+@pytest.mark.parametrize("wire_format", ["tagged_json", "json_object", "legacy_json"])
+def test_json_plan_tools_update_then_cancel_and_release_the_task(tmp_path, monkeypatch, wire_format):
+    import json
+
+    responses = [
+        _call("edit_plan", plan="New implementation approach"),
+        _call("cancel_plan", reason="The person asked to cancel"),
+    ]
+    if wire_format != "tagged_json":
+        objects = [json.loads(value[len("<tool_call>"):-len("</tool_call>")]) for value in responses]
+        if wire_format == "legacy_json":
+            objects = [{"actions": [{"type": value["name"], "args": value["arguments"]}]} for value in objects]
+        responses = [json.dumps(value) for value in objects]
+    agent, result, prompts = _run(tmp_path, monkeypatch, PlanUI(), responses, goal="Cancel this task")
+
+    assert "Approved plan:\nNew implementation approach" in prompts[1]
+    assert result == "Task cancelled. The person asked to cancel"
+    assert agent._state.task_cancelled
+    assert agent._peek_checkpoint() is None
+    agent._run_turn = lambda goal, role, images: "new task"
+    assert agent.run("Start another task") == "new task"
+
+
+def test_clarification_forbids_writes_without_discarding_task_context(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_NATIVE_TOOLS", "0")
+    agent = _agent(tmp_path)
+    agent._state.files_read = ["client.py"]
+    agent._state.recent_result_details = ["Existing client implementation"]
+    agent._save_checkpoint("Create hello.py", 2)
+    prompts = []
+    responses = iter([
+        _call("write_file", path="hello.py", content="too early"),
+        _call("cancel_plan", reason="The person requested cancellation"),
+    ])
+
+    def model(prompt):
+        prompts.append(prompt)
+        return next(responses)
+
+    agent._call_action_model = model
+    agent.run("Do not change files yet; explain first", routed_role="chat")
+
+    assert not (tmp_path / "hello.py").exists()
+    assert agent._state.files_read == ["client.py"]
+    assert "Existing client implementation" in prompts[0]
+    assert "Do not change files yet; explain first" in prompts[0]
+    assert "modifications are not allowed" in prompts[1]
+
+
+@pytest.mark.parametrize("name, args", [
+    ("edit_plan", {}), ("edit_plan", {"plan": " "}),
+    ("cancel_plan", {}), ("cancel_plan", {"reason": "x", "extra": True}),
+])
+def test_task_lifecycle_tools_validate_json_arguments(name, args):
+    with pytest.raises(CommandValidationError):
+        validate_action_args(name, args)

@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """Plan mode: the model offers a plan, explores read-only, the person decides.
 
-Two actions drive it. ``offer_plan`` asks whether to plan before any change;
-``propose_plan`` shows the plan and takes the person's decision. Both run on
+``offer_plan`` asks whether to plan before any change;
+``propose_plan`` shows the plan and takes the person's decision. ``edit_plan``
+revises it without losing work; ``cancel_plan`` releases the active task.
+These run on
 the agent's main thread and block on the frontend's dialog, so they share the
 step, checkpoint and journal path of every other action.
 
@@ -20,7 +22,7 @@ from kernel.protocol import AgentCommand
 
 # Roles whose runs change files; a reader or a chat reply has nothing to plan.
 PLAN_ROLES = frozenset({"coder", "devops", "universal"})
-PLAN_ACTIONS = frozenset({"offer_plan", "propose_plan"})
+PLAN_ACTIONS = frozenset({"offer_plan", "propose_plan", "edit_plan", "cancel_plan"})
 # Tools the model no longer sees while it is making the plan.
 _HIDDEN_WHILE_PLANNING = frozenset({"write_file", "append_file", "replace_in_file", "delegate_task", "offer_plan"})
 
@@ -41,6 +43,7 @@ class PlanStep:
     feedback: dict[str, Any]
     instruction: str = ""
     ended: bool = False
+    final_message: str = ""
 
 
 def can_ask(ui: Any) -> bool:
@@ -74,6 +77,8 @@ def tools_for_phase(tools: list[dict[str, Any]], agent: Any) -> list[dict[str, A
 def rejection_reason(agent: Any, command: AgentCommand) -> str:
     """Why a plan action cannot run now, or an empty string."""
     state = agent._state
+    if command.action.type in {"edit_plan", "cancel_plan"}:
+        return ""
     if command.action.type == "propose_plan":
         if state.plan_phase == PLAN_PLANNING:
             return ""
@@ -135,6 +140,24 @@ def ended_message(state: RunState, plan: str) -> str:
     if state.response_language == "ru":
         return f"{plan}\n\n_План не принят, изменения не вносились._"
     return f"{plan}\n\n_The plan was not accepted; nothing was changed._"
+
+
+def edit_plan(agent: Any, command: AgentCommand) -> PlanStep:
+    state = agent._state
+    state.approved_plan = str(command.action.args["plan"]).strip()
+    # Editing a draft cannot bypass the person's acceptance gate.
+    if state.plan_phase != PLAN_PLANNING:
+        state.plan_phase = PLAN_APPROVED
+    return PlanStep(_ok("edit_plan", {"plan": state.approved_plan, "note": "Task context and evidence preserved."}))
+
+
+def cancel_plan(agent: Any, command: AgentCommand) -> PlanStep:
+    state = agent._state
+    state.task_cancelled = True
+    state.finished_incomplete = True
+    reason = str(command.action.args["reason"]).strip()
+    message = f"Задача отменена. {reason}" if state.response_language == "ru" else f"Task cancelled. {reason}"
+    return PlanStep(_ok("cancel_plan", {"reason": reason}), ended=True, final_message=message)
 
 
 def _ok(action_type: str, data: dict[str, Any]) -> dict[str, Any]:

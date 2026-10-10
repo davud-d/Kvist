@@ -16,7 +16,7 @@ const HISTORY_LIMIT = 1000;
 // shipped default, DEFAULT_BLANK_START_PROVIDER in llm_clients.py), then config_info.py's
 // curated "built-in six". The other ~35 manual-tier vendors and custom endpoints stay
 // reachable later through Settings once the panel is actually running.
-const FIRST_RUN_PROVIDERS = ['anymodel', 'openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow'];
+const FIRST_RUN_PROVIDERS = ['anymodel', 'openai', 'anthropic', 'deepseek', 'openrouter', 'omniroute', 'freeflow', 'chatgpt'];
 
 export class KvistChatView implements vscode.WebviewViewProvider {
     static readonly viewType = 'kvist.chat';
@@ -197,7 +197,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             const child = execFile(
                 command.command,
                 [...command.prefixArgs, '--config-op', op],
-                { cwd: workspace, timeout: 30_000, maxBuffer: 8 * 1024 * 1024 },
+                { cwd: workspace, timeout: op === 'set-provider' && (payload as { provider?: string })?.provider === 'chatgpt' ? 190_000 : 30_000, maxBuffer: 8 * 1024 * 1024 },
                 (error, stdout) => {
                     try {
                         resolve(JSON.parse(stdout.trim().split('\n').at(-1) ?? '') as T);

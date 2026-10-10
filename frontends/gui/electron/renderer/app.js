@@ -760,6 +760,24 @@ function renderProviderDetail() {
     return
   }
 
+  if (summary.auth_type === "oauth") {
+    setProviderStatus(summary.has_credentials ? "Using ChatGPT plan" : "Continue with ChatGPT", summary.has_credentials ? "ok" : "warn")
+    providerDetail.append(detailLine("Uses your ChatGPT plan. Manage usage: https://chatgpt.com/settings/usage"))
+    const button = createElement("button", "quiet-button", summary.has_credentials ? "Sign out" : "Continue with ChatGPT")
+    button.type = "button"
+    button.onclick = async () => {
+      button.disabled = true
+      setProviderStatus("Waiting for ChatGPT…", "neutral")
+      try {
+        const result = await (summary.has_credentials ? window.kvist.chatgptLogout() : window.kvist.chatgptLogin())
+        configInfo = await window.kvist.configInfo()
+        renderProviderDetail()
+        if (result.message) providerDetail.append(detailLine(result.message))
+      } catch (error) { setProviderStatus(error.message, "warn"); button.disabled = false }
+    }
+    providerDetail.append(button)
+    return
+  }
   if (summary.has_credentials) setProviderStatus("API key ready", "ok")
   else setProviderStatus(`Missing ${summary.missing_keys.join(", ") || "credentials"}`, "warn")
 

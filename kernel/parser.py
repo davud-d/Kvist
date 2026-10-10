@@ -38,6 +38,8 @@ ALLOWED_ACTIONS = {
     "report_to_user",
     "offer_plan",
     "propose_plan",
+    "edit_plan",
+    "cancel_plan",
     # Offered only by an interactive frontend (end_session.available); the
     # runtime answers it as an unknown tool everywhere else.
     "end_session",
@@ -130,7 +132,7 @@ def plan_step_for_calls(names: list[str], files_changed: bool) -> str:
     kinds = set(names)
     if kinds & FINISHING_ACTIONS:
         return "done"
-    if kinds & {"offer_plan", "propose_plan"}:
+    if kinds & {"offer_plan", "propose_plan", "edit_plan", "cancel_plan"}:
         return "plan"
     if kinds & _WRITE_ACTIONS:
         return "edit"
@@ -349,12 +351,12 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
                     "'commands' must contain only non-empty strings"
                 )
 
-    elif action_type == "offer_plan":
+    elif action_type in {"offer_plan", "cancel_plan"}:
         require_keys(args, {"reason"})
         require_only_allowed_keys(args, {"reason"})
         require_str(args, "reason")
 
-    elif action_type == "propose_plan":
+    elif action_type in {"propose_plan", "edit_plan"}:
         require_keys(args, {"plan"})
         require_only_allowed_keys(args, {"plan"})
         require_str(args, "plan")
@@ -498,11 +500,10 @@ def _extract_embedded_json_object(decoder: json.JSONDecoder, text: str) -> Any:
 
 _OPEN_TAG_RE = re.compile(r"<\s*tool_call\s*>", re.IGNORECASE)
 _CLOSE_TAG_RE = re.compile(r"<\s*/\s*tool_call\s*>", re.IGNORECASE)
-# A model that wraps its tags in a markdown fence leaves the fence lines in
-# the text around them; only a fence touching a tag is removed, so a code
+# A model that wraps its tags in a markdown fence leaves the opening fence line
+# in the text before them; only a fence touching a tag is removed, so a code
 # block in the narration itself survives.
 _FENCE_BEFORE_TAG_RE = re.compile(r"```[\w+-]*[ \t]*$")
-_FENCE_AFTER_TAG_RE = re.compile(r"^```[ \t]*(?:\n|$)")
 _NAME_KEYS = ("name", "tool", "type")
 _ARGUMENT_KEYS = ("arguments", "args", "parameters", "input")
 _CALL_SHAPE = '{"name": "<tool>", "arguments": {...}}'
@@ -516,18 +517,13 @@ def parse_model_response(text: str) -> ModelResponse:
     """
     if not _OPEN_TAG_RE.search(text):
         return _whole_object_response(text) or ModelResponse(text=text.strip(), calls=[])
-    pieces: list[str] = []
     calls: list[ToolCallRequest] = []
-    position = 0
-    for start, body, end, closed in _tagged_bodies(text):
-        pieces.append(text[position:start])
-        call, trailing = _read_tagged_call(body, len(calls) + 1, closed)
-        calls.append(call)
-        if trailing:
-            pieces.append(trailing)
-        position = end
-    pieces.append(text[position:])
-    return ModelResponse(text=_join_outside_text(pieces), calls=calls)
+    # Only the words before the first call are kept: whatever follows describes
+    # a result the model has not been given, so it is a prediction ("done!").
+    opening = text[: _OPEN_TAG_RE.search(text).start()]
+    for _start, body, _end, _closed in _tagged_bodies(text):
+        calls.append(_read_tagged_call(body, len(calls) + 1))
+    return ModelResponse(text=_FENCE_BEFORE_TAG_RE.sub("", opening.rstrip(), count=1).strip(), calls=calls)
 
 
 def _tagged_bodies(text: str) -> Iterable[tuple[int, str, int, bool]]:
@@ -542,18 +538,16 @@ def _tagged_bodies(text: str) -> Iterable[tuple[int, str, int, bool]]:
             yield match.start(), text[match.end():limit], limit, False
 
 
-def _read_tagged_call(body: str, number: int, closed: bool) -> tuple[ToolCallRequest, str]:
-    """The call in one tag body, and text that followed the JSON of an unclosed tag."""
+def _read_tagged_call(body: str, number: int) -> ToolCallRequest:
+    """The call in one tag body."""
     stripped = _strip_inner_fence(body.strip())
     start = stripped.find("{")
     if start < 0:
-        return _broken_call(number, f"no JSON object inside the tag; write {_CALL_SHAPE}", stripped), ""
+        return _broken_call(number, f"no JSON object inside the tag; write {_CALL_SHAPE}", stripped)
     decoded = _decode_object(stripped[start:])
     if decoded is None:
-        return _broken_call(number, f"invalid JSON; write {_CALL_SHAPE}", stripped), ""
-    value, end = decoded
-    trailing = "" if closed or end is None else stripped[start + end:]
-    return _call_from_object(value, number), trailing
+        return _broken_call(number, f"invalid JSON; write {_CALL_SHAPE}", stripped)
+    return _call_from_object(decoded[0], number)
 
 
 def _strip_inner_fence(body: str) -> str:
@@ -621,18 +615,6 @@ def _broken_call(number: int, reason: str, raw: str = "", *, name: str = "") -> 
 
 def _new_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:12]}"
-
-
-def _join_outside_text(pieces: list[str]) -> str:
-    cleaned: list[str] = []
-    last = len(pieces) - 1
-    for index, piece in enumerate(pieces):
-        if index > 0:
-            piece = _FENCE_AFTER_TAG_RE.sub("", piece.lstrip(" \t\r\n"), count=1)
-        if index < last:
-            piece = _FENCE_BEFORE_TAG_RE.sub("", piece.rstrip(), count=1)
-        cleaned.append(piece.strip())
-    return "\n\n".join(piece for piece in cleaned if piece)
 
 
 def _whole_object_response(text: str) -> ModelResponse | None:

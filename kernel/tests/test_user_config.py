@@ -550,3 +550,25 @@ def test_custom_provider_models_persistence(tmp_path):
     info = user_config.get_custom_provider_by_name("local-gpt", path)
     assert info["models"]["fast"] == "gpt-4"
     assert info["models"]["smart"] == "gpt-4-turbo"
+
+
+def test_config_dir_override_keeps_home_untouched(tmp_path, monkeypatch):
+    home = tmp_path / "home"
+    home.mkdir()
+    elsewhere = tmp_path / "try-config"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv(user_config.CONFIG_DIR_ENV, str(elsewhere))
+
+    assert user_config.get_user_config_path() == elsewhere / "config.json"
+    assert user_config.get_saved_provider_or_none() is None
+    user_config.save_user_config({"llm_provider": "deepseek"})
+
+    assert json.loads((elsewhere / "config.json").read_text())["llm_provider"] == "deepseek"
+    assert not (home / ".kvist").exists()
+    assert user_config.get_saved_provider_or_none() == "deepseek"
+
+
+def test_without_the_override_the_config_is_in_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv(user_config.CONFIG_DIR_ENV, raising=False)
+    assert user_config.get_user_config_path() == tmp_path / ".kvist" / "config.json"

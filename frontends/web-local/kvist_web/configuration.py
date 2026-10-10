@@ -12,6 +12,7 @@ import threading
 from kernel import llm_clients as llm, user_config as config
 from kernel.anymodel_onboarding import ANYMODEL_DEFAULT_MODELS, ANYMODEL_REGISTER_URL
 from kernel.config_info import build_config_info
+from kernel.providers.chatgpt_auth import account_status
 # The manifest's own builders: the status chips need roles and reasoning levels with
 # their descriptions before any core of a session is running.
 from kernel.core_manifest import _effort_levels, _roles
@@ -42,6 +43,7 @@ def configuration_info() -> dict:
         provider=provider,
         setup_required=not selected or not selected["has_credentials"] or any(not v for v in selected["defaults"].values()),
         registration_url=ANYMODEL_REGISTER_URL,
+        chatgpt_accounts=account_status(),
         recommended_models={llm.DEFAULT_BLANK_START_PROVIDER: list(ANYMODEL_DEFAULT_MODELS)},
         model_roles=list(llm.MODEL_ROLES),
         effort=config.get_saved_reasoning_effort(),
@@ -105,7 +107,7 @@ def _verify_anymodel_key(key: str) -> None:
 def model_catalog(payload: dict) -> dict:
     entry = _provider(payload)
     credentials, supplied = _credentials(entry, payload)
-    if not entry["custom"] and not any(credentials.get(f["id"]) for f in entry["credential_fields"]):
+    if not entry["custom"] and entry.get("auth_type") != "oauth" and not any(credentials.get(f["id"]) for f in entry["credential_fields"]):
         raise ValueError("Enter an API key to load models.")
     if entry["id"] == llm.DEFAULT_BLANK_START_PROVIDER and supplied:
         _verify_anymodel_key(credentials["anymodel_api_key"])
@@ -123,6 +125,8 @@ def save_configuration(payload: dict) -> dict:
         provider = entry["id"]
         if entry["custom"] and not entry["has_credentials"]:
             raise ValueError("Configure this custom provider's credentials in Kvist first.")
+        if provider == "chatgpt" and not entry["has_credentials"]:
+            raise ValueError("Continue with ChatGPT before saving / Сначала войдите через ChatGPT.")
         models = payload.get("models")
         if not isinstance(models, dict) or set(models) != set(llm.MODEL_ROLES) or any(
             not isinstance(v, str) or not v.strip() or len(v) > 256 for v in models.values()
@@ -169,3 +173,20 @@ def save_configuration(payload: dict) -> dict:
             config.save_role_selection(role)
         config.set_provider_secret(config.LLM_PROVIDER_KEY, provider)
         return configuration_info()
+
+
+def chatgpt_authorization(payload: dict) -> dict:
+    from kernel.providers import chatgpt_auth as auth
+    operation = payload.get("operation", "status")
+    if operation == "start":
+        attempt_id, attempt = auth.start_login(account_id=payload.get("account") or None)
+        return {"ok": True, "attempt": attempt_id, "url": attempt.url}
+    if operation in {"poll", "cancel"}:
+        return auth.login_status(str(payload.get("attempt", "")), cancel=operation == "cancel")
+    if operation == "logout":
+        return auth.sign_out()
+    if operation == "select":
+        auth.select_account(str(payload.get("account", "")))
+    elif operation != "status":
+        raise ValueError("Unknown ChatGPT authorization operation.")
+    return {"ok": True, **auth.account_status()}

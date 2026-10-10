@@ -161,6 +161,10 @@ class ControllerHandler(BaseHTTPRequestHandler):
                 result = controller.add_server(body)
             elif route in {"/api/configuration", "/api/configuration/models"}:
                 result = controller.configuration(_text(body, "server_id"), "models" if route.endswith("/models") else "save", body)
+            elif route == "/api/configuration/chatgpt-auth":
+                if _text(body, "server_id") != "local":
+                    raise ValueError("Sign in on the remote computer itself; the browser callback uses its loopback address.")
+                result = controller.configuration("local", "chatgpt-auth", body)
             elif route == "/api/command":
                 result = controller.command(_text(body, "server_id"), _text(body, "workspace"),
                                             _text(body, "session"), _text(body, "name"), body.get("args", []))

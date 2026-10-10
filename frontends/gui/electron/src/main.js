@@ -137,7 +137,7 @@ function runConfigOp(op, payload) {
       stdio: ["pipe", "pipe", "pipe"],
     })
     let stdout = ""
-    const timer = setTimeout(() => child.kill("SIGKILL"), 30000)
+    const timer = setTimeout(() => child.kill("SIGKILL"), op === "chatgpt-login" ? 190000 : 30000)
     child.stdout.setEncoding("utf8")
     child.stdout.on("data", (chunk) => { stdout += chunk })
     child.on("error", () => {
@@ -296,6 +296,15 @@ function registerIpc() {
   ipcMain.handle("kvist:delete-custom-provider", async (_event, payload) => {
     if (runner) throw new Error("Finish or interrupt the current task first.")
     return runConfigOp("delete-custom-provider", payload)
+  })
+
+  ipcMain.handle("kvist:chatgpt-login", async () => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runConfigOp("chatgpt-login", {})
+  })
+  ipcMain.handle("kvist:chatgpt-logout", async () => {
+    if (runner) throw new Error("Finish or interrupt the current task first.")
+    return runConfigOp("chatgpt-logout", {})
   })
 
   ipcMain.handle("kvist:changes", () => runJournalOp("changes"))

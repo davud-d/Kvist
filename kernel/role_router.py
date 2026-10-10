@@ -149,6 +149,22 @@ _CONTINUATION_RE = re.compile(
 )
 
 
+_BARE_CONTINUATION_RE = re.compile(
+    r"\s*(?:(?:please|pls|ok|okay|ну|давай|пожалуйста)[,.]?\s+)*"
+    r"(?:continue(?:\s+and\s+finish\s+it)?|carry\s+on|go\s+on|keep\s+going"
+    r"|resume|finish(?:\s+(?:it|this|the\s+rest))?"
+    r"|продолж(?:ай|и|айте|ить)?(?:\s+(?:работу|задачу|с\s+места\s+остановки))?"
+    r"|доделай|заверши|дальше)"
+    r"(?:\s*,?\s*(?:please|пожалуйста))?\s*[.!?…]*\s*",
+    re.IGNORECASE,
+)
+
+
+def is_bare_continuation(user_goal: str) -> bool:
+    """Resume only an unqualified continuation, never discard new instructions."""
+    return _BARE_CONTINUATION_RE.fullmatch(user_goal) is not None
+
+
 def resume_role(user_goal: str, routed_role: str, session_history: list[dict]) -> str:
     """A bare "continue" after a stopped run belongs to that run's role.
 

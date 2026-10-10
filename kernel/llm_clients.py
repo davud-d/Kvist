@@ -21,6 +21,7 @@ from kernel.redaction import redact_text
 
 # Provider names.
 OPENAI_PROVIDER = "openai"
+CHATGPT_PROVIDER = "chatgpt"
 FREEFLOW_PROVIDER = "freeflow"
 OMNIROUTE_PROVIDER = "omniroute"
 OPENROUTER_PROVIDER = "openrouter"
@@ -315,7 +316,7 @@ MANUAL_MODEL_PROVIDERS: frozenset[str] = frozenset(MANUAL_OPENAI_PROVIDERS)
 # the manual tail to keep the tuple free of duplicates.
 SUPPORTED_LLM_PROVIDERS = (
     ANYMODEL_PROVIDER, OPENAI_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
-    FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER,
+    FREEFLOW_PROVIDER, OMNIROUTE_PROVIDER, OPENROUTER_PROVIDER, CHATGPT_PROVIDER,
 ) + tuple(
     provider for provider in MANUAL_OPENAI_PROVIDERS if provider != ANYMODEL_PROVIDER
 )
@@ -425,6 +426,7 @@ MODEL_ROLES = ("fast", "smart")
 
 # Default models per provider.
 _MODEL_DEFAULTS: dict[str, dict[str, str]] = {
+    CHATGPT_PROVIDER: {"fast": "gpt-6.1-sol", "smart": "gpt-6.1-sol"},
     OPENAI_PROVIDER: {
         # GPT-5.6 Luna across roles: the cost-optimized tier of the current
         # generation. Cheaper than the GPT-5.4 mini it replaces ($0.20/$1.20
@@ -457,6 +459,7 @@ _MODEL_ENV_KEYS = {
 
 # Model options presented to the user when selecting models.
 _MODEL_OPTIONS: dict[str, list[dict[str, str]]] = {
+    CHATGPT_PROVIDER: [{"value": "gpt-6.1-sol", "label": "GPT-6.1 Sol"}],
     OPENAI_PROVIDER: [
         # Current OpenAI catalog (developers.openai.com/api/docs/models).
         # The GPT-5.6 generation replaced the full/mini/nano split with named
@@ -757,6 +760,8 @@ def normalize_provider(provider: str | None) -> str:
     candidate = str(provider or "").strip().lower()
     if candidate in SUPPORTED_LLM_PROVIDERS:
         return candidate
+    if candidate in {"chatgpt plus/pro", "chatgpt-plus-pro"}:
+        return CHATGPT_PROVIDER
     # OmniRoute aliases
     if candidate in {"omni", "or", "9router"}:
         return OMNIROUTE_PROVIDER
@@ -781,6 +786,8 @@ def normalize_provider(provider: str | None) -> str:
 def provider_label(provider: str) -> str:
     """Return a human‑friendly label for a provider."""
     normalized = normalize_provider(provider)
+    if normalized == CHATGPT_PROVIDER:
+        return "ChatGPT Plus/Pro"
     if normalized == FREEFLOW_PROVIDER:
         return "FreeFlow LLM"
     if normalized == OMNIROUTE_PROVIDER:
@@ -894,7 +901,7 @@ def is_valid_omniroute_model_id(model: str) -> bool:
 def is_model_supported_by_provider(provider: str, model: str) -> bool:
     """Check whether the provider supports the given model."""
     normalized_provider = normalize_provider(provider)
-    if normalized_provider == OPENAI_PROVIDER:
+    if normalized_provider in (OPENAI_PROVIDER, CHATGPT_PROVIDER):
         return True
     if normalized_provider == ANTHROPIC_PROVIDER:
         return True
@@ -1134,6 +1141,12 @@ def fetch_available_models(
     caller can degrade gracefully to configured/static models.
     """
     normalized_provider = normalize_provider(provider)
+    if normalized_provider == CHATGPT_PROVIDER:
+        from kernel.providers.chatgpt_client import fetch_models
+        try:
+            return fetch_models(), None
+        except RuntimeError as error:
+            return [], str(error)
     endpoints = _discovery_endpoints(normalized_provider, credentials)
     if not endpoints:
         return [], None
@@ -1248,6 +1261,8 @@ def fallback_models_for_provider(provider: str) -> tuple[str, ...]:
     normalized_provider = normalize_provider(provider)
     if normalized_provider == OPENAI_PROVIDER:
         return _OPENAI_GENERIC_FALLBACKS
+    if normalized_provider == CHATGPT_PROVIDER:
+        return ()
     if normalized_provider == ANTHROPIC_PROVIDER:
         return ()
     if normalized_provider == DEEPSEEK_PROVIDER:
@@ -1322,6 +1337,7 @@ def provider_supports_streaming(provider: str) -> bool:
         info = get_custom_provider_by_name(extract_custom_provider_name(normalized))
         return bool(info.get("streaming", False)) if info else False
     return normalized in (
+        CHATGPT_PROVIDER,
         OPENAI_PROVIDER,
         OPENROUTER_PROVIDER,
         ANTHROPIC_PROVIDER,
@@ -1333,7 +1349,7 @@ def provider_supports_streaming(provider: str) -> bool:
 def provider_supports_json_mode(provider: str) -> bool:
     """Return True if the provider supports native JSON mode (response_format)."""
     normalized = normalize_provider(provider)
-    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, DEEPSEEK_PROVIDER)
+    return normalized in (OPENAI_PROVIDER, OPENROUTER_PROVIDER, DEEPSEEK_PROVIDER, CHATGPT_PROVIDER)
 
 
 def configured_freeflow_backends(credentials: dict[str, str]) -> tuple[str, ...]:
@@ -1451,6 +1467,8 @@ def get_model_options(
 def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[str, ...]) -> tuple[str, ...]:
     """Return which secret keys must be configured for the given provider and models."""
     normalized_provider = normalize_provider(provider)
+    if normalized_provider == CHATGPT_PROVIDER:
+        return ()
     if normalized_provider == OPENAI_PROVIDER:
         return (OPENAI_API_KEY_KEY,)
 
@@ -1510,6 +1528,9 @@ def _build_openai_client(api_key: str, base_url: str | None = None, api_timeout:
 def create_llm_client(provider: str, credentials: dict[str, str], verbose: bool = False) -> Any:
     """Instantiate an LLM client for the given provider using provided credentials."""
     normalized_provider = normalize_provider(provider)
+    if normalized_provider == CHATGPT_PROVIDER:
+        from kernel.providers.chatgpt_client import ChatGPTClient
+        return ChatGPTClient()
     if normalized_provider == OPENAI_PROVIDER:
         api_key = credentials.get(OPENAI_API_KEY_KEY, "").strip()
         if not api_key:

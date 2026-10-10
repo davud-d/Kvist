@@ -112,6 +112,7 @@ export async function showModel() {
             status.textContent = '';
             root.querySelector('#registration').hidden = p.id !== 'anymodel';
             root.querySelector('#provider-credentials').innerHTML = p.credential_fields.map(f => `<label class="credential-field">${esc(f.label)}<input type="password" data-credential="${esc(f.id)}" autocomplete="new-password" placeholder="${f.present ? 'Saved · leave blank to keep' : 'Paste API key'}"></label>`).join('');
+            if (p.auth_type === 'oauth') chatgptControls(root.querySelector('#provider-credentials'), serverId, ready => { if (ready !== false) loadModels(); });
             root.querySelector('#base-url-field').hidden = !p.can_edit_base_url;
             form.elements.base_url.value = p.can_edit_base_url ? p.base_url || '' : '';
             form.elements.base_url.placeholder = p.base_url_placeholder || '';
@@ -150,4 +151,67 @@ export async function showModel() {
     } catch (error) {
         if (root.isConnected) root.querySelector('p').textContent = `Could not load configuration. ${error.message}`;
     }
+}
+
+export function chatgptControls(root, serverId, connected = () => {}) {
+    root.innerHTML = '<p>Use your ChatGPT plan in Kvist. <a href="https://chatgpt.com/settings/usage" target="_blank" rel="noopener noreferrer">Manage usage ↗</a></p><label>ChatGPT account<select data-account><option value="">Add account…</option></select></label><button type="button" class="primary-button" data-login>Continue with ChatGPT</button><button type="button" class="quiet-button" data-logout>Sign out</button><p role="status" data-status></p>';
+    const status = root.querySelector('[data-status]'), accounts = root.querySelector('[data-account]');
+    const login = root.querySelector('[data-login]'), logout = root.querySelector('[data-logout]');
+    let attempt = '';
+    async function refresh() {
+        const info = await api.chatgptAuth(serverId, { operation: 'status' });
+        if (!login.isConnected) return;
+        accounts.innerHTML = '<option value="">Add account…</option>' + info.accounts.map(a => `<option value="${esc(a.id)}">${esc(a.email || 'ChatGPT account')}${a.connected ? '' : ' · signed out'}</option>`).join('');
+        accounts.value = info.active;
+        const ready = info.accounts.some(a => a.id === info.active && a.connected);
+        logout.hidden = !ready;
+        status.textContent = ready ? 'Using ChatGPT plan / Используется подписка ChatGPT.' : 'Continue with ChatGPT to connect / Войдите через ChatGPT.';
+        return ready;
+    }
+    accounts.onchange = async () => {
+        if (!accounts.value) return;
+        try { await api.chatgptAuth(serverId, { operation: 'select', account: accounts.value }); if (await refresh()) connected(); }
+        catch (error) { status.textContent = error.message; }
+    };
+    logout.onclick = async () => {
+        try { const result = await api.chatgptAuth(serverId, { operation: 'logout' }); await refresh(); status.textContent = result.message; connected(false); }
+        catch (error) { status.textContent = error.message; }
+    };
+    login.onclick = async () => {
+        if (attempt) {
+            try { await api.chatgptAuth(serverId, { operation: 'cancel', attempt }); }
+            catch (error) { status.textContent = error.message; }
+            return;
+        }
+        const popup = window.open('about:blank', '_blank');
+        if (popup) popup.opener = null;
+        login.disabled = accounts.disabled = logout.disabled = true;
+        try {
+            const result = await api.chatgptAuth(serverId, { operation: 'start', account: accounts.value });
+            attempt = result.attempt;
+            const url = new URL(result.url);
+            if (url.origin !== 'https://auth.openai.com') throw new Error('Unexpected sign-in address');
+            if (!popup) throw new Error('Allow popups, then try Continue with ChatGPT again.');
+            popup.location = url.href;
+            login.textContent = 'Cancel sign-in / Отменить вход';
+            login.disabled = false;
+            status.textContent = 'Finish signing in in the new tab / Завершите вход в новой вкладке.';
+            while (login.isConnected && !root.hidden && attempt) {
+                await new Promise(resolve => setTimeout(resolve, 700));
+                const current = await api.chatgptAuth(serverId, { operation: 'poll', attempt });
+                if (current.status === 'pending') continue;
+                attempt = '';
+                if (current.status !== 'connected') throw new Error(current.error);
+                await refresh();
+                connected(true);
+                break;
+            }
+        } catch (error) { status.textContent = error.message; popup?.close(); }
+        finally {
+            if (attempt) { api.chatgptAuth(serverId, { operation: 'cancel', attempt }).catch(error => { status.textContent = error.message; }); attempt = ''; }
+            login.disabled = accounts.disabled = logout.disabled = false;
+            login.textContent = 'Continue with ChatGPT';
+        }
+    };
+    refresh().then(ready => { if (ready) connected(true); }).catch(error => { status.textContent = error.message; });
 }

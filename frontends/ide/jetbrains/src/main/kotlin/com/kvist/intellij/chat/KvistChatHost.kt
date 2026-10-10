@@ -29,7 +29,7 @@ import java.util.concurrent.TimeoutException
 private const val HISTORY_LIMIT = 1000
 
 // The provider ids offered on first run, in priority order (same list as the VS Code panel).
-private val FIRST_RUN_PROVIDERS = listOf("anymodel", "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow")
+private val FIRST_RUN_PROVIDERS = listOf("anymodel", "openai", "anthropic", "deepseek", "openrouter", "omniroute", "freeflow", "chatgpt")
 
 private const val CORE_STOP_WAIT_SECONDS = 5L
 

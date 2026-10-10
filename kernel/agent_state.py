@@ -114,6 +114,9 @@ class RunState:
     # The accepted plan, kept whole: it is model-visible input, so it is also
     # in the checkpoint and the prompt.
     approved_plan: str = ""
+    # User clarifications remain part of the task across stops and resumes.
+    task_updates: list[str] = field(default_factory=list)
+    task_cancelled: bool = False
     # How plan mode ended for this turn ("declined", "not_accepted",
     # "approved", or ""); recorded in session history for the next turn.
     plan_outcome: str = ""

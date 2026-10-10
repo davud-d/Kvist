@@ -164,6 +164,8 @@ def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
     # batch of three reads: one save; the write: its write-ahead record, its
     # post-step save, and the batch save.
     assert saves[:4] == [False, True, False, False]
+    assert agent._state.finished_incomplete
+    assert agent._peek_checkpoint() is not None
 
 
 def test_refused_finish_tells_the_model_why(agent_factory):

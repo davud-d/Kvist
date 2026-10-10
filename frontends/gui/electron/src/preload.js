@@ -53,6 +53,8 @@ function subscribe(channel, listener) {
 contextBridge.exposeInMainWorld("kvist", {
   bootstrap: () => ipcRenderer.invoke("kvist:bootstrap"),
   navigation: () => ipcRenderer.invoke("kvist:navigation"),
+  chatgptLogin: () => ipcRenderer.invoke("kvist:chatgpt-login"),
+  chatgptLogout: () => ipcRenderer.invoke("kvist:chatgpt-logout"),
   configInfo: () => ipcRenderer.invoke("kvist:config-info"),
   addCustomProvider: (payload) => ipcRenderer.invoke("kvist:add-custom-provider", payload),
   deleteCustomProvider: (name) => ipcRenderer.invoke("kvist:delete-custom-provider", { name }),
