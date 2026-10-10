@@ -14,11 +14,12 @@ import {
   stepConfirm,
   stepLine,
 } from "../dialog.js"
-import { diffLines } from "../diff.js"
+import { parseUnifiedDiff } from "../diff.js"
 import { emptyEditor } from "../editor.js"
 import type { InputRequest } from "../protocol.js"
 import { Line } from "./input.js"
 import { color, currentSkin } from "./theme.js"
+import { DiffBody, SPLIT_MIN_COLUMNS } from "./tools.js"
 import {
   ARM_MS,
   ROWS_AFTER_LIST,
@@ -37,6 +38,8 @@ import { disableMouse, enableMouse } from "../mouse.js"
 
 const BODY_LINES = 14
 const LABEL_WIDTH = 34
+// Border and padding of Frame on both sides.
+const FRAME_CHROME = 4
 // Rows the dialog needs besides the option list: frame, title, search, footer, spacing.
 const CHROME_ROWS = 10
 
@@ -140,6 +143,7 @@ function introRows(request: InputRequest): number {
 // (1. Yes / 2. Yes, and don't ask again / 3. No), arrows + Enter, digits,
 // Esc = deny. Mouse: one click moves cursor, double click chooses.
 function Approval({ request, onAnswer }: Props) {
+  const { columns } = useWindowSize()
   const subject = subjectOf(request)
   const options = approvalOptions(request)
   const dialog = useDialogState(() => initialApproval(Date.now()))
@@ -245,11 +249,7 @@ function Approval({ request, onAnswer }: Props) {
           </Box>
         ) : subject?.kind === "overwrite" ? (
           <Box flexDirection="column" marginTop={1}>
-            {diffLines(subject.diff, "", 1, 10).slice(0, 20).map((row, i) => {
-              const textColor = row.kind === "add" ? "#3fc47a" : row.kind === "del" ? "#f2565b" : color.dim
-              return <Text key={i} color={textColor}>{row.text}</Text>
-            })}
-            {diffLines(subject.diff, "", 1, 10).length > 20 && <Text color={color.dim}>… {diffLines(subject.diff, "", 1, 10).length - 20} more lines</Text>}
+            <DiffBody rows={parseUnifiedDiff(subject.diff)} width={columns - FRAME_CHROME} split={columns >= SPLIT_MIN_COLUMNS} />
           </Box>
         ) : (
           <Intro request={request} />

@@ -339,8 +339,9 @@ class ExecutableBindingMixin:
             # would fail, but do not fabricate an attestation for it.
             return (binding.token, None, None, False)
         interpreter = Path(binding.resolved_path)
+        self._check_resolved_sensitive_path(interpreter, "shebang interpreter")
         in_workspace = _is_relative_to(interpreter, self.workspace)
-        if not binding.trusted_system and not in_workspace:
+        if not binding.trusted_system and not in_workspace and self._run_sandbox != "host":
             raise HardDenyError(
                 "Hard security denial: shebang interpreter is outside trusted system "
                 "roots and the workspace"
@@ -413,7 +414,7 @@ class ExecutableBindingMixin:
                     f"lookup={binding.lookup_path!r}, "
                     f"effective={binding.resolved_path!r}"
                 )
-            if not binding.lookup_in_workspace and not binding.trusted_system:
+            if not binding.lookup_in_workspace and not binding.trusted_system and self._run_sandbox != "host":
                 raise HardDenyError(
                     "Hard security denial: path-qualified executable is outside trusted system roots"
                 )

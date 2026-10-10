@@ -241,7 +241,14 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
 
     elif action_type == "run_shell":
         require_keys(args, {"command"})
-        require_only_allowed_keys(args, {"command", "cwd", "timeout"})
+        require_only_allowed_keys(args, {"command", "cwd", "timeout", "sandbox", "network", "justification"})
+        if not isinstance(args.get("sandbox", "default"), str) or args.get("sandbox", "default") not in {"default", "host"}:
+            raise CommandValidationError("'sandbox' must be 'default' or 'host'")
+        if not isinstance(args.get("network", False), bool):
+            raise CommandValidationError("'network' must be a boolean")
+        require_optional_str(args, "justification")
+        if (args.get("sandbox") == "host" or args.get("network")) and not str(args.get("justification") or "").strip():
+            raise CommandValidationError("'justification' is required for host or network access")
         command = args["command"]
         if not isinstance(command, list):
             raise CommandValidationError("'command' must be a list of strings")

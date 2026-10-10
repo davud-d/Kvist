@@ -52,9 +52,9 @@ class EventApprovalGate:
             subject={"kind": "command", "command": command_str, "reason": reason},
             remember_pattern=remember_pattern,
         )
-        if response.approved and response.remember and remember_pattern and self._workspace:
+        if response.approved is True and response.remember is True and remember_pattern and self._workspace:
             self._remembered_pattern = remember_pattern
-        return bool(response.approved)
+        return response.approved is True
 
     def commit_remembered_rule(self) -> None:
         pattern, self._remembered_pattern = self._remembered_pattern, None
@@ -63,6 +63,7 @@ class EventApprovalGate:
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         _ = question
+        self._remembered_pattern = None
         if self._mode == "deny":
             return False
         # File overwrites: diff is in body, but we want it structured for the UI.
@@ -79,9 +80,9 @@ class EventApprovalGate:
             title,
             body=body if not subject else "",
             subject=subject,
-            remember_pattern=None,  # File overwrites are never saved
+            remember_pattern=None,  # Overwrites and capability grants are never saved
         )
-        return bool(response.approved)
+        return response.approved is True
 
     def _save_allow_pattern(self, pattern: str) -> None:
         """Append the pattern to project allow rules."""

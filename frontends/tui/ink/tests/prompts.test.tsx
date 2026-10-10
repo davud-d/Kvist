@@ -31,6 +31,36 @@ function mount(fields: Partial<InputRequest>) {
   return { app, answers, frame: () => plain(app.lastFrame()) }
 }
 
+test("an overwrite approval shows removed and added lines, not the raw unified diff", () => {
+  const { app, frame } = mount({
+    kind: "confirm", title: "File overwrite", remember_pattern: null,
+    subject: { kind: "overwrite", path: "config.py", diff: "--- a/config.py\n+++ b/config.py\n@@ -1,3 +1,3 @@\n import os\n-DEBUG = False\n+DEBUG = True\n PORT = 8080" },
+  })
+  const out = frame()
+  assert.ok(out.includes("Overwrite config.py"))
+  assert.match(out, /−.*DEBUG = False/)
+  assert.match(out, /\+.*DEBUG = True/)
+  assert.doesNotMatch(out, /@@|\+\+\+ b\//)
+  app.unmount()
+})
+
+test("host and network confirmations show the command and never offer remembering", async () => {
+  for (const title of ["Host execution", "Network access"]) {
+    const { app, answers, frame } = mount({
+      kind: "confirm", title, remember_pattern: null,
+      body: 'Argv: ["python", "build.py"]\nDirectory: project\nReason: build',
+    })
+    assert.ok(frame().includes(title))
+    assert.match(frame(), /build.py/)
+    assert.match(frame(), /Directory: project/)
+    assert.doesNotMatch(frame(), /don't ask again/)
+    app.stdin.write("\x1b")
+    await tick()
+    assert.deepEqual(answers, [false])
+    app.unmount()
+  }
+})
+
 test("a choice dialog has a rounded frame, title, esc, search, counter and hints", () => {
   const { frame } = mount({ title: "Select Agent Role", options: roles, current_value: "coder" })
   const out = frame()

@@ -94,6 +94,28 @@ export function diffLines(oldText: string, newText: string, firstLine = 1, conte
   return rows
 }
 
+// Rows of a unified diff as the core sends it for an overwrite approval.
+// Everything before the first hunk header is file naming, and a line that is
+// not context, removal or addition (e.g. "\ No newline") is not a row.
+export function parseUnifiedDiff(text: string): DiffRow[] {
+  const rows: DiffRow[] = []
+  let oldNo = 0
+  let newNo = 0
+  let inHunk = false
+  for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
+    const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
+    if (header) {
+      oldNo = Number(header[1])
+      newNo = Number(header[2])
+      inHunk = true
+    } else if (!inHunk) continue
+    else if (line.startsWith("+")) rows.push({ kind: "add", text: line.slice(1), oldNo: null, newNo: newNo++ })
+    else if (line.startsWith("-")) rows.push({ kind: "del", text: line.slice(1), oldNo: oldNo++, newNo: null })
+    else if (line.startsWith(" ")) rows.push({ kind: "ctx", text: line.slice(1), oldNo: oldNo++, newNo: newNo++ })
+  }
+  return rows
+}
+
 // Side-by-side: a run of removals sits opposite the run of additions that
 // follows it, line for line; the shorter side is left empty.
 export function pairRows(rows: DiffRow[]): SplitRow[] {

@@ -121,8 +121,17 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         (),
     ),
     "run_shell": ToolSpec(
-        "Run one command as an argv list, never a shell string.",
-        {"command": _ARGV, "purpose": _SHELL_PURPOSE, "cwd": _CWD, "timeout": {"type": "number"}},
+        "Run one command as an argv list. Host and network access each require separate user approval for this command; give a justification when requesting either.",
+        {
+            "command": _ARGV, "purpose": _SHELL_PURPOSE, "cwd": _CWD,
+            "timeout": {"type": "number"},
+            "sandbox": {
+                "type": "string", "enum": ["default", "host"],
+                "description": "Defaults to default. Host exposes system tools/files after one-command approval; it does not grant network.",
+            },
+            "network": {"type": "boolean", "description": "Defaults to false. True requests separate one-command network approval."},
+            "justification": {"type": "string", "description": "Required for host or network access: explain why in the person's language."},
+        },
         ("command", "purpose"),
     ),
     "web_search": ToolSpec(

@@ -406,6 +406,9 @@ class SafeExecutor:
                 args["command"],
                 cwd=args.get("cwd"),
                 timeout=args.get("timeout"),
+                sandbox=args.get("sandbox", "default"),
+                network=args.get("network", False),
+                justification=args.get("justification"),
             )
 
         if action_type == "web_search":
@@ -1947,7 +1950,12 @@ class SafeExecutor:
         command: list[str],
         cwd: str | None = None,
         timeout: float | None = None,
+        sandbox: str = "default",
+        network: bool = False,
+        justification: str | None = None,
     ) -> ExecutionResult:
+        if not isinstance(network, bool):
+            raise ExecutorError("run_shell.network must be a boolean")
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             raise ExecutorError("run_shell.command must be a non-empty array of strings")
         if cwd is not None and not isinstance(cwd, str):
@@ -1973,7 +1981,10 @@ class SafeExecutor:
                 "Reading *.env files is strictly forbidden."
             )
         try:
-            result = self._terminal.run(command, cwd=cwd, timeout=timeout, role=self.active_role)
+            result = self._terminal.run(
+                command, cwd=cwd, timeout=timeout, role=self.active_role,
+                sandbox=sandbox, network=network, justification=justification,
+            )
         except TerminalError as exc:
             raise ExecutorError(f"{exc} {path_note}".strip())
 

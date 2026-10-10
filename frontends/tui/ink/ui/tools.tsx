@@ -12,7 +12,7 @@ type ToolItem = Extract<Item, { kind: "tool" }>
 const WRITE_LINES = 12
 const DIFF_ROWS = 30
 const OUTPUT_LINES = 15
-const SPLIT_MIN_COLUMNS = 100
+export const SPLIT_MIN_COLUMNS = 100
 // Body indent plus one spare column: a row painted to the very edge wraps in
 // some terminals.
 const INDENT = 2

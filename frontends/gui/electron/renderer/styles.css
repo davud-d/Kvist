@@ -2122,3 +2122,55 @@ kbd {
 .image-attachment:hover .image-remove, .image-attachment:focus-within .image-remove { opacity: 1; }
 .image-attach-button { border: 0; background: transparent; color: inherit; font-size: 22px; cursor: pointer; padding: 4px 10px; }
 @media (hover: none) { .image-attachment .image-remove { opacity: 1; } }
+
+/* Overwrite approval: removed lines left, added lines right */
+.diff-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  max-height: 260px;
+  overflow: auto;
+  margin: 10px 0 0 22px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diff-cell {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: pre;
+  color: var(--text-muted);
+}
+
+.diff-cell.add {
+  background: rgba(63, 185, 80, 0.16);
+  color: var(--text);
+}
+
+.diff-cell.remove {
+  background: rgba(255, 107, 122, 0.16);
+  color: var(--text);
+}
+
+.diff-no {
+  flex: none;
+  min-width: 3.5ch;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.diff-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-more {
+  grid-column: 1 / -1;
+  padding: 2px 12px;
+  color: var(--text-muted);
+}

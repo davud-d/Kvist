@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { diffLines, numberWidth, pairRows, toLines } from "../diff.js"
+import { diffLines, numberWidth, pairRows, parseUnifiedDiff, toLines } from "../diff.js"
 
 const shape = (rows: ReturnType<typeof diffLines>) => rows.map((r) => `${r.kind === "ctx" ? " " : r.kind === "del" ? "-" : "+"}${r.text}`)
 
@@ -92,4 +92,12 @@ test("pairRows leaves the short side empty for a pure deletion", () => {
 test("numberWidth covers the largest line number on either side", () => {
   assert.equal(numberWidth(diffLines("a", "b", 98)), 2)
   assert.equal(numberWidth(diffLines("a", "b\nc\nd", 98)), 3)
+})
+
+test("parseUnifiedDiff numbers rows from hunk headers and ignores file naming lines", () => {
+  const rows = parseUnifiedDiff("--- a/x.py\n+++ b/x.py\n@@ -2,3 +2,3 @@\n import os\n-DEBUG = False\n+DEBUG = True\n PORT = 1\n\\ No newline at end of file")
+  assert.deepEqual(
+    rows.map((r) => [r.kind, r.text, r.oldNo, r.newNo]),
+    [["ctx", "import os", 2, 2], ["del", "DEBUG = False", 3, null], ["add", "DEBUG = True", null, 3], ["ctx", "PORT = 1", 4, 4]],
+  )
 })

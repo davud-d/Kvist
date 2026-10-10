@@ -101,3 +101,37 @@ export function answerSummary(request, response) {
 
 // A denied answer gets a cross instead of a check.
 export const isDenied = summary => summary.startsWith('denied:');
+
+// Rows of the unified diff an overwrite approval carries. Lines before the first hunk header name the files.
+export function parseUnifiedDiff(text) {
+    const rows = [];
+    let oldNo = 0, newNo = 0, inHunk = false;
+    for (const line of String(text).replace(/\r\n?/g, '\n').split('\n')) {
+        const header = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+        if (header) {
+            oldNo = Number(header[1]);
+            newNo = Number(header[2]);
+            inHunk = true;
+        } else if (!inHunk) continue;
+        else if (line.startsWith('+')) rows.push({ kind: 'add', text: line.slice(1), oldNo: null, newNo: newNo++ });
+        else if (line.startsWith('-')) rows.push({ kind: 'del', text: line.slice(1), oldNo: oldNo++, newNo: null });
+        else if (line.startsWith(' ')) rows.push({ kind: 'ctx', text: line.slice(1), oldNo: oldNo++, newNo: newNo++ });
+    }
+    return rows;
+}
+
+// Side by side: a run of removals sits opposite the run of additions after it; the shorter side stays empty.
+export function pairRows(rows) {
+    const pairs = [];
+    for (let i = 0; i < rows.length;) {
+        if (rows[i].kind === 'ctx') {
+            pairs.push({ left: rows[i], right: rows[i] });
+            i++;
+            continue;
+        }
+        const dels = [], adds = [];
+        for (; i < rows.length && rows[i].kind !== 'ctx'; i++) (rows[i].kind === 'del' ? dels : adds).push(rows[i]);
+        for (let k = 0; k < Math.max(dels.length, adds.length); k++) pairs.push({ left: dels[k] ?? null, right: adds[k] ?? null });
+    }
+    return pairs;
+}

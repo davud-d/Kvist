@@ -63,6 +63,7 @@ def test_hitl_panel_renders_untrusted_argv_as_literal_text(monkeypatch):
 
     class FakeConsole:
         is_terminal = False
+        width = 80
 
         def print(self, value):
             printed.append(value)

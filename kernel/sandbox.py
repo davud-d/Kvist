@@ -22,6 +22,44 @@ class SandboxMode(Enum):
     NONE = "none"
     WORKSPACE_ONLY = "workspace_only"
     BUBBLEWRAP = "bubblewrap"
+    HOST = "host"
+
+
+def host_network_launcher(network_allowed: bool) -> str | None:
+    """Never treat lack of an OS network boundary as permission to go online."""
+    if sys.platform.startswith("linux"):
+        launcher = resolve_bubblewrap_path()
+        if launcher:
+            return launcher
+    if sys.platform == "darwin" and not network_allowed:
+        launcher = Path("/usr/bin/sandbox-exec")
+        if launcher.is_file() and _trusted_system_binary(launcher, launcher.resolve()):
+            return str(launcher)
+    if not network_allowed:
+        raise ValueError(
+            "Host execution without network is unavailable: this platform has no "
+            "supported network isolation backend. No command was started. "
+            "Network access requires a separate explicit request and user approval."
+        )
+    return None
+
+
+def _wrap_host_command(
+    command: list[str], cwd: Path, network_allowed: bool, launcher: str | None,
+) -> list[str]:
+    if not launcher:
+        if not network_allowed:
+            raise ValueError("Host execution requires an OS boundary to deny network access")
+        return command
+    if sys.platform == "darwin":
+        return [launcher, "-p", "(version 1)(allow default)(deny network*)", *command]
+    wrapped = [
+        launcher, "--die-with-parent", "--new-session", "--unshare-pid",
+        "--unshare-ipc", "--unshare-uts", "--bind", "/", "/", "--proc", "/proc",
+    ]
+    if not network_allowed:
+        wrapped.append("--unshare-net")
+    return [*wrapped, "--chdir", str(cwd), "--", *command]
 
 
 _SYSTEM_EXEC_PATH = os.pathsep.join(
@@ -334,6 +372,8 @@ def wrap_command_for_sandbox(
     enumeration the spawn-time context digest was built from; walking the
     workspace again milliseconds later cost seconds on every command.
     """
+    if mode is SandboxMode.HOST:
+        return _wrap_host_command(command, cwd, bool(network_allowed), bwrap_path)
     if mode is not SandboxMode.BUBBLEWRAP:
         return command
 

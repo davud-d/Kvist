@@ -1,4 +1,5 @@
 import { mountImageAttachments } from "./image-attachments.js"
+import { renderOverwriteDiff } from "./overwrite-diff.js"
 "use strict"
 
 const { ProtocolState } = window.KvistProtocol
@@ -1256,7 +1257,13 @@ function showInputRequest(request) {
     createElement("span", "", request.title || "Input required"),
   )
   content.append(heading)
-  if (request.body) content.append(createElement("div", "request-body", request.body))
+  const subject = request.subject
+  const diffView = subject?.kind === "overwrite" ? renderOverwriteDiff(subject.diff || "", createElement) : null
+  if (diffView) {
+    content.append(createElement("div", "request-body", subject.path ? `Overwrite ${subject.path}` : "File overwrite"), diffView)
+  } else if (request.body) {
+    content.append(createElement("div", "request-body", request.body))
+  }
   if (request.help_text) content.append(createElement("div", "request-help", request.help_text))
 
   const actions = createElement("div", "request-actions")

@@ -5,6 +5,21 @@ const test = require("node:test")
 
 const { ProtocolState } = require("../src/protocol-state")
 
+test("host and network approvals keep their details and independent answers", () => {
+  const protocol = new ProtocolState()
+  protocol.consume({ type: "hello", protocol_version: 1 })
+  for (const [requestId, title, approved] of [["host", "Host execution", true], ["network", "Network access", false]]) {
+    const event = {
+      type: "input_request", request_id: requestId, kind: "confirm", title,
+      body: 'Argv: ["python", "build.py"]\nDirectory: project\nReason: build',
+      remember_pattern: null,
+    }
+    assert.deepEqual(protocol.consume(event), { kind: "input_request", event })
+    assert.deepEqual(protocol.createResponse(requestId, approved), { request_id: requestId, approved })
+    assert.throws(() => protocol.createResponse(requestId, true), /no longer pending/)
+  }
+})
+
 test("requires hello as the first event", () => {
   const protocol = new ProtocolState()
   const result = protocol.consume({ type: "status" })

@@ -94,7 +94,7 @@ interface CodeLine {
   kind: "ctx" | "add" | "del" | "plain"
 }
 
-function CodeBlock({ lines, more }: { lines: CodeLine[]; more: number }) {
+export function CodeBlock({ lines, more }: { lines: CodeLine[]; more: number }) {
   const width = String(Math.max(1, ...lines.map((line) => line.no ?? 0))).length
   return (
     <div class="code" style={{ "--nw": `${width}ch` }}>
@@ -116,7 +116,7 @@ function fileLines(content: string, first: number, sign: string, kind: CodeLine[
   return { lines: shown.map((line, i) => ({ no: first + i, sign, text: line, kind })), more: all.length - shown.length }
 }
 
-function diffRows(rows: DiffRow[]): { lines: CodeLine[]; more: number } {
+export function diffRows(rows: DiffRow[]): { lines: CodeLine[]; more: number } {
   const shown = rows.slice(0, DIFF_ROWS)
   const lines = shown.map((row): CodeLine =>
     row.kind === "ctx" ? { no: row.newNo, sign: " ", text: row.text, kind: "ctx" }

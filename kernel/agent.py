@@ -135,7 +135,6 @@ from kernel.system_context import (
     current_time_context,
     identity_fact,
 )
-from kernel.sandbox import sandbox_network_allowed
 from kernel.self_info import ancestor_chain, describe_host, detect_host
 from kernel.session_events import JournalingUI, SessionJournal
 from kernel.session_titler import generate_session_title
@@ -547,7 +546,7 @@ class LocalAgent:
         self._state.system_git = self.executor.git_context_summary() or ""
         self._state.system_workspace = current_workspace_context(self.executor.workspace)
         self._state.system_sandbox = current_sandbox_context(
-            self.executor.sandbox_mode, sandbox_network_allowed()
+            self.executor.sandbox_mode, False
         )
         chain = ancestor_chain()
         self._state.system_host = describe_host(chain, detect_host(chain))

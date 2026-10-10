@@ -892,6 +892,25 @@ class RecordingClient:
         return schema.RequestPermissionResponse(outcome=self.outcomes.pop(0))
 
 
+def test_capability_approval_shows_command_and_scope_without_remember():
+    client = RecordingClient([
+        schema.AllowedOutcome(outcome="selected", option_id="allow-once"),
+        schema.AllowedOutcome(outcome="selected", option_id="reject-once"),
+    ])
+    bridge = AcpInputBridge(client, "s1", None)
+    for index, title in enumerate(("Host execution", "Network access")):
+        body = 'Argv: ["python", "build.py"]\nDirectory: project\nReason: build the project'
+        pending = bridge.describe(_request(title=title, body=body, request_id=str(index)))
+        answered = {}
+        run(bridge.handle(pending, lambda **kw: answered.update(kw)))
+        _, tool_call, options = client.calls[-1]
+        assert tool_call.title == title
+        assert tool_call.content[0].content.text == body
+        assert [option.kind for option in options] == ["allow_once", "reject_once"]
+        assert answered["approved"] is (index == 0)
+        assert answered["remember"] is False
+
+
 def test_allow_once_approves_without_saving():
     client = RecordingClient(
         [schema.AllowedOutcome(outcome="selected", option_id="allow-once")]
@@ -1408,3 +1427,28 @@ def test_new_session_keeps_the_active_sessions_history_out_of_the_model(tmp_path
 
     assert client.requests
     assert "ALPHA-MARKER" not in json.dumps(client.requests, default=str)
+
+
+def test_overwrite_approval_carries_a_before_after_diff_for_zed():
+    client = RecordingClient(
+        [schema.AllowedOutcome(outcome="selected", option_id="reject-once")]
+    )
+    bridge = AcpInputBridge(client, "s1", None)
+    diff = "--- a/c.py\n+++ b/c.py\n@@ -1,2 +1,2 @@\n import os\n-DEBUG = False\n+DEBUG = True"
+    pending = bridge.describe(
+        _request(
+            title="File overwrite",
+            body="The agent wants to overwrite c.py:\n\n" + diff,
+            subject={"kind": "overwrite", "path": "c.py", "diff": diff},
+        )
+    )
+
+    run(bridge.handle(pending, lambda **kw: None))
+
+    _, tool_call, _ = client.calls[-1]
+    block = tool_call.content[0]
+    assert (block.path, block.old_text, block.new_text) == (
+        "c.py",
+        "import os\nDEBUG = False",
+        "import os\nDEBUG = True",
+    )

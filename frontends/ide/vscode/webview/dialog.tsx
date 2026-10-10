@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "preact/hooks"
 
 import { approvalOptions, subjectOf } from "../../../tui/ink/approval"
+import { parseUnifiedDiff } from "../../../tui/ink/diff"
 import type { InputOption, InputRequest } from "../../../tui/ink/protocol"
+import { CodeBlock, diffRows } from "./transcript"
 
 export type Answer = (answer: boolean | string | null, remember?: boolean) => void
 
@@ -88,6 +90,14 @@ function TextDialog({ request, answer }: { request: InputRequest; answer: Answer
   )
 }
 
+// Removed lines on red and added lines on green, as in the transcript's edit cards.
+function OverwriteDiff({ diff }: { diff: string }) {
+  const rows = parseUnifiedDiff(diff)
+  if (rows.length === 0) return <pre class="output">{diff}</pre>
+  const { lines, more } = diffRows(rows)
+  return <CodeBlock lines={lines} more={more} />
+}
+
 function Approval({ request, answer }: { request: InputRequest; answer: Answer }) {
   const subject = subjectOf(request)
   return (
@@ -101,7 +111,7 @@ function Approval({ request, answer }: { request: InputRequest; answer: Answer }
       {subject?.kind === "overwrite" ? (
         <>
           <div class="target">{subject.path}</div>
-          {subject.diff ? <pre class="output">{subject.diff}</pre> : null}
+          {subject.diff ? <OverwriteDiff diff={subject.diff} /> : null}
         </>
       ) : null}
       {subject === null && request.body ? <pre class="output">{request.body}</pre> : null}

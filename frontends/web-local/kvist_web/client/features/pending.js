@@ -1,9 +1,28 @@
 import { el } from '/assets/utils/ui.js';
-import { choiceOptions } from '/assets/features/format.js';
+import { choiceOptions, pairRows, parseUnifiedDiff } from '/assets/features/format.js';
+
+const DIFF_PAIRS = 30;
 
 // The panel of an unanswered input_request, pinned above the input field: a heading, the text, the subject
 // of the request and the controls of its kind. Tab goes through the controls in DOM order, then on to the
 // composer. All request text goes in through textContent.
+
+// Removed lines on the left, added ones on the right; text goes in through textContent.
+function diffSplit(rows) {
+    const pairs = pairRows(rows), grid = el('div', 'diff-split');
+    const cell = (row, side) => {
+        const kind = !row ? 'empty' : row.kind === 'del' ? 'remove' : row.kind === 'add' ? 'add' : 'ctx';
+        const node = el('div', `diff-cell ${kind}`);
+        if (row) {
+            const no = side === 'left' ? row.oldNo : row.newNo;
+            node.append(el('span', 'diff-no', no == null ? '' : String(no)), el('span', 'diff-text', row.text || ' '));
+        }
+        return node;
+    };
+    for (const pair of pairs.slice(0, DIFF_PAIRS)) grid.append(cell(pair.left, 'left'), cell(pair.right, 'right'));
+    if (pairs.length > DIFF_PAIRS) grid.append(el('div', 'diff-more', `… ${pairs.length - DIFF_PAIRS} more lines`));
+    return grid;
+}
 
 // The command or the file a request is about, opened so the person can read it before answering. The
 // reason of a command goes under its block as a line of text, not into the block.
@@ -19,6 +38,11 @@ function subjectDetails(subject) {
     } else if (subject.kind === 'overwrite') {
         summary.textContent = subject.path ? `Overwrite ${subject.path}` : 'File overwrite awaiting approval';
         pre.textContent = subject.diff || 'No diff details were supplied.';
+        const rows = parseUnifiedDiff(subject.diff || '');
+        if (rows.length) {
+            details.append(summary, diffSplit(rows));
+            return details;
+        }
     } else {
         summary.textContent = 'Request details';
         pre.textContent = JSON.stringify(subject, null, 2);

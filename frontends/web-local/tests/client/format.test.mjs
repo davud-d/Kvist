@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { answerSummary, callSeconds, choiceOptions, formatDuration, groupStatus, isDenied, toolStatus, toolTarget } from '../../kvist_web/client/features/format.js';
+import { answerSummary, callSeconds, choiceOptions, formatDuration, pairRows, parseUnifiedDiff, groupStatus, isDenied, toolStatus, toolTarget } from '../../kvist_web/client/features/format.js';
 
 test('formatDuration: under a second shows tenths, floored', () => {
     assert.equal(formatDuration(0), '0.0s');
@@ -179,4 +179,14 @@ test('choiceOptions: bare values and objects become { value, label } strings', (
         [{ value: 'a', label: 'a' }, { value: 'b', label: 'Bee' }, { value: '3', label: '3' }, { value: '', label: '' }]);
     assert.deepEqual(choiceOptions({}), []);
     assert.deepEqual(choiceOptions({ options: null }), []);
+});
+
+test('an overwrite diff is parsed into numbered rows and paired removed-left, added-right', () => {
+    const rows = parseUnifiedDiff('--- a/x\n+++ b/x\n@@ -2,3 +2,3 @@\n import os\n-DEBUG = False\n+DEBUG = True\n PORT = 1');
+    assert.deepEqual(rows.map(r => [r.kind, r.text, r.oldNo, r.newNo]), [
+        ['ctx', 'import os', 2, 2], ['del', 'DEBUG = False', 3, null], ['add', 'DEBUG = True', null, 3], ['ctx', 'PORT = 1', 4, 4],
+    ]);
+    const pairs = pairRows(rows);
+    assert.equal(pairs[1].left.text, 'DEBUG = False');
+    assert.equal(pairs[1].right.text, 'DEBUG = True');
 });

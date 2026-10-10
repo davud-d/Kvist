@@ -539,6 +539,26 @@ include `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`,
 Prefer `/provider`, `/models`, `/role`, and `/effort` for interactive
 configuration; do not commit keys or local `.kvist` data.
 
+Agent shell commands can request two independent, one-command permissions:
+`sandbox: "host"` exposes host tools and files, while `network: true` permits
+network access. Either request requires a `justification`; requesting both
+produces two confirmations. Project allow rules do not suppress them, and
+neither permission can be remembered. The command, directory and reason appear
+in the classic/Ink terminals, Electron GUI, web UI, VS Code, JetBrains and Zed.
+The tray has no new controls.
+
+`run_shell` defaults to the configured filesystem sandbox with network denied,
+even if `AGENT_SANDBOX_NET=allow`; that variable still governs legacy internal
+terminal calls. Linux uses Bubblewrap network namespaces (also in host mode),
+and macOS uses `/usr/bin/sandbox-exec` for offline host execution. Windows has no
+offline host backend without an installed system component: Kvist refuses such
+a command rather than silently allowing network. The same refusal applies if
+the required Linux/macOS backend is absent. A host command with network access
+can run only after both permissions are approved. No system component is
+installed automatically. Host mode retains a private HOME, a sanitized
+environment, command/path validation and the user's existing OS privileges;
+it does not grant administrator rights. Its filesystem is no longer isolated.
+
 How much context a step may occupy is derived from the *active model's*
 documented **input** limit (`context_budget.py`), not from one flat number. Input
 limit, not context window: OpenAI reserves its 128k max output inside the window,

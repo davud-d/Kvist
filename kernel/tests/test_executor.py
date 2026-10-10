@@ -540,7 +540,11 @@ def test_absolute_paths_inside_the_workspace_run_in_relative_form(tmp_path):
     # "tree" lists directories.
     listing = ["tree", f"{workspace}/sub"] if os.name == "nt" else ["ls", f"{workspace}/sub"]
 
-    result = executor._run_shell(listing, cwd=workspace)
+    # This test exercises path rewriting on all platforms, including those
+    # without an offline backend; network enforcement is tested separately.
+    result = executor._run_shell(
+        listing, cwd=workspace, network=True, justification="Verify path rewriting",
+    )
 
     assert result.ok, result.data
     assert "marker" in result.data["stdout"]

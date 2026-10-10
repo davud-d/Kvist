@@ -2331,3 +2331,62 @@ details[open] > summary > .chevron {
     transition: none !important;
   }
 }
+
+/* Overwrite approval: removed lines left, added lines right */
+.diff-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  max-height: 320px;
+  overflow: auto;
+  margin: 2px var(--row-pad) 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg-1);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.diff-cell {
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+  overflow: hidden;
+  color: var(--text-2);
+}
+
+.diff-cell.add {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--text);
+}
+
+.diff-cell.remove {
+  background: color-mix(in srgb, var(--err) 14%, transparent);
+  color: var(--text);
+}
+
+.diff-no {
+  flex: none;
+  min-width: 3.5ch;
+  padding: 0 8px;
+  text-align: right;
+  color: var(--text-3);
+}
+
+.diff-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-more {
+  grid-column: 1 / -1;
+  padding: 2px 12px;
+  color: var(--text-3);
+}
+
+@media (max-width: 700px) {
+  .diff-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

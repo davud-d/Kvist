@@ -6,6 +6,7 @@ import pytest
 
 from kernel.agent_model import _load_role_prompt
 from kernel.parser import ALLOWED_ACTIONS
+from kernel.native_tools import native_role_prompt
 from kernel.tests.conftest import commands_from_response
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL)
@@ -22,6 +23,14 @@ _LEGACY_FINISHES = {"final_answer", "report_to_user"}
 # Added to the prompt at run time, and only by an interactive frontend
 # (end_session.with_tool_in_prompt); the static prompt files never list it.
 _CONDITIONAL = {"end_session"}
+
+
+@pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
+def test_shell_permission_rules_survive_native_prompt_conversion(role):
+    prompt = native_role_prompt(_load_role_prompt(role), "Native calls")
+    assert '"sandbox": "default" | "host"' in prompt
+    assert "Never retry a user-denied permission" in prompt
+    assert "do not silently add network access" in prompt
 
 
 def _extract_allowed_actions_block(prompt_text: str) -> set[str]:

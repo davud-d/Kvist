@@ -358,10 +358,13 @@ class AcpInputBridge:
         return options
 
     def _tool_call_for(self, pending: _PendingInput) -> schema.ToolCallUpdate:
+        from kernel.unified_diff import old_and_new_text, parse_unified_diff
+
         subject = pending.subject or {}
         title = pending.title
         raw_input: Any = None
         kind = "other"
+        content = [helpers.tool_content(helpers.text_block(pending.body))] if pending.body else None
         if subject.get("kind") == "command":
             command = str(subject.get("command", "") or "")
             reason = str(subject.get("reason", "") or "")
@@ -372,12 +375,18 @@ class AcpInputBridge:
             title = f"Overwrite {subject.get('path', '')}"
             kind = "edit"
             raw_input = {"path": subject.get("path"), "diff": subject.get("diff")}
+            hunks = parse_unified_diff(str(subject.get("diff", "") or ""))
+            if hunks:
+                # Zed draws its own before/after view for diff content.
+                old_text, new_text = old_and_new_text(hunks)
+                content = [helpers.tool_diff_content(str(subject.get("path", "")), new_text, old_text)]
         return schema.ToolCallUpdate(
             tool_call_id=f"perm-{pending.request_id}",
             title=title,
             kind=kind,  # type: ignore[arg-type]
             status="pending",  # type: ignore[arg-type]
             raw_input=raw_input,
+            content=content,
         )
 
     async def _handle_form(

@@ -8,6 +8,7 @@ import from kernel.terminal are re-exported below.
 from __future__ import annotations
 
 import functools
+import json
 import os
 import shlex
 import shutil  # noqa: F401  re-exported: tests patch shutil.which through this module
@@ -37,6 +38,7 @@ from kernel.redaction import redact_text, sanitize_display_text
 from kernel.sandbox import (
     SandboxMode,
     detect_sandbox_mode,
+    host_network_launcher,
     normalize_sandbox_request,
     resolve_bubblewrap_path,
     sandbox_network_allowed,
@@ -161,6 +163,9 @@ class TerminalExecutor(
         self._authorized_context_ids: set[int] = set()
         self._run_lock = threading.RLock()
         self._ask_user = True
+        self._run_sandbox = "default"
+        self._run_network: bool | None = None
+        self._run_justification = ""
         self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
         self._child_home = Path()
         self._rotate_child_home()
@@ -222,16 +227,79 @@ class TerminalExecutor(
         timeout: float | None = None,
         role: str = "coder",
         ask_user: bool = True,
+        sandbox: str = "default",
+        network: bool | None = None,
+        justification: str | None = None,
     ) -> TerminalResult:
         """Execute one serialized run with a fresh, private child HOME.
 
         With ``ask_user=False`` a command that needs approval is denied without
         a dialog, for runs the person did not request (prompt-context lookups).
+        ``network=None`` preserves the configured policy for internal callers;
+        model-facing run_shell always supplies an explicit boolean.
         """
         with self._run_lock:
+            if not isinstance(sandbox, str) or sandbox not in {"default", "host"}:
+                raise HardDenyError("sandbox must be 'default' or 'host'")
+            if network is not None and not isinstance(network, bool):
+                raise HardDenyError("network must be a boolean")
+            if justification is not None and not isinstance(justification, str):
+                raise HardDenyError("justification must be a string")
+            if (sandbox == "host" or network) and not (justification or "").strip():
+                raise HardDenyError("Host or network access requires a justification")
             self._rotate_child_home()
             self._ask_user = ask_user
-            return self._run_once(command, cwd, env_overrides, timeout, role)
+            self._run_sandbox = sandbox
+            self._run_network = network
+            self._run_justification = justification or ""
+            try:
+                return self._run_once(command, cwd, env_overrides, timeout, role)
+            finally:
+                self._run_sandbox = "default"
+                self._run_network = None
+                self._run_justification = ""
+
+    def _effective_sandbox(self) -> tuple[SandboxMode, bool, str | None]:
+        network = bool(self._run_network)
+        if self._run_sandbox == "host" or (
+            self._run_network is not None and self.sandbox_mode is not SandboxMode.BUBBLEWRAP
+        ):
+            try:
+                launcher = host_network_launcher(network)
+            except ValueError as error:
+                raise HardDenyError(f"Hard security denial: {error}") from error
+            return SandboxMode.HOST, network, launcher
+        if self._run_network is None:
+            network = sandbox_network_allowed()
+        return self.sandbox_mode, network, self._bwrap_path
+
+    def _confirm_run_capabilities(
+        self, command: list[str], context: ExecutionContext,
+    ) -> bool:
+        body = (
+            f"Argv: {json.dumps(command, ensure_ascii=False)}\n"
+            f"Directory / Каталог: {context.cwd}\n"
+            f"Reason / Причина: {self._run_justification}\n"
+        )
+        if self._run_sandbox == "host":
+            approved = self._ask_user and self._approvals.confirm(
+                "Host execution / Запуск вне песочницы",
+                body + "This command can access and change host files with your permissions; "
+                "sandbox file masking is disabled. Network access is a separate permission.\n"
+                "Команда получит доступ к файлам системы с вашими правами. "
+                "Доступ к сети разрешается отдельно.",
+                "Allow this host command once? / Разрешить этот запуск вне песочницы?",
+            )
+            if approved is not True:
+                return False
+        if self._run_network:
+            return self._ask_user and self._approvals.confirm(
+                "Network access / Доступ к сети",
+                body + "Allow network access for this command and its child processes only.\n"
+                "Разрешение на сеть только для этой команды и её дочерних процессов.",
+                "Allow network access once? / Разрешить сеть для этого запуска?",
+            ) is True
+        return True
 
     def _run_once(
         self,
@@ -269,14 +337,16 @@ class TerminalExecutor(
         self._deny_self_termination(command)
 
         work_dir = self._resolve_cwd(cwd)
-        if self._sandbox_required_unavailable:
+        if self._sandbox_required_unavailable and self._run_sandbox != "host":
             raise HardDenyError(
                 "Hard security denial: mandatory Bubblewrap sandbox is unavailable"
             )
         environment = self._build_env(env_overrides)
+        sandbox_mode, network_allowed, launcher = self._effective_sandbox()
         bindings = self._resolve_executable_bindings(command, work_dir, environment)
         if (
             self._automatic_restricted_fallback
+            and self._run_sandbox != "host"
             and not self._cgroup_available
             and self._command_needs_arbitrary_code(command, bindings)
         ):
@@ -293,11 +363,17 @@ class TerminalExecutor(
             role,
             environment,
             bindings,
-            sandbox_mode=self.sandbox_mode,
-            network_allowed=sandbox_network_allowed(),
-            bwrap_path=self._bwrap_path,
+            sandbox_mode=sandbox_mode,
+            network_allowed=network_allowed,
+            bwrap_path=launcher,
         )
         assessment = self._assess_risk(command, role)
+        if not self._confirm_run_capabilities(command, initial_context):
+            return TerminalResult(
+                command=command, returncode=-1, stdout="",
+                stderr="Host or network permission denied. Do not retry this request or bypass the denial.",
+                denied=True,
+            )
 
         allowlist_error: CommandNotAllowedError | None = None
         try:
@@ -433,7 +509,7 @@ class TerminalExecutor(
     def _fallback_requires_approval(
         self, command: list[str], bindings: tuple[ExecutableBinding, ...] | None = None
     ) -> bool:
-        if not self._automatic_restricted_fallback:
+        if not self._automatic_restricted_fallback or self._run_sandbox == "host":
             return False
         for index, segment in enumerate(self._split_pipe_segments(command)):
             binding = bindings[index] if bindings is not None else None
@@ -667,9 +743,7 @@ class TerminalExecutor(
                 )
             self._authorized_context_ids.remove(token_id)
         command_snapshot = list(command)
-        sandbox_mode = self.sandbox_mode
-        network_allowed = sandbox_network_allowed()
-        bwrap_path = self._bwrap_path
+        sandbox_mode, network_allowed, bwrap_path = self._effective_sandbox()
         workspace = self.workspace
         self._refresh_policy()
         if self._policy_decision(command_snapshot) == "deny":
@@ -817,6 +891,12 @@ class TerminalExecutor(
             "GIT_TERMINAL_PROMPT": "0",
             "PIP_NO_INPUT": "1",
         }
+        if self._run_sandbox == "host":
+            host_paths = [
+                part for part in os.environ.get("PATH", "").split(os.pathsep)
+                if part and Path(part).is_absolute()
+            ]
+            env["PATH"] = os.pathsep.join([*host_paths, env["PATH"]])
         explicitly_allowed = _explicit_child_env_names()
         for name, value in os.environ.items():
             upper = name.upper()
@@ -950,6 +1030,8 @@ def request_user_confirmation(title: str, body: str, question: str) -> bool:
     from rich.panel import Panel
     from rich.text import Text
 
+    from kernel.unified_diff import confirmation_renderable
+
     if TerminalExecutor._hitl_suspend_fn is not None:
         TerminalExecutor._hitl_suspend_fn()
     _enter_hitl()
@@ -958,7 +1040,7 @@ def request_user_confirmation(title: str, body: str, question: str) -> bool:
         with _alt_screen(console):
             console.print(
                 Panel(
-                    Text(sanitize_display_text(body)),
+                    confirmation_renderable(body, console.width - 6),
                     border_style="yellow",
                     title=Text(sanitize_display_text(title)),
                     title_align="left",
