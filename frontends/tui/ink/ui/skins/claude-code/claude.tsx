@@ -12,6 +12,7 @@ import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.j
 import { jobFailed, jobLabel, jobsCopy, jobTail } from "../../jobs.js"
 import { Markdown, renderInline } from "../../markdown.js"
 import { color } from "../../theme.js"
+import { shimmerColor } from "./shimmer.js"
 import { tipFor } from "./tips.js"
 import { doneLine, spinnerWord } from "./verbs.js"
 import { ClaudeDiff, ClaudePreview, diffSummary } from "./claude-diff.js"
@@ -357,11 +358,14 @@ function useNow(active: boolean, every: number): number {
   return now
 }
 
-function Spinner({ glyph, text, detail, tip = "" }: { glyph: string; text: string; detail: string; tip?: string }) {
+function Spinner({ glyph, text, detail, tip = "", waiting = 0, now = 0 }: { glyph: string; text: string; detail: string; tip?: string; waiting?: number; now?: number }) {
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text wrap="truncate-end">
-        <Text color={color.accent}>{glyph} {text}… </Text>
+        {[...`${glyph} ${text}…`].map((char, index) => (
+          <Text key={index} color={shimmerColor(waiting, now, index)}>{char}</Text>
+        ))}
+        <Text> </Text>
         <Text color={color.dim}>({detail})</Text>
       </Text>
       {tip ? (
@@ -455,7 +459,7 @@ export function ClaudeLiveBody({ state }: { state: State }) {
 export function ClaudeSpinner({ state }: { state: State }) {
   const now = useNow(state.running || state.command !== null, 120)
   const glyph = SPINNER[Math.floor(now / 120) % SPINNER.length] ?? "·"
-  if (state.command && !state.pending) return <Spinner glyph={glyph} text={`Running /${state.command}`} detail="esc to cancel" />
+  if (state.command && !state.pending) return <Spinner glyph={glyph} text={`Running /${state.command}`} detail="esc to cancel" now={now} />
   if (!state.running || state.pending) return null
 
   const turnSeconds = state.startedAt ? (now - state.startedAt) / 1000 : 0
@@ -470,12 +474,16 @@ export function ClaudeSpinner({ state }: { state: State }) {
   const tokens = Math.max(0, state.usage.output - state.turnStartOutput)
   const detail = [formatSeconds(turnSeconds), tokens > 0 ? `↓ ${tokenCount(tokens)} tokens` : "", doing].filter(Boolean).join(" · ")
   const text = request?.kind === "user" ? (request.request ?? request.text) : ""
+  // A running call has its own clock; only the wait for the model warms the colour.
+  const waiting = state.waitingSince && state.inflight.length === 0 ? (now - state.waitingSince) / 1000 : 0
   const tip = tipFor(state.startedAt ?? 0, text, turnSeconds)
   return (
     <Spinner
       glyph={glyph}
       text={spinnerWord(role, state.startedAt ?? 0, turnSeconds, text)}
       detail={detail}
+      waiting={waiting}
+      now={now}
       tip={tip ? `${CYRILLIC.test(text) ? "Совет" : "Tip"}: ${tip}` : ""}
     />
   )

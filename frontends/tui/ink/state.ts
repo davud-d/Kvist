@@ -118,6 +118,9 @@ export interface State {
   startedAt: number | null
   // The person stopped the running turn; the closing line then says so.
   interrupted: boolean
+  // When the model's current response began to be awaited: the turn start, then each finished
+  // model call or action result. The spinner warms up the longer this stays unchanged.
+  waitingSince: number | null
   // The output-token total when this turn began, so the turn's own count is `usage.output` minus this.
   turnStartOutput: number
   // The thought that just ended, for the spinner to mention for a moment.
@@ -148,11 +151,11 @@ export type Action =
   | { type: "toggle_debug" }
   | { type: "clear" }
 
-export function initialState(effort = ""): State {
+export function initialState(effort = "", banner = false): State {
   return {
-    nextId: 1,
+    nextId: banner ? 2 : 1,
     epoch: 0,
-    items: [],
+    items: banner ? [{ id: 1, kind: "banner" }] : [],
     live: null,
     exploring: null,
     exploringNames: [],
@@ -170,6 +173,7 @@ export function initialState(effort = ""): State {
     usage: { input: 0, output: 0, context: 0, limit: 0 },
     showDebug: false,
     startedAt: null,
+    waitingSince: null,
     interrupted: false,
     turnStartOutput: 0,
     thought: null,
@@ -562,7 +566,7 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
       // the input box disabled forever.
-      return { ...settle(state), jobs: stopRunning(state.jobs, now), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, interrupted: false, thought: null, command: null }
+      return { ...settle(state), jobs: stopRunning(state.jobs, now), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null }
     default:
       return state
   }
@@ -625,13 +629,15 @@ export function reduce(state: State, action: Action): State {
     case "event": {
       const at = action.now ?? Date.now()
       const next = onEvent(state, action.event, at)
-      return action.event.type === "turn_end" ? closeTurn(state, next, at) : next
+      if (action.event.type === "turn_end") return closeTurn(state, next, at)
+      const answered = action.event.type === "usage" || action.event.type === "action_result"
+      return answered ? { ...next, waitingSince: at } : next
     }
     case "restore":
       return restore(state, action.events, action.now ?? Date.now(), action.banner ?? false)
     case "submit":
       return push(
-        { ...state, running: true, startedAt: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null, info: { ...state.info, routedRole: undefined } },
+        { ...state, running: true, startedAt: action.now ?? Date.now(), waitingSince: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null, info: { ...state.info, routedRole: undefined } },
         (id) => ({ id, kind: "user", text: action.text, request: action.request }),
       )
     case "interrupt":
@@ -641,7 +647,7 @@ export function reduce(state: State, action: Action): State {
     case "command_start":
       return { ...state, command: action.name }
     case "resume_start":
-      return { ...state, running: true, startedAt: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null }
+      return { ...state, running: true, startedAt: action.now ?? Date.now(), waitingSince: action.now ?? Date.now(), turnStartOutput: state.usage.output, thought: null }
     case "note":
       return push(state, (id) => ({ id, kind: "note", tone: action.tone, text: action.text }))
     case "answered":
