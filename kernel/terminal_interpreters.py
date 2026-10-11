@@ -205,7 +205,7 @@ def _interpreter_target(command: list[str], executable: str) -> tuple[str, str |
         return "script", token
 
     if executable == "node":
-        args = _without_tsx_import(args)
+        args = _without_allowed_node_options(args)
     if not args:
         return "none", None
     token = args[0]
@@ -314,21 +314,31 @@ def _option_value(
 _NODE_TSX_IMPORTS = {"tsx", "tsx/esm"}
 
 
-def _without_tsx_import(args: list[str]) -> list[str]:
-    """Drop `--import tsx` / `--import tsx/esm` (also `--import=...`).
+def _without_allowed_node_options(args: list[str]) -> list[str]:
+    """Drop the node options a test run needs: `--import tsx[/esm]`, `--test`,
+    `--test-name-pattern PATTERN` (also the `=` forms).
 
-    It is the repository's launcher for TypeScript tests and runs the same
-    workspace tsx that `./node_modules/.bin/tsx` already runs; any other
-    `--import` value stays a preload and is denied by the caller.
+    `--import tsx` is the repository's launcher for TypeScript tests and runs
+    the same workspace tsx that `./node_modules/.bin/tsx` already runs; any
+    other `--import` value stays a preload and is denied by the caller.
+    `--test` and `--test-name-pattern` only select which workspace test files
+    and cases run. Reporters, coverage and every other node option stay denied.
     """
     kept: list[str] = []
     index = 0
     while index < len(args):
         arg = args[index]
-        if arg == "--import" and index + 1 < len(args) and args[index + 1] in _NODE_TSX_IMPORTS:
+        has_value = index + 1 < len(args)
+        if arg == "--import" and has_value and args[index + 1] in _NODE_TSX_IMPORTS:
             index += 2
             continue
         if arg.startswith("--import=") and arg[len("--import=") :] in _NODE_TSX_IMPORTS:
+            index += 1
+            continue
+        if arg == "--test-name-pattern" and has_value:
+            index += 2
+            continue
+        if arg == "--test" or arg.startswith("--test-name-pattern="):
             index += 1
             continue
         kept.append(arg)
@@ -371,7 +381,7 @@ class InterpreterValidationMixin:
             or arg.startswith(("-r", "--require=", "--loader=", "--experimental-loader=", "--import="))
             or arg in {"--experimental-loader", "--run"}
             or arg.startswith("--run=")
-            for arg in _without_tsx_import(command[1:])
+            for arg in _without_allowed_node_options(command[1:])
         ):
             raise HardDenyError("Hard security denial: Node preload/loader execution is forbidden")
         if executable == "ruby" and any(

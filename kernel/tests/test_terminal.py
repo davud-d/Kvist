@@ -745,6 +745,9 @@ def test_interpreter_stdin_inline_preload_and_shell_aliases_are_hard_denied(tmp_
     [
         ["node", "--import", "tsx", "a.test.ts"],
         ["node", "--import=tsx/esm", "a.test.ts"],
+        ["node", "--import", "tsx", "--test", "a.test.ts"],
+        ["node", "--import", "tsx", "--test", "--test-name-pattern=kitty", "a.test.ts"],
+        ["node", "--import", "tsx", "--test-name-pattern", "kitty reply", "a.test.ts"],
     ],
 )
 def test_node_import_of_tsx_is_allowed(tmp_path, command):
@@ -760,12 +763,30 @@ def test_node_import_of_tsx_is_allowed(tmp_path, command):
         ["node", "--import=./evil.mjs", "a.test.ts"],
         ["node", "--import", "tsx", "--import", "./evil.mjs", "a.test.ts"],
         ["node", "--import", "tsx-evil", "a.test.ts"],
+        ["node", "--import", "./evil.mjs", "--test", "a.test.ts"],
     ],
 )
 def test_node_import_of_anything_but_tsx_is_hard_denied(tmp_path, command):
     (tmp_path / "a.test.ts").write_text("console.log(1)\n", encoding="utf-8")
 
     with pytest.raises(HardDenyError, match="preload/loader"):
+        TerminalExecutor(tmp_path)._validate(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["node", "--test-reporter=spec", "a.test.ts"],
+        ["node", "--test-reporter-destination=out.txt", "a.test.ts"],
+        ["node", "--experimental-test-coverage", "--test", "a.test.ts"],
+        ["node", "--test-name-pattern"],
+        ["node", "--test", "--watch", "a.test.ts"],
+    ],
+)
+def test_node_test_runner_options_beyond_selection_stay_hard_denied(tmp_path, command):
+    (tmp_path / "a.test.ts").write_text("console.log(1)\n", encoding="utf-8")
+
+    with pytest.raises(HardDenyError):
         TerminalExecutor(tmp_path)._validate(command)
 
 
