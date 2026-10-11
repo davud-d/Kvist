@@ -78,6 +78,7 @@ from kernel.redaction import defang_prompt_boundary_tags, redact_text, redact_va
 from kernel import end_session, plan_mode
 from kernel.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker
 from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
+from kernel.background_jobs import UiJobListener
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -85,13 +86,16 @@ _READ_ONLY_ACTIONS = {
 }
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
+# Reading or ending a background job: repeating the call is how a job is
+# followed, so neither the repeat guard nor stagnation counting applies.
+_JOB_ACTIONS = {"job_output", "job_stop"}
 # What can answer "no file changed yet": an edit, or running the reported
 # problem, which is how a bug claim is confirmed (then fixed) or refuted.
 _CHANGE_OR_REPRODUCE_ACTIONS = _WRITE_ACTIONS | {"run_shell"}
 # Beyond the file reads, what plan mode still allows: it asks the person and
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
-    "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "edit_plan", "cancel_plan", "refuse",
+    "job_output", "job_stop", "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "edit_plan", "cancel_plan", "refuse",
 }
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
@@ -505,6 +509,7 @@ _BLOCKED = _ActionOutcome()
 
 def run_loop(self, user_goal: str, start_step: int) -> str:
     self._ui.start_live()
+    self.executor.jobs.listener = UiJobListener(self._ui)
 
     final_message = ""
     create_goal = _is_create_goal(user_goal)
@@ -565,12 +570,15 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             _note_inspection_streak(self._state)
             loop_pre = time.monotonic()
             turn: NativeTurn | None = None
+            _collect_job_note(self)
             try:
                 if self._state.native_tools:
                     turn = _call_native_turn(self, user_goal, step)
                     response = ModelResponse(text=turn.content.strip(), calls=calls_from_turn(turn))
                 else:
                     prompt = self._build_runtime_prompt(user_goal, step)
+                    if self._state.job_note:
+                        prompt = f"{prompt}\n\n{self._state.job_note}"
                     _note_run_context(self, action="waiting for the model")
                     response = parse_model_response(self._call_action_model(prompt))
             except RunCancelled:
@@ -591,6 +599,8 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 step += 1
                 continue
 
+            self._state.job_note = ""
+            self._state.job_note_sent = ""
             outcome, step = _run_turn(self, user_goal, step, response, turn)
             if outcome.finished:
                 final_message = outcome.final_message
@@ -610,6 +620,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         # already records as unconfirmed for /resume to reconcile.
         final_message = _stop_by_user(self)
     finally:
+        _stop_background_jobs(self)
         self._finalize_run(
             user_goal,
             task_completed=task_completed,
@@ -622,6 +633,24 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         )
 
     return final_message
+
+
+def _collect_job_note(self) -> None:
+    """Fold what the background jobs printed since the last request into the pending note."""
+    text, job_ids = self.executor.jobs.take_note()
+    if not text:
+        return
+    self._state.job_note = f"{self._state.job_note}\n{text}".strip()
+    notice = getattr(self._ui, "print_job_notice", None)
+    if notice is not None:
+        notice(text, job_ids)
+
+
+def _stop_background_jobs(self) -> None:
+    """Jobs live as long as the turn: nothing is running when the answer is given."""
+    jobs = self.executor.jobs
+    jobs.stop_all()
+    jobs.listener = None
 
 
 def _final_outcome(self, task_completed: bool) -> str:
@@ -720,6 +749,9 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
             {"role": "user", "content": f"Additional instruction:\n{state.pending_instruction}"}
         )
         state.native_note_sent = state.pending_instruction
+    if state.job_note and state.job_note != state.job_note_sent:
+        state.native_messages.append({"role": "user", "content": state.job_note})
+        state.job_note_sent = state.job_note
     _note_run_context(self, action="calling tools")
     return call_native_action_model(self, state.native_messages, state.native_tool_defs)
 
@@ -1612,6 +1644,8 @@ def _execute_action(
     watch_output = getattr(self._ui, "print_action_output", None)
     if watch_output is not None and command.action.type == "run_shell":
         self.executor.set_output_sink(functools.partial(watch_output, step, call_id=command.call_id))
+    if command.action.type == "run_shell":
+        self.executor.set_job_context(command.action.description, command.call_id)
     try:
         feedback = self._execute_command(command)
     finally:
@@ -1942,7 +1976,11 @@ def register_feedback(
         self._state.stagnation_count += 1
     elif self._state.progress > previous_progress:
         self._state.stagnation_count = 0
-    elif repeat_count > 1 and command.action.type not in _READ_ONLY_ACTIONS:
+    elif (
+        repeat_count > 1
+        and command.action.type not in _READ_ONLY_ACTIONS
+        and command.action.type not in _JOB_ACTIONS
+    ):
         self._state.stagnation_count += 1
     else:
         self._state.stagnation_count = max(0, self._state.stagnation_count - 1)
@@ -2477,6 +2515,8 @@ def _summarize_recent_errors(self) -> str:
 
 
 def is_repeat_blocked(self, command: AgentCommand) -> bool:
+    if command.action.type in _JOB_ACTIONS:
+        return False
     signature = self._action_signature(command)
     seen_count = self._state.seen_actions.get(signature, 0)
     # DevOps run_shell: warn early on repeated identical commands

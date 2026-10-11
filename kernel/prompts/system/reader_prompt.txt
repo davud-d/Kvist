@@ -44,7 +44,7 @@ find_files: {"pattern":"<glob>","path":"<rel_opt>"}
 search_code: {"query":"<str>","path":"<rel_opt>","max_results":20}
 git_status: {}
 git_diff: {"path":"<rel_opt>","ref":"<opt>","staged":false}
-run_shell: {"command":["cmd","arg1"],"purpose":"<why, ≤10 words>","cwd":"<rel_opt>","timeout":15}
+run_shell: {"command":["cmd","arg1"],"purpose":"<why, ≤10 words>","cwd":"<rel_opt>"}
 web_search: {"query":"<str>","max_results":5,"freshness":"any"}
 fetch_url: {"url":"<https>","max_chars":12000,"extract_mode":"text"}
 delegate_task: {"target_role":"coder|devops","task":"<str>"} — hand off a change; omit commands, you do not execute it; see HANDOFF in section 1

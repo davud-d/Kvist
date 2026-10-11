@@ -288,9 +288,9 @@ not already have, so `agent_runtime.update_progress` derives `RunState.progress`
 the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
 monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of 23 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 25 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
-git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, refuse,
+git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, refuse,
 final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
@@ -565,6 +565,42 @@ A UI without `ask_choice` (headless frontends, `run_task.py`, no TTY) has nobody
 ask, so the budget stays a hard stop with `_build_limit_reached_message` exactly as
 before; a cancelled question (Esc, or the screen shutting down mid-question) is
 treated the same way.
+
+### Background commands (`background_jobs.py`)
+`run_shell` with `"background": true` returns `{job_id, started_in_background}` at once and the
+process keeps running; `job_output {job_id, wait?}` reads what it printed since the model last saw it
+(`wait` blocks up to 120 s until there is new output or the job ended) and `job_stop {job_id}` ends it.
+**Output reaches the model only on step boundaries, never inside a request in flight**:
+`agent_runtime._collect_job_note` takes what is new from `BackgroundJobs.take_note()` before each
+model call and puts it in the next request (a `Background jobs:` section of the runtime prompt, a user
+message in a native conversation). `RunState.job_note` survives a failed or retried request and is
+cleared once a call succeeds; the same text is journaled as `job_notice`, so the conversation stays
+reconstructable. A quiet job costs the model nothing.
+- The same pipeline as a foreground command validates and approves it (policy, HITL, sandbox,
+  execution context); `TerminalExecutor.run(background=BackgroundLaunch)` then hands the wrapped argv
+  to `BackgroundJobs.launch` and releases the run lock, so the next command is not serialized behind a
+  server. The job keeps the child HOME it was built with (`_start_background` takes the manager; the
+  next `run()` rotates a fresh one). Without `timeout` a job lives up to the profile ceiling (300 s
+  dev, reported as `max_seconds`); an explicit one ends it as `timed_out` that early.
+- **Each sandboxed command has its own network namespace** (bubblewrap `--unshare-net`), so a port a
+  job opens is unreachable from another command unless both run with `network: true`; the start
+  result says so, and a check can also run server and client inside one command. The reader role is
+  not offered `job_output`/`job_stop` (its prompt is at its token budget and it has no use for them).
+- `process_tree.run_supervised(cancel=Event)` is how a job is stopped: same tree teardown as a timeout,
+  `SupervisedResult.cancelled`. Limit: 4 running jobs (`MAX_RUNNING_JOBS`).
+- **A job lives as long as the turn.** `_stop_background_jobs` runs in `run_loop`'s `finally`, before
+  `_finalize_run`: nothing is running once the answer is given, and every job gets `job_finished`
+  before `turn_end`. There is deliberately no wake-up after the answer, and `/resume` does not restore
+  jobs (like `run_shell`, they are non-reconcilable).
+- Output is untrusted like every shell result: `job_output` results are `untrusted: true` and wrapped
+  by `feedback_to_detail`; notes wrap each job's text in
+  `<UNTRUSTED_TOOL_OUTPUT source="background_job:job_N">` after `redact_text` + defanging.
+- Repeated `job_output`/`job_stop` calls are exempt from the repeat guard and from stagnation counting
+  (`_JOB_ACTIONS`): polling is how a job is followed. Both are allowed while planning.
+- Events (`frontend_protocol.py`, `docs/UI_API.md`): `job_started`, `job_output` (live-only snapshot,
+  throttled like `action_output`), `job_finished`, `job_notice`. Emitted from the job's thread through
+  `UiJobListener`; the journal's lock makes that safe. Tests: `kernel/tests/test_background_jobs.py`,
+  `test_background_jobs_loop.py`.
 
 ### Stopping a turn (Ctrl+C / Escape)
 **A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt`

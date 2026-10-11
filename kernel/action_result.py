@@ -64,6 +64,8 @@ def _summary(
         return SKIPPED_SUMMARY
     if action_type == "run_shell":
         return _shell_summary(data, error)
+    if action_type in {"job_output", "job_stop"} and ok:
+        return _one_line(f"{data.get('job_id', 'job')}: {data.get('state', '')}")
     if not ok:
         return _one_line(f"Failed: {error or 'action failed'}")
     return _one_line(_ok_summary(action_type, args, data))
@@ -114,6 +116,8 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
 def _shell_summary(data: dict[str, Any], error: str) -> str:
     if data.get("denied"):
         return "Command denied"
+    if data.get("job_id"):
+        return f"Started background job {data['job_id']}"
     if data.get("timed_out"):
         return "Command timed out"
     code = data.get("returncode")
@@ -159,6 +163,8 @@ def _raw_output(action_type: str, data: dict[str, Any], ok: bool, error: str) ->
         return streams or ("" if ok else error)
     if action_type == "delegate_task":
         return _delegation_output(data) or ("" if ok else error)
+    if action_type in {"job_output", "job_stop"} and ok:
+        return str(data.get("output") or "")
     return "" if ok else error
 
 

@@ -16,6 +16,9 @@ class TerminalResult:
     stderr: str
     timed_out: bool = False
     denied: bool = False
+    # Set when the command was started in the background: the process is still
+    # running and this is the id of its job, not an outcome.
+    job_id: str = ""
 
 
 class TerminalError(Exception):

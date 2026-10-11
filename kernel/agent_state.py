@@ -82,6 +82,11 @@ PLAN_APPROVED = "approved"
 @dataclass(slots=True)
 class RunState:
     current_agent_role: str = "coder"
+    # Background-job output the model has not seen yet. Kept until a model call
+    # succeeds so a retried request still carries it; ``job_note_sent`` is the
+    # part already appended to a native conversation.
+    job_note: str = ""
+    job_note_sent: str = ""
     task_language: str = ""
     # User-facing response language ("ru"/"en") resolved by language_policy
     # before any model call. Protocol JSON stays English regardless.

@@ -28,6 +28,7 @@ from kernel.command_policy import (
     is_exact_version_probe,
 )
 from kernel.approvals import ApprovalGate, TerminalApprovalGate
+from kernel.background_jobs import BackgroundLaunch
 from kernel.permission_policy import append_allow_rule, load_policy
 from kernel.process_tree import (
     ProcessSupervisionError,
@@ -166,6 +167,7 @@ class TerminalExecutor(
         self._run_sandbox = "default"
         self._run_network: bool | None = None
         self._run_justification = ""
+        self._run_background: BackgroundLaunch | None = None
         self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
         self._child_home = Path()
         self._rotate_child_home()
@@ -230,6 +232,7 @@ class TerminalExecutor(
         sandbox: str = "default",
         network: bool | None = None,
         justification: str | None = None,
+        background: BackgroundLaunch | None = None,
     ) -> TerminalResult:
         """Execute one serialized run with a fresh, private child HOME.
 
@@ -237,6 +240,9 @@ class TerminalExecutor(
         a dialog, for runs the person did not request (prompt-context lookups).
         ``network=None`` preserves the configured policy for internal callers;
         model-facing run_shell always supplies an explicit boolean.
+        ``background`` runs the same validation and approval, then starts the
+        process under ``background.jobs`` and returns a result carrying only
+        its ``job_id``; the run lock is released as soon as it has started.
         """
         with self._run_lock:
             if not isinstance(sandbox, str) or sandbox not in {"default", "host"}:
@@ -252,12 +258,14 @@ class TerminalExecutor(
             self._run_sandbox = sandbox
             self._run_network = network
             self._run_justification = justification or ""
+            self._run_background = background
             try:
                 return self._run_once(command, cwd, env_overrides, timeout, role)
             finally:
                 self._run_sandbox = "default"
                 self._run_network = None
                 self._run_justification = ""
+                self._run_background = None
 
     def _effective_sandbox(self) -> tuple[SandboxMode, bool, str | None]:
         network = bool(self._run_network)
@@ -751,7 +759,13 @@ class TerminalExecutor(
                 "Hard security denial: command became blocked by a project deny rule before execution"
             )
         work_dir = self._resolve_cwd(cwd)
-        effective_timeout = self._clamp_timeout(timeout)
+        # A background job has no caller waiting for it, so its default
+        # lifetime is the profile ceiling rather than the short per-call default.
+        effective_timeout = (
+            self._timeout_ceiling
+            if timeout is None and self._run_background is not None
+            else self._clamp_timeout(timeout)
+        )
         env = self._build_env(env_overrides)
         bindings = self._resolve_executable_bindings(command_snapshot, work_dir, env)
         self._validate_executable_boundaries(command_snapshot, work_dir, bindings)
@@ -820,6 +834,16 @@ class TerminalExecutor(
             if self._is_windows
             else functools.partial(_unix_resource_limits, self._resource_limits)
         )
+        if self._run_background is not None:
+            return self._start_background(
+                self._run_background,
+                command_snapshot,
+                actual_command,
+                work_dir,
+                env,
+                effective_timeout,
+                rlimit_setter,
+            )
         try:
             outcome = run_supervised(
                 actual_command,
@@ -853,6 +877,46 @@ class TerminalExecutor(
             stderr=stderr,
             timed_out=outcome.timed_out,
         )
+
+    def _start_background(
+        self,
+        launch: BackgroundLaunch,
+        command: list[str],
+        actual_command: list[str],
+        work_dir: Path,
+        env: dict[str, str],
+        timeout: float,
+        rlimit_setter: Callable[[], None] | None,
+    ) -> TerminalResult:
+        """Hand the validated, wrapped command to the job registry and return."""
+        # The job keeps the child HOME this run built the environment around:
+        # the next run() rotates in a fresh one, which would otherwise delete
+        # the directory under a process that is still running.
+        home = self._child_home_manager
+        self._child_home_manager = None
+        capture = self.max_output_chars * 4
+
+        def spawn(on_output: Callable[[str], None], cancel: threading.Event) -> tuple[int, bool, bool]:
+            try:
+                outcome = run_supervised(
+                    actual_command,
+                    cwd=work_dir,
+                    env=env,
+                    timeout=timeout,
+                    max_capture_bytes=capture,
+                    rlimit_setter=rlimit_setter,
+                    is_windows=self._is_windows,
+                    use_cgroup=self._cgroup_available,
+                    on_output=on_output,
+                    cancel=cancel,
+                )
+            finally:
+                if home is not None:
+                    home.cleanup()
+            return outcome.returncode, outcome.timed_out, outcome.cancelled
+
+        job = launch.jobs.launch(command, launch.purpose, launch.call_id, spawn, max_seconds=timeout)
+        return TerminalResult(command=command, returncode=0, stdout="", stderr="", job_id=job.job_id)
 
     def _request_user_approval(self, command: list[str], reason: str) -> bool:
         """Dangerous-command HITL gate, delegated to the injected approval gate.

@@ -20,6 +20,8 @@ ActionType = Literal[
     "git_status",
     "git_diff",
     "run_shell",
+    "job_output",
+    "job_stop",
     "web_search",
     "fetch_url",
     "delegate_task",
@@ -36,6 +38,8 @@ ActionType = Literal[
 # profile actually active, which the model cannot know.
 MIN_SHELL_TIMEOUT_SECONDS = 1.0
 MAX_SHELL_TIMEOUT_SECONDS = 300.0
+# Longest a job_output call may block the run.
+MAX_JOB_WAIT_SECONDS = 120.0
 
 
 @dataclass(slots=True)

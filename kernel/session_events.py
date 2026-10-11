@@ -62,7 +62,7 @@ _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
 
 # Live-only state: a frontend never needs it to redraw a finished conversation.
 _TRANSIENT_EVENTS = frozenset(
-    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output"}
+    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output"}
 )
 _ANSWER_EVENTS = frozenset({"final", "message", "stream_commit"})
 _ESSENTIAL_EVENTS = _ANSWER_EVENTS | {"error", "journal_notice", "turn_end", "session_ended"}
@@ -538,6 +538,18 @@ class JournalingUI:
     def print_action_result(self, result: dict) -> None:
         self._events.print_action_result(result)
         self._forward("print_action_result", result)
+
+    def print_job_started(self, job_id: str, command: list[str], purpose: str, call_id: str = "") -> None:
+        self._events.print_job_started(job_id, command, purpose, call_id)
+        self._forward("print_job_started", job_id, command, purpose, call_id)
+
+    def print_job_finished(self, job_id: str, status: str, exit_code: int | None, output: str) -> None:
+        self._events.print_job_finished(job_id, status, exit_code, output)
+        self._forward("print_job_finished", job_id, status, exit_code, output)
+
+    def print_job_notice(self, text: str, job_ids: list[str]) -> None:
+        self._events.print_job_notice(text, job_ids)
+        self._forward("print_job_notice", text, job_ids)
 
     def print_usage(self, usage: dict) -> None:
         self._events.print_usage(usage)

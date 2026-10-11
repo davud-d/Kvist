@@ -32,7 +32,8 @@ CREATED = b"hello from kvist\n"
 EDITED = b"goodbye from kvist\n"
 APPENDED = EDITED + b"and another line\n"
 # (goal, the tool call the fake provider makes, the file content to expect or
-# None for the terminal turn).
+# None for the terminal turn). A scenario's call may be a list: the provider
+# makes them one per request, then answers "Done.".
 SCENARIOS = (
     ("create hello.txt with a greeting", {"name": "write_file", "arguments": {
         "path": "hello.txt", "content": CREATED.decode()}}, CREATED),
@@ -42,6 +43,13 @@ SCENARIOS = (
         "path": "hello.txt", "content": "and another line\n"}}, APPENDED),
     ("print the git version", {"name": "run_shell", "arguments": {
         "command": ["git", "--version"], "purpose": "check git"}}, None),
+    # A background job: started, followed with job_output, and its events reach the wire
+    # before the turn ends.
+    ("print the git version in the background", [
+        {"name": "run_shell", "arguments": {
+            "command": ["git", "--version"], "purpose": "check git", "background": True}},
+        {"name": "job_output", "arguments": {"job_id": "job_1", "wait": 10}},
+    ], None),
 )
 
 
@@ -59,7 +67,7 @@ class FakeProvider:
     def __init__(self) -> None:
         self.runs_started = 0
         # The file the current run changes: it is read back before the run says it is done.
-        self.verify_after_tool = False
+        self.pending_calls: list[dict] = []
         self.requests: list[dict] = []
         provider = self
 
@@ -98,19 +106,22 @@ class FakeProvider:
             message = {"role": "assistant", "content": "Smoke test"}
         elif any(item.get("role") == "tool" for item in messages):
             answered = sum(1 for item in messages if item.get("role") == "tool")
-            if self.verify_after_tool and answered == 1:
-                # A run that changed a file is not finished until it has looked at the result;
-                # an unverified one ends "incomplete" and keeps its checkpoint, so the next
-                # goal would continue it instead of starting a run of its own.
-                message = self._call("read_file", {"path": "hello.txt"})
+            if answered < len(self.pending_calls):
+                message = self._call(**self.pending_calls[answered])
             else:
                 message = {"role": "assistant", "content": "Done."}
         else:
             index = min(self.runs_started, len(SCENARIOS) - 1)
             scenario = SCENARIOS[index][1]
-            self.verify_after_tool = SCENARIOS[index][2] is not None
+            calls = scenario if isinstance(scenario, list) else [scenario]
+            self.pending_calls = [{"name": c["name"], "arguments": c["arguments"]} for c in calls]
+            if SCENARIOS[index][2] is not None:
+                # A run that changed a file is not finished until it has looked at the result;
+                # an unverified one ends "incomplete" and keeps its checkpoint, so the next
+                # goal would continue it instead of starting a run of its own.
+                self.pending_calls.append({"name": "read_file", "arguments": {"path": "hello.txt"}})
             self.runs_started += 1
-            message = self._call(scenario["name"], scenario["arguments"])
+            message = self._call(**self.pending_calls[0])
         finish = "tool_calls" if message.get("tool_calls") else "stop"
         return {
             "id": "chatcmpl-smoke", "object": "chat.completion", "created": 0,
@@ -213,6 +224,9 @@ def check_turn(expected: bytes | None, events: list[dict], workspace: Path) -> N
         return
     output = " ".join(str(r.get("output", "")) for r in results)
     assert "git version" in output, f"the terminal returned nothing useful: {results}"
+    if "job_started" in types:
+        assert types.index("job_started") < types.index("job_finished") < types.index("turn_end"), types
+        assert any(r.get("action_type") == "job_output" for r in results), f"job_output never ran: {results}"
 
 
 def run_turns(core: Kvist, workspace: Path) -> float:

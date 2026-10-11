@@ -2,6 +2,7 @@
 """Argument, token and path validation for terminal commands."""
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from pathlib import Path
@@ -550,7 +551,16 @@ class ArgumentValidationMixin:
                         "outside the workspace"
                     )
 
-            if not candidate.exists() and not candidate.is_symlink():
+            try:
+                names_nothing = not candidate.exists() and not candidate.is_symlink()
+            except OSError as error:
+                # Inline code containing "=" is split into fragments, and a long
+                # one is not a possible file name: nothing exists under it. Any
+                # other stat failure (permissions, loops) still stops the run.
+                if error.errno != errno.ENAMETOOLONG:
+                    raise
+                continue
+            if names_nothing:
                 continue
             try:
                 canonical = candidate.resolve(strict=True)

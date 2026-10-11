@@ -49,6 +49,7 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Detailed recent action data:": 1,
     "Repeated errors:": 1,
     "Additional instruction:": 0,
+    "Background jobs:": 0,
     "Step summaries:": 1,
     "Final answer style:": 0,
 }

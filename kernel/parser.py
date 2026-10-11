@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from kernel.call_labels import call_label, trim_purpose
 from kernel.protocol import (
+    MAX_JOB_WAIT_SECONDS,
     MAX_SHELL_TIMEOUT_SECONDS,
     MIN_SHELL_TIMEOUT_SECONDS,
     AgentCommand,
@@ -32,6 +33,8 @@ ALLOWED_ACTIONS = {
     "git_status",
     "git_diff",
     "run_shell",
+    "job_output",
+    "job_stop",
     "web_search",
     "fetch_url",
     "delegate_task",
@@ -243,7 +246,11 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
 
     elif action_type == "run_shell":
         require_keys(args, {"command"})
-        require_only_allowed_keys(args, {"command", "cwd", "timeout", "sandbox", "network", "justification"})
+        require_only_allowed_keys(
+            args, {"command", "cwd", "timeout", "sandbox", "network", "justification", "background"}
+        )
+        if not isinstance(args.get("background", False), bool):
+            raise CommandValidationError("'background' must be a boolean")
         if not isinstance(args.get("sandbox", "default"), str) or args.get("sandbox", "default") not in {"default", "host"}:
             raise CommandValidationError("'sandbox' must be 'default' or 'host'")
         if not isinstance(args.get("network", False), bool):
@@ -269,6 +276,22 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
             args["timeout"] = min(
                 max(timeout, MIN_SHELL_TIMEOUT_SECONDS), MAX_SHELL_TIMEOUT_SECONDS
             )
+
+    elif action_type == "job_output":
+        require_keys(args, {"job_id"})
+        require_only_allowed_keys(args, {"job_id", "wait"})
+        require_str(args, "job_id")
+        wait = args.get("wait")
+        if wait is not None:
+            if isinstance(wait, bool) or not isinstance(wait, (int, float)):
+                raise CommandValidationError("'wait' must be a number of seconds")
+            # Clamped like run_shell's timeout: the model cannot know the ceiling.
+            args["wait"] = min(max(wait, 0), MAX_JOB_WAIT_SECONDS)
+
+    elif action_type == "job_stop":
+        require_keys(args, {"job_id"})
+        require_only_allowed_keys(args, {"job_id"})
+        require_str(args, "job_id")
 
     elif action_type == "web_search":
         require_keys(args, {"query"})

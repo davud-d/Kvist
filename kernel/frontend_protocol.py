@@ -393,6 +393,87 @@ class ActionOutputEvent:
 
 
 @dataclass(slots=True)
+class JobStartedEvent:
+    """A ``run_shell`` command with ``background: true`` began running.
+
+    ``job_id`` identifies the job in every later ``job_*`` event and in the
+    ``job_output``/``job_stop`` actions. ``call_id`` is the ``step`` call that
+    started it, so a frontend can attach the job to that call's card.
+    """
+
+    job_id: str
+    command: list[str]
+    purpose: str = ""
+    call_id: str = ""
+    type: ClassVar[str] = "job_started"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "job_id": self.job_id,
+            "command": list(self.command),
+            "purpose": self.purpose,
+            "call_id": self.call_id,
+        }
+
+
+@dataclass(slots=True)
+class JobOutputEvent:
+    """Live output of a background job: a redacted, capped snapshot of its tail.
+
+    Not a delta, like ``action_output``: a frontend replaces what it shows.
+    Live-only, never recorded in the session journal.
+    """
+
+    job_id: str
+    output: str
+    type: ClassVar[str] = "job_output"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "job_id": self.job_id, "output": self.output}
+
+
+@dataclass(slots=True)
+class JobFinishedEvent:
+    """A background job ended (exit, timeout, ``job_stop`` or the end of the turn).
+
+    ``status`` is ``exited`` (``exit_code`` set), ``timed_out`` or ``stopped``.
+    ``output`` is the redacted tail kept for the person, capped.
+    """
+
+    job_id: str
+    status: str
+    exit_code: int | None
+    output: str = ""
+    type: ClassVar[str] = "job_finished"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "job_id": self.job_id,
+            "status": self.status,
+            "exit_code": self.exit_code,
+            "output": self.output,
+        }
+
+
+@dataclass(slots=True)
+class JobNoticeEvent:
+    """What the runtime told the model about background jobs before a request.
+
+    Recorded so the conversation can be reconstructed: ``text`` is exactly the
+    redacted, capped note the model saw (new output and completions).
+    """
+
+    text: str
+    job_ids: list[str]
+    type: ClassVar[str] = "job_notice"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "text": self.text, "job_ids": list(self.job_ids)}
+
+
+@dataclass(slots=True)
 class SessionEvent:
     """The session a resumed run continues in, or the one a switch moved to.
 

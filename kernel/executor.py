@@ -20,6 +20,17 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 
+from kernel.background_jobs import (
+    BackgroundJob,
+    BackgroundJobs,
+    BackgroundLaunch,
+    JobLimitError,
+    NOTE_CHARS,
+    RUNNING,
+    UnknownJobError,
+    describe,
+    snapshot,
+)
 from kernel.change_journal import (
     JournalUnavailableError,
     build_diff_report,
@@ -197,6 +208,11 @@ class SafeExecutor:
         )
         self.max_diff_preview_chars = 4000
 
+        self.jobs = BackgroundJobs()
+        # Who started the next background command: set by the runtime around
+        # one call, like the output sink, because the parser drops ``purpose``.
+        self._job_purpose = ""
+        self._job_call_id = ""
         self._terminal = TerminalExecutor(
             workspace=self.workspace,
             timeout=terminal_timeout,
@@ -329,6 +345,11 @@ class SafeExecutor:
         """Watch the output of the shell command about to run; ``None`` stops."""
         self._terminal.output_sink = sink
 
+    def set_job_context(self, purpose: str, call_id: str) -> None:
+        """Label the background job the next ``run_shell`` call may start."""
+        self._job_purpose = purpose
+        self._job_call_id = call_id
+
     def begin_action_transaction(self, run_id: str | None, action_id: str | None) -> None:
         """Bind the write-ahead journal for the action about to execute."""
         self._txn_run_id = run_id
@@ -409,7 +430,14 @@ class SafeExecutor:
                 sandbox=args.get("sandbox", "default"),
                 network=args.get("network", False),
                 justification=args.get("justification"),
+                background=args.get("background", False),
             )
+
+        if action_type == "job_output":
+            return self._job_output(args["job_id"], args.get("wait", 0))
+
+        if action_type == "job_stop":
+            return self._job_stop(args["job_id"])
 
         if action_type == "web_search":
             return self._web_search(
@@ -1958,9 +1986,12 @@ class SafeExecutor:
         sandbox: str = "default",
         network: bool = False,
         justification: str | None = None,
+        background: bool = False,
     ) -> ExecutionResult:
         if not isinstance(network, bool):
             raise ExecutorError("run_shell.network must be a boolean")
+        if not isinstance(background, bool):
+            raise ExecutorError("run_shell.background must be a boolean")
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             raise ExecutorError("run_shell.command must be a non-empty array of strings")
         if cwd is not None and not isinstance(cwd, str):
@@ -1985,11 +2016,25 @@ class SafeExecutor:
                 "\u26d4 SECURITY PROTOCOL VIOLATION: Shell command is attempting to access a .env file. "
                 "Reading *.env files is strictly forbidden."
             )
+        launch = (
+            BackgroundLaunch(self.jobs, self._job_purpose, self._job_call_id)
+            if background
+            else None
+        )
+        if background:
+            # The model has no feel for durations: a job's limit is the profile
+            # ceiling, and its end is job_stop or the end of the turn.
+            timeout = None
+        self._job_purpose = ""
+        self._job_call_id = ""
         try:
             result = self._terminal.run(
                 command, cwd=cwd, timeout=timeout, role=self.active_role,
                 sandbox=sandbox, network=network, justification=justification,
+                background=launch,
             )
+        except JobLimitError as exc:
+            raise ExecutorError(str(exc))
         except TerminalError as exc:
             raise ExecutorError(f"{exc} {path_note}".strip())
 
@@ -2001,6 +2046,21 @@ class SafeExecutor:
                     "command": result.command,
                     "error": result.stderr,
                     "denied": True,
+                    **({"path_note": path_note} if path_note else {}),
+                },
+            )
+
+        if result.job_id:
+            job = self.jobs.get(result.job_id)
+            return ExecutionResult(
+                ok=True,
+                action_type="run_shell",
+                data={
+                    "command": result.command,
+                    "job_id": result.job_id,
+                    "started_in_background": True,
+                    "max_seconds": job.max_seconds,
+                    "note": _background_note(job.max_seconds, network),
                     **({"path_note": path_note} if path_note else {}),
                 },
             )
@@ -2019,6 +2079,41 @@ class SafeExecutor:
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
+
+    def _job_output(self, job_id: str, wait: float) -> ExecutionResult:
+        job = self._known_job(job_id)
+        if wait and job.status == RUNNING:
+            self.jobs.wait_for_change(job, float(wait))
+        return self._job_result("job_output", job)
+
+    def _job_stop(self, job_id: str) -> ExecutionResult:
+        job = self._known_job(job_id)
+        if job.status == RUNNING:
+            self.jobs.stop(job)
+        return self._job_result("job_stop", job)
+
+    def _job_result(self, action_type: str, job: BackgroundJob) -> ExecutionResult:
+        text, omitted = self.jobs.read(job)
+        return ExecutionResult(
+            ok=True,
+            action_type=action_type,
+            data={
+                **snapshot(job),
+                "state": describe(job),
+                "command": job.command,
+                "output": text[-NOTE_CHARS:],
+                "omitted_chars": omitted + max(0, len(text) - NOTE_CHARS),
+                "untrusted": True,
+                "notice": UNTRUSTED_CONTENT_NOTICE,
+            },
+        )
+
+    def _known_job(self, job_id: str) -> BackgroundJob:
+        try:
+            return self.jobs.get(job_id)
+        except UnknownJobError:
+            known = ", ".join(self.jobs.ids()) or "none"
+            raise ExecutorError(f"Unknown background job {job_id!r}; jobs of this run: {known}")
 
     def _relativize_workspace_paths(
         self, command: list[str], cwd: str | None
@@ -2722,6 +2817,21 @@ class SafeExecutor:
                 path = root_path / filename
                 if path.is_file():
                     yield path
+
+
+def _background_note(max_seconds: float, network: bool) -> str:
+    note = (
+        "The command is running. Its new output is shown to you before each request; "
+        "use job_output to wait for it and job_stop to end it. "
+        f"It is ended after {max_seconds:g} s, and when you give your final answer."
+    )
+    if network:
+        return note
+    return note + (
+        " It runs without network access, in a network namespace of its own: no other "
+        "command can reach a port it opens. To talk to it from another command, start both "
+        "with network: true, or run the server and its client inside one command."
+    )
 
 
 def _path_rewrite_note(rewrites: list[tuple[str, str]]) -> str:

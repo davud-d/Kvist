@@ -38,6 +38,7 @@ _READER_JOIN_GRACE = 2.0
 _REAP_DEADLINE = 2.0
 _CHUNK = 65536
 _DESCENDANT_POLL_INTERVAL = 0.01
+_CANCEL_POLL_INTERVAL = 0.1
 
 
 @dataclass(slots=True)
@@ -48,6 +49,8 @@ class SupervisedResult:
     timed_out: bool
     stdout_truncated: bool
     stderr_truncated: bool
+    # The caller's ``cancel`` event ended the run before exit or timeout.
+    cancelled: bool = False
 
 
 class ProcessSupervisionError(RuntimeError):
@@ -342,6 +345,24 @@ def _text_observer(
     return observe
 
 
+def _wait_unless_cancelled(
+    proc: subprocess.Popen[bytes], timeout: float, cancel: threading.Event
+) -> bool:
+    """Wait for exit; True when ``cancel`` fired first, TimeoutExpired at the deadline."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if cancel.is_set():
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(proc.args, timeout)
+        try:
+            proc.wait(timeout=min(_CANCEL_POLL_INTERVAL, remaining))
+        except subprocess.TimeoutExpired:
+            continue
+        return False
+
+
 def run_supervised(
     argv: list[str],
     *,
@@ -353,11 +374,14 @@ def run_supervised(
     is_windows: bool,
     use_cgroup: bool,
     on_output: Callable[[str], None] | None = None,
+    cancel: threading.Event | None = None,
 ) -> SupervisedResult:
     """Spawn ``argv`` under tree supervision with bounded output capture.
 
     ``on_output`` sees the decoded output as it arrives, from the reader
     threads (so it must be thread-safe and quick). Capture is unaffected.
+    Setting ``cancel`` tears the subtree down like a timeout and reports
+    ``cancelled``; the run then ends within ``_CANCEL_POLL_INTERVAL``.
     """
     scope: _CgroupScope | None = None
     if use_cgroup and not is_windows:
@@ -426,9 +450,13 @@ def run_supervised(
     stderr_reader.start()
 
     timed_out = False
+    cancelled = False
     interrupted: BaseException | None = None
     try:
-        proc.wait(timeout=timeout)
+        if cancel is None:
+            proc.wait(timeout=timeout)
+        else:
+            cancelled = _wait_unless_cancelled(proc, timeout, cancel)
     except subprocess.TimeoutExpired:
         timed_out = True
     except BaseException as error:
@@ -486,6 +514,7 @@ def run_supervised(
         timed_out=timed_out,
         stdout_truncated=stdout_reader.truncated,
         stderr_truncated=stderr_reader.truncated,
+        cancelled=cancelled,
     )
 
 

@@ -124,15 +124,33 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         "Run one command as an argv list. Host and network access each require separate user approval for this command; give a justification when requesting either.",
         {
             "command": _ARGV, "purpose": _SHELL_PURPOSE, "cwd": _CWD,
-            "timeout": {"type": "number"},
+            "timeout": {
+                "type": "number",
+                "description": "Seconds the command may run. Leave it out: the runtime picks a limit, and a command that hits it returns as timed out. Ignored for background commands.",
+            },
             "sandbox": {
                 "type": "string", "enum": ["default", "host"],
                 "description": "Defaults to default. Host exposes system tools/files after one-command approval; it does not grant network.",
             },
             "network": {"type": "boolean", "description": "Defaults to false. True requests separate one-command network approval."},
             "justification": {"type": "string", "description": "Required for host or network access: explain why in the person's language."},
+            "background": {
+                "type": "boolean",
+                "description": "Defaults to false. True returns a job_id at once and keeps the command running (a dev server, a watcher, a long build); its new output is shown to you before each request, and it is stopped when you give your final answer. A job's lifetime is not yours to set: it runs until it ends, you stop it, or you answer. Another command can reach a port the job opens only if both use network: true.",
+            },
         },
         ("command", "purpose"),
+    ),
+    "job_output": ToolSpec(
+        "Read what a background job printed since you last saw it. With wait, block up to that many seconds until it prints something or ends.",
+        {
+            "job_id": _STRING,
+            "wait": {"type": "number", "minimum": 0, "maximum": 120, "description": "Seconds to wait; 0 returns at once."},
+        },
+        ("job_id",),
+    ),
+    "job_stop": ToolSpec(
+        "Stop a background job and return its remaining output.", {"job_id": _STRING}, ("job_id",)
     ),
     "web_search": ToolSpec(
         "Search the web.",

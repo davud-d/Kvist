@@ -15,6 +15,10 @@ from kernel.frontend_protocol import (
     ErrorEvent,
     FinalEvent,
     FrontendChannel,
+    JobFinishedEvent,
+    JobNoticeEvent,
+    JobOutputEvent,
+    JobStartedEvent,
     LiveStartEvent,
     LiveStopEvent,
     MessageEvent,
@@ -37,6 +41,17 @@ from kernel.redaction import redact_text, redact_value
 
 
 _OUTPUT_TAIL_CHARS = 4000
+
+
+class _JobOutput:
+    """Rolling tail and emit schedule of one background job."""
+
+    __slots__ = ("tail", "last_emit", "timer")
+
+    def __init__(self) -> None:
+        self.tail = ""
+        self.last_emit = 0.0
+        self.timer: threading.Timer | None = None
 
 
 class EventStreamUI:
@@ -73,6 +88,8 @@ class EventStreamUI:
         self._output_last_emit = 0.0
         self._output_timer: threading.Timer | None = None
         self.output_interval = 0.12
+        # Background jobs stream the same way, one rolling tail per job.
+        self._job_outputs: dict[str, _JobOutput] = {}
         # A response's words go out once, on the first step of its batch.
         self._said_batch = ""
 
@@ -205,6 +222,59 @@ class EventStreamUI:
                 self._output_timer = threading.Timer(wait, self._flush_output)
                 self._output_timer.daemon = True
                 self._output_timer.start()
+
+    def print_job_started(self, job_id: str, command: list[str], purpose: str, call_id: str = "") -> None:
+        self._channel.emit(
+            JobStartedEvent(
+                job_id=job_id,
+                command=[redact_text(part) for part in command],
+                purpose=redact_text(purpose),
+                call_id=call_id,
+            )
+        )
+
+    def print_job_output(self, job_id: str, tail: str) -> None:
+        """Feed a job's rolling tail (called from its reader threads); a snapshot goes out per interval."""
+        with self._output_lock:
+            state = self._job_outputs.setdefault(job_id, _JobOutput())
+            state.tail = tail[-_OUTPUT_TAIL_CHARS:]
+            wait = state.last_emit + self.output_interval - time.monotonic()
+            if wait <= 0:
+                self._emit_job_output(job_id, state)
+            elif state.timer is None:
+                state.timer = threading.Timer(wait, self._flush_job_output, args=(job_id,))
+                state.timer.daemon = True
+                state.timer.start()
+
+    def _flush_job_output(self, job_id: str) -> None:
+        with self._output_lock:
+            state = self._job_outputs.get(job_id)
+            if state is None:
+                return
+            state.timer = None
+            self._emit_job_output(job_id, state)
+
+    def _emit_job_output(self, job_id: str, state: _JobOutput) -> None:
+        # Redacted as a whole, like action output: a secret split across reads must not slip through.
+        state.last_emit = time.monotonic()
+        self._channel.emit(JobOutputEvent(job_id, redact_text(state.tail)))
+
+    def print_job_finished(self, job_id: str, status: str, exit_code: int | None, output: str) -> None:
+        with self._output_lock:
+            state = self._job_outputs.pop(job_id, None)
+        if state is not None and state.timer is not None:
+            state.timer.cancel()
+        self._channel.emit(
+            JobFinishedEvent(
+                job_id=job_id,
+                status=status,
+                exit_code=exit_code,
+                output=redact_text(output[-_OUTPUT_TAIL_CHARS:]),
+            )
+        )
+
+    def print_job_notice(self, text: str, job_ids: list[str]) -> None:
+        self._channel.emit(JobNoticeEvent(text=redact_text(text), job_ids=list(job_ids)))
 
     def _flush_output(self) -> None:
         with self._output_lock:

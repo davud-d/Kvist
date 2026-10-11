@@ -26,6 +26,8 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "git_status": ("смотрит git status", "checks git status"),
     "git_diff": ("смотрит git diff {target}", "checks git diff {target}"),
     "run_shell": ("запускает {target}", "runs {target}"),
+    "job_output": ("смотрит вывод {target}", "reads the output of {target}"),
+    "job_stop": ("останавливает {target}", "stops {target}"),
     "web_search": ("ищет в сети {target}", "searches the web for {target}"),
     "fetch_url": ("открывает {target}", "opens {target}"),
     "delegate_task": ("передаёт задачу роли {target}", "hands the task to {target}"),
@@ -73,6 +75,8 @@ def _target(action_type: str, args: dict[str, Any], language: str) -> str:
         return _text(args.get("url"))
     if action_type == "delegate_task":
         return _text(args.get("target_role"))
+    if action_type in {"job_output", "job_stop"}:
+        return _text(args.get("job_id"))
     return path or ("." if action_type in {"list_dir", "list_tree"} else "")
 
 
