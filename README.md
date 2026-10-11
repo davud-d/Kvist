@@ -221,8 +221,11 @@ python installer\install.py; if ($?) { echo "Install OK" } else { echo "error in
 
 ## Run
 
-The workspace argument is required. If the directory does not exist, Kvist
-creates it. Relative paths are resolved from the directory where Kvist starts.
+Without `--workspace`, Kvist works in the directory it was started from. When
+that is your home directory or a filesystem root, it uses `Documents/Kvist
+Workspace` instead (the XDG documents directory on Linux). If an explicitly
+named directory does not exist, Kvist creates it. Relative paths are resolved
+from the directory where Kvist starts.
 
 ```bash
 .venv/bin/python -m kernel --workspace /path/to/project

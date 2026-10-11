@@ -45,13 +45,15 @@ def test_main_dispatches_stdio_frontend_without_starting_terminal(monkeypatch, t
     }
 
 
-def test_main_uses_default_workspace_when_stdio_workspace_is_omitted(monkeypatch, tmp_path):
+def test_main_uses_launch_directory_when_stdio_workspace_is_omitted(monkeypatch, tmp_path):
     captured = {}
 
     def fake_launch(workspace, goal, build_agent_fn, **options):
         captured.update(workspace=workspace, goal=goal)
 
-    monkeypatch.setattr(main, "_documents_directory", lambda: tmp_path / "Documents")
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
     monkeypatch.setattr(
         main.sys,
         "argv",
@@ -63,7 +65,7 @@ def test_main_uses_default_workspace_when_stdio_workspace_is_omitted(monkeypatch
     main.main()
 
     assert captured == {
-        "workspace": str((tmp_path / "Documents" / "Kvist Workspace").resolve()),
+        "workspace": str(project.resolve()),
         "goal": "Inspect the project",
     }
 

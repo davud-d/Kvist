@@ -73,7 +73,7 @@ Commits go to the backup relay server, never straight to GitHub.
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt
 
-.venv/bin/python -m kernel --workspace "<project_path>"  # optional; defaults to Documents/Kvist Workspace
+.venv/bin/python -m kernel --workspace "<project_path>"  # optional; defaults to the launch directory (Documents/Kvist Workspace if that is $HOME or /)
 .venv/bin/python kernel/__main__.py --workspace …        # same, from any cwd (what frontends spawn)
 .venv/bin/python scripts/run_task.py "<task prompt>"     # non-interactive single-task entry (hardcodes /tmp/kvist_test)
 

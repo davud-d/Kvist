@@ -30,8 +30,9 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--workspace",
         help=(
-            "Path to the project workspace directory. Defaults to "
-            "Documents/Kvist Workspace."
+            "Path to the project workspace directory. Defaults to the "
+            "directory Kvist was started from (Documents/Kvist Workspace "
+            "when that is the home directory or a filesystem root)."
         ),
     )
     parser.add_argument(
@@ -730,11 +731,28 @@ def default_workspace_path() -> Path:
     return _documents_directory() / "Kvist Workspace"
 
 
+def default_workspace_for_launch() -> Path:
+    """The folder Kvist was started from, or the fallback when that is too broad.
+
+    A home directory or a filesystem root as the workspace would give the agent
+    the person's whole account, which usually means a desktop launcher's cwd,
+    not a project the person chose.
+    """
+    try:
+        launch_dir = Path.cwd().resolve()
+    except OSError:
+        # The launch directory was deleted under the process: there is no cwd to use.
+        return default_workspace_path().expanduser().resolve()
+    if launch_dir == Path.home().resolve() or launch_dir == Path(launch_dir.anchor):
+        return default_workspace_path().expanduser().resolve()
+    return launch_dir
+
+
 def resolve_workspace_path(raw_path: str | None = None) -> Path:
     candidate = (
         Path(raw_path).expanduser().resolve()
         if raw_path and raw_path.strip()
-        else default_workspace_path().expanduser().resolve()
+        else default_workspace_for_launch()
     )
     if not candidate.exists():
         candidate.mkdir(parents=True, exist_ok=True)

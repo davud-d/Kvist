@@ -219,14 +219,15 @@ python installer\install.py; if ($?) { echo "Install OK" } else { echo "error in
 
 ## Запуск
 
-Если workspace не указан, Kvist автоматически создаёт и использует каталог
+Если workspace не указан, Kvist работает в каталоге, из которого его запустили.
+Если это домашний каталог или корень файловой системы, используется
 `Документы/Kvist Workspace` (на Linux учитывается каталог документов из XDG).
 Несуществующий явно указанный каталог Kvist создаёт сам.
 Относительные пути разрешаются от каталога, из которого запущен Kvist.
 
 ```bash
 .venv/bin/python -m kernel --workspace /path/to/project
-# Без --workspace используется Документы/Kvist Workspace
+# Без --workspace используется текущий каталог (запасной: Документы/Kvist Workspace)
 .venv/bin/python -m kernel
 ```
 
