@@ -23,7 +23,9 @@ class ResourceLimits:
     """Unix rlimits applied to child processes via preexec_fn."""
 
     cpu_seconds: int
-    address_space_bytes: int
+    # RLIMIT_DATA, not RLIMIT_AS: V8 reserves ~10 GB of address space per
+    # WebAssembly memory, so an address-space cap breaks Node (tsx, fetch).
+    data_bytes: int
     nproc: int
     fsize_bytes: int
     nofile: int
@@ -35,7 +37,7 @@ _PROFILE_RESOURCE_DEFAULTS: dict[str, ResourceLimits] = {
     # dev: wide enough for builds and test suites, still bounded.
     "dev": ResourceLimits(
         cpu_seconds=120,
-        address_space_bytes=2048 * _MB,
+        data_bytes=2048 * _MB,
         nproc=4096,
         fsize_bytes=64 * _MB,
         nofile=256,
@@ -43,7 +45,7 @@ _PROFILE_RESOURCE_DEFAULTS: dict[str, ResourceLimits] = {
     # restricted: the historical tight limits.
     "restricted": ResourceLimits(
         cpu_seconds=8,
-        address_space_bytes=256 * _MB,
+        data_bytes=256 * _MB,
         nproc=256,
         fsize_bytes=1 * _MB,
         nofile=64,
@@ -55,16 +57,16 @@ def resolve_resource_limits(profile: str) -> ResourceLimits:
     """Profile defaults, overridable via AGENT_RLIMIT_* env vars."""
     base = _PROFILE_RESOURCE_DEFAULTS.get(profile, _PROFILE_RESOURCE_DEFAULTS["dev"])
     cpu = read_int_env("AGENT_RLIMIT_CPU", default=base.cpu_seconds, min_value=1, max_value=3600)
-    as_mb = read_int_env(
-        "AGENT_RLIMIT_AS_MB",
-        default=base.address_space_bytes // _MB,
+    data_mb = read_int_env(
+        "AGENT_RLIMIT_DATA_MB",
+        default=base.data_bytes // _MB,
         min_value=64,
         max_value=16384,
     )
     nproc = read_int_env("AGENT_RLIMIT_NPROC", default=base.nproc, min_value=16, max_value=65536)
     return ResourceLimits(
         cpu_seconds=cpu,
-        address_space_bytes=as_mb * _MB,
+        data_bytes=data_mb * _MB,
         nproc=nproc,
         fsize_bytes=base.fsize_bytes,
         nofile=base.nofile,
@@ -78,7 +80,7 @@ def _unix_resource_limits(limits: ResourceLimits) -> None:
     RLIMIT_NPROC counts processes per user, so it is a fork-bomb brake,
     not a per-command process cap.
     Each limit is applied on its own: a kernel that rejects one of them
-    (macOS rejects RLIMIT_AS values) must not leave the others unset.
+    (macOS rejects some RLIMIT_DATA values) must not leave the others unset.
     """
     try:
         import resource
@@ -87,7 +89,7 @@ def _unix_resource_limits(limits: ResourceLimits) -> None:
 
     requested = (
         ("RLIMIT_CPU", limits.cpu_seconds),
-        ("RLIMIT_AS", limits.address_space_bytes),
+        ("RLIMIT_DATA", limits.data_bytes),
         ("RLIMIT_NPROC", limits.nproc),
         ("RLIMIT_FSIZE", limits.fsize_bytes),
         ("RLIMIT_NOFILE", limits.nofile),

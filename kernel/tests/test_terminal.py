@@ -740,6 +740,35 @@ def test_interpreter_stdin_inline_preload_and_shell_aliases_are_hard_denied(tmp_
         TerminalExecutor(tmp_path)._validate(command)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["node", "--import", "tsx", "a.test.ts"],
+        ["node", "--import=tsx/esm", "a.test.ts"],
+    ],
+)
+def test_node_import_of_tsx_is_allowed(tmp_path, command):
+    (tmp_path / "a.test.ts").write_text("console.log(1)\n", encoding="utf-8")
+
+    TerminalExecutor(tmp_path)._validate(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["node", "--import", "./evil.mjs", "a.test.ts"],
+        ["node", "--import=./evil.mjs", "a.test.ts"],
+        ["node", "--import", "tsx", "--import", "./evil.mjs", "a.test.ts"],
+        ["node", "--import", "tsx-evil", "a.test.ts"],
+    ],
+)
+def test_node_import_of_anything_but_tsx_is_hard_denied(tmp_path, command):
+    (tmp_path / "a.test.ts").write_text("console.log(1)\n", encoding="utf-8")
+
+    with pytest.raises(HardDenyError, match="preload/loader"):
+        TerminalExecutor(tmp_path)._validate(command)
+
+
 @pytest.mark.parametrize("cwd", [".kvist", ".ssh", ".aws", ".gnupg"])
 def test_sensitive_working_directories_are_hard_denied(tmp_path, cwd):
     (tmp_path / cwd).mkdir()
@@ -798,28 +827,28 @@ def test_moderate_command_without_tty_raises_deterministically(tmp_path):
 # ── Profile-based resource limits ────────────────────────────────────
 
 def test_resource_limits_profiles_differ(monkeypatch):
-    for name in ("AGENT_RLIMIT_CPU", "AGENT_RLIMIT_AS_MB", "AGENT_RLIMIT_NPROC"):
+    for name in ("AGENT_RLIMIT_CPU", "AGENT_RLIMIT_DATA_MB", "AGENT_RLIMIT_NPROC"):
         monkeypatch.delenv(name, raising=False)
 
     dev = terminal_module.resolve_resource_limits("dev")
     restricted = terminal_module.resolve_resource_limits("restricted")
 
     assert dev.cpu_seconds == 120
-    assert dev.address_space_bytes == 2048 * 1024 * 1024
+    assert dev.data_bytes == 2048 * 1024 * 1024
     assert restricted.cpu_seconds == 8
-    assert restricted.address_space_bytes == 256 * 1024 * 1024
+    assert restricted.data_bytes == 256 * 1024 * 1024
     assert dev.nproc > 0 and restricted.nproc > 0
 
 
 def test_resource_limits_env_overrides(monkeypatch):
     monkeypatch.setenv("AGENT_RLIMIT_CPU", "42")
-    monkeypatch.setenv("AGENT_RLIMIT_AS_MB", "512")
+    monkeypatch.setenv("AGENT_RLIMIT_DATA_MB", "512")
     monkeypatch.setenv("AGENT_RLIMIT_NPROC", "128")
 
     limits = terminal_module.resolve_resource_limits("dev")
 
     assert limits.cpu_seconds == 42
-    assert limits.address_space_bytes == 512 * 1024 * 1024
+    assert limits.data_bytes == 512 * 1024 * 1024
     assert limits.nproc == 128
 
 
@@ -835,7 +864,7 @@ def test_unix_resource_limits_set_nproc(monkeypatch):
     monkeypatch.setattr(resource, "setrlimit", record)
     limits = terminal_module.ResourceLimits(
         cpu_seconds=10,
-        address_space_bytes=1024 * 1024 * 1024,
+        data_bytes=1024 * 1024 * 1024,
         nproc=99,
         fsize_bytes=1024,
         nofile=32,
@@ -844,6 +873,9 @@ def test_unix_resource_limits_set_nproc(monkeypatch):
 
     assert calls[resource.RLIMIT_NPROC] == (99, 99)
     assert calls[resource.RLIMIT_CPU] == (10, 10)
+    assert calls[resource.RLIMIT_DATA] == (1024 * 1024 * 1024, 1024 * 1024 * 1024)
+    # Capping address space breaks V8's WebAssembly reservations (tsx, fetch).
+    assert resource.RLIMIT_AS not in calls
 
 
 @requires_posix
@@ -852,15 +884,15 @@ def test_unix_resource_limits_rejected_limit_does_not_skip_the_rest(monkeypatch,
 
     applied: list[int] = []
 
-    def reject_address_space(kind, value):
-        if kind == resource.RLIMIT_AS:
+    def reject_data(kind, value):
+        if kind == resource.RLIMIT_DATA:
             raise ValueError("current limit exceeds maximum limit")
         applied.append(kind)
 
-    monkeypatch.setattr(resource, "setrlimit", reject_address_space)
+    monkeypatch.setattr(resource, "setrlimit", reject_data)
     limits = terminal_module.ResourceLimits(
         cpu_seconds=10,
-        address_space_bytes=1024 * 1024 * 1024,
+        data_bytes=1024 * 1024 * 1024,
         nproc=99,
         fsize_bytes=1024,
         nofile=32,
@@ -873,7 +905,7 @@ def test_unix_resource_limits_rejected_limit_does_not_skip_the_rest(monkeypatch,
         resource.RLIMIT_FSIZE,
         resource.RLIMIT_NOFILE,
     ]
-    assert "Failed to set RLIMIT_AS" in capsys.readouterr().err
+    assert "Failed to set RLIMIT_DATA" in capsys.readouterr().err
 
 
 def test_allowlisted_command_runs_without_approval_gate(tmp_path):

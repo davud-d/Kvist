@@ -229,7 +229,9 @@ configured in-repo.
   child PATH and read-only mounted into Bubblewrap; must exist and not be
   world-writable; the user's HOME/.local/nvm/pyenv/cargo are never added),
   `AGENT_WRITE_APPROVAL` (1 default; 0 disables the file-overwrite HITL gate),
-  `AGENT_RLIMIT_CPU` / `AGENT_RLIMIT_AS_MB` / `AGENT_RLIMIT_NPROC` (profile rlimit overrides),
+  `AGENT_RLIMIT_CPU` / `AGENT_RLIMIT_DATA_MB` / `AGENT_RLIMIT_NPROC` (profile rlimit overrides;
+  the memory cap is `RLIMIT_DATA`, never `RLIMIT_AS`: V8 reserves ~10 GB of address space per
+  WebAssembly memory, so an address-space cap kills `tsx`, `fetch` and `node --test`),
   `AGENT_FETCH_EXTRA_DOMAINS` (extra fetch_url domains, comma-separated),
   and search providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` /
   `BRAVE_SEARCH_API_KEY`.
