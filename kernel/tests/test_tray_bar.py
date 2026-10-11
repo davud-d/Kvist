@@ -4,12 +4,16 @@ from __future__ import annotations
 import io
 import json
 import socket
+import sys
 import threading
 
 import pytest
 
 from kernel import tray_bar
 from kernel.tray_bar_client import run_stream, send_toggle
+
+# The bar modules (Waybar, Polybar) exist on Linux; ``install`` does nothing on Windows.
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="status-bar modules are Linux-only")
 
 WAYBAR = """{
     "layer": "top",

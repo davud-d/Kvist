@@ -14,7 +14,6 @@ a system tray icon instead.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import re
@@ -202,6 +201,10 @@ def _reload(name: str) -> None:
 
 
 def _locked(home: Path):
+    # Imported here because the module is imported by ``main`` on every platform and Windows has no
+    # fcntl; the only caller, ``_apply``, returns before this on win32.
+    import fcntl
+
     folder = home / ".kvist"
     folder.mkdir(parents=True, exist_ok=True)
     handle = open(folder / _LOCK_NAME, "w")
