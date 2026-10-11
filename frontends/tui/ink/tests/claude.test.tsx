@@ -368,7 +368,9 @@ test("the spinner counts this turn's output tokens and mentions a thought that j
   assert.match(frame(createElement(ClaudeSpinner, { state })), /\(\d+s · ↓ 8\.5k tokens · thought for 2s\)/)
   const later: State = { ...state, thought: { seconds: 2, at: now - 5000 } }
   assert.match(frame(createElement(ClaudeSpinner, { state: later })), /\(\d+s · ↓ 8\.5k tokens · Reading files\)/)
-  assert.doesNotMatch(frame(createElement(ClaudeSpinner, { state: { ...state, turnStartOutput: 10_600 } })), /tokens/)
+  // The counter is absent when the turn has produced nothing. The spinner word is picked at random
+  // and one of them is "Herding tokens", so only the counter itself is looked for.
+  assert.doesNotMatch(frame(createElement(ClaudeSpinner, { state: { ...state, turnStartOutput: 10_600 } })), /↓ [\d.]+k? tokens/)
 })
 
 test("a tip about a Kvist command sits under the spinner, in the request's language", () => {

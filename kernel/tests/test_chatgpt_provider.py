@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace as NS
@@ -70,7 +71,8 @@ def test_saved_credentials_do_not_open_browser(monkeypatch):
     assert auth.access_token() == "access-fixture"
     assert "access-fixture" not in json.dumps(build_config_info())
     assert "refresh-fixture" not in json.dumps(auth.account_status())
-    assert user_config.get_user_config_path().stat().st_mode & 0o777 == 0o600
+    if sys.platform != "win32":  # Windows has no POSIX permission bits to check
+        assert user_config.get_user_config_path().stat().st_mode & 0o777 == 0o600
 
 
 def test_refresh_is_serialized_and_rotating_credentials_saved_together(monkeypatch):
