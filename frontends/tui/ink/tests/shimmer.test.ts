@@ -25,14 +25,16 @@ test("the spinner is blue at the start of a wait", () => {
   assert.ok(b! > r!)
 })
 
-test("the wait turns orange, then gold, without jumps", () => {
-  const [r1, , b1] = average(60)
-  const [, g1] = average(45)
-  const [, g2] = average(150)
+test("the wait turns orange within seconds, then gold, then red, without jumps", () => {
+  const [r1, , b1] = average(6)
+  const [, g1] = average(6)
+  const [, g2] = average(30)
+  const [r3, g3, b3] = average(200)
   assert.ok(r1! > b1!)
   assert.ok(g2! > g1!)
-  let previous = average(0)
-  for (let seconds = 1; seconds <= 200; seconds++) {
+  assert.ok(r3! > b3! && g3! < g2! - 40)
+  let previous = average(6)
+  for (let seconds = 7; seconds <= 240; seconds++) {
     const now = average(seconds)
     assert.ok(Math.max(...now.map((v, i) => Math.abs(v - previous[i]!))) < 8)
     previous = now

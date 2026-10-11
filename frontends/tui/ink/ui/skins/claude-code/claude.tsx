@@ -5,7 +5,7 @@ import { useWindowSize } from "../../window-size.js"
 import { memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { diffLines, toLines } from "../../../diff.js"
-import { clip, clipLines, contextLabel, formatSeconds, lastLines, outputLines } from "../../../format.js"
+import { clip, clipLines, contextLabel, formatSeconds, outputLines } from "../../../format.js"
 import { actionTarget, requestIsRussian, type ActionResult, type ExploreCounts, type Item, type State } from "../../../state.js"
 import { ViewContext } from "../../context.js"
 import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.js"
@@ -24,7 +24,6 @@ const OUTPUT_LINES = 10
 // The lines of a finished job shown folded, and with Ctrl+O.
 const JOB_LINES = 3
 const JOB_LINES_EXPANDED = 12
-const THOUGHT_LINES = 6
 // "⎿" and its padding: the body of a result starts this many cells in.
 const RESULT_INDENT = 5
 const MARGIN = 3
@@ -324,7 +323,7 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
       return (
         <Box flexDirection="column" marginTop={1}>
           <Text color={color.thought} italic>✻ {item.seconds > 0 ? `Thought for ${formatSeconds(item.seconds)}` : "Thought"}</Text>
-          {item.text ? <Box paddingLeft={2}><Text color={color.thought} italic>{renderInline(lastLines(item.text, THOUGHT_LINES))}</Text></Box> : null}
+          {item.text ? <Box paddingLeft={2}><Text color={color.thought} italic>{renderInline(item.text)}</Text></Box> : null}
         </Box>
       )
     case "explored":
@@ -406,7 +405,7 @@ function useTypewriter(text: string): string {
 function LiveThought({ text }: { text: string }) {
   return (
     <Box marginTop={1} paddingLeft={2}>
-      <Text color={color.thought} italic>{renderInline(lastLines(useTypewriter(text), THOUGHT_LINES))}</Text>
+      <Text color={color.thought} italic>{renderInline(useTypewriter(text))}</Text>
     </Box>
   )
 }
