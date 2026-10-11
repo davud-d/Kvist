@@ -153,6 +153,9 @@ export function InputBox({ active, history, placeholder, mask = false, starters 
 
   useInput(
     (input, key) => {
+      // Ink strips ESC from unrecognised sequences, including late replies to
+      // its kitty keyboard query. These are terminal reports, not typed text.
+      if (/^\[\?\d+u$/.test(input)) return
       if (!mask && key.ctrl && input === "v") { attach(clipboardImage); return }
       const { editor: current, recall, pick: picked } = model.current
       const shown = mask ? [] : suggest(current.text)

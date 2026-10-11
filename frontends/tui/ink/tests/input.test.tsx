@@ -71,3 +71,18 @@ test("a file image becomes a label and travels as pixels only when submitted", a
     assert.deepEqual(removed.submitted, ["hello"])
   } finally { rmSync(folder, { recursive: true, force: true }) }
 })
+
+test("kitty keyboard capability replies do not become typed text", async () => {
+  for (const reply of ["\x1b[?0u", "\x1b[?31u"]) {
+    const { shown, submitted } = await typeKeys([], reply, "hello")
+    assert.doesNotMatch(shown, /\[\?\d+u/)
+    assert.deepEqual(submitted, [])
+    const sent = await typeKeys([], reply + "hello", "\r")
+    assert.deepEqual(sent.submitted, ["hello"])
+  }
+})
+
+test("bracketed paste keeps text that looks like a keyboard capability reply", async () => {
+  const { submitted } = await typeKeys([], "\x1b[200~[?0u\x1b[201~", "\r")
+  assert.deepEqual(submitted, ["[?0u"])
+})
