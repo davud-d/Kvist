@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { delimiter, join } from "node:path"
 import { test } from "node:test"
@@ -43,15 +43,25 @@ test("the frame reader hands over only the newest whole frame and keeps the part
   assert.deepEqual([...(reader.push(Buffer.from([3, 3])) ?? [])], [3, 3, 3, 3])
 })
 
-test("ffmpeg is KVIST_FFMPEG when it runs, else the first one on PATH", () => {
+test("ffmpeg is KVIST_FFMPEG when it runs, else the first one on PATH, else the installed one", () => {
   const directory = mkdtempSync(join(tmpdir(), "kvist-ffmpeg-"))
   const binary = join(directory, "ffmpeg")
   writeFileSync(binary, "#!/bin/sh\n")
   chmodSync(binary, 0o755)
-  assert.equal(findFfmpeg({ PATH: ["/nonexistent", directory].join(delimiter) }, "linux"), binary)
-  assert.equal(findFfmpeg({ KVIST_FFMPEG: binary, PATH: "" }, "linux"), binary)
-  assert.equal(findFfmpeg({ KVIST_FFMPEG: join(directory, "missing"), PATH: directory }, "linux"), null)
-  assert.equal(findFfmpeg({ PATH: "/nonexistent" }, "linux"), null)
+  const emptyHome = mkdtempSync(join(tmpdir(), "kvist-home-"))
+  assert.equal(findFfmpeg({ PATH: ["/nonexistent", directory].join(delimiter) }, "linux", emptyHome), binary)
+  assert.equal(findFfmpeg({ KVIST_FFMPEG: binary, PATH: "" }, "linux", emptyHome), binary)
+  assert.equal(findFfmpeg({ KVIST_FFMPEG: join(directory, "missing"), PATH: directory }, "linux", emptyHome), null)
+  assert.equal(findFfmpeg({ PATH: "/nonexistent" }, "linux", emptyHome), null)
+
+  // The release installer unpacks one beside kvist-core; PATH still wins when it has one.
+  const installedDirectory = join(emptyHome, ".local", "share", "kvist", "ffmpeg")
+  mkdirSync(installedDirectory, { recursive: true })
+  const installed = join(installedDirectory, "ffmpeg")
+  writeFileSync(installed, "#!/bin/sh\n")
+  chmodSync(installed, 0o755)
+  assert.equal(findFfmpeg({ PATH: "/nonexistent" }, "linux", emptyHome), installed)
+  assert.equal(findFfmpeg({ PATH: directory }, "linux", emptyHome), binary)
 })
 
 test("the demo clip is found beside the sources", () => {

@@ -32,7 +32,8 @@ def _assets(directory: Path, binary: str, drop: tuple[str, ...] = ()) -> Path:
 
 
 def _run(tmp_path: Path, system: str, machine: str, binary: str, shell: str = "/bin/zsh", extra_env=None,
-         args: tuple[str, ...] = (), drop: tuple[str, ...] = ()):
+         args: tuple[str, ...] = (), drop: tuple[str, ...] = (), stub_tools: tuple[str, ...] = (), scripts: dict[str, str] | None = None,
+         offline_assets: bool = True):
     """Run the installer in a scratch home (reused by a second call); returns (result, home)."""
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
@@ -40,9 +41,17 @@ def _run(tmp_path: Path, system: str, machine: str, binary: str, shell: str = "/
     shims.mkdir(exist_ok=True)
     # Only the tools the script uses, so an editor installed on this machine is not found.
     for tool in ("sh", "env", "basename", "dirname", "mktemp", "install", "cat", "mv", "rm",
-                 "mkdir", "chmod", "sort", "unzip", "cp"):
-        if not (shims / tool).exists():
+                 "mkdir", "chmod", "sort", "unzip", "cp", "sha256sum", "wc", "sleep"):
+        if shutil.which(tool) and not (shims / tool).exists():
             (shims / tool).symlink_to(shutil.which(tool))
+    for tool in stub_tools:
+        stub = shims / tool
+        stub.write_text("#!/bin/sh\nexit 0\n")
+        stub.chmod(0o755)
+    for tool, body in (scripts or {}).items():
+        script = shims / tool
+        script.write_text(body)
+        script.chmod(0o755)
     real_uname = shutil.which("uname")
     shim = shims / "uname"
     shim.unlink(missing_ok=True)
@@ -58,7 +67,8 @@ def _run(tmp_path: Path, system: str, machine: str, binary: str, shell: str = "/
     }
     env.update(extra_env or {})
     result = subprocess.run(
-        [shutil.which("bash"), str(SCRIPT), "--from", str(_assets(tmp_path / "assets", binary, drop)), *args],
+        [shutil.which("bash"), str(SCRIPT),
+         *(("--from", str(_assets(tmp_path / "assets", binary, drop))) if offline_assets else ()), *args],
         env=env, capture_output=True, text=True, timeout=60, check=False,
     )
     return result, home
@@ -199,7 +209,9 @@ def test_only_installs_just_the_chosen_components_and_reports_json_events(tmp_pa
 
     assert result.returncode == 0, result.stdout + result.stderr
     events = [json.loads(line) for line in result.stdout.splitlines()]
+    # "start" comes first while the asset is fetched, then again when it is installed.
     assert [e for e in events if e["event"] == "component"] == [
+        {"event": "component", "id": "cli", "status": "start"},
         {"event": "component", "id": "cli", "status": "start"},
         {"event": "component", "id": "cli", "status": "done"},
         {"event": "component", "id": "path", "status": "start"},
@@ -251,3 +263,114 @@ def test_plan_names_the_node_download_and_where_it_goes(tmp_path):
         "https://nodejs.org/dist/v22.23.3/node-v22.23.3-darwin-arm64.tar.gz",
         str(home / ".local" / "share" / "kvist" / "node"),
     ]
+
+
+def test_plan_offers_build_tools_with_the_package_managers_own_commands(tmp_path):
+    result, _home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",), stub_tools=("apt-get",))
+
+    plan = json.loads(result.stdout)
+    tools = {item["id"]: item for item in plan["components"]}
+    # No sudo and not root here, so the commands are shown as the person would type them.
+    assert plan["privilege"] == "none"
+    assert tools["python"]["available"] is True
+    assert tools["python"]["targets"] == ["sudo apt-get update", "sudo apt-get install -y python3 python3-venv python3-pip"]
+    assert tools["libpython"]["targets"][-1] == "sudo apt-get install -y python3-dev"
+    assert tools["binutils"]["targets"][-1] == "sudo apt-get install -y binutils"
+
+
+def test_build_tools_are_unsupported_without_a_known_package_manager(tmp_path):
+    result, _home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",))
+
+    tools = {item["id"]: item for item in json.loads(result.stdout)["components"]}
+    assert all(tools[name]["available"] is False and tools[name]["reason"] == "unsupported" for name in ("python", "libpython", "binutils"))
+
+
+def test_build_tools_without_administrator_rights_are_reported_and_the_run_goes_on(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", shell="/bin/bash",
+                        args=("--only", "binutils,path", "--events"), stub_tools=("apt-get",))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert {"event": "component", "id": "binutils", "status": "failed"} in events
+    warning = next(e for e in events if e["event"] == "warning")
+    assert "run it yourself: sudo apt-get update && sudo apt-get install -y binutils" in warning["message"]
+    # The component after the failed one still ran.
+    assert {"event": "component", "id": "path", "status": "done"} in events
+    assert (home / ".bashrc").is_file()
+
+
+def test_plan_offers_the_pinned_ffmpeg_for_each_supported_platform(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",))
+    ffmpeg = next(item for item in json.loads(result.stdout)["components"] if item["id"] == "ffmpeg")
+    assert ffmpeg["available"] is True
+    assert ffmpeg["targets"] == [
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz",
+        str(home / ".local" / "share" / "kvist" / "ffmpeg"),
+    ]
+
+    (tmp_path / "mac").mkdir()
+    mac, _home = _run(tmp_path / "mac", "Darwin", "arm64", "kvist-macos-arm64", args=("--plan",))
+    ffmpeg = next(item for item in json.loads(mac.stdout)["components"] if item["id"] == "ffmpeg")
+    assert ffmpeg["available"] is True
+    assert ffmpeg["targets"][0].endswith("/ffmpeg-darwin-arm64.gz")
+
+
+def test_ffmpeg_that_does_not_match_the_pinned_checksum_is_refused_and_nothing_is_written(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "ffmpeg-linux-x64.gz").write_bytes(b"not the pinned file")
+
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "ffmpeg", "--events"))
+
+    # ffmpeg only plays a preview: refusing it is a warning, not the end of the install.
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert "does not match the pinned SHA-256" in next(e for e in events if e["event"] == "warning")["message"]
+    assert {"event": "component", "id": "ffmpeg", "status": "failed"} in events
+    assert not (home / ".local").exists()
+
+
+# A curl that answers a probe (-w) with a speed by server and "downloads" a file that is not the
+# pinned one, logging which server it was asked for.
+_FAKE_CURL = r"""#!/bin/sh
+url=""; out=""; probe=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    -w) probe=1; shift ;;
+    -r|--connect-timeout|--max-time|--retry|--speed-limit|--speed-time) shift ;;
+    -*) ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+if [ "$probe" = 1 ]; then
+  case "$url" in
+    *github.com*) echo "206 100000" ;;
+    *npmmirror*) echo "206 9000000" ;;
+    *) echo "000 0" ;;
+  esac
+  exit 0
+fi
+echo "$url" >> "$KVIST_FAKE_LOG"
+printf junk > "$out"
+"""
+
+
+def test_the_fastest_server_is_tried_first_and_a_file_that_does_not_match_goes_to_the_next(tmp_path):
+    log = tmp_path / "downloads.log"
+    result, _home = _run(
+        tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "ffmpeg", "--events"),
+        scripts={"curl": _FAKE_CURL}, extra_env={"KVIST_FAKE_LOG": str(log)}, offline_assets=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert log.read_text().split() == [
+        "https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.0/ffmpeg-linux-x64.gz",
+        "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-x64.gz",
+    ]
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    messages = [e["message"] for e in events if "message" in e]
+    assert any("Downloading ffmpeg 6.0 from cdn.npmmirror.com (9.0 MB/s)" in m for m in messages)
+    assert any("did not arrive intact; trying the next server" in m for m in messages)
+    assert {"event": "component", "id": "ffmpeg", "status": "failed"} in events

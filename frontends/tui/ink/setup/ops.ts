@@ -70,6 +70,8 @@ export interface InstallScript {
 export interface PlanComponent {
   id: string
   available: boolean
+  // Why an unavailable item is not offered: "present" or "unsupported".
+  reason?: string
   // Paths and commands the component would touch or run.
   targets: string[]
 }
@@ -78,12 +80,13 @@ export interface PlanReply {
   os: string
   arch: string
   shell: string
+  privilege: "root" | "cached" | "password" | "none"
   components: PlanComponent[]
 }
 
 export type InstallEvent =
   | { event: "step" | "warning" | "error"; message: string }
-  | { event: "component"; id: string; status: "start" | "done" }
+  | { event: "component"; id: string; status: "start" | "done" | "failed" }
   | { event: "done" }
 
 export type InstallReply = { ok: true } | { ok: false; error: string }

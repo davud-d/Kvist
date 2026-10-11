@@ -859,11 +859,37 @@ mouse, bracketed paste, row-diff painting) and the effects. Tests: `tests/setup.
   warning for the highlighted row, and `install.sh --only <ids> --events` installs and reports
   one JSON object per line (`step`, `warning`, `error`, `component start|done`, `done`) that
   fill the progress list (`ops.readPlan`/`runInstall`). Components: `cli`, `node` (pinned
-  version and SHA-256 per OS in the script, never unpacked from an unchecked download), `jetbrains`
+  version and SHA-256 per OS in the script, never unpacked from an unchecked download), `ffmpeg`
+  (FFmpeg 6.0 static builds from the `b6.0` tag of github.com/eugeneware/ffmpeg-static: Linux x64
+  and macOS arm64/x64, one gzipped binary each, pinned by a SHA-256 recorded when they were
+  chosen — the publisher gives none — and unpacked to `~/.local/share/kvist/ffmpeg`. GitHub is
+  the source because johnvansickle.com served ~0.2 MB/s, which read as a hang. Node.js and ffmpeg
+  each have mirrors (`NODE_MIRRORS`, `FFMPEG_MIRRORS`: npmmirror, USTC) holding the same files:
+  `rank_mirrors` asks all servers for their first megabyte at once (8 s at most) and
+  `download_verified` takes them fastest first, keeping a file only if it has the pinned SHA-256,
+  so a mirror cannot change what is installed and one slow or blocked route does not stall it. Any failure
+  of this optional item is a warning and the install goes on; downloads give up under 5 kB/s
+  for 30 s and report their size once a second.
+  `video.findFfmpeg` finds it after `KVIST_FFMPEG` and PATH, and
+  `run.ts` looks again when an installation finishes so the video plays in the same session),
+  `jetbrains`
   and `vscode` (unavailable, shown dimmed, when no IDE is found), `path` (one line appended once
   to the login shell's startup file). `cli` cannot be unticked. Keyboard (↑↓/Tab, Space or X,
   digits, Enter, Esc, Q) and mouse (a click on a row ticks it, buttons) each work alone; the
   copy is in `strings.ts` (`componentLabels`, `componentActions`, English and Russian).
+  **Build tools** (`BUILD_TOOLS` in `flow.ts`: `python`, `libpython`, `binutils`) sit under one
+  folding row (`choiceRows`: a click or Space on it, → to unfold, ← to fold from the row or from
+  inside; folded, it shows how many are ticked). They are the system packages `install_cli.py`
+  checks for (`python3`+venv+pip, `python3-dev`/`python3-devel`, binutils' `objdump`; pacman's
+  python already ships libpython). They start ticked in the screen (the user's choice; the folding
+  row shows how many), while the script's own `--only` default never includes them. `--plan` reports `privilege` (`root`, `cached` = sudo needs no password, `password`,
+  `none`) and per item `reason` (`present`, `unsupported`) and the exact commands (apt-get, dnf,
+  zypper, pacman). With `password`, the screen hands the terminal over before installing
+  (`run.suspendTerminal`: leaves the alternate buffer and raw mode, `sudo -v`, then repaints and
+  dispatches `elevated`), so the script's own `sudo -n` finds the cached credentials; a refused
+  password returns to the choice. With `none`, the script emits a warning with the whole
+  command sequence for the person to run themselves and marks the item `failed`; the warnings
+  are repeated on the welcome screen.
   **Bootstrap**: with a terminal (`/dev/tty` opens; stdin is the script under a pipe) and none of
   `--only`/`--from`/`--events`/`KVIST_INSTALL_PLAIN`, the script downloads `kvist-<os>-<arch>` and
   the pinned Node.js into its temporary folder, then runs `kvist-core --installer` with

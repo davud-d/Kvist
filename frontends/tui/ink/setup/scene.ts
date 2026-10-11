@@ -10,6 +10,8 @@ import {
   MORE_PROVIDERS,
   RECOMMENDED_PROVIDER,
   REGISTERABLE_PROVIDER,
+  BUILD_TOOLS,
+  choiceRows,
   filteredModels,
   offeredProviders,
   type SetupState,
@@ -226,9 +228,10 @@ function optionRow(index: number, selected: boolean, label: string, blurb: strin
   }
 }
 
-// One tick-box row: the whole row is a click target that flips the box.
-function checkRow(index: number, selected: boolean, checked: boolean, available: boolean, label: string, blurb: string, width: number, labelWidth: number): PanelLine {
-  const head = ` [${checked && available ? "x" : " "}]  ${label.padEnd(labelWidth)}`
+// One tick-box row: the whole row is a click target that flips the box. `indent` pushes the
+// items that sit under the folding row to the right.
+function checkRow(index: number, selected: boolean, checked: boolean, available: boolean, label: string, blurb: string, width: number, labelWidth: number, indent = 0): PanelLine {
+  const head = `${" ".repeat(indent)} [${checked && available ? "x" : " "}]  ${label.padEnd(labelWidth)}`
   const body = truncate(blurb, Math.max(0, width - head.length))
   const tone: Tone = selected ? "primary" : available ? "text" : "dim"
   return {
@@ -241,13 +244,37 @@ function checkRow(index: number, selected: boolean, checked: boolean, available:
   }
 }
 
-// What the highlighted component would do, as the paths and commands themselves; as many as fit.
+// The row that folds the build tools: a click, Space, → and ← all work on it.
+function groupRow(index: number, selected: boolean, open: boolean, ticked: number, label: string, blurb: string, summary: string, width: number, labelWidth: number): PanelLine {
+  const head = ` ${open ? "▾" : "▸"}  ${label.padEnd(labelWidth + 2)}`
+  const body = truncate(`${ticked > 0 ? `${summary}  ` : ""}${blurb}`, Math.max(0, width - head.length))
+  return {
+    segments: [
+      { text: head, tone: selected ? "primary" : "text" },
+      { text: body, tone: selected ? "primary" : "dim" },
+    ],
+    selected,
+    hit: { kind: "option", index },
+  }
+}
+
+// What the highlighted row would do, as the paths and commands themselves; as many as fit.
 function actionLines(state: SetupState, strings: Strings, width: number, room: number): PanelLine[] {
-  const component = state.install?.components[state.install.cursor]
-  if (!component || !component.available || room < 3) return []
+  const install = state.install
+  const row = install ? choiceRows(install)[install.cursor] : undefined
+  if (!install || !row || room < 3) return []
+  if (row.kind === "group") return paragraph(strings.buildNote, width, "warm").slice(0, Math.max(1, room))
+  const component = row.component
+  if (!component.available) return []
   const lines = paragraph(strings.componentActions[component.id] ?? strings.installWillDo, width, "warm")
   const shown = component.targets.slice(0, Math.max(1, room - lines.length))
   shown.forEach((target) => lines.push(text(`  ${truncate(target, width - 2)}`, "dim")))
+  // What will be asked of the person, for the items that need administrator rights.
+  const needsRights = BUILD_TOOLS.includes(component.id)
+  if (needsRights && lines.length < room) {
+    if (install.privilege === "password") lines.push(...paragraph(strings.privilegePassword, width, "dim").slice(0, room - lines.length))
+    if (install.privilege === "none") lines.push(...paragraph(strings.privilegeNone, width, "dim").slice(0, room - lines.length))
+  }
   return lines
 }
 
@@ -257,11 +284,22 @@ function componentLines(input: SceneInput, width: number, room: number): PanelLi
   const lines: PanelLine[] = [text(strings.installTitle, "title"), ...paragraph(strings.installBody, width, "dim"), blank()]
   if (!install || install.plan === "loading") return [...lines, text(`${SPINNER[input.tick % SPINNER.length]} ${strings.installLoading}`, "dim")]
   if (install.plan === "failed") return [...lines, text(`${strings.installPlanFailed} ${install.error}`.trim(), "err"), blank(), buttons(button(strings.quit, "quit", "secondary"))]
-  const labels = install.components.map((component) => strings.componentLabels[component.id]?.[0] ?? component.id)
-  const labelWidth = Math.min(22, Math.max(...labels.map((label) => label.length)) + 2)
-  install.components.forEach((component, index) => {
-    const blurb = component.available ? (strings.componentLabels[component.id]?.[1] ?? "") : strings.installNotFound
-    lines.push(checkRow(index, install.cursor === index, component.checked, component.available, labels[index] ?? component.id, blurb, width, labelWidth))
+  const rows = choiceRows(install)
+  const label = (id: string) => strings.componentLabels[id]?.[0] ?? id
+  // The indent of the build tools is part of the column, so their descriptions line up with the rest.
+  const labelWidth = Math.min(32, Math.max(strings.buildGroup[0].length, ...install.components.map((component) => label(component.id).length)) + 2 + 3)
+  rows.forEach((row, index) => {
+    const selected = install.cursor === index
+    if (row.kind === "group") {
+      const ticked = install.components.filter((component) => BUILD_TOOLS.includes(component.id) && component.available && component.checked).length
+      lines.push(groupRow(index, selected, install.buildOpen, ticked, strings.buildGroup[0], strings.buildGroup[1], strings.buildTicked(ticked), width, labelWidth - 2))
+      return
+    }
+    const { component } = row
+    const reason = component.reason ? (strings.componentReason[component.reason] ?? strings.installNotFound) : strings.installNotFound
+    const blurb = component.available ? (strings.componentLabels[component.id]?.[1] ?? "") : reason
+    const indent = BUILD_TOOLS.includes(component.id) ? 3 : 0
+    lines.push(checkRow(index, selected, component.checked, component.available, label(component.id), blurb, width, labelWidth - indent, indent))
   })
   if (install.error) lines.push(blank(), ...paragraph(`${strings.installFailed} ${install.error}`, width, "err"))
   const used = lines.length + 3
@@ -483,7 +521,7 @@ function build(input: SceneInput, width: number, listRows: number): Built {
     case "components":
       return {
         lines: componentLines(input, width, input.rows - 8),
-        hint: [strings.hintMove, strings.hintToggle, strings.hintInstall, strings.hintQuit, hintMouse].join(" · "),
+        hint: [strings.hintMove, strings.hintToggle, ...(state.install && choiceRows(state.install).some((row) => row.kind === "group") ? [strings.hintFold] : []), strings.hintInstall, strings.hintQuit, hintMouse].join(" · "),
         step: 0,
         steps,
       }
@@ -494,7 +532,9 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       const wide = full && breadthOf(state.workspace, state.home) !== null
       const where = `${strings.workingFolder}: ${tail(input.workspace, Math.max(8, width - strings.workingFolder.length - 2))}`
       // A person who has just installed Kvist is told so once, above the welcome.
-      const installed = state.install ? [text(`✓ ${strings.installedAll}`, "ok")] : []
+      const installed = state.install
+        ? [text(`✓ ${strings.installedAll}`, "ok"), ...state.install.warnings.slice(-3).flatMap((warning) => paragraph(`! ${warning}`, width, "warm"))]
+        : []
       const title = text(strings.welcomeTitle, "title")
       const body = paragraph(strings.welcomeBody, width)
       const safe = paragraph(`✓ ${strings.welcomeSafe}`, width, "dim")

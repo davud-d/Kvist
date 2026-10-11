@@ -4,6 +4,7 @@
 // or without the clip beside the bundle there is no video and the step keeps its text preview.
 import { spawn } from "node:child_process"
 import { accessSync, constants } from "node:fs"
+import { homedir } from "node:os"
 import { delimiter, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -60,14 +61,16 @@ function executable(path: string): boolean {
   }
 }
 
-// The ffmpeg to decode with: KVIST_FFMPEG when it names a runnable file, else the first one on PATH.
-export function findFfmpeg(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform): string | null {
+// The ffmpeg to decode with: KVIST_FFMPEG when it names a runnable file, else the first one on PATH,
+// else the one the release installer unpacked beside kvist-core (~/.local/share/kvist/ffmpeg).
+export function findFfmpeg(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = process.platform, home: string = homedir()): string | null {
   if (env.KVIST_FFMPEG) return executable(env.KVIST_FFMPEG) ? env.KVIST_FFMPEG : null
   const name = platform === "win32" ? "ffmpeg.exe" : "ffmpeg"
   for (const directory of (env.PATH ?? "").split(delimiter)) {
     if (directory && executable(join(directory, name))) return join(directory, name)
   }
-  return null
+  const installed = join(home, ".local", "share", "kvist", "ffmpeg", name)
+  return executable(installed) ? installed : null
 }
 
 // The clip sits beside the bundle (dist-ui/), or in demo/ when running from source.

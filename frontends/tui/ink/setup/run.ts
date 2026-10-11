@@ -1,5 +1,6 @@
 // Runs the setup screen on the terminal: raw input, the alternate screen, the mouse, and the
 // core operations the flow asks for. Resolves with what the person decided.
+import { spawn } from "node:child_process"
 import { homedir } from "node:os"
 
 import type { CoreCommand } from "../core.js"
@@ -116,9 +117,11 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
   // The cell size in pixels sizes the image; a terminal that does not say gets an assumed one.
   const cell = image ? (await probeTerminal(stdin, stdout)).cell : null
   // The demo video needs the cell size (to keep its proportions), a decoder and the clip.
-  const ffmpeg = image && cell && cell.width > 0 && cell.height > 0 && env.KVIST_SETUP_VIDEO !== "off" ? findFfmpeg(env) : null
-  const clip = ffmpeg ? findClip() : null
-  const videoCell = ffmpeg && clip ? cell : null
+  const canPlayVideo = Boolean(image && cell && cell.width > 0 && cell.height > 0 && env.KVIST_SETUP_VIDEO !== "off")
+  // Looked up again once an installation has finished: it may have just put ffmpeg in place.
+  let ffmpeg = canPlayVideo ? findFfmpeg(env) : null
+  let clip = ffmpeg ? findClip() : null
+  let videoCell = ffmpeg && clip ? cell : null
 
   return new Promise((resolve) => {
     const script = options.install ?? null
@@ -274,8 +277,49 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
       }
     }
 
+    // Gives the terminal to a program that asks the person something itself (sudo's password
+    // prompt) and takes it back afterwards: the screen leaves the alternate buffer and raw mode,
+    // and is repainted from scratch when it returns.
+    const suspendTerminal = () => {
+      clearInterval(spinnerTimer)
+      spinnerTimer = undefined
+      stopVideo()
+      stdin.off("data", onData)
+      if (stdin.isTTY) stdin.setRawMode(false)
+      stdin.pause()
+      disableMouse()
+      stdout.write(`${image ? `\x1b_Ga=d,d=I,i=${PICTURE_ID},q=2\x1b\\` : ""}\x1b[?2004l\x1b[?25h\x1b[?1049l\x1b[23;0t`)
+    }
+
+    const resumeTerminal = () => {
+      stdout.write("\x1b[22;0t\x1b]2;Kvist setup\x07\x1b[?1049h\x1b[?25l\x1b[?2004h")
+      enableMouse(stdout, false, true)
+      if (stdin.isTTY) stdin.setRawMode(true)
+      stdin.resume()
+      stdin.on("data", onData)
+      painted = null
+      imageShown = ""
+      syncSpinner()
+      paint()
+    }
+
+    const elevate = () => {
+      suspendTerminal()
+      stdout.write(`\n${strings.elevateTitle}\n`)
+      const finishElevation = (error: string) => {
+        resumeTerminal()
+        dispatch({ type: "elevated", error })
+      }
+      // `sudo -v` only asks for the password and caches it, so the installer's own sudo -n finds it.
+      const child = spawn("sudo", ["-v"], { stdio: "inherit" })
+      child.on("error", () => finishElevation(strings.elevateFailed))
+      child.on("close", (code) => finishElevation(code === 0 ? "" : strings.elevateFailed))
+    }
+
     const run = (effect: Effect) => {
       switch (effect.type) {
+        case "elevate":
+          return elevate()
         case "finish": {
           if (effect.outcome.kind !== "frontend") return finish(effect.outcome)
           // A beat of confirmation: the next screen takes a moment to start, and the window
@@ -344,6 +388,11 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
       if (finished) return
       const before = state.step
       const next = update(state, action, strings)
+      if (action.type === "installed" && action.reply.ok && canPlayVideo && !ffmpeg) {
+        ffmpeg = findFfmpeg(env)
+        clip = ffmpeg ? findClip() : null
+        videoCell = ffmpeg && clip ? cell : null
+      }
       state = next.state
       syncSpinner()
       // The dialog and the chooser are different sizes: the pane glides from one to the other.

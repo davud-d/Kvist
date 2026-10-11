@@ -312,7 +312,7 @@ jobs:
           body: |
             Automatically rebuilt from `${{ github.sha }}` on every push to `main`.
 
-            **Install with one command.** In a terminal it opens an installer screen: tick what to install (the `kvist` command, Node.js for the terminal interface, the JetBrains plugin, the VS Code extension, the PATH line), read exactly which files and commands each choice touches, and the first-run setup follows. No administrator rights are used and no system packages are installed.
+            **Install with one command.** In a terminal it opens an installer screen: tick what to install (the `kvist` command, Node.js for the terminal interface, the JetBrains plugin, the VS Code extension, the PATH line), read exactly which files and commands each choice touches, and the first-run setup follows. By default no administrator rights are used and no system packages are installed; the build tools (Python, its headers, binutils) in the folded "Build from source" row are the exception: untick them to keep sudo out of it.
 
             ```sh
             # Linux and macOS (macOS is best-effort, see below)

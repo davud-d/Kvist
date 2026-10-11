@@ -9,14 +9,23 @@ export type Step = "components" | "installing" | "welcome" | "broad" | "folder" 
 
 // What the release installer can put on a machine, in the order it is offered. The first one is
 // the program itself and cannot be unticked.
-export const COMPONENT_IDS = ["cli", "node", "jetbrains", "vscode", "path"] as const
+export const COMPONENT_IDS = ["cli", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils"] as const
 export const REQUIRED_COMPONENT = "cli"
+// System packages for building Kvist from source: they sit under one folding row and are the only
+// items that need administrator rights.
+export const BUILD_TOOLS: readonly string[] = ["python", "libpython", "binutils"]
 
 export type ComponentStatus = "waiting" | "running" | "done" | "failed"
+
+// How system packages can be installed: as root, with a sudo that asks nothing, with a sudo that
+// asks for a password (the screen hands the terminal over for that), or not at all.
+export type Privilege = "root" | "cached" | "password" | "none"
 
 export interface Component {
   id: string
   available: boolean
+  // Why an unavailable item is not offered: "present" (already there) or "unsupported".
+  reason: string
   targets: string[]
   checked: boolean
 }
@@ -24,7 +33,10 @@ export interface Component {
 export interface InstallState {
   plan: "loading" | "ready" | "failed"
   components: Component[]
-  // The highlighted row of the list.
+  privilege: Privilege
+  // The build tools are folded away until this is true.
+  buildOpen: boolean
+  // The highlighted row of the list (choiceRows), the folding row included.
   cursor: number
   // Progress of the run, by component id.
   status: Record<string, ComponentStatus>
@@ -59,6 +71,7 @@ export type Outcome = { kind: "frontend"; value: InterfaceId } | { kind: "classi
 
 export type Effect =
   | { type: "plan" }
+  | { type: "elevate" }
   | { type: "install"; only: string[] }
   | { type: "listModels"; provider: string; key: string }
   | { type: "connect"; provider: string; key: string; model: string }
@@ -85,6 +98,7 @@ export type Action =
   | { type: "made"; path: string; error?: string }
   | { type: "plan"; reply: OpReply<PlanReply> }
   | { type: "installEvent"; event: InstallEvent }
+  | { type: "elevated"; error: string }
   | { type: "installed"; reply: InstallReply }
 
 export interface SetupState {
@@ -129,7 +143,7 @@ export interface SetupState {
 export function initialState(workspace = "", home = "", drives = false, scope: "full" | "provider" = "full", withInstall = false): SetupState {
   return {
     step: withInstall ? "components" : "welcome",
-    install: withInstall ? { plan: "loading", components: [], cursor: 0, status: {}, message: "", warnings: [], error: "" } : null,
+    install: withInstall ? { plan: "loading", components: [], privilege: "none", buildOpen: false, cursor: 0, status: {}, message: "", warnings: [], error: "" } : null,
     scope,
     workspace,
     home,
@@ -267,15 +281,53 @@ function withInstall(state: SetupState, change: Partial<InstallState>): SetupSta
   return state.install ? { ...state, install: { ...state.install, ...change } } : state
 }
 
-// A tick is flipped by key or click alike; the program itself and what is not here stay as they are.
-function toggleComponent(state: SetupState, index: number): Update {
+// One line of the choice: an item, or the row that folds the build tools away.
+export type Row = { kind: "component"; component: Component; index: number } | { kind: "group" }
+
+// The rows in the order they are drawn: the items, then the folding row, then (when it is open)
+// the build tools. A plan without build tools has no folding row.
+export function choiceRows(install: InstallState): Row[] {
+  const rows: Row[] = []
+  install.components.forEach((component, index) => {
+    if (!BUILD_TOOLS.includes(component.id)) rows.push({ kind: "component", component, index })
+  })
+  const tools = install.components.flatMap((component, index) => (BUILD_TOOLS.includes(component.id) ? [{ kind: "component" as const, component, index }] : []))
+  if (tools.length === 0) return rows
+  rows.push({ kind: "group" })
+  if (install.buildOpen) rows.push(...tools)
+  return rows
+}
+
+// Folds or unfolds the build tools; the highlight returns to the folding row if it was inside.
+function setBuildOpen(state: SetupState, open: boolean): SetupState {
   const install = state.install
-  const component = install?.components[index]
-  if (!install || !component) return { state }
-  const moved = withInstall(state, { cursor: index })
-  if (!component.available || component.id === REQUIRED_COMPONENT) return { state: moved }
-  const components = install.components.map((item, at) => (at === index ? { ...item, checked: !item.checked } : item))
-  return { state: withInstall(state, { cursor: index, components }) }
+  if (!install || install.buildOpen === open) return state
+  const rows = choiceRows({ ...install, buildOpen: open })
+  const group = rows.findIndex((row) => row.kind === "group")
+  const cursor = open || install.cursor <= group ? install.cursor : group
+  return withInstall(state, { buildOpen: open, cursor })
+}
+
+// → unfolds the build tools from their folding row; ← folds them from the row or from inside them.
+function foldWithArrow(state: SetupState, open: boolean): SetupState {
+  const install = state.install
+  const row = install ? choiceRows(install)[install.cursor] : undefined
+  if (!install || !row) return state
+  const inBuildTools = row.kind === "group" || BUILD_TOOLS.includes(row.component.id)
+  return inBuildTools ? setBuildOpen(state, open) : state
+}
+
+// A tick is flipped by key or click alike; the program itself and what is not here stay as they are.
+// The folding row has no tick: it folds or unfolds.
+function toggleComponent(state: SetupState, rowIndex: number): Update {
+  const install = state.install
+  const row = install ? choiceRows(install)[rowIndex] : undefined
+  if (!install || !row) return { state }
+  const moved = withInstall(state, { cursor: rowIndex })
+  if (row.kind === "group") return { state: setBuildOpen(moved, !install.buildOpen) }
+  if (!row.component.available || row.component.id === REQUIRED_COMPONENT) return { state: moved }
+  const components = install.components.map((item, at) => (at === row.index ? { ...item, checked: !item.checked } : item))
+  return { state: withInstall(state, { cursor: rowIndex, components }) }
 }
 
 function startInstall(state: SetupState): Update {
@@ -285,15 +337,20 @@ function startInstall(state: SetupState): Update {
   if (only.length === 0) return { state }
   const status: Record<string, ComponentStatus> = {}
   only.forEach((id) => (status[id] = "waiting"))
-  return { state: { ...withInstall(state, { status, message: "", warnings: [], error: "" }), step: "installing" }, effect: { type: "install", only } }
+  const running = { ...withInstall(state, { status, message: "", warnings: [], error: "" }), step: "installing" as const }
+  // A sudo that wants a password cannot ask inside this screen: the terminal is handed over first.
+  const needsPassword = install.privilege === "password" && only.some((id) => BUILD_TOOLS.includes(id))
+  return { state: running, effect: needsPassword ? { type: "elevate" } : { type: "install", only } }
 }
 
 function onInstallEvent(state: SetupState, event: InstallEvent): SetupState {
   const install = state.install
   if (!install) return state
   switch (event.event) {
-    case "component":
-      return withInstall(state, { status: { ...install.status, [event.id]: event.status === "start" ? "running" : "done" } })
+    case "component": {
+      const status: ComponentStatus = event.status === "start" ? "running" : event.status === "done" ? "done" : "failed"
+      return withInstall(state, { status: { ...install.status, [event.id]: status } })
+    }
     case "step":
       return withInstall(state, { message: event.message })
     case "warning":
@@ -369,7 +426,7 @@ function press(state: SetupState, strings: { keyEmpty: string }): Update {
 function move(state: SetupState, delta: number): SetupState {
   switch (state.step) {
     case "components":
-      return state.install ? withInstall(state, { cursor: wrap(state.install.cursor, delta, state.install.components.length) }) : state
+      return state.install ? withInstall(state, { cursor: wrap(state.install.cursor, delta, choiceRows(state.install).length) }) : state
     case "provider":
       return { ...state, providerIndex: wrap(state.providerIndex, delta, providerOptionCount(state)) }
     case "models":
@@ -393,6 +450,7 @@ function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string
   if (event.type === "key") {
     if (event.key === "enter") return press(state, strings)
     if (event.key === "escape") return back(state)
+    if (state.step === "components" && (event.key === "left" || event.key === "right")) return { state: foldWithArrow(state, event.key === "right") }
     if (event.key === "up") return { state: move(state, -1) }
     if (event.key === "down" || event.key === "tab") return { state: move(state, 1) }
     if (event.key === "shift-tab") return { state: move(state, -1) }
@@ -409,7 +467,7 @@ function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string
     if (state.step === "components") {
       if (event.text === " " || event.text === "x" || event.text === "X") return toggleComponent(state, state.install?.cursor ?? 0)
       const number = Number(event.text)
-      if (number >= 1 && number <= (state.install?.components.length ?? 0)) return toggleComponent(state, number - 1)
+      if (number >= 1 && number <= (state.install ? choiceRows(state.install).length : 0)) return toggleComponent(state, number - 1)
       if (event.text === "q" || event.text === "Q") return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
     }
     if (state.step === "welcome" && (event.text === "q" || event.text === "Q")) return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
@@ -513,12 +571,21 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
       const reply = action.reply
       const components = COMPONENT_IDS.flatMap((id) => {
         const found = reply.components.find((item) => item.id === id)
-        return found ? [{ id, available: found.available, targets: found.targets, checked: found.available }] : []
+        // Everything that can be installed here starts ticked, the build tools included; the
+        // folding row shows how many of them are.
+        return found ? [{ id, available: found.available, reason: found.reason ?? "", targets: found.targets, checked: found.available }] : []
       })
-      return { state: withInstall(state, { plan: "ready", components, cursor: 0, error: "" }) }
+      return { state: withInstall(state, { plan: "ready", components, privilege: reply.privilege, cursor: 0, error: "" }) }
     }
     case "installEvent":
       return { state: onInstallEvent(state, action.event) }
+    case "elevated": {
+      const install = state.install
+      if (state.step !== "installing" || !install) return { state }
+      // The password was not given: back to the choice, nothing was installed.
+      if (action.error) return { state: { ...withInstall(state, { error: action.error, status: {} }), step: "components" } }
+      return { state, effect: { type: "install", only: chosenComponents(install) } }
+    }
     case "installed":
       // A run that was abandoned with Ctrl+C has no screen left to update.
       if (state.step !== "installing") return { state }

@@ -132,14 +132,23 @@ Every push to `main` rebuilds the rolling
 One script puts the `kvist` command, the Node.js its terminal interface runs
 on, the JetBrains plugin (into every JetBrains IDE found) and the VS Code
 extension (VS Code, Insiders, VSCodium) where they belong. It needs no Python
-and no Node.js of its own, and it uses no administrator rights and installs no
-system packages.
+and no Node.js of its own, and by default it uses no administrator rights and
+installs no system packages except the ones you leave ticked in a folded "Build
+from source" row (click it, or press → and ←). That row holds the system
+packages for building Kvist yourself: Python 3 with venv and pip, the Python
+headers and binutils. They start ticked, the row shows how many are, and
+unticking them keeps sudo out of it; ticked ones are installed with your
+package manager under sudo, which asks for your password in the terminal.
 
 In a terminal the script downloads the agent and a pinned Node.js (about
 100 MB, checked against a SHA-256) into a temporary folder and opens an
-installer screen. There you tick what to install, see the exact files and
-commands each item touches, and watch the progress; the first-run setup follows
-in the same window. Everything on it works with the keyboard alone (arrows,
+installer screen. There you tick what to install (the agent, Node.js, an
+optional static ffmpeg that plays the preview video on Linux x86_64 and macOS, the editor
+plugins, the PATH line), see the exact files and commands each item touches,
+and watch the progress; the first-run setup follows
+in the same window. Node.js and ffmpeg come from whichever of several servers
+answers fastest from your connection, and are accepted only if they match a
+SHA-256 fixed in the script. Everything on it works with the keyboard alone (arrows,
 Space, Enter, Esc), with the mouse alone (click a row to tick it, click the
 buttons), or both. Nothing is written until you press Install.
 

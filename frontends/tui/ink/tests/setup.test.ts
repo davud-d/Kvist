@@ -3,7 +3,7 @@ import { test } from "node:test"
 
 import { FRAME_FILL, sampleBackdrop, sampleCells, sampleFramed } from "../setup/backdrop.js"
 import { detectColorLevel, toXterm256 } from "../setup/color.js"
-import { initialState, update, type Action, type SetupState, type Update } from "../setup/flow.js"
+import { choiceRows, chosenComponents, initialState, update, type Action, type SetupState, type Update } from "../setup/flow.js"
 import { parseInput } from "../setup/keys.js"
 import { pictureSize, renderPicture } from "../setup/picture.js"
 import { introFrame, shortPath } from "../setup/run.js"
@@ -527,4 +527,146 @@ test("install: a long description of what will be done wraps inside the panel", 
   const panel = scene.panel!
   const [first] = rows.filter((row) => row.includes("Downloads a pinned"))
   assert.ok(first!.indexOf("Downloads") + "Downloads a pinned Node.js from nodejs.org, checks its".length < panel.col + panel.width)
+})
+
+// ---- the folding row of build tools (system packages, for building from source) ----
+
+const withBuildTools = (privilege: "root" | "cached" | "password" | "none") => ({
+  ...plan,
+  privilege,
+  components: [
+    ...plan.components,
+    { id: "python", available: true, reason: "", targets: ["sudo apt-get update", "sudo apt-get install -y python3 python3-venv python3-pip"] },
+    { id: "libpython", available: true, reason: "", targets: ["sudo apt-get update", "sudo apt-get install -y python3-dev"] },
+    { id: "binutils", available: false, reason: "present", targets: [] },
+  ],
+})
+const withTools = (privilege: "root" | "cached" | "password" | "none" = "cached"): SetupState =>
+  send(initialState("/w", "/h", false, "full", true), { type: "plan", reply: withBuildTools(privilege) }).state
+const sceneOf = (state: SetupState, rows = 34) =>
+  plain(renderScene({ state, strings, cols: 110, rows, level: "truecolor", brightness: 0.4, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.join("\n"))
+const groupIndex = (state: SetupState) => choiceRows(state.install!).findIndex((row) => row.kind === "group")
+
+test("build tools: folded but ticked by default, and the folding row says how many", () => {
+  const state = withTools()
+  assert.equal(state.install!.buildOpen, false)
+  assert.deepEqual(chosenComponents(state.install!), ["cli", "node", "vscode", "path", "python", "libpython"])
+  assert.match(sceneOf(state), /▸\s+Build from source\s+2 ticked/)
+  const rows = choiceRows(state.install!)
+  assert.equal(rows.filter((row) => row.kind === "component").length, 4 + 1)
+  assert.equal(rows.at(-1)?.kind, "group")
+  assert.match(sceneOf(state), /▸\s+Build from source/)
+})
+
+test("build tools: a click on the folding row unfolds and folds it, and a click on an item ticks it", () => {
+  let state = withTools()
+  const header = groupIndex(state)
+  state = send(state, { type: "click", target: { kind: "option", index: header } }).state
+  assert.equal(state.install!.buildOpen, true)
+  assert.match(sceneOf(state), /▾\s+Build from source/)
+  assert.match(sceneOf(state), /\[ \] {2}binutils \(objdump\)\s+already installed/)
+  assert.match(sceneOf(state), /\[x\] {2}Python 3, venv, pip/)
+  // The item right under the folding row is Python: a click unticks it.
+  state = send(state, { type: "click", target: { kind: "option", index: header + 1 } }).state
+  assert.ok(!chosenComponents(state.install!).includes("python"))
+  state = send(state, { type: "click", target: { kind: "option", index: header } }).state
+  assert.equal(state.install!.buildOpen, false)
+  // A folded group still reports what is ticked inside it.
+  assert.match(sceneOf(state), /▸\s+Build from source\s+1 ticked/)
+})
+
+test("build tools: → unfolds and ← folds from the row or from inside, Space on the row does both", () => {
+  let state = withTools()
+  const header = groupIndex(state)
+  for (let step = 0; step < header; step++) state = send(state, key("down")).state
+  assert.equal(state.install!.cursor, header)
+  state = send(state, key("right")).state
+  assert.equal(state.install!.buildOpen, true)
+  state = send(state, key("down")).state
+  assert.equal(state.install!.cursor, header + 1)
+  // ← from inside folds the group and the highlight goes back to its row.
+  state = send(state, key("left")).state
+  assert.equal(state.install!.buildOpen, false)
+  assert.equal(state.install!.cursor, header)
+  state = send(state, space()).state
+  assert.equal(state.install!.buildOpen, true)
+  state = send(state, space()).state
+  assert.equal(state.install!.buildOpen, false)
+  // On an ordinary row the arrows do nothing to it.
+  state = send({ ...state, install: { ...state.install!, cursor: 0 } }, key("right")).state
+  assert.equal(state.install!.buildOpen, false)
+})
+
+test("build tools: an item that is already there or not offered cannot be ticked", () => {
+  let state = withTools()
+  state = send(state, { type: "click", target: { kind: "option", index: groupIndex(state) } }).state
+  const binutils = groupIndex(state) + 3
+  state = send(state, { type: "click", target: { kind: "option", index: binutils } }).state
+  assert.ok(!chosenComponents(state.install!).includes("binutils"))
+})
+
+test("build tools: a sudo that needs a password hands the terminal over first, then installs", () => {
+  const state = withTools("password")
+  // The build tools are ticked from the start, so the password is asked for at once.
+  const start = send(state, key("enter"))
+  assert.deepEqual(start.effect, { type: "elevate" })
+  assert.equal(start.state.step, "installing")
+  const granted = send(start.state, { type: "elevated", error: "" })
+  assert.deepEqual(granted.effect, { type: "install", only: ["cli", "node", "vscode", "path", "python", "libpython"] })
+  const refused = send(start.state, { type: "elevated", error: "Administrator rights were not granted, nothing was installed." })
+  assert.equal(refused.state.step, "components")
+  assert.match(refused.state.install!.error, /not granted/)
+})
+
+test("build tools: nothing is asked when sudo is cached or the person is root, and the plain run needs none", () => {
+  for (const privilege of ["root", "cached", "none"] as const) {
+    assert.equal(send(withTools(privilege), key("enter")).effect?.type, "install", privilege)
+  }
+  // With every build tool unticked a password sudo is never asked for.
+  let state = withTools("password")
+  const header = groupIndex(state)
+  state = send(state, { type: "click", target: { kind: "option", index: header } }).state
+  state = send(state, { type: "click", target: { kind: "option", index: header + 1 } }).state
+  state = send(state, { type: "click", target: { kind: "option", index: header + 2 } }).state
+  assert.equal(send(state, key("enter")).effect?.type, "install")
+})
+
+test("build tools: the highlighted item shows the commands and what will be asked", () => {
+  let state = withTools("password")
+  const header = groupIndex(state)
+  state = send(state, { type: "click", target: { kind: "option", index: header } }).state
+  const folded = sceneOf(send(state, { type: "click", target: { kind: "option", index: header } }).state)
+  assert.match(folded, /Only needed to build Kvist yourself/)
+  state = send(state, key("down")).state
+  const text = sceneOf(state)
+  assert.match(text, /Runs the package manager \(administrator rights\):/)
+  assert.match(text, /sudo apt-get install -y python3 python3-venv python3-pip/)
+  assert.match(text, /Your password will be asked for first/)
+  const noSudo = sceneOf(send(withTools("none"), { type: "click", target: { kind: "option", index: header } }).state)
+  assert.ok(noSudo.includes("Build from source"))
+})
+
+test("build tools: a command that could not run is marked failed and its advice survives to the welcome screen", () => {
+  let state = withTools("cached")
+  const header = groupIndex(state)
+  state = send(state, { type: "click", target: { kind: "option", index: header } }).state
+  state = send(state, { type: "click", target: { kind: "option", index: header + 1 } }).state
+  state = send(state, key("enter")).state
+  state = send(state, { type: "installEvent", event: { event: "component", id: "python", status: "start" } }).state
+  state = send(state, { type: "installEvent", event: { event: "warning", message: "could not run it here; run it yourself: sudo apt-get install -y python3" } }).state
+  state = send(state, { type: "installEvent", event: { event: "component", id: "python", status: "failed" } }).state
+  assert.equal(state.install!.status.python, "failed")
+  assert.match(sceneOf(state), /✗\s+Python 3, venv, pip\s+failed/)
+  state = send(state, { type: "installed", reply: { ok: true } }).state
+  assert.equal(state.step, "welcome")
+  assert.match(sceneOf(state), /run it yourself: sudo apt-get install/)
+})
+
+test("build tools: the Russian copy has every key the English one has", () => {
+  const ru = stringsFor("ru")
+  for (const id of ["python", "libpython", "binutils"]) {
+    assert.ok(ru.componentLabels[id] && ru.componentActions[id], id)
+  }
+  assert.deepEqual(Object.keys(ru.componentReason).sort(), Object.keys(strings.componentReason).sort())
+  assert.ok(ru.buildGroup[0] && ru.elevateTitle && ru.privilegePassword)
 })
