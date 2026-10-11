@@ -2091,6 +2091,8 @@ def update_state_from_success(
 
     elif action_type == "read_multiple_files":
         for file_info in data.get("files", []):
+            if "error" in file_info:
+                continue
             path = str(file_info.get("path", "")).strip()
             self._push_unique(self._state.files_read, path)
             _note_empty_data_cells(self, path, str(file_info.get("content", "")))
@@ -2251,8 +2253,10 @@ def feedback_to_line(self, command: AgentCommand, feedback: dict[str, Any]) -> s
             path = data.get("path", "")
             return f"ok: read file {path}"
         if action_type == "read_multiple_files":
-            count = len(data.get("files", []))
-            return f"ok: read {count} files"
+            items = data.get("files", [])
+            missing = [str(item.get("path", "")) for item in items if "error" in item]
+            note = f", not found: {', '.join(missing)}" if missing else ""
+            return f"ok: read {len(items) - len(missing)} files{note}"
         if action_type == "write_file":
             path = data.get("path", "")
             return f"ok: wrote file {path}"
@@ -2694,7 +2698,11 @@ def update_verification_evidence(self, command: AgentCommand, data: dict[str, An
 
     elif action_type == "read_multiple_files":
         if self._state.files_changed or self._state.verify_only_goal:
-            paths = [str(info.get("path", "")).strip() for info in data.get("files", [])]
+            paths = [
+                str(info.get("path", "")).strip()
+                for info in data.get("files", [])
+                if "error" not in info
+            ]
             for path in filter(None, paths):
                 evidence = f"read_file: {path}"
                 for pv_path in list(self._state.pending_verification_paths):

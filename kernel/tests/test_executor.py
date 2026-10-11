@@ -999,3 +999,33 @@ def test_delegation_without_commands_says_nothing_was_performed(tmp_path):
     assert result.ok is True
     assert result.data["results"] == []
     assert "NOT been performed" in result.data["note"]
+
+
+def test_read_multiple_files_returns_found_files_and_names_the_missing_one(tmp_path):
+    (tmp_path / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (tmp_path / "c.py").write_text("c = 3\n", encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+
+    result = executor._read_multiple_files(["a.py", "b.py", "c.py"])
+
+    assert result.ok is True
+    by_path = {item["path"]: item for item in result.data["files"]}
+    assert by_path["a.py"]["content"] == "a = 1\n"
+    assert by_path["c.py"]["content"] == "c = 3\n"
+    assert by_path["b.py"] == {"path": "b.py", "error": "File not found"}
+
+
+def test_read_multiple_files_fails_when_no_file_exists(tmp_path):
+    executor = SafeExecutor(tmp_path)
+
+    with pytest.raises(ExecutorError, match="File not found: x.py, y.py"):
+        executor._read_multiple_files(["x.py", "y.py"])
+
+
+def test_read_multiple_files_still_refuses_env_file_next_to_a_found_file(tmp_path):
+    (tmp_path / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("TOKEN=x\n", encoding="utf-8")
+    executor = SafeExecutor(tmp_path)
+
+    with pytest.raises(ExecutorError):
+        executor._read_multiple_files(["a.py", ".env"])

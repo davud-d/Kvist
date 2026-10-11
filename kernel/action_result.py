@@ -76,7 +76,10 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
             return f"Read lines {data['start_line']}-{data['end_line']} of {data['total_lines']}{suffix}"
         return f"Read {_plural(len(str(data.get('content', '')).splitlines()), 'line')}{suffix}"
     if action_type == "read_multiple_files":
-        return f"Read {_plural(len(data.get('files', [])), 'file')}"
+        items = data.get("files", [])
+        missing = sum(1 for item in items if "error" in item)
+        note = f", {missing} not found" if missing else ""
+        return f"Read {_plural(len(items) - missing, 'file')}{note}"
     if action_type == "write_file":
         return f"Wrote {_plural(len(str(args.get('content', '')).splitlines()), 'line')}"
     if action_type == "append_file":

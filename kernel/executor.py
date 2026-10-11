@@ -894,9 +894,11 @@ class SafeExecutor:
     def _read_multiple_files(self, paths: list[str]) -> ExecutionResult:
         files: list[dict[str, Any]] = []
         for path in paths:
+            # Policy violations still raise: they fail the whole call, a missing file does not.
             target = self._guard_env_file_access(path, read_only=True)
             if not target.exists() or not target.is_file():
-                raise ExecutorError(f"File not found: {path}")
+                files.append({"path": path, "error": "File not found"})
+                continue
             content, truncated = self._safe_read_text(target)
             files.append(
                 {
@@ -905,6 +907,9 @@ class SafeExecutor:
                     "truncated": truncated,
                 }
             )
+
+        if files and all("error" in item for item in files):
+            raise ExecutorError("File not found: " + ", ".join(paths))
 
         return ExecutionResult(
             ok=True,
