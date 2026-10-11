@@ -167,3 +167,17 @@ test("a frame is drawn from whichever set it is given", () => {
   assert.ok([...drawn(MASCOT_OCTANTS)].some((char) => (char.codePointAt(0) ?? 0) >= 0x1cd00))
   assert.ok(![...drawn(MASCOT_QUADRANTS)].some((char) => (char.codePointAt(0) ?? 0) >= 0x1cd00))
 })
+
+test("the claude welcome block is present before hello and is not duplicated by it", async () => {
+  const { initialState, reduce } = await import("../state.js")
+  const state = initialState("", true)
+  assert.deepEqual(state.items.map((item) => item.kind), ["banner"], "the first frame must not wait for the core")
+  const { written, screen } = pictureScreen()
+  const app = render(screen(state.items))
+  await wait(150)
+  assert.equal(drawn(written).length, 1, "the squirrel is drawn before hello")
+  const ready = reduce(state, { type: "event", event: { type: "hello", provider: "p", models: { fast: "m" }, role: "coder", session: "s" } })
+  assert.deepEqual(ready.items, state.items, "hello updates details without restarting the welcome block")
+  assert.equal(ready.info.model, "m")
+  app.unmount()
+})
