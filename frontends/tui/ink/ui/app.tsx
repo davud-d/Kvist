@@ -9,11 +9,12 @@ import type { Pointer } from "../pointer.js"
 import type { CoreEvent } from "../protocol.js"
 import { contextLabel, englishOnly } from "../format.js"
 import { addInputHistory, inputHistory, sessionHistory } from "../session.js"
-import { answerFromEnd, initialState, reduce } from "../state.js"
+import { answerFromEnd, initialState, reduce, requestIsRussian } from "../state.js"
 import type { Starters } from "../starters.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./skins/claude-code/claude.js"
 import { ViewContext } from "./context.js"
 import { ClosedBar, InputBox } from "./input.js"
+import { JobStrip } from "./jobs.js"
 import { ItemView } from "./skins/kvist/items.js"
 import { Live } from "./skins/kvist/live.js"
 import { Prompt } from "./prompts.js"
@@ -331,7 +332,9 @@ export function App(props: AppProps) {
   const configuredRole = state.info.role || props.role
   const role = state.running ? (state.info.routedRole ?? configuredRole) : configuredRole
   const armed = stopArmedAt > 0
-  const view = { workspace: props.workspace, info: state.info, effort: state.effort, pointer: props.pointer, expanded }
+  const russian = requestIsRussian(state)
+  const view = { workspace: props.workspace, info: state.info, effort: state.effort, pointer: props.pointer, expanded, russian }
+  const jobs = <JobStrip jobs={state.jobs} russian={russian} />
 
   const caption = claude
     ? <ClaudeFooter running={state.running} armed={armed} usage={state.usage} model={state.info.model} role={role} toast={toast} exitWarning={exitWarning} />
@@ -360,7 +363,7 @@ export function App(props: AppProps) {
           showDebug={state.showDebug}
           followKey={history.length}
           live={<ClaudeLiveBody state={state} />}
-          spinner={<ClaudeSpinner state={state} />}
+          spinner={<><ClaudeSpinner state={state} />{jobs}</>}
           hint={state.pending ? null : <ClaudeEffort effort={state.effort} />}
         >
           {input}
@@ -379,6 +382,7 @@ export function App(props: AppProps) {
         )}
       </Static>
       <Live state={state} />
+      {jobs}
       {input}
       <Footer running={state.running} armed={armed} usage={state.usage} version={state.info.kvistVersion} />
     </ViewContext.Provider>

@@ -1,13 +1,16 @@
 import { Box, Text } from "ink"
 import type { ReactNode } from "react"
 
-import { clip, formatThought, lastLines } from "../../../format.js"
+import { clip, formatSeconds, formatThought, lastLines } from "../../../format.js"
 import { exploreSummary, type Item } from "../../../state.js"
+import { jobFailed, jobLabel, jobsCopy, jobTail } from "../../jobs.js"
 import { Markdown, renderInline } from "../../markdown.js"
 import { BAR, color, planStepColor } from "../../theme.js"
 import { ToolCard } from "../../tools.js"
 
 const THOUGHT_LINES = 12
+const JOB_LINES = 6
+const NOTICE_WIDTH = 120
 
 function Banner() {
   return (
@@ -43,6 +46,40 @@ function Step({ item }: { item: Extract<Item, { kind: "step" }> }) {
         {item.target ? <Text color={color.dim}>  {clip(item.target, 90)}</Text> : null}
       </Text>
     </Box>
+  )
+}
+
+// A background job ended: how, and the last lines it printed.
+function JobCard({ item }: { item: Extract<Item, { kind: "job" }> }) {
+  const copy = jobsCopy(item.russian)
+  const failed = jobFailed(item.status, item.exitCode)
+  const tone = failed ? color.err : color.ok
+  const { shown, earlier } = jobTail(item.output, JOB_LINES)
+  return (
+    <Box flexDirection="column">
+      <Text wrap="truncate-end">
+        <Text color={tone}>{failed ? "✗" : "✓"} </Text>
+        <Text>{jobLabel(item)}</Text>
+        <Text color={tone}> · {copy.ended(item.status, item.exitCode)}</Text>
+        {item.seconds >= 1 ? <Text color={color.dim}> · {formatSeconds(item.seconds)}</Text> : null}
+      </Text>
+      <Box flexDirection="column" paddingLeft={2}>
+        {earlier > 0 ? <Text color={color.faint}>{copy.earlier(earlier)}</Text> : null}
+        {shown.length === 0 ? <Text color={color.faint}>{copy.noOutput}</Text> : null}
+        {shown.map((line, i) => (
+          <Text key={i} color={color.dim} wrap="truncate-end">{line || " "}</Text>
+        ))}
+      </Box>
+    </Box>
+  )
+}
+
+// A preview only: the model's whole note is in the session journal.
+function JobNotice({ item }: { item: Extract<Item, { kind: "job_notice" }> }) {
+  const lines = item.text.split("\n").filter((line) => line.trim())
+  const preview = `${clip(lines[0] ?? "", NOTICE_WIDTH)}${lines.length > 1 ? " …" : ""}`
+  return (
+    <Text color={color.faint} wrap="truncate-end">› {jobsCopy(item.russian).told} {preview}</Text>
   )
 }
 
@@ -93,6 +130,10 @@ export function ItemView({ item, showDebug }: { item: Item; showDebug: boolean }
           <Markdown text={item.text} />
         </Box>
       )
+    case "job":
+      return <JobCard item={item} />
+    case "job_notice":
+      return <JobNotice item={item} />
     case "done":
       return null
     case "note":

@@ -12,6 +12,8 @@ export interface ViewContextValue {
   pointer: Pointer | null
   // Ctrl+O: show every command with its output instead of "Ran N shell commands".
   expanded: boolean
+  // The request on screen is Russian: words of cards that carry no language of their own. Absent means English.
+  russian?: boolean
 }
 
 export const ViewContext = createContext<ViewContextValue>({ workspace: "", info: { provider: "", model: "", role: "", session: "" }, effort: "", pointer: null, expanded: false })

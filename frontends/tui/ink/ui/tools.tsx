@@ -1,10 +1,12 @@
 import { Box, Text } from "ink"
 import { useWindowSize } from "./window-size.js"
-import type { ReactNode } from "react"
+import { useContext, type ReactNode } from "react"
 
 import { diffLines, numberWidth, pairRows, toLines, type DiffRow } from "../diff.js"
 import { clipLines, fit, outputLines } from "../format.js"
 import { actionTarget, type ActionResult, type Item } from "../state.js"
+import { ViewContext } from "./context.js"
+import { jobsCopy } from "./jobs.js"
 import { color, planStepColor } from "./theme.js"
 
 type ToolItem = Extract<Item, { kind: "tool" }>
@@ -206,11 +208,13 @@ function ShellCard({ item }: { item: ToolItem }) {
   const { result } = item
   const code = result.exit_code
   const exited = code !== null && code !== 0
+  const { russian } = useContext(ViewContext)
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text wrap="truncate-end">
         <Text color={color.dim}>$ </Text>
         <Text>{commandLine(item.args)}</Text>
+        {item.args.background === true ? <Text color={color.dim}> ({jobsCopy(russian === true).background})</Text> : null}
       </Text>
       <Body>
         {result.output.trim() ? <Output text={result.output} /> : <Text color={color.faint}>(no output)</Text>}

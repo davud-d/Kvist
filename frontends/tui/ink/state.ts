@@ -25,6 +25,24 @@ export type Item =
   // The words a model response carries for the person, shown once, before the calls
   // of that response.
   | { id: number; kind: "say"; text: string }
+  // A background job ended. `seconds` is how long it ran; `russian` picks the card's words.
+  | { id: number; kind: "job"; jobId: string; command: string[]; purpose: string; status: JobEnd; exitCode: number | null; output: string; seconds: number; russian: boolean }
+  // What the model was told about background jobs before a request, shown dimmed.
+  | { id: number; kind: "job_notice"; text: string; jobIds: string[]; russian: boolean }
+
+export type JobEnd = Extract<CoreEvent, { type: "job_finished" }>["status"]
+
+// A background shell command: running until a job_finished event arrives.
+export type JobView = {
+  id: string
+  command: string[]
+  purpose: string
+  status: "running" | "exited" | "timed_out" | "stopped"
+  exitCode: number | null
+  output: string
+  startedAt: number
+  endedAt: number | null
+}
 
 export interface ExploreCounts {
   reads: number
@@ -92,6 +110,8 @@ export interface State {
   // The core's notice when end_session closed the session on screen; it takes the input's
   // place until another session is opened.
   closed: string | null
+  // Background jobs of the session on screen, oldest first; finished ones stay until a new session.
+  jobs: JobView[]
   info: { provider: string; model: string; role: string; session: string; routedRole?: string; kvistVersion?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
@@ -145,6 +165,7 @@ export function initialState(effort = ""): State {
     command: null,
     effort,
     closed: null,
+    jobs: [],
     info: { provider: "", model: "", role: "", session: "" },
     usage: { input: 0, output: 0, context: 0, limit: 0 },
     showDebug: false,
@@ -157,7 +178,7 @@ export function initialState(effort = ""): State {
   }
 }
 
-const TARGET_KEYS = ["path", "command", "query", "pattern", "url", "dir", "directory"] as const
+const TARGET_KEYS = ["path", "command", "query", "pattern", "url", "dir", "directory", "job_id"] as const
 
 // The one argument that says what an action is about, shown next to its name.
 export function actionTarget(args: Record<string, unknown>): string {
@@ -366,8 +387,27 @@ function onCommandResult(state: State, event: Extract<CoreEvent, { type: "comman
 // An empty feed under the welcome block, and a context that starts from nothing.
 function beginSession(state: State): State {
   const cleared = reduce(state, { type: "clear" })
-  const fresh = { ...cleared, usage: { ...cleared.usage, context: 0 } }
+  const fresh = { ...cleared, jobs: [], usage: { ...cleared.usage, context: 0 } }
   return push(fresh, (id) => ({ id, kind: "banner" }))
+}
+
+// The core ends every job before turn_end (or with the core itself), so one still running here
+// belongs to a journal cut short or a dead core and must not stay "running" on screen.
+function stopRunning(jobs: JobView[], now: number): JobView[] {
+  if (!jobs.some((job) => job.status === "running")) return jobs
+  return jobs.map((job) => (job.status === "running" ? { ...job, status: "stopped", endedAt: now } : job))
+}
+
+// A job's end is also a transcript card. It is appended without settling the pending calls:
+// jobs end while other calls of the same response are still waiting for their results.
+function onJobFinished(state: State, event: Extract<CoreEvent, { type: "job_finished" }>, now: number): State {
+  const known = state.jobs.find((job) => job.id === event.job_id)
+  const base: JobView = known ?? { id: event.job_id, command: [], purpose: "", status: "running", exitCode: null, output: "", startedAt: now, endedAt: null }
+  const done: JobView = { ...base, status: event.status, exitCode: event.exit_code ?? null, output: event.output ?? "", endedAt: now }
+  const jobs = known ? state.jobs.map((job) => (job === known ? done : job)) : [...state.jobs, done]
+  const seconds = Math.max(0, (now - done.startedAt) / 1000)
+  const card = (id: number): Item => ({ id, kind: "job", jobId: done.id, command: done.command, purpose: done.purpose, status: event.status, exitCode: done.exitCode, output: done.output, seconds, russian: requestIsRussian(state) })
+  return append({ ...state, jobs }, card)
 }
 
 // `justReasoned` must survive only from a reasoning_commit to the single event right
@@ -508,11 +548,21 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return { ...state, info: { ...state.info, session: event.session }, closed: event.closed === true ? (event.closed_notice ?? "") : null }
     case "session_ended":
       return { ...state, closed: event.closed_notice }
+    case "job_started": {
+      const job: JobView = { id: event.job_id, command: event.command ?? [], purpose: event.purpose ?? "", status: "running", exitCode: null, output: "", startedAt: now, endedAt: null }
+      return { ...state, jobs: [...state.jobs.filter((known) => known.id !== job.id), job] }
+    }
+    case "job_output":
+      return { ...state, jobs: state.jobs.map((job) => (job.id === event.job_id ? { ...job, output: event.output } : job)) }
+    case "job_finished":
+      return onJobFinished(state, event, now)
+    case "job_notice":
+      return append(state, (id) => ({ id, kind: "job_notice", text: event.text, jobIds: event.job_ids ?? [], russian: requestIsRussian(state) }))
     case "turn_end":
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
       // the input box disabled forever.
-      return { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, interrupted: false, thought: null, command: null }
+      return { ...settle(state), jobs: stopRunning(state.jobs, now), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, interrupted: false, thought: null, command: null }
     default:
       return state
   }
@@ -528,7 +578,7 @@ function noticeText(event: Extract<JournalEvent, { type: "journal_notice" }>): s
 // A session redrawn from its journal, through the reducer live events use. Token counts are
 // skipped: they describe the conversation now running, not the one being shown.
 function restore(state: State, events: JournalEvent[], now: number, banner: boolean): State {
-  let next = banner ? beginSession(state) : reduce(state, { type: "clear" })
+  let next = banner ? beginSession(state) : { ...reduce(state, { type: "clear" }), jobs: [] }
   for (const event of events) {
     if (event.type === "usage") continue
     if (event.type === "user") {
@@ -549,7 +599,8 @@ function restore(state: State, events: JournalEvent[], now: number, banner: bool
 
 const CYRILLIC = /\p{Script=Cyrillic}/u
 
-function requestIsRussian(state: State): boolean {
+// The request on screen decides the language of cards that have no text of their own.
+export function requestIsRussian(state: State): boolean {
   const request = state.items.findLast((item) => item.kind === "user")
   return request?.kind === "user" && CYRILLIC.test(request.request ?? request.text)
 }
@@ -596,13 +647,14 @@ export function reduce(state: State, action: Action): State {
     case "answered":
       return { ...state, pending: null }
     case "core_exit": {
-      const next = { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, command: null }
+      const next = { ...settle(state), jobs: stopRunning(state.jobs, Date.now()), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, command: null }
       if (action.expected) return next
       return push(next, (id) => ({ id, kind: "note", tone: "error", text: `The Kvist core stopped unexpectedly (exit code ${action.code ?? "?"}).` }))
     }
     case "toggle_debug":
       return { ...state, showDebug: !state.showDebug }
     case "clear":
+      // Jobs are kept: /clear empties the screen, and a running job is still running.
       return { ...state, items: [], exploring: null, exploringNames: [], exploreSteps: [], inflight: [], batch: null, justReasoned: false, epoch: state.epoch + 1 }
   }
 }

@@ -6,9 +6,10 @@ import { memo, useContext, useEffect, useMemo, useRef, useState, type ReactNode 
 
 import { diffLines, toLines } from "../../../diff.js"
 import { clip, clipLines, contextLabel, formatSeconds, lastLines, outputLines } from "../../../format.js"
-import { actionTarget, type ActionResult, type ExploreCounts, type Item, type State } from "../../../state.js"
+import { actionTarget, requestIsRussian, type ActionResult, type ExploreCounts, type Item, type State } from "../../../state.js"
 import { ViewContext } from "../../context.js"
 import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.js"
+import { jobFailed, jobLabel, jobsCopy, jobTail } from "../../jobs.js"
 import { Markdown, renderInline } from "../../markdown.js"
 import { color } from "../../theme.js"
 import { tipFor } from "./tips.js"
@@ -19,6 +20,9 @@ import { More, commandLine, diffLineColor, str } from "../../tools.js"
 type ToolItem = Extract<Item, { kind: "tool" }>
 
 const OUTPUT_LINES = 10
+// The lines of a finished job shown folded, and with Ctrl+O.
+const JOB_LINES = 3
+const JOB_LINES_EXPANDED = 12
 const THOUGHT_LINES = 6
 // "⎿" and its padding: the body of a result starts this many cells in.
 const RESULT_INDENT = 5
@@ -46,11 +50,16 @@ const TOOL_NAMES: Record<string, string> = {
   web_search: "Web Search",
   fetch_url: "Fetch",
   delegate_task: "Task",
+  job_output: "Job output",
+  job_stop: "Stop job",
 }
 
-function toolHeader(action: string, args: Record<string, unknown>): { name: string; target: string } {
+function toolHeader(action: string, args: Record<string, unknown>, russian = false): { name: string; target: string } {
   const name = TOOL_NAMES[action] ?? action
-  if (action === "run_shell") return { name, target: commandLine(args) }
+  if (action === "run_shell") {
+    const background = args.background === true ? ` (${jobsCopy(russian).background})` : ""
+    return { name: `${name}${background}`, target: commandLine(args) }
+  }
   if (action === "git_status") return { name, target: "git status" }
   if (action === "git_diff") return { name, target: `git diff ${actionTarget(args)}`.trim() }
   return { name, target: actionTarget(args) }
@@ -223,7 +232,8 @@ function ToolBody({ item, width }: { item: ToolItem; width: number }) {
 
 function Tool({ item }: { item: ToolItem }) {
   const { columns } = useWindowSize()
-  const { name, target } = toolHeader(item.action, item.args)
+  const { russian } = useContext(ViewContext)
+  const { name, target } = toolHeader(item.action, item.args, russian === true)
   return (
     <Call tone={item.result.ok ? (FILE_ACTIONS.has(item.action) ? color.file : color.ok) : color.err} name={name} target={target}>
       <ToolBody item={item} width={Math.max(20, columns - RESULT_INDENT - MARGIN)} />
@@ -236,6 +246,39 @@ function Note({ item }: { item: Extract<Item, { kind: "note" }> }) {
   return (
     <Result>
       <Text color={tone}>{item.tone === "debug" ? "› " : ""}{item.text}</Text>
+    </Result>
+  )
+}
+
+// A background job ended: a call line with the way it ended, and its last lines under it.
+function JobEnded({ item }: { item: Extract<Item, { kind: "job" }> }) {
+  const { expanded } = useContext(ViewContext)
+  const copy = jobsCopy(item.russian)
+  const failed = jobFailed(item.status, item.exitCode)
+  const { shown, earlier } = jobTail(item.output, expanded ? JOB_LINES_EXPANDED : JOB_LINES)
+  const took = item.seconds >= 1 ? ` · ${formatSeconds(item.seconds)}` : ""
+  return (
+    <Call tone={failed ? color.err : color.ok} name={jobLabel(item)} target="">
+      <Result>
+        <Text color={failed ? color.err : color.dim} wrap="truncate-end">{copy.ended(item.status, item.exitCode)}{took}</Text>
+        {earlier > 0 ? <Text color={color.dim}>{copy.earlier(earlier)}</Text> : null}
+        {shown.length === 0 ? <Text color={color.dim}>{copy.noOutput}</Text> : null}
+        {shown.map((line, i) => <Text key={i} color={color.dim} wrap="truncate-end">{line || " "}</Text>)}
+      </Result>
+    </Call>
+  )
+}
+
+// A preview only: the whole note is in the session journal; Ctrl+O shows more of it.
+function JobNotice({ item }: { item: Extract<Item, { kind: "job_notice" }> }) {
+  const { expanded } = useContext(ViewContext)
+  const lines = item.text.split("\n").filter((line) => line.trim())
+  const shown = expanded ? lines.slice(0, JOB_LINES_EXPANDED) : [`${clip(lines[0] ?? "", 100)}${lines.length > 1 ? " …" : ""}`]
+  return (
+    <Result>
+      {shown.map((line, i) => (
+        <Text key={i} color={color.faint} wrap="truncate-end">{i === 0 ? `${jobsCopy(item.russian).told} ` : ""}{line}</Text>
+      ))}
     </Result>
   )
 }
@@ -294,6 +337,10 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
           <Text color={color.dim}>✻ {doneLine(item)}</Text>
         </Box>
       )
+    case "job":
+      return <JobEnded item={item} />
+    case "job_notice":
+      return <JobNotice item={item} />
     case "note":
       if (item.tone === "debug" && !showDebug) return null
       return <Note item={item} />
@@ -387,7 +434,7 @@ export function ClaudeLiveBody({ state }: { state: State }) {
   // The answer itself follows a final_answer call, so the call gets no line of its own.
   const calls = state.inflight.filter((call) => !TERMINAL_ACTIONS.has(call.action))
   const inflight = calls.at(-1) ?? null
-  const header = inflight ? toolHeader(inflight.action, inflight.args) : null
+  const header = inflight ? toolHeader(inflight.action, inflight.args, requestIsRussian(state)) : null
   const live = state.live
   return (
     <>

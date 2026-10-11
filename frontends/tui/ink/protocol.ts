@@ -18,6 +18,9 @@ export interface ApprovalSubject {
   diff?: string
 }
 
+// How a background job ended; a running job has no status event.
+export type JobStatus = "exited" | "timed_out" | "stopped"
+
 export type InputKind = "choice" | "text" | "secret" | "confirm"
 
 export interface InputRequest {
@@ -69,6 +72,14 @@ export type CoreEvent =
   // The session a resume continues in or a session/new command switched to; `closed` and
   // `closed_notice` only for a session end_session closed (UI_API.md, "Closed sessions").
   | { type: "session"; session: string; has_checkpoint: boolean; closed?: boolean; closed_notice?: string }
+  // Background shell jobs (run_shell with `background: true`). job_started, job_finished and
+  // job_notice are recorded in the journal; job_output is a live-only snapshot of the job's tail
+  // (replace, never append). Every job gets a job_finished before the turn's turn_end.
+  | { type: "job_started"; job_id: string; command: string[]; purpose: string; call_id: string }
+  | { type: "job_output"; job_id: string; output: string }
+  | { type: "job_finished"; job_id: string; status: JobStatus; exit_code: number | null; output: string }
+  // What the runtime told the model about jobs before its next request.
+  | { type: "job_notice"; text: string; job_ids: string[] }
   // end_session closed the active session for good; `closed_notice` goes in place of the input.
   | { type: "session_ended"; session_id: string; warned_msg_id: number | null; closed_msg_id: number; reason: string; closed_notice: string }
 
