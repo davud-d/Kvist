@@ -199,6 +199,59 @@ def test_live_output_is_a_cumulative_snapshot(translator):
     assert updates[0].kind == "tool_call_update"
 
 
+def start_job(translator, job_id="j1"):
+    return translator.translate(
+        event("job_started", job_id=job_id, command=["npm", "run", "dev"], purpose="dev server", call_id="c")
+    )
+
+
+def test_job_opens_a_tool_call_that_stays_in_progress(translator):
+    updates = start_job(translator)
+
+    assert [u.kind for u in updates] == ["tool_call"]
+    assert updates[0].update.tool_call_id == "kvist-job-j1"
+    assert updates[0].update.title == "dev server"
+    assert updates[0].update.status == "in_progress"
+    assert updates[0].update.kind == "execute"
+
+
+def test_job_output_snapshots_replace_and_skip_repeats(translator):
+    start_job(translator)
+
+    first = translator.translate(event("job_output", job_id="j1", output="ready"))
+    again = translator.translate(event("job_output", job_id="j1", output="ready"))
+    grown = translator.translate(event("job_output", job_id="j1", output="ready\nlistening"))
+
+    assert first[0].update.raw_output == "ready"
+    assert again == []
+    assert grown[0].update.raw_output == "ready\nlistening"
+    assert grown[0].update.status == "in_progress"
+
+
+@pytest.mark.parametrize(
+    ("status", "exit_code", "expected"),
+    [("exited", 0, "completed"), ("exited", 2, "failed"), ("timed_out", None, "failed"), ("stopped", None, "completed")],
+)
+def test_job_finished_closes_the_tool_call(translator, status, exit_code, expected):
+    start_job(translator)
+
+    updates = translator.translate(
+        event("job_finished", job_id="j1", status=status, exit_code=exit_code, output="tail")
+    )
+
+    assert updates[0].update.status == expected
+    assert updates[0].update.raw_output == "tail"
+
+
+def test_job_events_for_an_unknown_job_are_dropped(translator):
+    assert translator.translate(event("job_output", job_id="x", output="a")) == []
+    assert translator.translate(event("job_finished", job_id="x", status="exited", exit_code=0, output="")) == []
+
+
+def test_job_notice_is_not_shown_to_the_client(translator):
+    assert translator.translate(event("job_notice", text="note", job_ids=["j1"])) == []
+
+
 def test_file_locations_are_absolute_inside_the_workspace(translator):
     updates = translator.translate(
         event(

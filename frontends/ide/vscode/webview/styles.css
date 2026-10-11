@@ -433,3 +433,16 @@ button.file:hover .file-name { color: var(--vscode-textLink-foreground); text-de
 .image-attachment:hover .image-remove, .image-attachment:focus-within .image-remove { opacity: 1; }
 .image-attach-button { border: 0; background: transparent; color: inherit; font-size: 22px; cursor: pointer; padding: 4px 10px; }
 @media (hover: none) { .image-attachment .image-remove { opacity: 1; } }
+
+/* Running background jobs above the composer: label, run time and the newest lines. */
+.jobs { display: flex; flex-direction: column; gap: 6px; padding: 0 6px 8px; font-size: .88em; }
+.job { padding: 6px 10px; border-radius: 10px; background: var(--vscode-textCodeBlock-background); }
+.job-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.job-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--kv); animation: job-pulse 1.4s ease-in-out infinite; }
+.job-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-time { flex: none; color: var(--muted); }
+.job-out { margin: 4px 0 0; max-height: 6.5em; overflow: hidden; white-space: pre-wrap; word-break: break-word; font: inherit; font-family: var(--vscode-editor-font-family); color: var(--muted); line-height: 1.45; }
+.job-more { color: var(--muted); padding-left: 10px; }
+.job-notice { opacity: .8; }
+@keyframes job-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .job-dot { animation: none; } }

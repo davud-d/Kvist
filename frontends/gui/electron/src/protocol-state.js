@@ -30,6 +30,10 @@
     "usage",
     "input_request",
     "session_ended",
+    "job_started",
+    "job_output",
+    "job_finished",
+    "job_notice",
   ])
 
   class ProtocolState {

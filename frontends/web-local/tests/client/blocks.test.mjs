@@ -438,3 +438,49 @@ test('a block with a local copy equals the same message from the journal alone, 
     const bare = state => state.blocks.map(({ id, ...rest }) => rest);
     assert.deepEqual(bare(merged), bare(plain));
 });
+
+// frontend_protocol.py:396 JobStartedEvent, :421 JobOutputEvent, :437 JobFinishedEvent, :461 JobNoticeEvent
+const jobStarted = (job_id, extra = {}) => ({ type: 'job_started', job_id, command: ['npm', 'run', 'dev'], purpose: 'dev server', call_id: 'c1', ...extra });
+const jobOutput = (job_id, text) => ({ type: 'job_output', job_id, output: text });
+const jobFinished = (job_id, status, exit_code, text = '') => ({ type: 'job_finished', job_id, status, exit_code, output: text });
+
+test('a background job is one running tool row whose output is replaced by each snapshot', () => {
+    let s = fold([env(jobStarted('j1'), null, 1000), env(jobOutput('j1', 'a')), env(jobOutput('j1', 'a\nb'))]);
+    assert.deepEqual(kinds(s), ['tool']);
+    const call = s.blocks[0].calls[0];
+    assert.deepEqual([call.actionType, call.status, call.output, call.args.command], ['background_job', 'running', 'a\nb', ['npm', 'run', 'dev']]);
+    s = fold([env(jobFinished('j1', 'exited', 0, 'a\nb\ndone'), null, 1005)], s);
+    const ended = s.blocks[0].calls[0];
+    assert.deepEqual([ended.status, ended.output, ended.exitCode, ended.endedAt], ['ok', 'a\nb\ndone', 0, 1005]);
+});
+
+test('job end statuses: a non-zero exit and a timeout fail, a stop does not', () => {
+    const end = (status, code) => fold([env(jobStarted('j')), env(jobFinished('j', status, code))]).blocks[0].calls[0];
+    assert.equal(end('exited', 2).status, 'failed');
+    assert.equal(end('timed_out', null).status, 'failed');
+    assert.equal(end('stopped', null).status, 'ok');
+    assert.equal(end('stopped', null).summary, 'Stopped');
+});
+
+test('the journal copy of a job event after the live one changes nothing, and output after the end is ignored', () => {
+    let s = fold([env(jobStarted('j1')), env(jobFinished('j1', 'exited', 0, 'x'))]);
+    const again = fold([env(jobStarted('j1'), 1, 1000), env(jobFinished('j1', 'exited', 0, 'x'), 2, 1001), env(jobOutput('j1', 'late'))], s);
+    assert.equal(again.blocks.length, 1);
+    assert.deepEqual([again.blocks[0].calls[0].status, again.blocks[0].calls[0].output], ['ok', 'x']);
+});
+
+test('job output for an unknown job is dropped; job events never land in meta.unknown; a notice is a notice', () => {
+    const s = fold([env(jobOutput('x', 'a')), env(jobNotice('j1'))]);
+    assert.deepEqual(s.blocks.map(b => [b.kind, b.source]), [['notice', 'job_notice']]);
+    assert.deepEqual(s.meta.unknown, {});
+});
+
+test('job_started and job_finished reduce live copies of durable events, job_output is not durable', () => {
+    for (const type of ['job_started', 'job_finished']) assert.equal(reducesLive({ durable: true, event: { type } }), true);
+    assert.equal(reducesLive({ durable: false, event: { type: 'job_output' } }), true);
+    assert.equal(reducesLive({ durable: true, event: { type: 'job_notice' } }), false);
+});
+
+function jobNotice(id) {
+    return { type: 'job_notice', text: `${id} finished`, job_ids: [id] };
+}

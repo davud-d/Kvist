@@ -68,6 +68,7 @@ function noticeText(block) {
     case 'error': return block.text || 'Kvist failed';
     case 'sandbox_notice': return block.text || null;
     case 'session_ended': return null;
+    case 'job_notice': return block.text ? `The model was told: ${block.text}` : null;
     case 'journal_notice': {
         const parts = [];
         if (turns) parts.push(`${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown`);
@@ -177,7 +178,9 @@ function drawCall(feed, row, call) {
         if (canOpen) row.summary.insertBefore(row.chevron, row.label);
         else row.chevron.remove();
     }
-    applyOpen(feed, row.key, row, failed && call.output !== '');
+    // A running job shows its output tail without a click; that is what it is for.
+    const jobTail = running && call.actionType === 'background_job' && call.output !== '';
+    applyOpen(feed, row.key, row, (failed && call.output !== '') || jobTail);
 }
 
 // One block of calls: a lone call is a plain row, two or more sit under a "N calls" header.

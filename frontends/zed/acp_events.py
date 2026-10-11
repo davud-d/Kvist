@@ -46,6 +46,8 @@ _ACTION_KINDS: dict[str, str] = {
     "web_search": "search",
     "fetch_url": "fetch",
     "delegate_task": "other",
+    "job_output": "read",
+    "job_stop": "other",
 }
 
 # FinalEvent.outcome values that mean the model refused rather than finished.
@@ -324,6 +326,62 @@ class AcpEventTranslator:
                     status=status,  # type: ignore[arg-type]
                     locations=locations,
                     raw_output=raw_output,
+                ),
+            )
+        ]
+
+    # Background jobs -------------------------------------------------------
+    # A job is its own tool call, separate from the `run_shell` call that
+    # started it (that one finished the moment it returned the job id).
+
+    def _job_call_id(self, event: Any) -> str:
+        return f"kvist-job-{event.job_id}"
+
+    def _on_job_started(self, event: Any) -> list[AcpUpdate]:
+        call_id = self._job_call_id(event)
+        command = [str(part) for part in event.command]
+        title = str(getattr(event, "purpose", "") or "").strip() or " ".join(command)
+        self._tools.add(call_id)
+        start = helpers.start_tool_call(
+            call_id,
+            title=title[:60] or "background job",
+            kind="execute",  # type: ignore[arg-type]
+            status="in_progress",  # type: ignore[arg-type]
+            raw_input={"command": command},
+        )
+        return [AcpUpdate("tool_call", start)]
+
+    def _on_job_output(self, event: Any) -> list[AcpUpdate]:
+        call_id = self._job_call_id(event)
+        snapshot = str(event.output or "")
+        # The update carries the whole snapshot (rawOutput replaces the
+        # previous value); the delta only tells whether anything changed.
+        if call_id not in self._tools or not self._delta(self._outputs, call_id, snapshot):
+            return []
+        return [
+            AcpUpdate(
+                "tool_call_update",
+                helpers.update_tool_call(
+                    call_id, status="in_progress", raw_output=snapshot  # type: ignore[arg-type]
+                ),
+            )
+        ]
+
+    def _on_job_finished(self, event: Any) -> list[AcpUpdate]:
+        call_id = self._job_call_id(event)
+        if call_id not in self._tools:
+            return []
+        self._tools.discard(call_id)
+        self._outputs.pop(call_id, None)
+        # `stopped` is the person's or the runtime's decision, not a failure.
+        ok = event.status == "stopped" or (event.status == "exited" and event.exit_code == 0)
+        return [
+            AcpUpdate(
+                "tool_call_update",
+                helpers.update_tool_call(
+                    call_id,
+                    status="completed" if ok else "failed",  # type: ignore[arg-type]
+                    raw_output=str(event.output or "") or None,
                 ),
             )
         ]

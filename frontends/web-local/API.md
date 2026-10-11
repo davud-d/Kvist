@@ -55,7 +55,7 @@ Live envelopes have this stable shape:
 
 `durable: true` means the event is also present in the addressed session
 journal and must be reconciled by the per-session `seq` cursor, rather than
-trusted as a second transcript. `stream_chunk`, status, `command_result`
+trusted as a second transcript. `stream_chunk`, `action_output`, `job_output`, status, `command_result`
 (the core writes it outside the journal) and connection/process notifications
 are transient. A client may paint a `stream_start` eagerly so
 chunks have a target, but must make its later durable replay idempotent.

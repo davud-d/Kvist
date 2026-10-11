@@ -99,3 +99,16 @@ test("preserves request_id and shapes each input response", () => {
     value: null,
   })
 })
+
+test("passes background job events through to the renderer", () => {
+  const protocol = new ProtocolState()
+  protocol.consume({ type: "hello", protocol_version: 1 })
+  for (const event of [
+    { type: "job_started", job_id: "j1", command: ["sleep", "9"], purpose: "wait", call_id: "c" },
+    { type: "job_output", job_id: "j1", output: "tick" },
+    { type: "job_finished", job_id: "j1", status: "stopped", exit_code: null, output: "tick" },
+    { type: "job_notice", text: "j1 finished", job_ids: ["j1"] },
+  ]) {
+    assert.deepEqual(protocol.consume(event), { kind: event.type, event })
+  }
+})

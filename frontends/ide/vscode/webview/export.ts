@@ -117,6 +117,15 @@ function itemText(item: Item): string {
       return item.tone === "debug" ? "" : item.text
     case "done":
       return ""
+    case "job": {
+      const head = `$ ${item.command.join(" ") || item.purpose} (background)`
+      const body = capped(outputLines(item.output), OUTPUT_LINES)
+      const end = item.status === "exited" ? `exit ${item.exitCode ?? "?"}` : item.status.replace("_", " ")
+      return `${fence("", body ? `${head}\n${body}` : head)}\n${end}`
+    }
+    // What the model was told, not something the person did or saw as a result.
+    case "job_notice":
+      return ""
   }
 }
 

@@ -33,6 +33,7 @@ _TRANSIENT_CORE_EVENTS = frozenset(
         "debug",
         "stream_chunk",
         "action_output",
+        "job_output",
         "command_result",
     }
 )

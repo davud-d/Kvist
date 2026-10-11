@@ -97,6 +97,7 @@ Same capability, delivered through ACP and drawn by Zed rather than by Kvist:
 | Proposed plan | A message with the plan's Markdown (ACP's plan update is a status list and cannot hold free text) |
 | Tool-call cards | ACP tool calls with `ToolKind` and `ToolCallLocation` |
 | Live shell output | Tool-call output updates; cumulative snapshots are reconciled into deltas |
+| Background shell jobs (`run_shell` with `background: true`) | One ACP tool call per job: `in_progress` with output updates (the tail snapshot replaces `rawOutput`), then `completed` (exit code 0, or stopped) or `failed` (non-zero exit, timeout). The runtime's notes to the model (`job_notice`) are not sent to Zed. |
 | Confirmations, choices, free-text questions | `session/request_permission` and elicitation. A choice with exactly two answers (plan first or not, accept the plan or not) is shown as permission buttons when the client has no form elicitation; a longer choice or a free-text question needs form elicitation and is otherwise refused. |
 | Open a terminal on Kvist | `/terminal`: ACP `client.create_terminal` when the client offers it, otherwise the exact command line to run yourself |
 | Open a file from a result | `ToolCallLocation` paths that Zed can jump to |

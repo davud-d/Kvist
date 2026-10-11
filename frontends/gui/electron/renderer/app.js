@@ -24,6 +24,7 @@ const activityText = document.querySelector("#activityText")
 const activitySpinner = document.querySelector("#activitySpinner")
 const progressBar = document.querySelector("#progressBar")
 const requestHost = document.querySelector("#requestHost")
+const jobsHost = document.querySelector("#jobsHost")
 const paletteBackdrop = document.querySelector("#paletteBackdrop")
 const settingsBackdrop = document.querySelector("#settingsBackdrop")
 const settingsForm = document.querySelector("#settingsForm")
@@ -651,6 +652,7 @@ function setRunning(value) {
       tokenSpeedTimer = window.setInterval(() => {
         renderTokenSpeed()
         renderRunStats()
+        if (jobs.size) renderJobs()
       }, 500)
     }
   } else {
@@ -1182,6 +1184,71 @@ function addError(message) {
   scrollToBottom()
 }
 
+// Background jobs of the run on screen, keyed by job id. Running ones are listed above the
+// composer with their output tail; a finished one leaves a card in the conversation.
+const jobs = new Map()
+const JOB_TAIL_LINES = 4
+const JOB_CARD_LINES = 15
+
+function jobLabel(job) {
+  return job.purpose || job.command.join(" ") || "job"
+}
+
+function tailOf(output, count) {
+  const text = String(output || "").replace(/\n+$/, "")
+  const lines = text ? text.split("\n") : []
+  return { shown: lines.slice(-count), earlier: Math.max(0, lines.length - count) }
+}
+
+function renderJobs() {
+  const running = [...jobs.values()].filter((job) => job.status === "running")
+  jobsHost.classList.toggle("is-hidden", running.length === 0)
+  jobsHost.replaceChildren(
+    ...running.map((job) => {
+      const row = createElement("div", "job-row")
+      const head = createElement("div", "job-head")
+      head.append(
+        createElement("span", "job-dot"),
+        createElement("span", "job-label", jobLabel(job)),
+        createElement("span", "job-time muted", `${Math.max(0, Math.round((Date.now() - job.startedAt) / 1000))}s`),
+      )
+      head.children[1].title = job.command.join(" ")
+      const { shown } = tailOf(job.output, JOB_TAIL_LINES)
+      row.append(head, createElement("pre", "job-out", shown.length ? shown.join("\n") : "No output yet"))
+      return row
+    }),
+  )
+}
+
+function resetJobs() {
+  jobs.clear()
+  renderJobs()
+}
+
+function addJobCard(job, event) {
+  enterConversation()
+  const failed = event.status === "timed_out" || (event.status === "exited" && event.exit_code !== 0)
+  const details = createElement("details", `message step-card job-card${failed ? " job-failed" : ""}`)
+  details.open = showDetails
+  const summary = createElement("summary")
+  const ended = event.status === "exited" ? `exit ${event.exit_code ?? "?"}` : event.status.replace("_", " ")
+  const seconds = Math.max(0, Math.round((Date.now() - job.startedAt) / 1000))
+  summary.append(
+    createElement("span", "step-action", "background"),
+    createElement("span", "", jobLabel(job)),
+    createElement("span", "step-phase", `${ended} · ${seconds}s`),
+  )
+  const content = createElement("div", "step-content")
+  content.append(createElement("pre", "", `$ ${job.command.join(" ")}`))
+  const { shown, earlier } = tailOf(event.output, JOB_CARD_LINES)
+  if (shown.length) {
+    content.append(createElement("pre", "job-out", `${earlier ? `… ${earlier} earlier lines\n` : ""}${shown.join("\n")}`))
+  }
+  details.append(summary, content)
+  messages.append(details)
+  scrollToBottom()
+}
+
 function addNotice(message) {
   enterConversation()
   messages.append(createElement("article", "message message-notice", message))
@@ -1452,6 +1519,34 @@ function handleEvent(event) {
     case "input_request":
       showInputRequest(event)
       break
+    case "job_started":
+      jobs.set(event.job_id, {
+        command: event.command || [],
+        purpose: event.purpose || "",
+        status: "running",
+        output: "",
+        startedAt: Date.now(),
+      })
+      renderJobs()
+      break
+    case "job_output": {
+      const job = jobs.get(event.job_id)
+      if (!job) break
+      job.output = event.output || ""
+      renderJobs()
+      break
+    }
+    case "job_finished": {
+      const job = jobs.get(event.job_id) || { command: [], purpose: "", startedAt: Date.now() }
+      jobs.delete(event.job_id)
+      renderJobs()
+      addJobCard(job, event)
+      break
+    }
+    case "job_notice":
+      // What the model was told, so a person can see why it reacted to a job.
+      if (showDetails) addNotice(`The model was told:\n${event.text}`)
+      break
   }
 }
 
@@ -1464,6 +1559,7 @@ async function startGoal(goal) {
   const payload = imageAttachments.pack(value)
   const shown = `${value} ${imageAttachments.labels()}`.trim()
   protocol = new ProtocolState()
+  resetJobs()
   lastAssistantText = ""
   resetTokenSpeed()
   resetRunStats()
@@ -1489,6 +1585,7 @@ function resetView() {
   if (running) return
   imageAttachments.clear()
   protocol = new ProtocolState()
+  resetJobs()
   lastAssistantText = ""
   resetTokenSpeed()
   resetRunStats()
@@ -1535,6 +1632,7 @@ async function resumeCheckpoint() {
     return
   }
   protocol = new ProtocolState()
+  resetJobs()
   lastAssistantText = ""
   resetTokenSpeed()
   resetRunStats()

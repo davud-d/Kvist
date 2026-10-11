@@ -2174,3 +2174,68 @@ kbd {
   padding: 2px 12px;
   color: var(--text-muted);
 }
+
+/* Running background jobs above the composer: label, run time and the newest output lines. */
+.jobs-host {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.job-row {
+  padding: 7px 12px;
+  border-left: 2px solid var(--primary);
+  background: rgba(13, 21, 28, 0.52);
+  font-size: 12px;
+}
+
+.job-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.job-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: job-pulse 1.4s ease-in-out infinite;
+}
+
+.job-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-out {
+  margin: 5px 0 0;
+  max-height: 6.5em;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.job-failed .step-phase {
+  color: var(--error);
+}
+
+@keyframes job-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job-dot {
+    animation: none;
+  }
+}

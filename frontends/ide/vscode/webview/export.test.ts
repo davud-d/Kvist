@@ -117,3 +117,13 @@ test("turnToText includes a thought's text and an explored summary", () => {
   assert.match(text, /checking the cache/)
   assert.match(text, /Explored: 2 reads/)
 })
+
+test("turnToText writes a finished background job as a fenced command with its end", () => {
+  const text = turnToText([
+    { id: 1, kind: "job", jobId: "j1", command: ["npm", "run", "dev"], purpose: "dev server", status: "stopped", exitCode: null, output: "ready", seconds: 3, russian: false },
+    { id: 2, kind: "job_notice", text: "j1 printed ready", jobIds: ["j1"], russian: false },
+  ])
+  assert.match(text, /\$ npm run dev \(background\)\nready/)
+  assert.match(text, /\nstopped$/)
+  assert.doesNotMatch(text, /printed ready/)
+})

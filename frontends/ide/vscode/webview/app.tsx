@@ -3,12 +3,13 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
 import { contextLabel, formatSeconds, formatTokens } from "../../../tui/ink/format"
-import { actionTarget, exploreSummary, initialState, lastInflight, reduce } from "../../../tui/ink/state"
+import { actionTarget, exploreSummary, initialState, lastInflight, reduce, requestIsRussian } from "../../../tui/ink/state"
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Icon, Ring } from "./icons"
+import { JobStrip } from "./jobs"
 import { opensNewSession } from "./closed"
 import { onMessage, post } from "./host"
 import { Markdown } from "./markdown"
@@ -384,6 +385,7 @@ export function App() {
             ))}
           </div>
         ) : null}
+        <JobStrip jobs={state.jobs} russian={requestIsRussian(state)} now={Date.now()} />
         {state.running || metrics.thinking > 0 || metrics.tokensPerSecond ? (
           <div class="strip">
             {state.running ? <span class="shimmer strip-status">{state.status?.text ?? "Working"}</span> : null}

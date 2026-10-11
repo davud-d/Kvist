@@ -21,6 +21,9 @@ const NAMES = {
     run_shell: ['Bash', 'Running a command', 'Command finished'],
     web_search: ['Search the web', 'Searching the web'], fetch_url: ['Fetch', 'Reading a web page'],
     delegate_task: ['Task', 'Delegating work'],
+    job_output: ['Job output', 'Reading a background job'], job_stop: ['Stop job', 'Stopping a background job'],
+    // Not an action of the model: a job is a row of its own (jobStarted below).
+    background_job: ['Background', 'Running in the background', 'Background job ended'],
     offer_plan: ['Plan'], propose_plan: ['Plan'], end_session: ['Close session'],
     final_answer: [undefined, 'Preparing response'], report_to_user: [undefined, 'Preparing report'],
     refuse: [undefined, 'Task declined'],
@@ -36,7 +39,10 @@ const TERMINAL_ACTIONS = new Set(['final_answer', 'report_to_user', 'refuse']);
 // streams) and hello. Every other durable event reaches the feed through the journal, whose seq deduplicates
 // it; reducing its live copy as well would show it twice (session.js applyLive).
 const LIVE_DURABLE = new Set(['stream_start', 'reasoning_start', 'reasoning_chunk', 'reasoning_commit', 'hello']);
-export const reducesLive = envelope => envelope?.durable !== true || LIVE_DURABLE.has(envelope.event?.type);
+// A job row has to appear when the job starts, not when the journal is next read; both copies are idempotent.
+const LIVE_JOBS = new Set(['job_started', 'job_finished']);
+export const reducesLive = envelope => envelope?.durable !== true
+    || LIVE_DURABLE.has(envelope.event?.type) || LIVE_JOBS.has(envelope.event?.type);
 // Known events that never reach the feed or meta.
 const DROPPED = new Set(['live_start', 'live_stop', 'debug', 'manifest', 'connection.log']);
 
@@ -189,6 +195,26 @@ const actionResult = (s, e, env) => {
 const actionOutput = (s, e) => !look(s, 'calls', callKey(e)) ? s
     : upsertCall(s, e, c => (c.status === 'running' ? { ...c, output: e.output || '' } : c));
 
+// Background jobs, frontend_protocol.py:396-473. A job is a tool block with one call whose key is the job id,
+// so the feed draws it like any command. The live and the journal copy of job_started/job_finished both
+// arrive (LIVE_DURABLE) and the second changes nothing; job_output is live-only, a snapshot of the tail.
+const jobCall = e => ({ call_id: `job:${e.job_id}` });
+const jobStarted = (s, e, env) => typeof e.job_id !== 'string' ? s : upsertCall(s, jobCall(e), c => (c.status !== 'running' ? c : {
+    ...c, actionType: 'background_job', args: { command: e.command || [] }, description: e.purpose || '',
+    startedAt: c.startedAt ?? stamp(env),
+}));
+const jobOutput = (s, e) => !look(s, 'calls', `job:${e.job_id}`) ? s
+    : upsertCall(s, jobCall(e), c => (c.status === 'running' ? { ...c, output: e.output || '' } : c));
+const JOB_SUMMARY = { timed_out: 'Timed out', stopped: 'Stopped' };
+const jobFinished = (s, e, env) => {
+    if (typeof e.job_id !== 'string') return s;
+    const code = num(e.exit_code), failed = e.status === 'timed_out' || (e.status === 'exited' && code !== 0);
+    return upsertCall(s, jobCall(e), c => (c.status !== 'running' ? c : {
+        ...c, actionType: 'background_job', status: failed ? 'failed' : 'ok', ok: !failed, output: e.output || '',
+        summary: JOB_SUMMARY[e.status] || '', exitCode: code, endedAt: stamp(env),
+    }));
+};
+
 // frontend_protocol.py:489-516. secret values never enter state (session.js:132).
 function inputRequest(s, e) {
     if (s.blocks.some(b => b.kind === 'input' && b.requestId === e.request_id)) return s;
@@ -254,6 +280,11 @@ const HANDLERS = {
     step,
     action_result: actionResult,
     action_output: actionOutput,
+    job_started: jobStarted,
+    job_output: jobOutput,
+    job_finished: jobFinished,
+    // frontend_protocol.py:461-473: what the model was told about jobs
+    job_notice: (s, e) => notice(s, 'job_notice', 'info', e.text || ''),
     input_request: inputRequest,
     'client.input_answered': inputAnswered,
     // Synthetic: the client saw that the session has no pending input (a fresh /navigation); no fields.

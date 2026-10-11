@@ -8,6 +8,7 @@ import { Icon } from "./icons"
 import { Markdown } from "./markdown"
 import { turnSlice, turnToText } from "./export"
 import { classifyRun, worseOf, type Tone } from "./outcome"
+import { jobFailed, jobLabel, jobsCopy } from "./jobs"
 import { verbOf } from "./verbs"
 
 type ToolItem = Extract<Item, { kind: "tool" }>
@@ -235,6 +236,32 @@ export function ShellCard({ args, result, startedAt, live }: ShellProps) {
         ) : null}
         {result && shown.length === 0 && result.ok ? <div class="term-empty">No output</div> : null}
         {result && !result.ok && code === null ? <div class="failure">{result.summary}</div> : null}
+      </div>
+    </div>
+  )
+}
+
+// A background job that ended. The running ones live in the strip above the composer.
+function JobCard({ item }: { item: Extract<Item, { kind: "job" }> }) {
+  const copy = jobsCopy(item.russian)
+  const failed = jobFailed(item.status, item.exitCode)
+  const { shown, earlier } = tailLines(item.output, OUTPUT_LINES)
+  return (
+    <div class="work">
+      <Node kind={failed ? "bad" : "ok"} />
+      <div class={`term tone-${failed ? "bad" : "ok"}`}>
+        <div class="term-head">
+          <span class="prompt">$</span>
+          <span class="term-cmd" title={item.command.join(" ")}>{jobLabel(item)}</span>
+          <span class="exit">{copy.background}</span>
+          <span class={`exit ${failed ? "bad" : ""}`}>{copy.ended(item.status, item.exitCode)} · {formatSeconds(item.seconds)}</span>
+        </div>
+        {shown.length > 0 ? (
+          <pre class="term-out">
+            {earlier > 0 ? `${copy.earlier(earlier)}\n` : ""}
+            {shown.join("\n")}
+          </pre>
+        ) : null}
       </div>
     </div>
   )
@@ -557,5 +584,9 @@ export function TranscriptItem({ item, uid, settled, items }: { item: Item; uid:
       return <Answer item={item} items={items} />
     case "note":
       return <div class={`note ${item.tone}`}>{item.text}</div>
+    case "job":
+      return <JobCard item={item} />
+    case "job_notice":
+      return <div class="note job-notice">{jobsCopy(item.russian).told}{"\n"}{item.text}</div>
   }
 }
