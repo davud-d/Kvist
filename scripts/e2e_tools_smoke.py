@@ -130,8 +130,12 @@ class Kvist:
     """One stdio-multi core process, read through a thread so waits can time out."""
 
     def __init__(self, argv: list[str], cwd: Path, home: Path) -> None:
+        # Commands run on the host here, and a host with no network isolation (a bare CI runner,
+        # Windows) refuses them unless network access is allowed explicitly. The smoke only runs
+        # `git --version` against a local fake provider, so it says so.
         env = dict(os.environ, HOME=str(home), USERPROFILE=str(home), PYTHONUTF8="1",
                    PYTHONUNBUFFERED="1", AGENT_WRITE_APPROVAL="0", AGENT_API_INTERVAL="0",
+                   AGENT_SANDBOX_NET="allow",
                    NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost")
         self.process = subprocess.Popen(
             argv + ["--frontend", "stdio-multi", "--provider", "custom:fake", "--role", "coder"],
