@@ -85,7 +85,7 @@ const HELP = [
 
 export function App(props: AppProps) {
   const { exit } = useApp()
-  const [state, dispatch] = useReducer(reduce, undefined, () => initialState(initialEffort()))
+  const [state, dispatch] = useReducer(reduce, undefined, () => initialState(initialEffort(), props.skin === "claude"))
   const [history, setHistory] = useState<string[]>([])
   // Typed lines of earlier runs are read from the core; starters wait for them so they do not
   // flash up for a person who already has a history.
