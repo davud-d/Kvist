@@ -58,6 +58,8 @@ class FakeProvider:
 
     def __init__(self) -> None:
         self.runs_started = 0
+        # The file the current run changes: it is read back before the run says it is done.
+        self.verify_after_tool = False
         self.requests: list[dict] = []
         provider = self
 
@@ -95,9 +97,18 @@ class FakeProvider:
         elif not tools:
             message = {"role": "assistant", "content": "Smoke test"}
         elif any(item.get("role") == "tool" for item in messages):
-            message = {"role": "assistant", "content": "Done."}
+            answered = sum(1 for item in messages if item.get("role") == "tool")
+            if self.verify_after_tool and answered == 1:
+                # A run that changed a file is not finished until it has looked at the result;
+                # an unverified one ends "incomplete" and keeps its checkpoint, so the next
+                # goal would continue it instead of starting a run of its own.
+                message = self._call("read_file", {"path": "hello.txt"})
+            else:
+                message = {"role": "assistant", "content": "Done."}
         else:
-            scenario = SCENARIOS[min(self.runs_started, len(SCENARIOS) - 1)][1]
+            index = min(self.runs_started, len(SCENARIOS) - 1)
+            scenario = SCENARIOS[index][1]
+            self.verify_after_tool = SCENARIOS[index][2] is not None
             self.runs_started += 1
             message = self._call(scenario["name"], scenario["arguments"])
         finish = "tool_calls" if message.get("tool_calls") else "stop"
