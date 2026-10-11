@@ -105,4 +105,8 @@ def test_reader_prompt_stays_within_token_budget():
     # The v2 contract (the <tool_call> block, when to speak, which calls run
     # together, how an end of the turn is checked) fit into the same budget by
     # saying each rule once.
-    assert tokens <= 2700, f"reader prompt is {tokens} tokens (budget 2700)"
+    # → 3000 for the cost of a response in BATCHING: runs took 2-3 reads per
+    # response while 4-8 were independent, and every extra response resends
+    # the whole conversation. The extra headroom is deliberate: wording that
+    # states the reason is kept whole rather than squeezed to fit a ceiling.
+    assert tokens <= 3000, f"reader prompt is {tokens} tokens (budget 3000)"
