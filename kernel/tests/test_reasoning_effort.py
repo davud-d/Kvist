@@ -268,6 +268,68 @@ def test_anthropic_wrapper_keeps_temperature_when_no_effort_marker():
     assert record["temperature"] == pytest.approx(0.1)
 
 
+# ── prompt caching ──────────────────────────────────────────────────────────
+
+
+def test_anthropic_direct_caches_system_prompt_only_for_a_single_message():
+    client = AnthropicCompatibleClient(api_key="test-key")
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+
+    client.chat.completions.create(
+        model="claude-sonnet-5-5",
+        messages=[
+            {"role": "system", "content": "stable role prompt"},
+            {"role": "user", "content": "changing runtime prompt"},
+        ],
+    )
+
+    assert record["system"] == [
+        {"type": "text", "text": "stable role prompt", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert record["messages"] == [{"role": "user", "content": "changing runtime prompt"}]
+
+
+def test_anthropic_direct_caches_end_of_a_growing_conversation_without_mutating_history():
+    client = AnthropicCompatibleClient(api_key="test-key")
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+    history_block = {"type": "text", "text": "second question"}
+    messages = [
+        {"role": "system", "content": "prompt"},
+        {"role": "user", "content": "first question"},
+        {"role": "assistant", "content": "first answer"},
+        {"role": "user", "content": [history_block]},
+    ]
+
+    client.chat.completions.create(model="claude-sonnet-5-5", messages=messages)
+
+    assert record["messages"][0] == {"role": "user", "content": "first question"}
+    assert record["messages"][-1]["content"] == [
+        {"type": "text", "text": "second question", "cache_control": {"type": "ephemeral"}}
+    ]
+    assert "cache_control" not in history_block
+
+
+def test_anthropic_gateway_endpoint_gets_no_cache_breakpoints():
+    client = AnthropicCompatibleClient(api_key="test-key", base_url="https://gateway.example.com")
+    record: dict = {}
+    client._client = _fake_anthropic(record)
+
+    client.chat.completions.create(
+        model="claude-sonnet-5-5",
+        messages=[
+            {"role": "system", "content": "prompt"},
+            {"role": "user", "content": "a"},
+            {"role": "assistant", "content": "b"},
+            {"role": "user", "content": "c"},
+        ],
+    )
+
+    assert record["system"] == "prompt"
+    assert "cache_control" not in str(record["messages"])
+
+
 # ── config persistence ──────────────────────────────────────────────────────
 
 

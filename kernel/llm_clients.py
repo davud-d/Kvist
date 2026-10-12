@@ -14,6 +14,7 @@ import logging
 import os
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 from kernel.language_utils import choose_localized_text
 from openai import OpenAI
@@ -1715,6 +1716,39 @@ def _anthropic_thinking_from_effort(effort: Any) -> dict[str, Any] | None:
     return anthropic_thinking_config(str(effort))
 
 
+_ANTHROPIC_DIRECT_HOST = "api.anthropic.com"
+_CACHE_BREAKPOINT = {"type": "ephemeral"}
+
+
+def _with_prompt_cache(
+    system: str | None, messages: list[dict[str, Any]]
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Mark the stable prefix of a request for Anthropic prompt caching.
+
+    One breakpoint ends the system prompt, which is the same on every step of
+    a run. A second ends the last message, but only when the conversation has
+    more than one: a lone, changing user message would pay the 1.25x cache
+    write on every call and never be read back. Content blocks are copied,
+    never mutated, because they may be the caller's own history objects.
+    """
+    cached_system: Any = system
+    if system:
+        cached_system = [{"type": "text", "text": system, "cache_control": _CACHE_BREAKPOINT}]
+    if len(messages) < 2:
+        return cached_system, messages
+
+    last = messages[-1]
+    content = last["content"]
+    if isinstance(content, str):
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": content}]
+    else:
+        blocks = [dict(block) for block in content]
+    if not blocks or blocks[-1].get("text") == "":
+        return cached_system, messages
+    blocks[-1]["cache_control"] = _CACHE_BREAKPOINT
+    return cached_system, [*messages[:-1], {**last, "content": blocks}]
+
+
 class _AnthropicCompletionsNamespace:
     """Translate OpenAI-style ``chat.completions.create(**kwargs)`` to Anthropic Messages API."""
 
@@ -1759,6 +1793,10 @@ class _AnthropicCompletionsNamespace:
             "messages": user_messages,
             "max_tokens": kwargs.get("max_tokens") or kwargs.get("max_completion_tokens") or 4096,
         }
+        # Gateways that speak the Anthropic protocol may reject cache_control,
+        # so only Anthropic's own endpoint gets breakpoints.
+        if urlparse(self._owner._base_url).hostname == _ANTHROPIC_DIRECT_HOST:
+            system, request_kwargs["messages"] = _with_prompt_cache(system, user_messages)
         if system:
             request_kwargs["system"] = system
 
