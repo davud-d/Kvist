@@ -349,14 +349,20 @@ def _path_is_user_mutable(path: Path) -> bool:
         return windows_path_is_user_mutable(path)
     if not hasattr(os, "geteuid"):
         return bool(info.st_mode & stat.S_IWOTH)
-    if info.st_uid == os.geteuid():
-        return True
-    try:
-        if os.access(path, os.W_OK, effective_ids=True):
+    if os.geteuid() == 0:
+        # Root can write everywhere, so ownership and access(2) say nothing;
+        # a path is mutable only when someone other than root can write it.
+        if info.st_uid != 0:
             return True
-    except TypeError:
-        if os.access(path, os.W_OK):
+    else:
+        if info.st_uid == os.geteuid():
             return True
+        try:
+            if os.access(path, os.W_OK, effective_ids=True):
+                return True
+        except TypeError:
+            if os.access(path, os.W_OK):
+                return True
     if info.st_mode & stat.S_IWOTH:
         return True
     try:

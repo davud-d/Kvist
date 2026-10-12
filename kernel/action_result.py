@@ -9,10 +9,10 @@ MAX_OUTPUT_CHARS = 4000
 MAX_SUMMARY_CHARS = 120
 
 _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
-# The runtime's answer to a write it did not run because an earlier write of
+# The runtime's answer to an action it did not run because an earlier action of
 # the same response failed (agent_runtime._SKIPPED_AFTER_FAILED_WRITE).
-SKIPPED_ERROR = "Skipped: an earlier write in this response failed."
-SKIPPED_SUMMARY = "Skipped: an earlier write failed"
+SKIPPED_ERROR = "Skipped: an earlier action in this response failed."
+SKIPPED_SUMMARY = "Skipped: an earlier action failed"
 
 
 def feedback_skipped(error: str) -> bool:

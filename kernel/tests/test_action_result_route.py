@@ -76,7 +76,7 @@ def test_a_skipped_write_says_so_instead_of_failed():
         4, "write_file", {"path": "b.py", "content": "x"}, {"ok": False, "error": SKIPPED_ERROR}
     )
 
-    assert result["summary"] == "Skipped: an earlier write failed"
+    assert result["summary"] == "Skipped: an earlier action failed"
 
 
 def test_append_and_replace_results():

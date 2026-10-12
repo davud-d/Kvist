@@ -1723,7 +1723,7 @@ def test_run_loop_skips_the_writes_after_a_failed_write_but_not_the_reads(agent_
     assert ("write_file", "b.txt") not in executed and ("append_file", "d.txt") not in executed
     skipped = [log for log in agent._state.step_logs if log.get("status") == "skipped_after_failed_write"]
     assert [log["command"]["action"]["args"]["path"] for log in skipped] == ["b.txt", "d.txt"]
-    assert "Skipped: an earlier write in this response failed." in prompts[1]
+    assert "Skipped: an earlier action in this response failed." in prompts[1]
 
 
 def test_run_loop_shows_each_call_label_in_the_live_panel(agent_factory):

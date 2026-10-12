@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,7 @@ from kernel.tests.conftest import requires_posix
 
 from kernel import sandbox
 from kernel import terminal as terminal_module
+from kernel import terminal_trust
 from kernel.permission_policy import policy_file_path
 from kernel.sandbox import SandboxMode, detect_sandbox_mode, resolve_bubblewrap_path, wrap_command_for_sandbox
 from kernel.terminal import HardDenyError, TerminalExecutor
@@ -280,3 +283,36 @@ def test_real_bwrap_hides_host_paths_and_uses_empty_home(tmp_path):
         "home": "/tmp/kvist-home",
         "home_entries": [],
     }
+
+
+class _StatOnly:
+    def __init__(self, uid: int, mode: int, gid: int = 0) -> None:
+        self._info = SimpleNamespace(st_uid=uid, st_mode=mode, st_gid=gid)
+
+    def stat(self):
+        return self._info
+
+
+@requires_posix
+@pytest.mark.parametrize(
+    "is_mutable",
+    [sandbox._user_mutable, terminal_trust._path_is_user_mutable],
+    ids=["sandbox", "terminal_trust"],
+)
+@pytest.mark.parametrize(
+    ("uid", "mode", "expected"),
+    [
+        (0, 0o100755, False),  # root-owned system binary: trusted
+        (0, 0o100757, True),  # world-writable
+        (1000, 0o100755, True),  # owned by a non-root user who can rewrite it
+    ],
+)
+def test_root_process_trusts_only_root_owned_unshared_paths(
+    monkeypatch, is_mutable, uid, mode, expected
+):
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(os, "getegid", lambda: 0)
+    monkeypatch.setattr(os, "getgroups", lambda: [0])
+    monkeypatch.setattr(os, "access", lambda *args, **kwargs: True)
+
+    assert is_mutable(_StatOnly(uid, mode)) is expected

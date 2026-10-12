@@ -926,7 +926,7 @@ _NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already 
 _NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
 _NOT_RUN_BUDGET = "Not executed: the step budget ran out."
 _SKIPPED_AFTER_FAILED_WRITE = SKIPPED_ERROR
-_SKIPPED_LABELS = ("пропущено: предыдущая запись упала", "skipped: an earlier write failed")
+_SKIPPED_LABELS = ("пропущено: предыдущее действие упало", "skipped: an earlier action failed")
 
 
 def _over_limit(calls: list[ToolCallRequest]) -> list[bool]:
