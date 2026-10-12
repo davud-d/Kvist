@@ -168,8 +168,18 @@ export class KvistCore extends EventEmitter {
     this.write(reply)
   }
 
+  // "Stop all": the turn, its helpers, calls and every process the task owns.
   cancel(): void {
     this.write({ type: "cancel" })
+  }
+
+  // Pause at the next safe point; the task and its live resources stay.
+  pause(): void {
+    this.write({ type: "pause" })
+  }
+
+  stopHelper(agentId: string): void {
+    this.write({ type: "helper_stop", agent_id: agentId })
   }
 
   // Closing stdin is the core's normal exit signal; open requests deny first.

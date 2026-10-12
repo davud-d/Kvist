@@ -16,7 +16,9 @@ const prompt = document.querySelector("#prompt"), sendButton = document.querySel
 const modelLabel = document.querySelector("#model-label");
 const slot = document.querySelector("#composer-slot"), hint = document.querySelector(".composer-hint");
 const title = document.querySelector("#session-title"), path = document.querySelector("#session-path"), server = document.querySelector("#session-server");
-const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent");
+const agentState = document.querySelector("#agent-state"), stop = document.querySelector("#stop-agent"), pauseButton = document.querySelector("#pause-agent");
+const screenPreview = document.querySelector("#screen-preview"), screenImage = document.querySelector("#screen-preview-image");
+const screenTitle = document.querySelector("#screen-preview-title"), screenState = document.querySelector("#screen-preview-state"), screenOpen = document.querySelector("#screen-preview-open");
 // The open session's feed: the reducer state is the single source of what the conversation shows. Retry on a
 // "Not sent" message is handled by app.js, which owns the sending.
 const feedOptions = { onRetry: block => document.dispatchEvent(new CustomEvent('kvist:retry-send', { detail: { localId: block.localId, text: block.text } })) };
@@ -75,6 +77,8 @@ let followTail = true, paintFrame = 0, feedReady = false;
 function paintFeed(live = true) {
     feed.render(feedState, { live: live && feedReady });
     showClosed(feedState.meta.closed !== null, live && feedReady);
+    showScreen(feedState.meta.screen);
+    showTaskState(feedState.meta.task_state);
     if (conversation.children.length)
         empty.hidden = true;
 }
@@ -420,12 +424,46 @@ export function setAgentState(value) {
     agentState.dataset.state = stateValue;
     const wasBusy = !stop.hidden;
     stop.hidden = !busy(stateValue);
+    pauseButton.hidden = !busy(stateValue);
     sendButton.hidden = busy(stateValue);
     // The control that takes the place fades in; the one that leaves is gone at once.
     if (feedReady && busy(stateValue) !== wasBusy)
         appear(busy(stateValue) ? stop : sendButton, { duration: '--dur-fast' });
     prompt.placeholder = busy(stateValue) ? 'Draft your next message…' : 'Message Kvist, or type / for commands';
 }
+// The agent's own screen, from Kvist's loopback viewer on the machine that runs the agent. A remote
+// agent's viewer is on the remote machine, so its link opens only there.
+function showScreen(screen) {
+    if (!screen) {
+        if (!screenPreview.hidden) {
+            screenPreview.hidden = true;
+            screenImage.removeAttribute('src');
+        }
+        return;
+    }
+    const remote = state.selected?.serverId && state.selected.serverId !== 'local';
+    screenTitle.textContent = screen.title;
+    screenState.textContent = remote ? 'on the remote machine' : screen.state;
+    screenState.dataset.state = screen.state;
+    screenOpen.href = remote ? '#' : screen.url;
+    screenOpen.hidden = remote;
+    if (!remote && screenImage.getAttribute('src') !== screen.stream_url)
+        screenImage.src = screen.stream_url;
+    screenPreview.hidden = false;
+}
+// "pause_requested" is shown until the core reports "paused": the agent may still be finishing a step.
+function showTaskState(value) {
+    pauseButton.disabled = value === 'pause_requested' || value === 'paused';
+    pauseButton.textContent = value === 'pause_requested' ? 'Pausing…' : 'Pause';
+}
+export function requestPause() {
+    const snapshot = selectionSnapshot();
+    if (!snapshot || pauseButton.hidden || pauseButton.disabled)
+        return;
+    pauseButton.disabled = true;
+    api.control(snapshot.selection, 'pause').catch(error => { pauseButton.disabled = false; toast(error.message); });
+}
+pauseButton.onclick = requestPause;
 // Removing the controls with the panel also removes what the person typed into them, a secret included.
 function hidePending() {
     pending.hidden = true;

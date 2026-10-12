@@ -104,8 +104,21 @@ class KvistCoreProcess(
         writeLine(reply.toString())
     }
 
+    // "Stop all": the turn, its helpers, calls and every process the task owns.
     fun cancel() {
         writeLine("""{"type":"cancel"}""")
+    }
+
+    // Pause at the next safe point; the task and its live resources stay.
+    fun pause() {
+        writeLine("""{"type":"pause"}""")
+    }
+
+    fun stopHelper(agentId: String) {
+        val message = JsonObject()
+        message.addProperty("type", "helper_stop")
+        message.addProperty("agent_id", agentId)
+        writeLine(message.toString())
     }
 
     // Closing stdin is the core's normal exit signal; open requests are denied first.

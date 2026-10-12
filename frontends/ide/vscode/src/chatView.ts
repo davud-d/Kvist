@@ -84,6 +84,10 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.core?.respond(message.requestId, message.answer, message.remember);
             case 'cancel':
                 return this.send(() => this.core?.cancel());
+            case 'pause':
+                return this.send(() => this.core?.pause());
+            case 'stopHelper':
+                return this.send(() => this.core?.stopHelper(message.agentId));
             case 'pickFiles':
                 return this.post({ type: 'attached', paths: await pickWorkspaceFiles() });
             case 'getEnvironment':
@@ -327,7 +331,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             `style-src ${webview.cspSource}`,
             `script-src 'nonce-${nonce}'`,
             `font-src ${webview.cspSource}`,
-            `img-src ${webview.cspSource} data:`,
+            // The agent's screen preview comes from Kvist's own loopback viewer.
+            `img-src ${webview.cspSource} data: http://127.0.0.1:*`,
         ].join('; ');
         return `<!DOCTYPE html>
 <html lang="en">

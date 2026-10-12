@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: http://127.0.0.1:*; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>Kvist</title>
     <link rel="stylesheet" href="styles.css" />
@@ -82,7 +82,18 @@
           <div id="messages" class="messages"></div>
         </section>
 
+        <aside id="screenPreview" class="screen-preview is-hidden" aria-label="Agent screen">
+          <header class="screen-preview-header">
+            <span id="screenPreviewTitle" class="screen-preview-title">Agent screen</span>
+            <span id="screenPreviewState" class="screen-preview-state">starting</span>
+            <button id="screenPreviewExpand" class="screen-preview-button" type="button" title="Enlarge">⤢</button>
+            <button id="screenPreviewOpen" class="screen-preview-button" type="button" title="Open in browser">↗</button>
+          </header>
+          <img id="screenPreviewImage" alt="The agent's own screen (view only)" />
+        </aside>
+
         <section class="dock">
+          <div id="helpersHost" class="helpers-host is-hidden" aria-label="Helpers"></div>
           <div id="jobsHost" class="jobs-host is-hidden" aria-label="Background jobs"></div>
           <div id="requestHost" class="request-host"></div>
           <form id="composer" class="composer">
@@ -113,6 +124,10 @@
             <div class="activity-main">
               <span id="activitySpinner" class="spinner is-hidden"></span>
               <span id="activityText" class="muted">Ready</span>
+              <span class="activity-controls">
+                <button id="pauseButton" class="activity-button is-hidden" type="button" title="Pause (Esc Esc)">Pause</button>
+                <button id="stopAllButton" class="activity-button danger is-hidden" type="button" title="Stop the agent, its helpers and every process of the task">Stop all</button>
+              </span>
             </div>
             <div class="activity-progress"><span id="progressBar"></span></div>
           </div>
@@ -426,5 +441,17 @@
 
     <script src="../src/protocol-state.js"></script>
     <script type="module" src="app.js"></script>
+    <div id="screenBackdrop" class="overlay is-hidden" role="presentation">
+      <section class="screen-large" role="dialog" aria-modal="true" aria-label="Agent screen">
+        <header class="screen-large-header">
+          <span id="screenLargeTitle">Agent screen</span>
+          <span id="screenLargeState" class="screen-preview-state"></span>
+          <span class="muted">view only</span>
+          <button id="screenLargeOpen" class="screen-preview-button" type="button" title="Open in browser">↗</button>
+          <button id="screenLargeClose" class="screen-preview-button" type="button" title="Close">✕</button>
+        </header>
+        <img id="screenLargeImage" alt="The agent's own screen (view only)" />
+      </section>
+    </div>
   </body>
 </html>

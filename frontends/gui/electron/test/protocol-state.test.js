@@ -112,3 +112,12 @@ test("passes background job events through to the renderer", () => {
     assert.deepEqual(protocol.consume(event), { kind: event.type, event })
   }
 })
+
+test("passes task state, screen, skill, helper and artifact events to the renderer", () => {
+  const state = new ProtocolState()
+  state.consume({ type: "hello", protocol_version: 1 })
+  for (const type of ["task_state", "screen", "skill", "helper", "artifact"]) {
+    const action = state.consume({ type, state: "running" })
+    assert.equal(action.kind, type)
+  }
+})

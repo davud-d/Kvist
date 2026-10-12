@@ -484,3 +484,23 @@ test('job_started and job_finished reduce live copies of durable events, job_out
 function jobNotice(id) {
     return { type: 'job_notice', text: `${id} finished`, job_ids: [id] };
 }
+
+// frontend_protocol.py TaskStateEvent, ScreenEvent, SkillEvent, HelperEvent, ArtifactEvent
+test('task state, the agent screen and skill/helper/artifact notices', () => {
+    const screen = { type: 'screen', screen_id: 'browser', skill: 'browser', title: 'Browser', state: 'running', url: 'http://127.0.0.1:5000/?t=a', stream_url: 'http://127.0.0.1:5000/stream.mjpeg?t=a', frame_url: 'f' };
+    let state = fold([
+        env({ type: 'task_state', state: 'pause_requested' }),
+        env(screen),
+        env({ type: 'skill', skill: 'browser', version: '0.1.0', name: 'Browser', state: 'attached' }),
+        env({ type: 'helper', agent_id: 'h1', event: 'update_applied', state: 'running', session: 'helper-x', task: '', summary: '' }),
+        env({ type: 'helper', agent_id: 'h1', event: 'stopped', state: 'stopped', session: 'helper-x', task: '', summary: 'partial', stopped_by: 'person' }),
+        env({ type: 'artifact', name: 'shot.png', mime: 'image/png', path: '/w/.kvist/artifacts/r/shot.png', caption: 'Screenshot', skill: 'browser' }),
+    ]);
+    assert.equal(state.meta.task_state, 'pause_requested');
+    assert.deepEqual(state.meta.screen, { title: 'Browser', state: 'running', url: screen.url, stream_url: screen.stream_url });
+    assert.deepEqual(state.blocks.filter(b => b.kind === 'notice').map(b => b.text), [
+        'Skill Browser 0.1.0 attached', 'Helper h1 stopped by you: partial', 'Screenshot: /w/.kvist/artifacts/r/shot.png',
+    ]);
+    state = reduce(state, env({ ...screen, state: 'closed', url: '', stream_url: '', frame_url: '' }));
+    assert.equal(state.meta.screen, null);
+});

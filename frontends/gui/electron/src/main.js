@@ -406,6 +406,53 @@ function registerIpc() {
     await stopRunner()
     return { ok: true }
   })
+
+  ipcMain.handle("kvist:pause", () => {
+    if (!runner) return { ok: false }
+    runner.control("pause")
+    return { ok: true }
+  })
+
+  ipcMain.handle("kvist:stop-all", () => {
+    if (!runner) return { ok: false }
+    runner.control("cancel")
+    return { ok: true }
+  })
+
+  ipcMain.handle("kvist:stop-helper", (_event, payload) => {
+    if (!runner) return { ok: false }
+    const agentId = String(payload?.agentId || "")
+    if (!/^h[0-9]{1,3}$/.test(agentId)) throw new Error("Unknown helper.")
+    runner.control("helper_stop", { agent_id: agentId })
+    return { ok: true }
+  })
+
+  // The agent's screen viewer listens on 127.0.0.1 with its own token; only
+  // such a link may be handed to the system browser from here.
+  ipcMain.handle("kvist:open-viewer", (_event, payload) => {
+    const url = String(payload?.url || "")
+    if (!/^http:\/\/127\.0\.0\.1:[0-9]{1,5}\/\?t=[A-Za-z0-9_-]+$/.test(url)) {
+      throw new Error("Not a Kvist screen link.")
+    }
+    void shell.openExternal(url)
+    return { ok: true }
+  })
+
+  // A helper's service session is read here without switching the person's
+  // conversation: --session-op history only reads its journal.
+  ipcMain.handle("kvist:helper-history", async (_event, payload) => {
+    const name = String(payload?.session || "")
+    if (!/^helper-[A-Za-z0-9._-]{1,120}$/.test(name)) throw new Error("Not a helper session.")
+    return runSessionOp(workspace, "history", name)
+  })
+
+  ipcMain.handle("kvist:show-artifact", (_event, payload) => {
+    const target = path.resolve(String(payload?.path || ""))
+    const root = path.resolve(workspace || "", ".kvist", "artifacts")
+    if (!workspace || !target.startsWith(root + path.sep)) throw new Error("Not a Kvist artifact.")
+    shell.showItemInFolder(target)
+    return { ok: true }
+  })
 }
 
 function createWindow() {

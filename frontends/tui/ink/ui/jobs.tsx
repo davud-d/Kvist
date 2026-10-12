@@ -77,6 +77,23 @@ function useNow(active: boolean, every: number): number {
   return now
 }
 
+// The agent's own screen while a skill shows one: a terminal cannot draw it, so it names the
+// local viewer link (127.0.0.1, with its token) that any browser on this machine can open.
+export function ScreenLine({ screen, russian }: { screen: { title: string; state: string; url: string; stream: string } | null; russian: boolean }) {
+  if (!screen) return null
+  const label = russian ? "Экран агента" : "Agent screen"
+  return (
+    <Box paddingX={currentSkin() === "claude" ? 1 : 0}>
+      <Text wrap="truncate-end">
+        <Text color={color.accent}>▣ </Text>
+        <Text>{label} · {screen.title}</Text>
+        <Text color={color.dim}> · {screen.state} · </Text>
+        <Text color={color.dim}>{screen.url}</Text>
+      </Text>
+    </Box>
+  )
+}
+
 // One row per running job (three at most, then "+N more"): marker, purpose or command, how long
 // it has run and the last line it printed. Ctrl+O in the fullscreen skin unfolds each job's tail.
 export function JobStrip({ jobs, russian }: { jobs: readonly JobView[]; russian: boolean }) {

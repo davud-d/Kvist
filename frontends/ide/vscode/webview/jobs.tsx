@@ -50,6 +50,23 @@ const STRIP_JOBS = 3
 const TAIL_LINES = 4
 
 // One row per running job above the composer, each with the newest lines it printed.
+// The agent's own screen while a skill shows one: a small live preview from Kvist's loopback
+// viewer (view only); a click opens the full viewer in the browser.
+export function ScreenStrip({ screen, stream, onOpen }: { screen: { title: string; state: string; url: string } | null; stream: string; onOpen: (url: string) => void }) {
+  if (!screen) return null
+  return (
+    <div class="screen-strip">
+      <div class="job-head">
+        <span class="job-dot" aria-hidden="true" />
+        <span class="job-label">{screen.title}</span>
+        <span class="job-time">{screen.state}</span>
+        <button class="link" title="Open the agent's screen in the browser" onClick={() => onOpen(screen.url)}>open ↗</button>
+      </div>
+      {stream ? <img class="screen-thumb" src={stream} alt="The agent's own screen (view only)" onClick={() => onOpen(screen.url)} /> : null}
+    </div>
+  )
+}
+
 export function JobStrip({ jobs, russian, now }: { jobs: readonly JobView[]; russian: boolean; now: number }) {
   const running = jobs.filter((job) => job.status === "running")
   if (running.length === 0) return null

@@ -631,7 +631,7 @@ export function ClaudeFooter({ running, armed, usage, model, role, toast = "", e
   const mode = [model, role].filter(Boolean).join(" · ")
   return (
     <Box justifyContent="space-between" paddingX={2}>
-      {armed ? <Text color={color.warn} wrap="truncate-end">esc again to interrupt</Text> : toast ? <Text color={color.ok} wrap="truncate-end">{toast}</Text> : <Text color={color.dim} wrap="truncate-end">{running ? "esc to interrupt" : "/ for commands"}</Text>}
+      {armed ? <Text color={color.warn} wrap="truncate-end">esc again to pause · ctrl+c stops all</Text> : toast ? <Text color={color.ok} wrap="truncate-end">{toast}</Text> : <Text color={color.dim} wrap="truncate-end">{running ? "esc to pause · ctrl+c to stop all" : "/ for commands"}</Text>}
       {exitWarning ? (
         <Text color={color.warn} wrap="truncate-end">Press Ctrl+{exitWarning} again to exit and stop the agent</Text>
       ) : (

@@ -49,6 +49,8 @@ export type ToHost =
     | { type: 'command'; name: string; args: string[] }
     | { type: 'respond'; requestId: string; answer: boolean | string | null; remember: boolean }
     | { type: 'cancel' }
+    | { type: 'pause' }
+    | { type: 'stopHelper'; agentId: string }
     | { type: 'pickFiles' }
     | { type: 'getConfig' }
     | { type: 'getEnvironment' }

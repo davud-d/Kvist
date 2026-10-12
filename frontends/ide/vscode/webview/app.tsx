@@ -9,7 +9,7 @@ import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
 import { CursorGlow } from "./glow"
 import { Icon, Ring } from "./icons"
-import { JobStrip } from "./jobs"
+import { JobStrip, ScreenStrip } from "./jobs"
 import { opensNewSession } from "./closed"
 import { onMessage, post } from "./host"
 import { Markdown } from "./markdown"
@@ -235,6 +235,12 @@ export function App() {
   const suggestions = suggest(text, PANEL_COMMANDS)
 
   function onKeyDown(event: KeyboardEvent): void {
+    if (event.key === "Escape" && state.running && !state.pending) {
+      // Escape pauses the agent and its helpers at a safe point; the stop button stops all.
+      event.preventDefault()
+      post({ type: "pause" })
+      return
+    }
     if (suggestions.length > 0 && (event.key === "Tab" || event.key === "ArrowDown" || event.key === "ArrowUp")) {
       event.preventDefault()
       if (event.key === "Tab") return setText(`/${suggestions[selected]?.name ?? suggestions[0].name} `)
@@ -385,6 +391,7 @@ export function App() {
             ))}
           </div>
         ) : null}
+        <ScreenStrip screen={state.screen} stream={state.screen?.stream ?? ""} onOpen={(url) => post({ type: "openLink", url })} />
         <JobStrip jobs={state.jobs} russian={requestIsRussian(state)} now={Date.now()} />
         {state.running || metrics.thinking > 0 || metrics.tokensPerSecond ? (
           <div class="strip">
@@ -450,8 +457,11 @@ export function App() {
                 <Ring value={contextShare} />
               </span>
             ) : null}
+            {state.running && state.taskState !== "pause_requested" ? (
+              <button class="pill" title="Pause: the agent and its helpers stop at a safe point and keep the task (Esc)" onClick={() => post({ type: "pause" })}>Pause</button>
+            ) : state.running ? <span class="hint">Pausing…</span> : null}
             {state.running ? (
-              <button class="send" title="Stop" onClick={() => post({ type: "cancel" })}><Icon name="stop" /></button>
+              <button class="send" title="Stop all: the agent, its helpers and every process of the task" onClick={() => post({ type: "cancel" })}><Icon name="stop" /></button>
             ) : (
               <button class="send" title="Send" disabled={busy || loadingImages || (!text.trim() && !images.length)} onClick={submit}><Icon name="arrowUp" /></button>
             )}

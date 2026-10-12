@@ -35,6 +35,8 @@ class Runtime(ABC):
     @abstractmethod
     def stop(self, workspace: str, session: str) -> dict[str, Any]: ...
 
+    def control(self, workspace: str, session: str, kind: str, agent_id: str = "") -> dict[str, Any]: ...
+
     @abstractmethod
     def respond(
         self, workspace: str, session: str, response: dict[str, Any]

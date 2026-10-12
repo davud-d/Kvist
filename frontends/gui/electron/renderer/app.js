@@ -25,6 +25,17 @@ const activitySpinner = document.querySelector("#activitySpinner")
 const progressBar = document.querySelector("#progressBar")
 const requestHost = document.querySelector("#requestHost")
 const jobsHost = document.querySelector("#jobsHost")
+const helpersHost = document.querySelector("#helpersHost")
+const screenPreview = document.querySelector("#screenPreview")
+const screenPreviewTitle = document.querySelector("#screenPreviewTitle")
+const screenPreviewState = document.querySelector("#screenPreviewState")
+const screenPreviewImage = document.querySelector("#screenPreviewImage")
+const screenBackdrop = document.querySelector("#screenBackdrop")
+const screenLargeImage = document.querySelector("#screenLargeImage")
+const screenLargeTitle = document.querySelector("#screenLargeTitle")
+const screenLargeState = document.querySelector("#screenLargeState")
+const pauseButton = document.querySelector("#pauseButton")
+const stopAllButton = document.querySelector("#stopAllButton")
 const paletteBackdrop = document.querySelector("#paletteBackdrop")
 const settingsBackdrop = document.querySelector("#settingsBackdrop")
 const settingsForm = document.querySelector("#settingsForm")
@@ -641,6 +652,8 @@ function applyClosed(notice) {
 
 function setRunning(value) {
   running = value
+  if (value) taskState = "running"
+  renderTaskControls()
   lockPrompt()
   workspaceButton.disabled = value
   roleButton.disabled = value
@@ -1502,6 +1515,7 @@ function handleEvent(event) {
       setRunning(false)
       // The closing words of end_session are Kvist speaking, not a failed run.
       if (event.closed) setActivity("")
+      else if (event.paused) setActivity(TASK_STATE_TEXT.paused)
       // An older core sends no outcome; only an explicit "incomplete" is not done.
       else if (event.outcome === "incomplete") setActivity("Finished, not done", { error: true })
       else setActivity("Done", { progress: 100 })
@@ -1547,7 +1561,206 @@ function handleEvent(event) {
       // What the model was told, so a person can see why it reacted to a job.
       if (showDetails) addNotice(`The model was told:\n${event.text}`)
       break
+    case "task_state":
+      showTaskState(event)
+      break
+    case "screen":
+      showScreen(event)
+      break
+    case "skill":
+      addSkillNotice(event)
+      break
+    case "helper":
+      showHelper(event)
+      break
+    case "artifact":
+      addArtifactCard(event)
+      break
   }
+}
+
+// --- task state: pause and stop-all ----------------------------------------
+// "pause_requested" stays on screen until the core reports "paused": the
+// loop may still be finishing an atomic step, and the interface must never
+// claim a pause the agent has not reached.
+const TASK_STATE_TEXT = {
+  pause_requested: "Pausing… waiting for a safe point",
+  paused: "Paused — write a correction, or “continue”",
+  cancelling: "Stopping the agent, its helpers and the task's processes…",
+  cancelled: "Stopped",
+  awaiting_input: "Waiting for your answer",
+}
+let taskState = "idle"
+
+function showTaskState(event) {
+  taskState = event.state || "idle"
+  const text = TASK_STATE_TEXT[taskState]
+  if (text) setActivity(text, { busy: taskState === "pause_requested" || taskState === "cancelling" })
+  renderTaskControls()
+}
+
+function renderTaskControls() {
+  const active = running && !["pause_requested", "paused", "cancelling", "cancelled"].includes(taskState)
+  pauseButton.classList.toggle("is-hidden", !active)
+  stopAllButton.classList.toggle("is-hidden", !running || taskState === "cancelling")
+}
+
+async function requestPause() {
+  if (!running) return
+  try {
+    await window.kvist.pause()
+  } catch (error) {
+    addError(error.message)
+  }
+}
+
+async function requestStopAll() {
+  if (!running) return
+  setActivity(TASK_STATE_TEXT.cancelling, { busy: true })
+  try {
+    await window.kvist.stopAll()
+  } catch (error) {
+    addError(error.message)
+  }
+  // The core stops at its next safe point; a core that does not answer is
+  // ended by process, which also ends what it owns (die-with-parent sandboxes).
+  window.setTimeout(() => { if (running) void window.kvist.stop() }, 15000)
+}
+
+pauseButton.addEventListener("click", () => void requestPause())
+stopAllButton.addEventListener("click", () => void requestStopAll())
+
+// --- the agent's own screen ------------------------------------------------
+let currentScreen = null
+
+function showScreen(event) {
+  if (event.state === "closed" || !event.stream_url) {
+    currentScreen = null
+    screenPreviewImage.removeAttribute("src")
+    screenLargeImage.removeAttribute("src")
+    screenPreview.classList.add("is-hidden")
+    screenBackdrop.classList.add("is-hidden")
+    return
+  }
+  const changed = !currentScreen || currentScreen.stream_url !== event.stream_url
+  currentScreen = event
+  screenPreviewTitle.textContent = event.title || "Agent screen"
+  screenLargeTitle.textContent = event.title || "Agent screen"
+  for (const label of [screenPreviewState, screenLargeState]) {
+    label.textContent = event.state
+    label.dataset.state = event.state
+  }
+  if (changed) screenPreviewImage.src = event.stream_url
+  screenPreview.classList.remove("is-hidden")
+}
+
+function openScreenLarge() {
+  if (!currentScreen) return
+  screenLargeImage.src = currentScreen.stream_url
+  screenBackdrop.classList.remove("is-hidden")
+}
+
+function closeScreenLarge() {
+  screenLargeImage.removeAttribute("src")
+  screenBackdrop.classList.add("is-hidden")
+}
+
+function openScreenInBrowser() {
+  if (currentScreen) void window.kvist.openViewer(currentScreen.url).catch((error) => addError(error.message))
+}
+
+screenPreviewImage.addEventListener("click", openScreenLarge)
+document.querySelector("#screenPreviewExpand").addEventListener("click", openScreenLarge)
+document.querySelector("#screenPreviewOpen").addEventListener("click", openScreenInBrowser)
+document.querySelector("#screenLargeOpen").addEventListener("click", openScreenInBrowser)
+document.querySelector("#screenLargeClose").addEventListener("click", closeScreenLarge)
+screenBackdrop.addEventListener("click", (event) => { if (event.target === screenBackdrop) closeScreenLarge() })
+
+// --- skills, helpers, artifacts --------------------------------------------
+function addSkillNotice(event) {
+  enterConversation()
+  const article = createElement("article", "message message-notice")
+  const verb = event.state === "attached" ? "attached" : "detached"
+  article.append(createElement("span", "skill-chip", `${event.name} ${event.version}`), document.createTextNode(` skill ${verb}`))
+  messages.append(article)
+  scrollToBottom()
+}
+
+const helpers = new Map()
+
+function showHelper(event) {
+  const previous = helpers.get(event.agent_id) || {}
+  helpers.set(event.agent_id, { ...previous, ...event, task: event.task || previous.task || "" })
+  if (["done", "failed", "stopped"].includes(event.event)) {
+    const who = event.stopped_by === "person" ? " by you" : ""
+    addNotice(`Helper ${event.agent_id} ${event.event}${who}${event.summary ? `: ${event.summary}` : ""}`)
+  }
+  renderHelpers()
+}
+
+function renderHelpers() {
+  helpersHost.replaceChildren()
+  for (const helper of helpers.values()) {
+    const row = createElement("div", "helper-row")
+    row.append(
+      createElement("span", "step-action", helper.agent_id),
+      createElement("span", "helper-task", helper.task),
+      createElement("span", "step-phase", helper.state),
+    )
+    const log = createElement("button", "activity-button", "Log")
+    log.type = "button"
+    log.addEventListener("click", () => void showHelperLog(helper))
+    row.append(log)
+    if (["starting", "running", "paused"].includes(helper.state)) {
+      const stop = createElement("button", "activity-button danger", "Stop")
+      stop.type = "button"
+      stop.addEventListener("click", () => void window.kvist.stopHelper(helper.agent_id).catch((error) => addError(error.message)))
+      row.append(stop)
+    }
+    helpersHost.append(row)
+  }
+  helpersHost.classList.toggle("is-hidden", helpers.size === 0)
+}
+
+async function showHelperLog(helper) {
+  try {
+    const history = await window.kvist.helperHistory(helper.session)
+    const lines = (history.events || [])
+      .map(({ event }) => event)
+      .filter((event) => ["user", "step", "final", "message", "action_result", "error"].includes(event.type))
+      .map((event) => `${event.type}: ${event.action_description || event.summary || event.user_message || event.message || event.text || ""}`)
+    const details = createElement("details", "message step-card")
+    details.open = true
+    const summary = createElement("summary")
+    summary.append(createElement("span", "step-action", helper.agent_id), createElement("span", "", "helper log (read-only)"))
+    const content = createElement("div", "step-content")
+    content.append(createElement("pre", "job-out", lines.slice(-60).join("\n") || "Nothing recorded yet."))
+    details.append(summary, content)
+    enterConversation()
+    messages.append(details)
+    scrollToBottom()
+  } catch (error) {
+    addError(error.message)
+  }
+}
+
+function addArtifactCard(event) {
+  enterConversation()
+  const article = createElement("article", "message artifact-card")
+  article.append(createElement("div", "", `${event.skill ? `${event.skill}: ` : ""}${event.caption || event.name}`))
+  if (event.preview && event.preview.startsWith("data:image/")) {
+    const image = document.createElement("img")
+    image.src = event.preview
+    image.alt = event.caption || event.name
+    article.append(image)
+  }
+  const path = createElement("button", "screen-preview-button artifact-path", event.path)
+  path.type = "button"
+  path.title = "Show in folder"
+  path.addEventListener("click", () => void window.kvist.showArtifact(event.path).catch((error) => addError(error.message)))
+  article.append(path)
+  messages.append(article)
+  scrollToBottom()
 }
 
 const imageAttachments = mountImageAttachments(composer, promptInput, composer.querySelector(".composer-meta") || composer, addError)
@@ -1601,20 +1814,19 @@ function resetView() {
   promptInput.focus()
 }
 
+// Escape pauses (the agent and its helpers stop at a safe point and keep the
+// task); "Stop all" is the separate button. Two presses, because Escape sits
+// next to keys people hit while reading.
 async function interrupt() {
   if (!running) return
   const now = Date.now()
   if (now > interruptDeadline) {
     interruptDeadline = now + 1500
-    setActivity("Press Escape again to interrupt", { busy: true })
+    setActivity("Press Escape again to pause", { busy: true })
     return
   }
   interruptDeadline = 0
-  setActivity("Interrupting…", { busy: true })
-  await window.kvist.stop()
-  requestHost.replaceChildren()
-  setRunning(false)
-  setActivity("Interrupted", { error: true })
+  await requestPause()
 }
 
 function activeCheckpointAvailable() {
@@ -1969,11 +2181,18 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault()
     showSettings()
   }
+  if (event.key === "Escape" && !screenBackdrop.classList.contains("is-hidden")) {
+    closeScreenLarge()
+    return
+  }
+  // Inside an open dialog Escape belongs to the dialog; it pauses the agent
+  // only when nothing else is asking for the key.
   if (
     event.key === "Escape"
     && paletteBackdrop.classList.contains("is-hidden")
     && settingsBackdrop.classList.contains("is-hidden")
     && infoBackdrop.classList.contains("is-hidden")
+    && requestHost.childElementCount === 0
   ) {
     void interrupt()
   }

@@ -56,6 +56,8 @@ export const api = Object.freeze({
     createSession: selection => post("/sessions", { server_id: selection.serverId, workspace: selection.workspace }),
     send: (selection, text) => post("/send", { ...ref(selection), text }),
     stop: selection => post("/stop", ref(selection)),
+    // "pause": the agent and its helpers stop at a safe point and keep the task; "helper_stop": one helper.
+    control: (selection, kind, extra = {}) => post("/control", { ...ref(selection), kind, ...extra }),
     respond: (selection, response) => post("/respond", { ...ref(selection), response }),
     markRead: (selection, seq) => post("/read", { ...ref(selection), seq }),
     addWorkspace: (serverId, path) => post("/workspaces", { server_id: serverId, path }),

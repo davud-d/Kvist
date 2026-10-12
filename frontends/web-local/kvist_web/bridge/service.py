@@ -146,6 +146,9 @@ class BridgeApplication:
                 return self.runtime.send(workspace, session, _text(params, "text"))
         if method == "sessions.stop":
             return self.runtime.stop(workspace, session)
+        if method == "sessions.control":
+            return self.runtime.control(workspace, session, str(params.get("kind") or ""),
+                                        str(params.get("agent_id") or ""))
         if method == "sessions.command":
             with self._lifecycle_lock:
                 if not self._accepting_work:

@@ -14,7 +14,7 @@ import type { Starters } from "../starters.js"
 import { ClaudeEffort, ClaudeFooter, ClaudeLiveBody, ClaudeScreen, ClaudeSpinner } from "./skins/claude-code/claude.js"
 import { ViewContext } from "./context.js"
 import { ClosedBar, InputBox } from "./input.js"
-import { JobStrip } from "./jobs.js"
+import { JobStrip, ScreenLine } from "./jobs.js"
 import { ItemView } from "./skins/kvist/items.js"
 import { Live } from "./skins/kvist/live.js"
 import { Prompt } from "./prompts.js"
@@ -59,7 +59,7 @@ function Footer({ running, armed, usage, version }: { running: boolean; armed: b
   // One row on any width: a wrapped footer is an unbudgeted row in the live frame.
   return (
     <Box justifyContent="space-between" paddingX={2}>
-      {armed ? <Text color={color.warn} wrap="truncate-end">esc again to interrupt</Text> : running ? <Text color={color.dim} wrap="truncate-end">esc interrupt</Text> : <Text> </Text>}
+      {armed ? <Text color={color.warn} wrap="truncate-end">esc again to pause · ctrl+c stops all</Text> : running ? <Text color={color.dim} wrap="truncate-end">esc pause · ctrl+c stop all</Text> : <Text> </Text>}
       <Text wrap="truncate-end">
         {version ? <Text color={color.dim}>v{version}   </Text> : null}
         {context ? <Text color={color.dim}>{context}   </Text> : null}
@@ -260,9 +260,14 @@ export function App(props: AppProps) {
     dispatch({ type: "answered" })
   }, [switchFrontend])
 
+  // Ctrl+C stops everything the task runs; Escape (twice) pauses it and keeps its state.
   const stop = () => {
     dispatch({ type: "interrupt" })
     core.current?.cancel()
+  }
+
+  const pause = () => {
+    core.current?.pause()
   }
 
   // The fullscreen skin asks for a second press, as Claude Code does, so a stray one costs nothing.
@@ -287,7 +292,7 @@ export function App(props: AppProps) {
       const now = Date.now()
       if (now - stopArmedAt < STOP_CONFIRM_MS) {
         setStopArmedAt(0)
-        return stop()
+        return pause()
       }
       setStopArmedAt(now)
     }
@@ -334,7 +339,12 @@ export function App(props: AppProps) {
   const armed = stopArmedAt > 0
   const russian = requestIsRussian(state)
   const view = { workspace: props.workspace, info: state.info, effort: state.effort, pointer: props.pointer, expanded, russian }
-  const jobs = <JobStrip jobs={state.jobs} russian={russian} />
+  const jobs = (
+    <>
+      <ScreenLine screen={state.screen} russian={russian} />
+      <JobStrip jobs={state.jobs} russian={russian} />
+    </>
+  )
 
   const caption = claude
     ? <ClaudeFooter running={state.running} armed={armed} usage={state.usage} model={state.info.model} role={role} toast={toast} exitWarning={exitWarning} />

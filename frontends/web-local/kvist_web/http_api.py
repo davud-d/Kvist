@@ -199,6 +199,15 @@ class ControllerHandler(BaseHTTPRequestHandler):
                     _text(body, "workspace"),
                     _text(body, "session"),
                 )
+            elif route == "/api/control":
+                agent_id = body.get("agent_id")
+                result = controller.control(
+                    _text(body, "server_id"),
+                    _text(body, "workspace"),
+                    _text(body, "session"),
+                    _text(body, "kind"),
+                    agent_id if isinstance(agent_id, str) else "",
+                )
             elif route == "/api/respond":
                 response = body.get("response")
                 if not isinstance(response, dict):
@@ -415,7 +424,7 @@ class ControllerHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: http://127.0.0.1:*; "
             "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
         )
 

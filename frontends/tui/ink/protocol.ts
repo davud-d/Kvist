@@ -58,7 +58,14 @@ export type CoreEvent =
   | { type: "reasoning_commit"; stream_id: string; duration_seconds: number }
   | { type: "message"; markdown: string }
   // `closed`: end_session's closing words or a closed session's reply, shown as an ordinary message.
-  | { type: "final"; message: string; user_messages: string[]; outcome?: "done" | "incomplete"; closed?: boolean }
+  | { type: "final"; message: string; user_messages: string[]; outcome?: "done" | "incomplete"; closed?: boolean ; paused?: boolean }
+  // The task's lifecycle; "pause_requested" until the loop reaches a safe point, then "paused".
+  | { type: "task_state"; state: string; reason?: string }
+  // The agent's own virtual screen: local viewer links (127.0.0.1, with a token); empty once closed.
+  | { type: "screen"; screen_id: string; skill: string; title: string; state: string; url: string; stream_url: string; frame_url: string }
+  | { type: "skill"; skill: string; version: string; name: string; state: string }
+  | { type: "helper"; agent_id: string; event: string; state: string; session: string; task: string; summary: string; stopped_by?: string }
+  | { type: "artifact"; name: string; mime: string; path: string; caption: string; skill: string; preview?: string }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number; context_limit: number; model: string; kind: string; step: number }
   | { type: "debug"; message: string }
   | { type: "error"; message: string }

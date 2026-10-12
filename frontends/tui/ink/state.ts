@@ -129,6 +129,10 @@ export interface State {
   // Items up to this id were redrawn from a session's journal rather than seen live, so a UI
   // can skip the entrance effects meant for fresh work.
   settledThrough: number
+  // The task's lifecycle state from the core: running, pause_requested, paused, cancelling, ...
+  taskState: string
+  // The agent's own screen while a skill shows one: its title, state and local viewer link.
+  screen: { title: string; state: string; url: string; stream: string } | null
   // True right after a reasoning_commit, until the very next event. The step that
   // immediately follows already narrated its thinking on that stream, so it must not
   // print its own short `thought` field as a second, near-duplicate card.
@@ -180,6 +184,8 @@ export function initialState(effort = "", banner = false): State {
     thought: null,
     settledThrough: 0,
     justReasoned: false,
+    taskState: "idle",
+    screen: null,
   }
 }
 
@@ -563,14 +569,41 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return onJobFinished(state, event, now)
     case "job_notice":
       return append(state, (id) => ({ id, kind: "job_notice", text: event.text, jobIds: event.job_ids ?? [], russian: requestIsRussian(state) }))
+    case "task_state":
+      return { ...state, taskState: event.state }
+    case "screen":
+      return { ...state, screen: event.state === "closed" || !event.url ? null : { title: event.title, state: event.state, url: event.url, stream: event.stream_url } }
+    case "skill":
+      return push(state, (id) => ({ id, kind: "note", tone: "info", text: skillNote(event, requestIsRussian(state)) }))
+    case "helper":
+      return event.event === "update_applied" ? state : push(state, (id) => ({ id, kind: "note", tone: event.event === "failed" ? "warn" : "info", text: helperNote(event, requestIsRussian(state)) }))
+    case "artifact":
+      return push(state, (id) => ({ id, kind: "note", tone: "info", text: `${event.caption || event.name}: ${event.path}` }))
     case "turn_end":
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
       // the input box disabled forever.
-      return { ...settle(state), jobs: stopRunning(state.jobs, now), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null }
+      return { ...settle(state), jobs: state.taskState === "paused" ? state.jobs : stopRunning(state.jobs, now), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, screen: state.taskState === "paused" ? state.screen : null }
     default:
       return state
   }
+}
+
+function skillNote(event: Extract<CoreEvent, { type: "skill" }>, russian: boolean): string {
+  if (russian) return `Скилл «${event.name}» ${event.version} ${event.state === "attached" ? "подключён" : "отключён"}`
+  return `Skill "${event.name}" ${event.version} ${event.state}`
+}
+
+function helperNote(event: Extract<CoreEvent, { type: "helper" }>, russian: boolean): string {
+  const by = event.stopped_by === "person" ? (russian ? " вами" : " by you") : ""
+  const words: Record<string, [string, string]> = {
+    started: ["запущен", "started"], done: ["закончил", "finished"], failed: ["завершился ошибкой", "failed"],
+    stopped: ["остановлен", "stopped"], paused: ["на паузе", "paused"],
+  }
+  const [ru, en] = words[event.event] ?? [event.event, event.event]
+  const head = russian ? `Помощник ${event.agent_id} ${ru}${by}` : `Helper ${event.agent_id} ${en}${by}`
+  const detail = event.summary || (event.event === "started" ? event.task : "")
+  return detail ? `${head}: ${detail}` : head
 }
 
 function noticeText(event: Extract<JournalEvent, { type: "journal_notice" }>): string {

@@ -90,6 +90,9 @@ class RemoteRuntime(Runtime):
     def stop(self, workspace: str, session: str) -> dict[str, Any]:
         return self._rpc("sessions.stop", workspace=workspace, session=session)
 
+    def control(self, workspace: str, session: str, kind: str, agent_id: str = "") -> dict[str, Any]:
+        return self._rpc("sessions.control", workspace=workspace, session=session, kind=kind, agent_id=agent_id)
+
     def respond(
         self, workspace: str, session: str, response: dict[str, Any]
     ) -> dict[str, Any]:

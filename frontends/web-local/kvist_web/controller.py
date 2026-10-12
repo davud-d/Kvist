@@ -283,6 +283,11 @@ class WebController:
     def stop(self, server_id: str, workspace: str, session: str):
         return self.runtime(server_id).stop(workspace, session)
 
+    def control(self, server_id: str, workspace: str, session: str, kind: str, agent_id: str = ""):
+        if kind not in ("pause", "helper_stop"):
+            raise ValueError("Unknown control message.")
+        return self.runtime(server_id).control(workspace, session, kind, agent_id)
+
     def respond(
         self,
         server_id: str,

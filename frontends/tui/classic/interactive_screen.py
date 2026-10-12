@@ -93,8 +93,8 @@ _ANSI_CHUNK_BATCH = 64
 # stop; a second press inside this window performs it.
 _STOP_CONFIRM_SECONDS = 3.0
 _STOP_HINTS = {
-    "ru": "  Esc ещё раз — остановить агента",
-    "en": "  Press Esc again to stop the agent",
+    "ru": "  Esc ещё раз — пауза (Ctrl+C — остановить всё)",
+    "en": "  Press Esc again to pause (Ctrl+C stops everything)",
 }
 
 
@@ -476,6 +476,8 @@ class InteractiveScreen:
         self._awaiting_input = threading.Event()
         self._awaiting_input.set()
         self._stop_armed_at: float | None = None
+        # Set by the REPL to the agent's request_pause: Escape pauses, Ctrl+C stops.
+        self.pause_handler: Any = None
         self._language = "en"
         # The core's notice while the active session is one end_session closed;
         # it takes the input row's place and Enter opens a new session.
@@ -1654,20 +1656,24 @@ class InteractiveScreen:
             eager=True,
         )
         def stop_run(event: Any) -> None:
-            """Escape stops the turn in flight on its second press.
+            """Escape pauses the turn in flight on its second press.
 
             Escape is the meta prefix while a line is being typed, so this
             takes it over only while the REPL is away running a turn — chat,
             planning and the action loop alike. The first press only arms the
-            stop and shows the hint; the confirmed stop shares Ctrl+C's path,
-            so "stop" keeps one meaning: the turn ends and reports, the
-            session stays.
+            pause and shows the hint. The confirmed press marks the pause on
+            the agent first, then interrupts like Ctrl+C: the loop reaches its
+            safe point as "paused" and keeps the task's live resources, where
+            Ctrl+C means "stop everything".
             """
             if not self._stop_armed():
                 self._stop_armed_at = time.monotonic()
                 self.invalidate()
                 return
             self._stop_armed_at = None
+            pause = self.pause_handler
+            if pause is not None:
+                pause()
             self._interrupt_main_thread()
 
         # Quitting stays possible in a closed session.

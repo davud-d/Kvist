@@ -183,6 +183,27 @@ class AcpEventTranslator:
     def _on_message(self, event: Any) -> list[AcpUpdate]:
         return self._agent_text(event.markdown)
 
+    # Zed cannot draw the agent's virtual screen, so it gets the local viewer
+    # link once per opened screen; skills, helpers and result files are short
+    # lines of the agent's message.
+
+    def _on_screen(self, event: Any) -> list[AcpUpdate]:
+        if getattr(event, "state", "") != "running" or not getattr(event, "url", ""):
+            return []
+        return self._agent_text(f"\n\n_{event.title}: the agent's own screen (view only) — {event.url}_\n\n")
+
+    def _on_skill(self, event: Any) -> list[AcpUpdate]:
+        return self._agent_text(f"\n\n_Skill {event.name} {event.version} {event.state}._\n\n")
+
+    def _on_helper(self, event: Any) -> list[AcpUpdate]:
+        if event.event in ("update_applied",):
+            return []
+        summary = f": {event.summary}" if event.summary else ""
+        return self._agent_text(f"\n\n_Helper {event.agent_id} {event.event}{summary}_\n\n")
+
+    def _on_artifact(self, event: Any) -> list[AcpUpdate]:
+        return self._agent_text(f"\n\n_{event.caption or event.name}: {event.path}_\n\n")
+
     def _on_user(self, event: Any) -> list[AcpUpdate]:
         """A stored prompt, replayed so a reloaded thread shows both sides.
 

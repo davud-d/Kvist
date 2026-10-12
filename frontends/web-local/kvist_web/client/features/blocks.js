@@ -52,7 +52,7 @@ export function initialState() {
         meta: {
             usage: { input: 0, output: 0, calls: 0 }, context: null, model: '', hello: null, command: null,
             session: null, session_title: null, route: null, status: null, closed: null, turn_end: null,
-            agent: null, unknown: {},
+            agent: null, unknown: {}, task_state: null, screen: null,
         },
         lastSeq: -1, nextId: 1,
         index: { streams: {}, calls: {}, batches: {} },
@@ -302,6 +302,17 @@ const HANDLERS = {
     }),
     // frontend_protocol.py:421-444
     session_ended: (s, e) => meta(notice(s, 'session_ended', 'info', e.closed_notice || '', { reason: e.reason || '' }), { closed: e.closed_notice ?? '' }),
+    // frontend_protocol.py TaskStateEvent: "pause_requested" until the core reaches a safe point
+    task_state: (s, e) => meta(s, { task_state: e.state || null }),
+    // frontend_protocol.py ScreenEvent: loopback viewer links of the agent's own screen; empty once closed
+    screen: (s, e) => meta(s, { screen: e.state === 'closed' || !e.stream_url ? null : { title: e.title || 'Agent screen', state: e.state || '', url: e.url || '', stream_url: e.stream_url } }),
+    // frontend_protocol.py SkillEvent
+    skill: (s, e) => notice(s, 'skill', 'info', `Skill ${e.name || e.skill} ${e.version || ''} ${e.state || ''}`.replace(/\s+/g, ' ').trim()),
+    // frontend_protocol.py HelperEvent; update_applied is bookkeeping, not news
+    helper: (s, e) => e.event === 'update_applied' ? s : notice(s, 'helper', e.event === 'failed' ? 'error' : 'info',
+        `Helper ${e.agent_id} ${e.event}${e.stopped_by === 'person' ? ' by you' : ''}${e.summary ? `: ${e.summary}` : ''}`, { agent_id: e.agent_id, session: e.session || '', state: e.state || '' }),
+    // frontend_protocol.py ArtifactEvent (the journal copy has no preview)
+    artifact: (s, e) => notice(s, 'artifact', 'info', `${e.caption || e.name}: ${e.path}`, { path: e.path || '', preview: e.preview || '' }),
     // controller.py:353-357, :372-376 (fields of the connection result)
     'connection.state_changed': (s, e) => notice(s, 'connection.state_changed', ['failed', 'offline'].includes(e.state) ? 'error' : 'info', e.error || e.message || '', { state: e.state || '' }),
     // remote.py:224-229

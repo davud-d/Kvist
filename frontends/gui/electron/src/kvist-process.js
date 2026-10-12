@@ -197,6 +197,19 @@ class KvistProcess extends EventEmitter {
     this.child.stdin.write(JSON.stringify(response) + "\n")
   }
 
+  // Control messages the core reads beside input responses: "pause" stops at
+  // the next safe point and keeps the task; "cancel" stops everything the task
+  // owns; "helper_stop" stops one helper agent.
+  control(type, extra = {}) {
+    if (!this.child || !this.child.stdin.writable) {
+      throw new Error("Kvist is not running.")
+    }
+    if (!["pause", "cancel", "helper_stop"].includes(type)) {
+      throw new TypeError("Unknown control message.")
+    }
+    this.child.stdin.write(JSON.stringify({ ...extra, type }) + "\n")
+  }
+
   failClosedPending() {
     if (!this.child || !this.child.stdin.writable) return
     for (const [requestId, kind] of this.pendingRequests) {

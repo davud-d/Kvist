@@ -184,6 +184,18 @@ class SessionProcess:
         self._stop_requested = True
         self._write({"type": "cancel"})
 
+    def control(self, kind: str, agent_id: str = "") -> None:
+        """Pause the running task, or stop one of its helpers; the core decides at its next safe point."""
+        process = self._process
+        if process is None or process.poll() is not None:
+            raise ValueError("This session has no running process.")
+        if kind == "pause":
+            self._write({"type": "pause"})
+        elif kind == "helper_stop" and agent_id:
+            self._write({"type": "helper_stop", "agent_id": agent_id})
+        else:
+            raise ValueError("Unknown control message.")
+
     def terminate(self, timeout: float = 3.0) -> None:
         process = self._process
         if process is None or process.poll() is not None:

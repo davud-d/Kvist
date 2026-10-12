@@ -164,3 +164,31 @@ test("diagnostics redact common API key forms", () => {
   assert.equal(redactDiagnostic(`api_key=${secret}`), "api_key=[REDACTED]")
   assert.equal(redactDiagnostic(`Authorization: Bearer ${secret}`), "Authorization: Bearer [REDACTED]")
 })
+
+test("pause, stop-all and helper stop are control lines on the core's stdin", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Fix tests")
+
+  processRunner.control("pause")
+  processRunner.control("cancel")
+  processRunner.control("helper_stop", { agent_id: "h1" })
+
+  const lines = stdin.trim().split("\n").slice(1).map((line) => JSON.parse(line))
+  assert.deepEqual(lines, [{ type: "pause" }, { type: "cancel" }, { agent_id: "h1", type: "helper_stop" }])
+  assert.throws(() => processRunner.control("shutdown"), /Unknown control message/)
+})
+
+test("a control line cannot override its type through the extra fields", () => {
+  const child = fakeChild()
+  const processRunner = new KvistProcess({ workspace: "/tmp/project", command: "kvist", spawnImpl: () => child })
+  let stdin = ""
+  child.stdin.on("data", (chunk) => { stdin += chunk.toString("utf8") })
+  processRunner.start("Fix tests")
+
+  processRunner.control("helper_stop", { agent_id: "h2", type: "cancel" })
+
+  assert.equal(JSON.parse(stdin.trim().split("\n").at(-1)).type, "helper_stop")
+})

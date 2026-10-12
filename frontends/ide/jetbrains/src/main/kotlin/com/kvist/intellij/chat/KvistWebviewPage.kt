@@ -32,7 +32,7 @@ internal object KvistWebviewPage {
             "default-src 'none'",
             "style-src 'nonce-$nonce'",
             "script-src 'nonce-$nonce'",
-            "img-src data:",
+            "img-src data: http://127.0.0.1:*",
         ).joinToString("; ")
         return """<!DOCTYPE html>
 <html lang="en">

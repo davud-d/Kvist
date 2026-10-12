@@ -34,6 +34,11 @@
     "job_output",
     "job_finished",
     "job_notice",
+    "task_state",
+    "screen",
+    "skill",
+    "helper",
+    "artifact",
   ])
 
   class ProtocolState {

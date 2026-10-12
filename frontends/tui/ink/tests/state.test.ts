@@ -744,3 +744,46 @@ test("the warning and the closing words are ordinary Kvist messages, with no sta
   const shapes = answers.map(({ id: _id, ...rest }) => Object.keys(rest).sort().join(","))
   assert.equal(new Set(shapes).size, 1)
 })
+
+const feedEvents = (state: State, ...events: CoreEvent[]): State =>
+  events.reduce((current, event) => reduce(current, { type: "event", event, now: 1000 }), state)
+
+test("the task state follows the core: pause requested is not paused yet", () => {
+  let state = feedEvents(initialState(), { type: "task_state", state: "pause_requested" })
+  assert.equal(state.taskState, "pause_requested")
+  state = feedEvents(state, { type: "task_state", state: "paused", reason: "user_paused" })
+  assert.equal(state.taskState, "paused")
+})
+
+test("the agent screen is shown while open and forgotten when closed", () => {
+  const open: CoreEvent = { type: "screen", screen_id: "browser", skill: "browser", title: "Browser", state: "running", url: "http://127.0.0.1:4000/?t=x", stream_url: "s", frame_url: "f" }
+  let state = feedEvents(initialState(), open)
+  assert.deepEqual(state.screen, { title: "Browser", state: "running", url: "http://127.0.0.1:4000/?t=x", stream: "s" })
+  state = feedEvents(state, { ...open, state: "closed", url: "", stream_url: "", frame_url: "" })
+  assert.equal(state.screen, null)
+})
+
+test("a paused turn keeps its screen and running jobs; a finished one clears the screen", () => {
+  const open: CoreEvent = { type: "screen", screen_id: "browser", skill: "browser", title: "Browser", state: "running", url: "u", stream_url: "s", frame_url: "f" }
+  const paused = feedEvents(initialState(), open, { type: "task_state", state: "paused" }, { type: "turn_end" })
+  assert.notEqual(paused.screen, null)
+  const finished = feedEvents(initialState(), open, { type: "task_state", state: "completed" }, { type: "turn_end" })
+  assert.equal(finished.screen, null)
+})
+
+test("skills, helpers and artifacts become short notes; update_applied stays silent", () => {
+  const state = feedEvents(initialState(),
+    { type: "skill", skill: "browser", version: "0.1.0", name: "Browser", state: "attached" },
+    { type: "helper", agent_id: "h1", event: "started", state: "running", session: "helper-x", task: "read the logs", summary: "" },
+    { type: "helper", agent_id: "h1", event: "update_applied", state: "running", session: "helper-x", task: "", summary: "" },
+    { type: "helper", agent_id: "h1", event: "stopped", state: "stopped", session: "helper-x", task: "", summary: "partial", stopped_by: "person" },
+    { type: "artifact", name: "shot.png", mime: "image/png", path: "/w/.kvist/artifacts/r/shot.png", caption: "Screenshot", skill: "browser" },
+  )
+  const notes = state.items.filter((item) => item.kind === "note").map((item) => (item as { text: string }).text)
+  assert.deepEqual(notes, [
+    'Skill "Browser" 0.1.0 attached',
+    "Helper h1 started: read the logs",
+    "Helper h1 stopped by you: partial",
+    "Screenshot: /w/.kvist/artifacts/r/shot.png",
+  ])
+})

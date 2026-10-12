@@ -97,6 +97,8 @@ internal class KvistChatHost(
             "command" -> send { it.sendCommand(message.stringField("name").orEmpty(), message.stringList("args")) }
             "respond" -> respond(message)
             "cancel" -> send { it.cancel() }
+            "pause" -> send { it.pause() }
+            "stopHelper" -> send { it.stopHelper(message.stringField("agentId").orEmpty()) }
             "pickFiles" -> ApplicationManager.getApplication().invokeLater { pickFiles() }
             "getEnvironment" -> post(environmentMessage(environment()))
             "setEnvironment" -> background { applyEnvironment(message.get("env")) }

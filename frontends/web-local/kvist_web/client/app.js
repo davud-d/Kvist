@@ -2,7 +2,7 @@ import { mountImageAttachments } from "./utils/image-attachments.js";
 import { api } from '/assets/utils/api.js';
 import { state, subscribe, update, serverOf, sessionOf, keyOf, busy, stateLabel } from '/assets/state/store.js';
 import { renderNavigation } from '/assets/features/navigation.js';
-import { applyLive, changeEcho, closeStaleInputs, echoSent, isCurrentSelection, loadDiff, openSession, recoverSelected, resetLive, revealFeed, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
+import { applyLive, changeEcho, closeStaleInputs, echoSent, isCurrentSelection, loadDiff, openSession, recoverSelected, requestPause, resetLive, revealFeed, selectionSnapshot, setAgentState, showPlace } from '/assets/features/session.js';
 import { openView, closeView } from '/assets/features/views.js';
 import { closePalette, openPalette } from '/assets/features/palette.js';
 import { $, icons, toast, closeModal, trapFocus } from '/assets/utils/ui.js';
@@ -516,6 +516,9 @@ document.addEventListener('keydown', event => {
             collapseMobile();
             $('#toggle-sidebar').focus();
         }
+        // With no dialog asking for the key, Escape pauses a running agent and its helpers.
+        else if ($('#pending-input').hidden)
+            requestPause();
     }
     if (event.key === 'Tab') {
         const active = !$('#modal').hidden ? $('#modal') : !$('#palette').hidden ? $('#palette') : !$('#workspace-view').hidden ? $('#workspace-view') : null;

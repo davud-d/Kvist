@@ -446,3 +446,18 @@ button.file:hover .file-name { color: var(--vscode-textLink-foreground); text-de
 .job-notice { opacity: .8; }
 @keyframes job-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .job-dot { animation: none; } }
+
+.screen-strip {
+  margin: 4px 0 6px;
+}
+
+.screen-thumb {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 16 / 10;
+  object-fit: contain;
+  background: #000;
+  border: 1px solid var(--vscode-panel-border, #333);
+  cursor: zoom-in;
+}

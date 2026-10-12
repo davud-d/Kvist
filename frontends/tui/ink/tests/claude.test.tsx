@@ -210,10 +210,10 @@ test("the input sits between two rules and its footer says what the keys do", ()
   assert.match(out, /\/ for commands\s+12\.3K \(6%\)\s+sonnet · coder/)
 })
 
-test("the footer asks for a second esc while a stop is armed", () => {
+test("the footer asks for a second esc while a pause is armed, and names ctrl+c for stopping all", () => {
   const usage = { input: 0, output: 0, context: 0, limit: 0 }
-  assert.match(frame(createElement(ClaudeFooter, { running: true, armed: false, usage, model: "m", role: "r" })), /esc to interrupt/)
-  assert.match(frame(createElement(ClaudeFooter, { running: true, armed: true, usage, model: "m", role: "r" })), /esc again to interrupt/)
+  assert.match(frame(createElement(ClaudeFooter, { running: true, armed: false, usage, model: "m", role: "r" })), /esc to pause · ctrl\+c to stop all/)
+  assert.match(frame(createElement(ClaudeFooter, { running: true, armed: true, usage, model: "m", role: "r" })), /esc again to pause/)
 })
 
 const agent = (role = "coder"): State => {

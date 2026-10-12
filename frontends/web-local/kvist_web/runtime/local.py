@@ -92,6 +92,13 @@ class LocalRuntime(Runtime):
         process.cancel()
         return {"ok": True, "state": process.snapshot().state}
 
+    def control(self, workspace: str, session: str, kind: str, agent_id: str = "") -> dict[str, Any]:
+        process = self.supervisor.find(self._workspace(workspace), session)
+        if process is None:
+            raise ValueError("This session has no running process.")
+        process.control(kind, agent_id)
+        return {"ok": True, "state": process.snapshot().state}
+
     def respond(
         self, workspace: str, session: str, response: dict[str, Any]
     ) -> dict[str, Any]:
