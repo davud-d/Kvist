@@ -104,19 +104,16 @@ def test_cancellation_message_is_localized(agent_factory):
 # ── Level 3 boundary: an in-flight action is never aborted ───────────────────
 
 
-def test_cancel_does_not_interrupt_the_current_action(agent_factory):
+def test_a_stop_that_arrives_with_the_response_leaves_its_calls_unrun(agent_factory):
+    # The calls of a response the model finished while the person pressed stop
+    # have not started yet: after a stop or a pause they must not run until the
+    # model has seen the correction.
     agent = _prepare_loop_agent(agent_factory)
 
     def fake(prompt):
-        # The cancel arrives during the step that writes the file; the write
-        # must still complete (level 3 is intentionally not implemented).
         agent.request_cancel()
         return json.dumps(
             {
-                "thought": "create the file",
-                "plan_step": "edit",
-                "progress": 60,
-                "user_message": "writing",
                 "action": {
                     "type": "write_file",
                     "args": {"path": "kept.py", "content": "print('kept')\n"},
@@ -128,9 +125,30 @@ def test_cancel_does_not_interrupt_the_current_action(agent_factory):
 
     agent._run_loop("create kept.py", start_step=1)
 
+    assert not (agent.executor.workspace / "kept.py").exists()
+    assert agent._state.stopped_by_user is True
+
+
+def test_an_action_already_executing_completes_after_a_stop(agent_factory):
+    agent = _prepare_loop_agent(agent_factory)
+    original = agent.executor.execute
+
+    def execute(command):
+        # The stop lands while the write is running: it finishes (atomic
+        # replace), and only the next step is not taken.
+        agent.request_cancel()
+        return original(command)
+
+    agent.executor.execute = execute
+    agent._call_action_model = lambda prompt: json.dumps(
+        {"action": {"type": "write_file", "args": {"path": "kept.py", "content": "print('kept')\n"}}}
+    )
+
+    agent._run_loop("create kept.py", start_step=1)
+
     written = agent.executor.workspace / "kept.py"
-    assert written.exists()
     assert written.read_text() == "print('kept')\n"
+    assert agent.control.state == "cancelled"
 
 
 # ── Level 2: cancellation while consuming a model stream ──────────────────────

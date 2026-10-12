@@ -183,6 +183,9 @@ class FinalEvent:
     # A frontend shows them as an ordinary message, with no status; the
     # outcome stays "incomplete" for frontends that do not know the field.
     closed: bool = False
+    # Additive: the person paused the task; it continues with their next
+    # message. The outcome stays "incomplete" for frontends that do not know it.
+    paused: bool = False
     type: ClassVar[str] = "final"
 
     def to_dict(self) -> dict:
@@ -194,6 +197,103 @@ class FinalEvent:
         }
         if self.closed:
             payload["closed"] = True
+        if self.paused:
+            payload["paused"] = True
+        return payload
+
+
+@dataclass(slots=True)
+class TaskStateEvent:
+    """The task's lifecycle state: running, pause_requested, paused, cancelling, cancelled, ...
+
+    ``pause_requested`` means the loop has not reached a safe point yet; a
+    frontend shows "pausing…" and never "paused" until ``paused`` arrives.
+    """
+
+    state: str
+    reason: str = ""
+    type: ClassVar[str] = "task_state"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "state": self.state, "reason": self.reason}
+
+
+@dataclass(slots=True)
+class ScreenEvent:
+    """The agent's virtual screen: live preview URLs on 127.0.0.1 carrying their access token.
+
+    One screen, several views: ``stream_url`` (MJPEG) for a small preview,
+    ``url`` for a browser tab. ``state``: starting, running, paused,
+    unavailable, closed (URLs are empty once closed).
+    """
+
+    screen_id: str
+    skill: str
+    title: str
+    state: str
+    url: str = ""
+    stream_url: str = ""
+    frame_url: str = ""
+    type: ClassVar[str] = "screen"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "screen_id": self.screen_id, "skill": self.skill, "title": self.title,
+                "state": self.state, "url": self.url, "stream_url": self.stream_url, "frame_url": self.frame_url}
+
+
+@dataclass(slots=True)
+class SkillEvent:
+    """A skill was attached to or detached from the task."""
+
+    skill: str
+    version: str
+    name: str
+    state: str
+    type: ClassVar[str] = "skill"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "skill": self.skill, "version": self.version, "name": self.name,
+                "state": self.state}
+
+
+@dataclass(slots=True)
+class HelperEvent:
+    """A compact notice about a helper agent; its full activity is in its service ``session``."""
+
+    agent_id: str
+    event: str
+    state: str
+    session: str = ""
+    task: str = ""
+    summary: str = ""
+    stopped_by: str | None = None
+    type: ClassVar[str] = "helper"
+
+    def to_dict(self) -> dict:
+        payload = {"type": self.type, "agent_id": self.agent_id, "event": self.event, "state": self.state,
+                   "session": self.session, "task": self.task, "summary": self.summary}
+        if self.stopped_by:
+            payload["stopped_by"] = self.stopped_by
+        return payload
+
+
+@dataclass(slots=True)
+class ArtifactEvent:
+    """A file or image a skill produced for the person; ``preview`` is a small JPEG data URL (live only)."""
+
+    name: str
+    mime: str
+    path: str
+    caption: str = ""
+    skill: str = ""
+    preview: str = ""
+    type: ClassVar[str] = "artifact"
+
+    def to_dict(self) -> dict:
+        payload = {"type": self.type, "name": self.name, "mime": self.mime, "path": self.path,
+                   "caption": self.caption, "skill": self.skill}
+        if self.preview:
+            payload["preview"] = self.preview
         return payload
 
 
@@ -622,10 +722,22 @@ class InputResponse:
 # "type" key, so the transport routes on that discriminator alone and every
 # pre-existing frontend keeps parsing unchanged.
 CANCEL_MESSAGE_TYPE = "cancel"
+# Inbound control messages besides cancel ("stop all"): pause the task at its
+# next safe point, and stop one helper agent ({"type": "helper_stop", "agent_id"}).
+PAUSE_MESSAGE_TYPE = "pause"
+HELPER_STOP_MESSAGE_TYPE = "helper_stop"
 
 
 def is_cancel_message(d: dict) -> bool:
     return d.get("type") == CANCEL_MESSAGE_TYPE
+
+
+def is_pause_message(d: dict) -> bool:
+    return d.get("type") == PAUSE_MESSAGE_TYPE
+
+
+def is_helper_stop_message(d: dict) -> bool:
+    return d.get("type") == HELPER_STOP_MESSAGE_TYPE and isinstance(d.get("agent_id"), str)
 
 
 # --- Channel -----------------------------------------------------------------

@@ -11,6 +11,11 @@ from typing import Any
 from kernel.frontend_protocol import (
     ActionOutputEvent,
     ActionResultEvent,
+    ArtifactEvent,
+    HelperEvent,
+    ScreenEvent,
+    SkillEvent,
+    TaskStateEvent,
     DebugEvent,
     ErrorEvent,
     FinalEvent,
@@ -333,6 +338,37 @@ class EventStreamUI:
     def print_session_title(self, session: str, title: str) -> None:
         self._channel.emit(SessionTitleEvent(str(session), str(title)))
 
+    def print_task_state(self, state: str, reason: str) -> None:
+        self._channel.emit(TaskStateEvent(str(state), str(reason)))
+
+    def print_screen(self, payload: dict) -> None:
+        self._channel.emit(ScreenEvent(
+            screen_id=str(payload["screen_id"]), skill=str(payload["skill"]), title=redact_text(str(payload["title"])),
+            state=str(payload["state"]), url=str(payload.get("url") or ""),
+            stream_url=str(payload.get("stream_url") or ""), frame_url=str(payload.get("frame_url") or ""),
+        ))
+
+    def print_skill_status(self, payload: dict) -> None:
+        self._channel.emit(SkillEvent(str(payload["skill"]), str(payload["version"]),
+                                      redact_text(str(payload["name"])), str(payload["state"])))
+
+    def print_helper(self, payload: dict) -> None:
+        self._channel.emit(HelperEvent(
+            agent_id=str(payload["agent_id"]), event=str(payload["event"]), state=str(payload["state"]),
+            session=str(payload.get("session") or ""), task=redact_text(str(payload.get("task") or "")),
+            summary=redact_text(str(payload.get("summary") or "")), stopped_by=payload.get("stopped_by"),
+        ))
+
+    def print_artifact(self, payload: dict) -> None:
+        self._channel.emit(ArtifactEvent(
+            name=redact_text(str(payload["name"])), mime=str(payload["mime"]), path=str(payload["path"]),
+            caption=redact_text(str(payload.get("caption") or "")), skill=str(payload.get("skill") or ""),
+            preview=str(payload.get("preview") or ""),
+        ))
+
+    def print_skill_message(self, skill: str, label: str, markdown: str) -> None:
+        self._channel.emit(MessageEvent(f"**{label}:** {redact_text(markdown)}"))
+
     def print_session_ended(self, payload: dict) -> None:
         self._channel.emit(
             SessionEndedEvent(
@@ -408,12 +444,14 @@ class EventStreamUI:
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
     ) -> None:
         closed = outcome == "closed"
+        paused = outcome == "paused"
         self._channel.emit(
             FinalEvent(
                 redact_text(final_message),
                 [redact_text(m) for m in (user_messages or [])],
-                "incomplete" if closed else outcome,
+                "incomplete" if closed or paused else outcome,
                 closed=closed,
+                paused=paused,
             )
         )
 

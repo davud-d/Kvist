@@ -121,6 +121,11 @@ class SessionStore:
                 "journal_bytes": self._journal_bytes(name),
                 **end_session.notice_fields(document),
             }
+            # A helper's service session: readable and stoppable, never a
+            # conversation the person types into (frontends group it apart).
+            service = document.get("service")
+            if isinstance(service, dict):
+                item["service"] = service
             if with_histories:
                 item["session_history"] = session_history
                 item["chat_history"] = chat_history

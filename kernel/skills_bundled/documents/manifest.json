@@ -1,0 +1,43 @@
+{
+  "manifest_version": 1,
+  "id": "documents",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Documents", "ru": "Документы"},
+  "summary": {
+    "en": "Read PDF pages, spreadsheet sheets and ranges (xlsx, csv) and Word paragraphs (docx) with exact page, sheet, cell and paragraph references.",
+    "ru": "Читать страницы PDF, листы и диапазоны таблиц (xlsx, csv) и абзацы Word (docx) с точными ссылками на страницу, лист, ячейку и абзац."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": ["linux"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "dependencies": {"python": ["pypdf==6.20.0", "openpyxl==3.1.5", "et_xmlfile==2.0.0"]},
+  "capabilities": {
+    "required": [{"name": "files.read", "reason": "to read the document from the workspace"}]
+  },
+  "limits": {"call_timeout_seconds": 120, "max_result_bytes": 262144, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {
+      "name": "info",
+      "summary": "What a document holds: its type, pages, sheets with their used ranges, paragraph or row count.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {
+        "path": {"type": "string", "maxLength": 1000}
+      }}
+    },
+    {
+      "name": "read",
+      "summary": "Read part of a document with references: PDF pages ('1-3,7'), a sheet and A1 range ('B2:F40'), CSV rows ('1-100') or DOCX paragraphs ('10-30').",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {
+        "path": {"type": "string", "maxLength": 1000},
+        "pages": {"type": "string", "maxLength": 100, "description": "PDF pages, e.g. 1-3,7 (1-based)."},
+        "sheet": {"type": "string", "maxLength": 200, "description": "Spreadsheet sheet name; defaults to the first."},
+        "range": {"type": "string", "maxLength": 50, "description": "A1 range for xlsx (B2:F40), or rows/paragraphs for csv/docx (1-100)."},
+        "max_chars": {"type": "integer", "minimum": 1000, "maximum": 200000}
+      }}
+    }
+  ]
+}

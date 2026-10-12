@@ -31,6 +31,14 @@ ActionType = Literal[
     "edit_plan",
     "cancel_plan",
     "end_session",
+    "skills",
+    "memory",
+    "sessions",
+    "helper",
+    "ask_user",
+    # Internal: what a call of an attached skill's tool (<skill>__<tool>)
+    # becomes after validation. The model never names it.
+    "skill_call",
 ]
 
 # run_shell timeout bounds shared by the parser and the terminal. The widest

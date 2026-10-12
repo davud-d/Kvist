@@ -16,6 +16,7 @@ import itertools
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from kernel.protocol import MAX_JOB_WAIT_SECONDS
@@ -122,12 +123,27 @@ Spawn = Callable[[Callable[[str], None], threading.Event], SpawnOutcome]
 
 
 @dataclass(frozen=True, slots=True)
+class ServiceExposure:
+    """A port of a background job that the task's network broker may route to.
+
+    ``socket_dir`` is a core-owned directory where the in-sandbox bridge puts
+    ``service.sock``; ``on_ready``/``on_exit`` register and drop the service.
+    """
+
+    port: int
+    socket_dir: Path
+    on_ready: Callable[[str, bool], None]  # (job_id, isolated) -> None
+    on_exit: Callable[[str], None]
+
+
+@dataclass(frozen=True, slots=True)
 class BackgroundLaunch:
     """Where and as what ``TerminalExecutor.run`` starts a command in the background."""
 
     jobs: "BackgroundJobs"
     purpose: str = ""
     call_id: str = ""
+    expose: ServiceExposure | None = None
 
 
 class BackgroundJobs:

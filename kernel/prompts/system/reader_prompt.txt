@@ -30,7 +30,7 @@ run_shell takes "purpose": up to 10 words in response_language, shown to the per
 
 == 3. ALLOWED ACTIONS ==
 
-read_file, read_multiple_files, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, edit_plan, cancel_plan.
+read_file, read_multiple_files, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user.
 
 This is the read-only subset of the runtime's tools. No write/edit tools exist for you. No invention, no renaming.
 
@@ -53,6 +53,12 @@ edit_plan: {"plan": "<str>"} — revise the active analysis plan, keeping the ev
 cancel_plan: {"reason": "<str>"} — only when the person asks to cancel or replace the task
 
 No extra keys, no renamed keys, no type changes. Empty schema → empty args object.
+skills: {"op":"list|attach|detach|status","skill":"<id>","query":"<words>"}
+memory: {"op":"search|add|update","query":"<words>","text":"<str>","kind":"observation|assumption","id":"<mem_id>","status":"outdated","reason":"<str>"}
+sessions: {"op":"list|search|read","query":"<words>","session":"<name>","before":120}
+helper: {"op":"start|message|update|status|wait|inspect|result|stop","task":"<str>","agent_id":"h1","text":"<str>","timeout":120}
+ask_user: {"question":"<str>","options":["<str>"]}
+<skill>__<tool>: an attached skill's tool, by its full name
 
 == 5. APPROACH ==
 

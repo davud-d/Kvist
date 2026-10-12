@@ -1,0 +1,185 @@
+{
+  "manifest_version": 1,
+  "id": "browser",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Browser", "ru": "Браузер"},
+  "summary": {
+    "en": "Its own Chromium on its own virtual screen: open the task's site or workspace pages, click, type, check results, screenshots, console and network errors.",
+    "ru": "Собственный Chromium на собственном виртуальном экране: открыть сайт задачи или страницы проекта, нажимать, вводить, проверять результат, снимки экрана, ошибки консоли и сети."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": ["linux"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "dependencies": {
+    "python": ["playwright==1.63.0", "greenlet==3.5.6", "pyee==13.0.0", "typing_extensions==4.16.0"],
+    "system": ["Xvfb", "i3", "chromium"]
+  },
+  "capabilities": {
+    "required": [
+      {"name": "input.read", "reason": "to know the task the pages are checked for"},
+      {"name": "display", "reason": "the browser runs on its own virtual screen, never on yours"},
+      {"name": "network.task_services", "reason": "to open the servers this task started (http://localhost:<port>)"},
+      {"name": "files.read", "reason": "to show the workspace's own HTML pages without starting a server"},
+      {"name": "artifacts", "reason": "to keep screenshots and downloads for you"},
+      {"name": "images.read", "reason": "to hand screenshots to the agent as images"},
+      {"name": "ui.notify", "reason": "to show what the browser is doing"}
+    ],
+    "optional": [
+      {"name": "network.internet", "scope": {"domains": ["*"]}, "reason": "to open an internet address, asked per address"},
+      {"name": "images.analyze", "reason": "to describe a screenshot with the Vision model"},
+      {"name": "images.original", "reason": "to upload one of your attachments into a form"}
+    ]
+  },
+  "limits": {
+    "call_timeout_seconds": 120,
+    "max_result_bytes": 262144,
+    "memory_mb": 3072,
+    "model_calls_per_task": 0,
+    "model_tokens_per_task": 0
+  },
+  "tools": [
+    {
+      "name": "open_page",
+      "summary": "Open a URL in the browser (a task server as http://localhost:<port>, or an internet address after the person allows it). Returns the page's title, URL, interactive elements with refs and visible text.",
+      "readonly": true,
+      "timeout_seconds": 60,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["url"], "properties": {
+        "url": {"type": "string", "maxLength": 2000},
+        "tab": {"type": "string", "description": "Tab id; defaults to the current tab."},
+        "new_tab": {"type": "boolean"},
+        "wait_until": {"type": "string", "enum": ["load", "domcontentloaded", "networkidle"]}
+      }}
+    },
+    {
+      "name": "open_workspace_page",
+      "summary": "Show an HTML file of the workspace: its folder is copied (read-only, protected files excluded) into the browser's sandbox and served there. Call it again after editing the files to see the changes.",
+      "readonly": true,
+      "timeout_seconds": 90,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {
+        "path": {"type": "string", "description": "An .html file, or a folder with index.html, relative to the workspace."},
+        "new_tab": {"type": "boolean"}
+      }}
+    },
+    {
+      "name": "snapshot",
+      "summary": "List the current page's interactive elements (ref, role, name, value) and its visible text, so an element can be addressed by ref.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "tab": {"type": "string"},
+        "max_items": {"type": "integer", "minimum": 1, "maximum": 300}
+      }}
+    },
+    {
+      "name": "click",
+      "summary": "Click an element (by ref from snapshot, CSS selector, or visible text) and report what changed: URL, new text, console and network errors. Give expect_text to verify the effect.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "ref": {"type": "string"}, "selector": {"type": "string"}, "text": {"type": "string"},
+        "expect_text": {"type": "string", "description": "Text that must appear after the click."},
+        "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "type",
+      "summary": "Type into a field (by ref, selector or label text); optionally clear it first and press Enter. Reports what changed.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["value"], "properties": {
+        "ref": {"type": "string"}, "selector": {"type": "string"}, "label": {"type": "string"},
+        "value": {"type": "string", "maxLength": 20000},
+        "clear": {"type": "boolean"}, "submit": {"type": "boolean"},
+        "expect_text": {"type": "string"}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "select",
+      "summary": "Choose an option of a <select> by its value or label.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "ref": {"type": "string"}, "selector": {"type": "string"},
+        "value": {"type": "string"}, "label": {"type": "string"},
+        "expect_text": {"type": "string"}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "press",
+      "summary": "Press a key or chord (Enter, Escape, Tab, Control+A) on the page or an element.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["key"], "properties": {
+        "key": {"type": "string", "maxLength": 40}, "ref": {"type": "string"}, "expect_text": {"type": "string"},
+        "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "scroll",
+      "summary": "Scroll the page (to top, bottom, by pixels) or bring an element into view.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "to": {"type": "string", "enum": ["top", "bottom"]}, "by": {"type": "integer", "minimum": -20000, "maximum": 20000},
+        "ref": {"type": "string"}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "wait_for",
+      "summary": "Wait until text appears, an element exists, or the URL contains a string; reports whether it happened.",
+      "readonly": true,
+      "timeout_seconds": 60,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "text": {"type": "string"}, "selector": {"type": "string"}, "url_contains": {"type": "string"},
+        "timeout_seconds": {"type": "number", "minimum": 0.5, "maximum": 45}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "screenshot",
+      "summary": "Save a screenshot of the page (or full page) as an artifact and an image attachment; with question, the Vision model describes it.",
+      "readonly": true,
+      "timeout_seconds": 90,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "full_page": {"type": "boolean"}, "ref": {"type": "string"},
+        "question": {"type": "string", "maxLength": 4000}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "console",
+      "summary": "Console messages and uncaught page errors since the page opened (or since seq).",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "level": {"type": "string", "enum": ["all", "error", "warning"]}, "since": {"type": "integer", "minimum": 0},
+        "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "network",
+      "summary": "Failed requests and HTTP errors (status 400 and above), including those the network policy refused.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "since": {"type": "integer", "minimum": 0}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "tabs",
+      "summary": "List tabs, switch to one, or close one.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["op"], "properties": {
+        "op": {"type": "string", "enum": ["list", "switch", "close"]}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "upload",
+      "summary": "Put one of the person's image attachments into a file input (asks the person for access to the original file).",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["attachment_id"], "properties": {
+        "attachment_id": {"type": "string"}, "ref": {"type": "string"}, "selector": {"type": "string"},
+        "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "close_browser",
+      "summary": "Close the browser now (the core also closes it when the task ends).",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {}}
+    }
+  ]
+}

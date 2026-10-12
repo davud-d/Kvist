@@ -136,3 +136,13 @@ class TerminalApprovalGate:
             # Resume background TUI rendering
             if TerminalExecutor._hitl_resume_fn is not None:
                 TerminalExecutor._hitl_resume_fn()
+
+
+class DenyApprovalGate:
+    """For an agent nobody can answer for (a helper): every approval is refused, never assumed."""
+
+    def confirm(self, title: str, body: str, question: str) -> bool:
+        return False
+
+    def confirm_command(self, command: list[str], reason: str) -> bool:
+        return False

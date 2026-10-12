@@ -125,6 +125,39 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "(input-history-add reads the input from stdin as UTF-8).",
     )
     parser.add_argument(
+        "--skill-op",
+        choices=("list", "show", "install", "approve", "revoke", "install-deps", "rollback", "uninstall",
+                 "remove-version", "reset-data", "check"),
+        help="Manage installed skills (see docs/SKILLS.md), print JSON, exit. approve and install-deps "
+        "ask on the terminal unless --yes is given.",
+    )
+    parser.add_argument("--skill", help="Skill id for --skill-op.")
+    parser.add_argument("--skill-path", help="Package folder for --skill-op install.")
+    parser.add_argument("--skill-version", help="Version for --skill-op remove-version.")
+    parser.add_argument("--yes", action="store_true", help="Confirm --skill-op approve/install-deps without asking.")
+    parser.add_argument("--language", choices=("en", "ru"), help="Language of --skill-op texts.")
+    parser.add_argument(
+        "--memory-op",
+        choices=("list", "add", "update", "delete"),
+        help="Manage this workspace's notes as the person (payload JSON on stdin or --memory-payload), print JSON, exit.",
+    )
+    parser.add_argument("--memory-payload", help="JSON payload for --memory-op.")
+    parser.add_argument(
+        "--mcp-op",
+        choices=("list", "add", "remove"),
+        help="Manage the MCP servers Kvist may connect (payload JSON on stdin or --mcp-payload), print JSON, exit.",
+    )
+    parser.add_argument("--mcp-name", help="Server name for --mcp-op add/remove.")
+    parser.add_argument("--mcp-payload", help="JSON server definition for --mcp-op add.")
+    parser.add_argument(
+        "--connection-op",
+        choices=("list", "add", "remove"),
+        help="Manage service connections skills may use by name (payload JSON with base_url and secret headers "
+        "on stdin, never in argv), print JSON, exit.",
+    )
+    parser.add_argument("--connection-name", help="Connection name for --connection-op add/remove.")
+    parser.add_argument("--connection-payload", help="JSON connection for --connection-op add (prefer stdin).")
+    parser.add_argument(
         "--tray-op",
         choices=("enable", "disable", "status", "bar-stream", "toggle"),
         help="Switch the tray icon on or off (saved in ~/.kvist/config.json, and its status-bar "
@@ -503,6 +536,30 @@ if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.selection_task:
 # provider SDKs and terminal UI below first made each one ~1 s instead of ~50 ms.
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.session_op:
     _run_session_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.skill_op:
+    from kernel.skill_ops import main_skill_op
+
+    main_skill_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.connection_op:
+    from kernel.skill_ops import main_connection_op
+
+    main_connection_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.mcp_op:
+    from kernel.skill_ops import main_mcp_op
+
+    main_mcp_op(_DIRECT_CLI_ARGS)
+    raise SystemExit(0)
+
+if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.memory_op:
+    from kernel.skill_ops import main_memory_op
+
+    main_memory_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.tray_op:
@@ -1564,6 +1621,8 @@ def build_agent(
         reasoning_effort=resolve_reasoning_effort(),
         title_model=get_saved_title_model() or "",
         end_session_enabled=end_session,
+        # The frontends that offer end_session have a person answering dialogs.
+        interactive=end_session,
     )
     apply_api_settings(config)
     agent_console = Console()
@@ -4132,6 +4191,30 @@ def main() -> None:
         _run_session_op(args)
         return
 
+    if args.skill_op:
+        from kernel.skill_ops import main_skill_op
+
+        main_skill_op(args)
+        return
+
+    if args.memory_op:
+        from kernel.skill_ops import main_memory_op
+
+        main_memory_op(args)
+        return
+
+    if args.mcp_op:
+        from kernel.skill_ops import main_mcp_op
+
+        main_mcp_op(args)
+        return
+
+    if args.connection_op:
+        from kernel.skill_ops import main_connection_op
+
+        main_connection_op(args)
+        return
+
     if args.frontend == "stdio-multi":
         from kernel.event_stdio import launch_multi
 
@@ -5347,6 +5430,7 @@ Support:
             turn_language = detect_request_language(user_goal, fallback=session_language)
             if interactive_screen is not None:
                 interactive_screen.set_language(turn_language)
+                interactive_screen.pause_handler = agent.request_pause
             try:
                 result = agent.run(user_goal, routed_role=detected_role)
             except KeyboardInterrupt:
@@ -5375,6 +5459,12 @@ Support:
         interrupted = True
     finally:
         release_terminal(interactive_screen, use_session_screen)
+        # Leaving Kvist ends what its tasks still own (a paused task's server,
+        # browser or helper); a checkpoint stays for /resume. Test doubles of
+        # the agent have no shutdown.
+        shutdown = getattr(agent, "shutdown", None)
+        if shutdown is not None:
+            shutdown("app_closed")
 
     render_exit_message(agent)
     if interrupted:

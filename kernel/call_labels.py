@@ -38,6 +38,11 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "propose_plan": ("предлагает план", "proposes a plan"),
     "edit_plan": ("изменяет план", "updates the plan"),
     "cancel_plan": ("отменяет задачу", "cancels the task"),
+    "skills": ("скиллы: {target}", "skills: {target}"),
+    "memory": ("заметки проекта: {target}", "project notes: {target}"),
+    "sessions": ("прошлые разговоры: {target}", "past conversations: {target}"),
+    "helper": ("помощник: {target}", "helper: {target}"),
+    "ask_user": ("спрашивает вас", "asks you"),
 }
 
 _IN = {"ru": " в ", "en": " in "}
@@ -77,6 +82,9 @@ def _target(action_type: str, args: dict[str, Any], language: str) -> str:
         return _text(args.get("target_role"))
     if action_type in {"job_output", "job_stop"}:
         return _text(args.get("job_id"))
+    if action_type in {"skills", "memory", "sessions", "helper"}:
+        detail = args.get("skill") or args.get("query") or args.get("session") or args.get("agent_id") or ""
+        return f"{_text(args.get('op'))} {_text(detail)}".strip()
     return path or ("." if action_type in {"list_dir", "list_tree"} else "")
 
 

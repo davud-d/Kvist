@@ -73,6 +73,9 @@ a = Analysis(
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
         ('kernel/themes', 'kernel/themes'),
+        # Mounted into skill sandboxes as files, run by the system python3.
+        ('kernel/plugins/runner', 'kernel/plugins/runner'),
+        ('kernel/skills_bundled', 'kernel/skills_bundled'),
         ('frontends/tui/classic/assets', 'assets'),
         ('frontends/web-local/kvist_web/client', 'kvist_web/client'),
         ('frontends/gui/electron/renderer/image-attachments.js', 'kvist_web/client/utils'),

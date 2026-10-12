@@ -182,6 +182,9 @@ def _session_document(
         "title_manual": bool(getattr(self, "_title_manual", False)),
         **end_session.document_fields(self),
     }
+    service = getattr(self, "service_session", None)
+    if isinstance(service, dict):
+        document["service"] = service
     sanitized = redact_value(document)
     assert isinstance(sanitized, dict)
     return sanitized
@@ -271,6 +274,9 @@ def find_resumable_session(self) -> str | None:
             continue
         if not document or _session_checkpoint(document) is None or document.get("closed") is True:
             continue
+        if isinstance(document.get("service"), dict):
+            # A helper's service session is continued by its main agent, never by /resume.
+            continue
         updated_at = document.get("updated_at")
         stamp = float(updated_at) if isinstance(updated_at, (int, float)) else 0.0
         if newest is None or stamp > newest[0]:
@@ -315,6 +321,10 @@ def save_active_session(self, name: str | None = None) -> None:
     session = name or getattr(self, "current_session", "default")
     if not is_valid_session_name(session):
         raise ValueError(f"Invalid session name: {session!r}")
+    if getattr(self, "service_session", None):
+        # A helper's service session is read and stopped from the main
+        # conversation; it never becomes the person's active session.
+        return
     _write_json_object(
         get_active_session_path(self),
         {"session": session, "updated_at": time.time()},
@@ -371,6 +381,9 @@ def load_active_session(self) -> str:
                 _validated_session_document(data, candidate.stem)
         except JsonStorageCorruptError:
             continue
+        if isinstance(data.get("service"), dict):
+            # A helper's service session is never the person's conversation.
+            continue
         return candidate.stem
     return "default"
 
@@ -398,6 +411,7 @@ def delete_session(self, name: str) -> bool:
     path = get_state_path(self, name)
     removed = delete_json_object(path, boundary=self.executor.workspace)
     delete_journal(get_journal_path(self, name), self.executor.workspace)
+    _delete_session_attachments(self, name)
     if removed:
         # Re-assert the marker so a stale marker pointing at the deleted
         # session can never resurrect it on the next start.
@@ -444,12 +458,42 @@ def reset_session(self) -> None:
     # The journal goes first: a crash in between must leave the conversation
     # without its display log, never a reset session that still shows its old feed.
     delete_journal(get_journal_path(self, session), self.executor.workspace)
+    _delete_session_attachments(self, session)
     _write_json_object(
         get_state_path(self, session),
         _empty_session_document(session),
         boundary=self.executor.workspace,
     )
     save_active_session(self, session)
+
+
+def mark_checkpoint_paused(self) -> None:
+    """Record on the stored checkpoint that the person paused (not stopped) the task.
+
+    The loop reaches its safe point after its last checkpoint write; the flag is
+    what makes the next message read as the correction after a pause.
+    """
+    session = getattr(self, "current_session", "default")
+
+    def update(document: dict[str, Any]) -> dict[str, Any]:
+        checkpoint = document.get("checkpoint")
+        if isinstance(checkpoint, dict):
+            checkpoint["paused_by_user"] = True
+        return document
+
+    update_json_object(get_state_path(self, session), update, boundary=self.executor.workspace)
+
+
+def _delete_session_attachments(self, session: str) -> None:
+    """An attachment lives as long as its session; its index entry stays as "deleted"."""
+    from kernel.attachments import AttachmentError, AttachmentStore
+
+    try:
+        AttachmentStore(self.executor.workspace).delete_session(session)
+    except AttachmentError:
+        # A damaged index cannot say which files belong to the session; they
+        # are left for the age-based cleanup rather than guessed at.
+        return
 
 
 def peek_checkpoint(
@@ -735,6 +779,10 @@ def save_checkpoint(
         "plan_phase": self._state.plan_phase,
         "approved_plan": self._state.approved_plan,
         "task_updates": self._state.task_updates,
+        "paused_by_user": self._state.paused_by_user,
+        "attached_skills": (
+            self.skills.checkpoint_state() if getattr(self, "skills", None) is not None else []
+        ),
         # A mutating action that is about to run is recorded here BEFORE it
         # executes, so a crash in the mutation window is reconciled on resume
         # instead of blindly replayed. Cleared (None) on the post-action save.
@@ -830,6 +878,9 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.plan_phase = str(data.get("plan_phase") or "")
     self._state.approved_plan = str(data.get("approved_plan") or "")
     self._state.task_updates = list(data.get("task_updates") or [])
+    self._state.paused_by_user = bool(data.get("paused_by_user"))
+    attached = data.get("attached_skills")
+    self._state.attached_skills = list(attached) if isinstance(attached, list) else []
     self._state.progress = data.get("progress", 0)
     self._state.current_agent_role = str(data.get("current_agent_role") or "coder")
     self._state.task_language = str(data.get("task_language") or "")

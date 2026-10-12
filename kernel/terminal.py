@@ -18,7 +18,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from kernel.command_policy import (
     CommandAssessment,
@@ -814,6 +814,13 @@ class TerminalExecutor(
                 raise HardDenyError("Hard security denial: trusted pipeline shell is unavailable")
             actual_command = [shell_binding.resolved_path, "-c", joined]
 
+        expose = self._run_background.expose if self._run_background is not None else None
+        # Only an isolated network namespace needs the bridge: a server on the
+        # host network (approved network access, or no Bubblewrap) is already
+        # on the host loopback, where the broker connects to it directly.
+        isolated_service = (
+            expose is not None and sandbox_mode is SandboxMode.BUBBLEWRAP and not network_allowed
+        )
         try:
             actual_command = wrap_command_for_sandbox(
                 actual_command,
@@ -825,6 +832,7 @@ class TerminalExecutor(
                 tool_paths=self._external_tool_paths + venv_interpreter_roots(bindings),
                 links=venv_interpreter_links(bindings, workspace),
                 secret_targets=secret_targets,
+                service=(expose.socket_dir, expose.port) if isolated_service else None,
             )
         except ValueError as error:
             raise HardDenyError(f"Hard security denial: {error}") from error
@@ -843,6 +851,7 @@ class TerminalExecutor(
                 env,
                 effective_timeout,
                 rlimit_setter,
+                isolated_service=isolated_service,
             )
         try:
             outcome = run_supervised(
@@ -887,6 +896,8 @@ class TerminalExecutor(
         env: dict[str, str],
         timeout: float,
         rlimit_setter: Callable[[], None] | None,
+        *,
+        isolated_service: bool = False,
     ) -> TerminalResult:
         """Hand the validated, wrapped command to the job registry and return."""
         # The job keeps the child HOME this run built the environment around:
@@ -895,6 +906,11 @@ class TerminalExecutor(
         home = self._child_home_manager
         self._child_home_manager = None
         capture = self.max_output_chars * 4
+        expose = launch.expose
+        # A job may end before launch() returns its id; the lock orders "ready"
+        # and "exit" so a service is never registered after its job ended.
+        service_lock = threading.Lock()
+        service_state: dict[str, Any] = {"job_id": "", "exited": False}
 
         def spawn(on_output: Callable[[str], None], cancel: threading.Event) -> tuple[int, bool, bool]:
             try:
@@ -913,9 +929,19 @@ class TerminalExecutor(
             finally:
                 if home is not None:
                     home.cleanup()
+                if expose is not None:
+                    with service_lock:
+                        service_state["exited"] = True
+                        if service_state["job_id"]:
+                            expose.on_exit(service_state["job_id"])
             return outcome.returncode, outcome.timed_out, outcome.cancelled
 
         job = launch.jobs.launch(command, launch.purpose, launch.call_id, spawn, max_seconds=timeout)
+        if expose is not None:
+            with service_lock:
+                if not service_state["exited"]:
+                    service_state["job_id"] = job.job_id
+                    expose.on_ready(job.job_id, isolated_service)
         return TerminalResult(command=command, returncode=0, stdout="", stderr="", job_id=job.job_id)
 
     def _request_user_approval(self, command: list[str], reason: str) -> bool:

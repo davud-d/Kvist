@@ -20,12 +20,14 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
 
+from kernel.plugins.net_broker import TaskService, TaskServices
 from kernel.background_jobs import (
     BackgroundJob,
     BackgroundJobs,
     BackgroundLaunch,
     JobLimitError,
     NOTE_CHARS,
+    ServiceExposure,
     RUNNING,
     UnknownJobError,
     describe,
@@ -166,6 +168,7 @@ class SafeExecutor:
             read_roots, self.workspace
         )
         self.internal_agent_dirname = ".kvist"
+        self._kvist_config_dir = _config_dir_inside(self.workspace)
         self._source_write_lock = (
             self.workspace / self.internal_agent_dirname / "source-writes"
         )
@@ -213,6 +216,12 @@ class SafeExecutor:
         # one call, like the output sink, because the parser drops ``purpose``.
         self._job_purpose = ""
         self._job_call_id = ""
+        # Servers of this task that skills' sandboxes may reach through the
+        # core's proxy (run_shell background with expose_port).
+        self.task_services = TaskServices()
+        # Private directory for an exposed server's socket; set by the agent
+        # from its resource manager. None means exposing is unavailable.
+        self.service_dir_factory: Callable[[str], Path] | None = None
         self._terminal = TerminalExecutor(
             workspace=self.workspace,
             timeout=terminal_timeout,
@@ -431,6 +440,7 @@ class SafeExecutor:
                 network=args.get("network", False),
                 justification=args.get("justification"),
                 background=args.get("background", False),
+                expose_port=args.get("expose_port"),
             )
 
         if action_type == "job_output":
@@ -832,7 +842,28 @@ class SafeExecutor:
         normalized = self._normalize_relative_like_path(value)
         internal = self.internal_agent_dirname.casefold()
         folded = normalized.casefold()
-        return folded == internal or folded.startswith(f"{internal}/")
+        if folded == internal or folded.startswith(f"{internal}/"):
+            return True
+        return self._inside_kvist_config(value)
+
+    def _inside_kvist_config(self, value: str | Path) -> bool:
+        """Kvist's own configuration (keys, skill grants, installed skills) is never workspace content.
+
+        It matters only when the configuration directory lies inside the
+        workspace (KVIST_CONFIG_DIR pointing into a project); ``~/.kvist`` under
+        a home-directory workspace is already the internal-directory rule.
+        """
+        config = self._kvist_config_dir
+        if config is None:
+            return False
+        candidate = value if isinstance(value, Path) else Path(str(value))
+        if not candidate.is_absolute():
+            candidate = self.workspace / candidate
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError):
+            return False
+        return resolved == config or config in resolved.parents
 
     def _raise_internal_access_denied(self, path: str | Path) -> None:
         normalized = self._normalize_relative_like_path(path)
@@ -1987,9 +2018,12 @@ class SafeExecutor:
         network: bool = False,
         justification: str | None = None,
         background: bool = False,
+        expose_port: int | None = None,
     ) -> ExecutionResult:
         if not isinstance(network, bool):
             raise ExecutorError("run_shell.network must be a boolean")
+        if expose_port is not None and not background:
+            raise ExecutorError("run_shell.expose_port needs background: true")
         if not isinstance(background, bool):
             raise ExecutorError("run_shell.background must be a boolean")
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
@@ -2017,7 +2051,10 @@ class SafeExecutor:
                 "Reading *.env files is strictly forbidden."
             )
         launch = (
-            BackgroundLaunch(self.jobs, self._job_purpose, self._job_call_id)
+            BackgroundLaunch(
+                self.jobs, self._job_purpose, self._job_call_id,
+                expose=self._service_exposure(expose_port) if expose_port is not None else None,
+            )
             if background
             else None
         )
@@ -2052,6 +2089,11 @@ class SafeExecutor:
 
         if result.job_id:
             job = self.jobs.get(result.job_id)
+            service = (
+                {"exposed_port": expose_port,
+                 "service_note": f"Skills with network access to task servers reach it as http://localhost:{expose_port}."}
+                if expose_port is not None else {}
+            )
             return ExecutionResult(
                 ok=True,
                 action_type="run_shell",
@@ -2061,6 +2103,7 @@ class SafeExecutor:
                     "started_in_background": True,
                     "max_seconds": job.max_seconds,
                     "note": _background_note(job.max_seconds, network),
+                    **service,
                     **({"path_note": path_note} if path_note else {}),
                 },
             )
@@ -2079,6 +2122,29 @@ class SafeExecutor:
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
         )
+
+    def _service_exposure(self, port: int) -> ServiceExposure:
+        if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
+            raise ExecutorError("run_shell.expose_port must be a port number in 1024..65535")
+        if self.service_dir_factory is None:
+            raise ExecutorError("exposing a server is not available in this frontend")
+        if self.task_services.get(port) is not None:
+            raise ExecutorError(f"port {port} is already exposed by another server of this task")
+        socket_dir = self.service_dir_factory(f"service-{port}")
+        purpose = self._job_purpose or f"server on port {port}"
+
+        def ready(job_id: str, isolated: bool) -> None:
+            self.task_services.add(TaskService(
+                port=port, label=purpose, unix_path=str(socket_dir / "service.sock") if isolated else "",
+                tcp_port=0 if isolated else port, resource_id=job_id,
+            ))
+
+        def exited(job_id: str) -> None:
+            service = self.task_services.get(port)
+            if service is not None and service.resource_id == job_id:
+                self.task_services.remove(port)
+
+        return ServiceExposure(port=port, socket_dir=socket_dir, on_ready=ready, on_exit=exited)
 
     def _job_output(self, job_id: str, wait: float) -> ExecutionResult:
         job = self._known_job(job_id)
@@ -2817,6 +2883,19 @@ class SafeExecutor:
                 path = root_path / filename
                 if path.is_file():
                     yield path
+
+
+def _config_dir_inside(workspace: Path) -> Path | None:
+    """The Kvist configuration directory when it lies inside ``workspace`` (not the workspace itself)."""
+    from kernel.user_config import get_user_config_path
+
+    try:
+        config = get_user_config_path().parent.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if config == workspace or workspace not in config.parents:
+        return None
+    return config
 
 
 def _background_note(max_seconds: float, network: bool) -> str:

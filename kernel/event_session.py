@@ -196,18 +196,33 @@ class EventSession:
         )
 
     def cancel(self) -> None:
-        """Ask the active run to stop at its next safe point.
+        """"Stop all": the active run, its helpers, calls and processes — or a paused task's leftovers.
 
         Delegates straight to the agent's transport-agnostic ``request_cancel``.
-        Harmless when idle: the flag is cleared at the start of the next run.
         """
         self._agent.request_cancel()
+
+    def pause(self) -> None:
+        """Pause the active run and its helpers at their next safe point; nothing is lost."""
+        self._agent.request_pause()
+
+    def stop_helper(self, agent_id: str) -> None:
+        """The person stopped one helper; a failure (unknown id) is reported as an error event."""
+        try:
+            self._agent.stop_helper(agent_id)
+        except (ValueError, RuntimeError) as error:
+            self._channel.emit(ErrorEvent(str(error)))
 
     def close(self, timeout: float = 5.0) -> None:
         self._channel.close()
         worker = self._worker
         if worker is not None:
             worker.join(timeout=timeout)
+        # The frontend is gone: everything the session's tasks own stops; a
+        # checkpoint stays for the next launch. Test doubles have no shutdown.
+        shutdown = getattr(self._agent, "shutdown", None)
+        if shutdown is not None:
+            shutdown("app_closed")
 
     def is_running(self) -> bool:
         worker = self._worker

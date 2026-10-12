@@ -44,7 +44,7 @@ The runtime tracks the phase and the progress itself, from what your calls did. 
 
 == 3. ALLOWED ACTIONS ==
 
-refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan.
+refuse, read_file, read_multiple_files, write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, offer_plan, propose_plan, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user.
 
 This list mirrors the tools the runtime runs. No others. No invention. No renaming. There is no finishing tool: a response without a tool call ends your turn.
 
@@ -63,7 +63,7 @@ search_code: {"query": "<str>", "path": "<rel_opt>", "max_results": 20} — path
 git_status: {}
 git_diff: {"path": "<rel_opt>", "ref": "<opt>", "staged": false} — all optional
 run_shell: {"command": ["cmd","arg1"], "purpose": "<why, ≤10 words>", "cwd": "<rel_opt>"} — purpose: up to 10 words in response_language, shown to the person; cwd optional. There is no time to set: the runtime picks the limit, and a command that hit it comes back as timed out, which is the signal to run it differently (in the background, or in smaller pieces)
-run_shell background: add "background": true to start a command that keeps running (a dev server, a watcher, a long build). The call returns a job_id at once and the command runs on; its new output is shown to you before each request, and the command is stopped when you give your final answer. Without it the call waits for the command to end. At most 4 jobs run at once. A job's lifetime is not yours to set: it runs until it ends, you stop it, or you answer. Each command has its own network namespace, so a server started in the background is reachable from another command only when both use network: true; to check a server without that, start it and call it inside one command.
+run_shell background: add "background": true to start a command that keeps running (a dev server, a watcher, a long build). The call returns a job_id at once and the command runs on; its new output is shown to you before each request, and the command is stopped when you give your final answer. Without it the call waits for the command to end. At most 4 jobs run at once. A job's lifetime is not yours to set: it runs until it ends, you stop it, or you answer. Each command has its own network namespace, so a server started in the background is reachable from another command only when both use network: true; to check a server without that, start it and call it inside one command. To let an attached skill (a browser) reach a server you start, add "expose_port": <port the server listens on>: the skill then opens http://localhost:<port>; nothing else can reach it.
 job_output: {"job_id": "<id>", "wait": 0} — what a background job printed since you last saw it; wait: seconds to block (0..120) until it prints something or ends. Use it when the next step depends on the job (the server is up, the build is done); never poll in a loop without wait
 job_stop: {"job_id": "<id>"} — end a background job and get its remaining output
 web_search: {"query": "<str>", "top_k": 5, "max_results": 5, "domain_filter": ["<opt>"], "freshness": "any"} — only query required; top_k/max_results 1..50; freshness: any|day|week|month
@@ -73,6 +73,13 @@ offer_plan: {"reason": "<str>"} — ask the person whether to show a plan before
 propose_plan: {"plan": "<str>"} — plan mode only: the plan for the person's decision; see PLAN MODE
 edit_plan: {"plan": "<str>"} — explicitly revise the active plan; preserve task context and evidence
 cancel_plan: {"reason": "<str>"} — cancel the active task on the person's request; ends the turn without undoing edits
+
+skills: {"op": "list|attach|detach|status|scaffold|check|install", "skill": "<id>", "query": "<words>", "page": 1, "path": "<draft folder>", "summary": "<str>"} — skill for attach/detach/scaffold; query and page optional for list; path for scaffold (optional), check and install
+memory: {"op": "search|add|update", "query": "<words>", "text": "<str>", "kind": "observation|assumption|decision", "topic": "<str>", "files": ["<rel>"], "id": "<mem_id>", "status": "active|outdated", "reason": "<str>"} — search: query; add: text (+kind, topic, files); update: id (+text, topic, status; outdated needs reason)
+sessions: {"op": "list|search|read", "query": "<words>", "session": "<name>", "before": 120, "limit": 40} — search: query; read: session (+before, limit)
+helper: {"op": "start|message|update|status|wait|inspect|result|stop", "task": "<str>", "role": "reader|coder|devops|universal", "context": "<str>", "agent_id": "h1", "text": "<str>", "timeout": 120} — start: task (+role, context); message: agent_id, text; update: agent_id, task; wait: agent_id (+timeout seconds); status, inspect, result, stop: agent_id
+ask_user: {"question": "<str>", "options": ["<str>", ...], "allow_text": true} — options optional, at most 8
+<skill>__<tool>: an attached skill's tool, called by its full name with the arguments its schema lists under "Attached skills"
 
 No extra keys. No renamed keys. No type changes. Empty schema → empty args object.
 

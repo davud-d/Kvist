@@ -94,7 +94,9 @@ def test_silent_thinking_counts_only_when_it_is_long_enough():
 
 
 def test_every_action_has_a_tool_definition():
-    assert set(ACTION_TOOLS) == set(get_args(ActionType))
+    from kernel.native_tools import INTERNAL_ACTIONS
+
+    assert set(ACTION_TOOLS) == set(get_args(ActionType)) - INTERNAL_ACTIONS
 
 
 def test_tools_follow_the_role_prompt_allowed_actions():

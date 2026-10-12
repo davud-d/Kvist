@@ -359,6 +359,18 @@ def _append_tool_path_mounts(
         wrapped.extend(("--ro-bind", value, value))
 
 
+def _kvist_config_inside(workspace: Path) -> Path | None:
+    from kernel.user_config import get_user_config_path
+
+    try:
+        config = get_user_config_path().parent.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if config == workspace or workspace not in config.parents or not config.is_dir():
+        return None
+    return config
+
+
 def wrap_command_for_sandbox(
     command: list[str],
     mode: SandboxMode,
@@ -370,6 +382,7 @@ def wrap_command_for_sandbox(
     tool_paths: tuple[Path, ...] = (),
     links: tuple[tuple[str, str], ...] = (),
     secret_targets: tuple[list[Path], list[Path]] | None = None,
+    service: tuple[Path, int] | None = None,
 ) -> list[str]:
     """Wrap a validated command in a minimal Bubblewrap filesystem.
 
@@ -377,6 +390,9 @@ def wrap_command_for_sandbox(
     without exposing anything else beside them. ``secret_targets`` is the
     enumeration the spawn-time context digest was built from; walking the
     workspace again milliseconds later cost seconds on every command.
+    ``service`` (socket directory, port) runs the command under Kvist's
+    in-sandbox bridge, which exposes that port of the sandbox's own loopback
+    as ``service.sock`` in the directory — the core's proxy is its only client.
     """
     if mode is SandboxMode.HOST:
         return _wrap_host_command(command, cwd, bool(network_allowed), bwrap_path)
@@ -429,7 +445,22 @@ def wrap_command_for_sandbox(
         wrapped.extend(("--symlink", target, path))
     internal_dir = workspace / ".kvist"
     wrapped.extend(("--tmpfs", str(internal_dir)))
+    config_dir = _kvist_config_inside(workspace)
+    if config_dir is not None:
+        # Keys, skill grants and installed skills when KVIST_CONFIG_DIR points into the project.
+        wrapped.extend(("--tmpfs", str(config_dir)))
     # Secret masks come after the workspace bind so they shadow the real files.
     _append_secret_masks(wrapped, workspace, secret_targets)
+    if service is not None:
+        socket_dir, port = service
+        runner_dir = Path(__file__).resolve().parent / "plugins" / "runner"
+        wrapped.extend((
+            "--bind", str(socket_dir), "/kvist/svc",
+            "--ro-bind", str(runner_dir), "/kvist/runner",
+        ))
+        command = [
+            "/usr/bin/python3", "-I", "-B", "/kvist/runner/kvist_service.py",
+            "--unix", "/kvist/svc/service.sock", "--port", str(port), "--", *command,
+        ]
     wrapped.extend(("--chdir", str(cwd), "--", *command))
     return wrapped

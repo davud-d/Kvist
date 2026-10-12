@@ -1,0 +1,68 @@
+{
+  "manifest_version": 1,
+  "id": "code_nav",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Python code navigation", "ru": "Навигация по Python-коду"},
+  "summary": {
+    "en": "Python only: go to a definition, find usages, outline a file, preview a rename as diffs, and pyflakes diagnostics.",
+    "ru": "Только Python: перейти к определению, найти использования, структура файла, предпросмотр переименования в виде diff и диагностика pyflakes."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": ["linux"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "dependencies": {"python": ["jedi==0.20.0", "parso==0.8.7", "pyflakes==4.0.3"]},
+  "capabilities": {
+    "required": [{"name": "files.read", "reason": "to analyse the workspace's Python files"}]
+  },
+  "limits": {"call_timeout_seconds": 180, "max_result_bytes": 262144, "memory_mb": 2048, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {
+      "name": "definition",
+      "summary": "Where the name at path:line:column is defined (follows imports).",
+      "readonly": true,
+      "timeout_seconds": 120,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path", "line", "column"], "properties": {
+        "path": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "column": {"type": "integer", "minimum": 0}
+      }}
+    },
+    {
+      "name": "references",
+      "summary": "Every usage of the name at path:line:column across the workspace's Python files.",
+      "readonly": true,
+      "timeout_seconds": 150,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path", "line", "column"], "properties": {
+        "path": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "column": {"type": "integer", "minimum": 0}
+      }}
+    },
+    {
+      "name": "outline",
+      "summary": "Classes, functions and module-level names of one Python file with their lines.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path"], "properties": {
+        "path": {"type": "string"}
+      }}
+    },
+    {
+      "name": "rename_preview",
+      "summary": "What renaming the name at path:line:column would change, as one unified diff per file. Nothing is written: apply the edits yourself.",
+      "readonly": true,
+      "timeout_seconds": 150,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["path", "line", "column", "new_name"], "properties": {
+        "path": {"type": "string"}, "line": {"type": "integer", "minimum": 1}, "column": {"type": "integer", "minimum": 0},
+        "new_name": {"type": "string", "maxLength": 100}
+      }}
+    },
+    {
+      "name": "diagnostics",
+      "summary": "pyflakes findings (undefined names, unused imports, syntax errors) for one file or the whole workspace.",
+      "readonly": true,
+      "timeout_seconds": 150,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "path": {"type": "string", "description": "One file; empty checks every Python file."}
+      }}
+    }
+  ]
+}

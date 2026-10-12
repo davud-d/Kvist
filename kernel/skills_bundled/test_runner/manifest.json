@@ -1,0 +1,44 @@
+{
+  "manifest_version": 1,
+  "id": "test_runner",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Test runner", "ru": "Запуск тестов"},
+  "summary": {
+    "en": "Run the project's tests (pytest, node --test, npm test) and get passed/failed/skipped counts, each failing test with its message, and the full log as a file.",
+    "ru": "Запустить тесты проекта (pytest, node --test, npm test) и получить числа прошедших, упавших и пропущенных, каждый упавший тест с сообщением и полный лог файлом."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": ["linux"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {
+    "required": [
+      {"name": "files.read", "reason": "to find which test tool the project uses"},
+      {"name": "processes.run", "reason": "to run the tests in the workspace sandbox"},
+      {"name": "artifacts", "reason": "to keep the full test log as a file"},
+      {"name": "ui.notify", "reason": "to show which tests run"}
+    ]
+  },
+  "limits": {"call_timeout_seconds": 330, "max_result_bytes": 131072, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {
+      "name": "run",
+      "summary": "Run tests and return a structured result: status (passed, failed, error, timeout), counts, failing tests with messages, the command and a link to the full log.",
+      "readonly": false,
+      "timeout_seconds": 330,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "runner": {"type": "string", "enum": ["auto", "pytest", "node", "npm"], "description": "Defaults to auto: detected from the project."},
+        "target": {"type": "string", "maxLength": 500, "description": "A test file, folder or pytest node id (path::name); empty runs everything."},
+        "timeout_seconds": {"type": "integer", "minimum": 5, "maximum": 300}
+      }},
+      "result": {"type": "object", "required": ["status", "runner", "command"], "properties": {
+        "status": {"type": "string", "enum": ["passed", "failed", "error", "timeout", "no_tests"]},
+        "runner": {"type": "string"}, "command": {"type": "array", "items": {"type": "string"}},
+        "counts": {"type": "object"}, "failures": {"type": "array"}, "duration_seconds": {"type": "number"},
+        "log_artifact": {"type": "string"}, "log_tail": {"type": "string"}, "note": {"type": "string"}
+      }}
+    }
+  ]
+}

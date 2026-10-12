@@ -53,6 +53,12 @@ packages = [
     "kernel.prompts.styles.agents",
     "kernel.prompts.styles.chat",
     "kernel.themes",
+    "kernel.plugins",
+    "kernel.plugins.runner",
+    "kernel.skills_bundled.browser",
+    "kernel.skills_bundled.test_runner",
+    "kernel.skills_bundled.documents",
+    "kernel.skills_bundled.code_nav",
     "frontends.gui.electron.renderer",
     "frontends.tui.classic",
     "frontends.tui.classic.assets",
@@ -69,6 +75,12 @@ packages = [
 kvist_web = "frontends/web-local/kvist_web"
 
 [tool.setuptools.package-data]
+# A bundled skill is installed as a package folder (kvist --skill-op install
+# --skill-path bundled:<id>), so its manifest, instructions and own tests ship too.
+"kernel.skills_bundled.browser" = ["manifest.json", "SKILL.md"]
+"kernel.skills_bundled.test_runner" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
+"kernel.skills_bundled.documents" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
+"kernel.skills_bundled.code_nav" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
 "frontends.gui.electron.renderer" = ["image-attachments.js"]
 kvist_web = [
     "client/index.html",

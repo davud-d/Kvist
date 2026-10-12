@@ -72,6 +72,10 @@ class AgentConfig:
     # Set only by the interactive frontends (classic terminal, stdio-multi,
     # ACP): end_session needs a person reading the conversation.
     end_session_enabled: bool = False
+    # A person answers dialogs (the GUI, the terminals, ACP). False for
+    # headless runs and helpers: a question then reports "no_interactive_user"
+    # and an approval is refused instead of waiting for nobody.
+    interactive: bool = False
 
 
 PLAN_OFFERED = "offered"
@@ -157,6 +161,11 @@ class RunState:
     # The user stopped this run (Ctrl+C, Escape, the GUI's cancel). Recorded in
     # session history so later turns know the work was cut short on purpose.
     stopped_by_user: bool = False
+    # The person paused (not stopped) this task: the next message continues it
+    # and is presented to the model as the correction that follows a pause.
+    paused_by_user: bool = False
+    # Skills attached to this task ({id, version, digest}), restored on resume.
+    attached_skills: list[dict[str, Any]] = field(default_factory=list)
     # The model ended the run with outcome "incomplete": seals as "blocked"
     # however clean the evidence looks, because nothing was claimed as done.
     finished_incomplete: bool = False

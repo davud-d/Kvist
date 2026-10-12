@@ -138,6 +138,10 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
                 "type": "boolean",
                 "description": "Defaults to false. True returns a job_id at once and keeps the command running (a dev server, a watcher, a long build); its new output is shown to you before each request, and it is stopped when you give your final answer. A job's lifetime is not yours to set: it runs until it ends, you stop it, or you answer. Another command can reach a port the job opens only if both use network: true.",
             },
+            "expose_port": {
+                "type": "integer", "minimum": 1024, "maximum": 65535,
+                "description": "With background: the port the server listens on, made reachable to attached skills (a browser) as http://localhost:<port>. Not reachable from anything else.",
+            },
         },
         ("command", "purpose"),
     ),
@@ -223,7 +227,87 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
     ),
 }
 
+ACTION_TOOLS.update({
+    "skills": ToolSpec(
+        "Installed skills: list or search them, attach one to this task (its instructions and tools arrive with "
+        "the answer; tools are callable from your next response), detach it, or see attached skills' state. "
+        "Attaching a skill with tools may ask the person for approval. Building one: scaffold a draft folder, "
+        "edit it, check it (Kvist's independent checks), then install it (the person approves).",
+        {
+            "op": {"type": "string", "enum": ["list", "attach", "detach", "status", "scaffold", "check", "install"]},
+            "skill": {"type": "string", "description": "The skill id, for attach, detach and scaffold."},
+            "query": {"type": "string", "description": "Words to filter the list by."},
+            "page": _integer(1, 100),
+            "path": {"type": "string", "description": "The draft folder in the workspace, for scaffold, check and install."},
+            "summary": {"type": "string", "description": "scaffold: one sentence on what the skill adds."},
+        },
+        ("op",),
+    ),
+    "memory": ToolSpec(
+        "Notes of this workspace from earlier tasks: search them, add one, or update one (mark it outdated with a "
+        "reason). kind: observation (you saw it), assumption (your inference), decision (the person confirms it "
+        "in a dialog). Never store secrets.",
+        {
+            "op": {"type": "string", "enum": ["search", "add", "update"]},
+            "query": _STRING,
+            "text": _STRING,
+            "kind": {"type": "string", "enum": ["observation", "assumption", "decision"]},
+            "topic": _STRING,
+            "files": _STRINGS,
+            "id": _STRING,
+            "status": {"type": "string", "enum": ["active", "outdated"]},
+            "reason": _STRING,
+            "limit": _integer(1, 50),
+        },
+        ("op",),
+    ),
+    "sessions": ToolSpec(
+        "Earlier conversations of this workspace: list them, search their messages (hits name the session and "
+        "event number), or read one in pages. Reading never switches the person's conversation.",
+        {
+            "op": {"type": "string", "enum": ["list", "search", "read"]},
+            "query": _STRING,
+            "session": _STRING,
+            "before": {"type": "integer", "minimum": 1, "description": "read: page back from this event number."},
+            "limit": _integer(1, 200),
+        },
+        ("op",),
+    ),
+    "helper": ToolSpec(
+        "One read-only helper agent with its own context: start it with a task (role optional; the router picks "
+        "one), send it a message, replace its task, check status, wait for it (no model requests while waiting), "
+        "inspect its actions, get its result, or stop it. It cannot change files or start helpers.",
+        {
+            "op": {"type": "string", "enum": ["start", "message", "update", "status", "wait", "inspect", "result", "stop"]},
+            "task": _STRING,
+            "role": {"type": "string", "enum": ["reader", "coder", "devops", "universal"]},
+            "context": {"type": "string", "description": "Only what the helper needs; it does not see this conversation."},
+            "attachments": _STRINGS,
+            "agent_id": _STRING,
+            "text": _STRING,
+            "timeout": {"type": "number", "minimum": 0, "maximum": 600},
+            "cursor": {"type": "integer", "minimum": 0},
+            "limit": _integer(1, 100),
+        },
+        ("op",),
+    ),
+    "ask_user": ToolSpec(
+        "Ask the person a question and wait for the answer: give options to choose from, free text, or both. "
+        "The answer says answered, skipped, cancelled or no_interactive_user. Ask only what you cannot settle "
+        "yourself.",
+        {
+            "question": _STRING,
+            "options": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+            "allow_text": {"type": "boolean"},
+        },
+        ("question",),
+    ),
+})
+
 READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.readonly)
+# Action types the model never names: a call of an attached skill's tool
+# (``<skill>__<tool>``, defined by the skill's manifest) becomes skill_call.
+INTERNAL_ACTIONS = frozenset({"skill_call"})
 
 _ALLOWED_ACTIONS_RE = re.compile(r"^== \d+\. ALLOWED ACTIONS ==\s*\n\s*([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)

@@ -30,6 +30,8 @@ from kernel.frontend_protocol import (
     InputResponse,
     SessionEvent,
     is_cancel_message,
+    is_helper_stop_message,
+    is_pause_message,
 )
 from kernel.redaction import redact_text, redact_value
 from kernel.user_config import get_saved_provider_or_none
@@ -50,6 +52,12 @@ def _read_responses(session: EventSession, in_reader) -> None:
                 continue
             if is_cancel_message(data):
                 session.cancel()
+                continue
+            if is_pause_message(data):
+                session.pause()
+                continue
+            if is_helper_stop_message(data):
+                session.stop_helper(data["agent_id"])
                 continue
             response = InputResponse.from_dict(data)
             session.respond(
@@ -282,6 +290,12 @@ def _read_multi(
                 data = parsed
             if data is not None and is_cancel_message(data):
                 session.cancel()
+                continue
+            if data is not None and is_pause_message(data):
+                session.pause()
+                continue
+            if data is not None and is_helper_stop_message(data):
+                session.stop_helper(data["agent_id"])
                 continue
             if data is not None and "request_id" in data:
                 response = InputResponse.from_dict(data)
@@ -593,6 +607,8 @@ def launch(
                 )
         finally:
             sys.stdin = original_stdin
+        # A frontend answers this process's dialogs.
+        agent.config.interactive = True
         serve_session(
             EventSession(channel, agent),
             out_stream=destination,
@@ -660,6 +676,7 @@ def launch_multi(
                 )
         finally:
             sys.stdin = original_stdin
+        agent.config.interactive = True
         session = EventSession(channel, agent)
 
         def rebuild(provider_override=None, models_override=None, interactive=False):

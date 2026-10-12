@@ -121,6 +121,10 @@ from kernel.agent_web import (
     summarize_search_results,
 )
 from kernel.executor import SafeExecutor
+from kernel.helpers import HelperManager
+from kernel.plugins.skills import SkillManager
+from kernel.resources import Owner, ResourceManager
+from kernel.task_control import TaskControl
 from kernel.performance_logger import PerfLogger
 from kernel.protocol import Action, AgentCommand
 from kernel.reasoning_effort import merge_reasoning_kwargs
@@ -233,7 +237,11 @@ class LocalAgent:
         ui: AgentUI,
         console: Console | None = None,
         perf_logger: PerfLogger | None = None,
+        session: str | None = None,
+        service_session: dict[str, Any] | None = None,
     ) -> None:
+        """``session``/``service_session`` make a helper: it works in that
+        service session and never reads or writes the active-session marker."""
         self.client = client
         self.executor = executor
         self.config = config or AgentConfig()
@@ -246,6 +254,15 @@ class LocalAgent:
         # not on RunState, so it survives a per-run state reset and is cleared
         # explicitly at the start of every turn. Transport-agnostic on purpose.
         self._cancel_event = threading.Event()
+        # Pause, stop-all and their states; shares the interrupt event above.
+        self.control = TaskControl(self._cancel_event)
+        self.control.listeners.append(self._announce_task_state)
+        self.service_session = service_session
+        self.is_helper = service_session is not None
+        # Set on a helper: its runs never change the workspace, whatever role it has.
+        self.force_read_only = False
+        # Set on a helper: messages from the main agent, drained before each request.
+        self.inbox_source: Any = None
         self.console = console or Console()
         self._perf_logger = perf_logger or PerfLogger(executor.workspace)
         # Everything the agent shows is also recorded to the session's event
@@ -258,9 +275,13 @@ class LocalAgent:
         self._ui = JournalingUI(ui, self._journal)
         self._tray = (
             TrayLink(executor.workspace, lambda: self.current_session, debug=lambda message: self._ui.debug_print(message))
-            if is_terminal_host()
+            if is_terminal_host() and not self.is_helper
             else None
         )
+        self.resources = ResourceManager(executor.workspace)
+        self.executor.service_dir_factory = self._service_dir
+        self.skills = SkillManager(self)
+        self.helpers = None if self.is_helper else HelperManager(self)
         # Loading tiktoken's rank table costs tens of MiB and is unnecessary
         # for session recovery and chat-only runs. count_tokens initializes it
         # on the first context-budget calculation.
@@ -271,7 +292,11 @@ class LocalAgent:
         # Last resolved user-facing language for this session; used as the
         # fallback when a new request has no detectable language.
         self._last_response_language: str | None = None
-        self.current_session = load_active_session(self)
+        if session is not None:
+            self.current_session = session
+            create_session(self, session)
+        else:
+            self.current_session = load_active_session(self)
         self.executor.set_active_session(self.current_session)
         self._session_history: list[dict[str, Any]] = []
         # Set by restore_session_document / rename_session; None until a title
@@ -285,6 +310,28 @@ class LocalAgent:
         # Lifecycle phase of a resumed checkpoint (set by load_checkpoint).
         self._resumed_phase: str = "executing"
         load_session(self)
+        if not self.is_helper:
+            self._recover_leftover_resources()
+
+    def _service_dir(self, label: str):
+        owner = Owner(session=self.current_session, run_id=str(self._run_id or "run"), kind="run")
+        resource = self.resources.temp_dir(owner, label)
+        return resource.path
+
+    def _recover_leftover_resources(self) -> None:
+        """Stop what a crashed core of this workspace left running; never touch anything else."""
+        report = self.resources.recover()
+        for outcome in report.outcomes:
+            state = "stopped" if outcome.stopped else f"not confirmed ({outcome.error})"
+            self._ui.debug_print(f"[resources] left by an earlier crash: {outcome.label}: {state}")
+        from kernel.attachments import AttachmentStore
+
+        AttachmentStore(self.executor.workspace).expire()
+
+    def _announce_task_state(self, state: str, reason: str) -> None:
+        printer = getattr(getattr(self, "_ui", None), "print_task_state", None)
+        if printer is not None and not self.is_helper:
+            printer(state, reason)
 
     def _harvest_run_outputs(self) -> list[str]:
         """Collect the substantive content a later turn needs to answer about.
@@ -552,17 +599,60 @@ class LocalAgent:
         self._state.system_host = describe_host(chain, detect_host(chain))
 
     def request_cancel(self) -> None:
-        """Request that the current action-loop turn stop at the next safe point.
+        """"Stop all": end this turn, its helpers, running calls and every process the task owns.
 
-        Callable from any thread. It sets a flag only — it never touches an
+        Callable from any thread. It sets flags only — it never touches an
         in-flight action or the transport. The loop observes it between steps
-        (safe-stop) and while consuming a model stream (mid-generation).
+        (safe-stop) and while consuming a model stream (mid-generation); the
+        cleanup runs on the loop's own thread when it leaves.
         """
-        self._cancel_event.set()
+        if self.control.state == "paused":
+            # A paused task has no running turn, only what it kept alive:
+            # "stop all" ends that now, on the caller's thread.
+            self._stop_paused_task()
+            return
+        if not self.control.request_cancel("user_cancelled"):
+            # No turn is running (or it already ended): still mark the interrupt
+            # so a turn that is just starting does not proceed.
+            self._cancel_event.set()
+
+    def _stop_paused_task(self) -> None:
+        from kernel.agent_runtime import _end_of_turn_resources
+
+        self.control.request_cancel("user_cancelled")
+        self.control.reached_safe_point()
+        report = _end_of_turn_resources(self)
+        if report is not None and report.summary(self._state.response_language or "en"):
+            self._ui.print_result(report.summary(self._state.response_language or "en"))
+
+    def request_pause(self) -> bool:
+        """Pause the main agent and its helpers at their next safe point, keeping the task's state.
+
+        Returns False when there is nothing running to pause. The interface
+        shows "pause requested" until the loop reports that it reached the
+        safe point; only then is the task "paused".
+        """
+        return self.control.request_pause("user_paused")
+
+    def stop_helper(self, agent_id: str) -> dict[str, Any]:
+        """The person stopped one helper; the main agent is told and does not restart it on its own."""
+        if self.helpers is None:
+            raise ValueError("this agent has no helpers")
+        return self.helpers.stop(agent_id, by="person")
+
+    def shutdown(self, reason: str = "app_closed") -> None:
+        """The process is ending: stop helpers, skills, jobs and every owned resource; keep the checkpoint."""
+        if self.helpers is not None:
+            self.helpers.stop_all(reason)
+        self.skills.finish_task(reason)
+        self.executor.jobs.stop_all()
+        report = self.resources.shutdown(reason)
+        for outcome in report.failed:
+            self._ui.debug_print(f"[resources] {outcome.label}: not confirmed stopped ({outcome.error})")
 
     def _reset_cancel(self) -> None:
-        """Clear a pending cancellation so it cannot leak into the next turn."""
-        self._cancel_event.clear()
+        """Clear a pending interrupt so it cannot leak into the next turn, and mark the turn running."""
+        self.control.begin()
 
     def run(self, user_goal: str, routed_role: str | None = None, *, images: list[dict] | None = None) -> str:
         refusal = self._refuse_closed_session()
@@ -573,7 +663,10 @@ class LocalAgent:
         if images is not None and embedded:
             raise ValueError("Pass images either in the goal envelope or as an argument")
         attachments = validate_images(images) if images is not None else embedded
+        self._store_attachments(attachments)
         active_task = self._peek_checkpoint() is not None
+        if self.helpers is not None and user_goal.strip():
+            self.helpers.person_wrote()
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
         self._journal.begin_turn(f"{user_goal} {labels}".strip())
         self._tray_turn_started()
@@ -584,6 +677,26 @@ class LocalAgent:
         finally:
             self._journal.end_turn()
             self._tray_turn_finished()
+
+    def _store_attachments(self, images: list[dict]) -> None:
+        """Keep each attached image's original privately and give it an id; drop the bytes from the dict."""
+        from kernel.attachments import AttachmentError, AttachmentStore
+
+        store = AttachmentStore(self.executor.workspace)
+        for image in images:
+            original = image.pop("_original", None)
+            if original is None:
+                continue
+            try:
+                attachment = store.add_bytes(
+                    original, image["name"], session=self.current_session,
+                    origin={"kind": "user_message", "session": self.current_session},
+                )
+            except (AttachmentError, OSError) as error:
+                # The model still gets the prepared copy; only re-analysis by id is lost.
+                self._ui.debug_print(f"[attachments] {image['name']}: not stored ({error})")
+                continue
+            image["attachment_id"] = attachment.id
 
     def is_session_closed(self) -> bool:
         """Whether end_session closed the active session, as its stored document says."""
@@ -761,17 +874,24 @@ class LocalAgent:
         self._state.parse_errors = 0
         self._state.step_budget = last_step + self.config.max_steps
 
+        notes = self.skills.restore(self._state.attached_skills)
+        if notes:
+            self._state.pending_instruction = " ".join([self._state.pending_instruction, *notes]).strip()
+        self.skills.resume()
         if instruction or images:
             self._state.message_id = end_session.next_message_id(self, from_person=True)
             if images:
                 from kernel.vision import prepare_goal
                 instruction = prepare_goal(self, instruction, images)
             if images or not is_bare_continuation(instruction):
-                self._state.task_updates.append(instruction)
+                prefix = "After pausing the work, the person wrote: " if self._state.paused_by_user else ""
+                self._state.task_updates.append(prefix + instruction)
             self._state.response_language = resolve_response_language(
                 instruction, previous_language=self._last_response_language
             )
+            self._state.paused_by_user = False
             self._save_checkpoint(user_goal, start_step - 1)
+        self._state.paused_by_user = False
 
         # Environment facts are recomputed for the current machine rather than
         # restored: run() sets them, resume() must too or the prompt shows blanks.

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 from urllib.parse import urlparse
 
 from kernel.call_labels import call_label, trim_purpose
@@ -46,7 +46,19 @@ ALLOWED_ACTIONS = {
     # Offered only by an interactive frontend (end_session.available); the
     # runtime answers it as an unknown tool everywhere else.
     "end_session",
+    "skills",
+    "memory",
+    "sessions",
+    "helper",
+    "ask_user",
 }
+SKILL_CALL = "skill_call"
+_SKILL_OPS = ("list", "attach", "detach", "status", "scaffold", "check", "install")
+_MEMORY_OPS = ("search", "add", "update")
+_MEMORY_KINDS = ("observation", "assumption", "decision")
+_SESSION_OPS = ("list", "search", "read")
+_HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
+_HELPER_ROLES = ("reader", "coder", "devops", "universal")
 
 MAX_BATCH_ACTIONS = 8
 
@@ -102,18 +114,31 @@ def load_single_json_object(text: str) -> Any:
 
 
 def build_command(
-    call: ToolCallRequest, *, text: str, batch_id: str, plan_step: str, language: str
+    call: ToolCallRequest,
+    *,
+    text: str,
+    batch_id: str,
+    plan_step: str,
+    language: str,
+    resolve_skill_tool: Callable[[str], Any] | None = None,
 ) -> AgentCommand:
     """One call of a response as a runtime command, or CommandValidationError.
 
     A call's ``purpose`` (run_shell's reason, and the stand-in argument of the
     tools that take none) is taken off before the arguments are checked: the
     executor never sees it, and only run_shell's reaches the person.
+
+    ``resolve_skill_tool`` maps a ``<skill>__<tool>`` name of an attached skill
+    to its declaration; such a call is checked against the tool's schema and
+    becomes ``skill_call``. A name no attached skill declares is unknown.
     """
     if call.error:
         raise CommandValidationError(call.error)
     if call.name not in ALLOWED_ACTIONS:
-        raise CommandValidationError(f"Unknown tool {call.name!r}")
+        resolved = resolve_skill_tool(call.name) if resolve_skill_tool is not None else None
+        if resolved is None:
+            raise CommandValidationError(f"Unknown tool {call.name!r}")
+        return _skill_command(call, resolved, text=text, batch_id=batch_id, plan_step=plan_step, language=language)
     args = dict(call.arguments or {})
     purpose = trim_purpose(args.pop(PURPOSE_KEY, "")) if call.name in _PURPOSE_ACTIONS else ""
     validate_action_args(call.name, args)
@@ -123,6 +148,29 @@ def build_command(
             type=call.name,  # type: ignore[arg-type]
             args=args,
             description=call_label(call.name, args, language, purpose),
+        ),
+        text=text,
+        call_id=call.call_id,
+        batch_id=batch_id,
+    )
+
+
+def _skill_command(
+    call: ToolCallRequest, resolved: Any, *, text: str, batch_id: str, plan_step: str, language: str
+) -> AgentCommand:
+    from kernel.plugins.schema import validate
+
+    arguments = dict(call.arguments or {})
+    errors = validate(arguments, resolved.tool.parameters)
+    if errors:
+        raise CommandValidationError(f"{resolved.label}: " + "; ".join(errors[:5]))
+    verb = "скилл" if language == "ru" else "skill"
+    return AgentCommand(
+        plan_step=plan_step,
+        action=Action(
+            type=SKILL_CALL,  # type: ignore[arg-type]
+            args={"skill": resolved.skill_id, "tool": resolved.tool.name, "arguments": arguments},
+            description=f"{verb} {resolved.label}",
         ),
         text=text,
         call_id=call.call_id,
@@ -247,10 +295,16 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
     elif action_type == "run_shell":
         require_keys(args, {"command"})
         require_only_allowed_keys(
-            args, {"command", "cwd", "timeout", "sandbox", "network", "justification", "background"}
+            args, {"command", "cwd", "timeout", "sandbox", "network", "justification", "background", "expose_port"}
         )
         if not isinstance(args.get("background", False), bool):
             raise CommandValidationError("'background' must be a boolean")
+        if "expose_port" in args:
+            port = args["expose_port"]
+            if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
+                raise CommandValidationError("'expose_port' must be a port number in 1024..65535")
+            if not args.get("background"):
+                raise CommandValidationError("'expose_port' needs \"background\": true")
         if not isinstance(args.get("sandbox", "default"), str) or args.get("sandbox", "default") not in {"default", "host"}:
             raise CommandValidationError("'sandbox' must be 'default' or 'host'")
         if not isinstance(args.get("network", False), bool):
@@ -387,6 +441,32 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
     elif action_type == "end_session":
         _validate_end_session(args)
 
+    elif action_type == "skills":
+        _validate_skills(args)
+
+    elif action_type == "memory":
+        _validate_memory(args)
+
+    elif action_type == "sessions":
+        _validate_sessions(args)
+
+    elif action_type == "helper":
+        _validate_helper(args)
+
+    elif action_type == "ask_user":
+        require_keys(args, {"question"})
+        require_only_allowed_keys(args, {"question", "options", "allow_text"})
+        require_str(args, "question")
+        _optional_str_list(args, "options", limit=8)
+        if not isinstance(args.get("allow_text", False), bool):
+            raise CommandValidationError("'allow_text' must be a boolean")
+
+    elif action_type == SKILL_CALL:
+        require_keys(args, {"skill", "tool"})
+        require_only_allowed_keys(args, {"skill", "tool", "arguments"})
+        if not isinstance(args.get("arguments", {}), dict):
+            raise CommandValidationError("'arguments' must be an object")
+
     elif action_type == "report_to_user":
         require_keys(args, {"summary", "result"})
         require_only_allowed_keys(args, {"summary", "result", "issues", "outcome"})
@@ -395,6 +475,137 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         if "issues" in args:
             require_text(args, "issues")
         _require_outcome(args)
+
+
+def _require_op(args: dict[str, Any], ops: tuple[str, ...]) -> str:
+    op = args.get("op")
+    if op not in ops:
+        raise CommandValidationError(f"'op' must be one of: {', '.join(ops)}")
+    return op
+
+
+def _optional_int(args: dict[str, Any], key: str, low: int, high: int) -> None:
+    value = args.get(key)
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+        raise CommandValidationError(f"'{key}' must be an integer in {low}..{high}")
+
+
+def _optional_str_list(args: dict[str, Any], key: str, limit: int) -> None:
+    value = args.get(key)
+    if value is None:
+        return
+    if not isinstance(value, list) or len(value) > limit or not all(isinstance(item, str) and item.strip() for item in value):
+        raise CommandValidationError(f"'{key}' must be a list of at most {limit} non-empty strings")
+
+
+def _validate_skills(args: dict[str, Any]) -> None:
+    op = _require_op(args, _SKILL_OPS)
+    if op == "list":
+        require_only_allowed_keys(args, {"op", "query", "page"})
+        require_optional_str(args, "query")
+        _optional_int(args, "page", 1, 100)
+    elif op in ("attach", "detach"):
+        require_keys(args, {"skill"})
+        require_only_allowed_keys(args, {"op", "skill"})
+        require_str(args, "skill")
+    elif op == "scaffold":
+        require_keys(args, {"skill"})
+        require_only_allowed_keys(args, {"op", "skill", "path", "summary"})
+        require_str(args, "skill")
+        require_optional_str(args, "path")
+        require_optional_str(args, "summary")
+    elif op in ("check", "install"):
+        require_keys(args, {"path"})
+        require_only_allowed_keys(args, {"op", "path"})
+        require_str(args, "path")
+    else:
+        require_only_allowed_keys(args, {"op"})
+
+
+def _validate_memory(args: dict[str, Any]) -> None:
+    op = _require_op(args, _MEMORY_OPS)
+    if op == "search":
+        require_only_allowed_keys(args, {"op", "query", "limit"})
+        require_optional_str(args, "query")
+        _optional_int(args, "limit", 1, 50)
+    elif op == "add":
+        require_keys(args, {"text"})
+        require_only_allowed_keys(args, {"op", "text", "kind", "topic", "files"})
+        require_str(args, "text")
+        if args.get("kind", "observation") not in _MEMORY_KINDS:
+            raise CommandValidationError(f"'kind' must be one of: {', '.join(_MEMORY_KINDS)}")
+        require_optional_str(args, "topic")
+        _optional_str_list(args, "files", limit=20)
+    else:
+        require_keys(args, {"id"})
+        require_only_allowed_keys(args, {"op", "id", "text", "topic", "status", "reason"})
+        require_str(args, "id")
+        for key in ("text", "topic", "reason"):
+            require_optional_str(args, key)
+        if args.get("status") not in (None, "active", "outdated"):
+            raise CommandValidationError("'status' must be active or outdated")
+        if args.get("status") == "outdated" and not str(args.get("reason") or "").strip():
+            raise CommandValidationError("marking a note outdated needs a 'reason'")
+
+
+def _validate_sessions(args: dict[str, Any]) -> None:
+    op = _require_op(args, _SESSION_OPS)
+    if op == "list":
+        require_only_allowed_keys(args, {"op", "limit"})
+        _optional_int(args, "limit", 1, 200)
+    elif op == "search":
+        require_keys(args, {"query"})
+        require_only_allowed_keys(args, {"op", "query", "limit"})
+        require_str(args, "query")
+        _optional_int(args, "limit", 1, 100)
+    else:
+        require_keys(args, {"session"})
+        require_only_allowed_keys(args, {"op", "session", "before", "limit"})
+        require_str(args, "session")
+        _optional_int(args, "before", 1, 10**12)
+        _optional_int(args, "limit", 1, 200)
+
+
+def _validate_helper(args: dict[str, Any]) -> None:
+    op = _require_op(args, _HELPER_OPS)
+    allowed = {
+        "start": {"op", "task", "role", "context", "attachments"},
+        "message": {"op", "agent_id", "text"},
+        "update": {"op", "agent_id", "task"},
+        "status": {"op", "agent_id"},
+        "wait": {"op", "agent_id", "timeout"},
+        "inspect": {"op", "agent_id", "cursor", "limit"},
+        "result": {"op", "agent_id"},
+        "stop": {"op", "agent_id"},
+    }[op]
+    require_only_allowed_keys(args, allowed)
+    if op == "start":
+        require_keys(args, {"task"})
+        require_str(args, "task")
+        if args.get("role") not in (None, *_HELPER_ROLES):
+            raise CommandValidationError(f"'role' must be one of: {', '.join(_HELPER_ROLES)}")
+        require_optional_str(args, "context")
+        _optional_str_list(args, "attachments", limit=8)
+        return
+    if op != "status":
+        require_keys(args, {"agent_id"})
+    require_optional_str(args, "agent_id")
+    if op == "message":
+        require_keys(args, {"text"})
+        require_str(args, "text")
+    if op == "update":
+        require_keys(args, {"task"})
+        require_str(args, "task")
+    if op == "wait":
+        timeout = args.get("timeout")
+        if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float))):
+            raise CommandValidationError("'timeout' must be a number of seconds")
+        if timeout is not None:
+            args["timeout"] = min(max(float(timeout), 0.0), 600.0)
+    _optional_int(args, "cursor", 0, 10**9)
+    _optional_int(args, "limit", 1, 100)
 
 
 _MESSAGE_ID_RE = re.compile(r"#?\s*([1-9][0-9]*)")

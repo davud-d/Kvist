@@ -68,7 +68,11 @@ def validate_images(images: object) -> list[dict]:
         total += len(data)
         if total > MAX_TOTAL_BYTES:
             raise ValueError("Images exceed 20 MiB per message")
-        result.append(image_from_bytes(data, str(item.get("name", "image"))))
+        prepared = image_from_bytes(data, str(item.get("name", "image")))
+        # The original bytes ride along only until the agent stores them as an
+        # attachment (LocalAgent.run); they never reach a prompt or a log.
+        prepared["_original"] = data
+        result.append(prepared)
     return result
 
 
@@ -158,7 +162,10 @@ def prepare_goal(agent, goal: str, images: list[dict]) -> str:
     if not images:
         return goal
     description = describe_images(agent, images, goal)
-    names = ", ".join(f"[Image #{i}] {item['name']}" for i, item in enumerate(images, 1))
+    names = ", ".join(
+        f"[Image #{i}] {item['name']}" + (f" (attachment {item['attachment_id']})" if item.get("attachment_id") else "")
+        for i, item in enumerate(images, 1)
+    )
     return f'{goal}\n\n{names}\n<UNTRUSTED_TOOL_OUTPUT source="vision">\n{description}\n</UNTRUSTED_TOOL_OUTPUT>'
 
 

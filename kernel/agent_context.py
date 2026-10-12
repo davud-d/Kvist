@@ -52,6 +52,12 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Background jobs:": 0,
     "Step summaries:": 1,
     "Final answer style:": 0,
+    "Installed skills:": 2,
+    # The instructions of an attached skill are how its tools are used: they
+    # outlive the catalog and the observations when the prompt is trimmed.
+    "Attached skills:": 1,
+    "Workspace memory:": 2,
+    "Helpers:": 0,
 }
 
 # Injected only on steps where a final answer is imminent (completion is ready
@@ -412,12 +418,14 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         or "report_to_user" in self._state.required_next_actions
     )
     final_answer_style = f"{_FINAL_ANSWER_STYLE}\n\n" if finalization_imminent else ""
+    extensions = _extensions_block(self, response_language)
 
     dynamic = (
         f"{text['step']}: {step}\n\n"
         f"{_plan_mode_block(self._state)}"
         f"{_required_next_actions_block(self._state, text)}"
         f"{text['web_facts']}:\n{web_facts}\n\n"
+        f"{extensions}"
         f"{text['step_summaries']}:\n{rolling_summaries_text}\n\n"
         f"{text['read_files']}: {files_read}\n"
         f"{text['changed_files']}: {files_changed}\n\n"
@@ -435,6 +443,29 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
     environment_header = "System environment:\n"
     prefix = f"{environment_header}- Identity: {identity}\n{cached_prefix[len(environment_header):]}"
     return prefix + dynamic + cached_suffix
+
+
+def _extensions_block(self, language: str) -> str:
+    """Skills, workspace notes and helpers: present only when there is something to say."""
+    from kernel.agent_tools import memory_prompt_section
+
+    parts: list[str] = []
+    catalog = self.skills.prompt_section(language)
+    if catalog:
+        parts.append(
+            "Installed skills: (attach one with skills {\"op\": \"attach\", \"skill\": \"<id>\"} only when the "
+            "task needs what it adds and the built-in tools do not suffice)\n" + catalog
+        )
+    if self.skills.attached and not self._state.native_tools:
+        parts.append("Attached skills:\n" + self.skills.attached_instructions())
+    memory = memory_prompt_section(self)
+    if memory:
+        parts.append("Workspace memory:\n" + memory)
+    helpers = getattr(self, "helpers", None)
+    helper_note = helpers.prompt_section() if helpers is not None else ""
+    if helper_note:
+        parts.append("Helpers:\n" + helper_note)
+    return "".join(f"{part}\n\n" for part in parts)
 
 
 def format_dependency_versions_for_prompt(self, language: str = "en") -> str:

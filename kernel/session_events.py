@@ -527,6 +527,36 @@ class JournalingUI:
         self._events.print_session_ended(payload)
         self._forward("print_session_ended", payload)
 
+    # Skills, helpers and their results are part of the conversation a replay
+    # redraws. Screen and task-state events are not: they carry live viewer
+    # tokens and transient states, so they fall through to the live UI only.
+
+    def print_skill_status(self, payload: dict) -> None:
+        self._events.print_skill_status(payload)
+        self._forward("print_skill_status", payload)
+
+    def print_helper(self, payload: dict) -> None:
+        self._events.print_helper(payload)
+        if getattr(self._ui, "print_helper", None) is not None:
+            self._ui.print_helper(payload)
+        elif payload.get("event") in ("started", "done", "failed", "stopped"):
+            self._ui.print_result(f"[{payload['agent_id']}] {payload['event']}: {payload.get('summary') or payload.get('task') or ''}")
+
+    def print_artifact(self, payload: dict) -> None:
+        # The preview is a data URL: shown live, never stored in the journal.
+        self._events.print_artifact({**payload, "preview": ""})
+        if getattr(self._ui, "print_artifact", None) is not None:
+            self._ui.print_artifact(payload)
+        else:
+            self._ui.print_result(f"{payload.get('caption') or payload['name']}: {payload['path']}")
+
+    def print_skill_message(self, skill: str, label: str, markdown: str) -> None:
+        self._events.print_skill_message(skill, label, markdown)
+        if getattr(self._ui, "print_skill_message", None) is not None:
+            self._ui.print_skill_message(skill, label, markdown)
+        else:
+            self._ui.print_user_markdown(f"**{label}:** {markdown}")
+
     def print_plan(self, markdown: str) -> None:
         self._events.print_plan(markdown)
         self._ui.print_plan(markdown)

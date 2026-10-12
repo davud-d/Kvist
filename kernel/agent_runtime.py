@@ -49,7 +49,17 @@ def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, A
         }
     if command.action.type in _NON_RECONCILABLE_SIDE_EFFECTS:
         return {**common, "action_kind": "side_effect", "action_type": command.action.type}
+    if command.action.type == "skill_call" and not _skill_call_readonly(self, command):
+        # A skill's effect (a click, a request, a started server) cannot be
+        # proven after a crash either: resume reports it instead of replaying it.
+        return {**common, "action_kind": "side_effect", "action_type": "skill_call",
+                "skill": command.action.args.get("skill"), "tool": command.action.args.get("tool")}
     return None
+
+
+def _skill_call_readonly(self, command: AgentCommand) -> bool:
+    args = command.action.args
+    return bool(self.skills.tool_readonly(str(args.get("skill")), str(args.get("tool"))))
 
 from kernel.action_result import SKIPPED_ERROR, build_action_result
 from kernel.agent_state import PLAN_PLANNING, RunCancelled, RunState
@@ -79,6 +89,10 @@ from kernel import end_session, plan_mode
 from kernel.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker
 from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 from kernel.background_jobs import UiJobListener
+from kernel.agent_tools import AGENT_TOOL_ACTIONS, memory_prompt_section, run_agent_tool
+from kernel.resources import CleanupReport, Owner, StopOutcome
+from kernel.task_control import PAUSED
+from kernel.agent_logging import mark_checkpoint_paused
 
 _READ_ONLY_ACTIONS = {
     "read_file", "read_multiple_files", "list_dir",
@@ -87,8 +101,13 @@ _READ_ONLY_ACTIONS = {
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 # Reading or ending a background job: repeating the call is how a job is
-# followed, so neither the repeat guard nor stagnation counting applies.
-_JOB_ACTIONS = {"job_output", "job_stop"}
+# followed, so neither the repeat guard nor stagnation counting applies. The
+# same holds for the agent's own tools: a skill's screenshot or a helper's
+# status is asked again because the world changed, not because of a loop.
+_JOB_ACTIONS = {"job_output", "job_stop", "skill_call", "helper", "skills", "memory", "sessions", "ask_user"}
+# The agent's own tools never change the workspace, except a skill tool not
+# declared read-only (checked per call).
+_AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user"}
 # What can answer "no file changed yet": an edit, or running the reported
 # problem, which is how a bug claim is confirmed (then fixed) or refuted.
 _CHANGE_OR_REPRODUCE_ACTIONS = _WRITE_ACTIONS | {"run_shell"}
@@ -96,6 +115,7 @@ _CHANGE_OR_REPRODUCE_ACTIONS = _WRITE_ACTIONS | {"run_shell"}
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
     "job_output", "job_stop", "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "edit_plan", "cancel_plan", "refuse",
+    *_AGENT_STATE_ACTIONS,
 }
 _VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
@@ -520,11 +540,19 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     # write — "переименуй ... и проверь, что всё работает" is a rename task, and
     # blocking its writes left it with nothing it was allowed to do. Clearing
     # create/modify avoids the runtime demanding a write it will then refuse.
-    read_only_goal = self._state.current_agent_role == "reader" or has_no_write_marker(user_goal)
+    read_only_goal = (
+        self._state.current_agent_role == "reader"
+        or has_no_write_marker(user_goal)
+        or self.force_read_only
+    )
     for update in self._state.task_updates:
         if has_no_write_marker(update):
             read_only_goal = True
-        elif self._state.current_agent_role != "reader" and (_is_modify_goal(update) or _is_create_goal(update)):
+        elif (
+            self._state.current_agent_role != "reader"
+            and not self.force_read_only
+            and (_is_modify_goal(update) or _is_create_goal(update))
+        ):
             read_only_goal = False
     # "Don't change files until steps 1-4 are done" orders the work: no change
     # is owed while those stages are open, and writes stay possible after them.
@@ -571,6 +599,8 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             loop_pre = time.monotonic()
             turn: NativeTurn | None = None
             _collect_job_note(self)
+            _collect_helper_note(self)
+            _drain_inbox(self)
             try:
                 if self._state.native_tools:
                     turn = _call_native_turn(self, user_goal, step)
@@ -620,18 +650,27 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         # already records as unconfirmed for /resume to reconcile.
         final_message = _stop_by_user(self)
     finally:
-        _stop_background_jobs(self)
+        cleanup = _end_of_turn_resources(self)
         self._finalize_run(
             user_goal,
             task_completed=task_completed,
             primary_error=sys.exception(),
         )
 
+    paused = self.control.state == PAUSED
+    summary = cleanup.summary(self._state.response_language or "en") if cleanup is not None else ""
+    if summary and not report_rendered:
+        final_message = f"{final_message}\n\n_{summary}_"
+    elif summary:
+        self._ui.print_result(summary)
     if not self.config.verbose and not report_rendered:
         self._ui.print_final(
-            final_message, self._state.user_messages, outcome=_final_outcome(self, task_completed)
+            final_message,
+            self._state.user_messages,
+            outcome="paused" if paused else _final_outcome(self, task_completed),
         )
-
+    if not paused:
+        self.control.finish()
     return final_message
 
 
@@ -646,11 +685,55 @@ def _collect_job_note(self) -> None:
         notice(text, job_ids)
 
 
-def _stop_background_jobs(self) -> None:
-    """Jobs live as long as the turn: nothing is running when the answer is given."""
+def _stop_background_jobs(self) -> list[Any]:
+    """Jobs live as long as the task: nothing is running when the answer is given."""
     jobs = self.executor.jobs
-    jobs.stop_all()
+    stopped = jobs.stop_all()
     jobs.listener = None
+    return stopped
+
+
+def _end_of_turn_resources(self) -> CleanupReport | None:
+    """What the task owns, at the end of the turn.
+
+    A pause keeps it all (a dev server, the virtual screen, a frozen skill,
+    paused helpers) for the person's correction. Any other ending — the final
+    answer, "stop all", an error — stops helpers, skills, background jobs and
+    every resource of this run, and reports what could not be confirmed.
+    """
+    if self.control.state == PAUSED:
+        self.skills.pause()
+        return None
+    reason = "user_cancelled" if self.control.cancel_requested() else "task_finished"
+    report = CleanupReport(reason)
+    if self.helpers is not None:
+        for agent_id in self.helpers.stop_all(reason):
+            report.outcomes.append(StopOutcome(agent_id, f"helper {agent_id}", stopped=True, kind="helper"))
+    report.outcomes.extend(self.skills.finish_task(reason).outcomes)
+    for job in _stop_background_jobs(self):
+        report.outcomes.append(StopOutcome(job.job_id, f"background job {job.job_id}", stopped=True, kind="job"))
+    owner = Owner(run_id=str(getattr(self, "_run_id", "") or "run"))
+    report.outcomes.extend(self.resources.cleanup(owner, reason).outcomes)
+    return report
+
+
+def _collect_helper_note(self) -> None:
+    """Helper notices since the last request go into the next one, as facts — no model polls for them."""
+    if self.helpers is None:
+        return
+    text = self.helpers.take_notices()
+    if text:
+        self._state.job_note = f"{self._state.job_note}\nHelpers:\n{text}".strip()
+
+
+def _drain_inbox(self) -> None:
+    """A helper's messages from the main agent become follow-ups of its task before its next request."""
+    source = self.inbox_source
+    if source is None:
+        return
+    for text in source():
+        self._state.task_updates.append(text)
+        self._state.pending_instruction = f"{self._state.pending_instruction}\n{text}".strip()
 
 
 def _final_outcome(self, task_completed: bool) -> str:
@@ -665,8 +748,25 @@ def _final_outcome(self, task_completed: bool) -> str:
 
 
 def _stop_by_user(self) -> str:
+    """The loop reached a safe point after a pause or a stop; which one decides what survives."""
+    if not self.control.interrupted():
+        # Ctrl+C reaches the loop as a KeyboardInterrupt without a request.
+        self.control.request_cancel("user_cancelled")
+    state = self.control.reached_safe_point()
     self._state.stopped_by_user = True
+    if state == PAUSED:
+        self._state.paused_by_user = True
+        mark_checkpoint_paused(self)
+        return _build_pause_message(self)
     return self._build_cancellation_message()
+
+
+def _build_pause_message(self) -> str:
+    if self._state.response_language == "ru":
+        return ("Работа на паузе: агент остановился в безопасной точке, состояние задачи сохранено. "
+                "Напишите уточнение — агент учтёт его и продолжит, — или «продолжай».")
+    return ("Paused: the agent stopped at a safe point and kept the task's state. "
+            "Write a correction and it continues with it, or say \"continue\".")
 
 
 def _handle_model_error(self, step: int, error: Exception, loop_pre: float) -> str | None:
@@ -737,6 +837,11 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     tools = tools_for_role(_load_role_prompt(role))
     if end_session.available(self, role):
         tools.append(tool_definition(end_session.ACTION))
+    if self.is_helper:
+        # A helper never manages helpers and never asks the person directly:
+        # its questions go through the main agent.
+        tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user")]
+    tools.extend(self.skills.tool_definitions())
     state.native_tool_defs = plan_mode.tools_for_phase(tools, self)
     if not state.native_messages:
         state.native_messages = [
@@ -925,6 +1030,10 @@ MAX_PARALLEL_CALLS = 4
 _NOT_RUN_AFTER_FINISH = "Not executed: an earlier call in this response already ended the task."
 _NOT_RUN_BESIDE_REFUSAL = "Not executed: this response refuses the task."
 _NOT_RUN_BUDGET = "Not executed: the step budget ran out."
+_NOT_RUN_INTERRUPTED = (
+    "Not executed: the person paused or stopped the task before this call. "
+    "Check again whether it is still needed before making it."
+)
 _SKIPPED_AFTER_FAILED_WRITE = SKIPPED_ERROR
 _SKIPPED_LABELS = ("пропущено: предыдущее действие упало", "skipped: an earlier action failed")
 
@@ -957,7 +1066,8 @@ def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCa
             continue
         try:
             command = build_command(
-                request, text=response.text, batch_id=batch_id, plan_step=plan_step, language=language
+                request, text=response.text, batch_id=batch_id, plan_step=plan_step, language=language,
+                resolve_skill_tool=self.skills.resolve,
             )
         except CommandValidationError as error:
             reason = redact_text(str(error))
@@ -991,6 +1101,14 @@ def _run_calls(
     index = 0
     while index < len(planned):
         item = planned[index]
+        if self.control.interrupted() and not outcome.finished:
+            # A pause or stop between calls: the rest of the response does not
+            # run; after the person's correction the model decides again.
+            answers.append(_NOT_RUN_INTERRUPTED)
+            if item.command is not None:
+                not_run.append(f"{item.command.action.description}: {_NOT_RUN_INTERRUPTED}")
+            index += 1
+            continue
         if outcome.finished or (refusal is not None and item is not refusal):
             answers.append(_NOT_RUN_AFTER_FINISH if outcome.finished else _NOT_RUN_BESIDE_REFUSAL)
             index += 1
@@ -1716,6 +1834,8 @@ def reset_run_state(self) -> None:
 
 
 def execute_command(self, command: AgentCommand) -> dict[str, Any]:
+    if command.action.type in AGENT_TOOL_ACTIONS:
+        return redact_value(run_agent_tool(self, command))
     try:
         result = self.executor.execute(command)
     except ExecutorError as error:
@@ -2868,6 +2988,16 @@ def _is_report_artifact_blocked(self, command: AgentCommand) -> bool:
 
 def _is_read_only_violation(self, command: AgentCommand) -> bool:
     """Block write actions on a run the user, the role or plan mode made read-only."""
+    if command.action.type == "skill_call":
+        # A skill tool may run in a read-only phase only when its approved
+        # manifest declares it read-only; the core then refuses any write it
+        # attempts through ctx as well.
+        read_only_phase = (
+            self._state.plan_phase == PLAN_PLANNING
+            or self._state.read_only_goal
+            or self._state.current_agent_role == "reader"
+        )
+        return read_only_phase and not _skill_call_readonly(self, command)
     if self._state.plan_phase == PLAN_PLANNING:
         return not _allowed_while_planning(command)
     if not self._state.read_only_goal:

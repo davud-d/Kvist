@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from kernel.redaction import redact_text
@@ -110,6 +111,16 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
         return f"Fetched {_plural(len(str(data.get('content', ''))), 'character')}{suffix}"
     if action_type == "delegate_task":
         return _delegation_summary(data)
+    if action_type == "skill_call":
+        return f"{data.get('skill', 'skill')}.{data.get('tool', '')}: {data.get('status', 'done')} in {data.get('duration_seconds', 0)} s"
+    if action_type == "ask_user":
+        return f"Answer: {data.get('status', '')}"
+    if action_type == "skills" and data.get("attached") and not isinstance(data.get("attached"), list):
+        return f"Attached {data['attached']} {data.get('version', '')}".strip()
+    if action_type == "skills" and data.get("detached"):
+        return f"Detached {data['detached']}"
+    if action_type == "helper" and data.get("agent_id"):
+        return f"{data['agent_id']}: {data.get('state', '')}".strip()
     return "Done"
 
 
@@ -165,6 +176,8 @@ def _raw_output(action_type: str, data: dict[str, Any], ok: bool, error: str) ->
         return _delegation_output(data) or ("" if ok else error)
     if action_type in {"job_output", "job_stop"} and ok:
         return str(data.get("output") or "")
+    if action_type == "skill_call" and ok:
+        return json.dumps(data.get("result"), ensure_ascii=False, indent=1)[:4000]
     return "" if ok else error
 
 

@@ -419,6 +419,14 @@ def _load_native_channel_section() -> str:
 
 
 _NATIVE_CHANNEL_KEY = "__native_tools__"
+_EXTENSIONS_KEY = "__extensions__"
+
+
+def _load_extensions_section() -> str:
+    """Skills, notes, past conversations, helpers, pause and questions: shared by the action roles."""
+    if _EXTENSIONS_KEY not in _PROMPT_CACHE:
+        _PROMPT_CACHE[_EXTENSIONS_KEY] = (_PROMPT_DIR / "extensions.txt").read_text(encoding="utf-8").strip()
+    return _PROMPT_CACHE[_EXTENSIONS_KEY]
 
 
 def build_role_system_prompt(
@@ -442,6 +450,8 @@ def build_role_system_prompt(
     base = f"{_load_constitution()}\n\n{role_prompt}\n\n{slash_commands_context()}"
     if plan_mode.offer_available(self) or self._state.plan_phase:
         base = f"{base}\n\n{_load_plan_mode_section()}"
+    if role != "chat":
+        base = f"{base}\n\n{_load_extensions_section()}"
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"

@@ -360,7 +360,7 @@ def redact_text(text: str) -> str:
 DEFANGED_TAG = "[tag removed by Kvist]"
 
 _PROMPT_BOUNDARY_TAG_RE = re.compile(
-    r"</?\s*(?:PROJECT_INSTRUCTIONS|UNTRUSTED_TOOL_OUTPUT|KVIST_RUNTIME)\b[^>]*>",
+    r"</?\s*(?:PROJECT_INSTRUCTIONS|UNTRUSTED_TOOL_OUTPUT|KVIST_RUNTIME|SKILL_INSTRUCTIONS|WORKSPACE_MEMORY)\b[^>]*>",
     re.IGNORECASE,
 )
 # The end_session tag is replaced even when its ">" is missing, up to the end of the line.
