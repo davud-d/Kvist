@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { shimmerColor } from "../ui/skins/claude-code/shimmer.js"
+import { coolDown, shimmerColor } from "../ui/skins/claude-code/shimmer.js"
 
 function rgb(hex: string): number[] {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
@@ -44,4 +44,13 @@ test("the wait turns orange within seconds, then gold, then red, without jumps",
 test("a long wait still ripples with the blue", () => {
   const blues = Array.from({ length: 24 }, (_, i) => rgb(shimmerColor(200, i * 100, 0))[2]!)
   assert.ok(Math.max(...blues) - Math.min(...blues) > 40)
+})
+
+test("the shown wait rises at once and falls back gradually", () => {
+  assert.equal(coolDown(5, 40, 0.12), 40)
+  const step = coolDown(40, 0, 0.12)
+  assert.ok(step < 40 && step > 30)
+  let shown = 40
+  for (let frame = 0; frame < 50; frame++) shown = coolDown(shown, 0, 0.12)
+  assert.ok(shown < 1)
 })

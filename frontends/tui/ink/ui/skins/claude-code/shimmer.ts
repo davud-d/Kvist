@@ -29,6 +29,10 @@ const IDLE_ORANGE = 0.4
 const PERIOD_MS = 2400
 const PHASE_PER_CHAR = 0.28
 
+// How quickly the shown wait falls back after the model answered: the gap closes by a factor
+// of e every this many seconds, so gold is bluish again after about three.
+const COOL_DOWN_SECONDS = 1
+
 type Rgb = [number, number, number]
 
 function smooth(from: number, to: number, value: number): number {
@@ -62,4 +66,17 @@ export function shimmerColor(waitingSeconds: number, nowMs: number, index: numbe
   // before it starts, only the crests of the ripple turn orange.
   const amount = warmth * (0.25 + 0.75 * ripple) + (1 - warmth) * IDLE_ORANGE * ripple * ripple
   return hex(mix(cool, hot, amount))
+}
+
+/**
+ * The wait to colour the spinner with: it rises with the real wait at once and falls back
+ * gradually, so the colour cools down instead of snapping to blue when the model answers.
+ * @param shown The wait that was shown at the previous frame.
+ * @param target The real wait now.
+ * @param elapsedSeconds Time since the previous frame.
+ * @returns The wait to show at this frame.
+ */
+export function coolDown(shown: number, target: number, elapsedSeconds: number): number {
+  if (target >= shown) return target
+  return target + (shown - target) * Math.exp(-elapsedSeconds / COOL_DOWN_SECONDS)
 }

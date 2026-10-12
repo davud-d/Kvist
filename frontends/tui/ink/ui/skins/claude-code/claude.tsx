@@ -12,7 +12,7 @@ import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.j
 import { jobFailed, jobLabel, jobsCopy, jobTail } from "../../jobs.js"
 import { Markdown, renderInline } from "../../markdown.js"
 import { color } from "../../theme.js"
-import { shimmerColor } from "./shimmer.js"
+import { coolDown, shimmerColor } from "./shimmer.js"
 import { tipFor } from "./tips.js"
 import { doneLine, spinnerWord } from "./verbs.js"
 import { ClaudeDiff, ClaudePreview, diffSummary } from "./claude-diff.js"
@@ -478,7 +478,12 @@ export function ClaudeLiveBody({ state }: { state: State }) {
 export function ClaudeSpinner({ state }: { state: State }) {
   const now = useNow(state.running || state.command !== null, 120)
   const glyph = SPINNER[Math.floor(now / 120) % SPINNER.length] ?? "·"
-  if (state.command && !state.pending) return <Spinner glyph={glyph} text={`Running /${state.command}`} detail="esc to cancel" now={now} />
+  // A running call has its own clock; only the wait for the model warms the colour, and the
+  // colour cools down gradually once the model has answered.
+  const target = state.running && state.waitingSince && state.inflight.length === 0 ? (now - state.waitingSince) / 1000 : 0
+  const shown = useRef({ waiting: 0, at: now })
+  shown.current = { waiting: coolDown(shown.current.waiting, target, (now - shown.current.at) / 1000), at: now }
+  if (state.command && !state.pending) return <Spinner glyph={glyph} text={`Running /${state.command}`} detail="esc to cancel" waiting={shown.current.waiting} now={now} />
   if (!state.running || state.pending) return null
 
   const turnSeconds = state.startedAt ? (now - state.startedAt) / 1000 : 0
@@ -493,15 +498,13 @@ export function ClaudeSpinner({ state }: { state: State }) {
   const tokens = Math.max(0, state.usage.output - state.turnStartOutput)
   const detail = [formatSeconds(turnSeconds), tokens > 0 ? `↓ ${tokenCount(tokens)} tokens` : "", doing].filter(Boolean).join(" · ")
   const text = request?.kind === "user" ? (request.request ?? request.text) : ""
-  // A running call has its own clock; only the wait for the model warms the colour.
-  const waiting = state.waitingSince && state.inflight.length === 0 ? (now - state.waitingSince) / 1000 : 0
   const tip = tipFor(state.startedAt ?? 0, text, turnSeconds)
   return (
     <Spinner
       glyph={glyph}
       text={spinnerWord(role, state.startedAt ?? 0, turnSeconds, text)}
       detail={detail}
-      waiting={waiting}
+      waiting={shown.current.waiting}
       now={now}
       tip={tip ? `${CYRILLIC.test(text) ? "Совет" : "Tip"}: ${tip}` : ""}
     />
