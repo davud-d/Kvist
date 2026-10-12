@@ -330,7 +330,7 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
       return <Call tone={color.ok} name={exploreLine(item.counts)} target="" />
     case "say":
     case "answer":
-      return <Message text={item.text} />
+      return item.fresh ? <FreshMessage text={item.text} /> : <Message text={item.text} />
     case "done":
       return (
         <Box marginTop={1}>
@@ -387,15 +387,23 @@ function tokenCount(count: number): string {
 // and a fast model is done in half a second, so shown as it arrives the text lands in a few blocks.
 const REVEAL_MS = 33
 const CATCH_UP = 5
+// A long report would otherwise open with a fifth of itself in one tick.
+const MAX_STEP = 24
 
-function useTypewriter(text: string): string {
-  const [revealed, setRevealed] = useState(0)
+// What the live answer had shown when it was committed: the settled answer continues from there
+// instead of retyping from the first character.
+let lastLiveShown = ""
+
+function useTypewriter(text: string, start = 0): string {
+  const [revealed, setRevealed] = useState(Math.min(start, text.length))
   const goal = useRef(text.length)
   goal.current = text.length
   useEffect(() => {
     const timer = setInterval(() => {
       // Each tick closes a fifth of the gap, so a burst is spread over about half a second.
-      setRevealed((n) => (n > goal.current ? goal.current : n + Math.ceil((goal.current - n) / CATCH_UP)))
+      setRevealed((n) =>
+        n > goal.current ? goal.current : n + Math.min(MAX_STEP, Math.ceil((goal.current - n) / CATCH_UP)),
+      )
     }, REVEAL_MS)
     return () => clearInterval(timer)
   }, [])
@@ -411,7 +419,19 @@ function LiveThought({ text }: { text: string }) {
 }
 
 function LiveAnswer({ text }: { text: string }) {
-  return <Message text={useTypewriter(text)} />
+  const shown = useTypewriter(text)
+  lastLiveShown = shown
+  return <Message text={shown} />
+}
+
+// An answer that arrived during the turn: revealed gradually, from where the live stream stopped.
+function FreshMessage({ text }: { text: string }) {
+  const [start] = useState(() => {
+    const from = text.startsWith(lastLiveShown) ? lastLiveShown.length : 0
+    lastLiveShown = ""
+    return from
+  })
+  return <Message text={useTypewriter(text, start)} />
 }
 
 const COMMAND_LINES = 4

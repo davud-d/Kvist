@@ -587,3 +587,48 @@ def test_decode_arguments_accepts_an_object_the_gateway_wrote_twice():
 def test_decode_arguments_rejects_other_text_after_the_object():
     with pytest.raises(json.JSONDecodeError):
         decode_arguments('{"ok":true}{"ok":false}')
+
+
+def test_words_before_a_call_stream_to_a_ui_that_takes_them_and_the_call_stays_out(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent._ui.streams_words = True
+    shown: list[str] = []
+
+    class _Live:
+        def __enter__(self):
+            return shown.append
+
+        def __exit__(self, *exc):
+            return False
+
+    agent._ui.live_markdown = lambda: _Live()
+
+    def chunk(**delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(**delta))])
+
+    stream = [
+        chunk(content="Reading the file.", tool_calls=None),
+        chunk(content=None, tool_calls=[
+            SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name="read_file", arguments="{}"))
+        ]),
+        chunk(content="Done!", tool_calls=None),
+    ]
+
+    agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+
+    assert shown and shown[-1] == "Reading the file."
+
+
+def test_a_ui_without_streams_words_gets_no_live_stream(agent_factory):
+    agent = agent_factory(max_steps=1)
+    opened: list[str] = []
+    agent._ui.live_markdown = lambda: opened.append("open")
+
+    def chunk(**delta):
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(**delta))])
+
+    agent_model._native_turn_from_stream(
+        agent, iter([chunk(content="Hello", tool_calls=None)]), time.monotonic()
+    )
+
+    assert opened == []

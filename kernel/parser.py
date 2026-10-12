@@ -532,6 +532,30 @@ _ARGUMENT_KEYS = ("arguments", "args", "parameters", "input")
 _CALL_SHAPE = '{"name": "<tool>", "arguments": {...}}'
 
 
+_LEADING_FENCE_RE = re.compile(r"^```[\w+-]*[ \t]*\n?")
+_OPEN_TAG_LITERAL = "<tool_call"
+
+
+def speakable_prefix(text: str) -> str:
+    """The words for the person in a response that is still arriving.
+
+    Ends before the first ``<tool_call>`` (and before a partial one at the end
+    of the text, which the next chunk may complete). A response that opens with
+    a JSON object is the JSON protocol: it carries no words, so nothing of it
+    is shown.
+    """
+    body = _LEADING_FENCE_RE.sub("", text.lstrip(), count=1)
+    if body.startswith("{"):
+        return ""
+    tag = _OPEN_TAG_RE.search(text)
+    if tag is not None:
+        return _FENCE_BEFORE_TAG_RE.sub("", text[: tag.start()].rstrip(), count=1).strip()
+    for size in range(len(_OPEN_TAG_LITERAL), 0, -1):
+        if text.endswith(_OPEN_TAG_LITERAL[:size]):
+            return text[: len(text) - size].strip()
+    return text.lstrip()
+
+
 def parse_model_response(text: str) -> ModelResponse:
     """Split a text-mode response into the words for the person and its calls.
 

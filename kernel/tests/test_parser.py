@@ -355,3 +355,22 @@ def test_model_response_reads_a_bare_call_object_without_tags():
     (call,) = parse_model_response('```json\n{"name": "read_file", "arguments": {"path": "a.py"}}\n```').calls
 
     assert (call.name, call.arguments) == ("read_file", {"path": "a.py"})
+
+
+@pytest.mark.parametrize(
+    ("text", "words"),
+    [
+        ("Reading the file.", "Reading the file."),
+        ("Reading.\n<tool_call>{\"name\": \"x\"}", "Reading."),
+        ("Reading.\n<tool_c", "Reading."),
+        ("Reading.\n```json\n<tool_call>{}", "Reading."),
+        ('{"thought": "x", "actions": []}', ""),
+        ('```json\n{"thought": "x"}', ""),
+        ("<tool_call>{}", ""),
+        ("", ""),
+    ],
+)
+def test_speakable_prefix_keeps_the_words_and_drops_calls_and_json(text, words):
+    from kernel.parser import speakable_prefix
+
+    assert speakable_prefix(text) == words

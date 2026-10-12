@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -49,6 +50,7 @@ from kernel.llm_clients import (
 )
 from kernel import end_session, plan_mode
 from kernel.agent_state import RunCancelled
+from kernel.parser import speakable_prefix
 from kernel.task_intent import is_complex_goal
 from kernel.native_tools import (
     NativeToolsRejected,
@@ -775,6 +777,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     first_output: float | None = None
     last_push = 0.0
     last_call_push = 0.0
+    spoken = _SpokenStream(self)
     try:
         for chunk in stream:
             if self._cancel_event.is_set():
@@ -804,12 +807,15 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 _seal_thinking(self, reasoning)
             if getattr(delta, "content", None):
                 (after_calls if calls else content).append(delta.content)
+                if not calls:
+                    spoken.feed("".join(content))
             for piece in pieces:
                 _merge_tool_call_delta(calls, piece)
             if calls and time.monotonic() - last_call_push > 0.5:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
     finally:
+        spoken.close("".join(content))
         close = getattr(stream, "close", None)
         if close is not None:
             try:
@@ -1174,6 +1180,48 @@ def call_model(
     raise RuntimeError(f"Failed to get model response: {safe_error}")
 
 
+def words_are_streamed(agent: Any) -> bool:
+    """Whether a response's words reach the person while the response arrives."""
+    ui_streams = bool(getattr(agent._ui, "streams_words", False))
+    return ui_streams and not end_session.available(agent, agent._state.current_agent_role)
+
+
+class _SpokenStream:
+    """Shows the words of a streaming response to a UI that takes them live.
+
+    Only the words are shown: ``speakable_prefix`` drops tool-call tags and a
+    JSON-protocol object. Disabled where the response may still be replaced by
+    the end_session tool, whose words never reach the person.
+    """
+
+    def __init__(self, agent: Any) -> None:
+        self._ui = agent._ui
+        self._enabled = words_are_streamed(agent)
+        self._stack = contextlib.ExitStack()
+        self._update: Any = None
+        self._shown = ""
+        self._last_push = 0.0
+
+    def feed(self, content: str) -> None:
+        words = speakable_prefix(content)
+        if not self._enabled or not words or words == self._shown:
+            return
+        now = time.monotonic()
+        if self._update is None:
+            self._update = self._stack.enter_context(self._ui.live_markdown())
+        elif now - self._last_push < 0.1:
+            return
+        self._last_push = now
+        self._shown = words
+        self._update(words)
+
+    def close(self, content: str) -> None:
+        words = speakable_prefix(content)
+        if self._update is not None and words != self._shown:
+            self._update(words)
+        self._stack.close()
+
+
 def _note_thinking(self, text: str) -> None:
     """Forward streamed reasoning to a UI that shows a live thinking panel.
 
@@ -1219,6 +1267,7 @@ def call_model_streaming(
     chunk_count = 0
     total_chunk_bytes = 0
     renderer = ThrottledRenderer(max_fps=10)
+    spoken = _SpokenStream(self)
     try:
         for chunk in stream:
             # Checked each chunk so a cancellation stops generation without
@@ -1250,6 +1299,7 @@ def call_model_streaming(
                 chunk_count += 1
                 total_chunk_bytes += len(delta.content)
                 chunks.append(delta.content)
+                spoken.feed("".join(chunks))
                 renderer.feed(delta.content)
                 if self.config.verbose and not preview_shown:
                     rendered = renderer.maybe_render()
@@ -1257,6 +1307,7 @@ def call_model_streaming(
                         preview_shown = True
                         print(f"  [streaming] {rendered[:120]}...", flush=True)
     finally:
+        spoken.close("".join(chunks))
         # An abandoned HTTP stream would otherwise hold its connection open;
         # applies to cancellation, provider failure, and normal completion.
         close = getattr(stream, "close", None)

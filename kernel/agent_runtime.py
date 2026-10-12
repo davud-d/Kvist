@@ -1527,7 +1527,17 @@ def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _Action
         self._record_error(error_text)
         # The prompt no longer lists blockers on every step, so the refusal
         # itself is where the model learns what "done" still lacks.
-        self._state.pending_instruction = f"Your finish was not accepted as done. {error_text}"
+        # A refused finish is not shown by a UI that does not stream words, so
+        # a model that asked the person a question in it must repeat it.
+        from kernel.agent_model import words_are_streamed
+
+        unseen = (
+            ""
+            if words_are_streamed(self)
+            else " The person has not seen the message of that finish: anything it "
+            "said or asked is lost unless your next answer says it again."
+        )
+        self._state.pending_instruction = f"Your finish was not accepted as done. {error_text}{unseen}"
         self._state.step_logs.append(
             {
                 "step": step,

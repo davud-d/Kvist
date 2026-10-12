@@ -63,6 +63,10 @@ class EventStreamUI:
     not a terminal.
     """
 
+    # The action loop streams a response's words through ``live_markdown`` to
+    # this UI; the classic terminal prints them with the step, so it is left out.
+    streams_words = True
+
     def __init__(
         self, channel: FrontendChannel, new_stream_id: Callable[[], str] | None = None
     ) -> None:
@@ -72,8 +76,8 @@ class EventStreamUI:
         # carries the id the live copy already sent.
         self._new_stream_id = new_stream_id or (lambda: uuid.uuid4().hex)
         self.last_stream_id = ""
-        # The action loop streams no answer, so its reasoning has no stream of
-        # its own: one is opened when the first thought arrives and sealed when
+        # Reasoning that arrives outside a words stream has no stream of its
+        # own: one is opened when the first thought arrives and sealed when
         # the model starts writing the action.
         self._loop_reasoning: tuple[str, float] | None = None
         self._loop_reasoning_sent = ""
@@ -92,6 +96,9 @@ class EventStreamUI:
         self._job_outputs: dict[str, _JobOutput] = {}
         # A response's words go out once, on the first step of its batch.
         self._said_batch = ""
+        # The words the last stream carried: the step that follows it would
+        # say them a second time.
+        self._streamed_words = ""
 
     def start_live(self) -> None:
         self._channel.emit(LiveStartEvent())
@@ -177,6 +184,8 @@ class EventStreamUI:
         if not command.batch_id or command.batch_id != self._said_batch:
             self._said_batch = command.batch_id
             text = command.text
+            if redact_text(text).strip() == self._streamed_words:
+                text = ""
         self._channel.emit(
             StepEvent(
                 step,
@@ -385,6 +394,7 @@ class EventStreamUI:
             yield update
         finally:
             commit_reasoning()
+            self._streamed_words = redact_text(last).strip()
             self._channel.emit(StreamCommitEvent(stream_id, redact_text(last)))
 
     def render_user_markdown(self, message: str, fallback_style: str = "") -> str:
