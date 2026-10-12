@@ -1060,7 +1060,9 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
         return None
     args.frontend = chosen
     # Setup has just saved a provider; the interface it chose is the agent itself.
+    # needs_setup() also reads args.installer, so leaving it set reopened the setup screen forever.
     args.setup = False
+    args.installer = False
     return launch_tui(args)
 
 

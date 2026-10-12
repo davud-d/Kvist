@@ -395,6 +395,27 @@ def test_tui_switch_between_node_interfaces_relaunches_with_the_new_skin(monkeyp
     assert calls == []
 
 
+def test_installer_switch_starts_the_agent_instead_of_reopening_setup(monkeypatch, tmp_path):
+    entry = tmp_path / "cli.js"
+    entry.write_text("")
+    monkeypatch.setattr(main, "save_frontend", lambda value: None)
+    monkeypatch.setenv("KVIST_INSTALL_SCRIPT", str(tmp_path / "install.sh"))
+    _make_tty(monkeypatch, entry)
+    launches = []
+
+    def choose_claude_then_quit(command, env):
+        launches.append(command)
+        if len(launches) == 1:
+            Path(env["KVIST_SWITCH_FILE"]).write_text("claude\n", encoding="utf-8")
+            return main._TUI_SWITCH_CODE
+        return 0
+
+    monkeypatch.setattr(subprocess, "call", choose_claude_then_quit)
+    assert main.launch_tui(_tui_args(installer=True)) == 0
+    assert "--setup" in launches[0]
+    assert "--setup" not in launches[1]
+
+
 @pytest.mark.parametrize(
     ("raw", "current", "expected"),
     [
