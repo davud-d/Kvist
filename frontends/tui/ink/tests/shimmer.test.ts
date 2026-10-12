@@ -33,8 +33,10 @@ test("the wait turns orange within seconds, then gold, then red, without jumps",
   assert.ok(r1! > b1!)
   assert.ok(g2! > g1!)
   assert.ok(r3! > b3! && g3! < g2! - 40)
+  const [r4, g4, b4] = average(700)
+  assert.ok(b4! > g4! + 100 && r4! > g4! + 30)
   let previous = average(6)
-  for (let seconds = 7; seconds <= 240; seconds++) {
+  for (let seconds = 7; seconds <= 700; seconds++) {
     const now = average(seconds)
     assert.ok(Math.max(...now.map((v, i) => Math.abs(v - previous[i]!))) < 8)
     previous = now
