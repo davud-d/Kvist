@@ -102,6 +102,27 @@ Every run has a human-in-the-loop approval gate. File writes and risky commands
 are visible and may require confirmation. This is a supervised tool, not an IDE
 and not a complete security boundary: review the diff and command output.
 
+## Skills
+
+Kvist can be extended with installable skills: packages with instructions and,
+optionally, Python tools that run in an OS sandbox with only the permissions you
+approve. A bundled **browser** skill gives the agent its own Chromium on a
+separate virtual screen: it opens the page it built, clicks through it, reads
+console and network errors and takes screenshots, and you watch a live preview
+(top right in the GUI, or a local viewer link). Other bundled skills run tests,
+read PDF/xlsx/docx and navigate Python code. `Esc` pauses the task, its
+helpers and the skills' work without losing anything; Ctrl+C or "Stop all"
+cancels everything and cleans up. Skills are Linux-only for now.
+
+```bash
+kvist --skill-op install --skill-path bundled:browser
+kvist --skill-op install-deps --skill browser
+kvist --skill-op approve --skill browser
+```
+
+Package format, permissions, the `ctx` API, the sandbox's guarantees and limits
+are in [`docs/SKILLS.md`](docs/SKILLS.md) ([RU](docs/SKILLS.ru.md)).
+
 ## Requirements
 
 - Python 3.11 or newer;
@@ -721,6 +742,7 @@ Each component keeps its tests next to it (`kernel/tests/`, `frontends/*/tests/`
 ## Related docs
 
 - [`docs/UI_API.md`](docs/UI_API.md) — complete frontend protocol;
+- [`docs/SKILLS.md`](docs/SKILLS.md) — skills: package format, permissions, `ctx` API, sandbox ([RU](docs/SKILLS.ru.md));
 - [`frontends/gui/electron/README.md`](frontends/gui/electron/README.md) — Electron development and packaging;
 - [`frontends/ide/jetbrains/README.md`](frontends/ide/jetbrains/README.md) — IntelliJ plugin;
 - [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md) — VS Code extension;

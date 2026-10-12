@@ -288,10 +288,11 @@ not already have, so `agent_runtime.update_progress` derives `RunState.progress`
 the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
 monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of 25 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 31 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
 git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, refuse,
-final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session). The parser tolerates fenced code blocks, smart quotes, and surrounding
+final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session, skills, memory, sessions, helper, ask_user, and the
+internal `skill_call` the model never names). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
 enforced by `kernel/tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
@@ -629,7 +630,13 @@ one stop after 40 steps of reading once cost 48 more).
 **Escape needs two presses; Ctrl+C needs one.** The first Escape only arms the stop
 (`_stop_armed_at`) and shows `_STOP_HINTS` in a one-line window directly under the
 status panel; a second press within `_STOP_CONFIRM_SECONDS` (3 s) performs it, and the
-arming expires on its own because every render re-checks the window. The hint language
+arming expires on its own because every render re-checks the window.
+**Escape pauses, Ctrl+C stops everything.** The confirmed Escape calls
+`InteractiveScreen.pause_handler` (`agent.request_pause`, which marks
+`TaskControl`) before it raises the same real signal, so the loop ends the turn as
+`paused` and keeps the task's live resources (dev server, virtual screen, frozen
+runner, helpers); Ctrl+C is "stop all": cancel plus cleanup of everything the task
+owns. Both keep the checkpoint. See "Skills platform" below. The hint language
 follows the request text (`main.py` calls `InteractiveScreen.set_language` per turn),
 not `LANG`, which is English on a machine whose user writes Russian.
 
@@ -647,6 +654,49 @@ that would orphan a build in a session that now survives the stop.
 `agent.request_cancel()` (the flag `_cancel_event`) stays the **GUI's**
 transport-agnostic mechanism — observed between steps, while consuming an action-loop
 stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
+
+### Skills platform (`kernel/plugins/`, `kernel/{resources,task_control,helpers,agent_tools,...}.py`)
+Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages:
+`docs/UI_API.md` §7 and §8f. Maintainer facts:
+- **Reading never executes.** `manifest.py` parses `manifest.json` without
+  following symlinks; `registry.py` stores immutable `versions/<v>/` with an
+  `active.json` pointer; `grants.py` keys approvals by (skill, content digest,
+  workspace), so a changed package starts with no grants. Package code runs only in
+  `host.py::RunnerHost`: Bubblewrap with the system `/usr/bin/python3`, a snapshot
+  of the package verified by digest, no workspace/HOME/config/display/env, its own
+  network namespace. Executable skills are Linux-only by design; never add an
+  unsandboxed fallback.
+- **Wire**: length-prefixed JSON over an inherited socketpair (`runner/kvist_wire.py`);
+  `services.py::CoreServices.METHODS` is the single table of ctx methods, each with
+  its capability, write flag and scope check. A write method goes through the same
+  journaled executor path as the model's writes. Readonly tools and reader/plan
+  runs are checked again at every nested call (`_require_write_allowed`).
+- **Model surface**: built-in tools `skills`, `memory`, `sessions`, `helper`,
+  `ask_user` (`agent_tools.py`); attached skill tools use wire names
+  `<skill>__<tool>` mapped to `ActionType.skill_call` (`INTERNAL_ACTIONS`, so it is
+  not a model-visible action), MCP tools `mcp__<server>__<tool>`. A new built-in tool
+  needs `protocol.py`, parser, `native_tools`, role prompts and `extensions.txt`
+  (`test_prompt_protocol_sync.py`).
+- **Resources**: everything a task starts (runner, Xvfb/i3, dev servers, MCP) is a
+  `resources.py::ManagedProcess` owned by a `ResourceManager` (cgroup scope, limits,
+  freeze/thaw, crash `recover()` via pid+starttime+env marker). `_end_of_turn_resources`
+  keeps them on a pause and cleans them on anything else.
+- **Pause vs stop**: `task_control.TaskControl` (states, shared `_cancel_event`).
+  `request_pause` = Esc, `request_cancel` = stop all. A skill call gets
+  `Paused`/`Cancelled` at its next request, then the runner is frozen (pause) or ended
+  (cancel/timeout). An interrupted batch's remaining actions are not run.
+- **Helpers** (`helpers.py`): one read-only helper in a service session `helper-…`;
+  `agent_logging` never makes a service session active or resumable. Messages are
+  `sent -> received -> applied` through `_drain_inbox`.
+- **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox, with
+  destination policy (task-exposed ports, granted domains, no private addresses,
+  redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and serves a
+  loopback MJPEG viewer (token, Host/Origin checks); events `screen`, `task_state`
+  are live-only in the journal.
+- **Tests**: `kernel/tests/test_skill_*.py`, `test_pause.py`, `test_helpers.py`,
+  `test_platform_services.py`, `test_mcp.py` run real Bubblewrap and skip without it;
+  `test_browser_skill.py` is `slow` and needs `KVIST_TEST_SKILL_CONFIG=<config dir with
+  browser installed>`.
 
 ### Ink terminal frontend (`frontends/tui/ink/`, bundled to `dist-ui/kvist-tui.mjs`)
 A separate Node 22 / TypeScript / Ink app, **not** part of the Python process. Paths in

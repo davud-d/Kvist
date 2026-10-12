@@ -184,6 +184,11 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `job_output` | `job_id:str, output:str` | live output of a running background job: a **snapshot** of its tail (redacted, capped), not a delta, so replace what you show. At most about every 120 ms, the last one is never dropped. Live-only, never recorded; the capped tail arrives again with `job_finished`. |
 | `job_finished` | `job_id:str, status:str, exit_code:int\|null, output:str` | a background job ended. `status` is `exited` (`exit_code` set), `timed_out` or `stopped` (`job_stop`, or the core killed it when the turn ended; `exit_code` may be `null`). `output` is the redacted, capped tail. A job still running when the agent answers is killed by the core, so every `job_started` gets its `job_finished` before `turn_end`; there is no wake-up after the answer. Recorded in the session journal. |
 | `job_notice` | `text:str, job_ids:string[]` | what the runtime told the **model** about background jobs (new output, completions) before its next request, exactly as the model saw it (redacted, capped). A frontend may show it as a muted note; it is not an instruction to the person. Recorded in the session journal. |
+| `task_state` | `state:str, reason:str` | the task's life cycle (§8f): `running`, `pause_requested`, `paused`, `resuming`, `cancelling`, `cancelled`, `completed`, `failed`, `awaiting_input`, `idle`. Show "pausing…" for `pause_requested` and "paused" only when `paused` arrives. Live-only, never recorded. |
+| `screen` | `screen_id:str, skill:str, title:str, state:str, url:str, stream_url:str, frame_url:str` | the agent's own virtual screen (a skill with the `display` capability, e.g. `browser`). `state`: `starting`, `running`, `paused`, `unavailable`, `closed` (URLs empty once closed). `stream_url` is an MJPEG stream for a small preview, `frame_url` one JPEG, `url` a page for a browser tab. All three are `http://127.0.0.1:<port>/…` addresses that carry their own access token and are view-only; open nothing but loopback addresses from them. Live-only. |
+| `skill` | `skill:str, version:str, name:str, state:str` | a skill was attached to or detached from the task (`state`: `attached`, `detached`). Recorded in the journal. |
+| `helper` | `agent_id:str, event:str, state:str, session:str, task:str, summary:str`; optional `stopped_by:str` | a short notice about a helper agent (`event`: `started`, `update_applied`, or the state a helper reached: `done`, `failed`, `stopped`, `paused`; `state`: `starting`, `running`, `paused`, `done`, `failed`, `stopped`; `stopped_by`: `person` when the person stopped it, `agent` or a core reason otherwise). Its full activity is the service session named in `session`, readable with `--session-op history`. Recorded in the journal. |
+| `artifact` | `name:str, mime:str, path:str, caption:str, skill:str`; optional `preview:str` | a file or image a skill produced for the person; `path` is the absolute path of the saved copy under the workspace's `.kvist/artifacts/` (a frontend may show it as a link or read it; it never leaves the workspace), `preview` a small JPEG data URL (live only). Recorded in the journal without `preview`. |
 | `route` | `role:str, source:str` | the role the turn actually runs under, sent once per turn before the plan or reply. `role` is `coder`, `reader`, `devops` or `chat`. `source` is `explicit` (the caller passed the role), `direct` / `llm` / `keyword_fallback` / `default` (how the router decided) or `resume` (a bare "continue" after a stopped run inherited that run's role). |
 | `plan` | `markdown:str` | the plan the model proposes for the person's decision (plan mode); short Markdown |
 | `sandbox_notice` | `note:str` | one-time sandbox honesty notice |
@@ -194,7 +199,7 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `reasoning_chunk` | `stream_id:str, text:str` | current cumulative **thinking** text (a snapshot, separate channel from the answer) |
 | `reasoning_commit` | `stream_id:str, duration_seconds:number` | thinking ended (the answer is about to stream); carries how long it took |
 | `message` | `markdown:str` | a non-streamed Markdown message |
-| `final` | `message:str, user_messages:string[], outcome:str`; optional `closed:true` | the run's final answer (terminal event). `outcome` is `"done"` when the run finished and passed its completion checks, `"incomplete"` otherwise (an honest "not done", a stop, the step budget, a refusal). `closed: true` marks end_session's closing words and a closed session's reply (§8a, "Closed sessions"): show `message` as an ordinary Kvist message, with no status or "not done" frame. `outcome` is then `"incomplete"`, for frontends that do not know the field. |
+| `final` | `message:str, user_messages:string[], outcome:str`; optional `closed:true`, `paused:true` | the run's final answer (terminal event). `outcome` is `"done"` when the run finished and passed its completion checks, `"incomplete"` otherwise (an honest "not done", a stop, the step budget, a refusal). `closed: true` marks end_session's closing words and a closed session's reply (§8a, "Closed sessions"): show `message` as an ordinary Kvist message, with no status or "not done" frame. `outcome` is then `"incomplete"`, for frontends that do not know the field. `paused: true` marks a turn the person paused (§8f): the task is kept and the next message continues it; `outcome` is `"incomplete"` and the turn is not a failure. |
 | `usage` | `input_tokens:int, output_tokens:int, context_tokens:int, context_limit:int, model:str, kind:str, step:int` | token usage of one completed model call. `input_tokens`/`output_tokens` are **spend**: sum them over the run. `context_tokens` is the **size of that one prompt** — the conversation itself — so *replace* the previous value instead of summing (it is 0 for calls that do not carry the conversation, e.g. `kind` `report`: keep the last known size). Because every step resends the context, the summed spend runs far ahead of `context_tokens` — showing the sum as "tokens" reads as a huge conversation that does not exist. `context_limit` is the budget the core trims a prompt to. |
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
@@ -686,6 +691,37 @@ recorded per capability in [`frontends/zed/README.md`](../frontends/zed/README.m
 - **Switch.** `tray_enabled` in `~/.kvist/config.json` (absent means on) is read before every send; `kvist --tray-op enable|disable|status` prints `{"ok", "enabled"}` and exits.
 - **Bar clients.** A hello with `"role": "bar"` subscribes to `{"type": "summary", "state": "idle|running|done", "count", "tooltip"}` lines (sent at once and on every change) and may send `{"type": "toggle"}` to open or close the panel. `kernel/tray_bar.py` adds a module to the user's Waybar or Polybar config that runs `--tray-op bar-stream` and `--tray-op toggle`; the edit is idempotent and keeps `<file>.kvist-backup`.
 - **Reading.** The daemon never reads session files; the mini chat calls `--session-op history`.
+
+## 8f. Skills, the agent's screen, pause and helpers
+
+Skills (installable packages, see [SKILLS.md](SKILLS.md)) reach a frontend through
+the additive events `skill`, `screen`, `helper`, `artifact` and `task_state` (§7). A
+frontend that ignores them keeps working.
+
+**Inbound control messages** (`--frontend stdio`, `stdio-multi`; one JSON object per line):
+
+| Message | Effect |
+|---|---|
+| `{"type": "cancel"}` | **Stop all.** Cancels the turn, the helpers and every resource of the task (processes, runners, virtual screens, ports). The checkpoint is kept, so `resume` continues. |
+| `{"type": "pause"}` | **Pause.** The main agent and every helper stop at their next safe point. `task_state` goes `pause_requested` → `paused`; the turn ends with `final` carrying `paused: true`, then `turn_end`. The task keeps its dev server, virtual screen and helpers; the person's next message continues the same task. |
+| `{"type": "helper_stop", "agent_id": str}` | Stops one helper. The main agent is told and does not restart it by itself; a helper stopped by the person stays stopped until the person writes again. An unknown id is reported as an `error` event. |
+
+Frontends bind Escape to pause and Ctrl+C (or a separate "Stop all" button) to cancel.
+A pause request while nothing runs does nothing.
+
+**Previews.** A `screen` event's URLs point to the core's loopback viewer. Rules for
+frontends: show `stream_url` in an `<img>` (or the frame URL periodically), let the person
+open `url` in the system browser, never load the URLs in a page that can run other
+content, and add `img-src http://127.0.0.1:*` (and the same for `frame-src` if you embed
+`url`) to a content security policy. Hide the preview when `state` is `closed`.
+
+**Management operations (headless, JSON on stdout, then exit):**
+`--skill-op list|show|install|approve|revoke|install-deps|rollback|uninstall|remove-version|reset-data|check`
+(with `--skill`, `--skill-path`, `--skill-version`, `--yes`), `--memory-op list|add|update|delete`,
+`--mcp-op list|add|remove` and `--connection-op list|add|remove` (secrets on stdin, never
+in argv). Details and semantics are in [SKILLS.md](SKILLS.md).
+
+---
 
 ## 9. Universal frontend dispatch (`frontends.py`)
 

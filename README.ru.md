@@ -102,6 +102,27 @@ Electron frontend использует тот же runtime и NDJSON-прото�
 команды видны и могут потребовать подтверждения. Это не IDE и не полноценная
 граница безопасности: проверяйте diff и вывод команд.
 
+## Скиллы
+
+Kvist расширяется устанавливаемыми скиллами: пакетами с инструкциями и, при желании, с
+Python-инструментами, которые работают в песочнице ОС только с теми правами, которые вы
+подтвердили. Встроенный скилл **browser** даёт агенту собственный Chromium на отдельном
+виртуальном экране: он открывает страницу, которую сам собрал, кликает по ней, читает ошибки
+консоли и сети и снимает скриншоты, а вы смотрите живое превью (в GUI справа сверху или по
+локальной ссылке). Другие встроенные скиллы запускают тесты, читают PDF/xlsx/docx и
+навигируют по Python-коду. `Esc` ставит на паузу задачу, помощников и работу скиллов, ничего не
+теряя; Ctrl+C или «Остановить всё» отменяет всё и убирает за собой. Пока скиллы работают
+только в Linux.
+
+```bash
+kvist --skill-op install --skill-path bundled:browser
+kvist --skill-op install-deps --skill browser
+kvist --skill-op approve --skill browser
+```
+
+Формат пакета, права, API `ctx`, гарантии и ограничения песочницы — в
+[`docs/SKILLS.ru.md`](docs/SKILLS.ru.md) ([EN](docs/SKILLS.md)).
+
 ## Требования
 
 - Python 3.11 или новее;
@@ -647,6 +668,7 @@ site/              лендинг kvist.site
 ## Связанные документы
 
 - [`docs/UI_API.ru.md`](docs/UI_API.ru.md) — полный frontend-протокол;
+- [`docs/SKILLS.ru.md`](docs/SKILLS.ru.md) — скиллы: формат пакета, права, API `ctx`, песочница ([EN](docs/SKILLS.md));
 - [`frontends/gui/electron/README.md`](frontends/gui/electron/README.md) — разработка и packaging Electron GUI;
 - [`frontends/ide/jetbrains/README.md`](frontends/ide/jetbrains/README.md) — IntelliJ-плагин;
 - [`frontends/ide/vscode/README.md`](frontends/ide/vscode/README.md) — расширение VS Code;
