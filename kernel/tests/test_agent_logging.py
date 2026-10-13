@@ -72,8 +72,8 @@ def test_checkpoint_roundtrip_and_clear(agent_factory):
         "ran pytest: ok",
     ]
     assert agent._state.pending_verification_paths == ["ui.py", "parser.py"]
-    assert agent._state.destructive_diff == "Mass deletion detected in ui.py."
-    assert agent._state.corrective_read_budget == 2
+    assert agent._state.destructive_diff == ""
+    assert agent._state.corrective_read_budget == 0
     assert agent._state.stalled_reasons == ["no progress"]
     assert agent._state.last_progress == 40
     assert agent._state.last_web_query == "python fsync durability"

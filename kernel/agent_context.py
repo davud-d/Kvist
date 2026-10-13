@@ -60,27 +60,6 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Helpers:": 0,
 }
 
-# Injected only on steps where a final answer is imminent (completion is ready
-# or a terminal action is required), so its cost is paid once at the end of a
-# run rather than on every intermediate step.
-_FINAL_ANSWER_STYLE = (
-    "Final answer style:\n"
-    "- Directly answer what the user actually asked. Lead with the answer or the "
-    "findings, not with a preamble about what you did.\n"
-    "- If the user asked a question or for analysis/recommendations, the message "
-    "MUST carry that substance (concrete findings, specific paths, line "
-    "references, concrete suggestions) — not a status line.\n"
-    "- Be concise and specific. No filler, no restating the task, no "
-    "\"I have completed...\" wind-up, no sign-off pleasantries.\n"
-    "- NEVER answer with a canned completion phrase (\"all checks passed\", "
-    "\"все проверки пройдены\", \"готово\") when the user wanted content. A status "
-    "phrase is only acceptable for a pure action task with no findings to report.\n"
-    "- Match length to the request: a one-line ask gets one line; an analysis ask "
-    "gets the full findings. Do not pad.\n"
-    "- End the reply where its content ends. A concrete next step is content; a "
-    "general offer of help is not."
-)
-
 # Build a regex that matches any known section header at the start of a line.
 _SECTION_HEADERS_RE = re.compile(
     r"^(" + "|".join(re.escape(h) for h in SECTION_PRIORITIES) + r")",
@@ -150,13 +129,12 @@ _RUNTIME_TEXT = {
             "the task forward and does not repeat dead-end steps."
         ),
         "completion_instruction": (
-            "A finish is checked when you send it. If the runtime does not accept it as done, the reason comes "
-            "back under \"Additional instruction\": it says what \"done\" still lacks, and it never forbids an "
-            "accurate account of where the work stands. While the work can still be finished, finish it — a gap "
-            "that verification found is closed by a corrective action, not by describing it. When it cannot or "
-            "should not be finished (the premise is false, the environment refuses, the missing piece is something "
-            "no action here can produce), finish with \"outcome\": \"incomplete\" and say why. When you ran the "
-            "reported problem and it does not occur, finish with \"outcome\": \"no_change_needed\" and show that run's output."
+            "Complete the requested work and check the result in a way appropriate to the task before reporting. "
+            "You choose the actions, relevant checks and when to finish. A build, command, analysis or a result "
+            "that already holds may need no source edits. Never create or modify files just to demonstrate activity. "
+            "Report only what the executed tools and inspected evidence support; say what was not checked. End the reply where its content ends. "
+            "If the work cannot or should not be finished, stop with outcome incomplete and explain why. "
+            "If no change is needed, use outcome no_change_needed and explain the evidence; no token command is required."
         ),
         "error_instruction": (
             "If normalized_error is present, use it for the next step; do not copy raw_error into public text."
@@ -180,22 +158,6 @@ def _plan_mode_block(state: Any) -> str:
             "cannot work, say so in your text and adjust instead of following it blindly.\n\n"
         )
     return ""
-
-
-def _required_next_actions_block(state: Any, text: dict[str, str]) -> str:
-    """Name the allowed actions only while the runtime actually restricts them.
-
-    Shown on every step as "none", the two lines were governance the model
-    reasoned about without it constraining anything.
-    """
-    if not state.required_next_actions:
-        return ""
-    allowed = ", ".join(state.required_next_actions)
-    return (
-        f"{text['allowed_next_actions']}: {allowed} (until one of these runs, the runtime refuses "
-        f"other actions except {state.corrective_read_budget} more read-only look(s) and an "
-        "\"incomplete\" or \"no_change_needed\" finish)\n\n"
-    )
 
 
 def _read_files_out_of_view(state: Any) -> list[str]:
@@ -412,18 +374,11 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         )
     rolling_summaries_text = "\n".join(rolling_summary_lines) if rolling_summary_lines else text["none"]
 
-    finalization_imminent = (
-        self._state.completion_ready
-        or "final_answer" in self._state.required_next_actions
-        or "report_to_user" in self._state.required_next_actions
-    )
-    final_answer_style = f"{_FINAL_ANSWER_STYLE}\n\n" if finalization_imminent else ""
     extensions = _extensions_block(self, response_language)
 
     dynamic = (
         f"{text['step']}: {step}\n\n"
         f"{_plan_mode_block(self._state)}"
-        f"{_required_next_actions_block(self._state, text)}"
         f"{text['web_facts']}:\n{web_facts}\n\n"
         f"{extensions}"
         f"{text['step_summaries']}:\n{rolling_summaries_text}\n\n"
@@ -434,7 +389,6 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         f"{text['recent_details']}:\n{detailed_results or text['none']}\n\n"
         f"{text['repeated_errors']}:\n{repeated_errors or text['none']}\n\n"
         f"{text['additional_instruction']}:\n{pending_instruction}\n\n"
-        f"{final_answer_style}"
     )
 
     # Built every step, not cached with the prefix: the run may escalate from
@@ -536,7 +490,7 @@ def build_summary(self, language: str = "en") -> str:
         parts.append(f"Missing: " + ", ".join(self._state.missing_artifacts[-6:]))
 
     if self._state.verification_evidence:
-        parts.append(f"Verification: " + " | ".join(self._state.verification_evidence[-3:]))
+        parts.append(f"Observed checks: " + " | ".join(self._state.verification_evidence[-3:]))
 
     if self._state.dependency_versions:
         parts.append(f"Dependency versions found: {len(self._state.dependency_versions)}")

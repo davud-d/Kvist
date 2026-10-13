@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import pytest
+
 import json
 
-from kernel.tests.conftest import make_command
 
 from kernel.language_policy import (
     detect_response_language,
@@ -121,46 +122,6 @@ def test_chat_prompt_does_not_script_the_refusal():
     assert "Respond: \"" not in content
 
 
-# ── final answer enforcement ─────────────────────────────────────────────────
-
-def _final_answer_command(message: str):
-    return make_command("final_answer", {"message": message}, plan_step="done")
-
-
-def test_english_final_rejected_for_russian_request(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    error = agent._command_language_error(
-        _final_answer_command("Task completed successfully. All checks passed.")
-    )
-    assert error is not None
-    assert "response_language: ru" in error
-
-
-def test_russian_final_accepted_for_russian_request(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    command = _final_answer_command("Готово, создал `hello.txt` с текстом `Hello`.")
-    assert agent._command_language_error(command) is None
-
-
-def test_english_final_accepted_for_english_request(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "en"
-    command = _final_answer_command("Done, created `hello.txt` with the text `Hello`.")
-    assert agent._command_language_error(command) is None
-
-
-def test_protocol_actions_are_not_language_checked(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    # Intermediate protocol steps stay English and must never be rejected.
-    command = make_command("read_file", {"path": "hello.txt"})
-    assert agent._command_language_error(command) is None
-    assert command.action.type == "read_file"
-    assert json.dumps({"type": command.action.type}) == '{"type": "read_file"}'
-
-
 def test_report_context_carries_response_language(agent_factory):
     from kernel.agent_runtime import _build_report_context
 
@@ -169,3 +130,13 @@ def test_report_context_carries_response_language(agent_factory):
     context = json.loads(_build_report_context(agent, "создай hello.txt", "s", "r", "", "incomplete"))
     assert context["response_language"] == "ru"
     assert context["outcome"] == "incomplete"
+
+
+@pytest.mark.parametrize("message", ["npm test: 18 passed.", "README.md", "30"])
+def test_technical_final_answers_are_not_rejected_by_character_counts(agent_factory, message):
+    agent = agent_factory(max_steps=2)
+    agent._state.response_language = "ru"
+    agent._call_action_model = lambda prompt: message
+
+    assert agent._run_loop("Покажи результат проверки", 1) == message
+    assert agent._state.run_status == "completed"

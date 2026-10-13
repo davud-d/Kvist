@@ -318,12 +318,11 @@ def test_recovered_write_requires_reverification_before_completion(agent_factory
     agent._load_checkpoint()
     agent._reconcile_pending_action(agent._pending_action)
 
-    # The recovered mutation re-enters pending_verification_paths, so completion
-    # is blocked despite the stale verification evidence.
+    # Recovery records the changed path, but completion belongs to the model.
     agent._refresh_completion_requirements()
     assert "feature.py" in agent._state.pending_verification_paths
     assert agent._state.completion_ready is False
-    assert agent._state.completion_blockers
+    assert agent._state.completion_blockers == []
 
 
 # --- F5: crash after replace before promote, direct /revert -------------------

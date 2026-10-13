@@ -104,8 +104,9 @@ def test_tools_follow_the_role_prompt_allowed_actions():
     reader = {tool["function"]["name"] for tool in tools_for_role(agent_model._load_role_prompt("reader"))}
 
     assert {"write_file", "replace_in_file", "run_shell", "refuse"} <= coder
-    # A response without a call ends the turn, so no finishing tool is offered.
-    assert not coder & {"final_answer", "report_to_user"}
+    # Plain text still ends the turn; final_answer carries explicit outcomes.
+    assert "final_answer" in coder
+    assert "report_to_user" not in coder
     assert not reader & {"write_file", "append_file", "replace_in_file"}
     assert "read_file" in reader
 
@@ -269,98 +270,6 @@ def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory)
     assert second_call[3]["role"] == "tool" and second_call[3]["tool_call_id"] == "c1"
     assert "MARKER = 1" in second_call[3]["content"]
     assert "response_format" not in agent.client.requests[-1]
-
-
-def test_a_fix_run_gets_a_sufficiency_checkpoint_once_per_read_streak(agent_factory):
-    from kernel.agent_runtime import _note_inspection_streak
-
-    agent = _native_agent(agent_factory, [])
-    state = agent._state
-    state.modify_goal = True
-    state.read_only_streak = 6
-
-    _note_inspection_streak(state)
-    assert "6 consecutive inspection calls" in state.pending_instruction
-    assert "specific missing fact" in state.pending_instruction
-    assert "not an instruction to invent a fix" in state.pending_instruction
-    assert not state.required_next_actions
-
-    state.pending_instruction = ""
-    _note_inspection_streak(state)
-    assert state.pending_instruction == ""
-    state.read_only_streak = 12
-    _note_inspection_streak(state)
-    assert "12 consecutive inspection calls" in state.pending_instruction
-
-
-@pytest.mark.parametrize("exemption", ["read_only_goal", "verify_only_goal", "reader", "planning", "no_change_goal"])
-def test_read_only_and_planning_runs_are_not_pushed_toward_edits(agent_factory, exemption):
-    from kernel.agent_runtime import _note_inspection_streak
-
-    agent = _native_agent(agent_factory, [])
-    state = agent._state
-    state.read_only_streak = 30
-    state.modify_goal = exemption != "no_change_goal"
-    if exemption in {"read_only_goal", "verify_only_goal"}:
-        setattr(state, exemption, True)
-    elif exemption == "reader":
-        state.current_agent_role = "reader"
-    elif exemption == "planning":
-        state.plan_phase = "planning"
-
-    _note_inspection_streak(state)
-
-    assert state.pending_instruction == ""
-
-
-def test_inspection_checkpoint_preserves_denials_and_rearms_after_action(agent_factory):
-    from kernel.agent_runtime import _note_inspection_streak
-    from kernel.tests.conftest import make_command
-
-    agent = _native_agent(agent_factory, [])
-    state = agent._state
-    state.modify_goal = True
-    state.read_only_streak = 6
-    state.pending_instruction = "User denied this change."
-    _note_inspection_streak(state)
-    assert state.pending_instruction == "User denied this change."
-    assert state.inspection_note_streak == 0
-    state.pending_instruction = ""
-    _note_inspection_streak(state)
-    agent._register_feedback(7, make_command("run_shell", {"command": ["python", "--version"]}),
-                             {"ok": True, "data": {"returncode": 0}})
-    assert state.read_only_streak == state.inspection_note_streak == 0
-    state.read_only_streak = 6
-    _note_inspection_streak(state)
-    assert "6 consecutive inspection calls" in state.pending_instruction
-
-
-@pytest.mark.parametrize("native", [False, True])
-def test_long_inspection_checkpoint_reaches_both_transports(agent_factory, monkeypatch, native):
-    from kernel.agent_model import NativeTurn
-    from kernel import agent_runtime
-
-    agent = _native_agent(agent_factory, [_response("The cause remains unverified.")])
-    agent._state.native_tools = native
-    agent._state.read_only_streak = 6
-    prompts = []
-    if native:
-        def capture(_agent, messages, tools):
-            prompts.extend(m["content"] for m in messages)
-            return NativeTurn("The cause remains unverified.")
-        monkeypatch.setattr(agent_model, "call_native_action_model", capture)
-    else:
-        def capture(prompt):
-            prompts.append(prompt)
-            return "The cause remains unverified."
-        agent._call_action_model = capture
-    # Observe delivery without invoking completion retries for this fixture.
-    monkeypatch.setattr(agent_runtime, "_finish_turn", lambda *args: agent_runtime._ActionOutcome(
-        finished=True, final_message="The cause remains unverified."))
-
-    agent._run_loop("fix a.py", start_step=1)
-
-    assert any("6 consecutive inspection calls" in prompt for prompt in prompts)
 
 
 def test_a_failed_read_does_not_stop_the_next_one(agent_factory):
@@ -634,3 +543,33 @@ def test_a_ui_without_streams_words_gets_no_live_stream(agent_factory):
     )
 
     assert opened == []
+
+
+def test_native_build_and_repeated_checks_do_not_require_source_edits(agent_factory):
+    turns = [
+        _response("", [_call("read-a", "read_file", path="a.py"), _call("read-b", "read_file", path="b.py")]),
+        *[_response("", [_call(f"build-{i}", "run_shell", command=["make"])]) for i in range(5)],
+        _response("Built app.bin."),
+    ]
+    agent = _native_agent(agent_factory, turns)
+    agent.config.repeat_action_limit = 1
+    workspace = agent.executor.workspace
+    for path in ("a.py", "b.py"):
+        (workspace / path).write_text("# existing code\n", encoding="utf-8")
+    execute = agent._execute_command
+    builds = []
+
+    def build(command):
+        if command.action.type != "run_shell":
+            return execute(command)
+        builds.append(command.action.args["command"])
+        (workspace / "app.bin").write_bytes(b"artifact")
+        return {"ok": True, "data": {"command": builds[-1], "returncode": 0, "stdout": "Built app.bin"}}
+
+    agent._execute_command = build
+
+    assert agent._run_loop("Build the binary and check it as needed", 1) == "Built app.bin."
+    assert builds == [["make"]] * 5
+    assert agent._state.files_changed == []
+    assert agent._state.run_status == "completed"
+    assert not any(log.get("status") in {"repeat_blocked", "blocked_final_answer"} for log in agent._state.step_logs)

@@ -29,6 +29,8 @@ class AgentConfig:
     max_steps: int = 150
     stagnation_limit: int = 6
     max_consecutive_errors: int = 6
+    # Accepted for compatibility with existing configurations; calls have no
+    # repetition quota. max_steps bounds every run instead.
     repeat_action_limit: int = 4
     summary_recent_events: int = 8
     recent_feedback_limit: int = 4
@@ -108,8 +110,7 @@ class RunState:
     # Writes are hard-blocked, so only an authoritative source sets it: the
     # reader role or an explicit "do not modify" request.
     read_only_goal: bool = False
-    # A keyword guess about a short check task; it only relaxes completion
-    # accounting and must never block a write or end a run by itself.
+    # A keyword guess used only for recording observations, never for gates.
     verify_only_goal: bool = False
     # The user asked for a substantive spoken answer (explain/describe/list/
     # "what would you change"), not just a file mutation or a yes/no check.
@@ -145,18 +146,18 @@ class RunState:
     files_changed: list[str] = field(default_factory=list)
     pending_verification_paths: list[str] = field(default_factory=list)
     security_policy_violations: list[str] = field(default_factory=list)
+    # Legacy completion-gate fields retained in persisted state for old clients.
+    # They are cleared on load and never restrict actions or completion.
     required_artifacts: list[str] = field(default_factory=list)
     missing_artifacts: list[str] = field(default_factory=list)
     verification_evidence: list[str] = field(default_factory=list)
     completion_blockers: list[str] = field(default_factory=list)
-    # Kind slug per blocker, same order. The UI labels these; the blocker
-    # texts themselves are written for the model and are never shown.
     completion_blocker_kinds: list[str] = field(default_factory=list)
     required_next_actions: list[str] = field(default_factory=list)
     completion_ready: bool = False
     # Sealed outcome of the run: "in_progress" until finalize, then "completed"
-    # or "blocked". Derived from the same state as progress/summary, never from
-    # the model's own claim of being done.
+    # or "blocked". A model-declared finish completes the run; explicit
+    # incomplete outcomes, cancellation and runtime limits leave it blocked.
     run_status: str = "in_progress"
     # The user stopped this run (Ctrl+C, Escape, the GUI's cancel). Recorded in
     # session history so later turns know the work was cut short on purpose.
@@ -170,17 +171,14 @@ class RunState:
     # however clean the evidence looks, because nothing was claimed as done.
     finished_incomplete: bool = False
     # Exit code of the latest run_shell that actually ran (None until one
-    # does). A "no change needed" finish is accepted only after a run that
-    # exited cleanly, so a failing reproduction cannot be called "absent".
+    # does). This is an observation, not a prerequisite for finishing.
     last_shell_returncode: int | None = None
-    # The model ended this attempt with outcome "no_change_needed" and the
-    # run holds the evidence for it; the change-required blockers stand down.
+    # The model ended this attempt with outcome "no_change_needed".
     no_change_declared: bool = False
-    # Ends of a turn (a response without calls) the runtime refused this run.
-    # After one refusal the next end is taken as an honest "not done".
+    # Legacy refusal count, unused by the model-owned completion path.
     finish_refusals: int = 0
-    # Blank cells in CSV/TSV files read this run, and whether the model was
-    # already asked to account for them before finishing (asked once, never twice).
+    # Blank cells observed in CSV/TSV reads. Legacy flag fields are unused;
+    # accounting for missing data is the model's responsibility.
     empty_data_cells: list[str] = field(default_factory=list)
     empty_cells_flagged: bool = False
     security_removal_flagged: bool = False
@@ -205,8 +203,7 @@ class RunState:
     native_messages: list[dict[str, Any]] = field(default_factory=list)
     native_tool_defs: list[dict[str, Any]] = field(default_factory=list)
     native_note_sent: str = ""
-    # Last inspection streak for which a sufficiency checkpoint was sent.
-    # Shared by text and native calls; advisory, never a forced-write gate.
+    # Legacy inspection-nudge counter, no longer used to direct the workflow.
     inspection_note_streak: int = 0
     # (provider, model) pairs already warned about this run for a dropped
     # reasoning-control kwarg / dropped JSON mode (agent_model.py). Warned once
@@ -217,14 +214,11 @@ class RunState:
     error_history: list[str] = field(default_factory=list)
     error_patterns: dict[str, int] = field(default_factory=dict)
     seen_actions: dict[str, int] = field(default_factory=dict)
-    # Actions rejected by the corrective guard. Kept separate from
-    # seen_actions so that a refused action never consumes the repeat budget
-    # of an action the runtime itself declined to execute.
+    # Legacy corrective-guard counts retained for old state documents.
     blocked_actions: dict[str, int] = field(default_factory=dict)
-    # Read-only inspections still allowed while a corrective action is
-    # required. Prevents the guard from forcing a blind mutation.
+    # Legacy read quota, ignored and cleared on checkpoint load.
     corrective_read_budget: int = 0
-    # Set when git_diff reveals a mass deletion. Blocks completion.
+    # Legacy diff heuristic, ignored by completion and cleared on checkpoint load.
     destructive_diff: str = ""
     stalled_reasons: list[str] = field(default_factory=list)
     step_logs: list[dict[str, Any]] = field(default_factory=list)

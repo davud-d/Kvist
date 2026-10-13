@@ -62,9 +62,8 @@ _HELPER_ROLES = ("reader", "coder", "devops", "universal")
 
 MAX_BATCH_ACTIONS = 8
 
-# Not offered to the model since the v2 contract (a response without calls
-# ends the turn), but still honoured when a model prompted with an older
-# schema calls them.
+# Plain text without calls ends the turn. final_answer is also offered for
+# explicit outcomes; report_to_user remains supported for older prompts.
 FINISHING_ACTIONS = frozenset({"final_answer", "report_to_user", "refuse"})
 _WRITE_ACTIONS = frozenset({"write_file", "append_file", "replace_in_file"})
 PURPOSE_KEY = "purpose"
@@ -73,8 +72,8 @@ PURPOSE_KEY = "purpose"
 _PURPOSE_ACTIONS = frozenset({"run_shell", "git_status", "git_diff"})
 # "incomplete" lets the model end a run it cannot or should not finish
 # without having to claim success. "no_change_needed" ends a run whose
-# reported problem the model exercised and found absent: a finished answer
-# with no file change, backed by the output of that run.
+# requested result already holds or needs no edit: the model explains the
+# inspected evidence, without a mandatory shell command or file change.
 FINISH_OUTCOMES = ("done", "incomplete", "no_change_needed")
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL | re.IGNORECASE)

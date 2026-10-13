@@ -23,7 +23,7 @@ def test_errors_and_no_changes_seal_as_blocked(agent_factory):
     agent._seal_run_status()
 
     assert agent._state.run_status == "blocked"
-    assert agent._state.completion_blockers
+    assert agent._state.completion_blockers == []
     assert agent._state.error_history
     assert agent._state.files_changed == []
     assert agent._state.progress < 100

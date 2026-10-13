@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from kernel.agent_runtime import _is_report_goal, _is_substantive_answer
+from kernel.agent_runtime import _is_report_goal
 
 
 # ── BUG-1: read content survives into session history ───────────────────────
@@ -211,16 +211,6 @@ def test_is_report_goal_detects_substantive_requests():
     assert _is_report_goal("исправь баг и объясни, что было не так")
 
 
-def test_is_substantive_answer_rejects_stub():
-    assert not _is_substantive_answer("Готово, все проверки пройдены.")
-    assert not _is_substantive_answer("Done. All checks passed.")
-    assert _is_substantive_answer(
-        "В hypr.conf стоит gaps_in=5; рекомендую вынести в переменную и "
-        "уменьшить до 3 для более плотной раскладки, а также включить "
-        "vrr для DP-1."
-    )
-
-
 def test_run_loop_report_task_lets_model_answer_instead_of_stub(agent_factory):
     """Regression for BUG-2: a verify-style task that also asks for a spoken
     answer must end with the model's substantive final_answer, never with the
@@ -270,31 +260,7 @@ def test_run_loop_report_task_lets_model_answer_instead_of_stub(agent_factory):
     assert "проверки пройдены" not in result.lower()
 
 
-def test_final_answer_style_only_injected_when_finalization_imminent(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-
-    agent._state.completion_ready = False
-    agent._state.required_next_actions = []
-    mid_step = agent._build_runtime_prompt("goal", 1)
-    assert "Final answer style:" not in mid_step
-
-    agent._state.completion_ready = True
-    final_step = agent._build_runtime_prompt("goal", 2)
-    assert "Final answer style:" in final_step
-
-
-def test_final_answer_style_injected_when_terminal_action_required(agent_factory):
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    agent._state.completion_ready = False
-    agent._state.required_next_actions = ["final_answer", "report_to_user"]
-
-    prompt = agent._build_runtime_prompt("goal", 1)
-    assert "Final answer style:" in prompt
-
-
-def test_run_loop_report_task_stub_answer_is_retried_then_failed_honestly(agent_factory):
+def test_runtime_preserves_a_short_model_answer_without_padding_or_retry(agent_factory):
     agent = agent_factory(max_steps=6)
     (agent.executor.workspace / "config.txt").write_text("gaps_in = 5\n", encoding="utf-8")
     agent._state.selected_action_role = "smart"
@@ -333,5 +299,5 @@ def test_run_loop_report_task_stub_answer_is_retried_then_failed_honestly(agent_
 
     result = agent._run_loop("Найди config и скажи что улучшить", start_step=1)
 
-    assert call_count["value"] == 3
-    assert "не удалось" in result.lower()
+    assert call_count["value"] == 2
+    assert result == "Готово."

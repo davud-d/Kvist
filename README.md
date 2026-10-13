@@ -48,6 +48,13 @@ Kvist is a supervised local coding agent. It works in one project workspace at
 a time, reads and edits project files, runs development or infrastructure
 commands, verifies the result, and keeps resumable named sessions.
 
+The model chooses the workflow, appropriate checks and when to finish. Builds,
+analysis and tasks whose requested result already holds can finish without
+source edits. The instructions require checking the result and reporting any
+unfinished or unverified work honestly. File counts, repeated tool calls,
+filenames and answer length do not gate completion. Workspace and secret access
+rules, approvals, cancellation and resource limits still apply.
+
 It is a terminal application first, with an Electron GUI, JetBrains, VS Code and
 Zed integrations, and a versioned NDJSON frontend protocol for other clients.
 

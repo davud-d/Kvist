@@ -57,38 +57,6 @@ def test_runtime_feedback_updates_read_write_web_and_verification_state(agent_fa
     assert agent._state.web_sources[-1] == "https://docs.python.org/3/"
 
 
-def test_runtime_error_feedback_and_repeat_blocking(agent_factory, tmp_path):
-    from kernel.agent_runtime import _keep_result_in_view
-
-    agent = agent_factory(repeat_action_limit=2)
-    command = make_command("read_file", {"path": "missing.py"})
-
-    assert agent._is_repeat_blocked(command) is False
-    assert agent._is_repeat_blocked(command) is False
-    _keep_result_in_view(agent, agent._action_signature(command), "missing.py result")
-    assert agent._is_repeat_blocked(command) is True
-    assert agent._state.stagnation_count == 1
-
-    feedback = agent._build_error_feedback("read_file", "invalid api key")
-    assert "API key is invalid" in feedback["normalized_error"]
-
-
-def test_reread_is_allowed_once_its_content_has_left_the_prompt(agent_factory):
-    from kernel.agent_runtime import _keep_result_in_view
-
-    agent = agent_factory(repeat_action_limit=2, detailed_feedback_limit=2)
-    read = make_command("read_file", {"path": "src/billing.py"})
-    for _ in range(2):
-        assert agent._is_repeat_blocked(read) is False
-    _keep_result_in_view(agent, agent._action_signature(read), "file content")
-    for path in ("a", "b"):
-        listing = make_command("list_dir", {"path": path})
-        _keep_result_in_view(agent, agent._action_signature(listing), f"{path} listing")
-
-    assert agent._is_repeat_blocked(read) is False
-    assert agent._state.stagnation_count == 0
-
-
 def test_legitimate_long_inspection_does_not_trigger_hard_stagnation_stop(agent_factory):
     agent = agent_factory()
     for step in range(1, 20):
@@ -97,15 +65,6 @@ def test_legitimate_long_inspection_does_not_trigger_hard_stagnation_stop(agent_
                                  {"ok": True, "data": {"path": path}})
     assert agent._state.stagnation_count == 0
     assert agent._build_early_stop_message(20) is None
-
-
-def test_repeated_side_effect_action_stays_blocked_out_of_view(agent_factory):
-    agent = agent_factory(repeat_action_limit=2)
-    status = make_command("git_status", {})
-
-    assert agent._is_repeat_blocked(status) is False
-    assert agent._is_repeat_blocked(status) is False
-    assert agent._is_repeat_blocked(status) is True
 
 
 def test_a_repeated_result_replaces_its_own_copy_instead_of_evicting_a_read(agent_factory):
@@ -168,19 +127,6 @@ def test_reads_are_checkpointed_once_per_batch_writes_at_once(agent_factory):
     assert agent._peek_checkpoint() is not None
 
 
-def test_refused_finish_tells_the_model_why(agent_factory):
-    from kernel.agent_runtime import _finish_with_final_answer
-
-    agent = agent_factory(max_steps=1)
-    agent._state.modify_goal = True
-
-    outcome = _finish_with_final_answer(agent, 3, make_command("final_answer", {"message": "done"}, "done"))
-
-    assert not outcome.finished
-    assert agent._state.pending_instruction.startswith("Your finish was not accepted as done.")
-    assert "no files were changed" in agent._state.pending_instruction
-
-
 def test_prompt_carries_no_standing_governance(agent_factory):
     agent = agent_factory(max_steps=1)
     agent._state.modify_goal = True
@@ -208,29 +154,6 @@ def test_progress_comes_from_the_phase_of_the_calls_and_never_walks_back(agent_f
 
     agent._update_progress(make_command("run_shell", {"command": ["true"]}, plan_step="verify"), False)
     assert agent._state.progress == 55
-
-
-def test_completion_requirements_and_final_answer(agent_factory):
-    agent = agent_factory()
-    agent._state.create_goal = True
-
-    agent._refresh_completion_requirements(force_enforcement=True)
-    assert agent._state.completion_blockers
-    assert "write_file" in agent._state.required_next_actions
-    # Read-only inspection is deliberately allowed through a corrective block
-    # (corrective_read_budget), so the model can read a file before patching it.
-    # Completion is still blocked.
-    assert agent._required_followup_error(make_command("read_file", {"path": "x"})) is None
-    assert agent._required_followup_error(make_command("final_answer", {"message": "done"}))
-
-    agent._state.files_changed = ["app.py"]
-    agent._state.verification_evidence = ["run_shell: python -m pytest"]
-    agent._refresh_completion_requirements()
-    assert agent._state.completion_blockers == []
-
-    agent._register_final_answer(5, "done")
-    assert agent._state.progress == 100
-    assert agent._state.step_logs[-1]["status"] == "final_answer"
 
 
 def test_runtime_helpers_format_feedback_and_bounded_lists(agent_factory):
@@ -303,80 +226,12 @@ def test_run_loop_create_task_finishes_only_on_the_models_final_answer(agent_fac
 
     # Readiness is only a hint: the run waits for the model to finish it.
     assert call_count["value"] == 3
-    assert "The task looks complete" in prompts[-1]
+    assert "The task looks complete" not in prompts[-1]
     assert result == "Создал hello.py и прочитал его обратно."
     assert agent._state.step_logs[-1]["status"] == "final_answer"
     assert agent._state.run_status == "completed"
     assert (agent.executor.workspace / "hello.py").exists()
     assert not (agent.executor.workspace / "task_report.txt").exists()
-
-
-def test_run_loop_does_not_finish_when_first_action_is_report_artifact(agent_factory):
-    agent = agent_factory(max_steps=5)
-    agent._state.response_language = "ru"
-    agent._state.selected_action_role = "smart"
-    agent._state.selected_action_model = "mock-model"
-
-    responses = [
-        {
-            "thought": "Сначала запишу отчёт",
-            "plan_step": "edit",
-            "progress": 40,
-            "user_message": "Готовлю отчёт",
-            "action": {
-                "type": "write_file",
-                "args": {"path": "task_report.txt", "content": "done\n"},
-            },
-        },
-        {
-            "thought": "Теперь создаю hello.py",
-            "plan_step": "edit",
-            "progress": 70,
-            "user_message": "Создаю файл",
-            "action": {
-                "type": "write_file",
-                "args": {"path": "hello.py", "content": "print('Hello')\n"},
-            },
-        },
-        {
-            "thought": "Проверяю hello.py",
-            "plan_step": "verify",
-            "progress": 90,
-            "user_message": "Проверяю файл",
-            "action": {
-                "type": "read_file",
-                "args": {"path": "hello.py"},
-            },
-        },
-        {
-            "thought": "Готово",
-            "plan_step": "done",
-            "user_message": "Готово",
-            "action": {
-                "type": "final_answer",
-                "args": {"message": "Создал hello.py и проверил его."},
-            },
-        },
-    ]
-    call_count = {"value": 0}
-
-    def fake_call_action_model(prompt: str) -> str:
-        index = call_count["value"]
-        if index >= len(responses):
-            raise AssertionError("run_loop requested an extra action after the final answer")
-        call_count["value"] += 1
-        return json.dumps(responses[index], ensure_ascii=False)
-
-    agent._call_action_model = fake_call_action_model
-
-    result = agent._run_loop("Создай hello.py", start_step=1)
-
-    assert call_count["value"] == 4
-    assert "hello.py" in result
-    assert agent._state.step_logs[-1]["status"] == "final_answer"
-    assert any(log["status"] == "error" for log in agent._state.step_logs[:-1])
-    assert not (agent.executor.workspace / "task_report.txt").exists()
-    assert (agent.executor.workspace / "hello.py").exists()
 
 
 def _read_responses(count: int) -> list[dict]:
@@ -414,30 +269,6 @@ def test_run_loop_preserves_checkpoint_when_step_limit_interrupts_work(
     checkpoint = restarted._load_checkpoint()
     assert checkpoint == ("Investigate files", 5)
     assert len(restarted._state.files_read) == 5
-
-
-def test_run_loop_records_blocked_action_breadcrumb(agent_factory):
-    agent = agent_factory(max_steps=1)
-    agent._state.create_goal = True
-    # keep_explicit_restriction needs both set so the loop-start refresh
-    # preserves required_next_actions instead of clearing it.
-    agent._state.required_next_actions = ["write_file"]
-    agent._state.pending_instruction = "Write the required file."
-
-    response = {
-        "thought": "look around first",
-        "plan_step": "inspect",
-        "progress": 10,
-        "user_message": "listing",
-        "action": {"type": "list_dir", "args": {"path": "."}},
-    }
-    agent._call_action_model = lambda prompt: json.dumps(response)
-
-    agent._run_loop("Build the thing", start_step=1)
-
-    # The corrective-guard block never reaches feedback, so without the
-    # breadcrumb a resumed run would forget the refusal entirely.
-    assert any("was blocked" in event for event in agent._state.recent_events)
 
 
 def test_run_loop_checkpoints_before_the_fifth_step(agent_factory):
@@ -706,263 +537,6 @@ def test_is_modify_goal_detects_fix_and_edit_intents():
     assert not _is_modify_goal("Create a new file")
 
 
-def test_modify_goal_blocks_final_answer_without_changes(agent_factory):
-    """P1: modify_goal + empty files_changed → final_answer is blocked."""
-    agent = agent_factory()
-    agent._state.modify_goal = True
-    agent._state.files_changed = []
-
-    agent._refresh_completion_requirements(force_enforcement=True)
-    assert agent._state.completion_blockers
-    assert any("Completion blocked" in b for b in agent._state.completion_blockers)
-
-
-def test_task_017_find_files_final_answer_blocked(agent_factory):
-    """P1 task_017: find_files → final_answer must be blocked for modify tasks."""
-    from kernel.agent_runtime import _is_modify_goal, _WRITE_ACTIONS
-
-    agent = agent_factory(max_steps=4)
-    agent._state.modify_goal = True
-    agent._state.task_language = "en"
-    agent._state.selected_action_role = "smart"
-    agent._state.selected_action_model = "mock-model"
-
-    # Step 1: find_files (read-only)
-    # Step 2: premature final_answer without changes → should be blocked
-    # Step 3: model should be forced to take corrective action
-    responses = [
-        {
-            "thought": "Finding the buggy files",
-            "plan_step": "inspect",
-            "progress": 15,
-            "user_message": "Searching for files",
-            "action": {
-                "type": "find_files",
-                "args": {"pattern": "*.py"},
-            },
-        },
-        {
-            "thought": "I found the files, now reporting",
-            "plan_step": "done",
-            "progress": 100,
-            "user_message": "Task is done",
-            "action": {
-                "type": "final_answer",
-                "args": {"message": "Found the files, task complete"},
-            },
-        },
-        {
-            "thought": "I need to actually fix the file",
-            "plan_step": "edit",
-            "progress": 50,
-            "user_message": "Fixing the file",
-            "action": {
-                "type": "write_file",
-                "args": {"path": "router.py", "content": "fixed"},
-            },
-        },
-    ]
-    call_count = {"value": 0}
-
-    def fake_call_action_model(prompt: str) -> str:
-        index = call_count["value"]
-        if index >= len(responses):
-            raise AssertionError("task_017: should have blocked final_answer, not requested more")
-        call_count["value"] += 1
-        return json.dumps(responses[index], ensure_ascii=False)
-
-    agent._call_action_model = fake_call_action_model
-
-    # Simulate executor: find_files succeeds but doesn't change any files
-    def fake_execute(cmd):
-        if cmd.action.type == "find_files":
-            return {"ok": True, "action_type": "find_files", "data": {"pattern": "*.py", "matches": ["main.py", "router.py"]}}
-        if cmd.action.type == "final_answer":
-            return {"ok": True, "action_type": "final_answer", "data": {"message": cmd.action.args.get("message", "")}}
-        return {"ok": False, "action_type": cmd.action.type, "error": "unexpected"}
-    agent._execute_command = fake_execute
-
-    result = agent._run_loop("Fix the router", start_step=1)
-
-    # Verify that step 2 (final_answer) was blocked
-    blocked_final = [log for log in agent._state.step_logs if log.get("status") == "blocked_final_answer"]
-    assert len(blocked_final) >= 1, f"Expected blocked_final_answer in step_logs, got: {[l['status'] for l in agent._state.step_logs]}"
-    assert "Completion blocked" in blocked_final[0].get("reason", "")
-
-
-def test_task_017_live_scenario_russian_modify_blocked(agent_factory):
-    """P1: Live scenario — Russian modify goal, find_files+read_file then
-    final_answer must be blocked when files_changed is empty.
-
-    Exact task_017 prompt:
-      В файле empty_list.py исправь функцию average, чтобы она обрабатывала
-      пустой список и возвращала 0 вместо ошибки деления на ноль.
-
-    State: files_read=["empty_list.py"], files_changed=[]
-    Model action: final_answer
-    Expected: final_answer blocked, completion not allowed.
-    """
-    from kernel.agent_runtime import _is_modify_goal, _is_verify_only_goal
-
-    TASK_017_GOAL = (
-        "В файле empty_list.py исправь функцию average, "
-        "чтобы она обрабатывала пустой список и возвращала 0 "
-        "вместо ошибки деления на ноль."
-    )
-
-    # --- Checkpoint 2: _is_modify_goal must return True for this Russian string ---
-    assert _is_modify_goal(TASK_017_GOAL), (
-        "_is_modify_goal must be True for 'исправь' marker"
-    )
-    assert not _is_verify_only_goal(TASK_017_GOAL), (
-        "_is_verify_only_goal must be False for a FIX/MODIFY task"
-    )
-
-    agent = agent_factory(max_steps=5)
-    agent._state.task_language = "ru"
-    agent._state.selected_action_role = "smart"
-    agent._state.selected_action_model = "mock-model"
-
-    # Live scenario: model reads the buggy file, then tries to end early
-    responses = [
-        # Step 1: find_files to locate the target
-        {
-            "thought": "Ищу файл для исправления",
-            "plan_step": "inspect",
-            "progress": 10,
-            "user_message": "Searching for the target file",
-            "action": {
-                "type": "find_files",
-                "args": {"pattern": "*.py"},
-            },
-        },
-        # Step 2: read the file content
-        {
-            "thought": "Читаю содержимое empty_list.py",
-            "plan_step": "inspect",
-            "progress": 20,
-            "user_message": "Reading empty_list.py for analysis",
-            "action": {
-                "type": "read_file",
-                "args": {"path": "empty_list.py"},
-            },
-        },
-        # Step 3: premature final_answer — THIS MUST BE BLOCKED
-        {
-            "thought": "Файл прочитан, задача выполнена",
-            "plan_step": "done",
-            "progress": 100,
-            "user_message": "Task is complete, all checks passed",
-            "action": {
-                "type": "final_answer",
-                "args": {
-                    "message": "Task completed successfully. All checks passed."
-                },
-            },
-        },
-        # Step 4: model should now attempt a corrective write action
-        {
-            "thought": "Исправляю функцию average для обработки пустого списка",
-            "plan_step": "edit",
-            "progress": 60,
-            "user_message": "Fixing the average function to handle empty list",
-            "action": {
-                "type": "replace_in_file",
-                "args": {
-                    "path": "empty_list.py",
-                    "old_text": "return total / len(numbers)",
-                    "new_text": "if len(numbers) == 0:\n        return 0\n    return total / len(numbers)",
-                },
-            },
-        },
-    ]
-    call_count = {"value": 0}
-
-    def fake_call_action_model(prompt: str) -> str:
-        index = call_count["value"]
-        if index >= len(responses):
-            raise AssertionError(
-                f"task_017 live: should have blocked final_answer at step 3, "
-                f"not required step {index + 1}"
-            )
-        call_count["value"] += 1
-        return json.dumps(responses[index], ensure_ascii=False)
-
-    agent._call_action_model = fake_call_action_model
-
-    def fake_execute(cmd):
-        if cmd.action.type == "find_files":
-            return {
-                "ok": True,
-                "action_type": "find_files",
-                "data": {
-                    "pattern": "*.py",
-                    "matches": ["empty_list.py"],
-                },
-            }
-        if cmd.action.type == "read_file":
-            return {
-                "ok": True,
-                "action_type": "read_file",
-                "data": {
-                    "path": cmd.action.args.get("path", ""),
-                    "content": "def average(numbers):\n    total = 0\n    for n in numbers:\n        total += n\n    return total / len(numbers)\n",
-                },
-            }
-        if cmd.action.type == "replace_in_file":
-            return {
-                "ok": True,
-                "action_type": "replace_in_file",
-                "data": {
-                    "path": cmd.action.args.get("path", ""),
-                    "occurrences_replaced": 1,
-                },
-            }
-        if cmd.action.type == "final_answer":
-            return {
-                "ok": True,
-                "action_type": "final_answer",
-                "data": {"message": cmd.action.args.get("message", "")},
-            }
-        return {"ok": False, "action_type": cmd.action.type, "error": "unexpected"}
-    agent._execute_command = fake_execute
-
-    result = agent._run_loop(TASK_017_GOAL, start_step=1)
-
-    # --- Checkpoint 1: modify_goal must be set in state ---
-    assert agent._state.modify_goal is True, (
-        "modify_goal must be True in RunState for this task"
-    )
-
-    # --- Checkpoint 3 & 4: final_answer at step 3 must be blocked ---
-    blocked_final = [
-        log for log in agent._state.step_logs
-        if log.get("status") == "blocked_final_answer"
-    ]
-    assert len(blocked_final) >= 1, (
-        f"Expected blocked_final_answer in step_logs, "
-        f"got statuses: {[l['status'] for l in agent._state.step_logs]}"
-    )
-    reason = blocked_final[0].get("reason", "")
-    assert "Completion blocked" in reason, (
-        f"Blocker message must contain 'Completion blocked', got: {reason!r}"
-    )
-    assert "FIX/MODIFY" in reason or "no files were changed" in reason, (
-        f"Blocker must mention FIX/MODIFY task nature, got: {reason!r}"
-    )
-
-    # After blocking, files_changed should still be empty (model was forced
-    # to take corrective action but we didn't reach it in this test)
-    # The important thing: completion was NOT allowed
-    final_steps = [
-        log for log in agent._state.step_logs
-        if log.get("status") == "final_answer"
-    ]
-    assert len(final_steps) == 0, (
-        "final_answer must not be accepted — task should not complete"
-    )
-
-
 # ── P2: security_policy_violations ───────────────────────────────────
 
 def test_security_policy_violations_tracked(agent_factory):
@@ -1012,8 +586,8 @@ def test_pending_verification_paths_added_after_write(agent_factory):
     assert "hello.py" in agent._state.pending_verification_paths
 
 
-def test_verification_clears_pending_paths(agent_factory):
-    """P3: git_diff and run_shell (pytest) clear pending_verification_paths; git_status does NOT."""
+def test_git_checks_record_observations_without_certifying_all_files(agent_factory):
+    """Git output is recorded without certifying every changed file."""
     agent = agent_factory()
     agent._state.files_changed = ["hello.py"]
     agent._state.pending_verification_paths = ["hello.py"]
@@ -1023,15 +597,15 @@ def test_verification_clears_pending_paths(agent_factory):
     agent._update_verification_evidence(cmd_status, {"returncode": 0, "git_available": True, "fallback_used": False})
     assert "hello.py" in agent._state.pending_verification_paths
 
-    # git_diff DOES clear
+    # A diff is observable evidence, not proof of all changed behavior.
     cmd_diff = make_command("git_diff", {}, plan_step="verify")
     agent._state.pending_verification_paths = ["hello.py"]  # reset
     agent._update_verification_evidence(cmd_diff, {"returncode": 0, "git_available": True, "fallback_used": False})
-    assert len(agent._state.pending_verification_paths) == 0
+    assert agent._state.pending_verification_paths == ["hello.py"]
 
 
-def test_run_shell_pytest_clears_pending_paths(agent_factory):
-    """P3: run_shell with pytest clears pending_verification_paths."""
+def test_shell_check_records_its_result_without_certifying_all_files(agent_factory):
+    """A successful command is an observation, not a completion certificate."""
     agent = agent_factory()
     agent._state.files_changed = ["hello.py"]
     agent._state.pending_verification_paths = ["hello.py"]
@@ -1041,20 +615,8 @@ def test_run_shell_pytest_clears_pending_paths(agent_factory):
         "command": ["python", "-m", "pytest"],
         "returncode": 0,
     })
-    assert len(agent._state.pending_verification_paths) == 0
+    assert agent._state.pending_verification_paths == ["hello.py"]
     assert any("run_shell" in v for v in agent._state.verification_evidence)
-
-
-def test_pending_verification_blocks_final_answer(agent_factory):
-    """P3: final_answer is blocked when pending_verification_paths is not empty."""
-    agent = agent_factory()
-    agent._state.create_goal = True
-    agent._state.files_changed = ["app.py"]
-    agent._state.pending_verification_paths = ["app.py"]
-
-    agent._refresh_completion_requirements()
-    assert agent._state.completion_blockers
-    assert any("verification required" in b.lower() for b in agent._state.completion_blockers)
 
 
 # ── P4: devops run_shell parsing ───────────────────────────────────────
@@ -1380,30 +942,6 @@ def test_run_loop_feeds_the_response_text_to_the_live_panel(agent_factory):
     agent._run_loop("Investigate files", start_step=1)
 
     assert shown == ["Сначала смотрю корень"]
-
-
-def test_unverified_blocker_names_the_cheapest_accepted_action(agent_factory):
-    agent = agent_factory()
-    agent._state.files_changed = ["main.py"]
-    agent._refresh_completion_requirements()
-
-    assert any("read_file on a file you changed" in text for text in agent._state.completion_blockers)
-
-
-def test_unverified_write_surfaces_a_blocker_label(agent_factory):
-    """The panel needs a short reason; the blocker text itself is model-facing."""
-    from kernel.agent_runtime import _run_position
-
-    agent = agent_factory()
-    agent._state.response_language = "ru"
-    agent._state.files_changed = ["main.py"]
-    agent._refresh_completion_requirements()
-
-    assert "unverified" in agent._state.completion_blocker_kinds
-    assert _run_position(agent)["blocker"] == "ждёт проверки правок"
-
-    agent._state.response_language = "en"
-    assert _run_position(agent)["blocker"] == "changes not verified"
 
 
 def test_no_blocker_label_once_the_change_is_verified(agent_factory):
@@ -1847,7 +1385,7 @@ def test_empty_data_cells_finds_blank_csv_fields_and_ignores_other_files():
     assert _empty_data_cells("orders.csv", "a,b\n1,2\n") == []
 
 
-def test_final_answer_is_held_once_when_the_data_read_had_blank_cells(agent_factory):
+def test_blank_cells_are_observed_without_refusing_the_final_answer(agent_factory):
     from kernel.agent_runtime import _finish_with_final_answer
 
     agent = agent_factory(max_steps=1)
@@ -1863,8 +1401,8 @@ def test_final_answer_is_held_once_when_the_data_read_had_blank_cells(agent_fact
     first = _finish_with_final_answer(agent, 1, command)
     second = _finish_with_final_answer(agent, 2, command)
 
-    assert not first.finished
-    assert "orders.csv line 2, column price" in agent._state.pending_instruction
+    assert first.finished
+    assert "orders.csv line 2, column price" in agent._state.empty_data_cells
     assert second.finished
 
 
@@ -1884,151 +1422,8 @@ def test_final_answer_is_not_held_without_blank_cells(agent_factory):
     assert outcome.finished
 
 
-def test_bare_artifact_name_is_anchored_to_the_file_it_already_names(tmp_path):
-    from kernel.agent_runtime import _anchor_artifacts
-
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "reminders.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "node_modules").mkdir()
-    (tmp_path / "node_modules" / "vendored.py").write_text("", encoding="utf-8")
-    (tmp_path / "main.py").write_text("", encoding="utf-8")
-
-    anchored = _anchor_artifacts(
-        tmp_path, ["reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]
-    )
-
-    assert anchored == ["src/reminders.py", "main.py", "new_module.py", "vendored.py", "docs/a.md"]
-
-
-def test_partial_artifact_path_is_anchored_to_the_file_it_already_names(tmp_path):
-    from kernel.agent_runtime import _anchor_artifacts
-
-    (tmp_path / "web" / "dist").mkdir(parents=True)
-    (tmp_path / "web" / "dist" / "app.js").write_text("", encoding="utf-8")
-
-    anchored = _anchor_artifacts(tmp_path, ["dist/app.js", "dist/missing.js"])
-
-    assert anchored == ["web/dist/app.js", "dist/missing.js"]
-
-
-def test_paths_outside_the_workspace_are_never_required_artifacts():
-    from kernel.agent_runtime import _extract_required_artifacts
-
-    goal = (
-        "Проверь гипотезы: редактор читает ~/.config/editor/settings.json, "
-        "Flatpak — ~/.var/app/org.example.Editor/data. "
-        "Не трогай /etc/hosts. Почини src/billing.py."
-    )
-
-    assert _extract_required_artifacts(goal) == ["src/billing.py"]
-
-
-def test_the_internal_agent_directory_is_never_a_required_artifact():
-    from kernel.agent_runtime import _extract_required_artifacts
-
-    goal = "Добавь /permissions: команда читает `.kvist/permissions.json`, а правит src/billing.py."
-
-    assert _extract_required_artifacts(goal) == ["src/billing.py"]
-
-
-def test_a_dotted_directory_keeps_its_leading_dot_in_a_required_artifact():
-    from kernel.agent_runtime import _extract_required_artifacts
-
-    assert _extract_required_artifacts("Поправь `.github/workflows/ci.yml`.") == [".github/workflows/ci.yml"]
-    assert _extract_required_artifacts("Fix app.py.") == ["app.py"]
-
-
-def test_removed_security_checks_reads_only_deleted_lines_from_the_journal(agent_factory):
-    from kernel.agent_runtime import _removed_security_checks
-
-    agent = agent_factory(max_steps=1)
-    workspace = Path(agent.executor.workspace)
-    # newline="\n": _replace_in_file matches against the bytes it reads back.
-    (workspace / "ci.yml").write_text(
-        "steps:\n  - run: pip-audit -r requirements.txt\n  - run: pytest\n",
-        encoding="utf-8",
-        newline="\n",
-    )
-    agent.executor._replace_in_file("ci.yml", "  - run: pip-audit -r requirements.txt\n", "")
-    agent.executor._write_file("notes.txt", "we should add bandit later\n")
-
-    assert _removed_security_checks(workspace) == ["- run: pip-audit -r requirements.txt"]
-
-
-def test_final_answer_is_held_once_when_the_run_deleted_a_security_check(agent_factory):
-    from kernel.agent_runtime import _finish_with_final_answer
-
-    agent = agent_factory(max_steps=1)
-    workspace = Path(agent.executor.workspace)
-    (workspace / "ci.yml").write_text(
-        "- run: trivy fs .\n- run: pytest\n", encoding="utf-8", newline="\n"
-    )
-    agent.executor._replace_in_file("ci.yml", "- run: trivy fs .\n", "")
-    agent._state.verification_evidence = ["read_file: ci.yml"]
-    agent._state.files_changed = ["ci.yml"]
-    command = make_command("final_answer", {"message": "removed the scan"}, "done")
-
-    first = _finish_with_final_answer(agent, 1, command)
-    second = _finish_with_final_answer(agent, 2, command)
-
-    assert not first.finished
-    assert "removed a security check" in agent._state.pending_instruction
-    assert second.finished
-
-
 def _shell_ok_log(argv, status="ok"):
     return {"status": status, "command": {"action": {"type": "run_shell", "args": {"command": argv}}}}
-
-
-def test_a_source_the_run_moved_or_removed_is_not_a_missing_required_artifact(agent_factory):
-    from kernel.agent_runtime import _missing_required_artifacts
-
-    agent = agent_factory()
-    (Path(agent.executor.workspace) / "chapters").mkdir()
-    (Path(agent.executor.workspace) / "chapters/04_intro.md").write_text("x", encoding="utf-8")
-    agent._state.required_artifacts = [
-        "chapters/01_intro.md",
-        "chapters/04_intro.md",
-        "chapters/gone.md",
-        "chapters/never_made.md",
-    ]
-    agent._state.step_logs = [
-        _shell_ok_log(["mv", "chapters/01_intro.md", "chapters/04_intro.md"]),
-        _shell_ok_log(["git", "rm", "-f", "chapters/gone.md"]),
-        _shell_ok_log(["python", "gen.py", "chapters/never_made.md"]),
-        _shell_ok_log(["mv", "chapters/never_made.md", "chapters/elsewhere.md"], status="error"),
-    ]
-
-    assert _missing_required_artifacts(agent) == ["chapters/never_made.md"]
-
-
-def test_a_bare_name_the_run_created_in_a_subfolder_is_not_missing_at_the_root(agent_factory):
-    from kernel.agent_runtime import _missing_required_artifacts
-
-    agent = agent_factory()
-    (Path(agent.executor.workspace) / "chapters").mkdir()
-    (Path(agent.executor.workspace) / "chapters/04_intro.md").write_text("x", encoding="utf-8")
-    agent._state.required_artifacts = ["04_intro.md", "05_absent.md"]
-
-    assert _missing_required_artifacts(agent) == ["05_absent.md"]
-
-
-def test_artifact_search_reruns_only_after_an_action_that_can_create_files(agent_factory):
-    from kernel.agent_runtime import _execute_action, _missing_required_artifacts
-
-    agent = agent_factory()
-    workspace = Path(agent.executor.workspace)
-    agent._state.required_artifacts = ["04_intro.md"]
-    assert _missing_required_artifacts(agent) == ["04_intro.md"]
-
-    (workspace / "chapters").mkdir()
-    (workspace / "chapters/04_intro.md").write_text("x", encoding="utf-8")
-    # Nothing this run did could have created it, so the cached search stands.
-    assert _missing_required_artifacts(agent) == ["04_intro.md"]
-
-    _execute_action(agent, "g", 1, make_command("write_file", {"path": "notes.md", "content": "n"}, "edit"))
-
-    assert _missing_required_artifacts(agent) == []
 
 
 def test_a_successful_mv_counts_as_a_changed_file(agent_factory):
@@ -2067,18 +1462,6 @@ def test_reading_changed_files_in_one_batch_clears_their_verification(agent_fact
     )
 
     assert agent._state.pending_verification_paths == ["c.md"]
-
-
-def test_a_file_the_goal_asks_to_delete_is_not_a_missing_required_artifact(agent_factory):
-    from kernel.agent_runtime import _missing_required_artifacts
-
-    agent = agent_factory()
-    agent._state.user_goal = (
-        "scratch_debug.py is junk from yesterday, delete it. Leave coupons.py alone, that is my feature."
-    )
-    agent._state.required_artifacts = ["scratch_debug.py", "coupons.py"]
-
-    assert _missing_required_artifacts(agent) == ["coupons.py"]
 
 
 def test_run_loop_a_response_without_calls_ends_the_turn_with_its_text(agent_factory):

@@ -71,37 +71,29 @@ from kernel.agent_runtime import (
     build_error_feedback,
     build_limit_reached_message,
     build_safety_refusal_message,
-    build_report_failure_message,
-    command_language_error,
     execute_command,
     feedback_error_for_model,
     feedback_to_detail,
     feedback_to_line,
     finalize_run,
-    is_repeat_blocked,
     normalize_error_for_model,
     refresh_completion_requirements,
     push_bounded,
     push_unique,
     record_error,
     record_user_message,
-    register_blocked_action,
     register_feedback,
     register_final_answer,
-    register_language_error,
     register_safety_refusal,
     render_feedback,
-    required_followup_error,
     reset_run_state,
     mark_file_write_applied,
     run_loop,
     seal_run_status,
-    set_required_next_actions,
     update_progress,
     update_recovery_tracking,
     update_state_from_success,
     update_verification_evidence,
-    _is_report_artifact_blocked,
     _is_read_only_violation,
 )
 from kernel import end_session
@@ -114,7 +106,6 @@ from kernel.agent_web import (
     contains_package_token,
     extract_fact_from_content,
     extract_version_token,
-    is_web_topic,
     normalize_message,
     prepare_fetch_url_command,
     prepare_web_search_command,
@@ -1086,10 +1077,8 @@ class LocalAgent:
 
     _execute_command = execute_command
     _build_error_feedback = build_error_feedback
-    _command_language_error = command_language_error
     _feedback_error_for_model = feedback_error_for_model
     _normalize_error_for_model = normalize_error_for_model
-    _register_language_error = register_language_error
     _register_feedback = register_feedback
     _update_state_from_success = update_state_from_success
     _mark_file_write_applied = mark_file_write_applied
@@ -1107,22 +1096,15 @@ class LocalAgent:
     _build_cancellation_message = build_cancellation_message
     _build_limit_reached_message = build_limit_reached_message
     _build_safety_refusal_message = build_safety_refusal_message
-    _build_report_failure_message = build_report_failure_message
-    _is_repeat_blocked = is_repeat_blocked
     _action_signature = action_signature
     _record_user_message = record_user_message
-    _required_followup_error = required_followup_error
-    _register_blocked_action = register_blocked_action
-    _set_required_next_actions = set_required_next_actions
     _push_unique = push_unique
     _push_bounded = push_bounded
     _update_verification_evidence = update_verification_evidence
-    _is_report_artifact_blocked = _is_report_artifact_blocked
     _is_read_only_violation = _is_read_only_violation
 
     _prepare_web_search_command = prepare_web_search_command
     _prepare_fetch_url_command = prepare_fetch_url_command
-    _is_web_topic = is_web_topic
     _append_known_version_to_query = append_known_version_to_query
     _contains_package_token = contains_package_token
     _extract_version_token = extract_version_token

@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kernel.change_journal import build_diff_report
 
 # Externally visible actions whose effect cannot be reconciled from workspace
 # state after a crash (their stdout/exit status are lost). Resume never replays
@@ -100,54 +99,24 @@ _READ_ONLY_ACTIONS = {
 }
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
-# Reading or ending a background job: repeating the call is how a job is
-# followed, so neither the repeat guard nor stagnation counting applies. The
-# same holds for the agent's own tools: a skill's screenshot or a helper's
-# status is asked again because the world changed, not because of a loop.
-_JOB_ACTIONS = {"job_output", "job_stop", "skill_call", "helper", "skills", "memory", "sessions", "ask_user"}
 # The agent's own tools never change the workspace, except a skill tool not
 # declared read-only (checked per call).
 _AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user"}
-# What can answer "no file changed yet": an edit, or running the reported
-# problem, which is how a bug claim is confirmed (then fixed) or refuted.
-_CHANGE_OR_REPRODUCE_ACTIONS = _WRITE_ACTIONS | {"run_shell"}
 # Beyond the file reads, what plan mode still allows: it asks the person and
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
     "job_output", "job_stop", "git_status", "git_diff", "web_search", "fetch_url", "propose_plan", "offer_plan", "edit_plan", "cancel_plan", "refuse",
     *_AGENT_STATE_ACTIONS,
 }
-_VERIFY_ONLY_ACTIONS = {"git_status", "git_diff", "run_shell", "list_tree", "find_files", "read_file"}
 
 # Progress floor per phase the core derives from a response's calls. "done" is
 # absent: 100 belongs to the terminal action, not to a phase label.
 _PLAN_STEP_BANDS = {"inspect": 15, "plan": 30, "edit": 55, "verify": 85}
 
-_FINISH_ACTIONS = {"final_answer", "report_to_user"}
-
 # Distinct actions after a hard environment denial before that denial stops
 # counting as an unresolved error. It never blocks finishing: a denial must not
 # push the model into working around it.
 _RECOVERY_ATTEMPTS_REQUIRED = 2
-
-# Every completion blocker names this exit, so a task that cannot or should
-# not be done ends truthfully instead of in forced busywork.
-_HONEST_EXIT_HINT = (
-    "If the work cannot or should not be done (target missing, premise false, "
-    "user denied the change, environment blocks it), end your turn again with a "
-    "response that has no tool call and says plainly what was not done and why; "
-    "it is recorded as not done."
-)
-_NO_CHANGE_NEEDED_HINT = (
-    "If you ran the reported problem and it does not occur, finish with "
-    "outcome \"no_change_needed\" and show that run's output: a problem that "
-    "does not reproduce is a finished answer, not a missing edit."
-)
-_HONEST_EXIT_HINT_RU = (
-    "Если работу нельзя или не нужно выполнять (цели нет, предпосылка ложна, "
-    "пользователь отклонил правку, среда не даёт), закончи ход ещё раз ответом "
-    "без вызовов и прямо скажи, что не сделано и почему; ход запишется как незавершённый."
-)
 
 
 def _is_hard_environment_denial(error_text: str) -> bool:
@@ -199,18 +168,6 @@ def _emit_action_result(
     )
 
 
-_BLOCKER_LABELS = {
-    "destructive": ("массовое удаление — нужна сверка", "mass deletion — needs review"),
-    "not_created": ("файл ещё не создан", "file not created yet"),
-    "not_modified": ("правки ещё не внесены", "no changes made yet"),
-    "artifacts_missing": ("не хватает файлов", "required files missing"),
-    "unverified": ("ждёт проверки правок", "changes not verified"),
-    "no_changes": ("файлы не изменены", "no file changed"),
-    "errors_present": ("есть неустранённые ошибки", "unresolved errors"),
-    "no_activity": ("ничего не прочитано и не изменено", "nothing read or changed"),
-}
-
-
 def _extend_step_budget(self) -> bool:
     """Ask whether to keep going past the step budget.
 
@@ -239,28 +196,14 @@ def _extend_step_budget(self) -> bool:
 def _run_position(self) -> dict[str, Any]:
     """Measured facts the live panel shows in place of a declared percentage.
 
-    Why completion is being withheld, how close the run is to the stagnation
-    limit, and the step budget.
+    Consecutive failed steps and the step budget. Completion belongs to the model.
     """
     return {
-        "blocker": _first_blocker_label(self),
+        "blocker": "",
         "stall": self._state.stagnation_count,
         "stall_limit": self.config.stagnation_limit,
         "max_steps": self._state.step_budget,
     }
-
-
-def _first_blocker_label(self) -> str:
-    """Short user-facing reason the run cannot finish yet, or empty.
-
-    The blocker texts themselves are instructions addressed to the model, so
-    the panel shows a label keyed off the blocker's kind instead.
-    """
-    for kind in self._state.completion_blocker_kinds:
-        label = _BLOCKER_LABELS.get(kind)
-        if label:
-            return label[0] if self._state.response_language == "ru" else label[1]
-    return ""
 
 
 def _note_response_text(self, text: str) -> None:
@@ -274,40 +217,6 @@ def _note_response_text(self, text: str) -> None:
         notify(text)
 
 
-# Read-only inspections still permitted while a corrective action is required.
-_CORRECTIVE_READ_BUDGET = 3
-
-# git_diff hunks removing at least this many lines, while adding proportionally
-# far fewer, are treated as accidental destruction rather than a fix.
-_DESTRUCTIVE_DIFF_MIN_REMOVED = 30
-_DESTRUCTIVE_DIFF_KEEP_RATIO = 0.5
-
-_REPORT_ARTIFACT_PATTERNS = {
-    "report.txt",
-    "final_report.txt",
-    "task_report.txt",
-    "task_completion_report.txt",
-    ".test_report.txt",
-    "summary.txt",
-    "status.txt",
-    "completion_report.txt",
-}
-_REPORT_ARTIFACT_EXTENSIONS = {".txt", ".md", ".json", ".log"}
-_REPORT_ARTIFACT_KEYWORDS = (
-    "report",
-    "summary",
-    "completion",
-    "status",
-    "verification",
-    "verify",
-    "results",
-    "result",
-    "отчет",
-    "отчёт",
-    "сводк",
-    "резюм",
-    "итог",
-)
 _SAFE_READ_ONLY_SHELLS = {"ls", "pwd", "cat", "head", "tail", "sed", "rg", "grep", "find"}
 _SAFE_READ_ONLY_GIT_SUBCOMMANDS = {"status", "diff", "show", "log"}
 _READ_ONLY_SHELL_DENYLIST = {
@@ -333,8 +242,6 @@ _UNSAFE_SQLITE_STATEMENT_RE = re.compile(
     r"^(insert|update|delete|drop|alter|create|replace|vacuum|reindex|attach)\b"
 )
 
-_ARTIFACT_RE = re.compile(r"(?<!\w)([A-Za-z0-9_./-]+(?:\.[A-Za-z0-9_-]+|/))(?!\w)")
-_VERIFY_SHELL_RE = re.compile(r"py_compile|compileall|pytest|python(?:3)?\s+-m\s+|python(?:3)?\s+-c|python(?:3)?\s+\S+\.py(?:\s|$)|uv\s+run|node\s+--check")
 
 _SYSTEMD_UNIT_NOT_FOUND_RE = re.compile(
     r"Unit\s+\S+\.service\s+could\s+not\s+be\s+found",
@@ -566,12 +473,6 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     self._state.read_only_goal = read_only_goal
     self._state.verify_only_goal = verify_only_goal
     self._state.report_goal = _is_report_goal(user_goal)
-    # "check if main.py exists" names a file it must not be required to create.
-    if not self._state.required_artifacts and not (read_only_goal or verify_only_goal or write_deferred):
-        self._state.required_artifacts = _anchor_artifacts(
-            Path(self.executor.workspace),
-            _extract_required_artifacts(user_goal),
-        )
     self._refresh_completion_requirements()
     self._state.step_budget = max(self._state.step_budget, self.config.max_steps)
     report_rendered = False
@@ -595,7 +496,6 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             if self._state.native_tools is None:
                 self._state.native_tools = _native_tools_for_run(self)
             self._current_step = step
-            _note_inspection_streak(self._state)
             loop_pre = time.monotonic()
             turn: NativeTurn | None = None
             _collect_job_note(self)
@@ -861,42 +761,6 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     return call_native_action_model(self, state.native_messages, state.native_tool_defs)
 
 
-_INSPECTION_NOTE_EVERY = 6
-
-
-def _note_inspection_streak(state: RunState) -> None:
-    """Ask for a decision after sustained inspection, without forcing a write.
-
-    New files can be read forever without tripping the repeated-action guard.
-    Count that separately from errors: legitimate research must not hit a hard
-    stop merely because it takes several reads. Both model transports receive
-    this through pending_instruction, preserving any more urgent instruction.
-    """
-    if state.read_only_streak < _INSPECTION_NOTE_EVERY:
-        state.inspection_note_streak = 0
-        return
-    if (
-        state.read_only_goal or state.verify_only_goal
-        or state.current_agent_role == "reader" or state.plan_phase == PLAN_PLANNING
-        or not (state.modify_goal or state.create_goal) or state.pending_instruction
-    ):
-        return
-    if state.read_only_streak - state.inspection_note_streak < _INSPECTION_NOTE_EVERY:
-        return
-    state.inspection_note_streak = state.read_only_streak
-    state.pending_instruction = (
-        f"Investigation checkpoint after {len(state.step_logs)} recorded steps: "
-        f"{state.read_only_streak} consecutive inspection calls. "
-        "Use the evidence already available. If the next requested change is supported "
-        "and safe, make that understood part and verify it. Otherwise name the specific "
-        "missing fact that would change the next action, and use a targeted read or probe "
-        "to settle it. A passing relevant check needs no repeat without a new reason. "
-        "This is not an instruction to invent a fix, skip a safety check or an approval, "
-        "or stop legitimate investigation. If no available action can resolve the blocker, "
-        "report it honestly; if the requested result already holds, report the evidence."
-    )
-
-
 def _run_turn(
     self, user_goal: str, step: int, response: ModelResponse, turn: NativeTurn | None
 ) -> tuple[_ActionOutcome, int]:
@@ -944,7 +808,7 @@ def _register_empty_response(self) -> _ActionOutcome:
 
 
 def _finish_turn(self, user_goal: str, step: int, text: str) -> _ActionOutcome:
-    """A response without calls ends the turn: its text is the answer, through the finish gates."""
+    """A response without calls ends the turn; its text is the final answer."""
     if self._state.plan_phase == PLAN_PLANNING:
         self._state.pending_instruction = (
             "Plan mode is on, so the turn ends with propose_plan: it is how the person sees "
@@ -964,44 +828,11 @@ def _finish_turn(self, user_goal: str, step: int, text: str) -> _ActionOutcome:
 
 
 def _run_final_answer(self, user_goal: str, step: int, command: AgentCommand) -> _ActionOutcome:
-    """An end of the turn, through every guard and the finish gates.
-
-    The first end the runtime refuses sends the model the reasons. An end
-    after that, while the completion blockers still hold, is its answer to
-    them: accepted, but as "not done", with one line from the core saying why.
-    A run can then never claim what its evidence does not show, and can never
-    be trapped between a refused finish and nothing left to do.
-    """
-    if _no_change_claim_unproven(self, command):
-        self._state.finish_refusals += 1
+    """The model owns completion; only authorization and plan mode constrain it."""
+    if not _prepare_action(self, user_goal, step, command):
         return _BLOCKED
-    if self._state.finish_refusals and not _is_incomplete_finish(command):
-        self._refresh_completion_requirements(force_enforcement=True)
-        if self._state.completion_blockers:
-            message = str(command.action.args["message"]) + _incomplete_note(self)
-            command.action.args.update({"message": message, "outcome": "incomplete"})
-    outcome = (
-        _finish_with_final_answer(self, step, command)
-        if _prepare_action(self, user_goal, step, command)
-        else _BLOCKED
-    )
-    if not outcome.finished:
-        self._state.finish_refusals += 1
-    return outcome
-
-
-def _incomplete_note(self) -> str:
-    """The core's own line under an answer accepted as not done."""
-    ru = self._state.response_language == "ru"
-    labels = [
-        _BLOCKER_LABELS[kind][0 if ru else 1]
-        for kind in dict.fromkeys(self._state.completion_blocker_kinds)
-        if kind in _BLOCKER_LABELS
-    ]
-    reason = "; ".join(labels) or ("проверки завершения не пройдены" if ru else "completion checks did not pass")
-    if ru:
-        return f"\n\n_Kvist: задача не отмечена как выполненная ({reason})._"
-    return f"\n\n_Kvist: the task is not marked as done ({reason})._"
+    self._state.no_change_declared = _declares_no_change(command)
+    return _finish_with_final_answer(self, step, command)
 
 
 def _calls_note(planned: list[_PlannedCall]) -> str:
@@ -1292,10 +1123,9 @@ def _run_one_action(
     self, user_goal: str, step: int, command: AgentCommand
 ) -> _ActionOutcome:
     self._current_step = step
-    # Safety refusal takes priority over every other guard (language,
-    # repeat-block, report-artifact, read-only, completion-readiness):
+    # A safety refusal takes priority over every authorization guard:
     # an illegal/malicious request must stop immediately, unconditionally,
-    # not queue behind corrective retries that assume the task is legitimate.
+    # not queue behind calls that assume the task is legitimate.
     if command.action.type == "refuse":
         return _stop_for_safety_refusal(self, step, command)
 
@@ -1309,9 +1139,6 @@ def _run_one_action(
         return _BLOCKED
 
     if command.action.type == "report_to_user":
-        if _no_change_claim_unproven(self, command):
-            self._state.finish_refusals += 1
-            return _BLOCKED
         return _finish_with_report(self, user_goal, step, command)
     if command.action.type in plan_mode.PLAN_ACTIONS:
         return _run_plan_action(self, step, command)
@@ -1365,11 +1192,10 @@ def _prepare_action(self, user_goal: str, step: int, command: AgentCommand) -> b
     pending_instruction or in a registered error result.
     """
     self._current_step = step
-    if _reject_wrong_language(self, step, command):
-        return False
-
     if _reject_before_execution(self, step, command):
         return False
+
+    record_action_attempt(self, command)
 
     self._ui.print_step_header(
         step, command, getattr(self, "_last_reasoning_seconds", 0.0)
@@ -1410,125 +1236,11 @@ def _stop_for_safety_refusal(self, step: int, command: AgentCommand) -> _ActionO
     return _ActionOutcome(finished=True, final_message=final_message)
 
 
-def _reject_wrong_language(self, step: int, command: AgentCommand) -> bool:
-    language_error = self._command_language_error(command)
-    if not language_error:
-        return False
-    self._register_language_error(step, command, language_error)
-    self._ui.update_live(
-        user_message="Fixing the model response language and retrying the step",
-        status="fixing response language",
-        step=step,
-        progress=self._state.progress,
-        plan_step="language correction",
-        is_error=True,
-    )
-    return True
-
-
 def _reject_before_execution(self, step: int, command: AgentCommand) -> bool:
-    # Order matters: _is_repeat_blocked records the action as seen, so it must
-    # not run for an action the follow-up guard already turned away.
     return (
-        _reject_missing_followup(self, step, command)
-        or _reject_repeated_action(self, step, command)
-        or _reject_report_artifact(self, step, command)
-        or _reject_read_only_violation(self, step, command)
+        _reject_read_only_violation(self, step, command)
         or _reject_plan_misuse(self, step, command)
     )
-
-
-def _reject_missing_followup(self, step: int, command: AgentCommand) -> bool:
-    followup_error = self._required_followup_error(command)
-    if not followup_error:
-        return False
-    blocked_count = self._register_blocked_action(command)
-    # blocked_actions is in-memory only; this breadcrumb rides in
-    # recent_events (persisted + prompted) so a resumed run still
-    # knows its last action was refused.
-    self._push_unique(
-        self._state.recent_events,
-        f"Action '{command.action.type}' was blocked; corrective action required.",
-        self.config.summary_recent_events,
-    )
-    self._state.stagnation_count += 1
-    self._state.pending_instruction = followup_error
-    if blocked_count >= 2:
-        self._state.pending_instruction = _build_strict_next_action_instruction(
-            self._state.task_language,
-            self._state.required_next_actions,
-            self._state.missing_artifacts,
-        )
-    self._state.step_logs.append(
-        {
-            "step": step,
-            "status": "blocked_for_corrective_action",
-            "blocked_count": blocked_count,
-            "reason": followup_error,
-            "required_next_actions": self._state.required_next_actions,
-            "command": _command_log(command),
-        }
-    )
-    self._ui.update_live(
-        user_message=command.action.description,
-        status="corrective action required",
-        step=step,
-        progress=self._state.progress,
-        plan_step=command.plan_step,
-        is_error=True,
-    )
-    return True
-
-
-def _reject_repeated_action(self, step: int, command: AgentCommand) -> bool:
-    if not self._is_repeat_blocked(command):
-        return False
-    if self._state.create_goal and not self._state.files_changed:
-        self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
-    self._ui.update_live(
-        user_message=command.action.description,
-        status="looking for another working step",
-        step=step,
-        progress=self._state.progress,
-        plan_step=command.plan_step,
-        is_error=True,
-    )
-    return True
-
-
-def _reject_report_artifact(self, step: int, command: AgentCommand) -> bool:
-    # Block report-like artifact creation at the UI/report layer only.
-    # Never auto-complete here: the model may try to write task_report.txt
-    # before doing any real work, and that must stay a corrective error.
-    if not self._is_report_artifact_blocked(command):
-        return False
-    self._refresh_completion_requirements(force_enforcement=True)
-    if self._state.completion_ready:
-        feedback = {
-            "ok": False,
-            "action_type": command.action.type,
-            "error": "Task is already complete. Do not write report artifacts. Give your final answer: a response with no tool call.",
-        }
-        live_status = "completion enforced"
-        live_message = "Task is complete, requiring final_answer"
-    else:
-        feedback = {
-            "ok": False,
-            "action_type": command.action.type,
-            "error": "Report artifacts are not part of the requested work. Do not create task_report.txt/summary.txt files. Continue the actual task and report in your final answer (a response with no tool call) only at the end.",
-        }
-        live_status = "report artifact blocked"
-        live_message = "Report artifact blocked; continue the actual task"
-    self._register_feedback(step, command, feedback)
-    self._ui.update_live(
-        user_message=live_message,
-        status=live_status,
-        step=step,
-        progress=self._state.progress,
-        plan_step=command.plan_step,
-        is_error=True,
-    )
-    return True
 
 
 def _reject_plan_misuse(self, step: int, command: AgentCommand) -> bool:
@@ -1611,100 +1323,12 @@ def _declares_no_change(command: AgentCommand) -> bool:
     return command.action.args.get("outcome") == "no_change_needed"
 
 
-def _no_change_claim_unproven(self, command: AgentCommand) -> bool:
-    """Record a "no change needed" finish; True when the run lacks its evidence.
-
-    The claim says the reported problem was exercised and is absent. That needs
-    a read of the target and a run that exited cleanly, and no file changed.
-    Until then the finish is refused with what is missing, and the change-required
-    blockers keep standing.
-    """
-    declared = _declares_no_change(command)
-    st = self._state
-    proven = bool(st.files_read) and st.last_shell_returncode == 0 and not st.files_changed
-    st.no_change_declared = declared and proven
-    if not declared or proven:
-        return False
-    if st.finish_refusals:
-        # Same exit as the completion gates: a repeated end is taken as an
-        # honest "not done" rather than trapping the run between refusals.
-        command.action.args["outcome"] = "incomplete"
-        if "message" in command.action.args:
-            command.action.args["message"] += _build_no_change_unproven_note(st.response_language)
-        return False
-    st.pending_instruction = _build_no_change_unproven_instruction(st.task_language)
-    return True
-
-
 def _finish_with_final_answer(self, step: int, command: AgentCommand) -> _ActionOutcome:
-    if _is_incomplete_finish(command):
-        # An honest "not done" claims nothing, so there is nothing for the
-        # completion or substance gates to verify.
-        final_message = str(command.action.args["message"])
-        _register_incomplete_finish(self, step, final_message)
-        return _ActionOutcome(finished=True, final_message=final_message)
-    self._refresh_completion_requirements(force_enforcement=True)
-    if self._state.completion_blockers:
-        error_text = _join_blockers(self._state.completion_blockers)
-        self._state.consecutive_errors += 1
-        self._record_error(error_text)
-        # The prompt no longer lists blockers on every step, so the refusal
-        # itself is where the model learns what "done" still lacks.
-        # A refused finish is not shown by a UI that does not stream words, so
-        # a model that asked the person a question in it must repeat it.
-        from kernel.agent_model import words_are_streamed
-
-        unseen = (
-            ""
-            if words_are_streamed(self)
-            else " The person has not seen the message of that finish: anything it "
-            "said or asked is lost unless your next answer says it again."
-        )
-        self._state.pending_instruction = f"Your finish was not accepted as done. {error_text}{unseen}"
-        self._state.step_logs.append(
-            {
-                "step": step,
-                "status": "blocked_final_answer",
-                "reason": error_text,
-                "command": _command_log(command),
-            }
-        )
-        self._ui.update_live(
-            user_message="Switching to a corrective action instead of stopping too early",
-            status="final answer blocked",
-            step=step,
-            progress=self._state.progress,
-            plan_step=command.plan_step,
-            is_error=True,
-        )
-        return _BLOCKED
-    if _flag_empty_data_cells(self, step, command):
-        return _BLOCKED
-    if _flag_removed_security_check(self, step, command):
-        return _BLOCKED
     final_message = str(command.action.args["message"])
-    if self._state.report_goal and not _is_substantive_answer(final_message):
-        substance_retries = self._state.seen_actions.get("report_substance_retries", 0)
-        if substance_retries < 1:
-            self._state.seen_actions["report_substance_retries"] = substance_retries + 1
-            self._register_feedback(
-                step,
-                command,
-                {
-                    "ok": False,
-                    "action_type": "final_answer",
-                    "error": _build_report_substance_instruction(self._state.task_language),
-                },
-            )
-            self._set_required_next_actions(
-                ["final_answer", "report_to_user"],
-                _build_report_substance_instruction(self._state.task_language),
-            )
-            return _BLOCKED
-        # The model would not answer substantively — report the miss
-        # honestly instead of surfacing a content-free final answer.
-        final_message = self._build_report_failure_message()
-    self._register_final_answer(step, final_message)
+    if _is_incomplete_finish(command):
+        _register_incomplete_finish(self, step, final_message)
+    else:
+        self._register_final_answer(step, final_message)
     return _ActionOutcome(finished=True, final_message=final_message)
 
 
@@ -1712,31 +1336,7 @@ def _finish_with_report(
     self, user_goal: str, step: int, command: AgentCommand
 ) -> _ActionOutcome:
     incomplete = _is_incomplete_finish(command)
-    if not incomplete:
-        self._refresh_completion_requirements(force_enforcement=True)
-    if not incomplete and self._state.completion_blockers:
-        error_text = _join_blockers(self._state.completion_blockers, with_hint=False)
-        self._state.consecutive_errors += 1
-        self._record_error(error_text)
-        self._state.pending_instruction = (
-            f"Task is not complete. Blockers: {error_text} "
-            "Fix the remaining issues before reporting. "
-            f"{_HONEST_EXIT_HINT}"
-        )
-        self._ui.update_live(
-            user_message="Report blocked — task not complete",
-            status="report blocked",
-            step=step,
-            progress=self._state.progress,
-            plan_step=command.plan_step,
-            is_error=True,
-        )
-        return _BLOCKED
-    if not incomplete and _flag_empty_data_cells(self, step, command):
-        return _BLOCKED
-    if not incomplete and _flag_removed_security_check(self, step, command):
-        return _BLOCKED
-    # Collect context and hand off to chat reporter
+    self._state.no_change_declared = _declares_no_change(command)
     summary = str(command.action.args.get("summary", ""))
     tech_result = str(command.action.args.get("result", ""))
     issues = str(command.action.args.get("issues", ""))
@@ -1785,7 +1385,6 @@ def _execute_action(
         self.executor.set_output_sink(None)
         if pending_action is not None:
             self.executor.end_action_transaction()
-            self._anchored_artifacts = None
     outcome = _finish_action(self, step, command, feedback)
     # A side effect is on disk the moment it runs, so its checkpoint cannot
     # wait. A read has nothing to recover — resume simply reads again — and is
@@ -1799,30 +1398,11 @@ def _execute_action(
 def _finish_action(
     self, step: int, command: AgentCommand, feedback: dict[str, Any]
 ) -> _ActionOutcome:
-    """Everything that follows an executed action, on the main thread."""
+    """Record the actual result without prescribing the next kind of action."""
     self._current_step = step
     self._register_feedback(step, command, feedback)
     _emit_action_result(self, step, command, feedback)
     ok = bool(feedback.get("ok"))
-
-
-    # Only the model may declare the task done, and it may still want to
-    # verify, so readiness is a hint rather than a gate.
-    if self._state.completion_ready and ok:
-        self._state.pending_instruction = (
-            f"{self._state.pending_instruction} {_build_completion_hint(self)}".strip()
-        )
-
-    if (
-        self._state.create_goal
-        and not self._state.files_changed
-        and ok
-        and command.action.type in _READ_ONLY_ACTIONS
-        and self._state.read_only_streak >= 2
-        and self._state.plan_phase != PLAN_PLANNING
-    ):
-        self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
-
     self._ui.update_live(
         user_message=command.action.description,
         status="continuing" if ok else "error received",
@@ -1895,52 +1475,6 @@ def build_error_feedback(
         "raw_error": safe_error,
         "normalized_error": self._normalize_error_for_model(safe_error),
     }
-
-
-def command_language_error(self, command: AgentCommand) -> str | None:
-    # Only the terminal user-facing text is policed. JSON keys, action types,
-    # thought, and intermediate technical fields are protocol-level English
-    # and are not language-checked; report_to_user output is rendered by the
-    # reporter, which receives response_language itself.
-    if command.action.type != "final_answer":
-        return None
-    language = self._state.response_language
-    message = str(command.action.args.get("message", ""))
-    if not _matches_response_language(message, language):
-        language_name = "Russian" if language == "ru" else "English"
-        return (
-            f"Your final answer is not written in {language_name} "
-            f"(response_language: {language})."
-        )
-    return None
-
-
-def register_language_error(
-    self,
-    step: int,
-    command: AgentCommand,
-    error_text: str,
-) -> None:
-    self._state.parse_errors += 1
-    self._state.consecutive_errors += 1
-    self._record_error(error_text)
-    language = self._state.response_language
-    language_name = "Russian" if language == "ru" else "English"
-    self._state.pending_instruction = (
-        f"{error_text} The previous step was rejected and was not executed. "
-        f"Retry the same intended step, but write your final answer in "
-        f"{language_name} (response_language: {language}). "
-        "Tool names and argument keys stay English."
-    )
-    self._state.step_logs.append(
-        {
-            "step": step,
-            "status": "language_error",
-            "error": error_text,
-            "command": _command_log(command),
-        }
-    )
-    self._ui.debug_print(f"\n[Step {step}] Language error: {error_text}")
 
 
 def normalize_error_for_model(self, raw_error: str) -> str:
@@ -2017,7 +1551,6 @@ def register_feedback(
     command: AgentCommand,
     feedback: dict[str, Any],
 ) -> None:
-    previous_progress = self._state.progress
     ok = bool(feedback.get("ok"))
     shell_result = feedback.get("data") or {}
     if command.action.type == "run_shell" and "returncode" in shell_result:
@@ -2025,7 +1558,6 @@ def register_feedback(
     summary_line = self._feedback_to_line(command, feedback)
     detail_line = self._feedback_to_detail(command, feedback)
     signature = self._action_signature(command)
-    repeat_count = self._state.seen_actions.get(signature, 1)
 
     if ok:
         self._state.consecutive_errors = 0
@@ -2077,25 +1609,10 @@ def register_feedback(
                 limit=12,
             )
             self._state.pending_instruction = (
-                f"TERMINAL CONDITION: systemctl reports that {service_name} service "
-                "is not found on this system. This IS the answer — the service unit "
-                "does not exist. Do NOT run grep, list-unit-files, is-active, "
-                "or any other systemctl command. Do NOT repeat status. "
-                "Give your final answer with an honest message: "
-                f"'Service {service_name} not found: the systemd unit does not exist on this system.'"
+                f"systemctl reports that {service_name} service is not found. "
+                "For an inspection request this may be the answer; for an installation "
+                "or repair request, decide what remains to do from the user's goal."
             )
-        elif (
-            command.action.type == "replace_in_file"
-            # executor raises this without a trailing period; comparing against
-            # the punctuated form silently disabled this recovery path.
-            and error_text.rstrip(". ") == "old_text fragment not found in file"
-        ):
-            failed_path = str(command.action.args.get("path", "")).strip()
-            if failed_path:
-                self._set_required_next_actions(
-                    {"read_file", "replace_in_file", "append_file", "write_file"},
-                    _build_read_before_patch_instruction(self._state.task_language, failed_path),
-                )
         else:
             self._state.pending_instruction = (
                 "The previous action failed. "
@@ -2109,16 +1626,8 @@ def register_feedback(
         and _is_service_not_found_error(self._feedback_error_for_model(feedback))
     ):
         self._state.stagnation_count += 1
-    elif self._state.progress > previous_progress:
-        self._state.stagnation_count = 0
-    elif (
-        repeat_count > 1
-        and command.action.type not in _READ_ONLY_ACTIONS
-        and command.action.type not in _JOB_ACTIONS
-    ):
-        self._state.stagnation_count += 1
     else:
-        self._state.stagnation_count = max(0, self._state.stagnation_count - 1)
+        self._state.stagnation_count = 0
 
     self._state.recent_feedback.append(summary_line)
     self._state.recent_feedback = self._state.recent_feedback[-self.config.recent_feedback_limit :]
@@ -2150,8 +1659,8 @@ def mark_file_write_applied(self, path: str) -> None:
     Used by both normal execution (``update_state_from_success``) and crash
     reconciliation (``_reconcile_pending_action``) so the two paths can never
     disagree about what a successful write means to agent state — in particular
-    that the changed path re-enters ``pending_verification_paths`` and must be
-    verified again before the task can complete.
+    that the changed path is recorded for reporting and later inspection.
+    This tracking never obliges the model to perform a particular check.
     """
     if not path:
         return
@@ -2183,70 +1692,6 @@ def _note_empty_data_cells(self, path: str, content: str) -> None:
         if cell not in self._state.empty_data_cells:
             self._state.empty_data_cells.append(cell)
     del self._state.empty_data_cells[20:]
-
-
-def _flag_empty_data_cells(self, step: int, command: AgentCommand) -> bool:
-    """Ask once, before finishing, how blank cells in the data read were handled.
-
-    A blank cell is missing data, not zero; the model had it in front of it and
-    a prompt rule alone does not reliably make it say so.
-    """
-    if not self._state.empty_data_cells or self._state.empty_cells_flagged:
-        return False
-    self._state.empty_cells_flagged = True
-    shown = "; ".join(self._state.empty_data_cells[:8])
-    instruction = (
-        f"Before finishing: the data you read has empty cells ({shown}). "
-        "An empty cell is missing data, not zero. If your answer depends on any of "
-        "them, say which cells were empty and how you handled them (skipped, or "
-        "refused to compute); otherwise send the same answer again."
-    )
-    self._register_feedback(
-        step, command, {"ok": False, "action_type": command.action.type, "error": instruction}
-    )
-    self._set_required_next_actions(["final_answer", "report_to_user"], instruction)
-    return True
-
-
-_SECURITY_CHECK_RE = re.compile(
-    r"pip[- ]audit|npm audit|yarn audit|snyk|trivy|bandit|semgrep|codeql|gitleaks"
-    r"|dependency-check|safety check|security[ -]scan",
-    re.IGNORECASE,
-)
-
-
-def _removed_security_checks(workspace: Path) -> list[str]:
-    removed = []
-    for line in build_diff_report(workspace).splitlines():
-        if line.startswith("-") and not line.startswith("---") and _SECURITY_CHECK_RE.search(line):
-            removed.append(line[1:].strip())
-    return removed
-
-
-def _flag_removed_security_check(self, step: int, command: AgentCommand) -> bool:
-    """Ask once, before finishing, why a security check the run deleted was failing.
-
-    Deleting a failing scan turns the pipeline green without touching the
-    finding; a prompt rule alone does not reliably make the model look first.
-    """
-    if self._state.security_removal_flagged:
-        return False
-    removed = _removed_security_checks(Path(self.executor.workspace))
-    if not removed:
-        return False
-    self._state.security_removal_flagged = True
-    instruction = (
-        f"Before finishing: your changes removed a security check ({removed[0][:80]}). "
-        "Find out why it was failing (its last output, the pins or code it examines). "
-        "If it shows a real finding, fix the cause and restore the check. If you keep it "
-        "removed, the final answer must say plainly that the check is off and which "
-        "finding stays unaddressed."
-    )
-    self._register_feedback(
-        step, command, {"ok": False, "action_type": command.action.type, "error": instruction}
-    )
-    self._set_required_next_actions(["final_answer", "report_to_user"], instruction)
-    return True
 
 
 def update_state_from_success(
@@ -2649,99 +2094,15 @@ def _summarize_recent_errors(self) -> str:
     return ", ".join(items[:3])
 
 
-def is_repeat_blocked(self, command: AgentCommand) -> bool:
-    if command.action.type in _JOB_ACTIONS:
-        return False
-    signature = self._action_signature(command)
-    seen_count = self._state.seen_actions.get(signature, 0)
-    # DevOps run_shell: warn early on repeated identical commands
-    if (
-        self._state.current_agent_role == "devops"
-        and command.action.type == "run_shell"
-        and seen_count >= 2
-    ):
-        if command.action.type not in self._state.required_next_actions:
-            command_text = " ".join(command.action.args.get("command", []))
-            message = (
-                f"Do not repeat the same systemctl query [{command_text}]. "
-                "Summarize the result or try a more specific read-only query. "
-                "If the unit is not found, stop and report honestly."
-            )
-            self._state.pending_instruction = message
-            self._state.stagnation_count += 1
-            self._state.step_logs.append(
-                {
-                    "status": "repeat_blocked",
-                    "command": _command_log(command),
-                }
-            )
-            self._ui.debug_print(f"DevOps repeat blocked: {command_text}")
-            return True
+def record_action_attempt(self, command: AgentCommand) -> None:
+    """Keep attempt counts for diagnostics, never as an execution quota.
 
-    if (
-        seen_count >= self.config.repeat_action_limit
-        and command.action.type not in self._state.required_next_actions
-        and _earlier_answer_in_view(self, command, signature)
-    ):
-        self._state.pending_instruction = (
-            "This exact action already ran and its result is still shown under "
-            "\"Detailed recent action data\"; running it again returns the same answer. "
-            "Work from that result, or take an action that answers a different question."
-        )
-        self._state.stagnation_count += 1
-        self._state.step_logs.append(
-            {
-                "status": "repeat_blocked",
-                "command": _command_log(command),
-            }
-        )
-        self._ui.debug_print(f"Repeat blocked: {command.action.type} {command.action.args}")
-        return True
-
-    if command.action.type == "write_file":
-        path = str(command.action.args.get("path", "")).strip()
-        if path:
-            target_signature = f"write_target::{path.casefold()}"
-            target_seen = self._state.seen_actions.get(target_signature, 0)
-            if target_seen >= self.config.repeat_action_limit + 1:
-                target_exists = (Path(self.executor.workspace) / path).exists()
-                if target_exists:
-                    self._set_required_next_actions(
-                        {"read_file", "replace_in_file", "append_file", "write_file"},
-                        _build_read_before_patch_instruction(self._state.task_language, path),
-                    )
-                message = (
-                    f"You are rewriting {path} too many times in a row. "
-                    "Read the file first, switch to another required artifact, or verify the current result."
-                )
-                self._state.pending_instruction = message
-                self._state.stagnation_count += 1
-                self._state.step_logs.append(
-                    {
-                        "status": "repeat_write_target_blocked",
-                        "path": path,
-                        "command": _command_log(command),
-                    }
-                )
-                self._ui.debug_print(f"Repeat write target blocked: {path}")
-                return True
-            self._state.seen_actions[target_signature] = target_seen + 1
-
-    self._state.seen_actions[signature] = seen_count + 1
-    self._state.last_action_signature = signature
-    return False
-
-
-def _earlier_answer_in_view(self, command: AgentCommand, signature: str) -> bool:
-    """A repeat is useless only while its earlier answer is in front of the model.
-
-    Once a read has left the prompt, running it again is the only way to see
-    it: refusing that left the model reasoning about a file it could no longer
-    read. Actions with side effects stay counted as repeats regardless.
+    The same command can answer a new question after a file, service or external
+    resource changes. The step budget bounds runs, including repeated successes.
     """
-    if command.action.type not in _READ_ONLY_ACTIONS:
-        return True
-    return signature in self._state.recent_result_signatures
+    signature = self._action_signature(command)
+    self._state.seen_actions[signature] = self._state.seen_actions.get(signature, 0) + 1
+    self._state.last_action_signature = signature
 
 
 def action_signature(self, command: AgentCommand) -> str:
@@ -2780,215 +2141,48 @@ def push_bounded(self, items: list[str], value: str, limit: int) -> None:
     del items[:-limit]
 
 
-def _diff_change_counts(diff_text: str) -> tuple[int, int]:
-    """Count removed and added content lines in a unified diff.
-
-    File headers (---/+++) are not content and are skipped.
-    """
-    removed = 0
-    added = 0
-    for line in diff_text.splitlines():
-        if line.startswith("---") or line.startswith("+++"):
-            continue
-        if line.startswith("-"):
-            removed += 1
-        elif line.startswith("+"):
-            added += 1
-    return removed, added
-
-
-def _is_destructive_diff(removed: int, added: int) -> bool:
-    if removed < _DESTRUCTIVE_DIFF_MIN_REMOVED:
-        return False
-    return added < removed * _DESTRUCTIVE_DIFF_KEEP_RATIO
-
-
 def update_verification_evidence(self, command: AgentCommand, data: dict[str, Any]) -> None:
+    """Record observed checks for the report, without certifying completion.
+
+    Command names do not determine whether a check is relevant. The model sees
+    the output and decides what it demonstrates and whether more work is needed.
+    """
     action_type = command.action.type
-    evidence: str | None = None
-    cleared_paths: list[str] = []
-
-    if action_type in {"git_status", "git_diff"}:
-        if data.get("fallback_used"):
-            self._push_bounded(
-                self._state.recent_events,
-                "Git unavailable, use fallback verification",
-                self.config.summary_recent_events,
-            )
-            if self._state.files_changed:
-                self._set_required_next_actions(
-                    _VERIFY_ONLY_ACTIONS,
-                    _build_git_fallback_instruction(self._state.task_language),
-                )
-            return
+    evidence = None
+    if action_type in {"git_status", "git_diff"} and not data.get("fallback_used"):
         evidence = action_type
-        # git_diff counts as verification, git_status does NOT
-        if action_type == "git_diff":
-            removed, added = _diff_change_counts(str(data.get("stdout", "")))
-            if _is_destructive_diff(removed, added):
-                # The diff is the evidence. A diff that deletes the file is
-                # evidence of destruction, not of a fix, so it must not clear
-                # the verification requirement or count as evidence at all.
-                self._state.destructive_diff = (
-                    f"git_diff shows {removed} lines removed and {added} added. "
-                    "This is file destruction, not a targeted fix."
-                )
-                return
-            # A clean diff after a destructive one means the file was restored.
-            self._state.destructive_diff = ""
-            cleared_paths = list(self._state.pending_verification_paths)
-            self._state.pending_verification_paths.clear()
-    elif action_type == "run_shell":
+    elif action_type == "run_shell" and data.get("returncode") == 0:
         command_text = " ".join(str(part) for part in data.get("command", []))
-        if data.get("returncode") == 0:
-            # For devops, any successful run_shell is verification evidence
-            if self._state.current_agent_role == "devops" or _VERIFY_SHELL_RE.search(command_text):
-                evidence = f"run_shell: {command_text}"
-                cleared_paths = list(self._state.pending_verification_paths)
-                self._state.pending_verification_paths.clear()
-    elif action_type in {"list_dir", "list_tree", "find_files", "search_code"}:
-        if self._state.create_goal or self._state.files_changed or self._state.verify_only_goal:
-            if action_type == "find_files":
-                if self._state.verify_only_goal and not (self._state.create_goal or self._state.files_changed):
-                    pattern = str(data.get("pattern") or command.action.args.get("pattern", "")).strip()
-                    evidence = f"find_files: {pattern}" if pattern else "find_files"
-                else:
-                    evidence = "find_files"
-            else:
-                evidence = action_type
-        # search_code counts as verification
-        if action_type == "search_code" and self._state.pending_verification_paths:
-            cleared_paths = list(self._state.pending_verification_paths)
-            self._state.pending_verification_paths.clear()
-    elif action_type == "read_file":
-        if self._state.files_changed or self._state.verify_only_goal:
-            path = str(data.get("path", "")).strip()
-            if path:
-                evidence = f"read_file: {path}"
-                # read_file of a changed file counts as verification
-                for pv_path in list(self._state.pending_verification_paths):
-                    if pv_path in path or path in pv_path:
-                        self._state.pending_verification_paths.remove(pv_path)
-                        cleared_paths.append(pv_path)
-
-    elif action_type == "read_multiple_files":
-        if self._state.files_changed or self._state.verify_only_goal:
-            paths = [
-                str(info.get("path", "")).strip()
-                for info in data.get("files", [])
-                if "error" not in info
-            ]
-            for path in filter(None, paths):
-                evidence = f"read_file: {path}"
-                for pv_path in list(self._state.pending_verification_paths):
-                    if pv_path in path or path in pv_path:
-                        self._state.pending_verification_paths.remove(pv_path)
-                        cleared_paths.append(pv_path)
-
+        evidence = f"run_shell: {command_text}"
+    elif action_type in {"read_file", "read_multiple_files"}:
+        files = data.get("files", []) if action_type == "read_multiple_files" else [data]
+        for info in files:
+            path = str(info.get("path", "")).strip()
+            if not path or "error" in info:
+                continue
+            normalized = Path(path).as_posix()
+            for pending in list(self._state.pending_verification_paths):
+                if Path(pending).as_posix() == normalized:
+                    self._state.pending_verification_paths.remove(pending)
+            if self._state.files_changed or self._state.verify_only_goal:
+                self._push_unique(self._state.verification_evidence, f"read_file: {path}", limit=12)
     if evidence:
         self._push_unique(self._state.verification_evidence, evidence, limit=12)
 
 
 def refresh_completion_requirements(self, force_enforcement: bool = False) -> None:
-    blockers, kinds, required_actions = _compute_completion_status(self)
-    self._state.missing_artifacts = _missing_required_artifacts(self)
-    self._state.completion_blockers = blockers
-    self._state.completion_blocker_kinds = kinds
+    """Discard legacy completion gates, including those restored from checkpoints.
 
-    # Set completion_ready flag: task is ready when no blockers and verification exists
-    self._state.completion_ready = (
-        len(blockers) == 0
-        and len(self._state.verification_evidence) > 0
-        and (len(self._state.files_changed) > 0 or not self._state.create_goal)
-    )
-
-    if blockers and force_enforcement:
-        self._set_required_next_actions(
-            required_actions,
-            _build_completion_blocker_instruction(
-                self._state.task_language,
-                blockers,
-                required_actions,
-            ),
-        )
-        return
-
-    if (
-        self._state.create_goal
-        and not self._state.files_changed
-        and self._state.read_only_streak >= 2
-        and self._state.plan_phase != PLAN_PLANNING
-    ):
-        self._set_required_next_actions(_WRITE_ACTIONS, _build_create_guidance(self._state.task_language))
-        return
-
-    keep_explicit_restriction = bool(self._state.required_next_actions and self._state.pending_instruction)
-
-    if not blockers:
-        self._state.required_next_actions = []
-    elif not keep_explicit_restriction:
-        self._state.required_next_actions = []
-
-
-def register_blocked_action(self, command: AgentCommand) -> int:
-    """Record an action the corrective guard refused to execute.
-
-    Deliberately kept out of ``seen_actions``. That dict drives the repeat
-    budget in ``is_repeat_blocked``, and charging a refusal against it means
-    the runtime penalises the model for an action the runtime itself declined
-    to run. In run_001 this exhausted the budget for ``read_file main.py``
-    before verification, so the verification reads were rejected as repeats.
-
-    Returns the number of times this exact action has been blocked.
+    These fields stay in the state document for older frontends/checkpoints;
+    they no longer decide whether an action or a final answer is permitted.
     """
-    signature = self._action_signature(command)
-    count = self._state.blocked_actions.get(signature, 0) + 1
-    self._state.blocked_actions[signature] = count
-    return count
-
-
-def required_followup_error(self, command: AgentCommand) -> str | None:
-    required_actions = set(self._state.required_next_actions)
-    if not required_actions or command.action.type in required_actions:
-        return None
-    if command.action.type in plan_mode.PLAN_ACTIONS:
-        return None
-    if command.action.type in _FINISH_ACTIONS and (
-        _is_incomplete_finish(command) or _declares_no_change(command)
-    ):
-        return None
-
-    # A read-only inspection is never a stall. Blocking it here is what forces
-    # the model to mutate a file it has never read: the runtime demands a write
-    # while the system prompt demands a prior read, and the runtime wins. The
-    # budget keeps the escape hatch from turning into an inspect loop.
-    if command.action.type in _READ_ONLY_ACTIONS and self._state.corrective_read_budget > 0:
-        self._state.corrective_read_budget -= 1
-        return None
-
-    return _build_required_action_error(
-        self._state.task_language,
-        self._state.required_next_actions,
-        self._state.completion_blockers,
-    )
-
-
-def _is_report_artifact_blocked(self, command: AgentCommand) -> bool:
-    """Block report-like artifact creation unless the user explicitly requested it."""
-    if command.action.type not in _WRITE_ACTIONS:
-        return False
-
-    path = str(command.action.args.get("path", "")).strip().lower()
-    if not path:
-        return False
-
-    if not _looks_like_report_artifact_path(path):
-        return False
-
-    if _user_explicitly_requested_report_artifact(self, path):
-        return False
-
-    return True
+    self._state.required_artifacts = []
+    self._state.missing_artifacts = []
+    self._state.completion_blockers = []
+    self._state.completion_blocker_kinds = []
+    self._state.required_next_actions = []
+    self._state.corrective_read_budget = 0
+    self._state.completion_ready = False
 
 
 def _is_read_only_violation(self, command: AgentCommand) -> bool:
@@ -3038,27 +2232,6 @@ def _allowed_while_planning(command: AgentCommand) -> bool:
     )
 
 
-def set_required_next_actions(self, actions: set[str] | list[str], message: str) -> None:
-    self._state.required_next_actions = sorted(set(actions))
-    self._state.pending_instruction = message
-    self._state.corrective_read_budget = _CORRECTIVE_READ_BUDGET
-
-
-def _matches_response_language(text: str, language: str) -> bool:
-    if language not in {"ru", "en"}:
-        return True
-    cyrillic = sum(1 for ch in text if "а" <= ch.lower() <= "я" or ch.lower() == "ё")
-    latin = sum(1 for ch in text if "a" <= ch.lower() <= "z")
-    if cyrillic == 0 and latin == 0:
-        # Purely technical output (paths, numbers, symbols) — no signal.
-        return True
-    if language == "ru":
-        # A Russian final must contain at least some Russian; Latin-only
-        # technical terms inside it are fine.
-        return cyrillic > 0
-    return cyrillic <= latin
-
-
 def _token_match(word: str, text: str) -> bool:
     """Return True if `word` appears as a standalone token in `text`.
 
@@ -3083,12 +2256,7 @@ _is_modify_goal = has_change_verb
 
 
 def _is_verify_only_goal(user_goal: str) -> bool:
-    """Detect short verify/check tasks that should end after one factual confirmation.
-
-    A guess, so it only relaxes completion accounting (a read counts as
-    evidence, a found-nothing answer is a valid ending). It never blocks a
-    write and never ends a run by itself.
-    """
+    """Label inspection requests for observational summaries, never for gates."""
     if _is_create_goal(user_goal):
         return False
     # A FIX/MODIFY task is never verify-only.
@@ -3133,207 +2301,6 @@ def _is_report_goal(user_goal: str) -> bool:
     if task_kind == "change":
         return asks_for_explanation(user_goal)
     return task_kind == "report"
-
-
-def _expects_file_changes(self) -> bool:
-    if has_deferred_write_marker(self._state.user_goal):
-        return False
-    return infer_task_kind(self._state.user_goal) == "change"
-
-
-def _is_substantive_answer(message: str) -> bool:
-    """Reject the auto-completion stub and other content-free final answers.
-
-    A genuine report answer is long enough to carry findings; the known stubs
-    ("Готово, все проверки пройдены." / "Done. All checks passed.") are short
-    and self-referential.
-    """
-    stripped = message.strip()
-    if len(stripped) < 80:
-        return False
-    lowered = stripped.casefold()
-    stub_phrases = (
-        "все проверки пройдены",
-        "all checks passed",
-        "проверка пройдена",
-        "verification confirmed",
-    )
-    if len(stripped) < 160 and any(phrase in lowered for phrase in stub_phrases):
-        return False
-    return True
-
-
-def build_report_failure_message(self) -> str:
-    """Honest failure for a report task the model never actually answered.
-
-    Never claims success: a green "checks passed" here would hide the miss
-    until the user goes digging.
-    """
-    if self._state.response_language == "ru":
-        return (
-            "Не удалось сформировать содержательный ответ на запрос. "
-            "Нужные данные прочитаны, но выводы не были выданы — "
-            "попробуйте повторить или переформулировать запрос."
-        )
-    return (
-        "Could not produce a substantive answer to the request. "
-        "The needed data was read, but no findings were returned — "
-        "please retry or rephrase the request."
-    )
-
-
-def _build_report_substance_instruction(language: str) -> str:
-    if language == "ru":
-        return (
-            "Ответь по сути на вопрос пользователя в финальном ответе: "
-            "приведи конкретные находки и рекомендации со ссылками на прочитанные "
-            "файлы. Шаблонные фразы вроде «все проверки пройдены» запрещены."
-        )
-    return (
-        "Answer the user's question in your final answer: give concrete "
-        "findings and recommendations that reference the files you read. Template "
-        "phrases like 'all checks passed' are forbidden."
-    )
-
-
-def _build_create_guidance(language: str) -> str:
-    return (
-        "This is a CREATE task. Do not loop on inspect and do not end the turn without changes. "
-        "Choose a path inside the workspace and move to write_file or append_file, then verify with facts."
-    )
-
-
-def _build_premature_final_answer_error(language: str) -> str:
-    return (
-        "Completion blocked: this looks like a CREATE task, "
-        "but no files were created or changed. "
-        "If the files should be created, create them inside the workspace, then verify. "
-        f"{_HONEST_EXIT_HINT}"
-    )
-
-
-def _build_missing_implementation_error(language: str) -> str:
-    return (
-        "Completion blocked: this looks like a FIX/MODIFY task, "
-        "but no files were changed. If a change is needed, read the target file, "
-        f"edit it, then verify. {_NO_CHANGE_NEEDED_HINT} {_HONEST_EXIT_HINT}"
-    )
-
-
-def _build_no_change_unproven_note(language: str) -> str:
-    if language == "ru":
-        return "\n\n_Kvist: отсутствие проблемы не подтверждено запуском — задача не отмечена как выполненная._"
-    return "\n\n_Kvist: the problem's absence was not confirmed by a run — the task is not marked as done._"
-
-
-def _build_no_change_unproven_instruction(language: str) -> str:
-    return (
-        "\"no_change_needed\" is accepted only after you read the target and ran the "
-        "reported problem with run_shell, and that run exited cleanly. Run it, then finish "
-        "again with the command's real output in the message; if it reproduces the "
-        "problem, fix it instead."
-    )
-
-
-def _build_completion_hint(self) -> str:
-    hint = (
-        "The task looks complete. If nothing is left to verify, give your final "
-        "answer: a response with no tool call."
-    )
-    if self._state.report_goal:
-        hint += " " + _build_report_substance_instruction(self._state.task_language)
-    return hint
-
-
-def _extract_required_artifacts(user_goal: str) -> list[str]:
-    candidates: list[str] = []
-    
-    # Extensions to consider as artifacts
-    valid_extensions = {
-        ".py", ".txt", ".json", ".md", ".toml", ".yaml", ".yml", ".xml",
-        ".kt", ".java", ".cpp", ".h", ".hpp", ".sh", ".ps1", ".bat"
-    }
-    
-    # Domains and versions to ignore
-    ignored_patterns = [
-        r"^python\.org/?$", r"^docs\.python\.org/?$",
-        r"^\d+\.x$", r"^\d+\.\d+(\.\d+)?$"
-    ]
-    ignored_re = re.compile("|".join(ignored_patterns), re.IGNORECASE)
-
-    for match in _ARTIFACT_RE.finditer(user_goal):
-        # A path outside the workspace ("~/.config/editor", "/etc/hosts") is
-        # context about the machine, not something this run can produce; read
-        # as relative it became a deliverable no action could ever satisfy.
-        if match.group(1).startswith("/") or user_goal[match.start() - 1 : match.start()] == "~":
-            continue
-        # Trailing punctuation only: a leading dot belongs to ".kvist/x.json" and
-        # ".github/ci.yml", and stripping it named a file that does not exist.
-        cleaned = match.group(1).strip().strip("([{\"'").rstrip(".,:;)]}\"'")
-        if not cleaned:
-            continue
-            
-        # Ignore URLs
-        if cleaned.startswith("http://") or cleaned.startswith("https://"):
-            continue
-
-        # The internal agent directory is closed to every action: a task that
-        # mentions .kvist/permissions.json reads it, and requiring it as a
-        # deliverable blocked a finished run on a file no action may write.
-        if cleaned.replace("\\", "/").removeprefix("./").casefold().startswith(".kvist/"):
-            continue
-
-        # Must be a path with / or have a valid extension
-        has_slash = "/" in cleaned
-        ext = Path(cleaned).suffix.lower()
-        
-        if not (has_slash or ext in valid_extensions):
-            continue
-            
-        # Ignore domains and versions
-        if ignored_re.match(cleaned):
-            continue
-            
-        candidates.append(cleaned)
-
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        value = candidate.replace("\\", "/")
-        while value.startswith("./"):
-            value = value[2:]
-        if not value or value in {".", ".."}:
-            continue
-        folded = value.casefold()
-        if folded in seen:
-            continue
-        seen.add(folded)
-        normalized.append(value)
-    return normalized[:24]
-
-
-_ARTIFACT_SEARCH_SKIP_DIRS = {".git", ".kvist", ".venv", "venv", "node_modules", "__pycache__"}
-
-
-def _anchor_artifacts(workspace: Path, artifacts: list[str]) -> list[str]:
-    """Point a partial file path at the file it already names deeper in the workspace.
-
-    "fix reminders.py" mentions a file that lives in src/, and a task quoting
-    dist/app.js means web/dist/app.js; requiring either where it was written
-    made the completion gate demand a duplicate there.
-    """
-    partial = {a for a in artifacts if not a.endswith("/") and not (workspace / a).exists()}
-    if not partial:
-        return artifacts
-    found: dict[str, str] = {}
-    for root, dirs, files in os.walk(workspace):
-        dirs[:] = sorted(d for d in dirs if d not in _ARTIFACT_SEARCH_SKIP_DIRS)
-        for name in sorted(files):
-            relative = (Path(root) / name).relative_to(workspace).as_posix()
-            for artifact in partial - found.keys():
-                if relative.endswith("/" + artifact):
-                    found[artifact] = relative
-    return [found.get(a, a) for a in artifacts]
 
 
 def _is_service_not_found_error(error_text: str) -> bool:
@@ -3398,21 +2365,8 @@ def _mv_rm_operands(argv: list[str]) -> tuple[str, list[str], str]:
     return "mv", operands[:-1], operands[-1]
 
 
-def _paths_moved_or_removed(self) -> set[str]:
-    """Paths a successful mv/rm in this run took away on purpose."""
-    gone: set[str] = set()
-    for log in self._state.step_logs:
-        action = log.get("command", {}).get("action", {})
-        if log.get("status") != "ok" or action.get("type") != "run_shell":
-            continue
-        _verb, sources, _dest = _mv_rm_operands(action.get("args", {}).get("command", []))
-        gone.update(sources)
-    return gone
-
-
 def _note_moved_files(self, argv: list[str]) -> None:
-    """A successful mv changed the files it landed; without this a pure rename
-    reads as "no files changed" and the completion gate refuses it."""
+    """Record the destinations of successful moves in the change summary."""
     verb, sources, dest = _mv_rm_operands(argv)
     if not verb:
         return
@@ -3429,208 +2383,18 @@ def _note_moved_files(self, argv: list[str]) -> None:
         self._mark_file_write_applied(f"{dest}/{Path(source).name}" if into_dir else dest)
 
 
-_REMOVAL_VERB_RE = re.compile(
-    r"\b(?:delet|remov|wip|eras|purg|get rid)\w*|удал|убер|сотр|сотри|стер",
-    re.IGNORECASE,
-)
-
-
-def _named_in_removal_request(user_goal: str, artifact: str) -> bool:
-    """A file named in a sentence that asks to remove things is not one to create.
-
-    rm is blocked, so a requested deletion often runs through a script that the
-    mv/rm bookkeeping never sees; sentence scope keeps "leave coupons.py alone"
-    protected next to "delete scratch.py".
-    """
-    name = artifact.rstrip("/").casefold()
-    for sentence in re.split(r"(?<=[.!?;])\s+|\n", user_goal):
-        if _REMOVAL_VERB_RE.search(sentence) and name in sentence.casefold():
-            return True
-    return False
-
-
-def _missing_required_artifacts(self) -> list[str]:
-    missing: list[str] = []
-    workspace = Path(self.executor.workspace)
-    gone = _paths_moved_or_removed(self)
-    artifacts = self._state.required_artifacts
-    for artifact, anchored in zip(artifacts, _anchored_required_artifacts(self, workspace)):
-        if artifact.rstrip("/") in gone:
-            continue
-        if _named_in_removal_request(self._state.user_goal, artifact):
-            continue
-        is_dir = artifact.endswith("/")
-        target = workspace / anchored.rstrip("/")
-        if is_dir and not target.is_dir():
-            missing.append(artifact)
-        elif not is_dir and not target.exists():
-            missing.append(artifact)
-    return missing
-
-
-def _anchored_required_artifacts(self, workspace: Path) -> list[str]:
-    """_anchor_artifacts, walked again only after an action that can create files.
-
-    A file named by the task can appear deeper in the tree only through a
-    write, a shell command or a delegation; the walk re-ran on every refresh —
-    twice per action, reads included — and cost seconds per action on a large
-    repository. _execute_action drops the cache after a side effect.
-    """
-    artifacts = self._state.required_artifacts
-    cached = getattr(self, "_anchored_artifacts", None)
-    if cached is None or cached[0] != artifacts:
-        cached = (list(artifacts), _anchor_artifacts(workspace, artifacts))
-        self._anchored_artifacts = cached
-    return cached[1]
-
-
-def _compute_completion_status(self) -> tuple[list[str], list[str], list[str]]:
-    """Blocker texts for the model, matching kind slugs for the UI, and the
-    actions that would clear them."""
-    blockers: list[str] = []
-    kinds: list[str] = []
-    required_actions: set[str] = set()
-
-    if self._state.destructive_diff:
-        kinds.append("destructive")
-        blockers.append(
-            self._state.destructive_diff
-            + " Do not report success. Either restore the file from git "
-            "(git checkout -- <path>) and verify with a clean git_diff, or stop and "
-            "tell the user exactly what was deleted."
-        )
-        # Two exits, both allowed: restore the file, or report honestly. Leaving
-        # only mutation here would repeat the trap that caused the destruction.
-        required_actions.update({
-            "git_status", "git_diff", "read_file", "run_shell",
-            "final_answer", "report_to_user",
-        })
-    missing = _missing_required_artifacts(self)
-    verify_only_complete = (
-        self._state.verify_only_goal
-        and not self._state.files_changed
-        and bool(self._state.verification_evidence)
-    )
-
-    if self._state.create_goal and not self._state.files_changed:
-        kinds.append("not_created")
-        blockers.append(_build_premature_final_answer_error(self._state.task_language))
-        required_actions.update(_WRITE_ACTIONS)
-
-    if self._state.modify_goal and not self._state.files_changed and not self._state.no_change_declared:
-        kinds.append("not_modified")
-        blockers.append(_build_missing_implementation_error(self._state.task_language))
-        required_actions.update(_CHANGE_OR_REPRODUCE_ACTIONS)
-
-    if missing and not (self._state.read_only_goal and not self._state.files_changed):
-        kinds.append("artifacts_missing")
-        blockers.append(_build_missing_artifacts_error(self._state.task_language, missing))
-        required_actions.update(_WRITE_ACTIONS)
-
-    if self._state.files_changed and not self._state.verification_evidence:
-        kinds.append("unverified")
-        blockers.append(_build_missing_verification_error(self._state.task_language))
-        required_actions.update(_VERIFY_ONLY_ACTIONS)
-
-    if self._state.pending_verification_paths:
-        kinds.append("unverified")
-        joined = ", ".join(self._state.pending_verification_paths[:5])
-        blockers.append(
-            f"Task cannot finish: verification required for recently changed files: {joined}. "
-            "Use git_diff, read_file, search_code, or run_shell (pytest/py_compile) to verify. "
-            "git_status alone is NOT sufficient. "
-            f"{_CHEAPEST_VERIFICATION_HINT}"
-        )
-        required_actions.update(_VERIFY_ONLY_ACTIONS)
-
-    for kind, text in _evidence_completion_blockers(self):
-        kinds.append(kind)
-        blockers.append(text)
-        required_actions.update(_CHANGE_OR_REPRODUCE_ACTIONS)
-
-    return blockers, kinds, sorted(required_actions)
-
-
-def _evidence_completion_blockers(self) -> list[tuple[str, str]]:
-    """Blockers that look only at hard evidence (files touched, recorded errors, denials)."""
-    st = self._state
-    ru = st.task_language == "ru"
-    out: list[tuple[str, str]] = []
-
-    # A request whose result is a change to files is not second-guessed:
-    # whatever the last call did, nothing changed means not done. The other
-    # keyword guesses keep their exceptions for read-only and verify-only
-    # runs, since they can mistake a question for an edit.
-    change_by_intent = _expects_file_changes(self)
-    change_task = not st.no_change_declared and (
-        change_by_intent
-        or st.create_goal
-        or st.modify_goal
-        or bool(st.required_artifacts)
-    )
-    verify_only_done = st.verify_only_goal and bool(st.verification_evidence)
-    guessed_change_open = change_task and not st.read_only_goal and not verify_only_done
-    if not st.files_changed and not st.no_change_declared and (change_by_intent or guessed_change_open):
-        out.append((
-            "no_changes",
-            "Completion blocked: this task changes files but files_changed is empty. "
-            f"Make the actual edit before claiming it done. {_HONEST_EXIT_HINT}"
-            if not ru else
-            "Завершение заблокировано: задача меняет файлы, но files_changed пуст. "
-            f"Внеси реальную правку, прежде чем заявлять о готовности. {_HONEST_EXIT_HINT_RU}",
-        ))
-
-    if (
-        st.progress >= 100
-        and st.error_history
-        and (st.recovery_pending or not st.files_changed)
-    ):
-        out.append((
-            "errors_present",
-            "Completion blocked: progress is 100% but there are unresolved errors "
-            f"({st.error_history[-1]}). Resolve them. {_HONEST_EXIT_HINT}"
-            if not ru else
-            "Завершение заблокировано: прогресс 100%, но есть неустранённые ошибки "
-            f"({st.error_history[-1]}). Устрани их. {_HONEST_EXIT_HINT_RU}",
-        ))
-
-    if (
-        (change_task or st.error_history)
-        and not st.files_read
-        and not st.files_changed
-        and not st.verification_evidence
-    ):
-        out.append((
-            "no_activity",
-            "Completion blocked: no file was read and no file was changed. "
-            f"Inspect the workspace before claiming the work done. {_HONEST_EXIT_HINT}"
-            if not ru else
-            "Завершение заблокировано: ни один файл не прочитан и не изменён. "
-            f"Изучи проект, прежде чем заявлять о готовности. {_HONEST_EXIT_HINT_RU}",
-        ))
-
-    return out
-
-
 def _blocked_progress(self) -> int:
     return min(self._state.progress, 99)
 
 
 def seal_run_status(self) -> None:
-    """Fix the final run_status/progress/summary from one shared state.
-
-    Runs at finalize so a run that stopped on the step budget or an early stop
-    still reports "blocked" (not a stale in-progress percentage) when blockers
-    remain, and progress reflects steps actually closed.
-    """
+    """Seal the declared outcome; an interrupted/budget-limited run is incomplete."""
     self._refresh_completion_requirements()
-    if self._state.finished_incomplete or self._state.completion_blockers:
+    if self._state.finished_incomplete or self._state.progress < 100:
         self._state.run_status = "blocked"
         self._state.progress = _blocked_progress(self)
-    elif self._state.progress >= 100:
-        self._state.run_status = "completed"
     else:
-        self._state.run_status = "in_progress"
+        self._state.run_status = "completed"
     self._state.summary = self._build_summary()
 
 
@@ -3658,144 +2422,6 @@ def update_recovery_tracking(self, command: AgentCommand, ok: bool, error_text: 
     self._state.recovery_signatures.add(self._action_signature(command))
     if len(self._state.recovery_signatures) >= _RECOVERY_ATTEMPTS_REQUIRED:
         self._state.recovery_pending = False
-
-
-def _build_missing_artifacts_error(language: str, missing: list[str]) -> str:
-    joined = ", ".join(missing[:8])
-    return (
-        f"Task cannot finish as done: the task names these workspace files and they do not exist yet: {joined}. "
-        f"{_HONEST_EXIT_HINT}"
-    )
-
-
-# A weak model given only "verification is required" keeps editing or
-# re-finishing; naming the cheapest accepted action ends that circling.
-_CHEAPEST_VERIFICATION_HINT = (
-    "The lightest action that counts: read_file on a file you changed "
-    "(or git_diff). One such call is enough; then finish."
-)
-
-
-def _build_missing_verification_error(language: str) -> str:
-    return (
-        "Task cannot finish without verification of the changes: structure, syntax, "
-        f"import, or run evidence is required. {_CHEAPEST_VERIFICATION_HINT}"
-    )
-
-
-def _join_blockers(blockers: list[str], with_hint: bool = True) -> str:
-    # Each blocker names the honest exit on its own; joined, it is said once.
-    texts = [
-        text.replace(_HONEST_EXIT_HINT, "").replace(_HONEST_EXIT_HINT_RU, "").strip()
-        for text in blockers
-    ]
-    if with_hint:
-        texts.append(_HONEST_EXIT_HINT)
-    return " ".join(texts)
-
-
-def _build_completion_blocker_instruction(language: str, blockers: list[str], actions: list[str]) -> str:
-    action_text = ", ".join(actions) or "none"
-    blocker_text = _join_blockers(blockers, with_hint=False)
-    return (
-        f"Ending the turn as done is not accepted yet. Blockers: {blocker_text} "
-        f"Next, either take a corrective action using one of: {action_text}; "
-        "or, if the work cannot or should not be done, end the turn again without a tool call "
-        "and say plainly what was not done and why."
-    )
-
-
-def _build_required_action_error(language: str, actions: list[str], blockers: list[str]) -> str:
-    action_text = ", ".join(actions)
-    blocker_text = _join_blockers(blockers)
-    return f"A corrective action is required. Allowed next actions: {action_text}. Blockers: {blocker_text}"
-
-
-def _build_strict_next_action_instruction(
-    language: str,
-    actions: list[str],
-    missing_artifacts: list[str],
-) -> str:
-    action_text = ", ".join(actions) or "none"
-    first_artifact = missing_artifacts[0] if missing_artifacts else ""
-    message = (
-        f"You again chose a forbidden action type. The next action.type must be one of: {action_text}. "
-        "Do not use inspect/read/list_tree/find/search on the next step, and do not end the turn yet. "
-        "For a CREATE task, switch directly to changing files inside the workspace. "
-        "The one exception: if the work cannot or should not be done, end the turn without a tool call "
-        "and say plainly what was not done and why."
-    )
-    if first_artifact:
-        message += f" Start with artifact: {first_artifact}."
-    return message
-
-
-def _build_read_before_patch_instruction(language: str, path: str) -> str:
-    return (
-        f"Stop rewriting {path} blindly. Read {path} first, then use replace_in_file, "
-        "append_file, or one deliberate write_file based on the actual content."
-    )
-
-
-def _build_git_fallback_instruction(language: str) -> str:
-    return (
-        "Git is unavailable or the repo is not initialized. Do not fail the task: "
-        "switch to list_tree, read_file, find_files, or run_shell to verify structure, syntax, and execution."
-    )
-
-
-def _looks_like_report_artifact_path(path: str) -> bool:
-    normalized = path.replace("\\", "/").strip().casefold()
-    filename = Path(normalized).name
-    if filename in _REPORT_ARTIFACT_PATTERNS:
-        return True
-
-    parsed = Path(filename)
-    if parsed.suffix not in _REPORT_ARTIFACT_EXTENSIONS:
-        return False
-
-    stem = parsed.stem
-    return any(keyword in stem for keyword in _REPORT_ARTIFACT_KEYWORDS)
-
-
-def _user_explicitly_requested_report_artifact(self, path: str) -> bool:
-    goal = self._state.user_goal.casefold()
-    normalized = path.replace("\\", "/").strip().casefold()
-    filename = Path(normalized).name
-
-    requested_artifacts = {
-        item.replace("\\", "/").strip().casefold()
-        for item in self._state.required_artifacts
-    }
-    if normalized in requested_artifacts or filename in requested_artifacts:
-        return True
-
-    if normalized in goal or filename in goal:
-        return True
-
-    report_words = (
-        "report",
-        "summary",
-        "status file",
-        "completion report",
-        "task report",
-        "отч",
-        "сводк",
-        "резюм",
-        "итог",
-    )
-    request_words = (
-        "create",
-        "write",
-        "save",
-        "generate",
-        "prepare",
-        "создай",
-        "сохрани",
-        "сгенерируй",
-        "подготов",
-    )
-    return any(word in goal for word in report_words) and any(word in goal for word in request_words)
 
 
 def _is_sqlite3_statement_read_only(statement: str) -> bool:

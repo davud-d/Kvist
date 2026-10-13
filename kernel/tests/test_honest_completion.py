@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The runtime may refuse an unbacked success claim, but it never claims
-success itself, never refuses a truthful "not done", and never blocks the
-model from verifying."""
+"""Model-declared outcomes are preserved; the runtime never invents success."""
 from __future__ import annotations
 
 import json
@@ -106,53 +104,6 @@ def test_incomplete_report_skips_gates_and_tells_the_reporter(agent_factory, mon
     assert agent._state.run_status == "blocked"
 
 
-def test_done_claim_without_changes_is_refused_then_taken_as_not_done(agent_factory):
-    agent = _fix_agent(agent_factory, max_steps=4)
-    (agent.executor.workspace / "src").mkdir()
-    (agent.executor.workspace / "src" / "payment.py").write_text("x = 1\n", encoding="utf-8")
-    prompts = _script(agent, [
-        _step("read_file", {"path": "src/payment.py"}),
-        _step("final_answer", {"message": "Fixed.", "outcome": "done"}, "done"),
-        _step("final_answer", {"message": "Fixed, really."}, "done"),
-    ])
-
-    result = agent._run_loop("Fix the bug in src/payment.py", start_step=1)
-
-    blocked = [log for log in agent._state.step_logs if log.get("status") == "blocked_final_answer"]
-    assert len(blocked) == 1
-    # The refusal must name the honest exit instead of ordering a fix.
-    assert "what was not done and why" in blocked[0]["reason"]
-    # The second claim, with the blockers still standing, is its answer to
-    # them: accepted, never as done, and the core says so under it.
-    assert len(prompts) == 3
-    assert result.startswith("Fixed, really.")
-    assert "the task is not marked as done" in result
-    assert agent._state.finished_incomplete
-    assert agent._state.run_status == "blocked"
-
-
-def test_a_turn_ending_without_calls_on_a_fix_with_no_changes_is_never_done(agent_factory):
-    agent = _fix_agent(agent_factory, max_steps=5)
-    agent._state.response_language = "ru"
-    finals = []
-    agent._ui.print_final = lambda message, user_messages=None, outcome="done": finals.append((message, outcome))
-    answers = iter(["Исправил баг в src/payment.py.", "Исправил, правда."])
-    prompts = []
-
-    def fake_call_action_model(prompt: str) -> str:
-        prompts.append(prompt)
-        return next(answers)
-
-    agent._call_action_model = fake_call_action_model
-
-    result = agent._run_loop("Исправь баг в src/payment.py", start_step=1)
-
-    assert "Ending the turn as done is not accepted" in prompts[1] or "not accepted as done" in prompts[1]
-    assert result.startswith("Исправил, правда.")
-    assert "задача не отмечена как выполненная" in result
-    assert finals == [(result, "incomplete")]
-
-
 def _call(name: str, **arguments) -> str:
     return "<tool_call>" + json.dumps({"name": name, "arguments": arguments}) + "</tool_call>"
 
@@ -166,37 +117,6 @@ def _scripted(agent, responses: list[str]) -> list[str]:
 
     agent._call_action_model = fake_call_action_model
     return prompts
-
-
-def test_a_change_task_is_never_done_with_no_file_changed_even_after_a_good_last_call(agent_factory):
-    agent = _planned_agent(agent_factory, max_steps=8)
-    agent._state.response_language = "ru"
-    workspace = agent.executor.workspace
-    (workspace / "client.py").write_text("TIMEOUT = 5\n", encoding="utf-8")
-    (workspace / "config.py").write_text("RETRIES = 3\n", encoding="utf-8")
-    finals = []
-    agent._ui.print_final = lambda message, user_messages=None, outcome="done": finals.append(outcome)
-    # The write fails in the middle of the batch; the batch still ends on a
-    # successful read, so the last call of the run succeeded.
-    prompts = _scripted(agent, [
-        "Читаю, правлю и сверяю конфиг.\n"
-        + _call("read_file", path="client.py")
-        + _call("replace_in_file", path="client.py", old_text="TIMEOUT = 50", new_text="TIMEOUT = 15")
-        + _call("read_file", path="config.py"),
-        "Готово.",
-        "Готово.",
-    ])
-
-    result = agent._run_loop("Поправь таймаут в client.py", start_step=1)
-
-    calls = [log for log in agent._state.step_logs if "feedback" in log]
-    assert [log["feedback"]["ok"] for log in calls] == [True, False, True]
-    blocked = [log for log in agent._state.step_logs if log.get("status") == "blocked_final_answer"]
-    assert len(blocked) == 1 and "files_changed is empty" in blocked[0]["reason"]
-    assert "no_changes" in agent._state.completion_blocker_kinds
-    assert len(prompts) == 3
-    assert result.startswith("Готово.") and "задача не отмечена как выполненная" in result
-    assert finals == ["incomplete"]
 
 
 def test_a_question_is_answered_as_done_after_a_failed_read(agent_factory):
@@ -214,30 +134,6 @@ def test_a_question_is_answered_as_done_after_a_failed_read(agent_factory):
     assert len(prompts) == 3
     assert result == "В `client.py` таймаут равен 5 секундам: `TIMEOUT = 5`. Файла `src/client.py` в проекте нет, поэтому значение берётся только отсюда."
     assert not agent._state.finished_incomplete
-
-
-def test_every_blocker_text_names_the_honest_exit(agent_factory):
-    agent = _fix_agent(agent_factory)
-    agent._state.modify_goal = True
-    agent._state.create_goal = True
-    agent._state.error_history = ["boom"]
-    agent._refresh_completion_requirements(force_enforcement=True)
-
-    assert agent._state.completion_blockers
-    for blocker in agent._state.completion_blockers:
-        assert "what was not done and why" in blocker, blocker
-    assert "what was not done and why" in agent._state.pending_instruction
-
-
-def test_incomplete_finish_passes_the_required_action_gate(agent_factory):
-    agent = _fix_agent(agent_factory)
-    agent._state.required_next_actions = ["write_file"]
-
-    honest = make_command("final_answer", {"message": "Cannot.", "outcome": "incomplete"}, "done")
-    claim = make_command("final_answer", {"message": "Done."}, "done")
-
-    assert agent._required_followup_error(honest) is None
-    assert agent._required_followup_error(claim) is not None
 
 
 def test_verification_still_runs_after_the_task_looks_complete(agent_factory):
@@ -266,10 +162,10 @@ def test_verification_still_runs_after_the_task_looks_complete(agent_factory):
 
     result = agent._run_loop("Create hello.py that prints hi", start_step=1)
 
-    assert agent._state.completion_ready
+    assert not agent._state.completion_ready
     assert executed == ["write_file", "read_file", "run_shell", "search_code"]
     assert all(log.get("status") != "error" for log in agent._state.step_logs)
-    assert "The task looks complete" in prompts[-1]
+    assert "The task looks complete" not in prompts[-1]
     assert result == "Created hello.py; py_compile passes."
     assert agent._state.run_status == "completed"
 
@@ -319,35 +215,3 @@ def test_read_only_guard_feedback_reaches_the_model_as_its_text(agent_factory):
     assert "read-only" in error
     assert "Unknown error" not in "".join(agent._state.recent_feedback)
     assert any("read-only" in line for line in agent._state.recent_feedback)
-
-
-@pytest.mark.parametrize("ready", [False, True])
-def test_report_artifact_guard_feedback_reaches_the_model_as_its_text(agent_factory, monkeypatch, ready):
-    agent = agent_factory(max_steps=1)
-    monkeypatch.setattr(agent, "_refresh_completion_requirements", lambda **_: None)
-    agent._state.completion_ready = ready
-    command = make_command("write_file", {"path": "task_report.txt", "content": "x"}, "edit")
-
-    from kernel.agent_runtime import _reject_report_artifact
-
-    assert _reject_report_artifact(agent, 1, command)
-    error = agent._feedback_error_for_model(_last_feedback(agent))
-    assert "report artifact" in error.casefold()
-    assert error != "Unknown error"
-
-
-def test_report_substance_feedback_reaches_the_model_as_its_text(agent_factory):
-    agent = agent_factory(max_steps=1)
-    agent._state.report_goal = True
-    agent._state.read_only_goal = True
-    agent._state.verification_evidence = ["read_file: config.txt"]
-    agent._state.files_read = ["config.txt"]
-    command = make_command("final_answer", {"message": "Done."}, "done")
-
-    from kernel.agent_runtime import _finish_with_final_answer
-
-    outcome = _finish_with_final_answer(agent, 1, command)
-
-    assert not outcome.finished
-    error = agent._feedback_error_for_model(_last_feedback(agent))
-    assert "your final answer" in error

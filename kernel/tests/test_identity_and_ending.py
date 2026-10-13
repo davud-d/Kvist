@@ -88,16 +88,8 @@ def test_the_stored_chat_turn_does_not_carry_the_ending_rule(agent_factory, monk
     assert agent._chat_history[-2]["content"] == "спасибо"
 
 
-def test_the_final_answer_style_of_the_action_roles_carries_the_same_rule(agent_factory):
+def test_the_action_roles_always_receive_the_plain_ending_rule(agent_factory):
     agent = agent_factory()
+    assert "End the reply where its content ends." in agent._build_runtime_prompt("goal", 1)
     agent._state.completion_ready = True
-
-    final_step = agent._build_runtime_prompt("goal", 2)
-
-    assert (
-        "- End the reply where its content ends. A concrete next step is content; "
-        "a general offer of help is not."
-    ) in final_step.split("Final answer style:")[1]
-
-    agent._state.completion_ready = False
-    assert "End the reply where its content ends" not in agent._build_runtime_prompt("goal", 3)
+    assert "End the reply where its content ends." in agent._build_runtime_prompt("goal", 2)

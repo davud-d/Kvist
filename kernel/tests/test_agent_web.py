@@ -8,16 +8,14 @@ def make_web_command(query: str, text: str = "Need current SDK docs"):
     return AgentCommand(plan_step="inspect", action=Action(type="web_search", args={"query": query}), text=text)
 
 
-def test_web_topic_detection_and_package_token(agent_factory):
+def test_dependency_package_token(agent_factory):
     agent = agent_factory()
     agent._state.dependency_versions = {"openai": ">=1.40.0"}
 
-    assert agent._is_web_topic("fix OpenAI import error", "openai docs") is True
-    assert agent._is_web_topic("local refactor", "pure project code") is False
     assert agent._contains_package_token("python_dotenv docs", "python-dotenv") is True
 
 
-def test_prepare_web_search_sets_defaults_versions_and_blocks_duplicates(agent_factory):
+def test_prepare_web_search_sets_defaults_versions_and_allows_retries(agent_factory):
     agent = agent_factory()
     agent._state.dependency_versions = {"openai": ">=1.40.0"}
     command = make_web_command("openai migration")
@@ -28,13 +26,13 @@ def test_prepare_web_search_sets_defaults_versions_and_blocks_duplicates(agent_f
     assert "1.40.0" in command.action.args["query"]
 
     duplicate = make_web_command("openai migration 1.40.0")
-    assert "Repeating identical" in agent._prepare_web_search_command("external library migration", duplicate)
+    assert agent._prepare_web_search_command("external library migration", duplicate) is None
 
 
-def test_prepare_web_search_rejects_non_web_topic(agent_factory):
+def test_prepare_web_search_has_no_topic_keyword_gate(agent_factory):
     agent = agent_factory()
     command = make_web_command("local variable names")
-    assert "only allowed" in agent._prepare_web_search_command("rename local files", command)
+    assert agent._prepare_web_search_command("rename local files", command) is None
 
 
 def test_fetch_url_defaults_and_fact_summaries(agent_factory):

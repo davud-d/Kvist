@@ -1,14 +1,7 @@
 # -*- coding: utf-8 -*-
-"""The universal role reuses the runtime's shared "no tool call ends the
-turn" mechanism (agent_runtime._run_turn) and its shared completion
-blockers — nothing role-specific was added to either. These tests prove
-both hold for "universal" exactly as they do for "coder": a plain-text
-reply finishes the turn immediately, and a claimed-done change with no
-actual edit is still refused.
-"""
+"""The universal role shares model-owned completion with the other action roles."""
 from __future__ import annotations
 
-from kernel.agent_runtime import _evidence_completion_blockers
 
 
 def test_universal_plain_conversation_ends_the_turn_without_any_tool_call(agent_factory):
@@ -27,10 +20,6 @@ def test_universal_plain_conversation_ends_the_turn_without_any_tool_call(agent_
     # non-streaming call, such as the native-tools "ping" probe).
     agent.client.content = reply
     agent.client.stream_chunks = [reply]
-    # A greeting is neither a "report" (which would demand an 80+ character
-    # substantive answer, see agent_runtime._is_substantive_answer) nor a
-    # "change" (which would demand a file edit): task_intent reads it as a
-    # short status exchange.
 
     result = agent.run("Привет, как дела?", routed_role="universal")
 
@@ -39,16 +28,16 @@ def test_universal_plain_conversation_ends_the_turn_without_any_tool_call(agent_
     assert agent._state.run_status != "blocked"
 
 
-def test_universal_change_task_is_still_blocked_without_a_real_edit(agent_factory):
-    """Completion blockers are generic (agent_runtime._evidence_completion_blockers
-    does not branch on role), so a "universal" run claiming a change is done
-    while files_changed is empty must be refused exactly like a coder run."""
+def test_universal_can_finish_a_build_without_source_edits(agent_factory):
+    from kernel.agent_runtime import _run_final_answer
+    from kernel.tests.conftest import make_command
+
     agent = agent_factory()
     agent._state.current_agent_role = "universal"
     agent._state.create_goal = True
-    agent._state.task_language = "en"
+    outcome = _run_final_answer(agent, "Build the binary", 1,
+        make_command("final_answer", {"message": "The build is available."}, "done"))
 
-    blockers = _evidence_completion_blockers(agent)
-
-    kinds = [kind for kind, _text in blockers]
-    assert "no_changes" in kinds
+    assert outcome.finished
+    assert outcome.final_message == "The build is available."
+    assert agent._state.run_status == "completed"

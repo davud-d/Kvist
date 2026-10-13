@@ -43,9 +43,10 @@ def test_reader_prompt_lists_only_read_only_actions():
     assert actions <= ALLOWED_ACTIONS
     assert actions.isdisjoint(_WRITE_ACTIONS)
     # Still offers the essential read/analyze surface; a response without a
-    # tool call is the report, so no finishing tool is offered.
+    # tool call is the report; final_answer optionally carries an explicit outcome.
     assert {"read_file", "search_code"} <= actions
-    assert actions.isdisjoint({"final_answer", "report_to_user"})
+    assert "final_answer" in actions
+    assert "report_to_user" not in actions
 
 
 def test_reader_prompt_has_no_write_or_patch_guidance():

@@ -11,30 +11,11 @@ def prepare_web_search_command(self, user_goal: str, command: AgentCommand) -> s
     query = str(command.action.args.get("query", "")).strip()
     if not query:
         return "Empty query for web_search"
-
-    if not self._is_web_topic(user_goal=user_goal, query=query):
-        return "web_search is only allowed for tasks involving external libraries and current API/releases"
-
     if "top_k" not in command.action.args and "max_results" not in command.action.args:
         command.action.args["top_k"] = 5
     if "freshness" not in command.action.args:
         command.action.args["freshness"] = "any"
-
-    enhanced_query = self._append_known_version_to_query(query)
-    command.action.args["query"] = enhanced_query
-
-    normalized_query = self._normalize_message(enhanced_query)
-    # The response's words stand for the hypothesis: the same query under the
-    # same words asks the same question again.
-    normalized_thought = self._normalize_message(command.text)
-    if (
-        normalized_query == self._state.last_web_query
-        and normalized_thought == self._state.last_web_thought
-    ):
-        return "Repeating identical web_search without a new hypothesis is forbidden"
-
-    self._state.last_web_query = normalized_query
-    self._state.last_web_thought = normalized_thought
+    command.action.args["query"] = self._append_known_version_to_query(query)
     return None
 
 
@@ -47,38 +28,6 @@ def prepare_fetch_url_command(self, command: AgentCommand) -> str | None:
     if "max_chars" not in command.action.args:
         command.action.args["max_chars"] = 12000
     return None
-
-
-def is_web_topic(self, user_goal: str, query: str) -> bool:
-    text = f"{user_goal} {query}".casefold()
-    keywords = (
-        "external library",
-        "sdk",
-        "framework",
-        "deprecated",
-        "migration",
-        "release notes",
-        "changelog",
-        "breaking change",
-        "signature",
-        "attribute",
-        "import error",
-        "official docs",
-        "new version",
-        "price",
-        "pricing",
-        "limit",
-        "status",
-    )
-
-    if any(keyword in text for keyword in keywords):
-        return True
-
-    for package in self._state.dependency_versions:
-        if self._contains_package_token(text, package):
-            return True
-
-    return False
 
 
 def append_known_version_to_query(self, query: str) -> str:

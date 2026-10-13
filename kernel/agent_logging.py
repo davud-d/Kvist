@@ -894,13 +894,13 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.summary = data.get("summary", "")
     self._state.files_read = data.get("files_read", [])
     self._state.files_changed = data.get("files_changed", [])
-    self._state.required_artifacts = data.get("required_artifacts", [])
-    self._state.missing_artifacts = data.get("missing_artifacts", [])
+    self._state.required_artifacts = []
+    self._state.missing_artifacts = []
     self._state.verification_evidence = data.get("verification_evidence", [])
     self._state.pending_verification_paths = data.get("pending_verification_paths", [])
-    self._state.destructive_diff = data.get("destructive_diff", "")
-    self._state.completion_blockers = data.get("completion_blockers", [])
-    self._state.required_next_actions = data.get("required_next_actions", [])
+    self._state.destructive_diff = ""
+    self._state.completion_blockers = []
+    self._state.required_next_actions = []
     self._state.recent_feedback = data.get("recent_feedback", [])
     self._state.recent_events = data.get("recent_events", [])
     self._state.recent_result_details = data.get("recent_result_details", [])
@@ -920,9 +920,10 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.stagnation_count = data.get("stagnation_count", 0)
     self._state.parse_errors = data.get("parse_errors", 0)
     self._state.read_only_streak = data.get("read_only_streak", 0)
-    self._state.pending_instruction = data.get("pending_instruction", "")
+    # Old checkpoints may contain orders to write/verify that were removed.
+    self._state.pending_instruction = "" if data.get("required_next_actions") else data.get("pending_instruction", "")
     self._state.last_action_signature = data.get("last_action_signature", "")
-    self._state.corrective_read_budget = data.get("corrective_read_budget", 0)
+    self._state.corrective_read_budget = 0
     self._state.stalled_reasons = data.get("stalled_reasons", [])
     self._state.last_progress = data.get("last_progress", 0)
     self._state.last_web_query = data.get("last_web_query", "")

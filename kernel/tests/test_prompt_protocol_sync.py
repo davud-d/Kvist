@@ -17,9 +17,9 @@ def _example_calls(prompt_text: str) -> list[str]:
     examples = prompt_text[re.search(r"^== \d+\. EXAMPLES ==$", prompt_text, re.MULTILINE).end():]
     following = re.search(r"^== \d+\. ", examples, re.MULTILINE)
     return _TOOL_CALL_RE.findall(examples[: following.start()] if following else examples)
-# Honoured when an older prompt calls them, never offered: a response without
-# a tool call ends the turn.
-_LEGACY_FINISHES = {"final_answer", "report_to_user"}
+# Only the reporter handoff is legacy. final_answer is optional for explicit
+# outcomes; ordinary text without calls still ends the turn.
+_LEGACY_FINISHES = {"report_to_user"}
 # Added to the prompt at run time, and only by an interactive frontend
 # (end_session.with_tool_in_prompt); the static prompt files never list it.
 _CONDITIONAL = {"end_session"}
@@ -119,3 +119,16 @@ def test_end_session_block_is_the_agreed_text():
     assert "The first call shows a warning and ends your turn; send nothing after it." in text
     assert "call end_session again with that NEW message's id" in text
     assert text.rstrip().endswith("If it returns a warning, the same rule applies to subsequent messages.")
+
+
+@pytest.mark.parametrize("role", ["coder", "reader", "devops", "universal"])
+def test_both_transports_describe_model_owned_completion(role):
+    from kernel.agent_model import _load_native_channel_section
+
+    original = _load_role_prompt(role)
+    native = native_role_prompt(original, _load_native_channel_section())
+    for prompt in (original, native):
+        assert "refused once" not in prompt
+        assert "runtime never records a fix task with no edits as done" not in prompt
+        assert "final_answer" in _extract_allowed_actions_block(prompt)
+        assert "no_change_needed" in prompt
