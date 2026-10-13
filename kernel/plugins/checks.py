@@ -144,6 +144,8 @@ def _static_checks(path: Path, manifest: Manifest, report: CheckReport) -> None:
         except SyntaxError as error:
             report.add("syntax", False, f"{relative}:{error.lineno}: {error.msg}")
             continue
+        if not relative.startswith("tests/"):
+            _check_declared_ctx_calls(tree, relative, manifest, report)
         if relative == manifest.entrypoint:
             defined = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
             missing = {"describe", "execute"} - defined
@@ -160,6 +162,29 @@ def _static_checks(path: Path, manifest: Manifest, report: CheckReport) -> None:
     report.add("permissions_listed", True, ", ".join(request.name for request in manifest.capabilities) or "none")
     if egress:
         report.add("egress", True, f"sends data off the machine through: {', '.join(egress)}", severity="warning")
+
+
+def _check_declared_ctx_calls(tree: ast.AST, relative: str, manifest: Manifest, report: CheckReport) -> None:
+    """Fail a ``ctx.<group>.<method>()`` call whose capability the manifest never declares.
+
+    The sandbox check only reaches the calls a tool makes on sample arguments, so a
+    skill whose dependencies are not installed would otherwise ship a call the core refuses.
+    """
+    from kernel.plugins.services import METHODS
+
+    declared = {request.name for request in manifest.capabilities}
+    reported: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Attribute)):
+            continue
+        method = f"{node.func.value.attr}.{node.func.attr}"
+        capability = METHODS.get(method, (None, False))[0]
+        if capability is None or capability in declared or method in reported:
+            continue
+        reported.add(method)
+        report.add("undeclared_ctx_call", False,
+                   f"{relative}:{node.lineno}: ctx.{method}() needs {capability}, which the manifest does not declare")
 
 
 def similar_skills(manifest: Manifest, registry: SkillRegistry) -> list[str]:

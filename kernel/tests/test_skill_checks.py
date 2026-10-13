@@ -118,3 +118,39 @@ class Probe(unittest.TestCase):
     report = check_package(_with_tests(write_skill(tmp_path / "src"), probing))
 
     assert report.author_tests["status"] == "passed", report.author_tests.get("output_tail")
+
+
+ASKING_PLUGIN = """
+def describe():
+    return {"tools": ["say"]}
+def execute(tool_name, arguments, context):
+    context.permissions.request("network.internet", "open a site", scope={"domains": ["example.com"]})
+    return {"echo": arguments["text"]}
+"""
+
+
+def test_a_call_to_an_undeclared_capability_fails_without_running_the_skill(tmp_path):
+    report = check_package(write_skill(tmp_path / "src", plugin=ASKING_PLUGIN), run_sandbox=False)
+
+    assert not report.ok
+    assert "permissions.request" in _finding(report, "undeclared_ctx_call").detail
+
+
+def test_declaring_the_capability_clears_the_static_finding(tmp_path):
+    folder = write_skill(tmp_path / "src", plugin=ASKING_PLUGIN,
+                         capabilities=["input.read", "permissions.request"])
+
+    report = check_package(folder, run_sandbox=False)
+
+    assert report.ok, report.summary()
+
+
+def test_every_bundled_skill_declares_what_its_code_calls():
+    from pathlib import Path
+
+    import kernel
+
+    bundled = Path(kernel.__file__).parent / "skills_bundled"
+    for package in sorted(path for path in bundled.iterdir() if (path / "manifest.json").is_file()):
+        report = check_package(package, run_sandbox=False)
+        assert report.ok, f"{package.name}: {report.summary()}"

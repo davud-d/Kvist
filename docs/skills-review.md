@@ -65,7 +65,7 @@
 ### SK-05 — Browser skill может не получить разрешение, которое сам запрашивает
 
 - **ID / Severity / Confidence:** SK-05 / MEDIUM / HIGH CONFIDENCE — следует из кода, сценарий не запускался.
-- **Статус:** ОТКРЫТО.
+- **Статус:** ИСПРАВЛЕНО 2026-10-13: `permissions.request` добавлен в обязательные права browser (версия 0.1.1), статическая проверка `undeclared_ctx_call` ловит вызов `ctx.*` без объявленного права; тесты в `test_skill_checks.py`, мутация (убрать право из манифеста) валит `test_every_bundled_skill_declares_what_its_code_calls`. Установленная в `~/.kvist` версия 0.1.0 остаётся старой до `--skill-op install --skill-path bundled:browser` и нового подтверждения.
 - **Ссылки:** [browser plugin.py:255](/path/to/Kvist/kernel/skills_bundled/browser/plugin.py:255), [browser manifest.json:17](/path/to/Kvist/kernel/skills_bundled/browser/manifest.json:17), [services.py](/path/to/Kvist/kernel/plugins/services.py) (`_permissions_request`).
 - **Описание:** browser skill вызывает ctx.permissions.request для интернет-домена и исходного изображения, но permissions.request не объявлен среди обязательных или необязательных разрешений browser manifest. При попытке открыть внешний домен или загрузить вложение запрос должен быть отклонён на проверке capability.
 - **Воздействие:** сценарии внешнего сайта и загрузки вложения могут быть недоступны, даже если пользователь хочет выдать узкое разрешение.
