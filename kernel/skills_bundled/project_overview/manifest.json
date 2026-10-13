@@ -1,0 +1,34 @@
+{
+  "manifest_version": 1,
+  "id": "project_overview",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Project overview", "ru": "Обзор проекта"},
+  "summary": {
+    "en": "One call that answers 'what is this project': languages, manifests, how it is built and tested, entry points, the top of the README.",
+    "ru": "Один вызов отвечает на вопрос «что это за проект»: языки, манифесты, как собирается и тестируется, точки входа, начало README."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": ["linux"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {
+    "required": [{"name": "files.read", "reason": "to look at the project's folders, manifests and README"}]
+  },
+  "limits": {"call_timeout_seconds": 120, "max_result_bytes": 65536, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {
+      "name": "scan",
+      "summary": "Describe the workspace: languages with file counts, manifests, top-level folders, test/lint/build commands taken from the project's own configuration, entry points and the head of the README. Reads only; nothing is changed.",
+      "readonly": true,
+      "timeout_seconds": 90,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {}},
+      "result": {"type": "object", "required": ["languages", "manifests", "commands"], "properties": {
+        "languages": {"type": "array"}, "manifests": {"type": "array"}, "top_level": {"type": "array"},
+        "commands": {"type": "object"}, "entry_points": {"type": "array"},
+        "readme": {"type": "string"}, "notes": {"type": "array"}
+      }}
+    }
+  ]
+}

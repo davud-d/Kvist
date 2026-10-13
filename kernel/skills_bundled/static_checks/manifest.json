@@ -1,0 +1,43 @@
+{
+  "manifest_version": 1,
+  "id": "static_checks",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Static checks", "ru": "Статические проверки"},
+  "summary": {
+    "en": "Run the project's own linters and type checkers (ruff, mypy, tsc, eslint, go vet, cargo check) and get findings as file, line, code and message.",
+    "ru": "Запустить линтеры и проверки типов проекта (ruff, mypy, tsc, eslint, go vet, cargo check) и получить замечания как файл, строка, код и сообщение."
+  },
+  "instructions": "SKILL.md",
+  "entrypoint": "plugin.py",
+  "platforms": ["linux"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {
+    "required": [
+      {"name": "files.read", "reason": "to find which checkers the project configures"},
+      {"name": "processes.run", "reason": "to run the checkers in the workspace sandbox"},
+      {"name": "artifacts", "reason": "to keep the full checker output as a file"},
+      {"name": "ui.notify", "reason": "to show which checker runs"}
+    ]
+  },
+  "limits": {"call_timeout_seconds": 900, "max_result_bytes": 131072, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {
+      "name": "run",
+      "summary": "Run the checkers the project configures (or the one named) and return findings per tool: file, line, column, code, severity, message, plus the exact command and a link to the full output.",
+      "readonly": false,
+      "timeout_seconds": 900,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "tool": {"type": "string", "enum": ["auto", "ruff", "mypy", "tsc", "eslint", "go_vet", "cargo_check"],
+                 "description": "Defaults to auto: every checker the project's configuration names."},
+        "target": {"type": "string", "maxLength": 500, "description": "A file or folder to check; empty checks the whole project. tsc and cargo_check always check the whole project."},
+        "timeout_seconds": {"type": "integer", "minimum": 5, "maximum": 300, "description": "Per checker; default 90."}
+      }},
+      "result": {"type": "object", "required": ["status", "tools"], "properties": {
+        "status": {"type": "string", "enum": ["clean", "findings", "incomplete", "error", "timeout", "no_tools"]},
+        "tools": {"type": "array"}, "log_artifact": {"type": "string"}, "note": {"type": "string"}
+      }}
+    }
+  ]
+}

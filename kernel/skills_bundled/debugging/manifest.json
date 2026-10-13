@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "id": "debugging",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {"en": "Debugging", "ru": "Отладка"},
+  "summary": {
+    "en": "How to find a bug: see it fail first, narrow it, test one guess at a time, fix, prove the fix.",
+    "ru": "Как искать ошибку: сначала увидеть сбой, сузить, проверять по одной догадке, чинить, доказать починку."
+  },
+  "instructions": "SKILL.md",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {"required": []}
+}

@@ -406,6 +406,9 @@ Installed on demand with `--skill-op install --skill-path bundled:<id>`:
 | `test_runner` | pytest / `node --test` / `npm test` with structured results and a log artifact. |
 | `documents` | read PDF pages, spreadsheet sheets and ranges (xlsx, csv) and Word paragraphs (docx) with exact page, sheet, cell and paragraph references. |
 | `code_nav` | **Python only**: go to definition, find usages, file outline, preview a rename as diffs, pyflakes diagnostics. |
+| `project_overview` | one read-only call that answers "what is this project": file counts per language, manifests, test/lint/typecheck/build commands read from the project's own configuration, entry points, top of the README. Needs only `files.read`. |
+| `static_checks` | ruff, mypy, tsc, eslint, `go vet` and `cargo check` detected from the project's configuration, findings as file, line, column, code and message, full output as a log artifact. A checker that is not installed is reported as `unavailable`, never as clean; nothing is installed. |
+| `debugging` | instructions only, no runner and no permissions: reproduce first, narrow, test one guess at a time, fix the cause, prove the fix; ends with `no_change_needed` when the problem cannot be reproduced. Works on every platform. |
 
 ## Platforms and limits
 
