@@ -147,3 +147,27 @@ def test_a_shell_command_cannot_read_a_config_directory_inside_the_project(tmp_p
     argv = wrap_command_for_sandbox(["cat", "x"], SandboxMode.BUBBLEWRAP, tmp_path, tmp_path)
 
     assert ["--tmpfs", str(config.resolve())] == argv[argv.index(str(config.resolve())) - 1:argv.index(str(config.resolve())) + 1]
+
+
+@requires_runner
+def test_a_skill_the_agent_installed_waits_for_a_restart(builder_agent):
+    agent, _ui = builder_agent
+    _skills(agent, op="scaffold", skill="greeter", summary="Greets people.")
+    _skills(agent, op="check", path="kvist-skills/greeter")
+
+    installed = _skills(agent, op="install", path="kvist-skills/greeter")
+    refused = _skills(agent, op="attach", skill="greeter")
+    listed = _skills(agent, op="list")
+
+    assert installed["ok"] and installed["data"]["available"] is False
+    assert installed["data"]["available_after_restart"] is True
+    assert not refused["ok"] and "restart" in refused["error"].lower()
+    row = next(item for item in listed["data"]["skills"] if item["id"] == "greeter")
+    assert row["available"] is False and "restarted" in row["reason"]
+    assert "available after Kvist is restarted" in agent.skills.prompt_section("en")
+
+    from kernel.plugins import skills as skills_module
+
+    skills_module._PENDING_RESTART.clear()  # what a new process starts with
+    attached = _skills(agent, op="attach", skill="greeter")
+    assert attached["ok"], attached.get("error")

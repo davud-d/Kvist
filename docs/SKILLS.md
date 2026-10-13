@@ -359,7 +359,12 @@ the last one always needs the person.
   * the author's `tests/test_*.py` under `unittest`, in the same kind of sandbox, without network.
 
   Passing proves none of this is broken in the cases tried; it does not prove the skill harmless.
-* `install` stages the draft as a new version, unapproved. Similar installed skills are reported.
+* `install` installs exactly the content that passed a check in this task, after a dialog that shows the
+  person what the skill does, its permissions and the check results; the model cannot answer it. Similar
+  installed skills are reported.
+* **An installed skill works only after Kvist is restarted.** It is installed, activated and granted for this
+  workspace, but `attach` refuses it in the process that installed it and `list` shows it as unavailable until
+  then: a conversation must not change its own tools mid-run. The task that built it keeps working as before.
 * Quotas per task: at most **10 checks**, **3 drafts**, **2 installs**; they stop endless
   fix loops.
 * Page text, documents, images and MCP replies are untrusted: they cannot grant an

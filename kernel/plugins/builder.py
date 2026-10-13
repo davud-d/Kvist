@@ -143,6 +143,7 @@ def install_draft(agent: Any, ledger: BuildLedger, relative: str) -> dict[str, A
         registry.activate(result.skill_id, result.version, result.digest)
     ledger.installs += 1
     agent.skills.grants.put(manifest.id, digest, Path(agent.executor.workspace), manifest.required_capabilities())
+    agent.skills.defer_until_restart(manifest.id)
     agent.skills._catalog_cache = None
     deps_note = ""
     if manifest.python_deps and not registry.env_ready(manifest):
@@ -157,8 +158,10 @@ def install_draft(agent: Any, ledger: BuildLedger, relative: str) -> dict[str, A
             deps_note = f"Dependencies were not installed: {error}"
     entry = registry.entry(manifest.id)
     return {"installed": manifest.id, "version": manifest.version, "digest": digest,
-            "available": bool(entry and entry.available), "reason": entry.reason if entry else "",
-            "note": deps_note or "Approved for this workspace; attach it with skills op attach."}
+            "available": False, "available_after_restart": bool(entry and entry.available),
+            "reason": entry.reason if entry and not entry.available else "",
+            "note": deps_note or "Approved for this workspace. It cannot be attached in this session: it becomes "
+                    "available after Kvist is restarted. Tell the person that."}
 
 
 def install_text(manifest, registry: SkillRegistry, report: CheckReport, language: str) -> tuple[str, str]:
