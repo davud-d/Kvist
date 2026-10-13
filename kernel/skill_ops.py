@@ -3,13 +3,16 @@
 
 These are operations a person runs (or a frontend runs on their behalf after
 its own dialog); the model has no tool that reaches them. Every op prints one
-JSON object. ``approve`` and ``install-deps`` show what they will allow or
-download and ask on the terminal unless ``--yes`` is given; without a terminal
-and without ``--yes`` they refuse instead of assuming consent.
+JSON object when stdout is not a terminal (or with ``--json``); on a terminal
+the result is drawn by ``skill_ops_view``. ``approve`` and ``install-deps``
+show what they will allow or download and ask on the terminal unless ``--yes``
+is given; without a terminal and without ``--yes`` they refuse instead of
+assuming consent.
 """
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -256,14 +259,29 @@ def _require(value: str | None, flag: str) -> str:
 
 
 def main_skill_op(args) -> None:
+    for_person = sys.stdout.isatty() and not getattr(args, "json", False)
+    # JSON stays "en" unless --language says otherwise: programs must not depend on the person's locale.
+    language = args.language or ("ru" if for_person and os.environ.get("LANG", "").startswith("ru") else "en")
     try:
         payload = run_skill_op(args.skill_op, workspace=Path(args.workspace or ".").resolve(), skill=args.skill,
                                path=args.skill_path, version=args.skill_version, assume_yes=args.yes,
-                               language=args.language or "en")
+                               language=language)
     except (OpError, RegistryError, ManifestError, OSError, RuntimeError, ValueError) as error:
-        print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
+        failure = {"ok": False, "error": str(error)}
+        _print_result(args.skill_op, failure, for_person, language)
         raise SystemExit(1) from error
-    print(json.dumps(payload, ensure_ascii=False))
+    _print_result(args.skill_op, payload, for_person, language)
+
+
+def _print_result(op: str, payload: dict[str, Any], for_person: bool, language: str) -> None:
+    if not for_person:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    from rich.console import Console
+
+    from kernel.skill_ops_view import render
+
+    render(op, payload, Console(), language)
 
 
 def main_memory_op(args) -> None:

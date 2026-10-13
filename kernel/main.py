@@ -136,6 +136,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skill-version", help="Version for --skill-op remove-version.")
     parser.add_argument("--yes", action="store_true", help="Confirm --skill-op approve/install-deps without asking.")
     parser.add_argument("--language", choices=("en", "ru"), help="Language of --skill-op texts.")
+    parser.add_argument("--json", action="store_true", help="Print the --skill-op result as JSON even on a terminal.")
     parser.add_argument(
         "--memory-op",
         choices=("list", "add", "update", "delete"),

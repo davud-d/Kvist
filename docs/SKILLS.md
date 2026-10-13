@@ -330,6 +330,9 @@ kvist --skill-op revoke | rollback | uninstall | remove-version | reset-data --s
 kvist --skill-op check --skill-path ./my_skill              # independent static checks and tests
 ```
 
+On a terminal the result is drawn for a person (cards, ✓/✗ lines). Pipes, scripts and frontends
+get one JSON object, as before; `--json` forces it on a terminal too.
+
 * `install` never executes the package. Atomic: staged under a temporary name, verified,
   then pointed to by `active.json`. Duplicate content is detected.
 * `approve` shows what the version asks for, with the scopes, in the person's language.

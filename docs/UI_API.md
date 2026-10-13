@@ -715,7 +715,8 @@ open `url` in the system browser, never load the URLs in a page that can run oth
 content, and add `img-src http://127.0.0.1:*` (and the same for `frame-src` if you embed
 `url`) to a content security policy. Hide the preview when `state` is `closed`.
 
-**Management operations (headless, JSON on stdout, then exit):**
+**Management operations (headless, then exit; JSON on stdout when it is not a terminal, or with
+`--json`; on a terminal `--skill-op` prints a formatted view instead):**
 `--skill-op list|show|install|approve|revoke|install-deps|rollback|uninstall|remove-version|reset-data|check`
 (with `--skill`, `--skill-path`, `--skill-version`, `--yes`), `--memory-op list|add|update|delete`,
 `--mcp-op list|add|remove` and `--connection-op list|add|remove` (secrets on stdin, never

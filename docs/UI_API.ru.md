@@ -703,7 +703,8 @@ MCP-серверов, ни аудио- и image-промптов. Что кон�
 исполнять другое содержимое, и добавьте `img-src http://127.0.0.1:*` (и то же для `frame-src`,
 если встраиваете `url`) в content security policy. Прячьте превью, когда `state` — `closed`.
 
-**Операции управления (без интерфейса, JSON в stdout, затем выход):**
+**Операции управления (без интерфейса, затем выход; JSON в stdout, если это не терминал или
+указан `--json`; на терминале `--skill-op` печатает оформленный вид):**
 `--skill-op list|show|install|approve|revoke|install-deps|rollback|uninstall|remove-version|reset-data|check`
 (с `--skill`, `--skill-path`, `--skill-version`, `--yes`), `--memory-op list|add|update|delete`,
 `--mcp-op list|add|remove` и `--connection-op list|add|remove` (секреты через stdin, никогда в
