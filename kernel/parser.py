@@ -303,8 +303,6 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
             port = args["expose_port"]
             if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
                 raise CommandValidationError("'expose_port' must be a port number in 1024..65535")
-            if not args.get("background"):
-                raise CommandValidationError("'expose_port' needs \"background\": true")
         if not isinstance(args.get("sandbox", "default"), str) or args.get("sandbox", "default") not in {"default", "host"}:
             raise CommandValidationError("'sandbox' must be 'default' or 'host'")
         if not isinstance(args.get("network", False), bool):

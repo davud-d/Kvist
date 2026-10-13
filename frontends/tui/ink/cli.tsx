@@ -11,6 +11,7 @@ import { probeTerminal } from "./probe.js"
 import { Pointer } from "./pointer.js"
 import { sessionOp } from "./session.js"
 import { starterSet } from "./starters.js"
+import { renderWithRawInput } from "./terminal.js"
 import { routeWarningsToLog } from "./warnings.js"
 import { App } from "./ui/app.js"
 import { SKINS, applySkin } from "./ui/theme.js"
@@ -106,7 +107,7 @@ const pictures = kittyGraphics(process.env) ? "kitty" : probe?.sixel ? "sixel" :
 const pointer = fullscreen ? new Pointer(process.stdin, process.stdout, { pictures, cell: probe?.cell ?? null }) : null
 let lastSession = ""
 
-const app = render(
+const app = renderWithRawInput(process.stdin, () => render(
   <App
     command={command}
     workspace={workspace}
@@ -123,7 +124,7 @@ const app = render(
   pointer
     ? { exitOnCtrlC: false, alternateScreen: true, stdin: pointer.stdin, stdout: pointer.stdout, kittyKeyboard: { mode: "auto" } }
     : { exitOnCtrlC: false, kittyKeyboard: { mode: "auto" } },
-)
+))
 pointer?.start()
 await app.waitUntilExit()
 pointer?.stop()

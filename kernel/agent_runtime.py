@@ -1073,6 +1073,11 @@ def _plan_calls(self, response: ModelResponse, batch_id: str) -> list[_PlannedCa
             reason = redact_text(str(error))
             if not request.error:
                 reason = f"Tool call {number} ({request.name}) was not run: {reason}"
+                # The result only carries the reason; without the arguments a
+                # repeated rejection cannot be traced to what the model sent.
+                # Debug output only, so a long write_file body is cut.
+                sent = redact_text(json.dumps(request.arguments, ensure_ascii=False, default=str))
+                self._ui.debug_print(f"[rejected call] {request.name} arguments: {sent[:500]}")
             planned.append(_PlannedCall(request, None, reason))
             continue
         planned.append(_PlannedCall(request, command))

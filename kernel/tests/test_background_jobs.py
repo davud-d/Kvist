@@ -256,6 +256,16 @@ def test_a_real_command_runs_in_the_background_and_is_followed(tmp_path):
 
 
 @requires_posix
+def test_expose_port_on_a_foreground_command_is_ignored_with_a_note(tmp_path):
+    executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
+
+    result = executor._run_shell(["python3", "-c", "print('ok')"], expose_port=8000)
+
+    assert result.ok and result.data["stdout"].strip() == "ok"
+    assert "expose_port was ignored" in result.data["port_note"]
+
+
+@requires_posix
 def test_a_second_command_runs_while_a_job_is_running(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     job = executor._run_shell(

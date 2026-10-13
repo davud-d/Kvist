@@ -158,6 +158,12 @@ def test_run_shell_timeout_is_clamped_not_rejected(given, expected):
     assert args["timeout"] == expected
 
 
+def test_run_shell_expose_port_without_background_is_not_rejected():
+    # A foreground command has no server to expose; the executor drops the port
+    # and says so, instead of the whole call failing.
+    validate_action_args("run_shell", {"command": ["pytest"], "expose_port": 8000})
+
+
 def test_build_command_clamps_out_of_range_timeout():
     assert command_for("run_shell", {"command": ["pytest"], "timeout": 600}).action.args["timeout"] == 300.0
 

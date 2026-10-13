@@ -118,6 +118,9 @@ progress.json.bak-20260919
 tools/
 frontends/web-local/design.md
 
+# Local implementation brief
+/docs/prompt.md
+
 # Postman Local View workspace scaffolding
 .postman/
 postman/

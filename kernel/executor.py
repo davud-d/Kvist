@@ -2022,10 +2022,14 @@ class SafeExecutor:
     ) -> ExecutionResult:
         if not isinstance(network, bool):
             raise ExecutorError("run_shell.network must be a boolean")
-        if expose_port is not None and not background:
-            raise ExecutorError("run_shell.expose_port needs background: true")
         if not isinstance(background, bool):
             raise ExecutorError("run_shell.background must be a boolean")
+        # A port names a server that outlives the call; a foreground command
+        # has none, and refusing the whole call cost a run six identical retries.
+        port_note = ""
+        if expose_port is not None and not background:
+            expose_port = None
+            port_note = "expose_port was ignored: it applies only to a command run with background: true."
         if not isinstance(command, list) or not command or not all(isinstance(item, str) for item in command):
             raise ExecutorError("run_shell.command must be a non-empty array of strings")
         if cwd is not None and not isinstance(cwd, str):
@@ -2118,6 +2122,7 @@ class SafeExecutor:
                 "stderr": self._sanitize_internal_paths_in_text(result.stderr),
                 "timed_out": result.timed_out,
                 **({"path_note": path_note} if path_note else {}),
+                **({"port_note": port_note} if port_note else {}),
                 "untrusted": True,
                 "notice": UNTRUSTED_CONTENT_NOTICE,
             },
