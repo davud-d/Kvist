@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "id": "skill_authoring",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {"en": "Writing skills", "ru": "Создание скиллов"},
+  "summary": {
+    "en": "How to build a Kvist skill: when it is worth it, the manifest, plugin.py, permissions, checks, install, and why it works only after a restart.",
+    "ru": "Как создать скилл Kvist: когда это оправдано, манифест, plugin.py, права, проверки, установка и почему он заработает только после перезапуска."
+  },
+  "instructions": "SKILL.md",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {"required": []}
+}

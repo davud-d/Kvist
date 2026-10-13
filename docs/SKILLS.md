@@ -414,6 +414,7 @@ Installed on demand with `--skill-op install --skill-path bundled:<id>`:
 | `project_overview` | one read-only call that answers "what is this project": file counts per language, manifests, test/lint/typecheck/build commands read from the project's own configuration, entry points, top of the README. Needs only `files.read`. |
 | `static_checks` | ruff, mypy, tsc, eslint, `go vet` and `cargo check` detected from the project's configuration, findings as file, line, column, code and message, full output as a log artifact. A checker that is not installed is reported as `unavailable`, never as clean; nothing is installed. |
 | `debugging` | instructions only, no runner and no permissions: reproduce first, narrow, test one guess at a time, fix the cause, prove the fix; ends with `no_change_needed` when the problem cannot be reproduced. Works on every platform. |
+| `skill_authoring` | instructions only, no permissions: when a skill is worth building, the manifest, `plugin.py` and the `ctx` rules, tests and `contract.json`, the scaffold → check → install flow and the restart rule. The tools it describes are the built-in `skills` ops. Works on every platform. |
 
 ## Platforms and limits
 
