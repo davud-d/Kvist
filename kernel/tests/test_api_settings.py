@@ -79,17 +79,18 @@ def test_untouched_interval_is_not_marked_as_the_users_choice(tmp_path):
     assert config.api_interval_user_set is False
 
 
+@pytest.mark.parametrize("provider", ["openai", "anymodel"])
 def test_chosen_interval_survives_the_fast_direct_provider_zeroing(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, provider
 ):
-    """A number the user typed must not be silently ignored on OpenAI."""
+    """A number the user typed must not be silently ignored on unpaced providers."""
     monkeypatch.delenv("AGENT_API_INTERVAL", raising=False)
     path = tmp_path / "config.json"
     values = api_settings.default_api_settings()
     values["request_interval"] = 12.5
     api_settings.store_api_settings(values, path)
 
-    config = _config(provider="openai")
+    config = _config(provider=provider)
     assert agent_model._get_api_interval(_Agent(config)) == 0.0
 
     api_settings.apply_api_settings(config, path)

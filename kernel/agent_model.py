@@ -43,6 +43,7 @@ from kernel.llm_clients import (
     provider_supports_json_mode,
     OPENAI_PROVIDER,
     ANTHROPIC_PROVIDER,
+    ANYMODEL_PROVIDER,
     DEEPSEEK_PROVIDER,
     CHATGPT_PROVIDER,
     OPENROUTER_PROVIDER,
@@ -111,13 +112,13 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "complete": "complete_prompt.txt",
 }
 
-# Direct official-API providers (OpenAI, ChatGPT, Anthropic, DeepSeek) are
-# reached straight at the vendor endpoint and answer fast, so request pacing is
-# pure overhead for them. Relay and aggregator providers (OpenRouter, FreeFlow,
-# OmniRoute, custom endpoints) keep the paced defaults for rate-limit
-# politeness.
+# Direct official-API providers (OpenAI, ChatGPT, Anthropic, DeepSeek) and
+# AnyModel skip default request pacing. Other relay and aggregator providers
+# (OpenRouter, FreeFlow, OmniRoute, custom endpoints) keep the paced defaults
+# for rate-limit politeness.
 _FAST_DIRECT_PROVIDERS: frozenset[str] = frozenset(
-    {OPENAI_PROVIDER, CHATGPT_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER}
+    {OPENAI_PROVIDER, CHATGPT_PROVIDER, ANTHROPIC_PROVIDER, DEEPSEEK_PROVIDER,
+     ANYMODEL_PROVIDER}
 )
 
 # Per-provider API request interval overrides (seconds) on top of the config
