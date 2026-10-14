@@ -787,3 +787,13 @@ test("skills, helpers and artifacts become short notes; update_applied stays sil
     "Screenshot: /w/.kvist/artifacts/r/shot.png",
   ])
 })
+
+test("a session_title for the session on screen becomes its window title; another session's does not", () => {
+  const on = feed(hello, { type: "session", session: "s1", has_checkpoint: false })
+  const titled = reduce(on, { type: "event", event: { type: "session_title", session: "s1", title: "Fix the parser" } })
+  assert.equal(titled.info.title, "Fix the parser")
+  const other = reduce(titled, { type: "event", event: { type: "session_title", session: "s2", title: "Other" } })
+  assert.equal(other.info.title, "Fix the parser")
+  const switched = reduce(other, { type: "event", event: { type: "session", session: "s2", has_checkpoint: false } })
+  assert.equal(switched.info.title, undefined)
+})

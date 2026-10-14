@@ -538,6 +538,8 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
                 task_completed = True
                 break
             self._save_checkpoint(user_goal, step - 1)
+            # The checkpoint made the session document exist, which the title is stored into.
+            self._request_session_title(user_goal)
 
         if not final_message:
             final_message = self._build_limit_reached_message()

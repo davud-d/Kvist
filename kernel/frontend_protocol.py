@@ -585,6 +585,8 @@ class SessionEvent:
     session: str
     has_checkpoint: bool
     closed_notice: str | None = None
+    # The session's stored title when it has one, so a frontend can name its window.
+    title: str | None = None
     type: ClassVar[str] = "session"
 
     def to_dict(self) -> dict:
@@ -596,6 +598,8 @@ class SessionEvent:
         if self.closed_notice is not None:
             payload["closed"] = True
             payload["closed_notice"] = self.closed_notice
+        if self.title:
+            payload["title"] = self.title
         return payload
 
 

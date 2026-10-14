@@ -113,7 +113,7 @@ export interface State {
   closed: string | null
   // Background jobs of the session on screen, oldest first; finished ones stay until a new session.
   jobs: JobView[]
-  info: { provider: string; model: string; role: string; session: string; routedRole?: string; kvistVersion?: string }
+  info: { provider: string; model: string; role: string; session: string; title?: string; routedRole?: string; kvistVersion?: string }
   usage: { input: number; output: number; context: number; limit: number }
   showDebug: boolean
   startedAt: number | null
@@ -365,6 +365,8 @@ function applyEffects(state: State, effects: Record<string, unknown>): State {
   if (model) info.model = model
   const session = asText(effects.session)
   if (session) info.session = session
+  const title = asText(effects.title)
+  if (title) info.title = title
   return { ...state, info, effort: asText(effects.effort) || state.effort }
 }
 
@@ -556,7 +558,10 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
     case "command_result":
       return onCommandResult(state, event)
     case "session":
-      return { ...state, info: { ...state.info, session: event.session }, closed: event.closed === true ? (event.closed_notice ?? "") : null }
+      return { ...state, info: { ...state.info, session: event.session, title: event.title || undefined }, closed: event.closed === true ? (event.closed_notice ?? "") : null }
+    case "session_title":
+      // A title can land after the person moved to another session.
+      return event.session === state.info.session ? { ...state, info: { ...state.info, title: event.title } } : state
     case "session_ended":
       return { ...state, closed: event.closed_notice }
     case "job_started": {

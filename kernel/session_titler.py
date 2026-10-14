@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """Automatic session titles.
 
-A session's title is generated once, in the background, from its first
-completed turn: the user's own message plus the first lines of the agent's
-reply — never the running context, and never something the turn itself waits
-on (the caller spawns this off a background thread; nothing here blocks the
+A session's title is generated once, in the background, as soon as its first
+batch of actions has run (the user's own message alone) or, when the turn ends
+before that, from its first completed turn: the user's message plus the first
+lines of the agent's reply — never the running context, and never something
+the turn itself waits on (the caller spawns this off a background thread; nothing here blocks the
 agent loop). The model is a separate, configurable ``AgentConfig.title_model``,
 defaulting to the provider's fast/cheap tier. A model that does not answer
 within ``GENERATION_TIMEOUT_SECONDS``, or answers with nothing usable, yields
@@ -33,8 +34,8 @@ TITLE_MAX_CHARS = 50
 FALLBACK_MAX_CHARS = 40
 
 _SYSTEM_PROMPT = (
-    "You title chat sessions. Read the user's request and the assistant's "
-    "reply, then reply with ONLY a short title for this conversation: at "
+    "You title chat sessions. Read the user's request and, when there is one, "
+    "the assistant's reply, then reply with ONLY a short title for this conversation: at "
     "most 6 words, no quotes, no trailing period, no prefix like 'Title:'. "
     "Write the title in the same language as the user's request."
 )
@@ -153,6 +154,8 @@ def session_display_title(document: dict[str, Any], session_name: str) -> str:
 
 
 def build_title_prompt(user_goal: str, agent_reply: str) -> str:
+    if not agent_reply.strip():
+        return f"User request:\n{user_goal}"
     preview = "\n".join(agent_reply.splitlines()[:REPLY_PREVIEW_LINES])
     return (
         f"User request:\n{user_goal}\n\n"

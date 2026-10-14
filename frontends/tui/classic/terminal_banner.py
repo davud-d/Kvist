@@ -26,6 +26,7 @@ from rich.text import Text
 
 from kernel.redaction import redact_value, sanitize_display_text
 from kernel.terminal import is_hitl_active
+from window_title import set_window_title
 
 try:
     from prompt_toolkit import prompt as pt_prompt
@@ -274,6 +275,9 @@ class TerminalBannerUI:
         """
         self._live_panel.last_thought = sanitize_display_text(str(text))
         self._publish_live()
+
+    def print_session_title(self, session: str, title: str) -> None:
+        set_window_title(title)
 
     def start_live(self) -> None:
         self._reset_message_hold()

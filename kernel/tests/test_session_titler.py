@@ -149,6 +149,13 @@ def test_generate_session_title_prompt_carries_only_first_20_reply_lines():
     assert "line 20" not in prompt
 
 
+def test_title_prompt_without_a_reply_carries_only_the_request():
+    client = FakeLLMClient(content="Add caching")
+    generate_session_title(client, _config(), "speed up the api", "")
+    prompt = client.requests[-1]["messages"][-1]["content"]
+    assert prompt == "User request:\nspeed up the api"
+
+
 # -- session_display_title -------------------------------------------------------
 
 

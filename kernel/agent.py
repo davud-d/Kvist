@@ -294,6 +294,9 @@ class LocalAgent:
         # exists (generated in the background, or set by hand via /rename).
         self._session_title: str | None = None
         self._title_manual: bool = False
+        # Session whose title generation already started, so the early request
+        # (first action batch) and the end-of-turn one never both run.
+        self._title_requested_for: str | None = None
         # Set by load_checkpoint; describes a mutation interrupted mid-flight.
         self._pending_action: dict[str, Any] | None = None
         # Identifies the active run; a new run() stamps a fresh id.
@@ -444,17 +447,21 @@ class LocalAgent:
         if len(self._session_history) > 10:
             self._session_history = self._session_history[-10:]
         self.save_session()
-        # First completed turn of a brand-new session: start naming it in the
-        # background. A resumed session that already has history (whether or
-        # not it has a title) never reaches this — len == 1 only right after
-        # the very first entry is appended.
+        # Fallback for a turn that ended before its first action batch ran
+        # (a chat reply, an immediate answer): name the brand-new session now.
+        if len(self._session_history) == 1 and not stopped_by_user:
+            self._request_session_title(user_goal, result)
+
+    def _request_session_title(self, user_goal: str, agent_reply: str = "") -> None:
+        """Start naming the active session once, unless it already has a title."""
         if (
-            len(self._session_history) == 1
-            and not stopped_by_user
-            and not self._title_manual
-            and not self._session_title
+            self._title_manual
+            or self._session_title
+            or self._title_requested_for == self.current_session
         ):
-            self._start_title_generation(self.current_session, user_goal, result)
+            return
+        self._title_requested_for = self.current_session
+        self._start_title_generation(self.current_session, user_goal, agent_reply)
 
     def _start_title_generation(
         self, session_name: str, user_goal: str, agent_reply: str

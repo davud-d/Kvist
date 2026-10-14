@@ -89,3 +89,35 @@ def test_resumed_session_with_existing_history_never_starts_generation(agent_fac
     agent._add_to_session_history("continue the work", "coder", "Done.")
 
     assert calls == []
+
+
+def test_early_request_names_the_session_from_the_goal_alone(agent_factory):
+    agent = agent_factory()
+    calls: list[tuple] = []
+    agent._start_title_generation = lambda *args: calls.append(args)
+
+    agent._request_session_title("fix the login bug")
+
+    assert calls == [(agent.current_session, "fix the login bug", "")]
+
+
+def test_early_request_is_not_repeated_by_the_end_of_turn_hook(agent_factory):
+    agent = agent_factory()
+    calls: list[tuple] = []
+    agent._start_title_generation = lambda *args: calls.append(args)
+
+    agent._request_session_title("fix the login bug")
+    agent._add_to_session_history("fix the login bug", "coder", "Fixed it.")
+
+    assert len(calls) == 1
+
+
+def test_early_request_respects_a_manual_title(agent_factory):
+    agent = agent_factory()
+    calls: list[tuple] = []
+    agent._start_title_generation = lambda *args: calls.append(args)
+
+    agent.rename_session("Mine")
+    agent._request_session_title("fix the login bug")
+
+    assert calls == []

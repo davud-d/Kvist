@@ -32,8 +32,16 @@ def test_session_title_event_carries_no_secret_leak_risk():
     json.dumps(payload)  # must be plain JSON-serializable
 
 
-def test_classic_terminal_ui_has_no_session_title_channel():
-    assert not hasattr(TerminalBannerUI, "print_session_title")
+def test_classic_terminal_ui_names_the_window_from_the_title(monkeypatch):
+    import window_title
+
+    written: list[str] = []
+    monkeypatch.setattr(window_title, "_write", written.append)
+    monkeypatch.setattr(window_title, "_last_written", None)
+
+    TerminalBannerUI.print_session_title(object(), "chat-1", "Add caching")
+
+    assert written == ["\x1b]2;Kvist | Add caching\x07"]
 
 
 class _RecordingUI(NullUI):

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
 import { CLASSIC_COMMAND, COMMANDS, EFFORTS, FRONTENDS, FRONTEND_REQUEST_ID, NAME_WIDTH, frontendOf, parseSlash, routeOf, sessionArgs } from "../commands.js"
 import { copyToClipboard } from "../clipboard.js"
+import { restoreWindowTitle, setWindowTitle } from "../window-title.js"
 import { KvistCore, type CoreCommand } from "../core.js"
 import type { Pointer } from "../pointer.js"
 import type { CoreEvent } from "../protocol.js"
@@ -330,6 +331,12 @@ export function App(props: AppProps) {
   useEffect(() => {
     if (state.info.session) props.onSession?.(state.info.session)
   }, [state.info.session, props])
+
+  useEffect(() => {
+    setWindowTitle(state.info.title)
+  }, [state.info.title])
+
+  useEffect(() => () => restoreWindowTitle(), [])
 
   const claude = props.skin === "claude"
   // The role the router picked belongs to the turn that is running; between turns the footer

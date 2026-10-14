@@ -78,7 +78,7 @@ export type CoreEvent =
   | { type: "session_title"; session: string; title: string }
   // The session a resume continues in or a session/new command switched to; `closed` and
   // `closed_notice` only for a session end_session closed (UI_API.md, "Closed sessions").
-  | { type: "session"; session: string; has_checkpoint: boolean; closed?: boolean; closed_notice?: string }
+  | { type: "session"; session: string; has_checkpoint: boolean; closed?: boolean; closed_notice?: string; title?: string }
   // Background shell jobs (run_shell with `background: true`). job_started, job_finished and
   // job_notice are recorded in the journal; job_output is a live-only snapshot of the job's tail
   // (replace, never append). Every job gets a job_finished before the turn's turn_end.

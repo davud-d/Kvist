@@ -626,6 +626,7 @@ from kernel.plugins.bundled import sync_bundled
 from kernel.plugins.registry import SkillRegistry
 from kernel.ui import AgentUI
 from terminal_banner import SetupCancelled, TerminalBannerUI, ctrl_c_stops_setup
+from window_title import pop_window_title, push_window_title, set_window_title
 from terminal_image import print_exit_logo
 from kernel.anymodel_onboarding import offer_anymodel_registration
 from kernel.performance_logger import PerfLogger
@@ -3564,7 +3565,12 @@ def _session_event(agent):
     """The session a switch moved to, with the closed notice when end_session closed it."""
     from kernel.frontend_protocol import SessionEvent
 
-    return SessionEvent(agent.current_session, agent._peek_checkpoint() is not None, _closed_notice(agent))
+    return SessionEvent(
+        agent.current_session,
+        agent._peek_checkpoint() is not None,
+        _closed_notice(agent),
+        agent._session_title,
+    )
 
 
 def _closed_notice(agent) -> str | None:
@@ -4532,7 +4538,10 @@ def main() -> None:
     completed_turns = 0
     try:
         startup_resume = bool(args.resume)
+        push_window_title()
         while True:
+            # /new, /session, /rename and a resume all land on the right title here.
+            set_window_title(getattr(agent, "_session_title", None))
             if startup_resume:
                 startup_resume = False
                 user_goal = "/resume"
@@ -5580,6 +5589,7 @@ Support:
         interrupted = True
     finally:
         release_terminal(interactive_screen, use_session_screen)
+        pop_window_title()
         # Leaving Kvist ends what its tasks still own (a paused task's server,
         # browser or helper); a checkpoint stays for /resume. Test doubles of
         # the agent have no shutdown.

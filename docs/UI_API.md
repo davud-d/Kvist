@@ -204,9 +204,9 @@ Every event is a JSON object with a `"type"` field. Outbound (core → frontend)
 | `debug` | `message:str` | verbose diagnostics |
 | `error` | `message:str` | an error line (also emitted if the run raises) |
 | `turn_end` | — | `--frontend stdio-multi` only: the turn ended (after `final`, `error`, or a chat reply that has no `final`); the process stays up for the next goal |
-| `session` | `session:str, has_checkpoint:bool`; optional `closed:true, closed_notice:str` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` — and the session a `session`/`new` command switched to (§8c). `closed` and `closed_notice` are present only for a session `end_session` closed (§8a, "Closed sessions"): show `closed_notice` in place of the input box. |
+| `session` | `session:str, has_checkpoint:bool`; optional `closed:true, closed_notice:str, title:str` | `--frontend stdio-multi` only: the first event of a `resume` turn — the session the interrupted run continues in, which may differ from the one in `hello` — and the session a `session`/`new` command switched to (§8c). `closed` and `closed_notice` are present only for a session `end_session` closed (§8a, "Closed sessions"): show `closed_notice` in place of the input box. `title` is the session's stored title, when it has one. |
 | `session_ended` | `session_id:str, warned_msg_id:int, closed_msg_id:int, reason:str, closed_notice:str` | the model closed the conversation for good with `end_session` (§8a, "Closed sessions"). Sent during the turn, before its `final`, which carries the closing words for the person. `session_id` is the session name; `warned_msg_id`/`closed_msg_id` are the numbers of the person's messages that got the warning and that closed it; `reason` is the model's one-line reason, for logs rather than for the person; `closed_notice` is the core's text for the place of the input box, in the session's language. Recorded in the session's journal. |
-| `session_title` | `session:str, title:str` | a session's title became known: generated in the background from its first completed turn (never the first user message — see §8a), or set by hand with the `rename` command (§8c). Additive, out-of-band — it can arrive well after the turn's `turn_end`, and `session` may name a different session than the one currently active if the user switched sessions while generation was still running. |
+| `session_title` | `session:str, title:str` | a session's title became known: generated in the background right after the first batch of actions (from the user's message alone) or, when the turn ends before that, from the first completed turn (see §8a), or set by hand with the `rename` command (§8c). Additive, out-of-band — it can arrive well after the turn's `turn_end`, and `session` may name a different session than the one currently active if the user switched sessions while generation was still running. |
 | `command_result` | `name:str, ok:bool, message:str, effects:object` | `--frontend stdio-multi` only: the outcome of an inbound `command` message (§8c). It is the last event of that command; **no `turn_end` follows it**. |
 
 **Background shell commands.** `run_shell` accepts an optional `background: true`. The call then returns at once with a job id instead of the command's output, the process keeps running, and its life shows as `job_started` / `job_output` / `job_finished` events. Two further `action_type` values appear in `step` and `action_result`: `job_output` (args `{job_id, wait?}`: read the job's new output, or wait up to `wait` seconds for it to end) and `job_stop` (args `{job_id}`: stop the job). The model's reads of a job are separate calls and do not change the job's events; the core kills every job still running when the turn ends.
@@ -360,9 +360,10 @@ after a `launch` is normally not the active one.
 **Session titles.** The `title` in each `status`/`list` item above is derived
 fresh on every call (first goal / first chat message / checkpoint goal, or the
 session name). Separately, the core also generates and *stores* a short title
-in the session document itself: once, in the background, from the session's
-first completed turn (never the first user message alone — the model sees the
-goal plus the first 20 lines of the reply). A model that does not answer in
+in the session document itself: once, in the background, as soon as the first
+batch of actions has run (the model sees the user's message alone) or, when the
+turn ends before that, from the first completed turn (the goal plus the first
+20 lines of the reply). A model that does not answer in
 time falls back to the user's own first message, cut to 40 characters at a
 word boundary, so a session is never left untitled. `rename` (§8c) sets one by
 hand and blocks the background generation for that session from then on. The
