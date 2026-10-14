@@ -658,7 +658,12 @@ def require_keys(data: dict[str, Any], required: set[str]) -> None:
 def require_only_allowed_keys(data: dict[str, Any], allowed: set[str]) -> None:
     extra = set(data.keys()) - allowed
     if extra:
-        raise CommandValidationError(f"Extra fields: {', '.join(sorted(extra))}")
+        # Name the accepted fields: a model that only hears "extra" repeats the same call.
+        accepted = ", ".join(sorted(allowed)) or "none"
+        raise CommandValidationError(
+            f"Extra fields: {', '.join(sorted(extra))}. This call accepts only: {accepted}. "
+            "Leave out fields it does not take."
+        )
 
 
 def require_str(data: dict[str, Any], key: str) -> None:

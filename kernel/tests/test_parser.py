@@ -72,6 +72,11 @@ def test_build_command_still_rejects_a_filled_argument_the_operation_does_not_ta
         command_for("skills", {"op": "attach", "skill": "browser", "path": "draft", "query": None})
 
 
+def test_extra_fields_error_names_the_accepted_fields():
+    with pytest.raises(CommandValidationError, match=r"accepts only: op, skill\. Leave out"):
+        command_for("skills", {"op": "attach", "skill": "browser", "path": "draft"})
+
+
 def test_build_command_passes_on_a_call_that_could_not_be_read():
     call = ToolCallRequest(call_id="c", name="read_file", arguments=None, error="Tool call 1 was not run: invalid JSON.")
     with pytest.raises(CommandValidationError, match="invalid JSON"):
