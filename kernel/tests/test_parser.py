@@ -67,6 +67,18 @@ def test_build_command_treats_null_arguments_as_absent():
     assert command.action.args == {"op": "attach", "skill": "browser"}
 
 
+def test_build_command_accepts_empty_strings_in_fields_the_operation_does_not_take():
+    command = command_for("skills", {"op": "attach", "skill": "browser", "query": "", "path": "  ", "summary": ""})
+
+    assert command.action.args["skill"] == "browser"
+
+
+def test_build_command_keeps_an_empty_string_the_operation_does_take():
+    command = command_for("write_file", {"path": "pkg/__init__.py", "content": ""})
+
+    assert command.action.args["content"] == ""
+
+
 def test_build_command_still_rejects_a_filled_argument_the_operation_does_not_take():
     with pytest.raises(CommandValidationError, match="Extra fields: path"):
         command_for("skills", {"op": "attach", "skill": "browser", "path": "draft", "query": None})

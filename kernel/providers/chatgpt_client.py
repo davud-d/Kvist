@@ -54,7 +54,8 @@ def _request(kwargs: dict) -> dict:
         request["text"] = {"format": kwargs["response_format"]}
     if kwargs.get("tools"):
         request["tools"] = [{"type": "namespace", "name": "kvist", "description": "Kvist workspace tools",
-                             "tools": [{"type": "function", **tool["function"]} for tool in kwargs["tools"]]}]
+                             # Responses API defaults to strict, which makes the model fill every property of a flat schema.
+                             "tools": [{"type": "function", "strict": False, **tool["function"]} for tool in kwargs["tools"]]}]
         choice = kwargs.get("tool_choice")
         if isinstance(choice, str):
             request["tool_choice"] = choice

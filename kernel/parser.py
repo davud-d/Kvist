@@ -656,7 +656,9 @@ def require_keys(data: dict[str, Any], required: set[str]) -> None:
 
 
 def require_only_allowed_keys(data: dict[str, Any], allowed: set[str]) -> None:
-    extra = set(data.keys()) - allowed
+    # An empty string in a field the operation does not take is the same filler as null;
+    # an empty string in a field it does take (write_file content) is a value.
+    extra = {key for key in data if key not in allowed and not (isinstance(data[key], str) and not data[key].strip())}
     if extra:
         # Name the accepted fields: a model that only hears "extra" repeats the same call.
         accepted = ", ".join(sorted(allowed)) or "none"
