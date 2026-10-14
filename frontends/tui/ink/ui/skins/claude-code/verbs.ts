@@ -252,7 +252,7 @@ function clock(at: number, russian: boolean): string {
   return new Date(at).toLocaleTimeString(russian ? "ru-RU" : "en-US", { hour: "numeric", minute: "2-digit" })
 }
 
-function span(seconds: number, russian: boolean): string {
+export function span(seconds: number, russian: boolean): string {
   const total = Math.round(seconds)
   const [minutes, rest] = [Math.floor(total / 60), total % 60]
   if (russian) return minutes ? `${minutes} мин ${String(rest).padStart(2, "0")} с` : `${rest} с`

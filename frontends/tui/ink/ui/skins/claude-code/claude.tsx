@@ -14,7 +14,7 @@ import { Markdown, renderInline } from "../../markdown.js"
 import { color } from "../../theme.js"
 import { coolDown, shimmerColor } from "./shimmer.js"
 import { tipFor } from "./tips.js"
-import { doneLine, spinnerWord } from "./verbs.js"
+import { doneLine, span, spinnerWord } from "./verbs.js"
 import { ClaudeDiff, ClaudePreview, diffSummary } from "./claude-diff.js"
 import { More, commandLine, diffLineColor, str } from "../../tools.js"
 
@@ -69,16 +69,32 @@ function plural(count: number, one: string, many: string): string {
   return `${count} ${count === 1 ? one : many}`
 }
 
+// Russian noun form for a count: 1 файл, 2 файла, 5 файлов.
+function pluralRu(count: number, one: string, few: string, many: string): string {
+  const tail = count % 100
+  if (tail >= 11 && tail <= 14) return `${count} ${many}`
+  const last = count % 10
+  return `${count} ${last === 1 ? one : last >= 2 && last <= 4 ? few : many}`
+}
+
 // "Searched for 2 patterns, read 3 files" — the order Claude Code lists them in.
-export function exploreLine(counts: ExploreCounts, shells = 0): string {
-  const parts = [
-    counts.searches > 0 ? `searched for ${plural(counts.searches, "pattern", "patterns")}` : "",
-    counts.reads > 0 ? `read ${plural(counts.reads, "file", "files")}` : "",
-    counts.lists > 0 ? `listed ${plural(counts.lists, "directory", "directories")}` : "",
-    counts.git > 0 ? `ran ${plural(counts.git, "git check", "git checks")}` : "",
-    shells > 0 ? `ran ${plural(shells, "shell command", "shell commands")}` : "",
-  ].filter(Boolean)
-  const text = parts.join(", ")
+export function exploreLine(counts: ExploreCounts, shells = 0, russian = false): string {
+  const parts = russian
+    ? [
+        counts.searches > 0 ? `искал ${pluralRu(counts.searches, "запрос", "запроса", "запросов")}` : "",
+        counts.reads > 0 ? `прочитал ${pluralRu(counts.reads, "файл", "файла", "файлов")}` : "",
+        counts.lists > 0 ? `просмотрел ${pluralRu(counts.lists, "каталог", "каталога", "каталогов")}` : "",
+        counts.git > 0 ? `выполнил ${pluralRu(counts.git, "проверку", "проверки", "проверок")} git` : "",
+        shells > 0 ? `выполнил ${pluralRu(shells, "команду", "команды", "команд")} shell` : "",
+      ]
+    : [
+        counts.searches > 0 ? `searched for ${plural(counts.searches, "pattern", "patterns")}` : "",
+        counts.reads > 0 ? `read ${plural(counts.reads, "file", "files")}` : "",
+        counts.lists > 0 ? `listed ${plural(counts.lists, "directory", "directories")}` : "",
+        counts.git > 0 ? `ran ${plural(counts.git, "git check", "git checks")}` : "",
+        shells > 0 ? `ran ${plural(shells, "shell command", "shell commands")}` : "",
+      ]
+  const text = parts.filter(Boolean).join(", ")
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
@@ -241,6 +257,31 @@ function Tool({ item }: { item: ToolItem }) {
   )
 }
 
+function FoldedRun({ counts, shells }: { counts: ExploreCounts; shells: number }) {
+  const { russian } = useContext(ViewContext)
+  return (
+    <Box marginTop={1} paddingLeft={2}>
+      <Text color={color.dim}>{exploreLine(counts, shells, russian === true)}</Text>
+    </Box>
+  )
+}
+
+function Thought({ item }: { item: Extract<Item, { kind: "thought" }> }) {
+  const { russian } = useContext(ViewContext)
+  const label = item.seconds > 0 ? (russian ? `Думал ${span(item.seconds, true)}` : `Thought for ${formatSeconds(item.seconds)}`) : russian ? "Думал" : "Thought"
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={color.thought} italic>✻ {label}</Text>
+      {item.text ? <Box paddingLeft={2}><Text color={color.thought} italic>{renderInline(item.text)}</Text></Box> : null}
+    </Box>
+  )
+}
+
+function ExploredLine({ counts, shells = 0 }: { counts: ExploreCounts; shells?: number }) {
+  const { russian } = useContext(ViewContext)
+  return <Call tone={color.ok} name={exploreLine(counts, shells, russian === true)} target="" />
+}
+
 function Note({ item }: { item: Extract<Item, { kind: "note" }> }) {
   const tone = item.tone === "info" ? color.dim : item.tone === "warn" ? color.warn : item.tone === "error" ? color.err : color.faint
   return (
@@ -321,13 +362,10 @@ export function ClaudeItemView({ item, showDebug }: { item: Item; showDebug: boo
       return <Tool item={item} />
     case "thought":
       return (
-        <Box flexDirection="column" marginTop={1}>
-          <Text color={color.thought} italic>✻ {item.seconds > 0 ? `Thought for ${formatSeconds(item.seconds)}` : "Thought"}</Text>
-          {item.text ? <Box paddingLeft={2}><Text color={color.thought} italic>{renderInline(item.text)}</Text></Box> : null}
-        </Box>
+        <Thought item={item} />
       )
     case "explored":
-      return <Call tone={color.ok} name={exploreLine(item.counts)} target="" />
+      return <ExploredLine counts={item.counts} />
     case "say":
     case "answer":
       return item.fresh ? <FreshMessage text={item.text} /> : <Message text={item.text} />
@@ -438,11 +476,12 @@ const COMMAND_LINES = 4
 
 // A shell command that is still running: what it is and how long it has been going.
 function RunningShell({ call }: { call: State["inflight"][number] }) {
+  const { russian } = useContext(ViewContext)
   const now = useNow(true, 1000)
   const lines = commandLine(call.args).split("\n")
   const shown = lines.slice(0, COMMAND_LINES)
   return (
-    <Call tone={color.dim} name={`Running shell command · ${formatSeconds((now - call.at) / 1000)}…`} target="">
+    <Call tone={color.dim} name={`${russian ? "Выполняю команду shell" : "Running shell command"} · ${formatSeconds((now - call.at) / 1000)}…`} target="">
       <Result>
         {shown.map((line, index) => (
           <Text key={index} color={color.dim} wrap="truncate-end">{index === 0 ? "$ " : "  "}{line || " "}</Text>
@@ -462,11 +501,10 @@ export function ClaudeLiveBody({ state }: { state: State }) {
   return (
     <>
       {state.running && live?.thinking && live.reasoning ? <LiveThought text={live.reasoning} /> : null}
-      {state.exploring ? <Call tone={color.dim} name={`${exploreLine(state.exploring)}…`} target="" /> : null}
       {inflight?.action === "run_shell" ? <RunningShell call={inflight} /> : null}
       {inflight && header && inflight.action !== "run_shell" ? (
         <Call tone={color.dim} name={header.name} target={header.target}>
-          {state.pending ? null : <Result><Text color={color.dim}>Running…</Text></Result>}
+          {state.pending ? null : <Result><Text color={color.dim}>{requestIsRussian(state) ? "Выполняется…" : "Running…"}</Text></Result>}
         </Call>
       ) : null}
       {state.running && !state.pending && state.live?.answer ? <LiveAnswer text={state.live.answer} /> : null}
@@ -483,7 +521,8 @@ export function ClaudeSpinner({ state }: { state: State }) {
   const target = state.running && state.waitingSince && state.inflight.length === 0 ? (now - state.waitingSince) / 1000 : 0
   const shown = useRef({ waiting: 0, at: now })
   shown.current = { waiting: coolDown(shown.current.waiting, target, (now - shown.current.at) / 1000), at: now }
-  if (state.command && !state.pending) return <Spinner glyph={glyph} text={`Running /${state.command}`} detail="esc to cancel" waiting={shown.current.waiting} now={now} />
+  const russian = requestIsRussian(state)
+  if (state.command && !state.pending) return <Spinner glyph={glyph} text={`${russian ? "Выполняю" : "Running"} /${state.command}`} detail={russian ? "esc — отмена" : "esc to cancel"} waiting={shown.current.waiting} now={now} />
   if (!state.running || state.pending) return null
 
   const turnSeconds = state.startedAt ? (now - state.startedAt) / 1000 : 0
@@ -522,8 +561,28 @@ function quiet(item: Item): boolean {
   return item.kind === "tool" && item.action === "run_shell" && item.result.ok && (item.result.exit_code ?? 0) === 0
 }
 
-// Consecutive quiet items become one dim line, "Searched for 2 patterns, ran 2 shell commands", when
-// the run holds a shell command; a run of reads alone keeps its own line.
+// A thought with no text of its own is only a duration; between two folded items it adds no
+// information, so it folds with them instead of splitting the run into one line per call.
+function bareThought(item: Item): boolean {
+  return item.kind === "thought" && !item.text
+}
+
+// Where the run of quiet items that starts at `start` ends (exclusive), skipping bare thoughts
+// that sit between quiet items.
+function quietRunEnd(items: readonly Item[], start: number): number {
+  let end = start
+  let scan = start
+  while (scan < items.length) {
+    const item = items[scan]!
+    if (quiet(item)) end = ++scan
+    else if (bareThought(item)) scan++
+    else break
+  }
+  return end
+}
+
+// Consecutive quiet items become one dim line, "Searched for 2 patterns, ran 2 shell commands".
+// A lone read summary keeps its own line.
 export function collapse(items: readonly Item[]): Entry[] {
   const entries: Entry[] = []
   for (let start = 0; start < items.length; ) {
@@ -533,24 +592,23 @@ export function collapse(items: readonly Item[]): Entry[] {
       start++
       continue
     }
-    let end = start
-    while (end < items.length && quiet(items[end]!)) end++
-    const run = items.slice(start, end)
-    const shells = run.filter((item) => item.kind === "tool").length
-    if (shells === 0) {
-      for (const item of run) entries.push({ key: item.id, item })
-    } else {
-      const counts = { reads: 0, searches: 0, lists: 0, git: 0 }
-      for (const item of run) {
-        if (item.kind !== "explored") continue
-        counts.reads += item.counts.reads
-        counts.searches += item.counts.searches
-        counts.lists += item.counts.lists
-        counts.git += item.counts.git
-      }
-      entries.push({ key: run[0]!.id, counts, shells })
-    }
+    const end = quietRunEnd(items, start)
+    const run = items.slice(start, end).filter(quiet)
     start = end
+    const shells = run.filter((item) => item.kind === "tool").length
+    if (run.length === 1 && shells === 0) {
+      entries.push({ key: run[0]!.id, item: run[0]! })
+      continue
+    }
+    const counts = { reads: 0, searches: 0, lists: 0, git: 0 }
+    for (const item of run) {
+      if (item.kind !== "explored") continue
+      counts.reads += item.counts.reads
+      counts.searches += item.counts.searches
+      counts.lists += item.counts.lists
+      counts.git += item.counts.git
+    }
+    entries.push({ key: run[0]!.id, counts, shells })
   }
   return entries
 }
@@ -606,9 +664,7 @@ export function ClaudeScreen({ items, showDebug, followKey, live, spinner, hint 
               {"item" in entry ? (
                 <MemoItem item={entry.item} showDebug={showDebug} />
               ) : (
-                <Box marginTop={1} paddingLeft={2}>
-                  <Text color={color.dim}>{exploreLine(entry.counts, entry.shells)}</Text>
-                </Box>
+                <FoldedRun counts={entry.counts} shells={entry.shells} />
               )}
             </Box>
           ))}
@@ -629,11 +685,15 @@ export function ClaudeScreen({ items, showDebug, followKey, live, spinner, hint 
 export function ClaudeFooter({ running, armed, usage, model, role, toast = "", exitWarning = null }: { running: boolean; armed: boolean; usage: State["usage"]; model: string; role: string; toast?: string; exitWarning?: "C" | "D" | null }) {
   const context = contextLabel(usage.context, usage.limit)
   const mode = [model, role].filter(Boolean).join(" · ")
+  const { russian } = useContext(ViewContext)
+  const keys = russian
+    ? { armed: "esc ещё раз — пауза · ctrl+c останавливает всё", running: "esc — пауза · ctrl+c — остановить всё", idle: "/ — команды", exit: `Нажми Ctrl+${exitWarning} ещё раз, чтобы выйти и остановить агента` }
+    : { armed: "esc again to pause · ctrl+c stops all", running: "esc to pause · ctrl+c to stop all", idle: "/ for commands", exit: `Press Ctrl+${exitWarning} again to exit and stop the agent` }
   return (
     <Box justifyContent="space-between" paddingX={2}>
-      {armed ? <Text color={color.warn} wrap="truncate-end">esc again to pause · ctrl+c stops all</Text> : toast ? <Text color={color.ok} wrap="truncate-end">{toast}</Text> : <Text color={color.dim} wrap="truncate-end">{running ? "esc to pause · ctrl+c to stop all" : "/ for commands"}</Text>}
+      {armed ? <Text color={color.warn} wrap="truncate-end">{keys.armed}</Text> : toast ? <Text color={color.ok} wrap="truncate-end">{toast}</Text> : <Text color={color.dim} wrap="truncate-end">{running ? keys.running : keys.idle}</Text>}
       {exitWarning ? (
-        <Text color={color.warn} wrap="truncate-end">Press Ctrl+{exitWarning} again to exit and stop the agent</Text>
+        <Text color={color.warn} wrap="truncate-end">{keys.exit}</Text>
       ) : (
         <Text color={color.dim} wrap="truncate-end">{[context, mode].filter(Boolean).join("  ")}</Text>
       )}

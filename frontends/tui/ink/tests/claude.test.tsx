@@ -127,6 +127,26 @@ test("reads alone keep their own line, and a failed command is never folded away
   assert.deepEqual(entries.map((entry) => ("item" in entry ? "item" : "group")), ["group", "item", "group"])
 })
 
+const bare = (id: number): Item => ({ id, kind: "thought", seconds: 5, text: "" })
+const one = (id: number): Item => ({ id, kind: "explored", counts: { reads: 0, searches: 1, lists: 0, git: 0 }, names: [] })
+
+test("searches split by bare thoughts fold into one line; a thought with text stays", () => {
+  const folded = collapse([one(1), bare(2), one(3), bare(4), explored(5)])
+  assert.equal(folded.length, 1)
+  const [group] = folded
+  assert.ok(group && "counts" in group && group.counts.searches === 4 && group.counts.reads === 3 && group.shells === 0)
+
+  const spoken: Item = { id: 4, kind: "thought", seconds: 5, text: "the cause is here" }
+  const split = collapse([one(1), bare(2), one(3), spoken, one(5)])
+  assert.deepEqual(split.map((entry) => ("item" in entry ? entry.item.kind : "group")), ["group", "thought", "explored"])
+})
+
+test("the fold line is worded in Russian with the right plural forms", () => {
+  assert.equal(exploreLine({ reads: 1, searches: 2, lists: 0, git: 0 }, 0, true), "Искал 2 запроса, прочитал 1 файл")
+  assert.equal(exploreLine({ reads: 5, searches: 0, lists: 0, git: 1 }, 21, true), "Прочитал 5 файлов, выполнил 1 проверку git, выполнил 21 команду shell")
+  assert.equal(exploreLine({ reads: 12, searches: 0, lists: 0, git: 0 }, 0, true), "Прочитал 12 файлов")
+})
+
 test("a folded run of commands is one line under Ctrl+O's opposite, and the full commands under Ctrl+O", async () => {
   const items = [shell(1), shell(2)]
   const show = async (expanded: boolean) => {
