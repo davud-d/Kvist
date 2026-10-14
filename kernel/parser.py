@@ -138,7 +138,9 @@ def build_command(
         if resolved is None:
             raise CommandValidationError(f"Unknown tool {call.name!r}")
         return _skill_command(call, resolved, text=text, batch_id=batch_id, plan_step=plan_step, language=language)
-    args = dict(call.arguments or {})
+    # A model that fills every property of a flat multi-operation schema sends
+    # null for the ones this operation does not take; absent and null mean the same.
+    args = {key: value for key, value in (call.arguments or {}).items() if value is not None}
     purpose = trim_purpose(args.pop(PURPOSE_KEY, "")) if call.name in _PURPOSE_ACTIONS else ""
     validate_action_args(call.name, args)
     return AgentCommand(

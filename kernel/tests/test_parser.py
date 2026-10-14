@@ -58,6 +58,20 @@ def test_build_command_rejects_an_invalid_call(name, arguments, error):
         command_for(name, arguments)
 
 
+def test_build_command_treats_null_arguments_as_absent():
+    command = command_for(
+        "skills",
+        {"op": "attach", "skill": "browser", "query": None, "page": None, "path": None, "summary": None},
+    )
+
+    assert command.action.args == {"op": "attach", "skill": "browser"}
+
+
+def test_build_command_still_rejects_a_filled_argument_the_operation_does_not_take():
+    with pytest.raises(CommandValidationError, match="Extra fields: path"):
+        command_for("skills", {"op": "attach", "skill": "browser", "path": "draft", "query": None})
+
+
 def test_build_command_passes_on_a_call_that_could_not_be_read():
     call = ToolCallRequest(call_id="c", name="read_file", arguments=None, error="Tool call 1 was not run: invalid JSON.")
     with pytest.raises(CommandValidationError, match="invalid JSON"):
