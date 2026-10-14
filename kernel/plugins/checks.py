@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import shutil
 import tempfile
 import threading
@@ -41,6 +42,7 @@ from kernel.plugins.manifest import (
     package_digest,
     package_files,
     read_package_file,
+    MAX_INSTRUCTIONS_BYTES,
     MAX_PACKAGE_BYTES,
 )
 from kernel.plugins.net_broker import TaskServices
@@ -162,6 +164,40 @@ def _static_checks(path: Path, manifest: Manifest, report: CheckReport) -> None:
     report.add("permissions_listed", True, ", ".join(request.name for request in manifest.capabilities) or "none")
     if egress:
         report.add("egress", True, f"sends data off the machine through: {', '.join(egress)}", severity="warning")
+    _check_references(path, manifest, files, report)
+
+
+def _check_references(path: Path, manifest: Manifest, files: list[str], report: CheckReport) -> None:
+    """Reference pages are read one at a time by `skills read`; a page that cannot be read is found here, not mid-task."""
+    shipped = [relative for relative in files if relative.startswith("references/")]
+    instructions = ""
+    if manifest.instructions in files:
+        instructions = read_package_file(path, manifest.instructions, MAX_PACKAGE_BYTES).decode("utf-8", errors="replace")
+    named = set(re.findall(r"references/[\w.-]+\.md", instructions))
+    if not shipped and not named:
+        return
+    readable = set()
+    for relative in shipped:
+        if relative.count("/") != 1 or not relative.endswith(".md"):
+            report.add("references", False, f"{relative} cannot be read by the model: only references/*.md pages are",
+                       severity="warning")
+            continue
+        data = read_package_file(path, relative, MAX_PACKAGE_BYTES)
+        if len(data) > MAX_INSTRUCTIONS_BYTES:
+            report.add("references", False, f"{relative} is larger than {MAX_INSTRUCTIONS_BYTES} bytes; split it")
+            continue
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError:
+            report.add("references", False, f"{relative} is not UTF-8")
+            continue
+        readable.add(relative)
+    for missing in sorted(named - set(shipped)):
+        report.add("references", False, f"{manifest.instructions} points to {missing}, which the package lacks")
+    for unnamed in sorted(readable - named):
+        report.add("references", False, f"{unnamed} is never named in {manifest.instructions}, so the model will not "
+                   "know when to read it", severity="warning")
+    report.add("references", True, f"{len(readable)} reference pages")
 
 
 def _check_declared_ctx_calls(tree: ast.AST, relative: str, manifest: Manifest, report: CheckReport) -> None:

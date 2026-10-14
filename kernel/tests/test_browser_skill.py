@@ -88,6 +88,54 @@ def test_a_click_is_verified_by_its_effect_and_errors_and_screenshots_are_kept(b
     assert Path(shot["artifact_path"]).stat().st_size > 1000
 
 
+_FAULTY = """<!doctype html><html><head><title>Faults</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { margin: 0; background: #fff; color: #111; font: 16px sans-serif }
+  @media (prefers-color-scheme: dark) { body { background: #111; color: #eee } }
+</style></head><body>
+<h1>Faults</h1><h3>Skipped a level</h3>
+<div id="wide" style="width: 600px">Six hundred pixels wide</div>
+<div id="clip" style="width: 80px; height: 20px; overflow: hidden; white-space: nowrap">A label far too long for its box</div>
+<p id="low" style="color: #999">Grey on white</p>
+<p id="ok" style="color: oklch(0.25 0 0)">Dark enough</p>
+<p id="fixed" style="color: #333">Fine on white, not on black</p>
+<button id="tiny" style="width: 16px; height: 16px; padding: 0">x</button>
+<button id="icon" style="width: 40px; height: 40px"><svg width="16" height="16"></svg></button>
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="10" height="10">
+<input id="search" placeholder="Search…">
+</body></html>"""
+
+
+def test_emulate_and_check_page_measure_a_page_as_phones_and_dark_themes_see_it(browser_agent):
+    agent, ui = browser_agent
+    (agent.executor.workspace / "index.html").write_text(_FAULTY, encoding="utf-8")
+    _call(agent, "open_workspace_page", {"path": "index.html"})
+
+    phone = _call(agent, "emulate", {"width": 390, "height": 844, "reduced_motion": "reduce"})
+    narrow = _call(agent, "check_page", {})
+    dark = _call(agent, "emulate", {"color_scheme": "dark"})
+    night = _call(agent, "check_page", {})
+    _call(agent, "emulate", {"width": 1440, "height": 900, "color_scheme": "light"})
+    wide = _call(agent, "check_page", {})
+
+    assert (phone["width"], phone["height"], phone["reduced_motion"]) == (390, 844, True)
+    assert dark["color_scheme"] == "dark" and night["color_scheme"] == "dark"
+    assert narrow["page_scrolls_sideways"] and any("div#wide" in row["element"] for row in narrow["wider_than_window"])
+    assert not wide["page_scrolls_sideways"] and wide["wider_than_window"] == []
+    assert any("div#clip" in row["element"] for row in narrow["clipped_text"])
+    low = {row["element"].split(" ")[0]: row for row in narrow["contrast"]["below_aa"]}
+    assert "p#low" in low and low["p#low"]["needs"] == 4.5 and low["p#low"]["ratio"] < 3
+    assert "p#ok" not in low and "p#fixed" not in low
+    assert "p#fixed" in {row["element"].split(" ")[0] for row in night["contrast"]["below_aa"]}
+    assert any("button#tiny" in row["element"] for row in narrow["small_targets"])
+    assert any("button#icon" in row for row in narrow["controls_without_name"])
+    assert len(narrow["images_without_alt"]) == 1
+    assert any("input#search" in row and "placeholder only" in row for row in narrow["fields_without_label"])
+    assert narrow["document"]["heading_jumps"] == ["h1 → h3"] and narrow["document"]["lang"] is None
+    assert narrow["document"]["charset"] != "UTF-8"  # no <meta charset>: "Search…" arrives garbled
+
+
 def test_the_preview_is_the_same_screen_and_needs_its_token(browser_agent):
     agent, ui = browser_agent
     (agent.executor.workspace / "index.html").write_text(_SITE, encoding="utf-8")

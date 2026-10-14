@@ -17,6 +17,7 @@ that changes its own tools mid-run is a conversation nobody has tested.
 """
 from __future__ import annotations
 
+import sys
 import threading
 import time
 import uuid
@@ -28,9 +29,9 @@ from kernel.plugins import capabilities as caps
 from kernel.plugins.builder import BuildLedger
 from kernel.plugins.grants import GrantStore
 from kernel.plugins.host import RunnerHost, RunnerStartError
-from kernel.plugins.manifest import KIND_TOOLS, MAX_INSTRUCTIONS_BYTES, ToolDef
+from kernel.plugins.manifest import KIND_TOOLS, MAX_INSTRUCTIONS_BYTES, ManifestError, ToolDef
 from kernel.plugins.mcp import AttachedServer, McpClient, McpError, ServerConfig, load_servers, render_result, tools_digest, wire_tool_name
-from kernel.plugins.registry import CatalogEntry, SkillRegistry
+from kernel.plugins.registry import CatalogEntry, RegistryError, SkillRegistry, reference_path
 from kernel.plugins.schema import validate
 from kernel.plugins.screen import ScreenViewer
 from kernel.plugins.services import AttachedSkill, CoreServices, SkillCall
@@ -107,7 +108,10 @@ class SkillManager:
 
     def prompt_section(self, language: str) -> str:
         """The short catalog for the model: ids, one line each, attached skills first. Empty when none."""
-        entries = self.catalog()
+        # Preinstalled skills include Linux-only ones; on another OS they could never be used, so the
+        # model is not shown them on every step (``skills list`` still reports them with the reason).
+        entries = [entry for entry in self.catalog()
+                   if entry.id in self.attached or entry.manifest is None or sys.platform in entry.manifest.platforms]
         servers = self._mcp_servers()
         if not entries and not self.attached and not servers:
             return ""
@@ -194,7 +198,7 @@ class SkillManager:
         self.attached[skill_id] = skill
         instructions = self.registry.instructions(entry, MAX_INSTRUCTIONS_BYTES)
         self._notify(skill, "attached")
-        return {
+        result = {
             "attached": skill_id,
             "version": entry.version,
             "by": by,
@@ -203,6 +207,23 @@ class SkillManager:
             "note": "The tools above can be called from your next response." if skill.grant else
                     "This skill has instructions only; it adds no tools.",
         }
+        references = self.registry.references(entry)
+        if references:
+            result["references"] = references
+            result["references_note"] = ("Longer pages of this skill, not in your context yet: read the one the "
+                                         "instructions point to with skills op read, skill and reference.")
+        return result
+
+    def read_reference(self, skill_id: str, name: str) -> dict[str, Any]:
+        skill = self.attached.get(skill_id)
+        if skill is None:
+            raise SkillUseError(f"{skill_id} is not attached; attach it before reading its pages")
+        try:
+            text = self.registry.reference(skill.entry, name, MAX_INSTRUCTIONS_BYTES)
+        except (RegistryError, ManifestError) as error:
+            raise SkillUseError(str(error)) from None
+        path = reference_path(name)
+        return {"skill": skill_id, "reference": path, "text": self.render_instructions(skill, text, path)}
 
     def detach(self, skill_id: str, reason: str = "detached") -> dict[str, Any]:
         if skill_id.startswith("mcp:"):
@@ -236,9 +257,10 @@ class SkillManager:
             })
         return {"attached": rows}
 
-    def render_instructions(self, skill: AttachedSkill, text: str) -> str:
+    def render_instructions(self, skill: AttachedSkill, text: str, reference: str = "") -> str:
         body = defang_prompt_boundary_tags(redact_text(text))[:MAX_INSTRUCTIONS_BYTES]
-        return (f'<SKILL_INSTRUCTIONS skill="{skill.id}" version="{skill.version}">\n{_INSTRUCTIONS_PREAMBLE}\n\n'
+        page = f' reference="{reference}"' if reference else ""
+        return (f'<SKILL_INSTRUCTIONS skill="{skill.id}" version="{skill.version}"{page}>\n{_INSTRUCTIONS_PREAMBLE}\n\n'
                 f"{body}\n</SKILL_INSTRUCTIONS>")
 
     def attached_instructions(self) -> str:

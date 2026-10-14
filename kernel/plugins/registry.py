@@ -43,7 +43,16 @@ from kernel.plugins.paths import skills_root
 ACTIVE_FILE = "active.json"
 VERSIONS_DIR = "versions"
 ENV_DIR = "env"
+REFERENCES_DIR = "references"
 _SYSTEM_PATH = os.pathsep.join(p for p in ("/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin") if Path(p).is_dir())
+
+
+def reference_path(name: str) -> str:
+    """``terminal`` and ``terminal.md`` both mean ``references/terminal.md``: a near miss should not cost a step."""
+    name = name.strip()
+    if "/" not in name:
+        name = f"{REFERENCES_DIR}/{name}"
+    return name if name.endswith(".md") else f"{name}.md"
 
 
 class RegistryError(RuntimeError):
@@ -125,8 +134,32 @@ class SkillRegistry:
         data = read_package_file(entry.version_dir, entry.manifest.instructions, max_bytes)
         return data.decode("utf-8", errors="replace")
 
+    def references(self, entry: CatalogEntry) -> list[str]:
+        """The pages a skill ships beside its instructions (``references/*.md``), read only on request."""
+        assert entry.version_dir is not None
+        folder = entry.version_dir / REFERENCES_DIR
+        if folder.is_symlink() or not folder.is_dir():
+            return []
+        with os.scandir(folder) as entries:
+            return sorted(f"{REFERENCES_DIR}/{item.name}" for item in entries
+                          if item.name.endswith(".md") and item.is_file(follow_symlinks=False))
+
+    def reference(self, entry: CatalogEntry, name: str, max_bytes: int) -> str:
+        """One page by its listed path (see ``reference_path`` for the short forms accepted)."""
+        assert entry.version_dir is not None
+        available = self.references(entry)
+        name = reference_path(name)
+        if name not in available:
+            listed = ", ".join(available) or "none"
+            raise RegistryError(f"{entry.id} has no reference page {name!r}; its pages: {listed}")
+        return read_package_file(entry.version_dir, name, max_bytes).decode("utf-8", errors="replace")
+
     def versions(self, skill_id: str) -> dict[str, Any]:
         return dict(self._active(skill_id).get("installed") or {})
+
+    def active_version(self, skill_id: str) -> str | None:
+        version = self._active(skill_id).get("version")
+        return version if isinstance(version, str) else None
 
     def unavailable_reason(self, manifest: Manifest) -> str:
         """Why the skill cannot be attached on this machine; empty when it can."""

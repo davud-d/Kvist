@@ -221,7 +221,8 @@ BROWSER = Browser()
 
 def describe() -> dict[str, Any]:
     return {"tools": ["open_page", "open_workspace_page", "snapshot", "click", "type", "select", "press",
-                      "scroll", "wait_for", "screenshot", "console", "network", "tabs", "upload",
+                      "scroll", "wait_for", "screenshot", "emulate", "check_page", "console", "network", "tabs",
+                      "upload",
                       "close_browser"]}
 
 
@@ -546,6 +547,121 @@ def _screenshot(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     return result
 
 
+_MEDIA_STATE = """() => ({width: innerWidth, height: innerHeight,
+  color_scheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+  reduced_motion: matchMedia('(prefers-reduced-motion: reduce)').matches})"""
+
+
+def _emulate(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    tab = BROWSER.tab(args.get("tab"))
+
+    def apply() -> dict[str, Any]:
+        page = tab.page
+        if args.get("width") or args.get("height"):
+            current = page.evaluate(_MEDIA_STATE)
+            page.set_viewport_size({"width": int(args.get("width") or current["width"]),
+                                    "height": int(args.get("height") or current["height"])})
+        media = {key: args[key] for key in ("color_scheme", "reduced_motion") if args.get(key)}
+        if media:
+            page.emulate_media(**media)
+        return page.evaluate(_MEDIA_STATE)
+
+    state = BROWSER.worker.run(apply)
+    return {**state, "tab": tab.id, "note": "Applies to this tab until it is changed again or the tab closes."}
+
+
+# Measures what a description of a screenshot can get wrong. Colours go through a canvas, so any
+# CSS colour syntax (oklch, color-mix, named) is compared as the sRGB the browser actually paints.
+_CHECK_PAGE = r"""(limit) => {
+  const vw = innerWidth, vh = innerHeight, root = document.documentElement;
+  const g = Object.assign(document.createElement('canvas'), {width: 1, height: 1})
+    .getContext('2d', {willReadFrequently: true});
+  const rgba = (css) => {
+    g.clearRect(0, 0, 1, 1); g.fillStyle = 'rgba(0,0,0,0)'; g.fillStyle = css; g.fillRect(0, 0, 1, 1);
+    const d = g.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2], d[3] / 255];
+  };
+  const over = (top, under) => top.slice(0, 3).map((c, i) => c * top[3] + under[i] * (1 - top[3])).concat(1);
+  const lum = (c) => { const [r, gg, b] = c.slice(0, 3).map((v) => { v /= 255;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * gg + 0.0722 * b; };
+  const ratio = (a, b) => { const [h, l] = [lum(a), lum(b)].sort((x, y) => y - x); return (h + 0.05) / (l + 0.05); };
+  const hex = (c) => '#' + c.slice(0, 3).map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+  const shown = (el) => { const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && (!el.checkVisibility || el.checkVisibility({opacityProperty: true, visibilityProperty: true})); };
+  const label = (el) => { let s = el.tagName.toLowerCase();
+    if (el.id) s += '#' + el.id; else if (el.classList.length) s += '.' + [...el.classList].slice(0, 2).join('.');
+    const t = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('alt') || el.value || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+    return t ? s + ' "' + t + '"' : s; };
+  const ownText = (el) => [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
+  const all = [...document.body.querySelectorAll('*')].filter(shown);
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const rootBg = rgba(getComputedStyle(root).backgroundColor), bodyBg = rgba(getComputedStyle(document.body).backgroundColor);
+  const canvasBg = rootBg[3] > 0 ? over(rootBg, [255, 255, 255]) : bodyBg[3] > 0 ? over(bodyBg, [255, 255, 255]) : dark ? [18, 18, 18, 1] : [255, 255, 255, 1];
+  const background = (el) => { const layers = [];
+    for (let p = el; p && p !== root; p = p.parentElement) { const s = getComputedStyle(p);
+      if (s.backgroundImage !== 'none') return null; const c = rgba(s.backgroundColor); if (c[3] > 0) layers.push(c); if (c[3] >= 1) break; }
+    return layers.reverse().reduce((under, top) => over(top, under), canvasBg); };
+  const out = {viewport: [vw, vh], color_scheme: dark ? 'dark' : 'light'};
+
+  out.page_scrolls_sideways = root.scrollWidth > vw + 1;
+  const contained = (el) => { for (let p = el.parentElement; p && p !== document.body; p = p.parentElement)
+    if (getComputedStyle(p).overflowX !== 'visible') return true; return false; };
+  const wide = all.filter((el) => { const r = el.getBoundingClientRect(); return (r.right > vw + 1 || r.left < -1) && !contained(el); });
+  out.wider_than_window = wide.filter((el) => !wide.includes(el.parentElement))
+    .map((el) => { const r = el.getBoundingClientRect(); return {element: label(el), left: Math.round(r.left), right: Math.round(r.right)}; })
+    .sort((a, b) => b.right - a.right).slice(0, limit);
+
+  out.clipped_text = all.filter((el) => { const s = getComputedStyle(el);
+    const clips = /hidden|clip/.test(s.overflowX + s.overflowY);
+    return clips && ownText(el) && s.textOverflow !== 'ellipsis' && (s.webkitLineClamp || 'none') === 'none'
+      && (el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1); })
+    .slice(0, limit).map((el) => ({element: label(el), visible: [el.clientWidth, el.clientHeight], content: [el.scrollWidth, el.scrollHeight]}));
+
+  const low = []; let checked = 0, unknown = 0;
+  for (const el of all) {
+    if (!ownText(el) || el.closest(':disabled, [aria-disabled="true"]')) continue;
+    const s = getComputedStyle(el), bg = background(el);
+    if (!bg) { unknown++; continue; }
+    checked++;
+    const fg = over(rgba(s.color), bg), size = parseFloat(s.fontSize), large = size >= 24 || (size >= 18.66 && parseInt(s.fontWeight) >= 700);
+    const value = ratio(fg, bg), need = large ? 3 : 4.5;
+    if (value < need) low.push({element: label(el), ratio: Math.round(value * 100) / 100, needs: need, text: hex(fg), background: hex(bg), font_px: size});
+  }
+  out.contrast = {checked, over_images_or_gradients: unknown, below_aa: low.sort((a, b) => a.ratio - b.ratio).slice(0, limit)};
+
+  const controls = all.filter((el) => el.matches('a[href], button, input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=checkbox], [role=tab], [role=menuitem], [tabindex]:not([tabindex="-1"])'));
+  const inlineLink = (el) => el.tagName === 'A' && getComputedStyle(el).display === 'inline' && el.parentElement && el.parentElement.innerText.trim().length > el.innerText.trim().length + 3;
+  const labelled = (el) => el.labels && [...el.labels].some((l) => { const r = l.getBoundingClientRect(); return r.width >= 24 && r.height >= 24; });
+  out.small_targets = controls.filter((el) => { const r = el.getBoundingClientRect(); return (r.width < 24 || r.height < 24) && !inlineLink(el) && !labelled(el); })
+    .slice(0, limit).map((el) => { const r = el.getBoundingClientRect(); return {element: label(el), size: [Math.round(r.width), Math.round(r.height)]}; });
+
+  const named = (el) => (el.getAttribute('aria-label') || '').trim() || el.getAttribute('aria-labelledby') || (el.getAttribute('title') || '').trim();
+  out.images_without_alt = [...document.images].filter((img) => shown(img) && !img.hasAttribute('alt')).slice(0, limit).map((img) => img.currentSrc.slice(-80));
+  const fields = all.filter((el) => el.matches('input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=image]), select, textarea'));
+  out.fields_without_label = fields.filter((el) => !named(el) && !(el.labels && el.labels.length))
+    .slice(0, limit).map((el) => label(el) + (el.placeholder ? ' (placeholder only: "' + el.placeholder.slice(0, 40) + '")' : ''));
+  out.controls_without_name = controls.filter((el) => el.matches('a[href], button, [role=button], [role=link]') && !el.innerText.trim() && !named(el)
+    && ![...el.querySelectorAll('img[alt], svg title')].some((n) => (n.getAttribute('alt') || n.textContent).trim())).slice(0, limit).map(label);
+
+  const heads = all.filter((el) => /^H[1-6]$/.test(el.tagName)).map((el) => +el.tagName[1]);
+  out.document = {title: document.title, lang: root.lang || null, charset: document.characterSet,
+    viewport_meta: !!document.querySelector('meta[name=viewport]'),
+    h1_count: heads.filter((h) => h === 1).length,
+    heading_jumps: heads.flatMap((h, i) => i && h > heads[i - 1] + 1 ? ['h' + heads[i - 1] + ' → h' + h] : []).slice(0, limit)};
+  out.fonts_failed = [...new Set([...document.fonts].filter((f) => f.status === 'error').map((f) => f.family))];
+  return out;
+}"""
+
+
+def _check_page(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
+    tab = BROWSER.tab(args.get("tab"))
+    limit = int(args.get("max_items") or 12)
+    report = BROWSER.worker.run(lambda: tab.page.evaluate(_CHECK_PAGE, limit))
+    report["note"] = ("Measured in the current viewport and colour scheme; text over images or gradients is not "
+                      "checked. Passing proves only these checks: still look at the page and walk it with the keyboard.")
+    report["untrusted"] = True
+    return report
+
+
 def _console(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     tab = BROWSER.tab(args.get("tab"))
     level = args.get("level", "all")
@@ -615,6 +731,8 @@ _TOOLS: dict[str, Callable[[dict[str, Any], Any], Any]] = {
     "scroll": _scroll,
     "wait_for": _wait_for,
     "screenshot": _screenshot,
+    "emulate": _emulate,
+    "check_page": _check_page,
     "console": _console,
     "network": _network,
     "tabs": _tabs,

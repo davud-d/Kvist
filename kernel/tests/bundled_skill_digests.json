@@ -1,0 +1,11 @@
+{
+  "browser": {"version": "0.2.0", "digest": "sha256:9dba8fd6d72b984338cb9a0d659f8559d5f0632fe9cd8b6122478c620e62be67"},
+  "code_nav": {"version": "0.1.0", "digest": "sha256:5d118c6ebcf101d0b4930ca41d73d967e77b436f8972777331f16f032b823ce6"},
+  "debugging": {"version": "0.1.0", "digest": "sha256:3a7fcac2c719895558fdd6060c3cb477e6893010aaa11b5cb5e7db285217d4d3"},
+  "design": {"version": "0.2.0", "digest": "sha256:f3b94c916673aba9738d6c4a98753b39b0b2951272d4557b5f25c84afd28825a"},
+  "documents": {"version": "0.1.0", "digest": "sha256:84f887d3fdbe683c70443057ad72f785928aaca0f0153332cc1c0966b15b9bfd"},
+  "project_overview": {"version": "0.1.0", "digest": "sha256:7c44b6c7f01f9c8572afca0fac233849b003ebcd05c1e101d44f1aec316f3190"},
+  "skill_authoring": {"version": "0.1.1", "digest": "sha256:3277ceda8d676bca444ebd83cdcab737d3ffbd771d4f1ea8527a747c9ba70a23"},
+  "static_checks": {"version": "0.1.0", "digest": "sha256:f87caff902a36e93bd1bbf7b4e47455bd4a0deda80e89224f2b4878397f91b73"},
+  "test_runner": {"version": "0.1.0", "digest": "sha256:2dfdc712ed0694fb35f11f1cf1d5bc9e7d1c289a62552fc76ec2a6818149a03f"}
+}

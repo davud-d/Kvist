@@ -154,3 +154,42 @@ def test_every_bundled_skill_declares_what_its_code_calls():
     for package in sorted(path for path in bundled.iterdir() if (path / "manifest.json").is_file()):
         report = check_package(package, run_sandbox=False)
         assert report.ok, f"{package.name}: {report.summary()}"
+
+
+def test_check_finds_reference_pages_the_model_could_not_read(tmp_path):
+    from kernel.plugins.manifest import MAX_INSTRUCTIONS_BYTES
+
+    folder = write_skill(tmp_path / "src", "guide", kind="instructions",
+                         instructions="Read references/ok.md, references/big.md, references/cp.md and references/gone.md.\n")
+    pages = folder / "references"
+    pages.mkdir()
+    (pages / "ok.md").write_text("# Fine\n", encoding="utf-8")
+    (pages / "big.md").write_text("x" * (MAX_INSTRUCTIONS_BYTES + 1), encoding="utf-8")
+    (pages / "cp.md").write_bytes("Привет".encode("cp1251"))
+    (pages / "extra.md").write_text("# Never named\n", encoding="utf-8")
+
+    report = check_package(folder, run_sandbox=False)
+
+    problems = {(item.detail.split(" ")[0], item.severity) for item in report.findings
+                if item.check == "references" and not item.ok}
+    assert not report.ok
+    assert ("references/big.md", "error") in problems and ("references/cp.md", "error") in problems
+    assert any("references/gone.md, which the package lacks" in item.detail for item in report.findings)
+    assert ("references/extra.md", "warning") in problems
+
+
+def test_bundled_reference_pages_match_what_their_instructions_name():
+    """A page the instructions point to but the package lacks is a dead end for the model; an unnamed one is never read."""
+    import re
+    from pathlib import Path
+
+    import kernel
+    from kernel.plugins.manifest import MAX_INSTRUCTIONS_BYTES
+
+    bundled = Path(kernel.__file__).parent / "skills_bundled"
+    for package in sorted(path for path in bundled.iterdir() if (path / "references").is_dir()):
+        shipped = {f"references/{page.name}" for page in (package / "references").glob("*.md")}
+        named = set(re.findall(r"references/[a-z0-9_-]+\.md", (package / "SKILL.md").read_text(encoding="utf-8")))
+        assert named == shipped, f"{package.name}: named {sorted(named - shipped)}, unnamed {sorted(shipped - named)}"
+        for page in shipped:
+            assert (package / page).stat().st_size <= MAX_INSTRUCTIONS_BYTES, f"{package.name}/{page} is too large"

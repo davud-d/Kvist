@@ -98,6 +98,36 @@ def test_an_instruction_only_skill_attaches_without_any_runner(agent_factory, re
     assert ui.confirms == []  # no code, nothing to approve
 
 
+def test_reference_pages_are_listed_on_attach_and_read_one_at_a_time(agent_factory, registry, tmp_path):
+    source = write_skill(tmp_path / "src", "guide", kind="instructions", instructions="# Guide\nSee the pages.\n")
+    (source / "references").mkdir()
+    (source / "references" / "terminal.md").write_text("# Terminal\nTest at 80x24.\n", encoding="utf-8")
+    (source / "references" / "notes.txt").write_text("not a page", encoding="utf-8")
+    install(registry, source)
+    agent, _ = _agent(agent_factory)
+    _script(agent, [
+        _call("skills", {"op": "read", "skill": "guide", "reference": "references/terminal.md"}),
+        _call("skills", {"op": "attach", "skill": "guide"}),
+        _call("skills", {"op": "read", "skill": "guide", "reference": "references/notes.txt"}),
+        _call("skills", {"op": "read", "skill": "guide", "reference": "references/terminal.md"}),
+        _call("skills", {"op": "read", "skill": "guide", "reference": "terminal"}),
+        "Read.",
+    ])
+
+    agent._run_loop("use the guide skill", start_step=1)
+
+    before, attached, unknown, page, short = [log["feedback"] for log in _feedback(agent, "skills")]
+    assert short["ok"] and short["data"]["reference"] == "references/terminal.md"
+    assert "Test at 80x24." in short["data"]["text"]
+    assert not before["ok"] and "not attached" in before["error"]
+    assert attached["data"]["references"] == ["references/terminal.md"]
+    assert "Test at 80x24." not in attached["data"]["instructions"]
+    assert not unknown["ok"] and "references/terminal.md" in unknown["error"]
+    text = page["data"]["text"]
+    assert '<SKILL_INSTRUCTIONS skill="guide" version="0.1.0" reference="references/terminal.md">' in text
+    assert "Test at 80x24." in text
+
+
 @requires_runner
 def test_an_attached_skill_tool_runs_in_its_sandbox_through_the_loop(agent_factory, registry, tmp_path):
     install(registry, write_skill(tmp_path / "src"))

@@ -670,3 +670,133 @@ test("build tools: the Russian copy has every key the English one has", () => {
   assert.deepEqual(Object.keys(ru.componentReason).sort(), Object.keys(strings.componentReason).sort())
   assert.ok(ru.buildGroup[0] && ru.elevateTitle && ru.privilegePassword)
 })
+
+// ---- no colour: selection has to survive NO_COLOR, TERM=dumb and TERM=linux ----
+
+interface Span {
+  row: number
+  text: string
+}
+
+// The runs of cells drawn in inverse video, and the rows underlined, read back from the ANSI rows.
+function inverseSpans(rows: string[]): Span[] {
+  const spans: Span[] = []
+  rows.forEach((raw, row) => {
+    let inverse = false
+    let run = ""
+    const flush = () => {
+      if (run) spans.push({ row, text: run })
+      run = ""
+    }
+    for (const part of raw.split(/(\x1b\[[0-9;]*m)/)) {
+      const codes = /^\x1b\[([0-9;]*)m$/.exec(part)
+      if (!codes) {
+        if (inverse) run += part
+        continue
+      }
+      const params = (codes[1] || "0").split(";")
+      for (let at = 0; at < params.length; at++) {
+        const code = params[at]
+        // Colour parameters carry their own numbers: 38;5;n and 38;2;r;g;b.
+        if (code === "38" || code === "48") at += params[at + 1] === "2" ? 4 : 2
+        else if (code === "0") {
+          flush()
+          inverse = false
+        } else if (code === "7") inverse = true
+      }
+    }
+    flush()
+  })
+  return spans
+}
+
+const mono = (state: SetupState, extra: { hover?: Parameters<typeof renderScene>[0]["hover"]; pressed?: Parameters<typeof renderScene>[0]["pressed"]; cols?: number; rows?: number } = {}) =>
+  renderScene({ state, strings, cols: extra.cols ?? 100, rows: extra.rows ?? 30, level: "none", brightness: 0.55, panel: 1, tick: 0, workspace: state.workspace || "/w", hover: extra.hover ?? null, pressed: extra.pressed ?? null, icons: "plain", ghost: null, picture: "cells" }).rows
+// The text the panel shows in inverse video, with the panel's frame removed.
+const inverseTexts = (rows: string[]) => inverseSpans(rows).map((span) => span.text.trim())
+
+test("without colour the button Enter presses is in inverse video and no other button is", () => {
+  const welcome = mono(initialState("/w", "/h"))
+  assert.deepEqual(inverseTexts(welcome), ["Get started"])
+  assert.ok(welcome.map(plain).some((row) => row.includes("Working folder") && row.includes("Quit")))
+  // The same screen with colour draws no inverse video: colour levels keep their own look.
+  const coloured = renderScene({ state: initialState("/w", "/h"), strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "/w", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows
+  assert.deepEqual(inverseSpans(coloured), [])
+})
+
+test("without colour the highlighted provider is a marked inverse row and follows the arrows", () => {
+  let state = send(ready(), key("enter")).state
+  for (const expected of ["anymodel", "chatgpt", "openai"]) {
+    const rows = mono(state)
+    const marked = rows.map(plain).filter((row) => row.includes("│ >"))
+    assert.equal(marked.length, 1, "exactly one marked row")
+    assert.match(marked[0]!, new RegExp(`>\\d\\s+${expected}`))
+    const inverse = inverseSpans(rows).filter((span) => span.text.includes(expected))
+    assert.equal(inverse.length, 1, "the marked row is inverse")
+    state = send(state, key("down")).state
+  }
+})
+
+test("without colour the highlighted row is marked on the model, interface and installer steps", () => {
+  const marked = (state: SetupState) => mono(state, { rows: 34 }).map(plain).filter((row) => row.includes("│ >"))
+  let models = send(send(ready(), key("enter")).state, key("enter")).state
+  models = send(send(typed(models, "sk-any"), key("enter")).state, { type: "models", reply: { ok: true, provider: "anymodel", models: ["a/one", "b/two"] } }).state
+  models = send(models, key("down")).state
+  assert.equal(marked(models).length, 1)
+  assert.match(marked(models)[0]!, />\s*b\/two/)
+
+  const connected = send(send(send(ready(), key("enter")).state, key("down")).state, key("down")).state
+  const openai = send(connected, key("enter")).state
+  const toInterface = send(send(typed(openai, "sk-1"), key("enter")).state, { type: "connected", reply: { ok: true, provider: "openai", models: {} } }).state
+  assert.equal(toInterface.step, "interface")
+  assert.equal(marked(toInterface).length, 1)
+  assert.match(marked(toInterface)[0]!, />1\s+Claude/)
+  assert.match(marked(send(toInterface, key("down")).state)[0]!, />2\s+/)
+  // The button that finishes the step is inverse too, as Enter would press it.
+  assert.ok(inverseTexts(mono(toInterface, { rows: 34 })).includes(strings.ready))
+
+  const install = installing()
+  assert.equal(marked(install).length, 1)
+  assert.match(marked(install)[0]!, />\s*\[x\]\s+Kvist agent/)
+  assert.match(marked(send(install, key("down")).state)[0]!, />\s*\[x\]\s+Node/)
+  assert.ok(inverseTexts(mono(install, { rows: 34 })).includes(strings.install))
+})
+
+test("without colour the wide-folder warning marks the safe answer", () => {
+  const asked = send({ ...initialState("/home/me", "/home/me"), catalog: "ready" as const, providers }, key("enter")).state
+  assert.equal(asked.step, "broad")
+  assert.deepEqual(inverseTexts(mono(asked)).map((text) => text.replace(/^\S+\s/, "")), [strings.broadChoose])
+})
+
+test("without colour the folder chooser marks the highlighted row, and the focused button", () => {
+  const start: SetupState = { ...initialState("/home/me/work", "/home/me"), catalog: "ready" }
+  const opened = send(start, key("char", "f")).state
+  const listed = send(opened, { type: "listing", listing: { path: "/home/me/work", dirs: [{ name: "app", git: true }, { name: "docs", git: false }], files: 1 } }).state
+  const marked = (state: SetupState) => mono(state, { rows: 30 }).map(plain).filter((row) => row.includes("│ >"))
+  assert.equal(marked(listed).length, 1)
+  assert.match(marked(listed)[0]!, new RegExp(strings.folderUse))
+  const down = send(listed, key("down")).state
+  assert.match(marked(down)[0]!, /\.\./)
+  // The default button is inverse while the list has focus.
+  assert.ok(inverseTexts(mono(listed)).some((text) => text.endsWith(strings.folderUseButton)))
+  // With Cancel focused the list marks nothing and Cancel is the inverse button.
+  const onCancel = { ...listed, folder: { ...listed.folder!, focus: "cancel" as const } }
+  assert.equal(marked(onCancel).length, 0)
+  const inverse = inverseTexts(mono(onCancel))
+  assert.ok(inverse.some((text) => text.endsWith(strings.cancel)))
+  assert.ok(!inverse.some((text) => text.endsWith(strings.folderUseButton)))
+})
+
+test("without colour the pointer is underlined and a held button changes again", () => {
+  const welcome = initialState("/w", "/h")
+  const quit = { kind: "button", id: "quit" } as const
+  const underlined = (rows: string[]) => rows.map((row, index) => (/\x1b\[(?:[0-9;]*;)?4[;m]/.test(row) ? index : -1)).filter((index) => index >= 0)
+  assert.equal(underlined(mono(welcome)).length, 0)
+  assert.equal(underlined(mono(welcome, { hover: quit })).length, 1)
+  assert.notDeepEqual(mono(welcome, { hover: quit, pressed: quit }), mono(welcome, { hover: quit }))
+  // Pointing at a row that is not highlighted underlines it; the highlighted row stays marked.
+  const provider = send(ready(), key("enter")).state
+  const over = mono(provider, { hover: { kind: "option", index: 2 } })
+  assert.equal(over.map(plain).filter((row) => row.includes("│ >")).length, 1)
+  assert.equal(underlined(over).length, 1)
+})

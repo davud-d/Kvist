@@ -53,7 +53,7 @@ ALLOWED_ACTIONS = {
     "ask_user",
 }
 SKILL_CALL = "skill_call"
-_SKILL_OPS = ("list", "attach", "detach", "status", "scaffold", "check", "install")
+_SKILL_OPS = ("list", "attach", "detach", "read", "status", "scaffold", "check", "install")
 _MEMORY_OPS = ("search", "add", "update")
 _MEMORY_KINDS = ("observation", "assumption", "decision")
 _SESSION_OPS = ("list", "search", "read")
@@ -509,6 +509,11 @@ def _validate_skills(args: dict[str, Any]) -> None:
         require_keys(args, {"skill"})
         require_only_allowed_keys(args, {"op", "skill"})
         require_str(args, "skill")
+    elif op == "read":
+        require_keys(args, {"skill", "reference"})
+        require_only_allowed_keys(args, {"op", "skill", "reference"})
+        require_str(args, "skill")
+        require_str(args, "reference")
     elif op == "scaffold":
         require_keys(args, {"skill"})
         require_only_allowed_keys(args, {"op", "skill", "path", "summary"})

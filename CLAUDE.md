@@ -671,6 +671,17 @@ on daemon threads while the loop's thread polls `_cancel_event` every 50 ms and
 raises `RunCancelled` (the abandoned stream is closed), so a GUI/Ink/IDE stop
 lands at once, not at the next chunk or step.
 
+**First-run setup in the classic terminal: Esc goes back, Ctrl+C quits.** The dialogs of
+`TerminalBannerUI` (`choose_option`, `prompt_text`, `prompt_secret`) answer `None` ("cancelled")
+to both keys, which is what a menu opened from the REPL wants. `main()` runs the first
+`build_agent` (provider, key and model dialogs) inside `terminal_banner.ctrl_c_stops_setup()`; while
+it is active Ctrl+C raises `SetupCancelled` (a `KeyboardInterrupt` subclass) out of the dialog,
+`main()` prints `setup_cancelled_text` and exits 130, and the terminal is already restored by the
+dialog's own `finally`. prompt_toolkit fields use their own Ctrl+C binding in
+`_cancel_on_escape_bindings` for this, because Esc there also ends as `KeyboardInterrupt`. Dialogs
+opened after startup (`/provider`, `/models`, rebuilds) are outside the context and keep the
+cancel meaning. Tests: `test_ui.py` (unit), `test_cli_pty.py::test_cli_pty_first_run_*` (real core, empty HOME).
+
 ### Skills platform (`kernel/plugins/`, `kernel/{resources,task_control,helpers,agent_tools,...}.py`)
 Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages:
 `docs/UI_API.md` §7 and §8f. Maintainer facts:
@@ -693,6 +704,25 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages
   not a model-visible action), MCP tools `mcp__<server>__<tool>`. A new built-in tool
   needs `protocol.py`, parser, `native_tools`, role prompts and `extensions.txt`
   (`test_prompt_protocol_sync.py`).
+- **Bundled skills are preinstalled** (`plugins/bundled.py::sync_bundled`, called by
+  `build_agent` and before every `--skill-op`; problems become startup warnings, never a
+  failed start). It installs missing ones and upgrades ones whose active version has origin
+  `bundled` when the shipped version was never installed (so a rollback sticks); an uninstall
+  is recorded in `plugins/skill/bundled.json` and respected until an explicit
+  `install bundled:<id>`. **Editing a bundled skill means raising its version**: an installed
+  version is never reinstalled, so new content under an old version silently reaches nobody
+  who has the old copy; `test_a_changed_bundled_skill_has_a_new_version` compares each
+  package with `kernel/tests/bundled_skill_digests.json` (update it with the bump). The
+  model's catalog hides skills whose `platforms` exclude this OS.
+- **Reference pages**: `SKILL.md` is re-sent with every text-protocol step, so a long
+  skill keeps its detail in `references/*.md` (`SkillRegistry.references`), listed in
+  the attach answer and read one at a time with `skills` op `read` (attached skills
+  only, same `<SKILL_INSTRUCTIONS>` quoting; `registry.reference_path` accepts `terminal`
+  for `references/terminal.md`). `checks._check_references` refuses pages that cannot be
+  read and dead pointers. The bundled `design` skill is built this way, and
+  `test_design_skill.py` runs the recipes its pages give the model (the inline contrast
+  script against the real `-c` and 2000-character rules, the pty terminal harness), because
+  a recipe the sandbox refuses fails silently in a run.
 - **Resources**: everything a task starts (runner, Xvfb/i3, dev servers, MCP) is a
   `resources.py::ManagedProcess` owned by a `ResourceManager` (cgroup scope, limits,
   freeze/thaw, crash `recover()` via pid+starttime+env marker). `_end_of_turn_resources`
@@ -1030,6 +1060,15 @@ mouse, bracketed paste, row-diff painting) and the effects. Tests: `tests/setup.
   least 90 ms so a quick click is still seen. The pointer turns into a hand over what can be
   pressed where the terminal speaks OSC 22 (kitty, Ghostty). Moving the pointer does not end
   the intro; only a press does.
+- **No colour keeps the state readable** (`NO_COLOR`, `TERM=dumb|linux`, level `none`): background
+  colours are dropped, so `scene.monochrome` carries every state in attributes. The button Enter
+  presses (tone `primary`) is inverse video; the highlighted row of any list (providers, models,
+  interfaces, installer components, folder rows) is an inverse row that starts with `>` in the
+  cell every row leaves blank; a pointed-at element is underlined and a held one also bold; dim
+  text stays dim. A switched-on toggle (tone `toggled`, the Hidden button) is only bold so the
+  inverse stays unique to the default action. The welcome and broad-folder screens have no focus
+  ring by design: Enter is the primary button, F/U/Q/Esc are the others, and Tab moves only in
+  lists. Coloured levels draw no inverse video.
 - **Working folder chooser** (`setup/folders.ts` state machine, `setup/listing.ts` reads and makes
   folders, scene in `scene.buildFolder`): the welcome screen's "Working folder" button (or F)
   swaps the small dialog for a large glass pane, the picture showing through it, with the dialog

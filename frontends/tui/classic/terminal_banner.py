@@ -39,6 +39,34 @@ except ImportError:
     _PROMPT_TOOLKIT_AVAILABLE = False
 
 
+class SetupCancelled(KeyboardInterrupt):
+    """Ctrl+C pressed in a dialog while ``ctrl_c_stops_setup`` is active.
+
+    A ``KeyboardInterrupt`` subclass so that code which lets interrupts pass
+    lets this one pass too; the dialogs themselves must not turn it into the
+    "cancelled, go back" answer that Esc gives.
+    """
+
+
+_setup_depth = 0
+
+
+@contextmanager
+def ctrl_c_stops_setup() -> Iterator[None]:
+    """Make Ctrl+C in a dialog raise ``SetupCancelled`` instead of answering "cancelled".
+
+    Esc is the "go back" key of the first-run wizard; Ctrl+C has to leave it,
+    but anywhere else (a menu opened from the REPL) it keeps meaning "cancel
+    this dialog", so only the first-run caller turns this on.
+    """
+    global _setup_depth
+    _setup_depth += 1
+    try:
+        yield
+    finally:
+        _setup_depth -= 1
+
+
 def _cancel_on_escape_bindings() -> Any:
     """Make a lone Escape abort a ``pt_prompt``.
 
@@ -53,6 +81,15 @@ def _cancel_on_escape_bindings() -> Any:
     @bindings.add("escape", eager=True)
     def _cancel(event: Any) -> None:
         event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
+    @bindings.add("c-c")
+    def _interrupt(event: Any) -> None:
+        # prompt_toolkit's own Ctrl+C raises KeyboardInterrupt, the same as Esc
+        # above; only this binding can tell the two keys apart.
+        event.app.exit(
+            exception=SetupCancelled if _setup_depth else KeyboardInterrupt,
+            style="class:aborting",
+        )
 
     return bindings
 
@@ -824,6 +861,8 @@ class TerminalBannerUI:
                     if filtered:
                         return filtered[index]["value"]
                     continue
+                if pressed == "interrupt" and _setup_depth:
+                    raise SetupCancelled
                 if pressed in {"escape", "interrupt"}:
                     return None
                 if not filterable:
@@ -899,6 +938,8 @@ class TerminalBannerUI:
                 else:
                     user_input = input("> ").strip()
                     return user_input if user_input else (current_value or None)
+            except SetupCancelled:
+                raise
             except (KeyboardInterrupt, EOFError):
                 return None
 
@@ -957,6 +998,8 @@ class TerminalBannerUI:
                     key_bindings=_cancel_on_escape_bindings(),
                 ).strip()
                 return user_input
+            except SetupCancelled:
+                raise
             except (KeyboardInterrupt, EOFError):
                 return None
 

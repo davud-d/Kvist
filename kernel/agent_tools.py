@@ -20,7 +20,7 @@ from kernel.session_search import SessionSearchError, list_sessions, read_sessio
 from kernel.workspace_memory import NoteError, render_for_prompt
 
 AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "skill_call"})
-SKILL_OPS = ("list", "attach", "detach", "status")
+SKILL_OPS = ("list", "attach", "detach", "read", "status")
 MEMORY_OPS = ("search", "add", "update")
 SESSION_OPS = ("list", "search", "read")
 HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
@@ -58,6 +58,8 @@ def _skills(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
         return agent.skills.attach(str(args["skill"]))
     if op == "detach":
         return agent.skills.detach(str(args["skill"]))
+    if op == "read":
+        return agent.skills.read_reference(str(args["skill"]), str(args["reference"]))
     if op == "scaffold":
         return _scaffold(agent, str(args["skill"]), str(args.get("path") or f"kvist-skills/{args['skill']}"),
                          str(args.get("summary") or ""))

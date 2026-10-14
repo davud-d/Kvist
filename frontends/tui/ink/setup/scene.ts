@@ -1,7 +1,7 @@
 // Draws one frame of the setup screen: the key art over the whole window, dimmed, and a panel in
 // the middle. Returns the ANSI rows and the places that react to a click.
 import { sampleCells } from "./backdrop.js"
-import { BOLD, Canvas, DIM, INVERSE, type Style } from "./canvas.js"
+import { BOLD, Canvas, DIM, INVERSE, UNDERLINE, type Style } from "./canvas.js"
 import { mix, pack, scale, unpack, type ColorLevel, type RGB } from "./color.js"
 import { DRIVES, breadthOf, crumbsOf, isRoot, rootOf, rowsOf, tildePath, visibleDirs, type FolderTarget } from "./folders.js"
 import {
@@ -39,7 +39,7 @@ const PALETTE = {
   onAccent: [7, 14, 26] as RGB,
 }
 
-type Tone = "text" | "dim" | "accent" | "warm" | "ok" | "err" | "title" | "primary" | "secondary"
+type Tone = "text" | "dim" | "accent" | "warm" | "ok" | "err" | "title" | "primary" | "toggled" | "secondary"
 
 interface Segment {
   text: string
@@ -445,7 +445,7 @@ function buildFolder(input: SceneInput, width: number, listRows: number): Built 
     places.push(
       ...(folder.path === DRIVES ? [] : [folderButton(`${rootOf(folder.path) === "/" ? icons.root : icons.drive} ${rootOf(folder.path)}`, { kind: "place", id: "root" }, "secondary" as Tone)]),
       folderButton(`${icons.plus} ${strings.folderNew}`, { kind: "toggle", id: "new" }, "secondary"),
-      folderButton(`${folder.showHidden ? icons.shown : icons.hidden} ${strings.folderHidden}`, { kind: "toggle", id: "hidden" }, folder.showHidden ? "primary" : "secondary"),
+      folderButton(`${folder.showHidden ? icons.shown : icons.hidden} ${strings.folderHidden}`, { kind: "toggle", id: "hidden" }, folder.showHidden ? "toggled" : "secondary"),
     )
     const spaced: Segment[] = []
     places.forEach((segment, index) => {
@@ -705,7 +705,10 @@ function style(tone: Tone, background: RGB | null, interaction: Interaction = "n
       return { fg: PALETTE.err }
     case "title":
       return { fg: PALETTE.text, attrs: BOLD }
-    case "primary": {
+    // A switched-on toggle looks like the default button in colour; without colour it is only bold,
+    // so the inverse of the button Enter presses stays unique.
+    case "primary":
+    case "toggled": {
       const bg = interaction === "hover" ? mix(PALETTE.accent, WHITE, 0.28) : interaction === "pressed" ? scale(PALETTE.accent, 0.62) : PALETTE.accent
       return { fg: interaction === "pressed" ? PALETTE.text : PALETTE.onAccent, bg, attrs: BOLD }
     }
@@ -715,6 +718,18 @@ function style(tone: Tone, background: RGB | null, interaction: Interaction = "n
       return { fg: PALETTE.text, bg: mix(base, PALETTE.border, amount), attrs: interaction === "pressed" ? BOLD : 0 }
     }
   }
+}
+
+// With no colour, state is carried by attributes alone: inverse video marks what Enter presses (the
+// default button, the highlighted row), underline marks the pointer, and dim keeps its meaning.
+function monochrome(painted: Style, tone: Tone, interaction: Interaction): Style {
+  let attrs = painted.attrs ?? 0
+  if (tone === "primary") attrs |= INVERSE
+  if (tone === "toggled") attrs |= BOLD
+  if (tone === "dim") attrs |= DIM
+  if (interaction !== "none") attrs |= UNDERLINE
+  if (interaction === "pressed") attrs |= BOLD
+  return { attrs }
 }
 
 // The colour each cell of a rectangle shows: the average of the cell's two colours.
@@ -835,9 +850,13 @@ export function renderScene(input: SceneInput): Scene {
     const y = contentTop + index
     let x = x0
     const row = interactionOf(line.hit)
-    if (line.selected) {
+    if (line.selected && level === "none") {
+      canvas.fill(x0, y, inner, 1, monochrome({}, "primary", row))
+    } else if (line.selected) {
       const fill = row === "hover" ? mix(PALETTE.accent, WHITE, 0.28) : row === "pressed" ? scale(PALETTE.accent, 0.62) : PALETTE.accent
       canvas.fill(x0, y, inner, 1, { bg: fill })
+    } else if (row !== "none" && level === "none") {
+      canvas.fill(x0, y, inner, 1, monochrome({}, "text", row))
     } else if (row !== "none") {
       // A row that is only pointed at gets a tint of the accent; pressed, a deeper one.
       canvas.fill(x0, y, inner, 1, { bg: mix(PALETTE.panel, PALETTE.accent, row === "pressed" ? 0.38 : 0.2) })
@@ -847,12 +866,20 @@ export function renderScene(input: SceneInput): Scene {
       const background = canvas.backgroundAt(x, y)
       // On a selected row the segments follow the row's own state, so text and fill agree.
       const interaction = segment.hit ? interactionOf(segment.hit) : line.selected ? row : "none"
-      const painted = style(segment.tone, background, interaction)
+      const colored = style(segment.tone, background, interaction)
+      const painted = level === "none" ? monochrome(colored, segment.tone, interaction) : colored
       const used = canvas.text(x, y, segment.text, painted)
       if (segment.hit) hits.push({ col: x, row: y, width: used, height: 1, target: segment.hit })
       x += used
     }
   })
+  // The inverse row alone is easy to miss in a terminal that renders inverse video faintly, so the
+  // highlighted row also starts with a marker in the cell every row leaves blank.
+  if (level === "none") {
+    built.lines.forEach((line, index) => {
+      if (line.selected) canvas.text(x0, contentTop + index, ">", { attrs: INVERSE | BOLD })
+    })
+  }
   if (built.scroll && built.scroll.total > built.scroll.count) {
     const { line, count, total, first } = built.scroll
     const thumb = Math.max(1, Math.round((count * count) / total))

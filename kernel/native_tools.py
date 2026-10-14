@@ -230,12 +230,17 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
 ACTION_TOOLS.update({
     "skills": ToolSpec(
         "Installed skills: list or search them, attach one to this task (its instructions and tools arrive with "
-        "the answer; tools are callable from your next response), detach it, or see attached skills' state. "
+        "the answer; tools are callable from your next response), read one of an attached skill's longer "
+        "reference pages, detach it, or see attached skills' state. "
         "Attaching a skill with tools may ask the person for approval. Building one: scaffold a draft folder, "
         "edit it, check it (Kvist's independent checks), then install it (the person approves).",
         {
-            "op": {"type": "string", "enum": ["list", "attach", "detach", "status", "scaffold", "check", "install"]},
-            "skill": {"type": "string", "description": "The skill id, for attach, detach and scaffold."},
+            "op": {"type": "string",
+                   "enum": ["list", "attach", "detach", "read", "status", "scaffold", "check", "install"]},
+            "skill": {"type": "string", "description": "The skill id, for attach, detach, read and scaffold."},
+            "reference": {"type": "string",
+                          "description": "read: a page the attach answer listed under references, "
+                                         "e.g. references/terminal.md."},
             "query": {"type": "string", "description": "Words to filter the list by."},
             "page": _integer(1, 100),
             "path": {"type": "string", "description": "The draft folder in the workspace, for scaffold, check and install."},

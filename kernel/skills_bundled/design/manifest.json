@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "id": "design",
+  "version": "0.2.0",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {"en": "Design", "ru": "Дизайн"},
+  "summary": {
+    "en": "Interfaces people can use: web apps, sites, phone apps, terminal UIs and CLI output, desktop and IDE panels, installers and first run. Layout, type, colour, accessibility, states, copy, checks.",
+    "ru": "Интерфейсы, которыми удобно пользоваться: веб-приложения, сайты, мобильные приложения, терминальные UI и вывод CLI, десктоп и IDE, установщики и первый запуск. Сетка, шрифты, цвет, доступность, состояния, тексты, проверки."
+  },
+  "instructions": "SKILL.md",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.0"},
+  "capabilities": {"required": []}
+}

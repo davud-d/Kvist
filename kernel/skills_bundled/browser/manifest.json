@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "browser",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "plugin_api": 1,
   "kind": "tools",
   "name": {"en": "Browser", "ru": "Браузер"},
@@ -12,7 +12,7 @@
   "instructions": "SKILL.md",
   "entrypoint": "plugin.py",
   "platforms": ["linux"],
-  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.1"},
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.0"},
   "dependencies": {
     "python": ["playwright==1.63.0", "greenlet==3.5.6", "pyee==13.0.0", "typing_extensions==4.16.0"],
     "system": ["Xvfb", "i3", "chromium"]
@@ -140,6 +140,26 @@
       "parameters": {"type": "object", "additionalProperties": false, "properties": {
         "full_page": {"type": "boolean"}, "ref": {"type": "string"},
         "question": {"type": "string", "maxLength": 4000}, "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "emulate",
+      "summary": "Set the tab's viewport size (e.g. 390x844 for a phone, 1440x900 for a laptop), its colour scheme (light or dark) and reduced motion, so a page can be checked as other people see it. Returns what the page now reports.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "width": {"type": "integer", "minimum": 240, "maximum": 3840},
+        "height": {"type": "integer", "minimum": 240, "maximum": 2400},
+        "color_scheme": {"type": "string", "enum": ["light", "dark", "no-preference"]},
+        "reduced_motion": {"type": "string", "enum": ["reduce", "no-preference"]},
+        "tab": {"type": "string"}
+      }}
+    },
+    {
+      "name": "check_page",
+      "summary": "Measure the current page for layout and accessibility faults a screenshot description can miss: sideways page scroll and the elements causing it, clipped text, text contrast below WCAG AA, pointer targets under 24 px, images without alt, fields and buttons without a name, heading jumps, missing lang, the document's character set, fonts that failed to load.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {
+        "max_items": {"type": "integer", "minimum": 1, "maximum": 50}, "tab": {"type": "string"}
       }}
     },
     {

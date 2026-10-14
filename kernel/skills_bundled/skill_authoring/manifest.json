@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "skill_authoring",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "plugin_api": 1,
   "kind": "instructions",
   "name": {"en": "Writing skills", "ru": "Создание скиллов"},
@@ -11,6 +11,6 @@
   },
   "instructions": "SKILL.md",
   "platforms": ["linux", "darwin", "win32"],
-  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.1"},
   "capabilities": {"required": []}
 }

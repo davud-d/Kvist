@@ -79,4 +79,7 @@ def _build_offline_agent(
 
 
 main.build_agent = _build_offline_agent
+# The offline agent stands in for a configured provider, so there is nothing for the first-run
+# setup screen to set up; without this every launch stopped on that screen instead of the REPL.
+main.needs_setup = lambda args: False
 main.main()

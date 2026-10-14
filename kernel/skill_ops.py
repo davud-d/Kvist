@@ -18,6 +18,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from kernel.plugins import bundled
+from kernel.plugins.bundled import decline as decline_bundled
+from kernel.plugins.bundled import restore as restore_bundled
+from kernel.plugins.bundled import sync_bundled
 from kernel.plugins.grants import GrantStore
 from kernel.plugins.paths import workspace_skill_dir
 from kernel.plugins.registry import RegistryError, SkillRegistry
@@ -36,6 +40,16 @@ def run_skill_op(op: str, *, workspace: Path, skill: str | None, path: str | Non
                  assume_yes: bool, language: str = "en") -> dict[str, Any]:
     registry = SkillRegistry()
     grants = GrantStore()
+    problems = sync_bundled(registry)
+    result = _skill_op(op, registry, grants, workspace=workspace, skill=skill, path=path, version=version,
+                       assume_yes=assume_yes, language=language)
+    if problems:
+        result["warnings"] = problems
+    return result
+
+
+def _skill_op(op: str, registry: SkillRegistry, grants: GrantStore, *, workspace: Path, skill: str | None,
+              path: str | None, version: str | None, assume_yes: bool, language: str) -> dict[str, Any]:
     if op == "list":
         return {"ok": True, "skills": [_entry_row(entry, grants, workspace, language) for entry in registry.catalog()]}
     if op == "install":
@@ -43,6 +57,8 @@ def run_skill_op(op: str, *, workspace: Path, skill: str | None, path: str | Non
             raise OpError("--skill-path is required for install")
         source, origin = _package_source(path)
         result = registry.install(source, origin=origin)
+        if origin == "bundled":
+            restore_bundled(registry, result.skill_id)
         # The person installs this version on purpose: it becomes the active
         # one, and the previous one stays installed for --skill-op rollback.
         registry.activate(result.skill_id, result.version, result.digest)
@@ -80,10 +96,15 @@ def run_skill_op(op: str, *, workspace: Path, skill: str | None, path: str | Non
         registry.remove_version(entry.id, _require(version, "--skill-version"))
         return {"ok": True, "removed_version": version}
     if op == "uninstall":
+        shipped = any(info.get("origin") == "bundled" for info in registry.versions(entry.id).values())
         registry.uninstall(entry.id)
         grants.revoke(entry.id)
-        return {"ok": True, "uninstalled": entry.id,
-                "note": "Data the skill kept in workspaces stays; remove it with --skill-op reset-data per workspace."}
+        note = "Data the skill kept in workspaces stays; remove it with --skill-op reset-data per workspace."
+        if shipped:
+            decline_bundled(registry, entry.id)
+            note += (f" It ships with Kvist and will not be installed again at startup; to bring it back: "
+                     f"kvist --skill-op install --skill-path bundled:{entry.id}")
+        return {"ok": True, "uninstalled": entry.id, "note": note}
     if op == "reset-data":
         target = workspace_skill_dir(workspace, entry.id)
         existed = target.exists()
@@ -101,7 +122,7 @@ def _package_source(path: str) -> tuple[Path, str]:
     """A folder, or ``bundled:<id>`` for a skill shipped with Kvist."""
     if path.startswith("bundled:"):
         name = path.split(":", 1)[1]
-        source = Path(__file__).resolve().parent / "skills_bundled" / name
+        source = bundled.BUNDLED_ROOT / name
         if not name or "/" in name or not source.is_dir():
             available = sorted(item.name for item in source.parent.iterdir() if item.is_dir())
             raise OpError(f"no bundled skill {name!r}; bundled: {', '.join(available)}")

@@ -29,10 +29,16 @@ What the model sees:
   quoted as untrusted package text that cannot override the system rules, the reader role or
   granted permissions) and its tools under wire names `<skill>__<tool>`. A skill cannot claim a
   built-in name or another skill's name; collisions are refused.
+* Reference pages: a skill may ship longer Markdown pages in `references/*.md`. The attach
+  answer lists them, and the model reads one with `skills read` when the instructions send it
+  there (`terminal` or `terminal.md` is enough). They are quoted like the instructions and never
+  enter the per-step prompt, so a long skill costs only the pages a task actually reads.
+  `check` refuses a page over 64 KiB or not in UTF-8 and a page the instructions name but the
+  package lacks, and warns about a page the instructions never name.
 * At most 4 skills are attached to one task.
 
 The model uses five small built-in tools to work with the platform: `skills`
-(`list`, `attach`, `detach`, `status`, and the builder ops `scaffold`, `check`, `install`),
+(`list`, `attach`, `detach`, `read`, `status`, and the builder ops `scaffold`, `check`, `install`),
 `memory`, `sessions`, `helper` and `ask_user`. Skill tools are mapped to the internal action type `skill_call`, so every
 guard of the loop (repeat guard, reader/plan barriers, journal, pending action) applies.
 
@@ -42,6 +48,7 @@ guard of the loop (repeat guard, reader/plan barriers, journal, pending action) 
 <id>/
   manifest.json      required, static, validated before anything runs
   SKILL.md           instructions (path set by "instructions")
+  references/*.md    optional longer pages, read on request (`skills read`), 64 KiB each
   plugin.py          only for kind "tools"
   tests/             optional, run by `kvist --skill-op check` (see below)
   ...                other files, size and count limits apply
@@ -323,7 +330,7 @@ One task, one life cycle: `running`, `pause_requested`, `paused`, `resuming`,
 kvist --skill-op list
 kvist --skill-op show --skill browser
 kvist --skill-op install --skill-path ./my_skill            # stage, check, install (not approved yet)
-kvist --skill-op install --skill-path bundled:browser       # bundled skills
+kvist --skill-op install --skill-path bundled:browser       # bring back a bundled skill you uninstalled
 kvist --skill-op approve --skill browser                    # asks on the terminal (--yes to confirm)
 kvist --skill-op install-deps --skill browser               # pip into the skill's own env
 kvist --skill-op revoke | rollback | uninstall | remove-version | reset-data --skill browser
@@ -406,11 +413,19 @@ for the methods the person allowed (default `GET`).
 
 ## Bundled skills
 
-Installed on demand with `--skill-op install --skill-path bundled:<id>`:
+Preinstalled. At every start (and before every `--skill-op`) Kvist installs a bundled skill
+that is missing and moves a bundled skill to the newer version a Kvist update ships, through the
+same atomic install as any other package (`kernel/plugins/bundled.py`). It leaves alone a skill
+the person installed from elsewhere under the same id, a version the person rolled back from,
+and a bundled skill the person uninstalled: that one stays removed (recorded in
+`plugins/skill/bundled.json`) until `--skill-op install --skill-path bundled:<id>` brings it back.
+Preinstalling grants nothing: a skill with tools still asks the person when it is first attached,
+and its Python dependencies still need `--skill-op install-deps <id>`. The model's catalog leaves
+out skills this OS can never run; `--skill-op list` shows them with the reason.
 
 | Id | What it does |
 | --- | --- |
-| `browser` | Chromium + Playwright on its own X11 screen: open pages (workspace files via a local server, task services, granted domains), snapshot, click, type, select, press, scroll, wait, screenshot, console/network errors, tabs, upload. Preview in the GUI, viewer link. Needs `xorg-server-xvfb`, `i3` and Chromium; Playwright is installed into the skill's own env. |
+| `browser` | Chromium + Playwright on its own X11 screen: open pages (workspace files via a local server, task services, granted domains), snapshot, click, type, select, press, scroll, wait, screenshot (described by the Vision model when given a `question`), console/network errors, tabs, upload. `emulate` sets the viewport, the colour scheme and reduced motion; `check_page` measures sideways scroll and its cause, clipped text, contrast below WCAG AA, small targets, unnamed controls, images without alt, heading jumps, `lang`, the character set and failed fonts. Preview in the GUI, viewer link. Needs `xorg-server-xvfb`, `i3` and Chromium; Playwright is installed into the skill's own env. |
 | `test_runner` | pytest / `node --test` / `npm test` with structured results and a log artifact. |
 | `documents` | read PDF pages, spreadsheet sheets and ranges (xlsx, csv) and Word paragraphs (docx) with exact page, sheet, cell and paragraph references. |
 | `code_nav` | **Python only**: go to definition, find usages, file outline, preview a rename as diffs, pyflakes diagnostics. |
@@ -418,6 +433,7 @@ Installed on demand with `--skill-op install --skill-path bundled:<id>`:
 | `static_checks` | ruff, mypy, tsc, eslint, `go vet` and `cargo check` detected from the project's configuration, findings as file, line, column, code and message, full output as a log artifact. A checker that is not installed is reported as `unavailable`, never as clean; nothing is installed. |
 | `debugging` | instructions only, no runner and no permissions: reproduce first, narrow, test one guess at a time, fix the cause, prove the fix; ends with `no_change_needed` when the problem cannot be reproduced. Works on every platform. |
 | `skill_authoring` | instructions only, no permissions: when a skill is worth building, the manifest, `plugin.py` and the `ctx` rules, tests and `contract.json`, the scaffold → check → install flow and the restart rule. The tools it describes are the built-in `skills` ops. Works on every platform. |
+| `design` | instructions only, no permissions: interfaces people can use — web apps, websites, phone apps, CLI output and full-screen TUIs, desktop and IDE panels, installers and the first run. A short core (process, the quality floor every interface must reach, first-run rules, the generic look to avoid, a checklist) and eleven reference pages read on request: process and audits, visual foundations with a contrast script (WCAG and APCA), web apps, websites, terminal, interaction patterns, accessibility (WCAG 2.2 AA), writing in English and Russian, first run and installation, desktop and IDE, mobile. Works on every platform. |
 
 ## Platforms and limits
 

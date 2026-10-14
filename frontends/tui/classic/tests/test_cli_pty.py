@@ -42,6 +42,7 @@ class _PtyChild:
         rows: int = 40,
         entry: Path | None = None,
         extra_env: dict[str, str] | None = None,
+        extra_args: tuple[str, ...] = (),
     ):
         child_env = {
             "PATH": os.environ.get("PATH", os.defpath),
@@ -63,6 +64,7 @@ class _PtyChild:
                 str(entry or _CHILD_ENTRY),
                 "--workspace",
                 str(workspace),
+                *extra_args,
             ]
             os.execve(sys.executable, argv, child_env)
         self.pid = pid
@@ -197,11 +199,12 @@ def _spawn(
     *,
     entry: Path | None = None,
     extra_env: dict[str, str] | None = None,
+    extra_args: tuple[str, ...] = (),
 ) -> _PtyChild:
     workspace.mkdir(parents=True, exist_ok=True)
     home.mkdir(parents=True, exist_ok=True)
     home.chmod(0o700)
-    return _PtyChild(workspace, home, entry=entry, extra_env=extra_env)
+    return _PtyChild(workspace, home, entry=entry, extra_env=extra_env, extra_args=extra_args)
 
 
 def test_cli_pty_launch_resize_response_error_and_shutdown(tmp_path):
@@ -379,6 +382,68 @@ def test_cli_pty_ctrl_c_saves_and_exits_130(tmp_path):
         child.close()
 
 
+def _spawn_first_run(tmp_path: Path) -> _PtyChild:
+    # The real core with an empty HOME: no provider is saved, so setup runs. No
+    # display variables, so "open registration" cannot launch a browser here.
+    return _spawn(
+        tmp_path / "workspace",
+        tmp_path / "home",
+        entry=_ROOT / "kernel" / "__main__.py",
+        extra_env={"KVIST_TRAY_CMD": "true", "DISPLAY": "", "WAYLAND_DISPLAY": ""},
+        extra_args=("--frontend", "terminal"),
+    )
+
+
+def test_cli_pty_first_run_escape_goes_back_and_ctrl_c_in_the_picker_quits_with_130(tmp_path):
+    child = _spawn_first_run(tmp_path)
+    try:
+        child.wait_for("Open registration in browser", timeout=30)
+        child.settle()
+        child.send("\x1b")
+        child.wait_for("Select LLM Provider")
+        child.settle()
+        child.send("\x03")
+        assert child.wait() == 130
+        visible = child.visible()
+        assert "Setup cancelled. Run kvist again to continue." in visible
+        assert "Traceback (most recent call last)" not in visible
+        assert not (tmp_path / "home" / ".kvist" / "config.json").exists()
+    finally:
+        child.close()
+
+
+def test_cli_pty_first_run_ctrl_c_at_the_registration_dialog_quits(tmp_path):
+    child = _spawn_first_run(tmp_path)
+    try:
+        child.wait_for("Open registration in browser", timeout=30)
+        child.settle()
+        child.send("\x03")
+        assert child.wait() == 130
+        assert "Setup cancelled. Run kvist again to continue." in child.visible()
+        assert not (tmp_path / "home" / ".kvist" / "config.json").exists()
+    finally:
+        child.close()
+
+
+def test_cli_pty_first_run_ctrl_c_in_the_key_prompt_quits(tmp_path):
+    child = _spawn_first_run(tmp_path)
+    try:
+        child.wait_for("Open registration in browser", timeout=30)
+        child.settle()
+        child.send("\x1b")
+        child.wait_for("Select LLM Provider")
+        child.settle()
+        child.send("\r")
+        child.wait_for("OpenAI API key")
+        child.settle()
+        child.send("\x03")
+        assert child.wait() == 130
+        assert "Setup cancelled. Run kvist again to continue." in child.visible()
+        assert not (tmp_path / "home" / ".kvist" / "config.json").exists()
+    finally:
+        child.close()
+
+
 def test_cli_pty_ctrl_c_stops_the_task_and_keeps_the_repl_alive(tmp_path):
     """Ctrl+C during a run ends that turn, not the session."""
     child = _spawn(tmp_path / "workspace", tmp_path / "home")
@@ -484,6 +549,7 @@ def _build_chat_agent(
 llm_clients.fallback_candidates_for_model = lambda *args, **kwargs: []
 main.build_agent = _build_chat_agent
 main.get_saved_role = lambda: "chat"
+main.needs_setup = lambda args: False  # the stub agent is the configured provider
 main.main()
 '''
 
@@ -620,6 +686,7 @@ def _build(executor, max_steps, persist_logs, verbose,
 llm_clients.fallback_candidates_for_model = lambda *args, **kwargs: []
 main.build_agent = _build
 main.get_saved_role = lambda: "chat"
+main.needs_setup = lambda args: False  # the stub agent is the configured provider
 main.main()
 '''
 
@@ -690,7 +757,7 @@ def test_live_ui_escape_stops_a_turn_in_flight_on_the_second_press(tmp_path):
 
         armed = child.mark()
         child.send("\x1b")
-        child.wait_for("Press Esc again to stop the agent", start=armed, timeout=10)
+        child.wait_for("Press Esc again to pause", start=armed, timeout=10)
         assert "Reply stopped by you." not in child.visible(start)
 
         # Escape reaches the application as a key, so freeing a thread parked

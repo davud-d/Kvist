@@ -106,7 +106,7 @@ def test_a_terminal_gets_the_drawn_result_and_json_flag_overrides(config, capsys
     json_out = capsys.readouterr().out
 
     assert drawn_out.lstrip().startswith("✓ guide 0.1.0")
-    assert json.loads(json_out)["skills"][0]["id"] == "guide"
+    assert "guide" in [row["id"] for row in json.loads(json_out)["skills"]]  # beside the preinstalled ones
 
 
 def test_a_failure_exits_1_in_both_modes(config, capsys, monkeypatch):

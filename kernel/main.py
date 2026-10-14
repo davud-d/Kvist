@@ -622,8 +622,10 @@ from kernel.custom_provider import (
 )
 from prompt_history import WorkspaceInputHistory
 from kernel.system_context import ensure_workspace_instructions
+from kernel.plugins.bundled import sync_bundled
+from kernel.plugins.registry import SkillRegistry
 from kernel.ui import AgentUI
-from terminal_banner import TerminalBannerUI
+from terminal_banner import SetupCancelled, TerminalBannerUI, ctrl_c_stops_setup
 from terminal_image import print_exit_logo
 from kernel.anymodel_onboarding import offer_anymodel_registration
 from kernel.performance_logger import PerfLogger
@@ -1249,6 +1251,14 @@ def run_stopped_text(language: str) -> str:
     )
 
 
+def setup_cancelled_text(language: str) -> str:
+    return (
+        "Настройка отменена. Запустите kvist снова, чтобы продолжить."
+        if language == "ru"
+        else "Setup cancelled. Run kvist again to continue."
+    )
+
+
 def release_terminal(
     screen: InteractiveScreen | None,
     use_session_screen: bool,
@@ -1640,6 +1650,7 @@ def build_agent(
         if provided_ui is not None
         else TerminalBannerUI(console=agent_console, verbose=verbose, perf_logger=perf_logger)
     )
+    warnings.extend(sync_bundled(SkillRegistry()))
     agent = LocalAgent(
         client=client,
         executor=executor,
@@ -4407,14 +4418,20 @@ def main() -> None:
             workspace=workspace_path,
             read_roots=tuple(args.allow_read),
         )
-        agent, config, model_warnings = build_agent(
-            executor=executor,
-            max_steps=max_steps,
-            persist_logs=persist_logs,
-            verbose=verbose,
-            language_hint=session_language,
-            end_session=True,
-        )
+        # Ctrl+C in a first-run dialog (provider, key, models) stops the program;
+        # Esc keeps going back.
+        with ctrl_c_stops_setup():
+            agent, config, model_warnings = build_agent(
+                executor=executor,
+                max_steps=max_steps,
+                persist_logs=persist_logs,
+                verbose=verbose,
+                language_hint=session_language,
+                end_session=True,
+            )
+    except SetupCancelled:
+        print(setup_cancelled_text(session_language), file=sys.stderr)
+        sys.exit(130)
     except (RuntimeError, ValueError) as error:
         print(sanitize_display_text(str(error)), file=sys.stderr)
         sys.exit(2)

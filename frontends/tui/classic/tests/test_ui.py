@@ -141,6 +141,49 @@ def test_cancel_on_escape_bindings_aborts_the_prompt():
     assert exits["exception"] is KeyboardInterrupt
 
 
+def _ctrl_c_exit_exception() -> type:
+    from prompt_toolkit.keys import Keys
+
+    binding = ui_module._cancel_on_escape_bindings().get_bindings_for_keys((Keys.ControlC,))[-1]
+    exits = {}
+
+    class _App:
+        def exit(self, **kwargs) -> None:
+            exits.update(kwargs)
+
+        def invalidate(self) -> None:
+            pass
+
+    binding.call(SimpleNamespace(app=_App()))
+    return exits["exception"]
+
+
+def test_ctrl_c_in_a_prompt_cancels_it_except_while_setup_runs():
+    """Esc and Ctrl+C both cancel a field; during first-run setup Ctrl+C must stop instead."""
+    assert _ctrl_c_exit_exception() is KeyboardInterrupt
+    with ui_module.ctrl_c_stops_setup():
+        assert _ctrl_c_exit_exception() is ui_module.SetupCancelled
+    assert _ctrl_c_exit_exception() is KeyboardInterrupt
+
+
+@pytest.mark.parametrize("method", ["prompt_text", "prompt_secret"])
+def test_prompt_lets_setup_cancellation_through_but_cancels_on_other_interrupts(monkeypatch, method):
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+
+    def _interrupted(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    def _setup_cancelled(*args, **kwargs):
+        raise ui_module.SetupCancelled
+
+    monkeypatch.setattr(ui_module, "pt_prompt", _interrupted)
+    assert getattr(ui, method)("Title") is None
+    monkeypatch.setattr(ui_module, "pt_prompt", _setup_cancelled)
+    with pytest.raises(ui_module.SetupCancelled):
+        getattr(ui, method)("Title")
+
+
 def test_print_user_markdown_accepts_markdown_text_without_crashing():
     console = Console(record=True, width=100, force_terminal=True)
     ui = AgentUI(console=console, verbose=False)
@@ -419,6 +462,20 @@ def test_choose_option_tty_eof_cancels(monkeypatch):
 
     result = ui.choose_option("Title", ["a", "b"])
     assert result is None
+
+
+def test_choose_option_ctrl_c_raises_only_while_setup_runs(monkeypatch):
+    """Esc goes back in every dialog; Ctrl+C leaves first-run setup but only cancels elsewhere."""
+    ui = AgentUI(verbose=False)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: "interrupt")
+    with ui_module.ctrl_c_stops_setup():
+        with pytest.raises(ui_module.SetupCancelled):
+            ui.choose_option("Title", ["a", "b"])
+        monkeypatch.setattr(ui, "_read_menu_key", lambda: "escape")
+        assert ui.choose_option("Title", ["a", "b"]) is None
+    monkeypatch.setattr(ui, "_read_menu_key", lambda: "interrupt")
+    assert ui.choose_option("Title", ["a", "b"]) is None
 
 
 def _many_options(n: int) -> list[dict[str, str]]:

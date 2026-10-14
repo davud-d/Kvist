@@ -63,6 +63,7 @@ packages = [
     "kernel.skills_bundled.static_checks",
     "kernel.skills_bundled.debugging",
     "kernel.skills_bundled.skill_authoring",
+    "kernel.skills_bundled.design",
     "frontends.gui.electron.renderer",
     "frontends.tui.classic",
     "frontends.tui.classic.assets",
@@ -89,6 +90,7 @@ kvist_web = "frontends/web-local/kvist_web"
 "kernel.skills_bundled.static_checks" = ["manifest.json", "SKILL.md", "tests/*.py", "tests/*.json"]
 "kernel.skills_bundled.debugging" = ["manifest.json", "SKILL.md"]
 "kernel.skills_bundled.skill_authoring" = ["manifest.json", "SKILL.md"]
+"kernel.skills_bundled.design" = ["manifest.json", "SKILL.md", "references/*.md"]
 "frontends.gui.electron.renderer" = ["image-attachments.js"]
 kvist_web = [
     "client/index.html",

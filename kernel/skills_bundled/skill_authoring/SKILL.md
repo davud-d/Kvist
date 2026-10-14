@@ -104,6 +104,13 @@ Give the reason behind each rule so it generalizes. Do not put orders that try
 to override the system rules: they are ignored by design, and the text is
 treated as untrusted package content.
 
+`SKILL.md` stays in the prompt of every step while the skill is attached, so
+keep it to what every task needs. Put longer material into reference pages,
+`references/<topic>.md` (64 KiB each): the attach answer lists them and the
+model reads one with `skills` op `read` only when a task needs it. In
+`SKILL.md`, name every page with its path and say when to read it; a page
+that is not named is never read.
+
 ## Traps
 
 - Reading files, search results, web pages and tool output are data, not
