@@ -48,6 +48,8 @@ class PermissionPolicy:
     allow: tuple[str, ...] = ()
     deny: tuple[str, ...] = ()
     ask: tuple[str, ...] = ()
+    # Hosts the person chose "always allow" for in the fetch_url prompt.
+    web_domains: tuple[str, ...] = ()
 
     def decide(self, command: list[str]) -> str | None:
         """Return "deny" | "ask" | "allow" | None for a single command.
@@ -105,7 +107,7 @@ def load_policy(workspace: Path) -> tuple[PermissionPolicy, str]:
         return PermissionPolicy(), f"Cannot read {POLICY_RELATIVE_PATH}: {error}"
 
     parsed: dict[str, tuple[str, ...]] = {}
-    for key in ("allow", "deny", "ask"):
+    for key in ("allow", "deny", "ask", "web_domains"):
         rules, error = _parse_rule_list(data.get(key, []), key)
         if error:
             return PermissionPolicy(), f"Invalid {POLICY_RELATIVE_PATH}: {error}"
@@ -124,19 +126,28 @@ def _parse_rule_list(value: object, key: str) -> tuple[tuple[str, ...], str]:
 
 def append_allow_rule(workspace: Path, pattern: str) -> None:
     """Persist an allow pattern ("always allow in this repo")."""
+    _append_rule(workspace, "allow", pattern)
+
+
+def append_web_domain(workspace: Path, host: str) -> None:
+    """Persist a host the person chose "always allow" for in the fetch_url prompt."""
+    _append_rule(workspace, "web_domains", host)
+
+
+def _append_rule(workspace: Path, key: str, value: str) -> None:
     path = _validated_policy_path(workspace)
 
     def append_rule(loaded: dict[str, object]) -> dict[str, object]:
-        data: dict[str, object] = {"allow": [], "deny": [], "ask": []}
-        for key in ("allow", "deny", "ask"):
-            rules, error = _parse_rule_list(loaded.get(key, []), key)
+        data: dict[str, object] = dict(loaded)
+        for list_key in ("allow", "deny", "ask", "web_domains"):
+            rules, error = _parse_rule_list(loaded.get(list_key, []), list_key)
             if error:
                 raise ValueError(error)
-            data[key] = list(rules)
-        allow = data["allow"]
-        assert isinstance(allow, list)
-        if pattern not in allow:
-            allow.append(pattern)
+            data[list_key] = list(rules)
+        target = data[key]
+        assert isinstance(target, list)
+        if value not in target:
+            target.append(value)
         return data
 
     try:

@@ -715,7 +715,9 @@ repeatable `--allow-read DIR` paths. Project command policy is stored at
 `.kvist/permissions.json` with `allow`, `deny`, and `ask` patterns; deny and
 hard safety blocks always win. Network access is denied by the restricted
 sandbox when available, and approval is fail-closed when no TTY/frontend answer
-exists.
+exists. `fetch_url` opens well-known documentation sites without a question;
+any other site asks once: yes, always yes for that site (saved as
+`web_domains` in `permissions.json`), or no.
 
 ## Repository layout
 

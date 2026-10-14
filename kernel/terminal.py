@@ -1113,6 +1113,15 @@ def request_user_confirmation(title: str, body: str, question: str) -> bool:
     SafeExecutor. Raises TerminalError when stdin is not a TTY so
     non-interactive callers get a deterministic failure.
     """
+    answer = request_user_answer(title, body, f"{question} [y/N]")
+    return answer in ("y", "yes")
+
+
+def request_user_answer(title: str, body: str, prompt: str) -> str:
+    """Show ``body`` in a panel and return the lowercased typed answer ("" on EOF).
+
+    Raises TerminalError when stdin is not a TTY.
+    """
     if not sys.stdin.isatty():
         raise TerminalError("Interactive confirmation required, but stdin is not a TTY")
 
@@ -1138,11 +1147,9 @@ def request_user_confirmation(title: str, body: str, question: str) -> bool:
                 )
             )
             try:
-                safe_question = sanitize_display_text(question)
-                choice = input(f"{safe_question} [y/N]: ").strip().lower()
+                return input(f"{sanitize_display_text(prompt)}: ").strip().lower()
             except EOFError:
-                return False
-        return choice in ("y", "yes")
+                return ""
     finally:
         _exit_hitl()
         if TerminalExecutor._hitl_resume_fn is not None:

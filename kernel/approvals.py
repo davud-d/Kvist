@@ -12,7 +12,9 @@ import ``TerminalApprovalGate`` at module load time without an import cycle.
 from __future__ import annotations
 
 import json
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
+
+FetchDecision = Literal["once", "always", "deny"]
 
 
 @runtime_checkable
@@ -25,6 +27,14 @@ class ApprovalGate(Protocol):
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         """Generic yes/no confirmation. May raise to fail closed."""
+        ...
+
+    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+        """Ask whether ``fetch_url`` may reach a host outside the trusted list.
+
+        ``"once"`` allows this request, ``"always"`` also remembers the host for
+        the project, ``"deny"`` refuses. May raise to fail closed.
+        """
         ...
 
     def commit_remembered_rule(self) -> None:
@@ -47,6 +57,20 @@ class TerminalApprovalGate:
         from kernel.terminal import request_user_confirmation
 
         return request_user_confirmation(title, body, question)
+
+    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+        from kernel.terminal import request_user_answer
+
+        answer = request_user_answer(
+            "Web fetch — Human-in-the-Loop",
+            f"The agent wants to fetch a page from {host}, which is not a trusted documentation site:\n\n{url}",
+            "Allow? [y] once / [a] always for this host / [N] no",
+        )
+        if answer in ("a", "always"):
+            return "always"
+        if answer in ("y", "yes"):
+            return "once"
+        return "deny"
 
     def confirm_command(self, command: list[str], reason: str) -> bool:
         """Interactive approval prompt (Human-in-the-Loop).
@@ -146,3 +170,6 @@ class DenyApprovalGate:
 
     def confirm_command(self, command: list[str], reason: str) -> bool:
         return False
+
+    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+        return "deny"

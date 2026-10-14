@@ -284,7 +284,7 @@ def test_executor_fetch_url_uses_mocked_http_and_extracts_html(tmp_path, monkeyp
 def test_executor_fetch_url_blocks_untrusted_and_binary_urls(tmp_path):
     executor = SafeExecutor(tmp_path)
 
-    with pytest.raises(ExecutorError, match="trusted domains"):
+    with pytest.raises(ExecutorError, match="requires interactive approval"):
         executor._fetch_url("https://example.invalid/")
     with pytest.raises(ExecutorError, match="binary or archive"):
         executor._fetch_url("https://docs.python.org/file.zip")
@@ -327,6 +327,24 @@ def test_web_search_result_marks_content_untrusted(tmp_path, monkeypatch):
     assert result.data["untrusted"] is True
     assert result.data["notice"] == UNTRUSTED_CONTENT_NOTICE
     assert result.data["results"]
+
+
+def test_web_search_keeps_results_from_hosts_outside_the_fetch_list(tmp_path, monkeypatch):
+    executor = SafeExecutor(tmp_path)
+
+    monkeypatch.setattr(executor, "_provider_order", lambda: ["tavily"])
+    monkeypatch.setattr(executor, "_provider_available", lambda provider: True)
+    monkeypatch.setattr(
+        executor,
+        "_search_with_provider",
+        lambda provider, query, top_k, freshness: [
+            {"title": "Blog", "url": "https://blog.example.org/post", "snippet": "text"},
+        ],
+    )
+
+    result = executor._web_search("anything")
+
+    assert [item["url"] for item in result.data["results"]] == ["https://blog.example.org/post"]
 
 
 # ── Role forwarding into the shell risk layer ────────────────────────
@@ -1029,3 +1047,76 @@ def test_read_multiple_files_still_refuses_env_file_next_to_a_found_file(tmp_pat
 
     with pytest.raises(ExecutorError):
         executor._read_multiple_files(["a.py", ".env"])
+
+
+# ── fetch_url: untrusted hosts need the person's answer ──────────────
+
+class _DomainGate:
+    def __init__(self, decision):
+        self.decision = decision
+        self.asked: list[str] = []
+
+    def confirm(self, title, body, question):
+        return False
+
+    def confirm_command(self, command, reason):
+        return False
+
+    def confirm_fetch_domain(self, host, url):
+        self.asked.append(host)
+        return self.decision
+
+    def commit_remembered_rule(self):
+        pass
+
+
+def _page(monkeypatch, executor):
+    monkeypatch.setattr(
+        executor,
+        "_http_request",
+        lambda **_: (200, {"Content-Type": "text/plain"}, b"hello"),
+    )
+
+
+def test_fetch_untrusted_host_once_asks_every_time(tmp_path, monkeypatch):
+    gate = _DomainGate("once")
+    executor = SafeExecutor(tmp_path, approvals=gate)
+    _page(monkeypatch, executor)
+
+    assert executor._fetch_url("https://docs.example.org/a").ok
+    assert executor._fetch_url("https://docs.example.org/b").ok
+    assert gate.asked == ["docs.example.org", "docs.example.org"]
+
+
+def test_fetch_untrusted_host_always_is_remembered_in_project(tmp_path, monkeypatch):
+    gate = _DomainGate("always")
+    executor = SafeExecutor(tmp_path, approvals=gate)
+    _page(monkeypatch, executor)
+
+    executor._fetch_url("https://docs.example.org/a")
+    executor._fetch_url("https://docs.example.org/b")
+    assert gate.asked == ["docs.example.org"]
+
+    fresh_gate = _DomainGate("deny")
+    fresh = SafeExecutor(tmp_path, approvals=fresh_gate)
+    _page(monkeypatch, fresh)
+    assert fresh._fetch_url("https://docs.example.org/c").ok
+    assert fresh_gate.asked == []
+
+
+def test_fetch_untrusted_host_denied_by_person(tmp_path, monkeypatch):
+    executor = SafeExecutor(tmp_path, approvals=_DomainGate("deny"))
+    _page(monkeypatch, executor)
+
+    with pytest.raises(ExecutorError, match="declined by the person"):
+        executor._fetch_url("https://docs.example.org/a")
+
+
+@pytest.mark.parametrize("url", ["http://localhost:8000/", "http://127.0.0.1/", "http://169.254.169.254/latest"])
+def test_fetch_never_asks_for_local_addresses(tmp_path, url):
+    gate = _DomainGate("always")
+    executor = SafeExecutor(tmp_path, approvals=gate)
+
+    with pytest.raises(ExecutorError, match="local or private"):
+        executor._fetch_url(url)
+    assert gate.asked == []

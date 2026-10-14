@@ -16,6 +16,7 @@ import threading
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+from kernel.approvals import FetchDecision
 from kernel.frontend_protocol import ErrorEvent, FrontendChannel
 
 
@@ -55,6 +56,23 @@ class EventApprovalGate:
         if response.approved is True and response.remember is True and remember_pattern and self._workspace:
             self._remembered_pattern = remember_pattern
         return response.approved is True
+
+    def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
+        if self._mode == "deny":
+            return "deny"
+        response = self._channel.request(
+            "choice",
+            f"Fetch a page from {host}?",
+            body=url,
+            options=[
+                {"value": "once", "label": "Yes"},
+                {"value": "always", "label": f"Always yes for {host}"},
+                {"value": "deny", "label": "No"},
+            ],
+        )
+        if response.value in ("once", "always"):
+            return response.value
+        return "deny"
 
     def commit_remembered_rule(self) -> None:
         pattern, self._remembered_pattern = self._remembered_pattern, None

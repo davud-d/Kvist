@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import difflib
 import fnmatch
+import ipaddress
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import secrets
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -50,11 +52,26 @@ from kernel.secret_paths import (
     is_secret_path,
 )
 from kernel.approvals import ApprovalGate, TerminalApprovalGate
+from kernel.permission_policy import append_web_domain, load_policy
 from kernel.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
 
 
 class ExecutorError(Exception):
     pass
+
+
+class _SameHostRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse a redirect to another host: the person approved the first one only."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old_host = (urllib.parse.urlparse(req.full_url).hostname or "").lower()
+        new_host = (urllib.parse.urlparse(newurl).hostname or "").lower()
+        if old_host != new_host:
+            raise ExecutorError(
+                f"The server redirected to another host ({new_host}). "
+                f"Fetch {newurl} directly if it is needed."
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 # Marker attached to every web_search / fetch_url result so the model treats
@@ -274,6 +291,7 @@ class SafeExecutor:
             "git-scm.com",
         }
         self.allowed_web_domains.update(self._extra_fetch_domains())
+        self._session_web_domains: set[str] = set()
 
         self.web_search_provider = (os.getenv("SEARCH_PROVIDER", "auto").strip().lower() or "auto")
         self.searxng_base_url = os.getenv("SEARXNG_BASE_URL", "").strip().rstrip("/")
@@ -2273,8 +2291,7 @@ class SafeExecutor:
 
         parsed = urllib.parse.urlparse(normalized_url)
         host = (parsed.hostname or "").lower()
-        if not self._is_allowed_domain(host):
-            raise ExecutorError("URL is not in the trusted domains whitelist")
+        self._authorize_fetch_host(host, normalized_url)
 
         path = parsed.path.lower()
         if any(path.endswith(suffix) for suffix in self.disallowed_fetch_suffixes):
@@ -2522,9 +2539,6 @@ class SafeExecutor:
 
             parsed = urllib.parse.urlparse(clean_url)
             host = (parsed.hostname or "").lower()
-            if not self._is_allowed_domain(host):
-                continue
-
             if domain_filter and not self._matches_domain_filter(host, domain_filter):
                 continue
 
@@ -2577,11 +2591,55 @@ class SafeExecutor:
         return False
 
     def _is_allowed_domain(self, host: str) -> bool:
+        return self._host_in_domains(host, self.allowed_web_domains)
+
+    @staticmethod
+    def _host_in_domains(host: str, domains: Any) -> bool:
         normalized_host = host.lower()
-        for domain in self.allowed_web_domains:
+        for domain in domains:
             if normalized_host == domain or normalized_host.endswith(f".{domain}"):
                 return True
         return False
+
+    def _authorize_fetch_host(self, host: str, url: str) -> None:
+        """Let fetch_url reach trusted and remembered hosts; ask the person about the rest."""
+        if self._is_local_host(host):
+            raise ExecutorError("Fetching local or private network addresses is forbidden")
+        if self._is_allowed_domain(host):
+            return
+        remembered = {*self._session_web_domains, *load_policy(self.workspace)[0].web_domains}
+        if self._host_in_domains(host, remembered):
+            return
+
+        try:
+            decision = self._approvals.confirm_fetch_domain(host, url)
+        except TerminalError as error:
+            raise ExecutorError(
+                f"Fetching from '{host}' requires interactive approval: {error}. "
+                "Set AGENT_FETCH_EXTRA_DOMAINS to trust it for non-interactive runs."
+            ) from error
+        if decision == "deny":
+            raise ExecutorError(
+                f"Fetching from '{host}' was declined by the person. "
+                "Do not retry it; use another source or report to the user."
+            )
+        if decision == "always":
+            self._session_web_domains.add(host)
+            try:
+                append_web_domain(self.workspace, host)
+            except ValueError as error:
+                # Approval itself stands; only the persistence for later sessions failed.
+                print(f"Failed to save trusted domain: {error}", file=sys.stderr)
+
+    @staticmethod
+    def _is_local_host(host: str) -> bool:
+        if host == "localhost" or host.endswith(".localhost"):
+            return True
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        return not address.is_global
 
     def _normalize_http_url(self, raw_url: str) -> str | None:
         try:
@@ -2656,7 +2714,8 @@ class SafeExecutor:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            opener = urllib.request.build_opener(_SameHostRedirectHandler)
+            with opener.open(request, timeout=timeout) as response:
                 content_length_raw = response.headers.get("Content-Length")
                 if content_length_raw:
                     try:

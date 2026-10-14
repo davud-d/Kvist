@@ -232,7 +232,7 @@ configured in-repo.
   `AGENT_RLIMIT_CPU` / `AGENT_RLIMIT_DATA_MB` / `AGENT_RLIMIT_NPROC` (profile rlimit overrides;
   the memory cap is `RLIMIT_DATA`, never `RLIMIT_AS`: V8 reserves ~10 GB of address space per
   WebAssembly memory, so an address-space cap kills `tsx`, `fetch` and `node --test`),
-  `AGENT_FETCH_EXTRA_DOMAINS` (extra fetch_url domains, comma-separated),
+  `AGENT_FETCH_EXTRA_DOMAINS` (extra fetch_url domains trusted without a question, comma-separated),
   and search providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` /
   `BRAVE_SEARCH_API_KEY`.
 - Per-workspace model instructions live in `<workspace>/KVIST.md` (action-loop
@@ -275,6 +275,13 @@ configured in-repo.
   (`allow`/`deny`/`ask` patterns, `permission_policy.py`); deny and built-in hard
   blocks always win over allow, and intrinsic DANGEROUS commands remain
   per-execution approval-only.
+  `fetch_url` trusts a built-in list of documentation hosts
+  (`SafeExecutor.allowed_web_domains`) plus `web_domains` in the same file; any
+  other host asks the person through `ApprovalGate.confirm_fetch_domain`: yes /
+  always yes for this host (saved to `web_domains`) / no. Local and private
+  addresses are never asked about, and a redirect to another host is refused so
+  the next fetch of it goes through the same question. `web_search` results are
+  not filtered by that list: a search only returns links, fetching one is what asks.
 
 ## Architecture
 
