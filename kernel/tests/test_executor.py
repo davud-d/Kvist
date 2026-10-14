@@ -1142,3 +1142,31 @@ def test_web_search_uses_the_key_saved_by_the_command(tmp_path, monkeypatch):
     result = executor._web_search("anything")
 
     assert result.data["provider"] == "tavily"
+
+
+def test_parallel_fetches_of_one_host_ask_once_when_the_answer_is_always(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    class _SlowGate(_DomainGate):
+        def confirm_fetch_domain(self, host, url):
+            self.asked.append(host)
+            time.sleep(0.2)
+            return "always"
+
+    gate = _SlowGate("always")
+    executor = SafeExecutor(tmp_path, approvals=gate)
+    _page(monkeypatch, executor)
+    results: list[bool] = []
+
+    def fetch(path):
+        results.append(executor._fetch_url(f"https://docs.example.org/{path}").ok)
+
+    threads = [threading.Thread(target=fetch, args=(name,)) for name in "abc"]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert results == [True, True, True]
+    assert gate.asked == ["docs.example.org"]

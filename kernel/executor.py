@@ -13,6 +13,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -293,6 +294,7 @@ class SafeExecutor:
         }
         self.allowed_web_domains.update(self._extra_fetch_domains())
         self._session_web_domains: set[str] = set()
+        self._fetch_domain_lock = threading.Lock()
 
         self._web_settings = get_web_search_settings()
 
@@ -2605,31 +2607,39 @@ class SafeExecutor:
         """Let fetch_url reach trusted and remembered hosts; ask the person about the rest."""
         if self._is_local_host(host):
             raise ExecutorError("Fetching local or private network addresses is forbidden")
-        if self._is_allowed_domain(host):
-            return
-        remembered = {*self._session_web_domains, *load_policy(self.workspace)[0].web_domains}
-        if self._host_in_domains(host, remembered):
+        if self._is_trusted_fetch_host(host):
             return
 
-        try:
-            decision = self._approvals.confirm_fetch_domain(host, url)
-        except TerminalError as error:
-            raise ExecutorError(
-                f"Fetching from '{host}' requires interactive approval: {error}. "
-                "Set AGENT_FETCH_EXTRA_DOMAINS to trust it for non-interactive runs."
-            ) from error
-        if decision == "deny":
-            raise ExecutorError(
-                f"Fetching from '{host}' was declined by the person. "
-                "Do not retry it; use another source or report to the user."
-            )
-        if decision == "always":
-            self._session_web_domains.add(host)
+        # Read-only calls of one response run in parallel threads: one question at
+        # a time, and a call that waited re-checks, because the answer may cover it.
+        with self._fetch_domain_lock:
+            if self._is_trusted_fetch_host(host):
+                return
             try:
-                append_web_domain(self.workspace, host)
-            except ValueError as error:
-                # Approval itself stands; only the persistence for later sessions failed.
-                print(f"Failed to save trusted domain: {error}", file=sys.stderr)
+                decision = self._approvals.confirm_fetch_domain(host, url)
+            except TerminalError as error:
+                raise ExecutorError(
+                    f"Fetching from '{host}' requires interactive approval: {error}. "
+                    "Set AGENT_FETCH_EXTRA_DOMAINS to trust it for non-interactive runs."
+                ) from error
+            if decision == "deny":
+                raise ExecutorError(
+                    f"Fetching from '{host}' was declined by the person. "
+                    "Do not retry it; use another source or report to the user."
+                )
+            if decision == "always":
+                self._session_web_domains.add(host)
+                try:
+                    append_web_domain(self.workspace, host)
+                except ValueError as error:
+                    # Approval itself stands; only the persistence for later sessions failed.
+                    print(f"Failed to save trusted domain: {error}", file=sys.stderr)
+
+    def _is_trusted_fetch_host(self, host: str) -> bool:
+        if self._is_allowed_domain(host):
+            return True
+        remembered = {*self._session_web_domains, *load_policy(self.workspace)[0].web_domains}
+        return self._host_in_domains(host, remembered)
 
     @staticmethod
     def _is_local_host(host: str) -> bool:
