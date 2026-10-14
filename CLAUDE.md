@@ -665,6 +665,11 @@ that would orphan a build in a session that now survives the stop.
 `agent.request_cancel()` (the flag `_cancel_event`) stays the **GUI's**
 transport-agnostic mechanism — observed between steps, while consuming an action-loop
 stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
+The flag alone cannot free a thread parked in a silent provider, so the model
+requests go through `cancellable_call.py`: the request and the stream read run
+on daemon threads while the loop's thread polls `_cancel_event` every 50 ms and
+raises `RunCancelled` (the abandoned stream is closed), so a GUI/Ink/IDE stop
+lands at once, not at the next chunk or step.
 
 ### Skills platform (`kernel/plugins/`, `kernel/{resources,task_control,helpers,agent_tools,...}.py`)
 Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages:

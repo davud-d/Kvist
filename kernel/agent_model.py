@@ -51,6 +51,7 @@ from kernel.llm_clients import (
 )
 from kernel import end_session, plan_mode
 from kernel.agent_state import RunCancelled
+from kernel.cancellable_call import call_cancellable, iterate_cancellable
 from kernel.parser import speakable_prefix
 from kernel.task_intent import is_complex_goal
 from kernel.native_tools import (
@@ -726,7 +727,9 @@ def _request_native_turn(
     # connection silently for the whole time the model thinks.
     started = time.monotonic()
     _note_thinking(self, "")
-    response = _create_completion_with_reasoning_fallback(self, request)
+    response = call_cancellable(
+        self._cancel_event, lambda: _create_completion_with_reasoning_fallback(self, request)
+    )
     if not self.config.stream:
         turn = _native_turn_from_message(response.choices[0].message, getattr(response, "usage", None))
         self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
@@ -790,7 +793,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
     last_call_push = 0.0
     spoken = _SpokenStream(self)
     try:
-        for chunk in stream:
+        for chunk in iterate_cancellable(self._cancel_event, stream):
             if self._cancel_event.is_set():
                 raise RunCancelled
             # The final usage-only chunk has no choices/delta. Capture totals
@@ -1072,10 +1075,13 @@ def call_model(
                 if self.config.stream:
                     content = self._call_model_streaming(current_model, messages, json_mode)
                 else:
-                    response = self._create_json_completion(
-                        model=current_model,
-                        messages=messages,
-                        json_mode=json_mode,
+                    response = call_cancellable(
+                        self._cancel_event,
+                        lambda: self._create_json_completion(
+                            model=current_model,
+                            messages=messages,
+                            json_mode=json_mode,
+                        ),
                     )
                     content = safe_extract_completion_content(
                         response, self.config.provider, current_model
@@ -1262,11 +1268,14 @@ def call_model_streaming(
     # clock starts with the request, since a provider may think silently.
     _note_thinking(self, "")
     stream_start = time.monotonic()
-    stream = self._create_json_completion(
-        model=model,
-        messages=messages,
-        stream=True,
-        json_mode=json_mode,
+    stream = call_cancellable(
+        self._cancel_event,
+        lambda: self._create_json_completion(
+            model=model,
+            messages=messages,
+            stream=True,
+            json_mode=json_mode,
+        ),
     )
     chunks: list[str] = []
     reasoning_chunks: list[str] = []
@@ -1280,7 +1289,7 @@ def call_model_streaming(
     renderer = ThrottledRenderer(max_fps=10)
     spoken = _SpokenStream(self)
     try:
-        for chunk in stream:
+        for chunk in iterate_cancellable(self._cancel_event, stream):
             # Checked each chunk so a cancellation stops generation without
             # waiting for the model to finish. The finally closes the HTTP
             # stream; the loop then unwinds through call_model to run_loop's

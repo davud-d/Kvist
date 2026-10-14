@@ -179,9 +179,9 @@ def test_cancel_during_generation_raises_and_closes_stream(agent_factory):
     with pytest.raises(RunCancelled):
         agent._call_model_streaming("mock-model", [{"role": "user", "content": "hi"}])
 
-    # Generation stopped on the first chunk instead of draining the stream,
-    # and the HTTP stream was closed on the way out.
-    assert state["consumed"] == 1
+    # A stop that is already requested reads nothing from the stream, and the
+    # HTTP stream is closed on the way out.
+    assert state["consumed"] == 0
     assert state["closed"] is True
 
 
@@ -430,3 +430,55 @@ def test_every_history_reader_tells_the_model_about_the_stop(agent_factory):
 
     assert "stopped this turn" in render_session_history(agent._session_history, include_outputs=False)
     assert "stopped this turn" in agent._build_runtime_prompt("carry on", 1)
+
+
+# ── Level 3: a stop must not wait for a silent provider ───────────────────────
+
+
+def test_stop_frees_a_loop_blocked_on_a_silent_stream():
+    import threading
+    import time
+
+    from kernel.cancellable_call import iterate_cancellable
+
+    cancel = threading.Event()
+    release = threading.Event()
+    closed = threading.Event()
+
+    class SilentStream:
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            release.wait(10)
+            raise StopIteration
+
+        def close(self):
+            closed.set()
+            release.set()
+
+    threading.Timer(0.1, cancel.set).start()
+    started = time.monotonic()
+    with pytest.raises(RunCancelled):
+        list(iterate_cancellable(cancel, SilentStream()))
+
+    assert time.monotonic() - started < 1.0
+    assert closed.wait(1.0)
+
+
+def test_stop_frees_a_loop_blocked_on_a_request_that_never_answers():
+    import threading
+    import time
+
+    from kernel.cancellable_call import call_cancellable
+
+    cancel = threading.Event()
+    release = threading.Event()
+    threading.Timer(0.1, cancel.set).start()
+    started = time.monotonic()
+    try:
+        with pytest.raises(RunCancelled):
+            call_cancellable(cancel, lambda: release.wait(10))
+        assert time.monotonic() - started < 1.0
+    finally:
+        release.set()
