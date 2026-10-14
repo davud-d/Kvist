@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 import time
+import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -663,6 +664,12 @@ from kernel.user_config import (
     save_style_configuration,
     secret_label_for_key,
     set_provider_secret,
+    BRAVE_API_KEY_KEY,
+    SEARXNG_BASE_URL_KEY,
+    TAVILY_API_KEY_KEY,
+    WEB_SEARCH_PROVIDERS,
+    get_web_search_settings,
+    save_web_search_settings,
 )
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
@@ -2149,6 +2156,77 @@ def choose_style(verbose: bool, ui: AgentUI | None = None) -> str | None:
     )
 
 
+_WEB_SEARCH_PROVIDER_DESCRIPTIONS = {
+    "auto": "First configured one: SearXNG, then Tavily, then Brave",
+    "tavily": "Tavily Search API (needs an API key)",
+    "brave": "Brave Search API (needs an API key)",
+    "searxng": "Your own SearXNG instance (needs its base URL)",
+}
+
+
+def choose_web_search_provider(
+    verbose: bool, ui: AgentUI | None = None
+) -> tuple[bool, str] | None:
+    """Pick the web search provider and enter its API key (or SearXNG URL).
+
+    Returns None when the person cancelled, otherwise ``(saved, message)``.
+    Nothing is written unless the chosen provider ends up with a credential.
+    """
+    if ui is None:
+        ui = TerminalBannerUI(console=console, verbose=verbose)
+
+    current = get_web_search_settings()
+    provider = ui.choose_option(
+        title="Web search provider",
+        current_value=current.provider,
+        options=[
+            {"value": name, "label": name, "description": _WEB_SEARCH_PROVIDER_DESCRIPTIONS[name]}
+            for name in WEB_SEARCH_PROVIDERS
+        ],
+        help_text="↑/↓ — select, Enter — confirm, Esc — cancel",
+    )
+    if provider is None:
+        return None
+
+    secrets: dict[str, str] = {}
+    if provider in ("tavily", "brave"):
+        key_name = TAVILY_API_KEY_KEY if provider == "tavily" else BRAVE_API_KEY_KEY
+        existing = current.tavily_api_key if provider == "tavily" else current.brave_api_key
+        label = secret_label_for_key(key_name)
+        entered = ui.prompt_secret(
+            title=label,
+            current_value=existing,
+            help_text="Leave empty and press Enter to keep the current key.",
+        )
+        key = (entered or existing).strip()
+        if not key:
+            return False, _bi(
+                f"No {label} entered; the provider was not changed.",
+                f"{label} не введён; провайдер не изменён.",
+            )
+        secrets[key_name] = key
+    elif provider == "searxng":
+        entered = ui.prompt_text(
+            title="SearXNG base URL",
+            current_value=current.searxng_base_url,
+            help_text="For example http://localhost:8080 — Enter keeps the current value.",
+        )
+        url = (entered or current.searxng_base_url).strip().rstrip("/")
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            return False, _bi(
+                "The SearXNG address must start with http:// or https://; nothing was changed.",
+                "Адрес SearXNG должен начинаться с http:// или https://; ничего не изменено.",
+            )
+        secrets[SEARXNG_BASE_URL_KEY] = url
+
+    save_web_search_settings(provider, secrets)
+    return True, _bi(
+        f"Web search provider set to: {provider}",
+        f"Провайдер веб-поиска: {provider}",
+    )
+
+
 # ── /settings-api ════════════════════════════════════════════════════════════
 # Menu rows carry the current value only; the long explanation belongs to the
 # edit panel, where there is room for it and where the user is about to need it.
@@ -3375,6 +3453,17 @@ def _stdio_effort(ctx: CommandContext) -> CommandResult:
     )
 
 
+def _stdio_web_search_provider(ctx: CommandContext) -> CommandResult:
+    try:
+        chosen = choose_web_search_provider(ctx.session.agent.config.verbose, ui=ctx.ui)
+    except RuntimeError as error:
+        return CommandResult(False, "Web search settings not saved" + _save_failure_note(error))
+    if chosen is None:
+        return _command_cancelled()
+    saved, message = chosen
+    return CommandResult(saved, message, {"web_search_provider": get_web_search_settings().provider})
+
+
 def _stdio_verbose(ctx: CommandContext) -> CommandResult:
     agent = ctx.session.agent
     enabled = parse_verbose_value("/verbose " + " ".join(ctx.args), agent.config.verbose)
@@ -3980,6 +4069,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "commit-message": _stdio_commit_message,
     "role": _stdio_role,
     "effort": _stdio_effort,
+    "web-search-provider": _stdio_web_search_provider,
     "verbose": _stdio_verbose,
     "style": _stdio_style,
     "session": _stdio_session,
@@ -5332,6 +5422,19 @@ def main() -> None:
                 advisory = effort_advisory(config.provider, selected_effort)
                 if advisory:
                     console.print(_display_text(advisory, "yellow"))
+                continue
+
+            if user_goal.lower() in ("/web-search-provider", "/web_search_provider", "/websearch"):
+                with paused_interactive_screen(interactive_screen):
+                    try:
+                        chosen = choose_web_search_provider(verbose)
+                    except RuntimeError as error:
+                        chosen = (False, "Web search settings not saved: " + sanitize_display_text(str(error)))
+                if chosen is None:
+                    console.print("[yellow]Web search provider unchanged.[/yellow]")
+                    continue
+                saved, message = chosen
+                console.print(_display_text(message, "green" if saved else "yellow"))
                 continue
 
             validation_error = validate_user_goal(

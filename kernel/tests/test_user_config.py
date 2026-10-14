@@ -572,3 +572,25 @@ def test_without_the_override_the_config_is_in_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv(user_config.CONFIG_DIR_ENV, raising=False)
     assert user_config.get_user_config_path() == tmp_path / ".kvist" / "config.json"
+
+
+def test_web_search_settings_prefer_saved_values_over_the_environment(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    monkeypatch.setenv("TAVILY_API_KEY", "env-key")
+    monkeypatch.setenv("SEARCH_PROVIDER", "brave")
+
+    from_env = user_config.get_web_search_settings(path)
+    assert (from_env.provider, from_env.tavily_api_key) == ("brave", "env-key")
+
+    user_config.save_web_search_settings("tavily", {"tavily_api_key": " saved-key "}, path)
+    saved = user_config.get_web_search_settings(path)
+    assert (saved.provider, saved.tavily_api_key) == ("tavily", "saved-key")
+
+
+def test_web_search_settings_fall_back_to_auto_for_an_unknown_provider(tmp_path):
+    path = tmp_path / "config.json"
+    user_config.save_user_config({"web_search_provider": "bing"}, path)
+
+    assert user_config.get_web_search_settings(path).provider == "auto"
+    with pytest.raises(ValueError):
+        user_config.save_web_search_settings("bing", {}, path)

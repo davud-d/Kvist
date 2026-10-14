@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import getpass
 import os
+from dataclasses import dataclass
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -48,6 +49,11 @@ ANTHROPIC_BASE_URL_KEY = "anthropic_base_url"
 DEEPSEEK_API_KEY_KEY = "deepseek_api_key"
 DEEPSEEK_BASE_URL_KEY = "deepseek_base_url"
 CUSTOM_PROVIDERS_KEY = "custom_providers"
+WEB_SEARCH_PROVIDER_KEY = "web_search_provider"
+TAVILY_API_KEY_KEY = "tavily_api_key"
+BRAVE_API_KEY_KEY = "brave_search_api_key"
+SEARXNG_BASE_URL_KEY = "searxng_base_url"
+WEB_SEARCH_PROVIDERS = ("auto", "tavily", "brave", "searxng")
 
 _ENV_KEY_ALIASES = {
     USER_CONFIG_KEY: ("OPENAI_API_KEY",),
@@ -61,6 +67,9 @@ _ENV_KEY_ALIASES = {
     ANTHROPIC_BASE_URL_KEY: ("ANTHROPIC_BASE_URL",),
     DEEPSEEK_API_KEY_KEY: ("DEEPSEEK_API_KEY",),
     DEEPSEEK_BASE_URL_KEY: ("DEEPSEEK_BASE_URL",),
+    TAVILY_API_KEY_KEY: ("TAVILY_API_KEY",),
+    BRAVE_API_KEY_KEY: ("BRAVE_SEARCH_API_KEY",),
+    SEARXNG_BASE_URL_KEY: ("SEARXNG_BASE_URL",),
 }
 for _manual_provider, _manual_config in MANUAL_OPENAI_PROVIDERS.items():
     _ENV_KEY_ALIASES[_manual_config["api_key_key"]] = (_manual_config["api_key_key"].upper(),)
@@ -75,6 +84,8 @@ _SECRET_LABELS = {
     OPENROUTER_API_KEY_KEY: "OpenRouter API key",
     ANTHROPIC_API_KEY_KEY: "Anthropic API key",
     DEEPSEEK_API_KEY_KEY: "DeepSeek API key",
+    TAVILY_API_KEY_KEY: "Tavily API key",
+    BRAVE_API_KEY_KEY: "Brave Search API key",
 }
 for _manual_provider, _manual_config in MANUAL_OPENAI_PROVIDERS.items():
     _SECRET_LABELS[_manual_config["api_key_key"]] = f"{_manual_config['label']} API key"
@@ -479,6 +490,48 @@ def save_api_settings(
         return payload
 
     _update_user_config(save_settings, config_path)
+
+
+@dataclass(frozen=True, slots=True)
+class WebSearchSettings:
+    """Web search provider choice and credentials: saved value first, then the environment."""
+
+    provider: str = "auto"
+    tavily_api_key: str = ""
+    brave_api_key: str = ""
+    searxng_base_url: str = ""
+
+
+def get_web_search_settings(config_path: Path | None = None) -> WebSearchSettings:
+    """Resolve the web search provider and its credentials (`/web-search-provider`)."""
+    payload = load_user_config(config_path)
+    saved = payload.get(WEB_SEARCH_PROVIDER_KEY)
+    provider = saved if isinstance(saved, str) else os.getenv("SEARCH_PROVIDER", "")
+    provider = provider.strip().casefold()
+    return WebSearchSettings(
+        provider=provider if provider in WEB_SEARCH_PROVIDERS else "auto",
+        tavily_api_key=_resolve_secret(payload, TAVILY_API_KEY_KEY) or "",
+        brave_api_key=_resolve_secret(payload, BRAVE_API_KEY_KEY) or "",
+        searxng_base_url=(_resolve_secret(payload, SEARXNG_BASE_URL_KEY) or "").rstrip("/"),
+    )
+
+
+def save_web_search_settings(
+    provider: str,
+    secrets: dict[str, str],
+    config_path: Path | None = None,
+) -> None:
+    """Persist the provider choice together with the credential it needs, in one write."""
+    if provider not in WEB_SEARCH_PROVIDERS:
+        raise ValueError(f"Unknown web search provider: {provider}")
+
+    def save(payload: dict[str, object]) -> dict[str, object]:
+        payload[WEB_SEARCH_PROVIDER_KEY] = provider
+        for key_name, value in secrets.items():
+            payload[key_name] = value.strip()
+        return payload
+
+    _update_user_config(save, config_path)
 
 
 def ensure_provider_credentials(

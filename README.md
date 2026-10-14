@@ -445,6 +445,7 @@ Type `/` to open command completion. The most useful commands are:
 | `/provider` | Select or configure a provider |
 | `/change-api` | Replace the current provider key (`/change_api` and `/apikey` also work) |
 | `/models` | Select `fast` and `smart` models |
+| `/web-search-provider` | Choose the web search provider (Tavily, Brave, SearXNG, auto) and enter its API key; saved in `~/.kvist/config.json` |
 | `/settings-api` | Tune request pacing, timeout, retries, the context window, dynamic model loading, response cache and model fallbacks (`/api` also works, saved globally) |
 | `/role` | Select `auto`, `coder`, `reader`, `devops`, or `chat` |
 | `/effort` | Set reasoning effort: `false`, `low`, `medium`, `high`, `xhigh`, `max` (saved globally) |

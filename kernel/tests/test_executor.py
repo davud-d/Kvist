@@ -1120,3 +1120,25 @@ def test_fetch_never_asks_for_local_addresses(tmp_path, url):
     with pytest.raises(ExecutorError, match="local or private"):
         executor._fetch_url(url)
     assert gate.asked == []
+
+
+def test_web_search_uses_the_key_saved_by_the_command(tmp_path, monkeypatch):
+    from kernel import user_config
+
+    for name in ("TAVILY_API_KEY", "SEARXNG_BASE_URL", "BRAVE_SEARCH_API_KEY", "SEARCH_PROVIDER"):
+        monkeypatch.delenv(name, raising=False)
+    executor = SafeExecutor(tmp_path)
+    assert executor._provider_available("tavily") is False
+
+    user_config.save_web_search_settings("tavily", {"tavily_api_key": "tvly-saved"})
+    monkeypatch.setattr(
+        executor,
+        "_search_with_provider",
+        lambda provider, query, top_k, freshness: [
+            {"title": "T", "url": "https://example.org/", "snippet": ""},
+        ],
+    )
+
+    result = executor._web_search("anything")
+
+    assert result.data["provider"] == "tavily"

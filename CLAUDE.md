@@ -234,7 +234,11 @@ configured in-repo.
   WebAssembly memory, so an address-space cap kills `tsx`, `fetch` and `node --test`),
   `AGENT_FETCH_EXTRA_DOMAINS` (extra fetch_url domains trusted without a question, comma-separated),
   and search providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` /
-  `BRAVE_SEARCH_API_KEY`.
+  `BRAVE_SEARCH_API_KEY`. `/web-search-provider` (`main.choose_web_search_provider`)
+  saves the same choice in `~/.kvist/config.json` (`web_search_provider`,
+  `tavily_api_key`, `brave_search_api_key`, `searxng_base_url`); a saved value
+  outranks the variable, and `user_config.get_web_search_settings` is re-read on
+  every `web_search`, so a change applies without a restart.
 - Per-workspace model instructions live in `<workspace>/KVIST.md` (action-loop
   roles) and `<workspace>/KVIST-CHAT.md` (chat role) — Kvist's own CLAUDE.md.
   Owned by `system_context.py`: `build_agent` calls `ensure_workspace_instructions`

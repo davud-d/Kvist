@@ -354,6 +354,45 @@ def test_effort_wizard_applies_and_persists(home, agent_factory):
     assert _saved("reasoning_effort") == "high"
 
 
+def test_web_search_provider_saves_choice_and_key(home, agent_factory):
+    result, requests, _ = _run_handler(
+        "web-search-provider", agent_factory(), answers=["tavily", "tvly-secret"]
+    )
+
+    assert [r.kind for r in requests] == ["choice", "secret"]
+    assert {o["value"] for o in requests[0].options} == {"auto", "tavily", "brave", "searxng"}
+    assert result.ok and result.effects == {"web_search_provider": "tavily"}
+    assert _saved("web_search_provider") == "tavily"
+    assert _saved("tavily_api_key") == "tvly-secret"
+
+
+def test_web_search_provider_without_a_key_changes_nothing(home, agent_factory):
+    result, _, _ = _run_handler("web-search-provider", agent_factory(), answers=["brave", ""])
+
+    assert result.ok is False
+    assert _saved("web_search_provider") is None
+    assert _saved("brave_search_api_key") is None
+
+
+def test_web_search_provider_searxng_needs_an_http_url(home, agent_factory):
+    result, _, _ = _run_handler("web-search-provider", agent_factory(), answers=["searxng", "localhost:8080"])
+    assert result.ok is False
+    assert _saved("web_search_provider") is None
+
+    result, _, _ = _run_handler(
+        "web-search-provider", agent_factory(), answers=["searxng", "http://localhost:8080/"]
+    )
+    assert result.ok
+    assert _saved("searxng_base_url") == "http://localhost:8080"
+
+
+def test_web_search_provider_cancelled_dialog_changes_nothing(home, agent_factory):
+    result, _, _ = _run_handler("web-search-provider", agent_factory(), answers=[None])
+
+    assert result.ok and result.effects == {"cancelled": True}
+    assert _saved("web_search_provider") is None
+
+
 def test_effort_rejects_an_unknown_level(home, agent_factory):
     result, _, _ = _run_handler("effort", agent_factory(), args=["ludicrous"])
     assert result.ok is False
@@ -522,7 +561,7 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "verbose", "style", "session", "new", "rename", "models",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
-        "strime", "revert", "bug", "commit-message",
+        "strime", "revert", "bug", "commit-message", "web-search-provider",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)

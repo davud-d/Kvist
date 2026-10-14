@@ -49,6 +49,11 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     ),
     SlashCommand("role", "Choose auto, coder, devops or chat role"),
     SlashCommand("effort", "Set the model's reasoning effort level"),
+    SlashCommand(
+        "web-search-provider",
+        "Choose the web search provider and enter its API key",
+        aliases=("web_search_provider", "websearch"),
+    ),
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("style", "Select a style for chat/agent responses"),
     SlashCommand("tui", "Choose the Ink, Claude-style or classic terminal UI for the next launch"),
@@ -120,7 +125,7 @@ def slash_commands_context() -> str:
         "Do not invent slash commands, flags, subcommands or arguments from their "
         "descriptions or from other assistants' conventions. When frontend details "
         "are unknown, recommend the bare command. /role, /models, /provider, "
-        "/effort, /style and /settings-api open selection/configuration dialogs; "
+        "/effort, /style, /web-search-provider and /settings-api open selection/configuration dialogs; "
         "describe the choice to make in that dialog separately from the command. "
         "Some frontends also accept inline selections, but that syntax is not "
         "portable: do not assume it is available. /role offers auto, coder, reader, "

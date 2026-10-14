@@ -53,6 +53,7 @@ from kernel.secret_paths import (
 )
 from kernel.approvals import ApprovalGate, TerminalApprovalGate
 from kernel.permission_policy import append_web_domain, load_policy
+from kernel.user_config import get_web_search_settings
 from kernel.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
 
 
@@ -293,10 +294,7 @@ class SafeExecutor:
         self.allowed_web_domains.update(self._extra_fetch_domains())
         self._session_web_domains: set[str] = set()
 
-        self.web_search_provider = (os.getenv("SEARCH_PROVIDER", "auto").strip().lower() or "auto")
-        self.searxng_base_url = os.getenv("SEARXNG_BASE_URL", "").strip().rstrip("/")
-        self.tavily_api_key = os.getenv("TAVILY_API_KEY", "").strip()
-        self.brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+        self._web_settings = get_web_search_settings()
 
         self.web_timeout = self._read_float_env("WEB_SEARCH_TIMEOUT", default=8.0, min_value=1.0, max_value=30.0)
         self.web_max_results = self._read_int_env("WEB_SEARCH_MAX_RESULTS", default=5, min_value=1, max_value=20)
@@ -2222,6 +2220,8 @@ class SafeExecutor:
         normalized_query = query.strip()
         if not normalized_query:
             raise ExecutorError("Empty query for web_search")
+        # Re-read on every search so /web-search-provider takes effect immediately.
+        self._web_settings = get_web_search_settings()
 
         requested = top_k if top_k is not None else self.web_max_results
         if max_results is not None:
@@ -2355,19 +2355,19 @@ class SafeExecutor:
 
     def _provider_order(self) -> list[str]:
         chain = ["searxng", "tavily", "brave"]
-        selected = self.web_search_provider
+        selected = self._web_settings.provider
         if selected in chain:
             return [selected] + [item for item in chain if item != selected]
         return chain
 
     def _provider_available(self, provider: str) -> bool:
         if provider == "searxng":
-            parsed = urllib.parse.urlparse(self.searxng_base_url)
+            parsed = urllib.parse.urlparse(self._web_settings.searxng_base_url)
             return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
         if provider == "tavily":
-            return bool(self.tavily_api_key)
+            return bool(self._web_settings.tavily_api_key)
         if provider == "brave":
-            return bool(self.brave_api_key)
+            return bool(self._web_settings.brave_api_key)
         return False
 
     def _search_with_provider(
@@ -2386,7 +2386,7 @@ class SafeExecutor:
         raise ExecutorError(f"Unknown search provider: {provider}")
 
     def _search_searxng(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
-        if not self.searxng_base_url:
+        if not self._web_settings.searxng_base_url:
             raise ExecutorError("SEARXNG_BASE_URL is not set")
 
         params: dict[str, Any] = {
@@ -2402,7 +2402,7 @@ class SafeExecutor:
         if freshness in freshness_map:
             params["time_range"] = freshness_map[freshness]
 
-        endpoint = f"{self.searxng_base_url}/search?{urllib.parse.urlencode(params)}"
+        endpoint = f"{self._web_settings.searxng_base_url}/search?{urllib.parse.urlencode(params)}"
         payload = self._http_json_request(
             url=endpoint,
             method="GET",
@@ -2428,11 +2428,11 @@ class SafeExecutor:
         return mapped
 
     def _search_tavily(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
-        if not self.tavily_api_key:
+        if not self._web_settings.tavily_api_key:
             raise ExecutorError("TAVILY_API_KEY is not set")
 
         payload: dict[str, Any] = {
-            "api_key": self.tavily_api_key,
+            "api_key": self._web_settings.tavily_api_key,
             "query": query,
             "max_results": top_k,
             "search_depth": "basic",
@@ -2472,7 +2472,7 @@ class SafeExecutor:
         return mapped
 
     def _search_brave(self, query: str, top_k: int, freshness: str) -> list[dict[str, str]]:
-        if not self.brave_api_key:
+        if not self._web_settings.brave_api_key:
             raise ExecutorError("BRAVE_SEARCH_API_KEY is not set")
 
         params: dict[str, Any] = {
@@ -2493,7 +2493,7 @@ class SafeExecutor:
             method="GET",
             headers={
                 "Accept": "application/json",
-                "X-Subscription-Token": self.brave_api_key,
+                "X-Subscription-Token": self._web_settings.brave_api_key,
             },
             timeout=self.web_timeout,
         )
