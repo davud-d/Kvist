@@ -25,8 +25,9 @@ _KNOWN_GIT_SUBCOMMANDS: frozenset[str] = frozenset({
     "cherry-pick", "clean", "clone", "commit", "config", "describe", "diff",
     "fetch", "format-patch", "gc", "grep", "init", "log", "ls-files", "merge",
     "mv", "notes", "pull", "push", "range-diff", "rebase", "reflog", "remote",
-    "reset", "restore", "revert", "rev-parse", "rm", "show", "show-branch",
-    "sparse-checkout", "stash", "status", "submodule", "switch", "tag", "worktree",
+    "reset", "restore", "revert", "rev-list", "rev-parse", "rm", "shortlog",
+    "show", "show-branch", "show-ref", "sparse-checkout", "stash", "status",
+    "submodule", "switch", "tag", "worktree", "ls-tree", "merge-base",
 })
 
 

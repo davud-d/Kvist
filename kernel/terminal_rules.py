@@ -83,6 +83,7 @@ _COMMON_ALLOWED: dict[str, set[str] | None] = {
     "git": {
         "status", "diff", "rev-parse", "branch", "log",
         "show", "tag", "remote", "stash", "ls-files",
+        "rev-list", "shortlog", "ls-tree", "merge-base", "show-ref",
     },
 }
 

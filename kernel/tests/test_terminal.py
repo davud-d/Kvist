@@ -650,6 +650,20 @@ def test_indirect_execution_and_malformed_argv_are_hard_denied(tmp_path, command
 
 
 @pytest.mark.parametrize(
+    "command",
+    [
+        ["git", "rev-list", "--count", "HEAD"],
+        ["git", "shortlog", "-sn", "HEAD"],
+        ["git", "ls-tree", "HEAD"],
+        ["git", "merge-base", "HEAD", "HEAD"],
+        ["git", "show-ref"],
+    ],
+)
+def test_read_only_git_inspection_subcommands_are_not_hard_denied(tmp_path, command):
+    TerminalExecutor(tmp_path)._validate(command)
+
+
+@pytest.mark.parametrize(
     "command,needs_diff_guards",
     [
         (["git", "status"], False),
