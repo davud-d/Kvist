@@ -8,7 +8,6 @@ from typing import Any
 
 from kernel import end_session
 from kernel.agent_state import PLAN_APPROVED, PLAN_PLANNING
-from kernel.language_policy import response_language_name
 from kernel.redaction import defang_prompt_boundary_tags
 from kernel.system_context import current_time_context, identity_fact
 
@@ -110,7 +109,6 @@ def estimate_section_tokens(text: str, chars_per_token: int = 4) -> int:
 _RUNTIME_TEXT = {
     "en": {
         "step": "Step",
-        "task_language": "Task language",
         "user_task": "User task",
         "allowed_next_actions": "Allowed next actions now",
         "dependency_versions": "Known dependency versions",
@@ -319,20 +317,15 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
         cached_prefix = (
             system_block +
             session_history +
-            f"{text['task_language']}: {response_language_name(response_language)}\n\n"
             f"{text['user_task']}:\n{message_line}{user_goal}\n\n"
         )
         language_block = (
             "USER-FACING LANGUAGE:\n"
             "- Tool names, argument keys, and tool schemas are always English.\n"
-            "- The text of every response (your words to the person, the final answer), run_shell's purpose, and plain chat replies must use response_language.\n"
+            "- The text of every response (your words to the person, the final answer), run_shell's purpose, and plain chat replies must be in the language of the person's request.\n"
             "- The final answer and plain chat replies may use simple Markdown: backticks for file paths/commands, short bullet lists for multi-item reports, fenced code blocks for file contents. Do not over-format trivial answers.\n"
-            f"- Current response_language: {response_language}\n"
         )
-        if response_language == "ru":
-            language_block += (
-                "- Final message style: short and natural Russian, no template phrases.\n"
-            )
+        language_block += "- Final message style: short and natural, no template phrases.\n"
         cached_suffix = (
             f"{text['dependency_versions']}:\n{dependency_versions}\n\n"
             f"{language_block}\n"

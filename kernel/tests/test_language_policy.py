@@ -64,17 +64,17 @@ def _build_prompt(agent_factory, language: str) -> str:
     return agent._build_runtime_prompt("создай hello.txt", step=1)
 
 
-def test_runtime_prompt_carries_russian_response_language(agent_factory):
+def test_runtime_prompt_tells_the_model_to_follow_the_request_language(agent_factory):
     prompt = _build_prompt(agent_factory, "ru")
     assert "USER-FACING LANGUAGE:" in prompt
-    assert "Current response_language: ru" in prompt
-    assert "Task language: Russian" in prompt
+    assert "must be in the language of the person's request" in prompt
 
 
-def test_runtime_prompt_carries_english_response_language(agent_factory):
-    prompt = _build_prompt(agent_factory, "en")
-    assert "Current response_language: en" in prompt
-    assert "Task language: English" in prompt
+def test_runtime_prompt_does_not_state_a_detected_language(agent_factory):
+    for language in ("ru", "en"):
+        prompt = _build_prompt(agent_factory, language)
+        assert "response_language" not in prompt
+        assert "Task language" not in prompt
 
 
 def test_runtime_prompt_has_no_english_only_directive(agent_factory):
@@ -122,13 +122,13 @@ def test_chat_prompt_does_not_script_the_refusal():
     assert "Respond: \"" not in content
 
 
-def test_report_context_carries_response_language(agent_factory):
+def test_report_context_leaves_the_language_to_the_reporter(agent_factory):
     from kernel.agent_runtime import _build_report_context
 
     agent = agent_factory()
     agent._state.response_language = "ru"
     context = json.loads(_build_report_context(agent, "создай hello.txt", "s", "r", "", "incomplete"))
-    assert context["response_language"] == "ru"
+    assert "response_language" not in context
     assert context["outcome"] == "incomplete"
 
 

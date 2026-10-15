@@ -93,9 +93,8 @@ class RunState:
     # part already appended to a native conversation.
     job_note: str = ""
     job_note_sent: str = ""
-    task_language: str = ""
-    # User-facing response language ("ru"/"en") resolved by language_policy
-    # before any model call. Protocol JSON stays English regardless.
+    # Language ("ru"/"en") of the runtime's own canned strings, resolved by
+    # language_policy; the model is told to follow the request's language.
     response_language: str = "en"
     system_os: str = ""
     system_shell: str = ""

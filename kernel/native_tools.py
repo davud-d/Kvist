@@ -324,7 +324,7 @@ ELIDED_OUTPUT = "[output removed to fit the context window; run the action again
 # AnyModel stayed silent on every first turn); beside the task it held.
 OPENING_NOTE = (
     "\n\nOPENING: the person has just handed you this task and sees nothing until you write. "
-    "Your first response opens with your line to them, in response_language and in the voice "
+    "Your first response opens with your line to them, in the language of the person's request and in the voice "
     "your working style sets, before its first tool call."
 )
 

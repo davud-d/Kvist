@@ -43,7 +43,6 @@ def _planned_agent(agent_factory, **overrides):
     agent = agent_factory(**overrides)
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
-    agent._state.task_language = "en"
     agent._state.response_language = "en"
     return agent
 

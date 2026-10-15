@@ -840,7 +840,6 @@ def test_devops_blocked_command_produces_honest_feedback(agent_factory):
     agent._state.current_agent_role = "devops"
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
-    agent._state.task_language = "ru"
 
     cmd = make_command("run_shell", {"command": ["systemctl", "restart", "nginx"], "timeout": 15})
     feedback = {"ok": False, "action_type": "run_shell", "error": "Subcommand 'restart' is not allowed for 'systemctl'"}
@@ -884,7 +883,6 @@ def test_devops_status_nginx_no_parse_error(agent_factory):
     agent._state.current_agent_role = "devops"
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
-    agent._state.task_language = "ru"
 
     agent._register_feedback(1, command, {
         "ok": True,
@@ -1337,7 +1335,6 @@ def test_keyword_heuristics_cannot_block_writes_on_a_coder_run(agent_factory):
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"
-    agent._state.task_language = "ru"
 
     response = json.dumps(
         {

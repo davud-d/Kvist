@@ -220,7 +220,6 @@ def test_run_loop_report_task_lets_model_answer_instead_of_stub(agent_factory):
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"
-    agent._state.task_language = "ru"
 
     substantive = (
         "В config.txt задано gaps_in = 5. Рекомендую уменьшить до 3 и вынести "
@@ -266,7 +265,6 @@ def test_runtime_preserves_a_short_model_answer_without_padding_or_retry(agent_f
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"
-    agent._state.task_language = "ru"
 
     stub_answer = {
         "thought": "Завершаю",

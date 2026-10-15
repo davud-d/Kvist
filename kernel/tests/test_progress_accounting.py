@@ -7,7 +7,6 @@ from kernel.tests.conftest import make_command
 def test_errors_and_no_changes_seal_as_blocked(agent_factory):
     agent = agent_factory()
     agent._state.modify_goal = True
-    agent._state.task_language = "en"
 
     failing = make_command(
         "replace_in_file",
@@ -32,7 +31,6 @@ def test_errors_and_no_changes_seal_as_blocked(agent_factory):
 def test_real_changes_still_reach_progress_100(agent_factory):
     agent = agent_factory()
     agent._state.create_goal = True
-    agent._state.task_language = "en"
 
     agent._register_feedback(
         1,
@@ -59,7 +57,6 @@ def test_real_changes_still_reach_progress_100(agent_factory):
 def test_summary_and_progress_do_not_diverge_when_blocked(agent_factory):
     agent = agent_factory()
     agent._state.modify_goal = True
-    agent._state.task_language = "en"
 
     agent._register_feedback(
         1,
@@ -76,7 +73,6 @@ def test_summary_and_progress_do_not_diverge_when_blocked(agent_factory):
 def test_summary_and_progress_do_not_diverge_when_complete(agent_factory):
     agent = agent_factory()
     agent._state.create_goal = True
-    agent._state.task_language = "en"
 
     agent._register_feedback(
         1,

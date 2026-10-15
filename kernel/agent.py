@@ -135,8 +135,7 @@ from kernel.session_events import JournalingUI, SessionJournal
 from kernel.session_titler import generate_session_title
 from kernel.tray_link import TrayLink, is_terminal_host
 from kernel.ui import AgentUI
-from kernel.language_utils import detect_request_language
-from kernel.language_policy import resolve_response_language, response_language_name
+from kernel.language_policy import resolve_response_language
 
 
 class ChatRequestCancelled(Exception):
@@ -720,7 +719,6 @@ class LocalAgent:
         self._reset_run_state()
         self._state.message_id = end_session.next_message_id(self, from_person=True)
         self._state.user_goal = user_goal
-        self._state.task_language = detect_request_language(user_goal)
         # User-facing response language is resolved by the runtime layer
         # before any model call; the JSON protocol itself stays English.
         self._state.response_language = resolve_response_language(
@@ -901,8 +899,6 @@ class LocalAgent:
         notify = getattr(self._ui, "print_route", None)
         if notify is not None:
             notify(self._state.current_agent_role, "resume")
-        if not self._state.task_language:
-            self._state.task_language = detect_request_language(user_goal)
         if self._state.response_language not in ("ru", "en"):
             self._state.response_language = resolve_response_language(
                 user_goal, previous_language=self._last_response_language
@@ -1279,12 +1275,6 @@ class LocalAgent:
 
     def _chat_turn_message(self, user_goal: str, *, offer_tag: bool) -> str:
         """The person's message as the model gets it: this turn's runtime facts, the session, the text."""
-        # Per-turn runtime directive: the reply language is resolved by the
-        # runtime layer (language_policy), not guessed by the model.
-        language_note = (
-            f"(Runtime directive: response_language = {self._state.response_language}. "
-            f"Reply in {response_language_name(self._state.response_language)}.)\n\n"
-        )
         # Who the model is and which model serves this turn are two facts: given
         # only the second, the model named itself after its vendor or another product.
         model_note = (
@@ -1309,7 +1299,7 @@ class LocalAgent:
             else ""
         )
         return (
-            language_note + model_note + host_note + workspace_note + message_note + self._chat_session_context()
+            model_note + host_note + workspace_note + message_note + self._chat_session_context()
             + _REPLY_END_NOTE + user_goal
         )
 

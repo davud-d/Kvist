@@ -538,8 +538,8 @@ still apply.
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
 the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
 - **chat** role takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol.
-  Each turn's message opens with runtime facts (`_chat_turn_message`): the response
-  language, `system_context.identity_fact` (you are Kvist; the language model behind you
+  Each turn's message opens with runtime facts (`_chat_turn_message`):
+  `system_context.identity_fact` (you are Kvist; the language model behind you
   is a separate thing, named with provider and model), the host, and — last before the
   person's words — the rule that a reply ends where its content ends. The same identity
   fact is the first line of the action roles' `System environment:` (rebuilt every step,

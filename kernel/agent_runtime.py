@@ -262,7 +262,6 @@ def _build_report_context(
     context = {
         "user_goal": user_goal,
         "outcome": outcome,
-        "response_language": state.response_language or "en",
         "role": state.current_agent_role or "coder",
         "summary": summary,
         "result": result,

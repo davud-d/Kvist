@@ -60,7 +60,7 @@ def test_a_chat_turn_puts_the_ending_rule_last_before_the_persons_message(agent_
     sent = _chat_message_sent(agent_factory, monkeypatch, goal="спасибо")
 
     assert sent.endswith(f"{_ENDING}спасибо")
-    assert sent.index("response_language") < sent.index(_ENDING)
+    assert "response_language" not in sent
 
 
 def test_the_ending_rule_follows_the_session_history_too(agent_factory, monkeypatch):

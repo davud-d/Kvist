@@ -709,7 +709,6 @@ def persist_logs(self, user_goal: str) -> None:
     payload = {
         "goal": user_goal,
         "current_agent_role": self._state.current_agent_role,
-        "task_language": self._state.task_language,
         "response_language": self._state.response_language,
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
@@ -788,7 +787,6 @@ def save_checkpoint(
         # instead of blindly replayed. Cleared (None) on the post-action save.
         "pending_action": pending_action,
         "current_agent_role": self._state.current_agent_role,
-        "task_language": self._state.task_language,
         "response_language": self._state.response_language,
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
@@ -883,7 +881,6 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     self._state.attached_skills = list(attached) if isinstance(attached, list) else []
     self._state.progress = data.get("progress", 0)
     self._state.current_agent_role = str(data.get("current_agent_role") or "coder")
-    self._state.task_language = str(data.get("task_language") or "")
     saved_response_language = data.get("response_language")
     self._state.response_language = (
         saved_response_language if saved_response_language in ("ru", "en") else ""

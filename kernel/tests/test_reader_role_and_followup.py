@@ -68,7 +68,6 @@ def test_run_loop_reader_role_blocks_file_writes(agent_factory):
     agent._state.selected_action_role = "smart"
     agent._state.selected_action_model = "mock-model"
     agent._state.response_language = "ru"
-    agent._state.task_language = "ru"
 
     responses = [
         {

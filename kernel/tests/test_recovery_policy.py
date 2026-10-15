@@ -20,7 +20,6 @@ def _deny(agent, step: int) -> None:
 
 def test_hard_denial_is_recorded_but_never_demands_a_workaround(agent_factory):
     agent = agent_factory()
-    agent._state.task_language = "en"
 
     _deny(agent, 1)
 
@@ -34,7 +33,6 @@ def test_hard_denial_is_recorded_but_never_demands_a_workaround(agent_factory):
 
 def test_two_distinct_strategies_clear_the_recovery_requirement(agent_factory):
     agent = agent_factory()
-    agent._state.task_language = "en"
 
     _deny(agent, 1)
 
@@ -58,7 +56,6 @@ def test_two_distinct_strategies_clear_the_recovery_requirement(agent_factory):
 
 def test_repeating_one_strategy_does_not_satisfy_recovery(agent_factory):
     agent = agent_factory()
-    agent._state.task_language = "en"
 
     _deny(agent, 1)
     for step in (2, 3, 4):
@@ -74,7 +71,6 @@ def test_repeating_one_strategy_does_not_satisfy_recovery(agent_factory):
 
 def test_new_denial_resets_the_strategy_counter(agent_factory):
     agent = agent_factory()
-    agent._state.task_language = "en"
 
     _deny(agent, 1)
     agent._register_feedback(
