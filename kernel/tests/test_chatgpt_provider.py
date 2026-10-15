@@ -240,6 +240,51 @@ def test_complete_stream_returns_text_tools_and_usage(monkeypatch):
     assert calls[0]["stream"] is True
 
 
+def test_prompt_cache_key_survives_growing_history_and_client_recreation(monkeypatch):
+    calls, _ = fake_responses(monkeypatch, [
+        NS(type="response.output_text.delta", delta="hello"),
+        NS(type="response.completed", response=NS(usage=None)),
+    ])
+    messages = [{"role": "system", "content": "stable instructions"}, {"role": "user", "content": "hi"}]
+    tools = [{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object"}}}]
+    transport.ChatGPTClient().create(model="test", messages=messages, tools=tools)
+    messages += [{"role": "assistant", "content": "hello"}, {"role": "user", "content": "next question"}]
+    list(transport.ChatGPTClient().create(model="test", messages=messages, tools=tools, stream=True))
+    assert calls[0]["prompt_cache_key"] == calls[1]["prompt_cache_key"]
+    assert len(calls[0]["prompt_cache_key"]) <= 64
+    assert "stable instructions" not in calls[0]["prompt_cache_key"]
+    assert calls[1]["input"][-1]["content"] == "next question"
+
+
+@pytest.mark.parametrize("change", ["account", "model", "instructions", "tools"])
+def test_prompt_cache_key_separates_accounts_and_prefixes(change):
+    request = {"model": "test", "instructions": "instructions", "tools": []}
+    original = transport._prompt_cache_key("account", request)
+    account = "other-account" if change == "account" else "account"
+    if change != "account":
+        request[change] = [{"type": "function", "name": "read_file"}] if change == "tools" else "changed"
+    assert transport._prompt_cache_key(account, request) != original
+
+
+def test_explicit_prompt_cache_key_reaches_transport(monkeypatch):
+    calls, _ = fake_responses(monkeypatch, [NS(type="response.completed", response=NS(usage=None))])
+    transport.ChatGPTClient().create(model="test", messages=[], prompt_cache_key="chosen-key")
+    assert calls[0]["prompt_cache_key"] == "chosen-key"
+
+
+@pytest.mark.parametrize("streaming", [False, True])
+def test_cached_and_reasoning_usage_survives_adapter(monkeypatch, streaming):
+    fake_responses(monkeypatch, [NS(type="response.completed", response=NS(usage=NS(
+        input_tokens=2048, output_tokens=120, total_tokens=2168,
+        input_tokens_details=NS(cached_tokens=1024), output_tokens_details=NS(reasoning_tokens=100))))])
+    response = transport.ChatGPTClient().create(model="test", messages=[], stream=streaming)
+    usage = list(response)[-1].usage if streaming else response.usage
+    assert usage.prompt_tokens == 2048
+    assert usage.prompt_tokens_details.cached_tokens == 1024
+    assert usage.completion_tokens_details.reasoning_tokens == 100
+    assert usage.total_tokens == 2168
+
+
 @pytest.mark.parametrize("terminal", [None, NS(type="response.incomplete", response=NS(error=None)),
     NS(type="response.failed", response=NS(error=NS(code="subscription_sharing_usage_limit_exceeded")))])
 def test_partial_answer_is_not_reported_as_success(monkeypatch, terminal):
@@ -294,3 +339,5 @@ def test_sdk_wire_uses_oauth_responses_and_refreshes_once_on_401(monkeypatch):
     body = json.loads(requests[1].content)
     assert body['stream'] is True and body['store'] is False
     assert body['instructions'] == 'instructions'
+    assert body['prompt_cache_key'].startswith('kvist-')
+    assert body['prompt_cache_key'] == json.loads(requests[0].content)['prompt_cache_key']

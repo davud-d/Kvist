@@ -2,6 +2,8 @@
 """Adapt Kvist's completion interface to ChatGPT plan Responses requests."""
 from __future__ import annotations
 
+import hashlib
+import json
 from types import SimpleNamespace as NS
 from typing import Any
 
@@ -68,8 +70,19 @@ def _usage(response: Any) -> NS | None:
     usage = getattr(response, "usage", None)
     if usage is None:
         return None
+    details = getattr(usage, "input_tokens_details", None)
     return NS(prompt_tokens=usage.input_tokens, completion_tokens=usage.output_tokens,
-              total_tokens=usage.total_tokens)
+              total_tokens=usage.total_tokens,
+              prompt_tokens_details=NS(cached_tokens=getattr(details, "cached_tokens", 0)),
+              completion_tokens_details=getattr(usage, "output_tokens_details", None))
+
+
+def _prompt_cache_key(account_id: str, request: dict) -> str:
+    # Growing history must not change the routing key for its reusable prefix.
+    prefix = {"account": account_id, "model": request["model"],
+              "instructions": request.get("instructions", ""), "tools": request.get("tools", [])}
+    digest = hashlib.sha256(json.dumps(prefix, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return "kvist-" + digest[:58]
 
 
 def _chunk(content: str = "", calls: list | None = None, usage: Any = None, reasoning: str = "") -> NS:
@@ -104,6 +117,7 @@ class ChatGPTClient:
 
     def create(self, **kwargs):
         request = _request(kwargs)
+        request["prompt_cache_key"] = kwargs.get("prompt_cache_key") or _prompt_cache_key(self.account_id, request)
         stream = self._stream(request)
         if kwargs.get("stream"):
             return stream

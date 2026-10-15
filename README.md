@@ -301,6 +301,18 @@ is GPT-6.1 Sol. Model availability and actual access remain account-dependent.
 A reply succeeds only after `response.completed`; interrupted/incomplete streams
 and plan-limit failures are surfaced as errors.
 
+ChatGPT requests include a stable, hashed `prompt_cache_key` scoped to the account,
+model, instructions and tool definitions. Growing conversation history keeps the
+same key so supported models can reuse an unchanged prefix; on GPT-5.6 and later,
+OpenAI routes the cache automatically and the key provides separate accounting.
+The adapter preserves the server's `prompt_tokens_details.cached_tokens` usage
+field for both streamed and buffered replies. `store=false` remains in effect;
+response storage and prompt caching are separate features. Cache hits depend on
+the model, prefix length and server retention, and do not eliminate requests.
+OpenAI's API documentation says cached input still counts toward token rate
+limits; a reduction in Plus/Pro subscription quota usage is not guaranteed.
+See [OpenAI prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching).
+
 Usage counts against your ChatGPT plan or permitted credits. Plus usage limits
 are shared with other apps using the plan; this integration does not provide
 unlimited requests. Review limits, credits permissions, and connected apps at
