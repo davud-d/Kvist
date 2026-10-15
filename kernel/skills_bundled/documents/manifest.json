@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "documents",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "plugin_api": 1,
   "kind": "tools",
   "name": {"en": "Documents", "ru": "Документы"},
@@ -12,8 +12,8 @@
   "instructions": "SKILL.md",
   "entrypoint": "plugin.py",
   "platforms": ["linux"],
-  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
-  "dependencies": {"python": ["pypdf==6.20.0", "openpyxl==3.1.5", "et_xmlfile==2.0.0"]},
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.1"},
+  "dependencies": {"python": ["pypdf==6.20.0", "openpyxl==3.1.5", "et_xmlfile==2.0.0", "defusedxml==0.7.1"]},
   "capabilities": {
     "required": [{"name": "files.read", "reason": "to read the document from the workspace"}]
   },

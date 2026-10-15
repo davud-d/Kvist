@@ -5,6 +5,7 @@ import zipfile
 from pathlib import Path
 
 import plugin
+from defusedxml.common import DefusedXmlException
 
 DOCX_BODY = (
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
@@ -42,6 +43,20 @@ class DocumentsTest(unittest.TestCase):
     def test_unsupported_types_are_named(self):
         with self.assertRaises(ValueError):
             plugin.kind_of("slides.pptx")
+
+    def test_docx_rejects_dtd_and_entities(self):
+        bodies = [
+            '<!DOCTYPE document [<!ENTITY payload "expanded">]><document>&payload;</document>',
+            '<!DOCTYPE document SYSTEM "file:///etc/passwd"><document/>',
+        ]
+        for body in bodies:
+            for encoding in ("utf-8", "utf-16"):
+                with self.subTest(body=body, encoding=encoding):
+                    path = self.folder / "untrusted.docx"
+                    with zipfile.ZipFile(path, "w") as archive:
+                        archive.writestr("word/document.xml", body.encode(encoding))
+                    with self.assertRaises(DefusedXmlException):
+                        plugin.docx_read(path, {})
 
     def test_long_results_say_where_to_continue(self):
         result = plugin.bounded({"blocks": [{"ref": f"row {n}", "text": "x" * 600} for n in range(1, 5)]}, 1000)

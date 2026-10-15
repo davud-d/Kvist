@@ -21,6 +21,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import uuid
@@ -336,14 +337,11 @@ class ResourceManager:
 
     def runtime_dir(self) -> Path:
         """A private (0700) directory for this core's sockets and scratch files."""
-        if self._runtime_root is None:
-            base = Path(os.environ.get("XDG_RUNTIME_DIR") or f"/tmp/kvist-{os.getuid()}")
-            base.mkdir(mode=0o700, exist_ok=True)
-            root = base / "kvist" / f"core-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-            root.mkdir(mode=0o700, parents=True)
-            os.chmod(root.parent, 0o700)
-            self._runtime_root = root
-        return self._runtime_root
+        with self._lock:
+            if self._runtime_root is None:
+                # Atomic allocation avoids following a pre-created per-user directory.
+                self._runtime_root = Path(tempfile.mkdtemp(prefix="kvist-core-"))
+            return self._runtime_root
 
     def temp_dir(self, owner: Owner, label: str) -> Resource:
         path = self.runtime_dir() / f"{label}-{uuid.uuid4().hex[:10]}"

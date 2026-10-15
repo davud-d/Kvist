@@ -403,7 +403,8 @@ class SkillManager:
         if skill.host is not None:
             self._stop_host(skill, "runner_exited")
         agent = self._agent
-        assert skill.grant is not None
+        if skill.grant is None:
+            raise SkillUseError(f"{skill.id} has no capability grant")
         owner = Owner(session=agent.current_session, run_id=str(getattr(agent, "_run_id", "") or "run"),
                       kind="skill", skill=f"{skill.id}@{skill.version}")
         host = RunnerHost(skill.entry, skill.grant, resources=agent.resources, owner=owner, registry=self.registry,

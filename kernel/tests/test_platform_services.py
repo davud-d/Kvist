@@ -384,3 +384,32 @@ def test_a_skill_reaches_only_connections_granted_by_name_and_never_sees_their_s
                                      {"connection": "crm", "method": "GET", "path": "https://evil.example.org/x"})
     with pytest.raises(ServiceError, match="read-only"):
         agent.skills.services.handle(call, "connections.request", {"connection": "crm", "method": "POST", "path": "/x"})
+
+
+def test_runtime_directory_is_private_unique_and_thread_safe(tmp_path, monkeypatch):
+    import stat
+    from concurrent.futures import ThreadPoolExecutor
+    import kernel.resources as resources
+
+    monkeypatch.setattr(resources.tempfile, "tempdir", str(tmp_path))
+    manager = ResourceManager(tmp_path)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        roots = list(pool.map(lambda _: manager.runtime_dir(), range(32)))
+    assert len(set(roots)) == 1
+    assert stat.S_IMODE(roots[0].stat().st_mode) == 0o700
+    other = ResourceManager(tmp_path).runtime_dir()
+    assert other != roots[0]
+
+
+def test_runtime_directory_ignores_precreated_xdg_symlink(tmp_path, monkeypatch):
+    import kernel.resources as resources
+
+    victim = tmp_path / "victim"
+    victim.mkdir(mode=0o755)
+    fake_runtime = tmp_path / "runtime"
+    fake_runtime.symlink_to(victim, target_is_directory=True)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(fake_runtime))
+    monkeypatch.setattr(resources.tempfile, "tempdir", str(tmp_path))
+    root = ResourceManager(tmp_path).runtime_dir()
+    assert root.parent == tmp_path
+    assert not list(victim.iterdir())

@@ -15,6 +15,7 @@ import json
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from typing import Any
 
 from kernel.redaction import redact_text
@@ -52,10 +53,22 @@ def clear_anymodel_pricing_cache() -> None:
 def _cache_key(api_key: str, base_url: str) -> str:
     # Same fingerprint style as llm_clients' discovery cache: the key's
     # identity, never its raw value, ends up as a dict key.
-    return hashlib.sha1(f"{base_url}\n{api_key}".encode("utf-8")).hexdigest()
+    return hashlib.sha256(f"{base_url}\n{api_key}".encode("utf-8")).hexdigest()
+
+
+class _NoCatalogRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Authorization must never be forwarded to a redirect destination.
+        raise urllib.error.HTTPError(req.full_url, code, "Catalog redirect refused", headers, fp)
+
+
+_catalog_opener = urllib.request.build_opener(_NoCatalogRedirect())
 
 
 def _fetch_raw_catalog(api_key: str, base_url: str) -> Any:
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username is not None or parsed.password is not None:
+        raise AnyModelUnavailableError("AnyModel catalog requires an HTTPS URL without credentials")
     request = urllib.request.Request(
         url=base_url,
         headers={
@@ -66,9 +79,10 @@ def _fetch_raw_catalog(api_key: str, base_url: str) -> Any:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
+        with _catalog_opener.open(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
             raw = response.read(_MAX_RESPONSE_BYTES + 1)
     except urllib.error.HTTPError as error:
+        error.close()
         if error.code == 401:
             raise AnyModelAuthError("AnyModel rejected the API key (HTTP 401)") from None
         raise AnyModelUnavailableError(

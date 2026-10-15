@@ -90,7 +90,8 @@ def install_dependencies(registry: SkillRegistry, manifest: Manifest,
 def _argv(staging: Path, net_dir: Path, pins: tuple[str, ...]) -> list[str]:
     bwrap = resolve_bubblewrap_path()
     python = runner_python()
-    assert bwrap is not None and python is not None
+    if bwrap is None or python is None:
+        raise RuntimeError("Dependency installation requires trusted Bubblewrap and Python executables")
     argv = [bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--cap-drop", "ALL", "--clearenv",
             "--setenv", "PATH", "/usr/bin:/bin", "--setenv", "HOME", "/tmp/home", "--setenv", "LANG", "C.UTF-8"]
     for root in RUNTIME_MOUNT_ROOTS:

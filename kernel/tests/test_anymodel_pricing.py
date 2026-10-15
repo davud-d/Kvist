@@ -49,7 +49,7 @@ def test_fetch_model_coefficients_parses_billing_coefficient(monkeypatch):
         calls.append(request.full_url)
         return _FakeResponse(_catalog_payload())
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     coefficients = anymodel_pricing.fetch_model_coefficients("test-key")
 
@@ -64,7 +64,7 @@ def test_second_call_within_ttl_is_served_from_cache(monkeypatch):
         calls.append(request.full_url)
         return _FakeResponse(_catalog_payload())
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     anymodel_pricing.fetch_model_coefficients("test-key")
     anymodel_pricing.fetch_model_coefficients("test-key")
@@ -79,7 +79,7 @@ def test_force_refresh_bypasses_cache(monkeypatch):
         calls.append(request.full_url)
         return _FakeResponse(_catalog_payload())
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     anymodel_pricing.fetch_model_coefficients("test-key")
     anymodel_pricing.fetch_model_coefficients("test-key", force_refresh=True)
@@ -89,8 +89,8 @@ def test_force_refresh_bypasses_cache(monkeypatch):
 
 def test_get_model_coefficient_returns_none_for_unknown_model(monkeypatch):
     monkeypatch.setattr(
-        anymodel_pricing.urllib.request,
-        "urlopen",
+        anymodel_pricing._catalog_opener,
+        "open",
         lambda request, timeout=None: _FakeResponse(_catalog_payload()),
     )
 
@@ -102,7 +102,7 @@ def test_401_raises_auth_error(monkeypatch):
     def fake_urlopen(request, timeout=None):
         raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(b""))
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelAuthError):
         anymodel_pricing.fetch_model_coefficients("bad-key")
@@ -112,7 +112,7 @@ def test_timeout_raises_unavailable_error(monkeypatch):
     def fake_urlopen(request, timeout=None):
         raise socket.timeout("timed out")
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelUnavailableError):
         anymodel_pricing.fetch_model_coefficients("test-key")
@@ -122,7 +122,7 @@ def test_network_error_raises_unavailable_error(monkeypatch):
     def fake_urlopen(request, timeout=None):
         raise urllib.error.URLError("no route to host")
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelUnavailableError):
         anymodel_pricing.fetch_model_coefficients("test-key")
@@ -137,7 +137,7 @@ def test_failed_fetch_is_not_cached(monkeypatch):
             raise urllib.error.URLError("temporary failure")
         return _FakeResponse(_catalog_payload())
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", flaky_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", flaky_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelUnavailableError):
         anymodel_pricing.fetch_model_coefficients("test-key")
@@ -150,3 +150,24 @@ def test_failed_fetch_is_not_cached(monkeypatch):
 def test_compute_step_cost_is_pure_arithmetic():
     assert anymodel_pricing.compute_step_cost(100, 50, 2.0) == 300.0
     assert anymodel_pricing.compute_step_cost(0, 0, 5.0) == 0.0
+
+
+@pytest.mark.parametrize("url", ["file:///etc/passwd", "http://example.com/models",
+                                      "ftp://example.com/models", "https://user:secret@example.com/models"])
+def test_catalog_rejects_unsafe_urls_before_network(monkeypatch, url):
+    def unexpected_request(*args, **kwargs):
+        pytest.fail("unsafe URL reached the network")
+
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", unexpected_request)
+    with pytest.raises(anymodel_pricing.AnyModelUnavailableError):
+        anymodel_pricing.fetch_model_coefficients("test-key", base_url=url)
+
+
+@pytest.mark.parametrize("destination", ["https://other.example/models", "http://anymodel.org/models",
+                                             "file:///etc/passwd"])
+def test_catalog_refuses_redirects_with_credentials(destination):
+    request = anymodel_pricing.urllib.request.Request(
+        anymodel_pricing.ANYMODEL_MODELS_URL, headers={"Authorization": "Bearer test-key"})
+    handler = anymodel_pricing._NoCatalogRedirect()
+    with pytest.raises(urllib.error.HTTPError):
+        handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, destination)

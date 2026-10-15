@@ -33,7 +33,7 @@ def test_anymodel_auth_error_message_never_contains_the_key(monkeypatch):
     def fake_urlopen(request, timeout=None):
         raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(b""))
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelAuthError) as excinfo:
         anymodel_pricing.fetch_model_coefficients(SYNTHETIC_KEY)
@@ -45,7 +45,7 @@ def test_anymodel_http_error_message_never_contains_the_key(monkeypatch):
     def fake_urlopen(request, timeout=None):
         raise urllib.error.HTTPError(request.full_url, 500, "Server Error", {}, io.BytesIO(b""))
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelUnavailableError) as excinfo:
         anymodel_pricing.fetch_model_coefficients(SYNTHETIC_KEY)
@@ -61,7 +61,7 @@ def test_anymodel_unavailable_error_scrubs_a_key_that_leaks_into_the_local_reaso
     def fake_urlopen(request, timeout=None):
         raise urllib.error.URLError(f"connection reset, anymodel_api_key={SYNTHETIC_KEY}")
 
-    monkeypatch.setattr(anymodel_pricing.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(anymodel_pricing._catalog_opener, "open", fake_urlopen)
 
     with pytest.raises(anymodel_pricing.AnyModelUnavailableError) as excinfo:
         anymodel_pricing.fetch_model_coefficients(SYNTHETIC_KEY)

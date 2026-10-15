@@ -8,7 +8,7 @@ import re
 import zipfile
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree
+from defusedxml import ElementTree
 
 DEFAULT_CHARS = 40_000
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -181,7 +181,7 @@ def _paragraphs(source: Path) -> list[str]:
     with zipfile.ZipFile(source) as archive:
         if archive.getinfo("word/document.xml").file_size > 50 * 1024 * 1024:
             raise ValueError("the document body is too large")
-        root = ElementTree.fromstring(archive.read("word/document.xml"))
+        root = ElementTree.fromstring(archive.read("word/document.xml"), forbid_dtd=True)
     paragraphs = []
     for paragraph in root.iter(f"{_W}p"):
         paragraphs.append("".join(node.text or "" for node in paragraph.iter(f"{_W}t")))

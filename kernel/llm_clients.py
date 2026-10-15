@@ -1152,7 +1152,7 @@ def fetch_available_models(
     if not endpoints:
         return [], None
 
-    fingerprint = hashlib.sha1(
+    fingerprint = hashlib.sha256(
         "\n".join(
             f"{item['kind']}|{item['base_url']}|{item['api_key']}" for item in endpoints
         ).encode("utf-8")
