@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { KvistLauncher } from './launcher';
+import { BinaryResolver } from './binaryResolver';
+import { SelectionActions } from './selectionActions';
 import { CommitMessageGenerator } from './commitMessage';
 import { KvistChatView } from './chatView';
 import { KvistInlineCompletionProvider } from './completionProvider';
@@ -10,7 +12,11 @@ export function activate(context: vscode.ExtensionContext) {
     const chat = new KvistChatView(context);
     const inlineCompletionProvider = new KvistInlineCompletionProvider(context);
 
+    const selectionActions = new SelectionActions(new BinaryResolver(context));
     context.subscriptions.push(
+        selectionActions,
+        ...(['rewriteAsSenior', 'translateSelection', 'explainAndFix'] as const).map(action =>
+            vscode.commands.registerCommand(`kvist.${action}`, (uri?: vscode.Uri) => selectionActions.run(action, uri))),
         chat,
         vscode.window.registerWebviewViewProvider(KvistChatView.viewType, chat, {
             webviewOptions: { retainContextWhenHidden: true }

@@ -35,6 +35,19 @@ The agent will start in a new terminal window.
 
 The generated message will be inserted into the commit message input box.
 
+### Selection actions
+
+Select text in an editor, then open the editor context menu (right click, or the
+menu key) and choose `Kvist`:
+
+- `Rewrite as Senior` rewrites the selection for readability, keeping its behavior.
+- `Translate Selection` translates the human-readable text in the selection into a language you pick.
+- `Explain and Fix` opens a review (explanation, risks, bugs) and, when the fix is local and safe, offers a patch.
+
+Each change opens a diff first and is applied only after you press `Apply`. The
+actions run `kvist --selection-task`, the same core mode the JetBrains plugin uses;
+the document must not change while the model works, or the action asks you to retry.
+
 ## Inline completion
 
 Kvist uses your configured fast model and requests disabled reasoning where the

@@ -44,7 +44,11 @@
         }
       ]
     },
+    "submenus": [{ "id": "kvist.editor", "label": "Kvist" }],
     "commands": [
+      { "command": "kvist.rewriteAsSenior", "title": "Rewrite as Senior", "category": "Kvist", "enablement": "editorHasSelection && !editorReadonly" },
+      { "command": "kvist.translateSelection", "title": "Translate Selection", "category": "Kvist", "enablement": "editorHasSelection && !editorReadonly" },
+      { "command": "kvist.explainAndFix", "title": "Explain and Fix", "category": "Kvist", "enablement": "editorHasSelection && !editorReadonly" },
       {
         "command": "kvist.focus",
         "title": "Open Kvist Chat",
@@ -77,6 +81,12 @@
       }
     ],
     "menus": {
+      "editor/context": [{ "submenu": "kvist.editor", "group": "1_modification@1" }],
+      "kvist.editor": [
+        { "command": "kvist.rewriteAsSenior", "group": "selection@1" },
+        { "command": "kvist.translateSelection", "group": "selection@2" },
+        { "command": "kvist.explainAndFix", "group": "selection@3" }
+      ],
       "commandPalette": [
         {
           "command": "kvist.generateCommitMessage",

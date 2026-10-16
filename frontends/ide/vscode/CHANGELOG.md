@@ -1,5 +1,10 @@
 # Change Log
 
+## [Unreleased]
+
+### Added
+- `Kvist` submenu in the editor context menu: Rewrite as Senior, Translate Selection, Explain and Fix, each with a diff preview before applying
+
 ## [0.1.0] - 2026-09-21
 
 ### Added
