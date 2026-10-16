@@ -4,7 +4,7 @@ import { useWindowSize } from "./window-size.js"
 import { useReducer, useRef, type ReactNode } from "react"
 
 import { NAME_WIDTH, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
-import { applyKey, emptyEditor, insert, moveLine, windowLine, type Editor } from "../editor.js"
+import { applyKey, cursorRow, emptyEditor, insert, moveRow, wrapRows, type Editor } from "../editor.js"
 import type { Starters } from "../starters.js"
 import { collapsePaste, emptyPasteStore, expandPastes, findRepeatedLabel, isLargePaste, labelLengthBefore } from "../paste.js"
 import { color, currentSkin } from "./theme.js"
@@ -23,40 +23,30 @@ interface Props {
 }
 
 // The box prefix and the frame's borders and padding leave columns - 6 cells
-// for the line; `maxRows` bounds how much of a long line it may take.
+// for the line, one of them kept for the cursor at the end of a full row.
+export function lineCells(columns: number): number {
+  return Math.max(8, columns - 6) - 1
+}
+
+// The text wrapped to the box width; `maxRows` bounds how many rows show, scrolled to keep the cursor row in view.
 export function Line({ editor, mask, active, maxRows = 1 }: { editor: Editor; mask: boolean; active: boolean; maxRows?: number }) {
   const { columns } = useWindowSize()
   const shown = mask ? { text: "•".repeat(editor.text.length), cursor: editor.cursor } : editor
-  const cells = Math.max(8, columns - 6)
-  if (shown.text.includes("\n")) return <MultiLine editor={shown} active={active} cells={cells} maxRows={maxRows} />
-  const { before, at, after } = windowLine(shown, cells * maxRows)
-  return (
-    <Text>
-      {before}
-      {active ? <Text inverse>{at || " "}</Text> : at}
-      {after}
-    </Text>
-  )
-}
-
-// One Text per line; only the cursor's line is windowed around the cursor, the others are cut at the box width.
-function MultiLine({ editor, active, cells, maxRows }: { editor: Editor; active: boolean; cells: number; maxRows: number }) {
-  const rows = editor.text.split("\n")
-  const upToCursor = editor.text.slice(0, editor.cursor).split("\n")
-  const row = upToCursor.length - 1
-  const column = upToCursor[row]?.length ?? 0
+  const rows = wrapRows(shown.text, lineCells(columns))
+  const row = cursorRow(rows, shown.cursor)
   const visible = Math.max(1, maxRows)
   const first = Math.min(Math.max(0, row - Math.floor(visible / 2)), Math.max(0, rows.length - visible))
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {rows.slice(first, first + visible).map((text, i) => {
-        if (first + i !== row) return <Text key={first + i} wrap="truncate-end">{text || " "}</Text>
-        const { before, at, after } = windowLine({ text, cursor: column }, cells)
+      {rows.slice(first, first + visible).map((span, i) => {
+        const text = shown.text.slice(span.start, span.end)
+        if (first + i !== row) return <Text key={first + i}>{text || " "}</Text>
+        const column = shown.cursor - span.start
         return (
           <Text key={first + i}>
-            {before}
-            {active ? <Text inverse>{at || " "}</Text> : at}
-            {after}
+            {text.slice(0, column)}
+            {active ? <Text inverse>{text.slice(column, column + 1) || " "}</Text> : text.slice(column, column + 1)}
+            {text.slice(column + 1)}
           </Text>
         )
       })}
@@ -86,7 +76,7 @@ export function InputBox({ active, history, placeholder, mask = false, starters 
     redraw()
   }
 
-  const { rows } = useWindowSize()
+  const { rows, columns } = useWindowSize()
   const visible = visibleSuggestionCount(rows)
   const boxRows = visibleBoxRows(rows)
 
@@ -183,11 +173,9 @@ export function InputBox({ active, history, placeholder, mask = false, starters 
         const up = key.upArrow
         // The command menu is for typing a command; a recalled one keeps walking the history.
         if (shown.length && recall < 0) return update({ pick: (selected + (up ? -1 : 1) + shown.length) % shown.length })
-        if (current.text.includes("\n")) {
-          const moved = moveLine(current, up ? -1 : 1)
-          if (moved) return update({ editor: moved })
-        }
-        // In typed text the first arrow goes to its start or end; only the next one recalls history.
+        const moved = moveRow(current, lineCells(columns), up ? -1 : 1)
+        if (moved) return update({ editor: moved })
+        // On the first or last row the arrow goes to the text's start or end; only the next one recalls history.
         if (recall < 0 && current.text) {
           const edge = up ? 0 : current.text.length
           if (current.cursor !== edge) return update({ editor: { text: current.text, cursor: edge } })

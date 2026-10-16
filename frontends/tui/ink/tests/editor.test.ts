@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { MAX_BOX_ROWS, MAX_VISIBLE_SUGGESTIONS, parseSlash, resolveEnter, suggest, visibleBoxRows, visibleSuggestionCount, windowStart } from "../commands.js"
-import { applyKey, emptyEditor, insert, moveLine, windowLine } from "../editor.js"
+import { applyKey, cursorRow, emptyEditor, insert, moveRow, wrapRows } from "../editor.js"
 import { parseBlocks } from "../ui/markdown.js"
 
 test("typing inserts at the cursor and accented letters are fine", () => {
@@ -103,29 +103,18 @@ test("box rows and suggestions share a budget that keeps the frame under the ter
   assert.equal(frame(5), frame(8))
 })
 
-test("windowLine shows the whole line while it fits and keeps the cursor in view once it does not", () => {
-  assert.deepEqual(windowLine({ text: "abc", cursor: 1 }, 10), { before: "a", at: "b", after: "c" })
-  // An empty line still reports the (absent) character at the cursor.
-  assert.deepEqual(windowLine(emptyEditor, 10), { before: "", at: "", after: "" })
+test("wrapRows breaks at newlines and where a character no longer fits, counting display cells", () => {
+  assert.deepEqual(wrapRows("", 4), [{ start: 0, end: 0 }])
+  assert.deepEqual(wrapRows("abcdef", 4), [{ start: 0, end: 4 }, { start: 4, end: 6 }])
+  assert.deepEqual(wrapRows("ab\ncd", 4), [{ start: 0, end: 2 }, { start: 3, end: 5 }])
+  assert.deepEqual(wrapRows("你好世", 4), [{ start: 0, end: 2 }, { start: 2, end: 3 }])
+})
 
-  const long = { text: "0123456789", cursor: 8 }
-  const cut = windowLine(long, 6)
-  assert.equal(cut.at, "8")
-  assert.ok(cut.before.endsWith("7"), `cursor stays visible: ${JSON.stringify(cut)}`)
-  assert.ok(cut.before.startsWith("…"), `a clipped head is marked: ${JSON.stringify(cut)}`)
-  assert.equal(cut.after, "9")
-
-  // A cursor near the start keeps the tail instead, and marks its cut.
-  const tail = windowLine({ text: "abcdefghij", cursor: 1 }, 6)
-  assert.deepEqual(tail, { before: "a", at: "b", after: "c…" })
-
-  // The budget is display cells, so a double-width character takes two.
-  const wide = windowLine({ text: "你好世界", cursor: 0 }, 4)
-  assert.equal(wide.at, "你")
-  assert.ok(wide.before.length === 0 && wide.after.endsWith("…"), JSON.stringify(wide))
-
-  // A cursor at the end shows no character at the cursor.
-  assert.equal(windowLine({ text: "abcdefgh", cursor: 8 }, 6).at, "")
+test("cursorRow puts a cursor at a wrap point on the row that starts there", () => {
+  const rows = wrapRows("abcdef", 4)
+  assert.equal(cursorRow(rows, 3), 0)
+  assert.equal(cursorRow(rows, 4), 1)
+  assert.equal(cursorRow(rows, 6), 1)
 })
 
 test("Enter runs the highlighted command, or completes one that needs an argument", () => {
@@ -159,11 +148,14 @@ test("Home, End and Ctrl+A/E/U/K work on the cursor's line", () => {
   assert.deepEqual(applyKey(ed, "k", { ctrl: true }), { text: "ab\ncd", cursor: 5 })
 })
 
-test("moveLine keeps the column and stops at the first and last line", () => {
-  const ed = { text: "abcd\nx\nefgh", cursor: 3 }
-  const down = moveLine(ed, 1)!
+test("moveRow keeps the column across wrapped rows and stops at the first and last row", () => {
+  const ed = { text: "abcdefghij", cursor: 6 }
+  assert.equal(moveRow(ed, 4, -1)!.cursor, 2)
+  assert.equal(moveRow(ed, 4, 1)!.cursor, 10)
+  assert.equal(moveRow({ ...ed, cursor: 2 }, 4, -1), null)
+  assert.equal(moveRow({ ...ed, cursor: 9 }, 4, 1), null)
+  const lines = { text: "abcd\nx\nefgh", cursor: 3 }
+  const down = moveRow(lines, 8, 1)!
   assert.equal(down.cursor, 6)
-  assert.equal(moveLine(down, 1)!.cursor, 8)
-  assert.equal(moveLine({ ...ed, cursor: 3 }, -1), null)
-  assert.equal(moveLine({ ...ed, cursor: 12 }, 1), null)
+  assert.equal(moveRow(down, 8, 1)!.cursor, 8)
 })

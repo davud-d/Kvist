@@ -31,48 +31,57 @@ export function insert(ed: Editor, raw: string, keepNewlines = false): Editor {
   return { text: ed.text.slice(0, ed.cursor) + chunk + ed.text.slice(ed.cursor), cursor: ed.cursor + chunk.length }
 }
 
-// The visible part of the single input line, cursor split out for rendering.
-export interface WindowLine {
-  before: string
-  at: string
-  after: string
+// One screen row of the text: offsets into `text`, `end` exclusive and before any newline.
+export interface Row {
+  start: number
+  end: number
 }
 
-function takeCells(text: string, cells: number): string {
-  let out = ""
+// Breaks the text into screen rows of at most `cells` display cells: at every
+// newline, and inside a logical line wherever the next character would not fit.
+export function wrapRows(text: string, cells: number): Row[] {
+  const rows: Row[] = []
+  let start = 0
+  let used = 0
+  let at = 0
   for (const char of text) {
-    if (stringWidth(out + char) > cells) break
-    out += char
+    if (char === "\n") {
+      rows.push({ start, end: at })
+      at += 1
+      start = at
+      used = 0
+      continue
+    }
+    const width = stringWidth(char)
+    if (used > 0 && used + width > cells) {
+      rows.push({ start, end: at })
+      start = at
+      used = 0
+    }
+    used += width
+    at += char.length
   }
-  return out
+  rows.push({ start, end: at })
+  return rows
 }
 
-function takeCellsFromEnd(text: string, cells: number): string {
-  let out = ""
-  for (const char of [...text].reverse()) {
-    if (stringWidth(char + out) > cells) break
-    out = char + out
-  }
-  return out
+// The row holding the cursor; a cursor at a wrap point belongs to the row that starts there.
+export function cursorRow(rows: readonly Row[], cursor: number): number {
+  let found = 0
+  rows.forEach((row, i) => { if (row.start <= cursor) found = i })
+  return found
 }
 
-// The box shows a window of the line, not the whole line: Ink redraws the live
-// region in place by erasing the previous frame row by row, and a frame that
-// reaches the terminal height makes Ink fall back to a full-screen clear on
-// every redraw. `cells` is the display budget of the box; the window keeps the
-// cursor visible, with a quarter of the budget left for the text after it.
-export function windowLine(ed: Editor, cells: number): WindowLine {
-  const at = ed.text.slice(ed.cursor, ed.cursor + 1)
-  const before = ed.text.slice(0, ed.cursor)
-  const after = ed.text.slice(ed.cursor + 1)
-  if (stringWidth(ed.text) <= cells) return { before, at, after }
-  const shownAfter = takeCells(after, Math.floor(cells / 4))
-  const shownBefore = takeCellsFromEnd(before, cells - stringWidth(at) - stringWidth(shownAfter) - 2)
-  return {
-    before: shownBefore.length < before.length ? `…${shownBefore}` : shownBefore,
-    at,
-    after: shownAfter.length < after.length ? `${shownAfter}…` : shownAfter,
-  }
+// Moves the cursor one screen row up or down, keeping its display column; null on the first or last row.
+export function moveRow(ed: Editor, cells: number, delta: -1 | 1): Editor | null {
+  const rows = wrapRows(ed.text, cells)
+  const current = cursorRow(rows, ed.cursor)
+  const target = rows[current + delta]
+  if (!target) return null
+  const column = stringWidth(ed.text.slice(rows[current]!.start, ed.cursor))
+  let cursor = target.start
+  while (cursor < target.end && stringWidth(ed.text.slice(target.start, cursor + 1)) <= column) cursor++
+  return { text: ed.text, cursor }
 }
 
 const isSpace = (char: string | undefined) => char !== undefined && /\s/.test(char)
@@ -98,23 +107,6 @@ export function lineStart(text: string, cursor: number): number {
 export function lineEnd(text: string, cursor: number): number {
   const at = text.indexOf("\n", cursor)
   return at < 0 ? text.length : at
-}
-
-// Moves the cursor one line up or down, keeping its column; null on the first or last line.
-export function moveLine(ed: Editor, delta: -1 | 1): Editor | null {
-  const { text, cursor } = ed
-  const start = lineStart(text, cursor)
-  const column = cursor - start
-  if (delta < 0) {
-    if (start === 0) return null
-    const previousEnd = start - 1
-    const previousStart = lineStart(text, previousEnd)
-    return { text, cursor: previousStart + Math.min(column, previousEnd - previousStart) }
-  }
-  const end = lineEnd(text, cursor)
-  if (end === text.length) return null
-  const nextEnd = lineEnd(text, end + 1)
-  return { text, cursor: end + 1 + Math.min(column, nextEnd - end - 1) }
 }
 
 // Returns null when the key is not an editing key (the caller may use it).
