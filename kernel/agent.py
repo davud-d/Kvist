@@ -45,6 +45,7 @@ from kernel.agent_logging import (
     save_session,
     store_session_title,
 )
+from kernel.context_meter import ContextLedger, begin_call, note_generated, note_pending
 from kernel.agent_model import (
     call_action_model,
     call_model,
@@ -277,6 +278,7 @@ class LocalAgent:
         # on the first context-budget calculation.
         self._encoding = _TOKEN_ENCODING_UNINITIALIZED
         self._current_step = 0
+        self._context_ledger = ContextLedger()
         # Wall-clock of the last model call (performance log).
         self._last_model_duration = 0.0
         # Last resolved user-facing language for this session; used as the
@@ -665,6 +667,7 @@ class LocalAgent:
         if self.helpers is not None and user_goal.strip():
             self.helpers.person_wrote()
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
+        note_pending(self, user_goal)
         self._journal.begin_turn(f"{user_goal} {labels}".strip())
         self._tray_turn_started()
         try:
@@ -1482,6 +1485,14 @@ class LocalAgent:
         merge_reasoning_kwargs(
             stream_kwargs, self.config.provider, self.config.reasoning_effort
         )
+        begin_call(
+            self,
+            sum(
+                self._count_tokens(str(message.get("content", "")))
+                for message in safe_messages
+                if isinstance(message, dict)
+            ),
+        )
         try:
             stream = _create_completion_with_reasoning_fallback(self, stream_kwargs)
         except KeyboardInterrupt as error:
@@ -1565,6 +1576,7 @@ class LocalAgent:
                 elif isinstance(chunk, str):
                     text = chunk
 
+                note_generated(self, lambda: "".join(reasoning_chunks) + "".join(chunks))
                 reasoning_text = safe_extract_reasoning_delta(delta)
                 if reasoning_text and reasoning_update is not None and not chunks:
                     append_reasoning_delta(reasoning_chunks, reasoning_text)

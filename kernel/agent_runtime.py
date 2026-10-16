@@ -60,6 +60,7 @@ def _skill_call_readonly(self, command: AgentCommand) -> bool:
     args = command.action.args
     return bool(self.skills.tool_readonly(str(args.get("skill")), str(args.get("tool"))))
 
+from kernel.context_meter import note_pending
 from kernel.action_result import SKIPPED_ERROR, build_action_result
 from kernel.agent_state import PLAN_PLANNING, RunCancelled, RunState
 from kernel.executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
@@ -1558,6 +1559,7 @@ def register_feedback(
         self._state.last_shell_returncode = shell_result["returncode"]
     summary_line = self._feedback_to_line(command, feedback)
     detail_line = self._feedback_to_detail(command, feedback)
+    note_pending(self, detail_line)
     signature = self._action_signature(command)
 
     if ok:

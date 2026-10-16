@@ -169,7 +169,7 @@ function rememberEvent(event) {
     // browser state safe if an older/third-party producer gets that wrong.
     const value = event.type === "input_request" && event.kind === "secret" ? { ...event, current_value: "" } : event;
     // The reducer takes these live and again from the journal; no view reads them.
-    if (['stream_chunk', 'job_output', 'status', 'reasoning_chunk', 'stream_start', 'reasoning_start', 'reasoning_commit'].includes(event.type))
+    if (['stream_chunk', 'job_output', 'context', 'status', 'reasoning_chunk', 'stream_start', 'reasoning_start', 'reasoning_commit'].includes(event.type))
         return;
     if (event.type === 'action_output') {
         const previous = state.events.findLastIndex(e => e.type === 'action_output' && e.call_id === event.call_id && e.step === event.step);
@@ -238,10 +238,13 @@ export function applyEvent(event, { initial = false, durableReplay = false, seq,
         state.usage.input += Number(event.input_tokens) || 0;
         state.usage.output += Number(event.output_tokens) || 0;
         state.usage.calls++;
-        if (event.context_tokens > 0)
-            state.context = event;
+        state.context = event;
         if (event.model)
             state.model = event.model;
+        renderMetadata();
+    }
+    else if (kind === 'context') {
+        state.context = event;
         renderMetadata();
     }
     else if (kind === "input_request" && !initial)

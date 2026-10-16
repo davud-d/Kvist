@@ -62,7 +62,7 @@ _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
 
 # Live-only state: a frontend never needs it to redraw a finished conversation.
 _TRANSIENT_EVENTS = frozenset(
-    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output"}
+    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output", "context"}
 )
 _ANSWER_EVENTS = frozenset({"final", "message", "stream_commit"})
 _ESSENTIAL_EVENTS = _ANSWER_EVENTS | {"error", "journal_notice", "turn_end", "session_ended"}

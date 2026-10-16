@@ -28,6 +28,7 @@ from kernel.agent_context import (
     SECTION_PRIORITIES,
     split_prompt_into_sections,
 )
+from kernel.context_meter import begin_call, context_usage, end_call, mute_generation, note_generated
 from kernel.context_budget import (
     derived_prompt_budget,
     env_prompt_budget,
@@ -665,6 +666,7 @@ def call_native_action_model(
         compact_history(messages, self._count_tokens, context_token_limit(self))
         input_tokens = sum(self._count_tokens(json.dumps(message, ensure_ascii=False)) for message in messages)
         input_tokens += self._count_tokens(json.dumps(tools, ensure_ascii=False))
+        begin_call(self, input_tokens)
         _throttle_request_rate(self)
         try:
             turn = _request_native_turn(self, model, messages, tools)
@@ -828,6 +830,12 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
             if calls and time.monotonic() - last_call_push > 0.5:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
+            note_generated(
+                self,
+                lambda: "".join(reasoning)
+                + "".join(content)
+                + "".join(call["arguments"] for call in calls.values()),
+            )
     finally:
         spoken.close("".join(content))
         close = getattr(stream, "close", None)
@@ -987,19 +995,23 @@ def _emit_usage(
     /``output_tokens`` are *spend*: every step resends the whole conversation, so
     a UI summing them across a run reaches hundreds of thousands of tokens while
     the conversation itself is a fraction of that. ``context_tokens`` is that
-    conversation — the size of this one prompt — and is reported only for the
-    kinds that carry it (0 otherwise, meaning "leave the last known value").
+    conversation — the size of this one prompt. Both ``context_*`` values come
+    from ``context_meter.context_usage`` and are always current, so a UI
+    assigns them as they are.
     """
+    normalized_input = max(0, int(input_tokens))
+    if kind in _CONTEXT_USAGE_KINDS:
+        end_call(self, normalized_input, max(0, int(output_tokens)))
     callback = getattr(getattr(self, "_ui", None), "print_usage", None)
     if callback is None:
         return
-    normalized_input = max(0, int(input_tokens))
+    context = context_usage(self)
     callback(
         {
             "input_tokens": normalized_input,
             "output_tokens": max(0, int(output_tokens)),
-            "context_tokens": normalized_input if kind in _CONTEXT_USAGE_KINDS else 0,
-            "context_limit": max(0, int(context_token_limit(self))),
+            "context_tokens": context.used,
+            "context_limit": context.limit,
             "model": str(model),
             "kind": str(kind),
             "step": int(getattr(self, "_current_step", 0) or 0),
@@ -1069,6 +1081,10 @@ def call_model(
             return self._cache[cache_key]
 
         for attempt in range(1, self.config.max_retries + 1):
+            if usage_kind in _CONTEXT_USAGE_KINDS:
+                begin_call(self, _input_tokens)
+            else:
+                mute_generation(self)
             _throttle_request_rate(self)
             request_start = time.monotonic()
             try:
@@ -1321,6 +1337,7 @@ def call_model_streaming(
                 chunks.append(delta.content)
                 spoken.feed("".join(chunks))
                 renderer.feed(delta.content)
+                note_generated(self, lambda: "".join(reasoning_chunks) + "".join(chunks))
                 if self.config.verbose and not preview_shown:
                     rendered = renderer.maybe_render()
                     if rendered and len(rendered) > 80:

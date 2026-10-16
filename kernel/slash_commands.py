@@ -60,6 +60,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("resume", "Continue the latest saved checkpoint"),
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
     SlashCommand("changes", "Show agent file changes across all sessions"),
+    SlashCommand("context", "Show the model's context size and how much of it is used"),
     SlashCommand("diff", "Show agent file changes recorded in this session"),
     SlashCommand("revert", "Restore agent-changed files to their baselines"),
     SlashCommand(

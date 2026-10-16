@@ -561,10 +561,25 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "verbose", "style", "session", "new", "rename", "models",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
-        "strime", "revert", "bug", "commit-message", "web-search-provider",
+        "strime", "revert", "bug", "commit-message", "web-search-provider", "context",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)
+
+
+def test_context_command_answers_with_the_meter_numbers(monkeypatch):
+    from kernel import context_meter
+
+    monkeypatch.setattr(
+        context_meter, "context_usage", lambda _agent: context_meter.ContextUsage(1000, 250)
+    )
+    agent, reader, out, thread = _serve(main.STDIO_COMMANDS)
+
+    reader.push(_command("context"))
+    result = _result(out, "context")
+    assert result["ok"] is True
+    assert result["effects"]["context"] == {"used": 250, "limit": 1000, "free": 750}
+    _finish(reader, thread)
 
 
 def test_real_handlers_over_the_wire_change_the_role_of_the_next_goal(home):

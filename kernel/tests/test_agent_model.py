@@ -291,14 +291,16 @@ def test_usage_reports_context_only_for_conversation_calls(agent_factory):
     agent = agent_factory(max_context_tokens=120000)
     agent._ui = _UsageCapturingUI()
 
+    # The window holds the prompt and what the model wrote in answer to it.
     for kind in ("step", "chat"):
         usage = _emit(agent, kind=kind)
-        assert usage["context_tokens"] == usage["input_tokens"] == 9000
+        assert usage["context_tokens"] == usage["input_tokens"] + usage["output_tokens"] == 9120
 
-    # A plan or report call sends its own one-off prompt: counting it as the
-    # conversation size would make the context appear to shrink mid-run.
+    # A plan or report call sends its own one-off prompt: it must not become
+    # the conversation size, so the event repeats the conversation's value.
     for kind in ("plan", "report"):
-        assert _emit(agent, kind=kind)["context_tokens"] == 0
+        usage = _emit(agent, kind=kind, input_tokens=300)
+        assert usage["context_tokens"] == 9120
 
 
 def test_usage_carries_the_limit_the_prompt_is_trimmed_to(agent_factory):

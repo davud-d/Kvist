@@ -34,6 +34,7 @@ _TRANSIENT_CORE_EVENTS = frozenset(
         "stream_chunk",
         "action_output",
         "job_output",
+        "context",
         "command_result",
     }
 )

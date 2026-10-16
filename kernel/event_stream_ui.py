@@ -40,6 +40,7 @@ from kernel.frontend_protocol import (
     StreamChunkEvent,
     StreamCommitEvent,
     StreamStartEvent,
+    ContextEvent,
     UsageEvent,
 )
 from kernel.redaction import redact_text, redact_value
@@ -219,6 +220,17 @@ class EventStreamUI:
                 step=max(0, int(usage.get("step", 0))),
                 context_tokens=max(0, int(usage.get("context_tokens", 0))),
                 context_limit=max(0, int(usage.get("context_limit", 0))),
+            )
+        )
+
+    def print_context(self, context: dict) -> None:
+        self._channel.emit(
+            ContextEvent(
+                context_tokens=max(0, int(context.get("context_tokens", 0))),
+                context_limit=max(0, int(context.get("context_limit", 0))),
+                prompt=max(0, int(context.get("prompt", 0))),
+                generated=max(0, int(context.get("generated", 0))),
+                pending=max(0, int(context.get("pending", 0))),
             )
         )
 

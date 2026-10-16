@@ -160,15 +160,25 @@ test("a response's words are shown once as a say line before its calls, reads in
   assert.deepEqual(read.exploring, { reads: 1, searches: 0, lists: 0, git: 0 })
 })
 
-test("usage sums spend but replaces context size, and keeps it on a zero", () => {
+test("usage sums spend and takes the core's context size as given", () => {
   const usage = (input: number, context: number, limit: number): CoreEvent => ({
     type: "usage", input_tokens: input, output_tokens: 1, context_tokens: context, context_limit: limit, model: "m", kind: "action", step: 1,
   })
-  const state = feed(usage(100, 500, 9000), usage(100, 800, 9000), usage(50, 0, 0))
+  const state = feed(usage(100, 500, 9000), usage(100, 800, 9000), usage(50, 800, 9000))
   assert.equal(state.usage.input, 250)
   assert.equal(state.usage.output, 3)
   assert.equal(state.usage.context, 800)
   assert.equal(state.usage.limit, 9000)
+})
+
+test("a live context event moves the context without touching the spend", () => {
+  const state = feed(
+    { type: "usage", input_tokens: 10, output_tokens: 2, context_tokens: 100, context_limit: 9000, model: "m", kind: "action", step: 1 },
+    { type: "context", context_tokens: 450, context_limit: 9000, prompt: 100, generated: 300, pending: 50 },
+  )
+  assert.equal(state.usage.context, 450)
+  assert.equal(state.usage.limit, 9000)
+  assert.equal(state.usage.input, 10)
 })
 
 test("/new empties the feed under a fresh welcome block and restarts the context", () => {

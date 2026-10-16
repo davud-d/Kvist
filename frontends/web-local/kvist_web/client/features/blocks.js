@@ -330,9 +330,10 @@ const HANDLERS = {
     // frontend_protocol.py:300-334; input/output are summed, context is replaced (session.js:198-207)
     usage: (s, e) => meta(s, {
         usage: { input: s.meta.usage.input + (Number(e.input_tokens) || 0), output: s.meta.usage.output + (Number(e.output_tokens) || 0), calls: s.meta.usage.calls + 1 },
-        ...(e.context_tokens > 0 && { context: { context_tokens: e.context_tokens, context_limit: e.context_limit || 0 } }),
+        context: { context_tokens: e.context_tokens, context_limit: e.context_limit || 0 },
         ...(e.model && { model: e.model }),
     }),
+    context: (s, e) => meta(s, { context: { context_tokens: e.context_tokens, context_limit: e.context_limit || 0 } }),
     // frontend_protocol.py:98-117
     status: (s, e) => meta(s, { status: { user_message: e.user_message || '', status: e.status || '', step: e.step, plan_step: e.plan_step || '', is_error: e.is_error === true } }),
     // frontend_protocol.py:395-418; a session event without closed clears the closed state

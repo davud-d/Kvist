@@ -24,6 +24,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "style", route: "core", hint: "Working style of the agent and the chat" },
   { name: "verbose", route: "core", hint: "Toggle verbose mode (on | off)" },
   { name: "changes", route: "core", hint: "Files the agent changed, across sessions" },
+  { name: "context", route: "core", hint: "Context size of the model and how much is used" },
   { name: "revert", route: "core", hint: "Undo the agent's changes" },
   { name: "resume", route: "core", hint: "Continue an interrupted run" },
   { name: "provider", route: "core", hint: "Switch or configure the provider" },

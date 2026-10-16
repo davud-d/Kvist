@@ -398,6 +398,34 @@ class DebugEvent:
 
 
 @dataclass(slots=True)
+class ContextEvent:
+    """Live size of the context window, from ``context_meter``.
+
+    Emitted while a call streams (at most every ``REFRESH_SECONDS``) and at
+    every point where the size changes at once: a request is sent, a call
+    ends, a tool result or a new message is added. ``context_tokens`` is the
+    sum of ``prompt``, ``generated`` and ``pending``; a frontend assigns it.
+    """
+
+    context_tokens: int
+    context_limit: int
+    prompt: int = 0
+    generated: int = 0
+    pending: int = 0
+    type: ClassVar[str] = "context"
+
+    def to_dict(self) -> dict:
+        return {
+            "type": self.type,
+            "context_tokens": self.context_tokens,
+            "context_limit": self.context_limit,
+            "prompt": self.prompt,
+            "generated": self.generated,
+            "pending": self.pending,
+        }
+
+
+@dataclass(slots=True)
 class UsageEvent:
     """Token usage of one model call (real tiktoken counts, not estimates).
 
@@ -406,10 +434,9 @@ class UsageEvent:
     "model" when unspecified); ``step`` is the agent loop step (0 outside it).
 
     ``input_tokens``/``output_tokens`` are spend and are meant to be summed;
-    ``context_tokens`` is the size of this one prompt and is meant to *replace*
-    the previous value — it is 0 for calls that do not carry the conversation
-    (plan, report), where a frontend keeps the last known figure.
-    ``context_limit`` is the budget the core trims that prompt to.
+    ``context_tokens`` and ``context_limit`` are the core's current answer from
+    ``context_meter.context_usage``: the size of the last conversation prompt
+    and the budget the core trims it to. A frontend assigns them as they are.
     """
 
     input_tokens: int

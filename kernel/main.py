@@ -3673,6 +3673,17 @@ def _stdio_changes(ctx: CommandContext) -> CommandResult:
     return CommandResult(True, report)
 
 
+def _stdio_context(ctx: CommandContext) -> CommandResult:
+    from kernel.context_meter import context_usage, describe
+
+    usage = context_usage(ctx.session.agent)
+    return CommandResult(
+        True,
+        describe(usage),
+        {"context": {"used": usage.used, "limit": usage.limit, "free": usage.free}},
+    )
+
+
 def _stdio_bug(ctx: CommandContext) -> CommandResult:
     from kernel.bug_report import save_bug_report
     from kernel.durable_json import JsonStorageError
@@ -4094,6 +4105,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "rename": _stdio_rename,
     "models": _stdio_models,
     "changes": _stdio_changes,
+    "context": _stdio_context,
     "provider": _stdio_provider,
     "change-api": _stdio_change_api,
     "del-provider": _stdio_del_provider,
@@ -5024,6 +5036,16 @@ def main() -> None:
                 console.print(Panel(
                     Text(report),
                     title="Agent changes in this workspace (all sessions)",
+                    border_style="bright_cyan",
+                ))
+                continue
+
+            if user_goal.lower() == "/context":
+                from kernel.context_meter import context_usage, describe
+
+                console.print(Panel(
+                    Text(describe(context_usage(agent))),
+                    title="/context",
                     border_style="bright_cyan",
                 ))
                 continue

@@ -423,6 +423,9 @@ class AcpEventTranslator:
         self._usage["input"] += int(getattr(event, "input_tokens", 0) or 0)
         self._usage["output"] += int(getattr(event, "output_tokens", 0) or 0)
         self._usage["total"] = self._usage["input"] + self._usage["output"]
+        return self._on_context(event)
+
+    def _on_context(self, event: Any) -> list[AcpUpdate]:
         limit = int(getattr(event, "context_limit", 0) or 0)
         used = int(getattr(event, "context_tokens", 0) or 0)
         if limit <= 0:

@@ -276,27 +276,6 @@ function currentProject() {
   return navigationProjects.find((project) => project.path === workspace) || null
 }
 
-// No real usage numbers survive a session switch — the core only reports
-// them live, mid-run, via `usage` events. The best a reopened session can
-// show is the size of what's actually stored for it, estimated with the same
-// chars/4 fallback the live speed indicator uses. Good enough to replace a
-// stale "0 in · 0 out" with a number that reflects the session just loaded.
-function estimateSessionContextTokens(item) {
-  let chars = 0
-  for (const message of item?.chat_history || []) {
-    if (typeof message?.content === "string") chars += message.content.length
-  }
-  for (const entry of item?.session_history || []) {
-    if (!entry || typeof entry !== "object") continue
-    if (typeof entry.goal === "string") chars += entry.goal.length
-    if (typeof entry.result === "string") chars += entry.result.length
-    for (const output of entry.outputs || []) {
-      if (typeof output === "string") chars += output.length
-    }
-  }
-  return chars / CHARS_PER_TOKEN
-}
-
 function displaySession(item) {
   resetView()
   if (!item) return
@@ -306,12 +285,6 @@ function displaySession(item) {
   )
   const hasUserChat = chatHistory.some((message) => message.role === "user")
   const sessionHistory = Array.isArray(item.session_history) ? item.session_history : []
-
-  const estimatedTokens = estimateSessionContextTokens(item)
-  if (estimatedTokens > 0) {
-    runStats.contextTokens = estimatedTokens
-    renderRunStats()
-  }
 
   if (!hasUserChat && !sessionHistory.length) {
     setActivity(item.has_checkpoint ? "Unfinished task" : "Ready")
@@ -1487,14 +1460,17 @@ function handleEvent(event) {
       renderRunStats()
       addStep(event)
       break
+    case "context": {
+      runStats.contextTokens = Number(event.context_tokens) || 0
+      runStats.contextLimit = Number(event.context_limit) || 0
+      renderRunStats()
+      break
+    }
     case "usage": {
       runStats.tokensIn += Number(event.input_tokens) || 0
       runStats.tokensOut += Number(event.output_tokens) || 0
-      // Context replaces rather than accumulates, and only calls carrying the
-      // conversation report it (0 = keep the last known size).
-      const context = Number(event.context_tokens) || 0
-      if (context > 0) runStats.contextTokens = context
-      runStats.contextLimit = Math.max(runStats.contextLimit, Number(event.context_limit) || 0)
+      runStats.contextTokens = Number(event.context_tokens) || 0
+      runStats.contextLimit = Number(event.context_limit) || 0
       renderRunStats()
       break
     }

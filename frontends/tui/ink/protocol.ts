@@ -67,6 +67,7 @@ export type CoreEvent =
   | { type: "helper"; agent_id: string; event: string; state: string; session: string; task: string; summary: string; stopped_by?: string }
   | { type: "artifact"; name: string; mime: string; path: string; caption: string; skill: string; preview?: string }
   | { type: "usage"; input_tokens: number; output_tokens: number; context_tokens: number; context_limit: number; model: string; kind: string; step: number }
+  | { type: "context"; context_tokens: number; context_limit: number; prompt: number; generated: number; pending: number }
   | { type: "debug"; message: string }
   | { type: "error"; message: string }
   | ({ type: "input_request" } & InputRequest)

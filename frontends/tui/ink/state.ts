@@ -543,12 +543,13 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
         usage: {
           input: u.input + (event.input_tokens || 0),
           output: u.output + (event.output_tokens || 0),
-          // 0 means "this call carried no conversation": keep the last size.
-          context: event.context_tokens > 0 ? event.context_tokens : u.context,
-          limit: event.context_tokens > 0 && event.context_limit > 0 ? event.context_limit : u.limit,
+          context: event.context_tokens,
+          limit: event.context_limit,
         },
       }
     }
+    case "context":
+      return { ...state, usage: { ...state.usage, context: event.context_tokens, limit: event.context_limit } }
     case "debug":
       return push(state, (id) => ({ id, kind: "note", tone: "debug", text: event.message }))
     case "error":
