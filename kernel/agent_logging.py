@@ -437,6 +437,7 @@ def begin_run(self, user_goal: str, run_id: str) -> None:
         "current_agent_role": self._state.current_agent_role,
         "selected_action_role": self._state.selected_action_role,
         "selected_action_model": self._state.selected_action_model,
+        "selected_action_provider": self.config.provider,
     }
     _write_json_object(
         get_state_path(self, session),
@@ -791,6 +792,7 @@ def save_checkpoint(
         "create_goal": self._state.create_goal,
         "selected_action_role": self._state.selected_action_role,
         "selected_action_model": self._state.selected_action_model,
+        "selected_action_provider": self.config.provider,
         "step": step,
         "progress": self._state.progress,
         "summary": self._state.summary,
@@ -887,7 +889,10 @@ def load_checkpoint(self) -> tuple[str, int] | None:
     )
     self._state.create_goal = bool(data.get("create_goal", False))
     self._state.selected_action_role = str(data.get("selected_action_role") or "")
-    self._state.selected_action_model = str(data.get("selected_action_model") or "")
+    # A model id is only valid for the provider that served it; after a provider
+    # switch the run re-selects instead of sending the old id to the new gateway.
+    same_provider = data.get("selected_action_provider") == self.config.provider
+    self._state.selected_action_model = str(data.get("selected_action_model") or "") if same_provider else ""
     self._state.summary = data.get("summary", "")
     self._state.files_read = data.get("files_read", [])
     self._state.files_changed = data.get("files_changed", [])

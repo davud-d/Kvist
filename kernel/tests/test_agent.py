@@ -309,6 +309,26 @@ def test_continue_restores_checkpoint_before_routing_or_reset(
     assert agent._state.task_updates == []
 
 
+def test_resume_after_a_provider_switch_reselects_the_model(agent_factory):
+    agent = agent_factory()
+    goal = "Investigate the implementation"
+    agent._state.selected_action_role = "smart"
+    agent._state.selected_action_model = "old-provider-model"
+    agent._save_checkpoint(goal, 4)
+    agent.config.provider = "deepseek"
+    agent.config.fast_model = agent.config.smart_model = "deepseek-flash"
+
+    seen = []
+
+    def resumed_loop(resumed_goal, start_step):
+        seen.append(agent._state.selected_action_model)
+        return "continued"
+
+    agent._run_loop = resumed_loop
+    assert agent.resume() == "continued"
+    assert seen == ["deepseek-flash"]
+
+
 @pytest.mark.parametrize("case", ["no_checkpoint", "other_session"])
 def test_continue_does_not_resume_an_unrelated_task(agent_factory, case):
     agent = agent_factory()
