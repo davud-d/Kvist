@@ -179,7 +179,9 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         readonly=True,
     ),
     "delegate_task": ToolSpec(
-        "Hand a sub-task to another role.",
+        "Despite the name, starts no other agent, and nobody performs the task later. Without commands it only "
+        "records a handoff note: the task stays undone, and your answer must say so. With commands it runs them "
+        "here, like your own run_shell calls. To have a second agent actually do part of the work, use helper.",
         {
             "target_role": {"type": "string", "enum": ["coder", "devops", "chat"]},
             "task": _STRING,
@@ -279,9 +281,11 @@ ACTION_TOOLS.update({
         ("op",),
     ),
     "helper": ToolSpec(
-        "One read-only helper agent with its own context: start it with a task (role optional; the router picks "
-        "one), send it a message, replace its task, check status, wait for it (no model requests while waiting), "
-        "inspect its actions, get its result, or stop it. It cannot change files or start helpers.",
+        "One helper agent with its own context, working while you do: start it with a task (role optional; "
+        "without it the router picks one from the task), send it a message, replace its task, check status, wait "
+        "for it (no model requests while waiting), inspect its actions, get its result, or stop it. A reader helper "
+        "only reads; a coder, devops or universal one may also change files, unless you yourself may not. It "
+        "cannot start helpers or ask the person questions.",
         {
             "op": {"type": "string", "enum": ["start", "message", "update", "status", "wait", "inspect", "result", "stop"]},
             "task": _STRING,

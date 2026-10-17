@@ -56,7 +56,8 @@ export function splitLines(buffer: string): { lines: string[]; rest: string } {
 }
 
 function coreArgs(options: CoreOptions): string[] {
-  const args = ["--workspace", options.workspace, "--frontend", "stdio-multi"]
+  // `--wake`: this app and the VS Code panel handle turns the core starts by itself (`wake`).
+  const args = ["--workspace", options.workspace, "--frontend", "stdio-multi", "--wake"]
   if (options.resume !== undefined) args.push("--resume", ...(options.resume ? [options.resume] : []))
   if (options.provider) args.push("--provider", options.provider)
   if (options.models) {

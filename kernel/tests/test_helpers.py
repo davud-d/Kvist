@@ -75,39 +75,62 @@ def test_a_helper_works_in_its_own_service_session_and_reports_back(agent_factor
     assert load_active_session(main) == marker_before == main.current_session
 
 
-def test_without_a_role_the_router_picks_one(agent_factory, monkeypatch):
+@pytest.mark.parametrize(("verdict", "expected"), [("coder", "coder"), ("chat", "reader")])
+def test_without_a_role_the_router_picks_one_from_the_task_alone(agent_factory, monkeypatch, verdict, expected):
     main = _main(agent_factory, ScriptedClient(["done"]))
-    chosen: list[object] = []
+    routed: list[str] = []
     from kernel.agent import LocalAgent
+    from kernel.role_router import RoleRouteResult
 
-    original = LocalAgent._choose_role
+    def route(self, user_goal):
+        routed.append(user_goal)
+        return RoleRouteResult(role=verdict, source="llm")
 
-    def spy(self, user_goal, routed_role):
-        chosen.append(routed_role)
-        return original(self, user_goal, routed_role)
+    monkeypatch.setattr(LocalAgent, "_route_decision", route)
+    helper_id = main.helpers.start("explain the module layout", role=None, context="the src/ folder",
+                                   attachments=[], started_by="main")["agent_id"]
+    waited = main.helpers.wait(helper_id, 10)
 
-    monkeypatch.setattr(LocalAgent, "_choose_role", spy)
-    helper_id = main.helpers.start("explain the module layout", role=None, context="", attachments=[],
-                                   started_by="main")["agent_id"]
-    main.helpers.wait(helper_id, 10)
-
-    assert chosen == [None]
+    # The helper's own instructions and context would sway the router; only the task is routed.
+    assert routed == ["explain the module layout"]
+    assert waited["role"] == expected
 
 
-def test_a_helper_cannot_change_files_whatever_its_role(agent_factory):
+def test_a_coder_helper_changes_files(agent_factory):
+    main = _main(agent_factory, ScriptedClient([
+        _call("write_file", {"path": "notes.txt", "content": "made by the helper\n"}),
+        "Created notes.txt.",
+    ]))
+
+    started = main.helpers.start("create notes.txt", role="coder", context="", attachments=[], started_by="main")
+    main.helpers.wait(started["agent_id"], 10)
+
+    assert (main.executor.workspace / "notes.txt").read_text(encoding="utf-8") == "made by the helper\n"
+    assert "may change files" in started["note"]
+
+
+@pytest.mark.parametrize("limit", ["reader_role", "planning", "read_only_goal", "skill"])
+def test_a_helper_gets_no_more_than_the_agent_that_started_it(agent_factory, limit):
     main = _main(agent_factory, ScriptedClient([
         _call("write_file", {"path": "pwned.txt", "content": "x"}),
         "I could not write the file.",
     ]))
+    if limit == "reader_role":
+        main._state.current_agent_role = "reader"
+    elif limit == "planning":
+        main._state.plan_phase = "planning"
+    elif limit == "read_only_goal":
+        main._state.read_only_goal = True
+    started_by = "skill:browser" if limit == "skill" else "main"
 
-    helper_id = main.helpers.start("create pwned.txt", role="coder", context="", attachments=[],
-                                   started_by="main")["agent_id"]
-    main.helpers.wait(helper_id, 10)
+    started = main.helpers.start("create pwned.txt", role="coder", context="", attachments=[], started_by=started_by)
+    main.helpers.wait(started["agent_id"], 10)
 
     assert not (main.executor.workspace / "pwned.txt").exists()
-    helper = main.helpers.get(helper_id)
+    helper = main.helpers.get(started["agent_id"])
     refused = [log for log in helper.agent._state.step_logs if log.get("status") == "error"]
     assert refused and "read-only" in json.dumps(refused[0])
+    assert "read-only" in started["note"]
 
 
 def test_only_one_helper_works_at_a_time_and_a_helper_has_no_helpers(agent_factory):

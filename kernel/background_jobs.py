@@ -8,7 +8,8 @@ and what the model has been told so far.
 
 Output reaches the model on step boundaries: ``take_note`` is called once before
 each request and returns only what is new since the previous note. Nothing is
-pushed into a request already in flight.
+pushed into a request already in flight. A job the answered turn left running
+reaches the model when it ends, through a turn the transport starts for it.
 """
 from __future__ import annotations
 
@@ -96,10 +97,15 @@ class JobListener(Protocol):
 
 
 class UiJobListener:
-    """Forwards job events to a UI through its optional ``print_job_*`` methods."""
+    """Forwards job events to a UI through its optional ``print_job_*`` methods.
 
-    def __init__(self, ui: Any) -> None:
+    ``on_finished`` runs after the UI heard that a job ended on its own (not
+    stopped); the agent uses it to be woken by a job its answered turn left running.
+    """
+
+    def __init__(self, ui: Any, on_finished: Callable[[], None] | None = None) -> None:
         self._ui = ui
+        self._on_finished = on_finished
 
     def job_started(self, job: BackgroundJob) -> None:
         method = getattr(self._ui, "print_job_started", None)
@@ -115,6 +121,9 @@ class UiJobListener:
         method = getattr(self._ui, "print_job_finished", None)
         if method is not None:
             method(job.job_id, job.status, job.exit_code, job.tail)
+        # A stopped job was stopped by the model or by "stop all", who already know.
+        if self._on_finished is not None and job.status != STOPPED:
+            self._on_finished()
 
 
 # What the supervisor reports for a finished run: (returncode, timed_out, cancelled).
@@ -147,7 +156,7 @@ class BackgroundLaunch:
 
 
 class BackgroundJobs:
-    """Registry of the jobs of one run; every method is thread-safe."""
+    """Registry of the jobs of one executor, across turns; every method is thread-safe."""
 
     def __init__(self, max_running: int = MAX_RUNNING_JOBS) -> None:
         self._max_running = max_running
@@ -155,6 +164,9 @@ class BackgroundJobs:
         self._jobs: dict[str, BackgroundJob] = {}
         self._ids = itertools.count(1)
         self.listener: JobListener | None = None
+        # Whether a job outlives the final answer of the turn that started it
+        # (the agent is woken when it ends); only the start note reads it.
+        self.outlives_answer = False
 
     def launch(
         self,
@@ -280,6 +292,11 @@ class BackgroundJobs:
         for job in stopped:
             job.done.wait(_STOP_GRACE_SECONDS)
         return stopped
+
+    def has_unreported_finish(self) -> bool:
+        """Whether a job ended on its own and the model has not been told yet; new output alone does not count."""
+        with self._cond:
+            return any(job.status not in (RUNNING, STOPPED) and not job.finish_told for job in self._jobs.values())
 
     def take_note(self) -> tuple[str, list[str]]:
         """What the model has not been told yet, as one block, plus the job ids.

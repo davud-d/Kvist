@@ -5,7 +5,7 @@ import json
 import os
 import threading
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from rich.console import Console
 from rich.text import Text
@@ -188,6 +188,14 @@ _AFTER_TOOL_NOTE = (
     "(Runtime fact: answer the work, or how the person is doing if they are struggling. "
     "Do not reproach, lecture or comment on how the person speaks.)"
 )
+# The goal of a turn the runtime starts, not the person: the helpers or jobs an
+# answered turn left running have ended. What they reported comes with it as
+# the loop's background note.
+WAKE_GOAL = (
+    "(Runtime: no new message from the person. Work you left running after your last answer has ended; "
+    "the background note in this request says what it reported. Tell the person what it means for their "
+    "request, and continue the task only if it still needs work.)"
+)
 
 
 def _no_response_message(language: str | None, detail: str | None) -> str:
@@ -254,6 +262,9 @@ class LocalAgent:
         self.force_read_only = False
         # Set on a helper: messages from the main agent, drained before each request.
         self.inbox_source: Any = None
+        self._wake_listener: Callable[[], None] | None = None
+        # The role of the answered turn that left helpers or jobs running; their wake-up turn keeps it.
+        self._background_role: str | None = None
         self.console = console or Console()
         self._perf_logger = perf_logger or PerfLogger(executor.workspace)
         # Everything the agent shows is also recorded to the session's event
@@ -518,6 +529,8 @@ class LocalAgent:
             raise ValueError(f"Invalid session name: {name!r}")
         if name is not None and name == self.current_session:
             raise ValueError(f"Session {name!r} already exists")
+        # Their wake-up turn would land in a conversation that never asked for it.
+        self.stop_left_running()
         self.save_session()
         previous = self.current_session
         resolved = name or self._generate_session_name()
@@ -570,6 +583,7 @@ class LocalAgent:
         target_document = self._read_session_document(name)
         if not target_document:
             raise ValueError(f"Unknown session: {name!r}")
+        self.stop_left_running()
         self.save_session()
         previous = self.current_session
         self._save_active_session(name)
@@ -639,8 +653,68 @@ class LocalAgent:
             raise ValueError("this agent has no helpers")
         return self.helpers.stop(agent_id, by="person")
 
+    @property
+    def wake_listener(self) -> Callable[[], None] | None:
+        """Called from a job's or helper's thread when work an answered turn left running ends on its own.
+
+        Set by a transport that can start a turn by itself (``wake``); while it
+        is None, a final answer stops helpers and background jobs as before.
+        The listener must not run the turn on the calling thread.
+        """
+        return self._wake_listener
+
+    @wake_listener.setter
+    def wake_listener(self, listener: Callable[[], None] | None) -> None:
+        self._wake_listener = listener
+        self.executor.jobs.outlives_answer = listener is not None
+
+    def _background_finished(self) -> None:
+        listener = self._wake_listener
+        if listener is not None:
+            listener()
+
+    def has_background_news(self) -> bool:
+        """Whether a helper or background job ended on its own and the model has not been told."""
+        helpers_done = self.helpers is not None and self.helpers.has_finish_notice()
+        return helpers_done or self.executor.jobs.has_unreported_finish()
+
+    def wake_due(self) -> bool:
+        """Whether ``wake`` would run a turn now.
+
+        A paused or interrupted task (it has a checkpoint) keeps its news for
+        the person's next message, and a closed session takes no turns.
+        """
+        if self.control.state == "paused" or not self.has_background_news():
+            return False
+        return self._peek_checkpoint() is None and not self.is_session_closed()
+
+    def stop_left_running(self) -> None:
+        """Stop helpers and background jobs that answered turns left running (session switch, new session)."""
+        from kernel.agent_runtime import _stop_left_running
+
+        _stop_left_running(self, "task_finished")
+
+    def wake(self) -> str | None:
+        """Give the model a turn about helpers or jobs that ended after its answer; None when nothing did.
+
+        The turn is not the person's message: it keeps the role and language of
+        the turn that left the work running, takes no message number, and the
+        news itself reaches the model through the loop's usual background note.
+        """
+        if not self.wake_due():
+            return None
+        self._journal.begin_turn("", woken=True)
+        self._tray_turn_started()
+        try:
+            return self._run_turn(WAKE_GOAL, self._background_role or None, woken=True)
+        finally:
+            self._journal.end_turn()
+            self._tray_turn_finished()
+
     def shutdown(self, reason: str = "app_closed") -> None:
         """The process is ending: stop helpers, skills, jobs and every owned resource; keep the checkpoint."""
+        # Nothing stopped from here on may start a turn.
+        self.wake_listener = None
         if self.helpers is not None:
             self.helpers.stop_all(reason)
         self.skills.finish_task(reason)
@@ -715,17 +789,28 @@ class LocalAgent:
         self._ui.print_final(reply, [], outcome="closed")
         return reply
 
-    def _run_turn(self, user_goal: str, routed_role: str | None, images: list[dict] | None = None) -> str:
+    def _run_turn(
+        self, user_goal: str, routed_role: str | None, images: list[dict] | None = None, *, woken: bool = False
+    ) -> str:
         # Cleared before routing so a cancel requested during a previous turn
         # never aborts this one's setup.
         self._reset_cancel()
         self._reset_run_state()
-        self._state.message_id = end_session.next_message_id(self, from_person=True)
+        if woken:
+            # Taken before anything can fail, so the same news never wakes the agent twice.
+            from kernel.agent_runtime import _collect_helper_note, _collect_job_note
+
+            _collect_job_note(self)
+            _collect_helper_note(self)
+        self._state.message_id = end_session.next_message_id(self, from_person=not woken)
         self._state.user_goal = user_goal
         # User-facing response language is resolved by the runtime layer
-        # before any model call; the JSON protocol itself stays English.
-        self._state.response_language = resolve_response_language(
-            user_goal, previous_language=self._last_response_language
+        # before any model call; the JSON protocol itself stays English. A
+        # wake-up's goal is the runtime's English, not the person's language.
+        self._state.response_language = (
+            self._last_response_language or "en"
+            if woken
+            else resolve_response_language(user_goal, previous_language=self._last_response_language)
         )
         self._last_response_language = self._state.response_language
         self._set_environment_facts()

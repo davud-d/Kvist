@@ -4,9 +4,14 @@
 The main agent starts at most one helper per task. The helper is a separate
 ``LocalAgent`` on its own thread with the same model client, a fresh run state
 and a service session (``helper-…``) that the person can read and stop but
-never types into; it never becomes the active session. It works read-only —
-whatever role the router or the main agent names — and cannot start helpers
-or ask the person directly.
+never types into; it never becomes the active session. Its role is the one the
+main agent names, or the router's choice for the task. A reader helper only
+reads; a coder, devops or universal helper changes files too, unless the main
+agent itself may not write (reader role, plan mode, a "do not change" request)
+or a skill started it (its ``agents.manage`` grant covers read-only helpers).
+It cannot start helpers or ask the person questions; overwriting an existing
+file goes through the main agent's approvals when they can be answered from
+another thread, and is refused otherwise.
 
 Coordination is ordinary code, not a polling model: the helper's thread posts
 compact events (started, finished, failed, stopped, update applied) into a
@@ -210,17 +215,22 @@ class HelperManager:
         agent_id = f"h{len(self._helpers) + 1}"
         session = f"helper-{main.current_session}-{agent_id}-{uuid.uuid4().hex[:6]}"[:120]
         helper = Helper(agent_id=agent_id, session=session, task=task, role=role, started_by=started_by, agent=None)
-        helper.agent = self._build_agent(helper)
-        goal = _helper_goal(task, context, attachments)
+        # A skill's grant is "start a read-only helper": a writing one would give
+        # the skill writes its manifest never declared.
+        read_only = _main_cannot_write(main) or role == "reader" or started_by != "main"
+        helper.agent = self._build_agent(helper, read_only=read_only)
+        goal = _helper_goal(task, context, attachments, read_only=read_only)
         self._helpers[agent_id] = helper
         main.control.adopt(helper.agent.control)
         self._launch(helper, goal)
         self._emit(helper, "started")
         return {"agent_id": agent_id, "state": helper.state, "session": session,
-                "note": "It works read-only in its own session. You get a short notice when it finishes; "
-                        "use helper wait to block until then, or continue other work."}
+                "note": _start_note(role, read_only, self._wakes_after_answer())}
 
-    def _build_agent(self, helper: Helper) -> Any:
+    def _wakes_after_answer(self) -> bool:
+        return getattr(self._main, "wake_listener", None) is not None
+
+    def _build_agent(self, helper: Helper, *, read_only: bool) -> Any:
         from kernel.agent import LocalAgent
         from kernel.approvals import DenyApprovalGate
         from kernel.executor import SafeExecutor
@@ -230,7 +240,9 @@ class HelperManager:
         config.interactive = False
         config.end_session_enabled = False
         config.max_steps = min(config.max_steps, HELPER_MAX_STEPS)
-        executor = SafeExecutor(main.executor.workspace, approvals=DenyApprovalGate(),
+        main_gate = main.executor.approvals
+        shared_gate = not read_only and getattr(main_gate, "answers_from_any_thread", False)
+        executor = SafeExecutor(main.executor.workspace, approvals=main_gate if shared_gate else DenyApprovalGate(),
                                 read_roots=main.executor.read_roots)
         agent = LocalAgent(main.client, executor, config, ui=_HelperUI(),
                            console=main.console,
@@ -238,9 +250,20 @@ class HelperManager:
                                             "parent_session": main.current_session,
                                             "parent_run": getattr(main, "_run_id", None)},
                            session=helper.session)
-        agent.force_read_only = True
+        agent.force_read_only = read_only
         agent.inbox_source = lambda: self._drain_inbox(helper)
         return agent
+
+    def _role_for(self, helper: Helper) -> str:
+        """The named role, or the router's choice for the task itself (not the instructions around it).
+
+        A helper has nobody to chat with, so a "chat" verdict becomes a reader:
+        a question about the code is answered by looking at it.
+        """
+        if helper.role:
+            return helper.role
+        role = helper.agent._route_decision(helper.task).role
+        return "reader" if role == "chat" else role
 
     def _launch(self, helper: Helper, goal: str, *, resume_instruction: str | None = None) -> None:
         helper.state = RUNNING
@@ -249,6 +272,7 @@ class HelperManager:
             agent = helper.agent
             try:
                 if resume_instruction is None:
+                    helper.role = self._role_for(helper)
                     text = agent.run(goal, routed_role=helper.role)
                 else:
                     text = agent.run(resume_instruction)
@@ -399,6 +423,14 @@ class HelperManager:
         if printer is not None:
             printer({**notice, "session": helper.session, "task": helper.task[:200],
                      "stopped_by": helper.stopped_by or None})
+        # A stop came from the person or the main agent, who already know.
+        if event in (DONE, FAILED):
+            self._main._background_finished()
+
+    def has_finish_notice(self) -> bool:
+        """Whether a helper ended on its own and the main model has not been told yet."""
+        with self._cond:
+            return any(notice["event"] in (DONE, FAILED) for notice in self._events)
 
     def take_notices(self) -> str:
         """Compact lines about helper events since the last call, for the main model's next request."""
@@ -431,13 +463,40 @@ class HelperManager:
         self._person_stopped_at_message = None
 
 
-def _helper_goal(task: str, context: str, attachments: list[str]) -> str:
+def _main_cannot_write(main: Any) -> bool:
+    """A helper never gets more than the agent that started it."""
+    state = main._state
+    return (
+        main.force_read_only
+        or state.current_agent_role == "reader"
+        or state.read_only_goal
+        or state.plan_phase == "planning"
+    )
+
+
+def _helper_goal(task: str, context: str, attachments: list[str], *, read_only: bool) -> str:
     parts = [task.strip()]
     if context.strip():
         parts.append(f"Context from the main agent:\n{context.strip()}")
     if attachments:
         parts.append("Attachments mentioned by the main agent (ids only; you cannot open them): "
                      + ", ".join(attachments))
-    parts.append("You are a helper of another Kvist agent: work read-only, do not ask the person anything, and end "
-                 "with a concise report of what you found, with file paths and line numbers.")
+    if read_only:
+        parts.append("You are a helper of another Kvist agent: work read-only, do not ask the person anything, and "
+                     "end with a concise report of what you found, with file paths and line numbers.")
+    else:
+        parts.append("You are a helper of another Kvist agent, which may be changing files of this workspace at the "
+                     "same time: change only what this assignment covers, do not ask the person anything, and end "
+                     "with a concise report of what you changed and checked, with file paths.")
     return "\n\n".join(parts)
+
+
+def _start_note(role: str | None, read_only: bool, wakes: bool) -> str:
+    role_part = f"It works as {role}" if role else "The router picks its role from the task; it works"
+    access = ("read-only" if read_only else
+              "and may change files: do not edit the files of its assignment yourself until it reports")
+    after = ("If you give your final answer before it finishes, it keeps working, and its result reaches you "
+             "as a new turn when it ends." if wakes else
+             "It is stopped when you give your final answer.")
+    return (f"{role_part} {access}, in its own session. You get a short notice when it finishes; use helper wait to "
+            f"block until then, or continue other work. {after}")

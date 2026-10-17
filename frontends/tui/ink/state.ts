@@ -102,6 +102,9 @@ export interface State {
   // The model response the latest step came from, and how many of its calls arrived.
   batch: { id: string; count: number } | null
   running: boolean
+  // Wake-up turns the core began while a turn the person had just sent was already shown as
+  // running: the core runs them first, and their turn_end must not end the person's turn.
+  turnsAhead: number
   status: { text: string; step: number; planStep: string; error: boolean } | null
   pending: InputRequest | null
   // The slash command the core is running; the input stays locked meanwhile.
@@ -168,6 +171,7 @@ export function initialState(effort = "", banner = false): State {
     inflight: [],
     batch: null,
     running: false,
+    turnsAhead: 0,
     status: null,
     pending: null,
     command: null,
@@ -585,11 +589,16 @@ function applyEvent(state: State, event: CoreEvent, now: number): State {
       return event.event === "update_applied" ? state : push(state, (id) => ({ id, kind: "note", tone: event.event === "failed" ? "warn" : "info", text: helperNote(event, requestIsRussian(state)) }))
     case "artifact":
       return push(state, (id) => ({ id, kind: "note", tone: "info", text: `${event.caption || event.name}: ${event.path}` }))
+    case "wake":
+      if (state.running) return { ...state, turnsAhead: state.turnsAhead + 1 }
+      return { ...state, running: true, startedAt: now, waitingSince: now, turnStartOutput: state.usage.output, thought: null, info: { ...state.info, routedRole: undefined } }
     case "turn_end":
       // `command` is cleared too: `resume` is dispatched as a command but ends
       // as a turn, and a core that answers any command this way must not leave
       // the input box disabled forever.
-      return { ...settle(state), jobs: state.taskState === "paused" ? state.jobs : stopRunning(state.jobs, now), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, screen: state.taskState === "paused" ? state.screen : null }
+      // Jobs keep their state: a stopped one already reported job_finished, and one still
+      // running was left running by an answered turn and reports its end later.
+      return { ...settle(state), exploreSteps: [], batch: null, running: false, live: null, status: null, pending: null, startedAt: null, waitingSince: null, interrupted: false, thought: null, command: null, screen: state.taskState === "paused" ? state.screen : null }
     default:
       return state
   }
@@ -636,9 +645,9 @@ function restore(state: State, events: JournalEvent[], now: number, banner: bool
     }
     next = onEvent(next, event, now)
   }
-  // A journal cut off by a crash has no closing turn_end.
+  // A journal cut off by a crash has no closing turn_end, and no job of a journal is still running.
   const settled = onEvent(next, { type: "turn_end" }, now)
-  return { ...settled, info: { ...settled.info, routedRole: undefined }, settledThrough: settled.nextId - 1 }
+  return { ...settled, jobs: stopRunning(settled.jobs, now), info:{ ...settled.info, routedRole: undefined }, settledThrough: settled.nextId - 1 }
 }
 
 const CYRILLIC = /\p{Script=Cyrillic}/u
@@ -668,6 +677,7 @@ export function reduce(state: State, action: Action): State {
   switch (action.type) {
     case "event": {
       const at = action.now ?? Date.now()
+      if (action.event.type === "turn_end" && state.turnsAhead > 0) return { ...settle(state), turnsAhead: state.turnsAhead - 1 }
       const next = onEvent(state, action.event, at)
       if (action.event.type === "turn_end") return closeTurn(state, next, at)
       const answered = action.event.type === "usage" || action.event.type === "action_result"

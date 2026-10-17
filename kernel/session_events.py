@@ -302,8 +302,12 @@ class SessionJournal:
 
     # -- turn lifecycle --
 
-    def begin_turn(self, text: str, *, resumed: bool = False) -> None:
-        """Open a turn; nothing reaches the disk until the first event of it."""
+    def begin_turn(self, text: str, *, resumed: bool = False, woken: bool = False) -> None:
+        """Open a turn; nothing reaches the disk until the first event of it.
+
+        A woken turn was started by the runtime when background work ended: it
+        has no request text, and its ``job_notice``/``helper`` events say why.
+        """
         with self._lock:
             if self._active:
                 return
@@ -316,6 +320,8 @@ class SessionJournal:
             self._pending_user = {"type": "user", "text": text}
             if resumed:
                 self._pending_user["resumed"] = True
+            if woken:
+                self._pending_user["woken"] = True
 
     def describe_turn(self, text: str) -> None:
         """Fill in the goal of a resumed turn, which is only known once loaded."""

@@ -275,3 +275,122 @@ def test_every_turn_ends_with_turn_end_even_without_final():
     assert "final" not in types
     assert types.count("turn_end") == 2
     assert types.index("stream_commit") < types.index("turn_end")
+
+
+class _WakeAgent(_ScriptAgent):
+    """A fake whose background work ends when the test says so."""
+
+    def __init__(self, ui: EventStreamUI, handler) -> None:
+        super().__init__(ui, handler)
+        self.wake_listener = None
+        self.news = False
+        self.wakes = 0
+
+    def wake_due(self) -> bool:
+        return self.news
+
+    def wake(self) -> str:
+        self.news = False
+        self.wakes += 1
+        self._ui.print_final("the build finished")
+        return "the build finished"
+
+    def finish_background_work(self) -> None:
+        """What a job's thread does when the job ends."""
+        self._ui.print_job_finished("job_1", "exited", 0, "built\n")
+        self.news = True
+        self.wake_listener()
+
+
+def _run_wake(handler):
+    channel = FrontendChannel()
+    ui = EventStreamUI(channel)
+    agent = _WakeAgent(ui, handler)
+    session = EventSession(channel, agent)
+    reader = _ScriptedReader()
+    out = _Collector()
+    thread = threading.Thread(
+        target=event_stdio.serve_session_multi,
+        kwargs={"session": session, "out_stream": out, "in_reader": reader, "wake": True},
+        daemon=True,
+    )
+    thread.start()
+    out.wait_for(lambda e: e["type"] == "hello")
+    return agent, ui, reader, out, thread
+
+
+def _types(out: _Collector) -> list[str]:
+    return [e["type"] for e in out.events()]
+
+
+def test_work_that_ends_between_turns_wakes_the_agent_in_a_turn_of_its_own():
+    agent, _ui, reader, out, thread = _run_wake(_simple_handler)
+    reader.push("start the build in the background")
+    out.wait_for(lambda e: e["type"] == "turn_end")
+
+    agent.finish_background_work()
+    out.wait_for(lambda e: e["type"] == "final" and e["message"] == "the build finished")
+    out.wait_for(lambda e: e["type"] == "turn_end" and _types(out).count("turn_end") == 2)
+    reader.eof()
+    thread.join(timeout=3.0)
+
+    types = _types(out)
+    woken = types[types.index("turn_end") + 1:]
+    # The finish that caused the wake-up is shown before the turn it opens.
+    assert woken[:2] == ["job_finished", "wake"] and "final" in woken and woken[-1] == "turn_end"
+    assert agent.wakes == 1
+    assert agent.goals == ["start the build in the background"]
+
+
+def test_work_that_ends_during_a_turn_wakes_the_agent_right_after_it():
+    def handler(agent, ui, goal):
+        # The job ends while the turn still runs: the listener finds the loop busy.
+        agent.finish_background_work()
+        ui.print_final("answered")
+        return "answered"
+
+    agent, _ui, reader, out, thread = _run_wake(handler)
+    reader.push("go")
+    out.wait_for(lambda e: e["type"] == "turn_end" and _types(out).count("turn_end") == 2)
+    reader.eof()
+    thread.join(timeout=3.0)
+
+    types = _types(out)
+    assert types.count("wake") == 1
+    assert types.index("turn_end") < types.index("wake")
+    assert agent.wakes == 1
+
+
+def test_no_wake_turn_when_the_news_was_already_told():
+    agent, _ui, reader, out, thread = _run_wake(_simple_handler)
+    agent.wake_listener()  # a finish the person's next turn already reported
+    reader.push("hello")
+    out.wait_for(lambda e: e["type"] == "turn_end")
+    reader.eof()
+    thread.join(timeout=3.0)
+
+    assert "wake" not in _types(out)
+    assert agent.wakes == 0
+
+
+def test_with_wake_ups_events_between_turns_are_written_at_once():
+    agent, ui, reader, out, thread = _run_wake(_simple_handler)
+
+    ui.print_job_finished("job_1", "exited", 0, "built\n")
+    out.wait_for(lambda e: e["type"] == "job_finished")
+    reader.eof()
+    thread.join(timeout=3.0)
+
+    assert "turn_end" not in _types(out)
+
+
+def test_without_the_wake_flag_the_agent_gets_no_listener():
+    channel = FrontendChannel()
+    ui = EventStreamUI(channel)
+    agent = _WakeAgent(ui, _simple_handler)
+    reader = _ScriptedReader()
+    reader.eof()
+
+    event_stdio.serve_session_multi(EventSession(channel, agent), out_stream=_Collector(), in_reader=reader)
+
+    assert agent.wake_listener is None

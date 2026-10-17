@@ -311,9 +311,13 @@ One task, one life cycle: `running`, `pause_requested`, `paused`, `resuming`,
 
 ## Helpers, memory and past conversations
 
-* **Helper** (`helper` tool, `agents.manage`): one read-only agent at a time, in its
-  own service session (`helper-…`, never the active or resumable session). It cannot write
-  files or run state-changing commands. Messages travel through an inbox:
+* **Helper** (`helper` tool, `agents.manage`): one agent at a time, in its own service
+  session (`helper-…`, never the active or resumable session). Its role is the one named or,
+  without one, the router's choice for the task. A reader helper only reads; a coder, devops
+  or universal helper the model starts may also change files, unless the main agent itself
+  may not (reader role, plan mode). A helper a skill starts through `agents.manage` is always
+  read-only. Overwriting an existing file asks the person through the main agent's approvals
+  in the event frontends and is refused in the classic terminal. Messages travel through an inbox:
   `sent → received → applied`. `wait` costs no model calls. A helper that the person stopped
   stays stopped until the person writes again. Step limit: 40.
 * **Workspace notes** (`memory` tool, `ctx.memory`): decisions, observations, assumptions.

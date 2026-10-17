@@ -600,10 +600,24 @@ reconstructable. A quiet job costs the model nothing.
   not offered `job_output`/`job_stop` (its prompt is at its token budget and it has no use for them).
 - `process_tree.run_supervised(cancel=Event)` is how a job is stopped: same tree teardown as a timeout,
   `SupervisedResult.cancelled`. Limit: 4 running jobs (`MAX_RUNNING_JOBS`).
-- **A job lives as long as the turn.** `_stop_background_jobs` runs in `run_loop`'s `finally`, before
-  `_finalize_run`: nothing is running once the answer is given, and every job gets `job_finished`
-  before `turn_end`. There is deliberately no wake-up after the answer, and `/resume` does not restore
-  jobs (like `run_shell`, they are non-reconcilable).
+- **A job outlives a final answer only when the agent can be woken.** `_end_of_turn_resources(answered=)`
+  in `run_loop`'s `finally` stops helpers and jobs (`_stop_left_running`) on every ending except a final
+  answer with `LocalAgent.wake_listener` set. That listener is set only by `serve_session_multi(wake=True)`
+  (`--frontend stdio-multi --wake`, passed by the Ink `core.ts`, so the Ink app and the VS Code panel;
+  JetBrains, web-local, ACP, the classic REPL and headless runs keep the old stop-at-answer contract).
+  A job or helper that then ends **on its own** (never one stopped by `job_stop`, the person or stop
+  all, so a stop cannot wake the agent) calls the listener from its thread; `_queue_wake` puts `_WAKE`
+  on the goal queue unless the loop is busy, and the loop re-checks `agent.wake_due()` after every item,
+  so nothing that ended mid-turn is lost. `_run_wake` writes a `wake` event and runs `agent.wake()`: a
+  `_run_turn(WAKE_GOAL, _background_role, woken=True)` that takes the background note **before**
+  anything can fail (so the same news never wakes twice, never a loop), keeps the previous language and
+  role, takes no person's message number, and is journaled as `user` with empty text and `woken`.
+  `wake_due` is false while paused, with a checkpoint or in a closed session. With `--wake` the idle
+  loop also writes events queued between turns (`_next_item`), so a writing helper's approval request
+  is never stuck until the next turn. `/new`, switching sessions and a provider rebuild
+  (`EventSession.replace_agent`) stop what was left running. The start results tell the model which
+  contract holds (`_background_note`, `helpers._start_note`). `/resume` does not restore jobs (like
+  `run_shell`, they are non-reconcilable). Tests: `kernel/tests/test_wake.py`, `test_event_stdio_multi.py`.
 - Output is untrusted like every shell result: `job_output` results are `untrusted: true` and wrapped
   by `feedback_to_detail`; notes wrap each job's text in
   `<UNTRUSTED_TOOL_OUTPUT source="background_job:job_N">` after `redact_text` + defanging.
@@ -731,9 +745,17 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages
   `request_pause` = Esc, `request_cancel` = stop all. A skill call gets
   `Paused`/`Cancelled` at its next request, then the runner is frozen (pause) or ended
   (cancel/timeout). An interrupted batch's remaining actions are not run.
-- **Helpers** (`helpers.py`): one read-only helper in a service session `helper-…`;
+- **Helpers** (`helpers.py`): one helper at a time in a service session `helper-…`;
   `agent_logging` never makes a service session active or resumable. Messages are
-  `sent -> received -> applied` through `_drain_inbox`.
+  `sent -> received -> applied` through `_drain_inbox`. Role: the one named, else
+  `_role_for` routes the bare task (never the goal with its instructions, which sway the
+  router; a `chat` verdict becomes `reader`). It may write unless its role is reader, the
+  main agent may not write (`_main_cannot_write`: reader role, `read_only_goal`, planning,
+  `force_read_only`) or a skill started it (`agents.manage` grants read-only helpers only).
+  A writing helper borrows the main executor's gate only when it is `answers_from_any_thread`
+  (`EventApprovalGate`), else `DenyApprovalGate`, so a classic-terminal helper cannot
+  overwrite existing files. `delegate_task` is not a helper: it starts nobody, and its
+  descriptions say so, because a model once took it for one and reported work that never ran.
 - **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox, with
   destination policy (task-exposed ports, granted domains, no private addresses,
   redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and serves a

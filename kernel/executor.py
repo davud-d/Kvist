@@ -329,6 +329,11 @@ class SafeExecutor:
             ".avi",
         }
 
+    @property
+    def approvals(self) -> ApprovalGate:
+        """The gate this executor asks; a writing helper borrows the main agent's."""
+        return self._approvals
+
     def set_hitl_callbacks(self, suspend_fn, resume_fn):
         """Register UI callbacks for HITL prompts: suspend Live display during input."""
         TerminalExecutor.set_hitl_callbacks(suspend_fn, resume_fn)
@@ -2087,7 +2092,7 @@ class SafeExecutor:
                     "job_id": result.job_id,
                     "started_in_background": True,
                     "max_seconds": job.max_seconds,
-                    "note": _background_note(job.max_seconds, network),
+                    "note": _background_note(job.max_seconds, network, self.jobs.outlives_answer),
                     **service,
                     **({"path_note": path_note} if path_note else {}),
                 },
@@ -2935,11 +2940,16 @@ def _config_dir_inside(workspace: Path) -> Path | None:
     return config
 
 
-def _background_note(max_seconds: float, network: bool) -> str:
+def _background_note(max_seconds: float, network: bool, outlives_answer: bool) -> str:
+    after = (
+        "If you give your final answer while it runs, it keeps running, and when it ends you get "
+        "its result as a new turn: to wait for it without blocking, say so and answer."
+        if outlives_answer else "It is also ended when you give your final answer."
+    )
     note = (
         "The command is running. Its new output is shown to you before each request; "
         "use job_output to wait for it and job_stop to end it. "
-        f"It is ended after {max_seconds:g} s, and when you give your final answer."
+        f"It is ended after {max_seconds:g} s. {after}"
     )
     if network:
         return note

@@ -23,6 +23,10 @@ from kernel.frontend_protocol import ErrorEvent, FrontendChannel
 class EventApprovalGate:
     """`approvals.ApprovalGate` that confirms via a `FrontendChannel` request."""
 
+    # Each request waits on its own id, so a writing helper's thread can ask
+    # while the main agent's thread asks too.
+    answers_from_any_thread = True
+
     def __init__(self, channel: FrontendChannel, mode: str = "ask", workspace: str | Path | None = None) -> None:
         if mode not in {"ask", "deny"}:
             raise ValueError("Approval mode must be 'ask' or 'deny'.")
@@ -81,7 +85,8 @@ class EventApprovalGate:
 
     def confirm(self, title: str, body: str, question: str) -> bool:
         _ = question
-        self._remembered_pattern = None
+        # `_remembered_pattern` is left alone: it belongs to the command approved
+        # last, which may still be running while a helper asks about a file.
         if self._mode == "deny":
             return False
         # File overwrites: diff is in body, but we want it structured for the UI.
@@ -149,9 +154,20 @@ class EventSession:
         """Adopt a rebuilt agent (provider/model switch) for the next run.
 
         Called from a command's own worker, so it cannot refuse while a worker
-        is alive; the transport only runs commands between turns.
+        is alive; the transport only runs commands between turns. Work the old
+        agent left running is stopped, and its wake listener moves over.
         """
+        previous = self._agent
+        listener = getattr(previous, "wake_listener", None)
+        if listener is not None:
+            previous.wake_listener = None
+            previous.stop_left_running()
+            agent.wake_listener = listener
         self._agent = agent
+
+    def drain_events(self) -> list:
+        """Events queued while no turn runs (a background job ending, a helper's approval request)."""
+        return self._channel.drain()
 
     def emit(self, event) -> None:
         """Queue an out-of-band event from any thread, in stream order."""

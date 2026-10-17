@@ -100,6 +100,15 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Dangerous-command approval mode for the stdio frontend.",
     )
     parser.add_argument(
+        "--wake",
+        action="store_true",
+        help=(
+            "stdio-multi only: the frontend handles turns it did not start. Helpers and "
+            "background jobs outlive a final answer, and when one ends the core runs a "
+            "turn about it, opened by a `wake` event."
+        ),
+    )
+    parser.add_argument(
         "--resume",
         nargs="?",
         const=True,
@@ -4362,6 +4371,7 @@ def main() -> None:
                 routed_role=None if args.role == "auto" else args.role,
                 approval_mode=args.approval_mode,
                 commands=STDIO_COMMANDS,
+                wake=args.wake,
                 **({"resume": args.resume} if args.resume else {}),
             )
         except (RuntimeError, ValueError) as error:

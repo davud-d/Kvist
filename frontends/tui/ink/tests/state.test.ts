@@ -244,6 +244,32 @@ test("echo shows a typed command like a request without starting a run", () => {
   assert.equal(state.running, false)
 })
 
+test("a wake event starts a turn nobody typed, and its turn_end closes it", () => {
+  let state = reduce(feed(hello), { type: "event", event: { type: "wake" }, now: 2000 })
+  assert.equal(state.running, true)
+  assert.equal(state.startedAt, 2000)
+  assert.equal(state.items.some((item) => item.kind === "user"), false)
+  state = reduce(state, { type: "event", event: { type: "turn_end" }, now: 5000 })
+  assert.equal(state.running, false)
+  assert.equal(state.items.at(-1)?.kind, "done")
+})
+
+test("a wake turn the core runs before a just-sent request does not end that request's turn", () => {
+  let state = reduce(feed(hello), { type: "submit", text: "next question", now: 1000 })
+  state = reduce(state, { type: "event", event: { type: "wake" }, now: 1001 })
+  state = reduce(state, { type: "event", event: { type: "turn_end" }, now: 3000 })
+  assert.equal(state.running, true)
+  assert.equal(state.turnsAhead, 0)
+  state = reduce(state, { type: "event", event: { type: "turn_end" }, now: 6000 })
+  assert.equal(state.running, false)
+  assert.equal(state.items.filter((item) => item.kind === "done").length, 1)
+})
+
+test("a restored woken turn shows no request of the person", () => {
+  const restored = reduce(feed(hello), { type: "restore", events: [{ type: "user", text: "", woken: true }, { type: "final", message: "the build passed", user_messages: [] }, { type: "turn_end" }], now: 1 })
+  assert.equal(restored.items.some((item) => item.kind === "user"), false)
+})
+
 test("a turn runs from submit until turn_end, even without a final", () => {
   let state = reduce(initialState(), { type: "submit", text: "hi", now: 5 })
   assert.equal(state.running, true)

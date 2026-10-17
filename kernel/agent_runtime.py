@@ -436,7 +436,7 @@ _BLOCKED = _ActionOutcome()
 
 def run_loop(self, user_goal: str, start_step: int) -> str:
     self._ui.start_live()
-    self.executor.jobs.listener = UiJobListener(self._ui)
+    self.executor.jobs.listener = UiJobListener(self._ui, on_finished=self._background_finished)
 
     final_message = ""
     create_goal = _is_create_goal(user_goal)
@@ -552,7 +552,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         # already records as unconfirmed for /resume to reconcile.
         final_message = _stop_by_user(self)
     finally:
-        cleanup = _end_of_turn_resources(self)
+        cleanup = _end_of_turn_resources(self, answered=task_completed)
         self._finalize_run(
             user_goal,
             task_completed=task_completed,
@@ -595,28 +595,42 @@ def _stop_background_jobs(self) -> list[Any]:
     return stopped
 
 
-def _end_of_turn_resources(self) -> CleanupReport | None:
+def _end_of_turn_resources(self, *, answered: bool = False) -> CleanupReport | None:
     """What the task owns, at the end of the turn.
 
     A pause keeps it all (a dev server, the virtual screen, a frozen skill,
-    paused helpers) for the person's correction. Any other ending — the final
-    answer, "stop all", an error — stops helpers, skills, background jobs and
-    every resource of this run, and reports what could not be confirmed.
+    paused helpers) for the person's correction. A final answer keeps running
+    helpers and background jobs when the transport wakes the agent once they
+    finish (``wake_listener``): their result is then a turn of its own. Any
+    other ending — "stop all", an error, a limit — and a final answer without
+    a way to be woken stop helpers, skills, background jobs and every resource
+    of this run, and report what could not be confirmed.
     """
     if self.control.state == PAUSED:
         self.skills.pause()
         return None
     reason = "user_cancelled" if self.control.cancel_requested() else "task_finished"
     report = CleanupReport(reason)
-    if self.helpers is not None:
-        for agent_id in self.helpers.stop_all(reason):
-            report.outcomes.append(StopOutcome(agent_id, f"helper {agent_id}", stopped=True, kind="helper"))
+    keep_running = answered and reason == "task_finished" and self.wake_listener is not None
+    if keep_running:
+        self._background_role = self._state.current_agent_role
+    else:
+        report.outcomes.extend(_stop_left_running(self, reason))
     report.outcomes.extend(self.skills.finish_task(reason).outcomes)
-    for job in _stop_background_jobs(self):
-        report.outcomes.append(StopOutcome(job.job_id, f"background job {job.job_id}", stopped=True, kind="job"))
     owner = Owner(run_id=str(getattr(self, "_run_id", "") or "run"))
     report.outcomes.extend(self.resources.cleanup(owner, reason).outcomes)
     return report
+
+
+def _stop_left_running(self, reason: str) -> list[StopOutcome]:
+    """Stop the helpers and background jobs of this conversation, whichever turn started them."""
+    outcomes: list[StopOutcome] = []
+    if self.helpers is not None:
+        for agent_id in self.helpers.stop_all(reason):
+            outcomes.append(StopOutcome(agent_id, f"helper {agent_id}", stopped=True, kind="helper"))
+    for job in _stop_background_jobs(self):
+        outcomes.append(StopOutcome(job.job_id, f"background job {job.job_id}", stopped=True, kind="job"))
+    return outcomes
 
 
 def _collect_helper_note(self) -> None:

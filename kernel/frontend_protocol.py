@@ -601,6 +601,22 @@ class JobNoticeEvent:
 
 
 @dataclass(slots=True)
+class WakeEvent:
+    """The core starts a turn nobody typed: helpers or jobs left running ended.
+
+    Sent by a multi-turn transport whose frontend asked for wake-ups
+    (``--wake``), before the turn's own events; the turn ends with
+    ``turn_end`` like any other. No request text: the ``job_notice`` and
+    ``helper`` events of the turn say what ended.
+    """
+
+    type: ClassVar[str] = "wake"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type}
+
+
+@dataclass(slots=True)
 class SessionEvent:
     """The session a resumed run continues in, or the one a switch moved to.
 

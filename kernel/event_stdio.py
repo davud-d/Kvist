@@ -29,6 +29,7 @@ from kernel.frontend_protocol import (
     HelloEvent,
     InputResponse,
     SessionEvent,
+    WakeEvent,
     is_cancel_message,
     is_helper_stop_message,
     is_pause_message,
@@ -247,6 +248,12 @@ _STDIN_EOF = object()
 # the agent, so the loop runs it with `submit_resume` instead of `submit_call`.
 _RESUME = object()
 
+# Queued when helpers or jobs an answered turn left running end: the loop runs
+# `agent.wake` as a turn of its own, announced with a `wake` event.
+_WAKE = object()
+# How often an idle loop with wake-ups on forwards events queued between turns.
+_IDLE_POLL_SECONDS = 0.1
+
 
 class _Gate:
     """Whether the serving loop is occupied, decided under one lock.
@@ -454,6 +461,49 @@ def _announce_resume(session: EventSession, out_stream) -> bool:
     return True
 
 
+def _queue_wake(goal_queue: queue.Queue, gate: _Gate) -> None:
+    """Called from a job's or helper's thread: start a wake-up turn unless the loop is busy.
+
+    A busy loop checks for the same news when its current item ends, so
+    nothing that ended meanwhile is lost.
+    """
+    with gate.lock:
+        if gate.busy:
+            return
+        gate.busy = True
+        goal_queue.put(_WAKE)
+
+
+def _run_wake(session: EventSession, out_stream) -> None:
+    """Run ``agent.wake`` as a turn; nothing at all when the news was already told."""
+    if not session.agent.wake_due():
+        return
+    # The `job_finished` that caused the wake-up comes before the turn it opens.
+    for event in session.drain_events():
+        out_stream.write(json.dumps(event.to_dict()) + "\n")
+    out_stream.write(json.dumps(WakeEvent().to_dict()) + "\n")
+    out_stream.flush()
+    session.submit_call(session.agent.wake)
+    _stream_events(session, out_stream)
+    out_stream.write(json.dumps({"type": "turn_end"}) + "\n")
+    out_stream.flush()
+
+
+def _next_item(session: EventSession, goal_queue: queue.Queue, out_stream, wake: bool):
+    """The next queued item; with wake-ups on, events queued between turns are written while waiting."""
+    if not wake:
+        return goal_queue.get()
+    while True:
+        try:
+            return goal_queue.get(timeout=_IDLE_POLL_SECONDS)
+        except queue.Empty:
+            events = session.drain_events()
+            for event in events:
+                out_stream.write(json.dumps(event.to_dict()) + "\n")
+            if events:
+                out_stream.flush()
+
+
 def _write_event(event: CommandResultEvent, out_stream) -> None:
     out_stream.write(json.dumps(event.to_dict()) + "\n")
     out_stream.flush()
@@ -492,8 +542,14 @@ def serve_session_multi(
     ui: EventStreamUI | None = None,
     rebuild: Callable[..., tuple] | None = None,
     resume: bool | str = False,
+    wake: bool = False,
 ) -> None:
     """Multi-turn stdio lifecycle: one hello, one reader, one run per goal line.
+
+    With ``wake`` the frontend handles turns it did not start: helpers and
+    background jobs outlive a final answer, and when one ends on its own the
+    core runs ``agent.wake`` as a turn (``wake`` event, its events,
+    ``turn_end``). Events queued between turns are then written as they come.
 
     The process and its agent outlive every turn: ``hello`` is emitted once, a
     single reader thread owns stdin for the process lifetime, and each goal line
@@ -522,6 +578,8 @@ def serve_session_multi(
     if resume:
         goal_queue.put(_RESUME)
     gate = _Gate()
+    if wake:
+        session.agent.wake_listener = lambda: _queue_wake(goal_queue, gate)
     context = CommandContext(session, ui, rebuild, routed_role)
     reader = threading.Thread(
         target=_read_multi,
@@ -532,13 +590,15 @@ def serve_session_multi(
 
     try:
         while True:
-            item = goal_queue.get()
+            item = _next_item(session, goal_queue, out_stream, wake)
             if item is _STDIN_EOF:
                 return
             if isinstance(item, CommandResultEvent):
                 _write_event(item, out_stream)
             elif item is _RESUME:
                 _run_resume(session, out_stream)
+            elif item is _WAKE:
+                _run_wake(session, out_stream)
             elif isinstance(item, _Command):
                 _run_command(session, item, commands or {}, context, out_stream)
             else:
@@ -552,7 +612,12 @@ def serve_session_multi(
                 # Refusals emitted while this item ran may have missed its
                 # stream; flush them before the gate reopens.
                 _stream_events(session, out_stream)
-                if goal_queue.empty():
+                if not goal_queue.empty():
+                    continue
+                # Work that ended while this item ran had no idle loop to wake.
+                if wake and session.agent.wake_due():
+                    goal_queue.put(_WAKE)
+                else:
                     gate.busy = False
     finally:
         session.close()
@@ -632,6 +697,7 @@ def launch_multi(
     approval_mode: str = "ask",
     commands: dict[str, CommandHandler] | None = None,
     resume: bool | str = False,
+    wake: bool = False,
 ) -> None:
     """Run the real Kvist core behind the multi-turn stdio frontend boundary.
 
@@ -714,6 +780,7 @@ def launch_multi(
             ui=ui,
             rebuild=rebuild,
             resume=resume,
+            wake=wake,
         )
 
 

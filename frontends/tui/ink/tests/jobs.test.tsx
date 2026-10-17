@@ -98,10 +98,18 @@ test("a new session clears the jobs, while /clear keeps running ones", () => {
   assert.deepEqual(next.jobs, [])
 })
 
-test("turn_end and a dead core stop jobs the core never reported", () => {
+test("a job outlives turn_end until the core reports its end, and a dead core stops it", () => {
   const before = feed(initialState(), started("j1"))
-  assert.equal(feed(before, { type: "turn_end" }).jobs[0]?.status, "stopped")
+  // An answered turn may leave the job running; its job_finished comes later, between turns.
+  const answered = feed(before, { type: "turn_end" })
+  assert.equal(answered.jobs[0]?.status, "running")
+  assert.equal(feed(answered, { type: "job_finished", job_id: "j1", status: "exited", exit_code: 0, output: "" }).jobs[0]?.status, "exited")
   assert.equal(reduce(before, { type: "core_exit", expected: true, code: 0 }).jobs[0]?.status, "stopped")
+})
+
+test("a replayed journal leaves no job running", () => {
+  const restored = reduce(initialState(), { type: "restore", events: [started("j1")], now: 1 })
+  assert.equal(restored.jobs[0]?.status, "stopped")
 })
 
 test("the strip shows three running jobs, the rest as a count, and the last output line", () => {

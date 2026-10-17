@@ -73,6 +73,9 @@ export type CoreEvent =
   | ({ type: "input_request" } & InputRequest)
   | { type: "command_result"; name: string; ok: boolean; message: string; effects?: Record<string, unknown> }
   | { type: "turn_end" }
+  // `--wake` only: the core starts a turn nobody typed, because helpers or jobs an answered turn
+  // left running have ended. Its events and turn_end follow like any turn's.
+  | { type: "wake" }
   // Additive, out-of-band: a session's title became known in the background,
   // well after that turn's own turn_end, and possibly for a session the user
   // has since switched away from (UI_API.md §7).
@@ -82,7 +85,8 @@ export type CoreEvent =
   | { type: "session"; session: string; has_checkpoint: boolean; closed?: boolean; closed_notice?: string; title?: string }
   // Background shell jobs (run_shell with `background: true`). job_started, job_finished and
   // job_notice are recorded in the journal; job_output is a live-only snapshot of the job's tail
-  // (replace, never append). Every job gets a job_finished before the turn's turn_end.
+  // (replace, never append). A job stopped with its turn gets job_finished before turn_end; one an
+  // answered turn left running (`--wake`) reports it later, between turns.
   | { type: "job_started"; job_id: string; command: string[]; purpose: string; call_id: string }
   | { type: "job_output"; job_id: string; output: string }
   | { type: "job_finished"; job_id: string; status: JobStatus; exit_code: number | null; output: string }
@@ -95,7 +99,7 @@ export type CoreEvent =
 // (UI_API.md, "Restoring a session's feed").
 export type JournalEvent =
   | CoreEvent
-  | { type: "user"; text: string; resumed?: boolean }
+  | { type: "user"; text: string; resumed?: boolean; woken?: boolean }
   | { type: "journal_notice"; omitted_events?: number; omitted_turns?: number }
 
 export type Reply =
