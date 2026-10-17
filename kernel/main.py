@@ -75,7 +75,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
             "the Node/Ink terminal UI (frontends/tui/ink), 'claude' for the same app drawn "
-            "like Claude Code, 'terminal' for the classic UI, "
+            "like Claude Code, 'terminal' for the Classic Legacy UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
             "per stdin line."
@@ -984,7 +984,7 @@ TUI_FRONTENDS = ("tui", "claude")
 _TUI_SAVED_NOTICE = {
     "tui": "The Ink terminal UI will open on the next launch.",
     "claude": "The Claude-style terminal UI will open on the next launch.",
-    "terminal": "The classic terminal will open on the next launch.",
+    "terminal": "Classic Legacy will open on the next launch.",
 }
 
 
@@ -1031,7 +1031,7 @@ def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: 
     if node is None:
         if not quiet:
             print(
-                "The Ink UI needs Node.js 22 or newer on PATH; using the classic terminal.",
+                "The Ink UI needs Node.js 22 or newer on PATH; using Classic Legacy.",
                 file=sys.stderr,
             )
         return None
@@ -1043,7 +1043,7 @@ def launch_tui(args: argparse.Namespace, *, quiet: bool = False, provider_only: 
             else "build it with `npm install && npm run build` in frontends/tui/ink"
         )
         if not quiet:
-            print(f"The Ink UI is not built: {rebuild}. Using the classic terminal.", file=sys.stderr)
+            print(f"The Ink UI is not built: {rebuild}. Using Classic Legacy.", file=sys.stderr)
         return None
 
     # A provider-only setup has no workspace: resolving one would create the default folder.
@@ -1131,7 +1131,7 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     try:
         save_frontend(chosen)
     except ValueError:
-        print(f"Unknown interface '{chosen}'; using the classic terminal.", file=sys.stderr)
+        print(f"Unknown interface '{chosen}'; using Classic Legacy.", file=sys.stderr)
         return None
     if chosen not in TUI_FRONTENDS:
         return None
@@ -1758,7 +1758,7 @@ def render_startup_banner(
     console.print("[dim]Command '/models' — switch models for the current provider.[/dim]")
     console.print("[dim]Command '/role' — select agent role (auto/coder/reader/devops/chat).[/dim]")
     console.print("[dim]Command '/effort' — set reasoning effort (false/low/medium/high/xhigh/max).[/dim]")
-    console.print("[dim]Command '/tui' — choose the Ink terminal UI or the classic one for the next launch.[/dim]")
+    console.print("[dim]Command '/tui' — choose the Ink terminal UI or Classic Legacy for the next launch.[/dim]")
     console.print("[dim]Command '/session' — manage and switch sessions.[/dim]")
     console.print("[dim]Command '/rename NAME' — set the active session's title by hand.[/dim]")
     console.print("[dim]Command '/new' — start a new session (the current one is kept).[/dim]")

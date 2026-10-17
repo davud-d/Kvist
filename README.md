@@ -152,7 +152,7 @@ interrupted task stays in the session, so `/resume` or a new message picks it up
 ## Interfaces
 
 - **Terminal.** The default. Three looks of the same app: Ink, a Claude Code
-  style and the classic prompt_toolkit one; `/tui` switches between them.
+  style and the Classic Legacy prompt_toolkit one; `/tui` switches between them.
 - **Electron app.** `scripts/installer/install_gui.py`, or
   [`frontends/gui/electron`](frontends/gui/electron/README.md).
 - **Browser.** `kvist-web` opens `http://127.0.0.1:9671` and guides you through

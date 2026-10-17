@@ -49,7 +49,7 @@ export const EFFORTS = ["false", "low", "medium", "high", "xhigh", "max"] as con
 export const FRONTENDS = [
   { value: "tui", label: "Ink terminal", description: "Panels and a boxed input" },
   { value: "claude", label: "Claude-style terminal", description: "The Claude Code look: ● calls, ⎿ results, ruled input" },
-  { value: "terminal", label: "Classic terminal", description: "The original prompt_toolkit interface" },
+  { value: "terminal", label: "Classic Legacy", description: "The original prompt_toolkit interface" },
 ] as const
 
 // The saved `frontend` value of the interface a skin belongs to.

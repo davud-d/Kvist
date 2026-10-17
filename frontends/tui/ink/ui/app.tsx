@@ -76,7 +76,7 @@ function initialEffort(): string {
   return (EFFORTS as readonly string[]).includes(value) ? value : ""
 }
 
-const CLASSIC_NOTE = `Available in the classic terminal: ${CLASSIC_COMMAND}`
+const CLASSIC_NOTE = `Available in Classic Legacy: ${CLASSIC_COMMAND}`
 
 const HELP = [
   ...COMMANDS.map((c) => `/${c.name.padEnd(NAME_WIDTH)} ${c.hint}`),

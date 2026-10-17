@@ -261,7 +261,7 @@ def test_cli_pty_tui_command_saves_the_preference_for_the_next_launch(tmp_path):
         child.wait_for("Claude-style terminal UI will open on the next launch.")
         assert json.loads((home / ".kvist" / "config.json").read_text())["frontend"] == "claude"
         child.send("/tui off\r")
-        child.wait_for("classic terminal will open on the next launch.")
+        child.wait_for("Classic Legacy will open on the next launch.")
         assert json.loads((home / ".kvist" / "config.json").read_text()).get("frontend", "terminal") == "terminal"
         child.send("/bye\r")
         assert child.wait() == 0

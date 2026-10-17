@@ -167,11 +167,11 @@ From source:
 (cd frontends/tui/ink && npm install && npm run build)   # frontends/tui/ink/dist-ui/kvist-tui.mjs
 .venv/bin/python -m kernel --frontend tui      # Ink
 .venv/bin/python -m kernel --frontend claude   # Claude Code style skin of the same app
-.venv/bin/python -m kernel --frontend terminal # classic terminal
+.venv/bin/python -m kernel --frontend terminal # Classic Legacy terminal
 ```
 
 `/tui` saves the choice. If Node.js, the built file, a provider or a TTY is
-missing, Kvist starts the classic terminal and says why. The Claude-style skin
+missing, Kvist starts Classic Legacy and says why. The Claude-style skin
 uses the alternate screen, so it scrolls itself (`PgUp`/`PgDn`,
 `Ctrl+Home`/`Ctrl+End`, mouse wheel) and handles the mouse: drag selects, double
 click selects a word, triple click a line, and `Shift` plus drag uses the

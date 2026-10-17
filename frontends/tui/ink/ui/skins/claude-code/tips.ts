@@ -27,7 +27,7 @@ export const TIPS: readonly string[] = [
   "Choose \"don't ask again\" in an approval to add that command to the project's allow list",
   "Esc twice pauses a run and keeps its state, Ctrl+C stops everything",
   "Ctrl+O shows the shell commands with their output, Ctrl+O again folds them",
-  "/tui switches between the Ink, Claude-style and classic terminal",
+  "/tui switches between the Ink, Claude-style and Classic Legacy terminal",
   "/rename gives the session a title of your own",
   "Provider slow or rate-limited? /settings-api tunes pacing, timeouts and retries",
 ]
