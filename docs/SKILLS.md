@@ -37,9 +37,12 @@ What the model sees:
   package lacks, and warns about a page the instructions never name.
 * At most 4 skills are attached to one task.
 
-The model uses five small built-in tools to work with the platform: `skills`
+The model uses small built-in tools to work with the platform: `skills`
 (`list`, `attach`, `detach`, `read`, `status`, and the builder ops `scaffold`, `check`, `install`),
-`memory`, `sessions`, `helper` and `ask_user`. Skill tools are mapped to the internal action type `skill_call`, so every
+`memory`, `sessions`, `helper`, `ask_user`, and the timers `wait` (a background pause that wakes the agent, up to
+24 hours) and `schedule` (`add`, `list`, `update`, `cancel`, `pause`, `resume`: a one-time or recurring wake-up with
+a task, stored in `<workspace>/.kvist/schedules.json`). Timers fire only while Kvist runs in an interface that can
+wake the agent (the Ink terminal app and the IDE panels, `--wake`). Skill tools are mapped to the internal action type `skill_call`, so every
 guard of the loop (repeat guard, reader/plan barriers, journal, pending action) applies.
 
 ## Package layout

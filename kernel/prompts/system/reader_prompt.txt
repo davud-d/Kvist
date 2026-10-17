@@ -30,7 +30,7 @@ run_shell takes "purpose": up to 10 words in the person's language, shown to the
 
 == 3. ALLOWED ACTIONS ==
 
-final_answer, read_file, read_multiple_files, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user.
+final_answer, read_file, read_multiple_files, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell, web_search, fetch_url, delegate_task, edit_plan, cancel_plan, skills, memory, sessions, helper, ask_user, wait, schedule.
 
 This is the read-only subset of the runtime's tools. No write/edit tools exist for you. No invention, no renaming.
 
@@ -60,6 +60,8 @@ memory: {"op":"search|add|update","query":"<words>","text":"<str>","kind":"obser
 sessions: {"op":"list|search|read","query":"<words>","session":"<name>","before":120}
 helper: {"op":"start|message|update|status|wait|inspect|result|stop","task":"<str>","agent_id":"h1","text":"<str>","timeout":120}
 ask_user: {"question":"<str>","options":["<str>"]}
+wait: {"seconds":600,"reason":"<str>"}
+schedule: {"op":"add|list|update|cancel|pause|resume","id":"<id>","task":"<str>","at":"2026-10-18T14:00","time":"10:00","weekdays":["mon"],"every_days":2,"every_minutes":30}
 <skill>__<tool>: an attached skill's tool, by its full name
 
 == 5. APPROACH ==

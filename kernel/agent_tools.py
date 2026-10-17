@@ -3,7 +3,7 @@
 
 ``skills`` attaches installed skills, ``memory`` keeps notes about this
 workspace, ``sessions`` reads earlier conversations, ``helper`` runs a
-read-only helper agent, ``ask_user`` asks the person, and ``skill_call`` (never
+read-only helper agent, ``ask_user`` asks the person, ``wait`` and ``schedule`` set timed wake-ups, and ``skill_call`` (never
 named by the model: it is what a ``<skill>__<tool>`` call becomes) runs a
 skill's tool. Each returns the executor's feedback shape, so the run loop's
 guards, logs and untrusted-output wrapping treat them like any other action.
@@ -16,10 +16,11 @@ from kernel.plugins.builder import BuildError, check_draft, install_draft, scaff
 from kernel.plugins.skills import SkillUseError
 from kernel.protocol import AgentCommand
 from kernel.redaction import redact_text
+from kernel.scheduler import ScheduleError
 from kernel.session_search import SessionSearchError, list_sessions, read_session, search_sessions
 from kernel.workspace_memory import NoteError, render_for_prompt
 
-AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "skill_call"})
+AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "skill_call"})
 SKILL_OPS = ("list", "attach", "detach", "read", "status")
 MEMORY_OPS = ("search", "add", "update")
 SESSION_OPS = ("list", "search", "read")
@@ -35,7 +36,7 @@ def run_agent_tool(agent: Any, command: AgentCommand) -> dict[str, Any]:
         if action_type == "skill_call":
             return agent.skills.call(args["skill"], args["tool"], args.get("arguments") or {}, command.call_id)
         data = _HANDLERS[action_type](agent, args)
-    except (SkillUseError, NoteError, SessionSearchError, HelperError, BuildError) as error:
+    except (SkillUseError, NoteError, SessionSearchError, HelperError, BuildError, ScheduleError) as error:
         return _error(action_type, str(error))
     return {"ok": True, "action_type": action_type, "data": data}
 
@@ -176,6 +177,30 @@ def _helper(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
     return helpers.stop(agent_id, by="agent")
 
 
+def _scheduler(agent: Any) -> Any:
+    if agent.scheduler is None:
+        raise ScheduleError("a helper cannot wait or schedule")
+    return agent.scheduler
+
+
+def _wait(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
+    return _scheduler(agent).start_wait(float(args["seconds"]), str(args["reason"]))
+
+
+def _schedule(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
+    scheduler = _scheduler(agent)
+    op = args["op"]
+    if op == "add":
+        return scheduler.add(str(args["task"]), args)
+    if op == "list":
+        return scheduler.list()
+    if op == "cancel":
+        return scheduler.cancel(str(args["id"]))
+    if op == "update":
+        return scheduler.update(str(args["id"]), args)
+    return scheduler.update(str(args["id"]), {"paused": op == "pause"})
+
+
 def _ask_user(agent: Any, args: dict[str, Any]) -> dict[str, Any]:
     question = redact_text(str(args["question"]))
     options = [str(option) for option in args.get("options") or []]
@@ -221,6 +246,8 @@ _HANDLERS = {
     "sessions": _sessions,
     "helper": _helper,
     "ask_user": _ask_user,
+    "wait": _wait,
+    "schedule": _schedule,
 }
 
 

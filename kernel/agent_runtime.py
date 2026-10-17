@@ -102,7 +102,7 @@ _READ_ONLY_ACTIONS = {
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
 # The agent's own tools never change the workspace, except a skill tool not
 # declared read-only (checked per call).
-_AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user"}
+_AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule"}
 # Beyond the file reads, what plan mode still allows: it asks the person and
 # looks things up, and never changes the workspace.
 _PLANNING_EXTRA_ACTIONS = {
@@ -500,6 +500,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             turn: NativeTurn | None = None
             _collect_job_note(self)
             _collect_helper_note(self)
+            _collect_schedule_note(self)
             _drain_inbox(self)
             try:
                 if self._state.native_tools:
@@ -642,6 +643,15 @@ def _collect_helper_note(self) -> None:
         self._state.job_note = f"{self._state.job_note}\nHelpers:\n{text}".strip()
 
 
+def _collect_schedule_note(self) -> None:
+    """Waits and schedules that came due go into the next request, with the task recorded for them."""
+    if self.scheduler is None:
+        return
+    text = self.scheduler.take_note()
+    if text:
+        self._state.job_note = f"{self._state.job_note}\n{text}".strip()
+
+
 def _drain_inbox(self) -> None:
     """A helper's messages from the main agent become follow-ups of its task before its next request."""
     source = self.inbox_source
@@ -756,7 +766,7 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     if self.is_helper:
         # A helper never manages helpers and never asks the person directly:
         # its questions go through the main agent.
-        tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user")]
+        tools = [tool for tool in tools if tool["function"]["name"] not in ("helper", "ask_user", "wait", "schedule")]
     tools.extend(self.skills.tool_definitions())
     state.native_tool_defs = plan_mode.tools_for_phase(tools, self)
     if not state.native_messages:

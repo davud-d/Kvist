@@ -36,6 +36,8 @@ ActionType = Literal[
     "sessions",
     "helper",
     "ask_user",
+    "wait",
+    "schedule",
     # Internal: what a call of an attached skill's tool (<skill>__<tool>)
     # becomes after validation. The model never names it.
     "skill_call",

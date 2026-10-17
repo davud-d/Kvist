@@ -114,6 +114,7 @@ from kernel.agent_web import (
 )
 from kernel.executor import SafeExecutor
 from kernel.helpers import HelperManager
+from kernel.scheduler import Scheduler
 from kernel.plugins.skills import SkillManager
 from kernel.resources import Owner, ResourceManager
 from kernel.task_control import TaskControl
@@ -195,6 +196,13 @@ WAKE_GOAL = (
     "(Runtime: no new message from the person. Work you left running after your last answer has ended; "
     "the background note in this request says what it reported. Tell the person what it means for their "
     "request, and continue the task only if it still needs work.)"
+)
+# The goal of a turn started by a wait or a schedule coming due. The note in the
+# request carries the task text the model wrote when it set the wake-up.
+SCHEDULE_WAKE_GOAL = (
+    "(Runtime: no new message from the person. A wait or schedule you set has come due; the scheduled "
+    "wake-up note in this request says which, with the task you recorded for it. Carry that task out now, "
+    "and tell the person what you did or found.)"
 )
 
 
@@ -284,6 +292,7 @@ class LocalAgent:
         self.executor.service_dir_factory = self._service_dir
         self.skills = SkillManager(self)
         self.helpers = None if self.is_helper else HelperManager(self)
+        self.scheduler = None if self.is_helper else Scheduler(executor.workspace)
         # Loading tiktoken's rank table costs tens of MiB and is unnecessary
         # for session recovery and chat-only runs. count_tokens initializes it
         # on the first context-budget calculation.
@@ -667,6 +676,8 @@ class LocalAgent:
     def wake_listener(self, listener: Callable[[], None] | None) -> None:
         self._wake_listener = listener
         self.executor.jobs.outlives_answer = listener is not None
+        if self.scheduler is not None:
+            self.scheduler.set_listener(self._background_finished if listener is not None else None)
 
     def _background_finished(self) -> None:
         listener = self._wake_listener
@@ -676,7 +687,8 @@ class LocalAgent:
     def has_background_news(self) -> bool:
         """Whether a helper or background job ended on its own and the model has not been told."""
         helpers_done = self.helpers is not None and self.helpers.has_finish_notice()
-        return helpers_done or self.executor.jobs.has_unreported_finish()
+        timer_due = self.scheduler is not None and self.scheduler.has_due()
+        return helpers_done or timer_due or self.executor.jobs.has_unreported_finish()
 
     def wake_due(self) -> bool:
         """Whether ``wake`` would run a turn now.
@@ -693,6 +705,8 @@ class LocalAgent:
         from kernel.agent_runtime import _stop_left_running
 
         _stop_left_running(self, "task_finished")
+        if self.scheduler is not None:
+            self.scheduler.clear_waits()
 
     def wake(self) -> str | None:
         """Give the model a turn about helpers or jobs that ended after its answer; None when nothing did.
@@ -706,7 +720,8 @@ class LocalAgent:
         self._journal.begin_turn("", woken=True)
         self._tray_turn_started()
         try:
-            return self._run_turn(WAKE_GOAL, self._background_role or None, woken=True)
+            goal = SCHEDULE_WAKE_GOAL if self.scheduler is not None and self.scheduler.has_due() else WAKE_GOAL
+            return self._run_turn(goal, self._background_role or None, woken=True)
         finally:
             self._journal.end_turn()
             self._tray_turn_finished()
@@ -798,10 +813,11 @@ class LocalAgent:
         self._reset_run_state()
         if woken:
             # Taken before anything can fail, so the same news never wakes the agent twice.
-            from kernel.agent_runtime import _collect_helper_note, _collect_job_note
+            from kernel.agent_runtime import _collect_helper_note, _collect_job_note, _collect_schedule_note
 
             _collect_job_note(self)
             _collect_helper_note(self)
+            _collect_schedule_note(self)
         self._state.message_id = end_session.next_message_id(self, from_person=not woken)
         self._state.user_goal = user_goal
         # User-facing response language is resolved by the runtime layer

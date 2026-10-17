@@ -115,6 +115,10 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
         return f"{data.get('skill', 'skill')}.{data.get('tool', '')}: {data.get('status', 'done')} in {data.get('duration_seconds', 0)} s"
     if action_type == "ask_user":
         return f"Answer: {data.get('status', '')}"
+    if action_type == "wait" and data.get("wakes_at"):
+        return f"Wakes at {data['wakes_at']}"
+    if action_type == "schedule":
+        return _schedule_summary(data)
     if action_type == "skills" and data.get("attached") and not isinstance(data.get("attached"), list):
         return f"Attached {data['attached']} {data.get('version', '')}".strip()
     if action_type == "skills" and data.get("detached"):
@@ -122,6 +126,15 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
     if action_type == "helper" and data.get("agent_id"):
         return f"{data['agent_id']}: {data.get('state', '')}".strip()
     return "Done"
+
+
+def _schedule_summary(data: dict[str, Any]) -> str:
+    if data.get("cancelled"):
+        return f"Cancelled {data['cancelled']}"
+    if "schedules" in data:
+        return _plural(len(data["schedules"]), "schedule")
+    entry = data.get("scheduled") or data.get("updated") or {}
+    return f"{entry.get('id', 'Schedule')}: next {entry.get('next_run', '')} ({entry.get('repeat', '')})".strip()
 
 
 def _shell_summary(data: dict[str, Any], error: str) -> str:

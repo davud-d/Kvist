@@ -311,6 +311,34 @@ ACTION_TOOLS.update({
         },
         ("question",),
     ),
+    "wait": ToolSpec(
+        "Wait in the background: the call returns at once, you say what you need to and end the turn, and the "
+        "runtime wakes you with a turn of your own when the time is up. For a pause of seconds up to 24 hours, "
+        "such as a rate limit resetting or a service starting. A later time of day is a schedule.",
+        {
+            "seconds": {"type": "number", "minimum": 1, "maximum": 86400},
+            "reason": {"type": "string", "description": "What you are waiting for and what to do when woken."},
+        },
+        ("seconds", "reason"),
+    ),
+    "schedule": ToolSpec(
+        "Wake yourself later to carry out a task, once or repeatedly, in local time. add: 'at' (ISO local time, "
+        "one time) or 'time' HH:MM with optional 'weekdays' or 'every_days' (recurring; no weekdays means every "
+        "day), or 'every_minutes' (at least 5). list shows every schedule and the current time; update changes "
+        "the task or the timing; pause, resume and cancel take the id. 'task' is a complete instruction to your "
+        "future self: it will not see this conversation.",
+        {
+            "op": {"type": "string", "enum": ["add", "list", "update", "cancel", "pause", "resume"]},
+            "id": _STRING,
+            "task": _STRING,
+            "at": {"type": "string", "description": "One time, local: 2026-10-18T14:00."},
+            "time": {"type": "string", "description": "Local time of day for a recurring schedule: 10:00."},
+            "weekdays": {"type": "array", "items": {"type": "string", "enum": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]}},
+            "every_days": _integer(1, 365),
+            "every_minutes": _integer(5, 10080),
+        },
+        ("op",),
+    ),
 })
 
 READONLY_TOOLS = frozenset(name for name, spec in ACTION_TOOLS.items() if spec.readonly)

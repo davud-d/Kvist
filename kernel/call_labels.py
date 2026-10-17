@@ -43,6 +43,8 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "sessions": ("прошлые разговоры: {target}", "past conversations: {target}"),
     "helper": ("помощница: {target}", "helper: {target}"),
     "ask_user": ("спрашивает вас", "asks you"),
+    "wait": ("ждёт {target}", "waits {target}"),
+    "schedule": ("расписание: {target}", "schedule: {target}"),
 }
 
 _IN = {"ru": " в ", "en": " in "}
@@ -82,10 +84,22 @@ def _target(action_type: str, args: dict[str, Any], language: str) -> str:
         return _text(args.get("target_role"))
     if action_type in {"job_output", "job_stop"}:
         return _text(args.get("job_id"))
-    if action_type in {"skills", "memory", "sessions", "helper"}:
-        detail = args.get("skill") or args.get("query") or args.get("session") or args.get("agent_id") or ""
+    if action_type == "wait":
+        return _wait_duration(args.get("seconds"), language)
+    if action_type in {"skills", "memory", "sessions", "helper", "schedule"}:
+        detail = args.get("skill") or args.get("query") or args.get("session") or args.get("agent_id") or args.get("id") or ""
         return f"{_text(args.get('op'))} {_text(detail)}".strip()
     return path or ("." if action_type in {"list_dir", "list_tree"} else "")
+
+
+def _wait_duration(seconds: Any, language: str) -> str:
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+        return ""
+    units = (("ч", "h", 3600), ("мин", "min", 60), ("с", "s", 1))
+    for ru, en, size in units:
+        if seconds >= size:
+            return f"{round(seconds / size)} {ru if language == 'ru' else en}"
+    return ""
 
 
 def _text(value: Any) -> str:

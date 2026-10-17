@@ -300,10 +300,10 @@ not already have, so `agent_runtime.update_progress` derives `RunState.progress`
 the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
 monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
 model prompted from a cached older schema does not lose a step. The closed
-set of 31 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
+set of 33 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
 write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
 git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, refuse,
-final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session, skills, memory, sessions, helper, ask_user, and the
+final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session, skills, memory, sessions, helper, ask_user, wait, schedule, and the
 internal `skill_call` the model never names). The parser tolerates fenced code blocks, smart quotes, and surrounding
 noise. **When adding a new action type, update `protocol.py`, the parser's schema
 validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
@@ -628,6 +628,26 @@ reconstructable. A quiet job costs the model nothing.
   throttled like `action_output`), `job_finished`, `job_notice`. Emitted from the job's thread through
   `UiJobListener`; the journal's lock makes that safe. Tests: `kernel/tests/test_background_jobs.py`,
   `test_background_jobs_loop.py`.
+
+### Waits and schedules (`scheduler.py`)
+`wait {seconds, reason}` (1 s..24 h) and `schedule {op: add|list|update|cancel|pause|resume}` wake the agent
+by time through the same path as a finished job: `Scheduler` calls the agent's `wake_listener`, `has_background_news`
+sees `Scheduler.has_due()`, and `wake()` runs a turn with `SCHEDULE_WAKE_GOAL`; the fired occurrences reach the
+model as a `Scheduled wake-ups that came due` note (`_collect_schedule_note`, also taken at step boundaries, so an
+occurrence is never shown twice). The tools return at once; the model says its piece and ends the turn.
+- A wait lives in memory and ends with the conversation (`clear_waits` on `/new`, a session switch and shutdown).
+  A schedule is `<workspace>/.kvist/schedules.json` (`durable_json`): one-time (`at`, ISO local time) or recurring
+  (`time` HH:MM with `weekdays` or `every_days`, no weekdays meaning daily; or `every_minutes` ≥ 5). Local time
+  throughout; `schedule list` returns the current time because the model should not guess it.
+- **The file is the source of truth, so cores share it.** The timer thread re-reads it every ≤30 s and a core
+  *claims* a due entry by advancing `next_run` under the file lock, so Ink and an IDE open on one workspace never
+  run an occurrence twice. An occurrence missed while no core ran fires once, flagged late, and a recurring entry
+  jumps to its next future time (no replay of every missed day).
+- **The timer runs only where the agent can be woken** (`wake_listener` set: `--frontend stdio-multi --wake`). The
+  classic REPL and headless runs refuse `wait` and save a `schedule` with a note that it fires elsewhere. There is
+  no daemon: a closed Kvist runs nothing. Helpers have neither tool.
+- A woken turn has nobody watching: approvals still go through the normal gates, so a command that needs one waits
+  for the person. Tests: `kernel/tests/test_scheduler.py` (a fake clock; the timer thread is left off).
 
 ### Stopping a turn (Ctrl+C / Escape)
 **A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt`

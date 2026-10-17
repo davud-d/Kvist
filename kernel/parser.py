@@ -17,6 +17,7 @@ from kernel.protocol import (
     ModelResponse,
     ToolCallRequest,
 )
+from kernel.scheduler import MAX_WAIT_SECONDS, WEEKDAYS
 
 ALLOWED_ACTIONS = {
     "final_answer",
@@ -51,6 +52,8 @@ ALLOWED_ACTIONS = {
     "sessions",
     "helper",
     "ask_user",
+    "wait",
+    "schedule",
 }
 SKILL_CALL = "skill_call"
 _SKILL_OPS = ("list", "attach", "detach", "read", "status", "scaffold", "check", "install")
@@ -59,6 +62,7 @@ _MEMORY_KINDS = ("observation", "assumption", "decision")
 _SESSION_OPS = ("list", "search", "read")
 _HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
 _HELPER_ROLES = ("reader", "coder", "devops", "universal")
+_SCHEDULE_OPS = ("add", "list", "update", "cancel", "pause", "resume")
 
 MAX_BATCH_ACTIONS = 8
 
@@ -460,6 +464,15 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
         if not isinstance(args.get("allow_text", False), bool):
             raise CommandValidationError("'allow_text' must be a boolean")
 
+    elif action_type == "wait":
+        require_keys(args, {"seconds", "reason"})
+        require_only_allowed_keys(args, {"seconds", "reason"})
+        require_str(args, "reason")
+        _require_number(args, "seconds", 1, MAX_WAIT_SECONDS)
+
+    elif action_type == "schedule":
+        _validate_schedule(args)
+
     elif action_type == SKILL_CALL:
         require_keys(args, {"skill", "tool"})
         require_only_allowed_keys(args, {"skill", "tool", "arguments"})
@@ -481,6 +494,44 @@ def _require_op(args: dict[str, Any], ops: tuple[str, ...]) -> str:
     if op not in ops:
         raise CommandValidationError(f"'op' must be one of: {', '.join(ops)}")
     return op
+
+
+def _require_number(args: dict[str, Any], key: str, low: float, high: float) -> None:
+    value = args.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= value <= high:
+        raise CommandValidationError(f"'{key}' must be a number in {low}..{high}")
+
+
+def _validate_schedule(args: dict[str, Any]) -> None:
+    op = _require_op(args, _SCHEDULE_OPS)
+    timing = {"at", "time", "weekdays", "every_days", "every_minutes"}
+    if op == "list":
+        require_only_allowed_keys(args, {"op"})
+        return
+    if op in ("cancel", "pause", "resume"):
+        require_keys(args, {"id"})
+        require_only_allowed_keys(args, {"op", "id"})
+        require_str(args, "id")
+        return
+    if op == "add":
+        require_keys(args, {"task"})
+        require_only_allowed_keys(args, {"op", "task", *timing})
+    else:
+        require_keys(args, {"id"})
+        require_only_allowed_keys(args, {"op", "id", "task", *timing})
+        require_str(args, "id")
+    require_optional_str(args, "task")
+    if op == "add":
+        require_str(args, "task")
+    require_optional_str(args, "at")
+    require_optional_str(args, "time")
+    _optional_int(args, "every_days", 1, 365)
+    _optional_int(args, "every_minutes", 5, 7 * 24 * 60)
+    weekdays = args.get("weekdays")
+    if weekdays is not None and (not isinstance(weekdays, list) or not weekdays or not all(day in WEEKDAYS for day in weekdays)):
+        raise CommandValidationError(f"'weekdays' must be a non-empty list of: {', '.join(WEEKDAYS)}")
+    if op == "add" and not any(key in args for key in ("at", "time", "every_minutes")):
+        raise CommandValidationError("a schedule needs 'at' (one time) or 'time' / 'every_minutes' (recurring)")
 
 
 def _optional_int(args: dict[str, Any], key: str, low: int, high: int) -> None:
