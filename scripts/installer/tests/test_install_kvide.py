@@ -27,6 +27,7 @@ def test_install_writes_a_generators_file_kvide_can_load(lib_dir):
 
     entry = tomllib.loads(config.read_text(encoding="utf-8"))["generators"][0]
     assert entry["name"] == "Kvist"
+    assert entry["color"] == install_kvide.ICON_COLOR
     assert entry["command"] == [
         sys.executable,
         str(lib_dir / "kvide" / "kvist_generator.py"),

@@ -32,6 +32,8 @@ CONFIG_NAME = "generators.toml"
 ICON_NAME = "icon.txt"
 # Nerd Font "terminal" glyph, the one kvide's own generator example uses.
 ICON_GLYPH = ""
+# Sky blue, applied by kvide to the icon only.
+ICON_COLOR = "#4fc3f7"
 # A model call plus the diff upload; kvide's default of 60 s is tight for a large change.
 TIMEOUT_SECONDS = 120
 
@@ -69,6 +71,7 @@ def render_config(adapter: Path, core: Path) -> str:
         'name = "Kvist"\n'
         f"command = {command}\n"
         f"icon = {json.dumps(ICON_NAME)}\n"
+        f"color = {json.dumps(ICON_COLOR)}\n"
         f"timeout = {TIMEOUT_SECONDS}\n"
     )
 
