@@ -4,7 +4,7 @@
 
 This is the front door: it offers the installers (`install_cli.py`,
 `install_web.py`, `install_jetbrains.py`, `install_vscode.py`, `install_gui.py`,
-`install_zed.py`) as an arrow-key list, all selected by default, and runs the
+`install_zed.py`, `install_kvide.py`) as an arrow-key list, all selected by default, and runs the
 ones you keep.
 
     python scripts/installer/install.py             # pick with the arrow keys
@@ -69,6 +69,7 @@ COMPONENTS = (
     Component("vscode", "VS Code extension", "install_vscode.py"),
     Component("gui", "GUI application", "install_gui.py"),
     Component("zed", "Zed agent registration", "install_zed.py", after=("cli",)),
+    Component("kvide", "kvide commit-message generator", "install_kvide.py", after=("cli",)),
 )
 
 # How much of a failed component's output is shown afterwards. It already went

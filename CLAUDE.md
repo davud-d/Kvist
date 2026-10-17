@@ -26,6 +26,7 @@ frontends/
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
   ide/jetbrains/        IntelliJ plugin (separate Gradle build)
   zed/                  Zed ACP frontend (acp_frontend, acp_events, acp_stdio) + tests/
+  kvide/                commit-message generator for the kvide editor (adapter over --commit-message) + tests/
   tray/                 Electron tray icon + read-only mini chat (own package.json, tests/)
 scripts/                installer/ (+ tests/), run_task.py, package_script.py, tests/
 branding/               icons and logos (installer icons, kvist.ico)

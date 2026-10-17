@@ -5,12 +5,13 @@
 
 | Скрипт | Что делает |
 | --- | --- |
-| `install.py` | Главный вход: показывает пять установщиков ниже списком со стрелками, все отмечены по умолчанию, и запускает оставленные вами. |
+| `install.py` | Главный вход: показывает установщики ниже списком со стрелками, все отмечены по умолчанию, и запускает оставленные вами. |
 | `install_cli.py` | Ставит команду `kvist` и автономный бинарник (собирает его через PyInstaller, если в `dist/` его нет). Раньше лежал в корне репозитория, потом в `install.py`. |
 | `install_jetbrains.py` | Находит все установленные IDE JetBrains и распаковывает плагин **Kvist Launcher** в папку `plugins/` каждой из них. |
 | `install_vscode.py` | Находит команды запуска VS Code, VS Code Insiders и VSCodium и ставит `.vsix` Kvist в каждый редактор. |
 | `install_gui.py` | Ставит Electron-GUI как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux, копия `Kvist.app` в `~/Applications` в macOS. |
 | `install_zed.py` | Регистрирует установленный `kvist-core` как внешний ACP-агент Zed: одна запись `agent_servers` в файле настроек Zed, комментарии и всё остальное не трогаются. |
+| `install_kvide.py` | Добавляет генератор сообщений коммита Kvist в редактор kvide: копирует адаптер (`frontends/kvide/`) рядом с `kvist-core` и пишет `generators.toml`, который передаётся как `kvide --generators`. Настройки kvide не трогает. |
 | `jsonc_settings.py` | Точечный редактор одной записи JSONC-документа. Чистая работа с текстом; единственный вызывающий — `install_zed.py`. |
 | `_common.py` | Общие помощники: тихий лог и спиннер, через которые отчитываются установщики, безопасная распаковка ZIP, поиск IDE JetBrains. |
 
@@ -30,6 +31,8 @@ python scripts/installer/install_gui.py                  # --build — снач�
 python scripts/installer/install_gui.py --uninstall
 python scripts/installer/install_zed.py                  # сначала должен отработать install_cli.py
 python scripts/installer/install_zed.py --uninstall
+python scripts/installer/install_kvide.py                # сначала должен отработать install_cli.py
+python scripts/installer/install_kvide.py --uninstall
 ```
 
 ## Вывод
