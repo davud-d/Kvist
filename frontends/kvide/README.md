@@ -12,12 +12,19 @@ library.
 ```bash
 python scripts/installer/install_cli.py     # puts kvist-core in place
 python scripts/installer/install_kvide.py   # or: install.py --kvide
-kvide --generators ~/.local/share/kvist/kvide/generators.toml
+kvide                                       # the Kvist button is there
 ```
+
+The installer writes kvide's user file (`$XDG_CONFIG_HOME/kvide/generators.toml`,
+else `~/.config/kvide/`; `%APPDATA%\kvide` on Windows), which kvide reads when
+started without `--generators`. A user file Kvist did not write (it starts with
+`# managed by kvist`) is never overwritten or removed; the installer then keeps
+a copy at `~/.local/share/kvist/kvide/generators.toml` and prints the
+`kvide --generators` command for it.
 
 Open the commit panel (`Ctrl+G`), select files, press `Kvist` or `Ctrl+F1`.
 Generation never commits. `install_kvide.py --uninstall` removes the
-`kvide/` directory next to the binary and nothing else.
+`kvide/` directory next to the binary and the user file if Kvist wrote it.
 
 What the adapter does with kvide's input (`{"version", "files", "diff"}`):
 

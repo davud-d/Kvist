@@ -11,12 +11,20 @@ JSON в другой, поэтому ему нужна только станда
 ```bash
 python scripts/installer/install_cli.py     # ставит kvist-core
 python scripts/installer/install_kvide.py   # или: install.py --kvide
-kvide --generators ~/.local/share/kvist/kvide/generators.toml
+kvide                                       # кнопка Kvist уже на месте
 ```
+
+Установщик пишет пользовательский файл kvide (`$XDG_CONFIG_HOME/kvide/generators.toml`,
+иначе `~/.config/kvide/`; `%APPDATA%\kvide` в Windows), который kvide читает без
+`--generators`. Чужой файл (без первой строки `# managed by kvist`) не
+перезаписывается и не удаляется; тогда установщик кладёт копию в
+`~/.local/share/kvist/kvide/generators.toml` и печатает команду с
+`kvide --generators`.
 
 Откройте панель коммита (`Ctrl+G`), выберите файлы, нажмите `Kvist` или
 `Ctrl+F1`. Генерация никогда не делает коммит. `install_kvide.py --uninstall`
-удаляет каталог `kvide/` рядом с бинарником и больше ничего.
+удаляет каталог `kvide/` рядом с бинарником и пользовательский файл, если его
+писал Kvist.
 
 Что адаптер делает со входом kvide (`{"version", "files", "diff"}`):
 

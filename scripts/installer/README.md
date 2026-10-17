@@ -11,7 +11,7 @@ Windows (and, best-effort, macOS).
 | `install_vscode.py` | Finds VS Code, VS Code Insiders and VSCodium command-line launchers and installs the Kvist `.vsix` into each editor. |
 | `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux, `Kvist.app` copied into `~/Applications` on macOS. |
 | `install_zed.py` | Registers the installed `kvist-core` as a Zed ACP external agent: one `agent_servers` member in Zed's settings file, comments and all else left alone. |
-| `install_kvide.py` | Adds a Kvist commit-message generator to the kvide editor: copies the adapter (`frontends/kvide/`) next to `kvist-core` and writes a `generators.toml` to pass as `kvide --generators`. Touches no kvide settings. |
+| `install_kvide.py` | Adds a Kvist commit-message generator to the kvide editor: copies the adapter (`frontends/kvide/`) next to `kvist-core` and writes kvide's user `generators.toml`, so a plain `kvide` shows the button. A user file Kvist did not write is never overwritten or removed. |
 | `jsonc_settings.py` | Surgical editor for one member of a JSONC document. Pure text surgery; `install_zed.py` is its only caller. |
 | `_common.py` | Shared helpers: the quiet log + spinner every installer reports through, safe ZIP extraction, JetBrains IDE discovery. |
 
