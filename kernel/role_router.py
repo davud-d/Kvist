@@ -180,21 +180,30 @@ def resume_role(user_goal: str, routed_role: str, session_history: list[dict]) -
     return routed_role
 
 
-# A change verb that is asked about or ruled out is not a request: "how to
-# fix it" wants words, "don't delete the logs" wants the logs kept.
-_NOT_A_REQUEST_RE = re.compile(
-    r"(?:how\s+(?:to|do\s+i|can\s+i|should\s+i|would\s+you)"
-    r"|как(?:\s+(?:мне|можно|лучше|бы))*"
-    r"|(?<!\w)(?:don'?t|do\s+not|never|не))\s+"
-    r"(?:" + _CHANGE_VERB_RE.pattern + r")",
-    re.IGNORECASE,
-)
+def asks_for(verb: re.Pattern[str], text: str) -> bool:
+    """True when `verb` matches outside a question about it or a negation of it.
+
+    "how to fix it" wants words and "don't delete the logs" wants the logs
+    kept, so neither is a request for that action.
+    """
+    not_a_request = re.compile(
+        r"(?:how\s+(?:to|do\s+i|can\s+i|should\s+i|would\s+you)"
+        r"|как(?:\s+(?:мне|можно|лучше|бы))*"
+        r"|(?<!\w)(?:don'?t|do\s+not|never|не))\s+"
+        r"(?:" + verb.pattern + r")",
+        re.IGNORECASE,
+    )
+    return verb.search(not_a_request.sub(" ", text.casefold())) is not None
+
+
+def mentions_any(keywords: tuple[str, ...], lowered: str) -> bool:
+    """A keyword may start a word and take any ending: "script" is not in "description"."""
+    return any(re.search(r"(?<!\w)" + re.escape(keyword), lowered) for keyword in keywords)
 
 
 def has_change_verb(text: str) -> bool:
     """True when the request asks for something to be changed."""
-    lowered = _NOT_A_REQUEST_RE.sub(" ", text.casefold())
-    return bool(_CHANGE_VERB_RE.search(lowered) or _CHANGE_PHRASE_RE.search(lowered))
+    return asks_for(_CHANGE_VERB_RE, text) or asks_for(_CHANGE_PHRASE_RE, text)
 
 
 def has_no_write_marker(text: str) -> bool:
@@ -507,11 +516,6 @@ _CHAT_KEYWORDS: tuple[str, ...] = (
 )
 
 
-def _mentions_any(keywords: tuple[str, ...], lowered: str) -> bool:
-    """A keyword may start a word and take any ending: "script" is not in "description"."""
-    return any(re.search(r"(?<!\w)" + re.escape(keyword), lowered) for keyword in keywords)
-
-
 def _keyword_route(user_goal: str) -> str:
     """Keyword-based fallback routing. Priority: reader (no-write) → devops → coder → reader (explain-artifact) → chat → default."""
     lowered = user_goal.casefold()
@@ -521,11 +525,11 @@ def _keyword_route(user_goal: str) -> str:
         return "reader"
 
     # DevOps: infrastructure/deployment keywords
-    if _mentions_any(_DEVOPS_KEYWORDS, lowered):
+    if mentions_any(_DEVOPS_KEYWORDS, lowered):
         return "devops"
 
     # Coder: creation/modification keywords
-    if _mentions_any(_CODER_KEYWORDS, lowered):
+    if mentions_any(_CODER_KEYWORDS, lowered):
         return "coder"
 
     # Reader: "explain/summarize <artifact>" reads a workspace file, which
@@ -536,7 +540,7 @@ def _keyword_route(user_goal: str) -> str:
             return "reader"
 
     # Chat: explanation/discussion keywords
-    if _mentions_any(_CHAT_KEYWORDS, lowered):
+    if mentions_any(_CHAT_KEYWORDS, lowered):
         return "chat"
 
     # A change verb aimed at a named file ("add X to pricing.py") is an edit
@@ -671,7 +675,7 @@ def route_role_decision_with_llm(
         )
         kw_role = _keyword_route(user_goal)
         if kw_role != _DEFAULT_ROLE or any(
-            _mentions_any(kw_list, user_goal.casefold())
+            mentions_any(kw_list, user_goal.casefold())
             for kw_list in (_DEVOPS_KEYWORDS, _CODER_KEYWORDS, _CHAT_KEYWORDS)
         ):
             decision.role = kw_role

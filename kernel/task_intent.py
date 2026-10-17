@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from kernel.role_router import has_change_verb
+import re
+
+from kernel.role_router import asks_for, has_change_verb, mentions_any
 
 # Keyword guesses about what a request expects back. They only relax or add
 # completion accounting; none of them may block a write by itself.
@@ -25,36 +27,33 @@ _REPORT_MARKERS: tuple[str, ...] = (
 
 
 # The words that ask for something new to be made; the router's change verbs
-# cover every other kind of edit.
-_CREATE_MARKERS: tuple[str, ...] = (
-    "create ", "build ", "generate ", "scaffold", "bootstrap", "создай", "сгенерируй",
+# cover every other kind of edit. "build" is left out: "build the project and
+# run the tests" runs a build and creates nothing.
+_CREATE_VERB_RE = re.compile(
+    r"(?<!\w)(?:create|generate|scaffold|bootstrap|создай|сгенерируй)",
+    re.IGNORECASE,
 )
 
+# Words that name work spanning the codebase. Topic nouns ("system", "project",
+# "agent") are not here: they appear in plain questions as often as in hard tasks,
+# and errors or stagnation escalate to the smart model on their own.
 _COMPLEX_KEYWORDS: tuple[str, ...] = (
     "architect",
     "refactor",
-    "production",
-    "system",
-    "agent",
     "multiple files",
-    "project",
-    "analysis",
-    "memory",
-    "planning",
-    "improv",
-    "upgrade",
+    "несколько файлов",
+    "архитектур",
+    "рефактор",
 )
 
 
 def is_create_goal(user_goal: str) -> bool:
-    lowered = user_goal.casefold()
-    return any(marker in lowered for marker in _CREATE_MARKERS)
+    return asks_for(_CREATE_VERB_RE, user_goal)
 
 
 def asks_for_explanation(user_goal: str) -> bool:
     """The request expects a substantive spoken answer (an explanation, a review)."""
-    lowered = user_goal.casefold()
-    return any(marker in lowered for marker in _REPORT_MARKERS)
+    return mentions_any(_REPORT_MARKERS, user_goal.casefold())
 
 
 def infer_task_kind(user_goal: str) -> str:
@@ -70,5 +69,4 @@ def infer_task_kind(user_goal: str) -> str:
 
 def is_complex_goal(user_goal: str) -> bool:
     """Whether the request starts on the smart model instead of the fast one."""
-    lowered = user_goal.casefold()
-    return len(user_goal) > 180 or any(keyword in lowered for keyword in _COMPLEX_KEYWORDS)
+    return len(user_goal) > 180 or mentions_any(_COMPLEX_KEYWORDS, user_goal.casefold())

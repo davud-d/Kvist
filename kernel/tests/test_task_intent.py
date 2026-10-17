@@ -34,3 +34,23 @@ def test_is_complex_goal_heuristic():
     assert is_complex_goal("small edit") is False
     assert is_complex_goal("architect a production system") is True
     assert is_complex_goal("x" * 181) is True
+
+
+def test_a_topic_noun_alone_does_not_start_a_run_on_the_smart_model():
+    assert not is_complex_goal("what is my system date")
+    assert not is_complex_goal("show the project name")
+    assert is_complex_goal("рефактор модуля оплаты")
+    assert is_complex_goal("change the config in multiple files")
+
+
+def test_build_runs_a_build_and_asking_how_to_create_creates_nothing():
+    assert not is_create_goal("build the project and run the tests")
+    assert not is_create_goal("how to create a parser?")
+    assert not is_create_goal("don't generate a new file, just show the diff")
+    assert not is_create_goal("recreate the failure and report")
+    assert is_create_goal("Generate a changelog for this release")
+
+
+def test_a_report_marker_must_start_a_word():
+    assert not asks_for_explanation("open the preview tab")
+    assert asks_for_explanation("review this module")
