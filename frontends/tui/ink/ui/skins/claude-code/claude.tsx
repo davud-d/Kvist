@@ -268,7 +268,7 @@ function FoldedRun({ counts, shells }: { counts: ExploreCounts; shells: number }
 
 function Thought({ item }: { item: Extract<Item, { kind: "thought" }> }) {
   const { russian } = useContext(ViewContext)
-  const label = item.seconds > 0 ? (russian ? `Думал ${span(item.seconds, true)}` : `Thought for ${formatSeconds(item.seconds)}`) : russian ? "Думал" : "Thought"
+  const label = item.seconds > 0 ? (russian ? `Думала ${span(item.seconds, true)}` : `Thought for ${formatSeconds(item.seconds)}`) : russian ? "Думала" : "Thought"
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text color={color.thought} italic>✻ {label}</Text>

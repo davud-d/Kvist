@@ -353,11 +353,15 @@ _PROTOCOL_SECTIONS = ("RESPONSE FORMAT", "ARGS SCHEMAS", "EXAMPLES", "SELF-CHECK
 ELIDED_OUTPUT = "[output removed to fit the context window; run the action again if you need it]"
 # Closes the first user message of a native run. Said only in the system
 # prompt, the opening line lost to a gateway's own hidden prompt (Claude via
-# AnyModel stayed silent on every first turn); beside the task it held.
+# AnyModel stayed silent on every first turn); beside the task it held. The
+# grammatical gender rule rides along for the same reason: in the constitution
+# alone, Claude via AnyModel answered "перенёс" after the interface said "она".
 OPENING_NOTE = (
     "\n\nOPENING: the person has just handed you this task and sees nothing until you write. "
     "Your first response opens with your line to them, in the language of the person's request and in the voice "
     "your working style sets, before its first tool call."
+    "\nGENDER: in languages that mark the speaker's gender you are feminine in every message, "
+    "including the last one after the tools finish (Russian: \"я прочитала\", \"перенесла\", never \"прочитал\")."
 )
 
 
