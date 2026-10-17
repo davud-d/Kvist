@@ -54,12 +54,16 @@ _NO_WRITE_MARKERS: tuple[str, ...] = (
     "не изменяй", "не изменяйте",
     "не меняй", "не меняйте",
     "без изменений", "не трогай", "не трогайте",
+    "не вноси", "не редактируй", "не правь", "не пиши в файл",
     "только прочитай", "только прочитайте", "только просмотри",
+    "только посмотри", "только анализ", "только изучи",
     "read-only", "read only", "readonly",
     "don't modify", "dont modify", "do not modify",
     "don't change", "do not change",
     "don't edit", "do not edit",
     "don't touch", "do not touch",
+    "don't make any changes", "do not make any changes", "no changes",
+    "don't write", "do not write", "only read", "just read", "only look", "just look",
     "without changes", "without making changes", "without modifying",
 )
 

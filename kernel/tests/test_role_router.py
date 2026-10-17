@@ -1062,6 +1062,21 @@ def test_no_write_request_that_only_asks_how_to_change_is_read_only(goal):
 @pytest.mark.parametrize(
     "goal",
     [
+        "разбери модуль оплаты, не вноси правок",
+        "посмотри конфиг, только анализ",
+        "не редактируй файлы, просто расскажи что тут не так",
+        "look at the auth flow, make no changes",
+        "just read the logs and tell me what failed",
+        "do not make any changes, explain why the test is flaky",
+    ],
+)
+def test_common_no_write_phrasings_make_the_run_read_only(goal):
+    assert role_router.has_no_write_marker(goal) is True
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
         "write a short answer about what happens",
         "make sure both options are clear",
         "explain what a pipeline is in pandas",
