@@ -1255,7 +1255,7 @@ def request_cancelled_text(language: str) -> str:
 
 def run_stopped_text(language: str) -> str:
     return (
-        "Работа агента остановлена вами."
+        "Работа Kvist остановлена вами."
         if language == "ru"
         else "Agent run stopped by you."
     )
@@ -3987,8 +3987,8 @@ def _revert_confirmation_body(baseline: dict) -> str:
         "(all sessions) to their state before the agent's first change and cannot be "
         "undone. Files changed outside the agent's writes are kept.",
         f"Будет восстановлено файлов: {len(paths)} (журнал изменений рабочей папки, все "
-        "сессии) — до первого изменения агентом; отменить нельзя. Файлы, изменённые "
-        "вне записей агента, сохраняются.",
+        "сессии) — до первого изменения Kvist; отменить нельзя. Файлы, изменённые "
+        "вне записей Kvist, сохраняются.",
     )
     return summary + "\n\n" + "\n".join(lines)
 
@@ -4017,7 +4017,7 @@ def _stdio_revert(ctx: CommandContext) -> CommandResult:
         )
     confirmed = ctx.ui.confirm(
         f"Revert {len(baseline)} agent-changed file(s) to their baselines? / "
-        f"Откатить файлов, изменённых агентом: {len(baseline)}?",
+        f"Откатить файлов, изменённых Kvist: {len(baseline)}?",
         _revert_confirmation_body(baseline),
     )
     if not confirmed:
@@ -4032,7 +4032,7 @@ def _stdio_revert(ctx: CommandContext) -> CommandResult:
     if skipped:
         message += "\n" + _bi(
             f"Kept {len(skipped)} file(s) that changed outside the agent's tracked writes.",
-            f"Оставлено файлов, изменённых вне записей агента: {len(skipped)}.",
+            f"Оставлено файлов, изменённых вне записей Kvist: {len(skipped)}.",
         )
     return CommandResult(
         True,

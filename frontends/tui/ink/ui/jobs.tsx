@@ -81,7 +81,7 @@ function useNow(active: boolean, every: number): number {
 // local viewer link (127.0.0.1, with its token) that any browser on this machine can open.
 export function ScreenLine({ screen, russian }: { screen: { title: string; state: string; url: string; stream: string } | null; russian: boolean }) {
   if (!screen) return null
-  const label = russian ? "Экран агента" : "Agent screen"
+  const label = russian ? "Экран Kvist" : "Agent screen"
   return (
     <Box paddingX={currentSkin() === "claude" ? 1 : 0}>
       <Text wrap="truncate-end">

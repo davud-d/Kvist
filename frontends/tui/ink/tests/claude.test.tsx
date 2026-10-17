@@ -362,7 +362,7 @@ test("the closing line names the time it took and when it was done, in the reque
   assert.match(doneLine(finished), /^.+ for 1m 20s · done \d{1,2}:\d{2} [AP]M$/)
   assert.match(doneLine({ ...finished, role: "chat" }), /^Replied for 1m 20s · done /)
   assert.match(doneLine({ ...finished, russian: true }), /^.+ за 1 мин 20 с · готово \d{2}:\d{2}$/)
-  assert.match(doneLine({ ...finished, role: "chat", russian: true, seconds: 4 }), /^Ответил за 4 с · готово /)
+  assert.match(doneLine({ ...finished, role: "chat", russian: true, seconds: 4 }), /^Ответила за 4 с · готово /)
   assert.match(doneLine({ ...finished, interrupted: true }), /^Stopped after 1m 20s · \d{1,2}:\d{2} [AP]M$/)
   assert.equal(doneLine(finished), doneLine(finished))
   assert.notEqual(doneLine(finished), doneLine({ ...finished, seed: finished.seed + 1000 }))

@@ -679,8 +679,8 @@ def _stop_by_user(self) -> str:
 
 def _build_pause_message(self) -> str:
     if self._state.response_language == "ru":
-        return ("Работа на паузе: агент остановился в безопасной точке, состояние задачи сохранено. "
-                "Напишите уточнение — агент учтёт его и продолжит, — или «продолжай».")
+        return ("Работа на паузе: Kvist остановилась в безопасной точке, состояние задачи сохранено. "
+                "Напишите уточнение — она учтёт его и продолжит, — или «продолжай».")
     return ("Paused: the agent stopped at a safe point and kept the task's state. "
             "Write a correction and it continues with it, or say \"continue\".")
 
@@ -2024,7 +2024,7 @@ def build_cancellation_message(self) -> str:
     # terminal, the GUI's cancel), so it says who stopped the run instead of
     # leaving "on request" to be read as an internal limit being hit.
     if self._state.response_language == "ru":
-        return "Работа агента остановлена вами. Показано то, что агент успел сделать."
+        return "Работа Kvist остановлена вами. Показано то, что она успела сделать."
     return "Agent run stopped by you. Showing what the agent completed so far."
 
 
@@ -2038,7 +2038,7 @@ def build_early_stop_message(self, step: int) -> str | None:
         errors = _summarize_recent_errors(self)
         if is_ru:
             return (
-                "Агент остановлен: слишком много ошибок подряд. "
+                "Kvist остановлена: слишком много ошибок подряд. "
                 f"Последние ошибки: {errors}"
             )
         return (
@@ -2054,7 +2054,7 @@ def build_early_stop_message(self, step: int) -> str | None:
         last_actions = ", ".join(self._state.recent_feedback[-3:])
         if is_ru:
             return (
-                "Агент остановлен: прогресса нет, похоже на зацикливание. "
+                "Kvist остановлена: прогресса нет, похоже на зацикливание. "
                 f"Последние действия: {last_actions}"
             )
         return (
@@ -2070,7 +2070,7 @@ def build_limit_reached_message(self) -> str:
     blockers = ", ".join(self._state.completion_blockers[-3:])
     if self._state.response_language == "ru":
         message = (
-            "Агент не успел завершить задачу за отведённый лимит шагов. "
+            "Kvist не успела завершить задачу за отведённый лимит шагов. "
             f"Текущий прогресс: {self._state.progress}%. "
             f"Последние ошибки: {errors}."
         )

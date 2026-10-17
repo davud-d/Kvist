@@ -71,7 +71,7 @@ _CATALOG = (
     Capability("storage", "Keep its own data for this workspace", "Хранить свои данные для этого проекта"),
     Capability("artifacts", "Save result files (screenshots, reports) for you",
                "Сохранять файлы результатов (снимки экрана, отчёты) для вас"),
-    Capability("agents.manage", "Start a read-only helper agent", "Запускать помощника только для чтения"),
+    Capability("agents.manage", "Start a read-only helper agent", "Запускать помощницу только для чтения"),
     Capability("display", "Run programs on its own virtual screen, separate from yours",
                "Запускать программы на собственном виртуальном экране, отдельном от вашего"),
     Capability("permissions.request", "Ask you for extra access during a task",

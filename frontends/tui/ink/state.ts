@@ -612,11 +612,11 @@ function skillNote(event: Extract<CoreEvent, { type: "skill" }>, russian: boolea
 function helperNote(event: Extract<CoreEvent, { type: "helper" }>, russian: boolean): string {
   const by = event.stopped_by === "person" ? (russian ? " вами" : " by you") : ""
   const words: Record<string, [string, string]> = {
-    started: ["запущен", "started"], done: ["закончил", "finished"], failed: ["завершился ошибкой", "failed"],
-    stopped: ["остановлен", "stopped"], paused: ["на паузе", "paused"],
+    started: ["запущена", "started"], done: ["закончила", "finished"], failed: ["завершилась ошибкой", "failed"],
+    stopped: ["остановлена", "stopped"], paused: ["на паузе", "paused"],
   }
   const [ru, en] = words[event.event] ?? [event.event, event.event]
-  const head = russian ? `Помощник ${event.agent_id} ${ru}${by}` : `Helper ${event.agent_id} ${en}${by}`
+  const head = russian ? `Помощница ${event.agent_id} ${ru}${by}` : `Helper ${event.agent_id} ${en}${by}`
   const detail = event.summary || (event.event === "started" ? event.task : "")
   return detail ? `${head}: ${detail}` : head
 }

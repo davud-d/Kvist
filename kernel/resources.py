@@ -93,7 +93,7 @@ class CleanupReport:
         labels = ", ".join(dict.fromkeys(item.label for item in visible if item.stopped))
         if self.ok:
             if language == "ru":
-                return f"Kvist закрыл процессы задачи: {labels}."
+                return f"Kvist закрыла процессы задачи: {labels}."
             return f"Kvist closed the task's processes: {labels}."
         failed = "; ".join(f"{item.label} ({item.error})" for item in self.failed)
         if language == "ru":

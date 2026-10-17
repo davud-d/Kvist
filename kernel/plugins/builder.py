@@ -169,7 +169,7 @@ def install_text(manifest, registry: SkillRegistry, report: CheckReport, languag
     ru = language == "ru"
     current = registry.entry(manifest.id)
     lines = [f"{manifest.label(language)} {manifest.version} — {manifest.short(language)}",
-             ("Создан агентом в этой задаче." if ru else "Built by the agent in this task.")]
+             ("Создан Kvist в этой задаче." if ru else "Built by the agent in this task.")]
     if current is not None and current.manifest is not None:
         before = set(current.manifest.required_capabilities())
         after = set(manifest.required_capabilities())

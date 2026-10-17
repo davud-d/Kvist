@@ -41,7 +41,7 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "skills": ("скиллы: {target}", "skills: {target}"),
     "memory": ("заметки проекта: {target}", "project notes: {target}"),
     "sessions": ("прошлые разговоры: {target}", "past conversations: {target}"),
-    "helper": ("помощник: {target}", "helper: {target}"),
+    "helper": ("помощница: {target}", "helper: {target}"),
     "ask_user": ("спрашивает вас", "asks you"),
 }
 
