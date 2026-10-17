@@ -86,7 +86,7 @@ from kernel.parser import (
 from kernel.protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from kernel.redaction import defang_prompt_boundary_tags, redact_text, redact_value
 from kernel import end_session, plan_mode
-from kernel.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker
+from kernel.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker, mentions_any
 from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 from kernel.background_jobs import UiJobListener
 from kernel.agent_tools import AGENT_TOOL_ACTIONS, memory_prompt_section, run_agent_tool
@@ -2299,14 +2299,15 @@ def _is_verify_only_goal(user_goal: str) -> bool:
     en_phrases = (
         "check if",
         "check whether",
+        "how many",
         "git status",
         "git diff",
     )
     # Short single-word markers use word-boundary matching via _token_match to
     # avoid false positives on filenames ("list" inside "empty_list.py").
-    en_token_markers = {"find", "show", "list", "inspect"}
+    en_token_markers = {"find", "show", "list", "inspect", "count"}
 
-    if any(pattern in lowered for pattern in ru_patterns + en_phrases):
+    if mentions_any(ru_patterns + en_phrases, lowered):
         return True
     return any(_token_match(marker, lowered) for marker in en_token_markers)
 

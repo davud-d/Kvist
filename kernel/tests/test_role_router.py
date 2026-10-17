@@ -1275,3 +1275,10 @@ def test_a_bare_do_not_touch_is_still_read_only():
 )
 def test_keyword_fallback_treats_a_change_verb_on_a_directory_as_an_action(goal, role):
     assert role_router._keyword_route(goal) == role
+
+
+def test_reading_a_named_file_is_not_a_direct_coder_rule():
+    # A request to read a file has no write in it; the router weighs the whole
+    # sentence, and the keyword fallback sends it to the read-only role.
+    assert role_router._match_direct_rule("прочитай utils.py и скажи что там") is None
+    assert role_router._keyword_route("прочитай utils.py и скажи что там") == "reader"

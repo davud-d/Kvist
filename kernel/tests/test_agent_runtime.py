@@ -1760,3 +1760,11 @@ def test_a_response_of_only_calls_leaves_their_labels_as_the_step_note(agent_fac
 
     assert agent._state.rolling_summaries[1] == 'читает a.py · ищет "role" в src/'
     assert agent._state.user_messages == []
+
+
+def test_verify_only_goal_matches_english_counting_like_the_russian_one():
+    from kernel.agent_runtime import _is_verify_only_goal
+
+    assert _is_verify_only_goal("how many files are in src?")
+    assert _is_verify_only_goal("count the TODO comments")
+    assert not _is_verify_only_goal("fix the parser")
