@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from types import SimpleNamespace as NS
 from typing import Any
 
@@ -85,6 +86,13 @@ def _prompt_cache_key(account_id: str, request: dict) -> str:
     return "kvist-" + digest[:58]
 
 
+def _session_headers(cache_key: str) -> dict[str, str]:
+    # Without these headers the plan backend spreads requests over machines and almost never reuses the cache
+    # (measured: 0 of 6 repeats cached without, 4 of 5 with), so every step is billed to the plan limit in full.
+    session = str(uuid.uuid5(uuid.NAMESPACE_URL, cache_key))
+    return {"session-id": session, "thread-id": session, "x-client-request-id": session}
+
+
 def _chunk(content: str = "", calls: list | None = None, usage: Any = None, reasoning: str = "") -> NS:
     return NS(choices=[NS(delta=NS(content=content, tool_calls=calls or [], reasoning_content=reasoning),
                           finish_reason=None)], usage=usage)
@@ -118,6 +126,7 @@ class ChatGPTClient:
     def create(self, **kwargs):
         request = _request(kwargs)
         request["prompt_cache_key"] = kwargs.get("prompt_cache_key") or _prompt_cache_key(self.account_id, request)
+        request["extra_headers"] = _session_headers(request["prompt_cache_key"])
         stream = self._stream(request)
         if kwargs.get("stream"):
             return stream

@@ -57,7 +57,9 @@ counts as complete only after `response.completed`; interrupted streams and
 plan-limit errors are shown as errors. Requests carry a stable `prompt_cache_key`
 so supported models can reuse an unchanged prefix, and cached-token counts from
 the server are kept in the usage figures. Caching does not remove requests, and
-cached input still counts toward rate limits.
+cached input still counts toward rate limits. The same key also derives the
+`session-id`, `thread-id` and `x-client-request-id` headers: without them the
+backend routes requests to different machines and the cache is almost never hit.
 
 Usage counts against your ChatGPT plan and is shared with other apps that use it.
 Check limits at [ChatGPT Settings, Usage](https://chatgpt.com/settings/usage).
