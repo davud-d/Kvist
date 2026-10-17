@@ -160,10 +160,10 @@ function splitCell(row: DiffRow | null, numW: number, width: number) {
   return <CodeRow no={row.newNo} numW={numW} sign="+" signColor={color.ok} text={row.text} width={width} bg={color.addBg} />
 }
 
-export function DiffBody({ rows, width, split }: { rows: DiffRow[]; width: number; split: boolean }) {
+export function DiffBody({ rows, width, split, limit = DIFF_ROWS }: { rows: DiffRow[]; width: number; split: boolean; limit?: number }) {
   const numW = numberWidth(rows)
   if (!split) {
-    const shown = rows.slice(0, DIFF_ROWS)
+    const shown = rows.slice(0, limit)
     return (
       <>
         {shown.map((row, i) => unifiedRow(row, numW, width, i))}
@@ -172,7 +172,7 @@ export function DiffBody({ rows, width, split }: { rows: DiffRow[]; width: numbe
     )
   }
   const paired = pairRows(rows)
-  const shown = paired.slice(0, DIFF_ROWS)
+  const shown = paired.slice(0, limit)
   const half = Math.floor((width - 1) / 2)
   return (
     <>

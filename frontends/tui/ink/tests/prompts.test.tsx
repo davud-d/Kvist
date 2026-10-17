@@ -44,6 +44,20 @@ test("an overwrite approval shows removed and added lines, not the raw unified d
   app.unmount()
 })
 
+test("a huge overwrite diff is clipped so every answer stays on screen", () => {
+  const body = Array.from({ length: 80 }, (_, i) => `-old ${i}\n+new ${i}`).join("\n")
+  const { app, frame } = mount({
+    kind: "confirm", title: "File overwrite", remember_pattern: null,
+    subject: { kind: "overwrite", path: "big.py", diff: `--- a/big.py\n+++ b/big.py\n@@ -1,80 +1,80 @@\n${body}` },
+  })
+  const out = frame()
+  assert.match(out, /more lines/)
+  assert.match(out, /1\. Yes/)
+  assert.match(out, /No/)
+  assert.ok(out.split("\n").length <= 24, `dialog is ${out.split("\n").length} rows`)
+  app.unmount()
+})
+
 test("host and network confirmations show the command and never offer remembering", async () => {
   for (const title of ["Host execution", "Network access"]) {
     const { app, answers, frame } = mount({

@@ -42,6 +42,10 @@ const LABEL_WIDTH = 34
 const FRAME_CHROME = 4
 // Rows the dialog needs besides the option list: frame, title, search, footer, spacing.
 const CHROME_ROWS = 10
+// Rows an approval needs besides the diff and the option list: rule, title, "more lines",
+// question, footer, spacing, plus the status bar and prompt the fullscreen skin keeps below it.
+const APPROVAL_CHROME_ROWS = 20
+const MIN_DIFF_ROWS = 4
 
 type Answer = boolean | string | null | { approved: boolean; remember: boolean }
 
@@ -143,9 +147,11 @@ function introRows(request: InputRequest): number {
 // (1. Yes / 2. Yes, and don't ask again / 3. No), arrows + Enter, digits,
 // Esc = deny. Mouse: one click moves cursor, double click chooses.
 function Approval({ request, onAnswer }: Props) {
-  const { columns } = useWindowSize()
+  const { columns, rows } = useWindowSize()
   const subject = subjectOf(request)
   const options = approvalOptions(request)
+  // The answers must stay on screen however large the change is.
+  const diffLimit = Math.max(MIN_DIFF_ROWS, rows - APPROVAL_CHROME_ROWS - options.length)
   const dialog = useDialogState(() => initialApproval(Date.now()))
   const model = dialog.get()
   const clickState = useRef<ClickState>({ index: null, at: 0 })
@@ -249,7 +255,7 @@ function Approval({ request, onAnswer }: Props) {
           </Box>
         ) : subject?.kind === "overwrite" ? (
           <Box flexDirection="column" marginTop={1}>
-            <DiffBody rows={parseUnifiedDiff(subject.diff)} width={columns - FRAME_CHROME} split={columns >= SPLIT_MIN_COLUMNS} />
+            <DiffBody rows={parseUnifiedDiff(subject.diff)} width={columns - FRAME_CHROME} split={columns >= SPLIT_MIN_COLUMNS} limit={diffLimit} />
           </Box>
         ) : (
           <Intro request={request} />
