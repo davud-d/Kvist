@@ -186,6 +186,15 @@ def has_change_verb(text: str) -> bool:
     return bool(_CHANGE_VERB_RE.search(lowered) or _CHANGE_PHRASE_RE.search(lowered))
 
 
+# A change verb right after "how to" / "как" is the subject of a question, not
+# a request: "don't change anything, explain how to fix it" asks for words.
+_ASKED_HOW_TO_CHANGE_RE = re.compile(
+    r"(?:how\s+(?:to|do\s+i|can\s+i|should\s+i|would\s+you)|как(?:\s+(?:мне|можно|лучше|бы))*)\s+"
+    r"(?:" + _CHANGE_VERB_RE.pattern + r")",
+    re.IGNORECASE,
+)
+
+
 def has_no_write_marker(text: str) -> bool:
     """True when the user forbids modifying anything at all.
 
@@ -193,12 +202,14 @@ def has_no_write_marker(text: str) -> bool:
     run ("make all tests pass without modifying the tests"), so the marker
     only counts when nothing else in the request asks for a change. The
     markers themselves contain change verbs ("don't change"), so they are
-    removed before the request is checked for one.
+    removed before the request is checked for one, and so are verbs the
+    request only asks how to apply.
     """
     lowered = text.casefold()
     if not any(marker in lowered for marker in _NO_WRITE_MARKERS):
         return False
-    return not has_change_verb(_strip_no_write_markers(lowered))
+    remainder = _ASKED_HOW_TO_CHANGE_RE.sub(" ", _strip_no_write_markers(lowered))
+    return not has_change_verb(remainder)
 
 
 _DEFERRED_WRITE_RE = re.compile(

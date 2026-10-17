@@ -1047,6 +1047,31 @@ def test_plain_no_write_request_is_read_only(goal):
 
 
 @pytest.mark.parametrize(
+    "goal",
+    [
+        "ничего не меняй, объясни как исправить",
+        "don't change anything, just explain how to fix it",
+        "read-only: tell me how to refactor this module",
+        "не трогай файлы, подскажи как мне переименовать модуль",
+    ],
+)
+def test_no_write_request_that_only_asks_how_to_change_is_read_only(goal):
+    assert role_router.has_no_write_marker(goal) is True
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "don't change the tests, fix the parser",
+        "не трогай CHANGELOG, исправь баг в main.py",
+        "don't touch the tests, and show me how to fix it, then fix it",
+    ],
+)
+def test_no_write_scope_with_a_separate_change_request_is_not_read_only(goal):
+    assert role_router.has_no_write_marker(goal) is False
+
+
+@pytest.mark.parametrize(
     "goal, role",
     [
         ("Add a function apply_discount(price, percent) to pricing.py", "coder"),
