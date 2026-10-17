@@ -323,9 +323,8 @@ _DIRECT_DEVOPS_PATTERNS: tuple[tuple[str, str], ...] = (
     ("настрой.*(?:nginx|apache|сервер|server|proxy|firewall|ssl|certbot)", "infra config"),
     ("перезапусти.*(?:сервис|systemd|служб|systemctl|демон)", "service restart"),
     ("запусти.*docker.*(?:compose|контейнер)", "docker compose"),
-    ("(?:ci/cd|cicd|pipeline|пайплайн)", "ci/cd"),
     # English
-    ("deploy.*(?:docker|server|vps|project|app)", "deploy action"),
+    ("\\bdeploy\\b.*\\b(?:docker|server|vps|project|apps?)\\b", "deploy action"),
     ("configure.*(?:nginx|apache|server|proxy|firewall|ssl|certbot)", "infra config"),
     ("restart.*(?:service|systemd|systemctl|daemon)", "service restart"),
     ("run.*docker.*(?:compose|container)", "docker compose"),
@@ -334,7 +333,7 @@ _DIRECT_DEVOPS_PATTERNS: tuple[tuple[str, str], ...] = (
 
 _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
     # Russian: creation verbs + artifact
-    ("(?:создай|напиши|сделай|сгенерируй|закоди|разработай)\\s.*(?:скрипт|файл|бот|README|readme|программ|приложени|код|модуль)", "create artifact"),
+    ("\\b(?:создай|напиши|сделай|сгенерируй|закоди|разработай)\\s.*\\b(?:скрипт\\w*|файл\\w*|бот\\w*|readme|программ\\w*|приложени\\w*|код\\w*|модул\\w*)", "create artifact"),
     ("исправь\\s.*(?:ошибк|баг|проблем|issue)", "fix action"),
     # "почини баг" carries no artifact noun, so the create-artifact rule above
     # never sees it; without its own rule it fell through to chat.
@@ -346,14 +345,14 @@ _DIRECT_CODER_PATTERNS: tuple[tuple[str, str], ...] = (
     ("собери\\s.*(?:проект|project)", "build project"),
     ("проверь\\s+.*(?:\\bgit\\b|git\\s+status|git\\s+diff|\\bdiff\\b)", "git check"),
     # English: creation verbs + artifact
-    ("(?:create|write|make|generate|code|develop)\\s.*(?:script|file|bot|README|readme|program|app|code|module)", "create artifact"),
-    ("fix\\s.*(?:bug|error|issue|problem)", "fix action"),
+    ("\\b(?:create|write|make|generate|code|develop)\\s.*\\b(?:scripts?|files?|bots?|readme|programs?|apps?|applications?|code|modules?)\\b", "create artifact"),
+    ("\\bfix\\s.*\\b(?:bugs?|errors?|issues?|problems?)\\b", "fix action"),
     ("add\\s.*logging", "add logging"),
     ("refactor", "refactor"),
     ("read\\s.*\\.py\\b", "read project file"),
-    ("run\\s.*tests?", "run tests"),
-    ("build\\s.*(?:project|app)", "build project"),
-    ("check\\s.*(?:git|status|diff)", "git check"),
+    ("\\brun\\s.*\\btests?\\b", "run tests"),
+    ("\\bbuild\\s.*\\b(?:project|apps?)\\b", "build project"),
+    ("\\bcheck\\s.*\\b(?:git|diff)\\b", "git check"),
 )
 
 _MIXED_EXPLAIN_AND_CHANGE_PATTERNS: tuple[tuple[str, str], ...] = (
@@ -485,7 +484,7 @@ _CODER_KEYWORDS: tuple[str, ...] = (
     "создай", "напиши", "сделай", "исправь", "рефактор",
     "create", "write", "make", "fix", "refactor",
     "скрипт", "script",
-    "readme", "README", "логирование", "logging",
+    "readme", "логирование", "logging",
     "сгенерируй", "закоди", "разработай",
     "generate", "develop",
 )
@@ -501,11 +500,16 @@ _CHAT_KEYWORDS: tuple[str, ...] = (
     "architecture",
     # Russian
     "объясни", "расскажи", "что думаешь", "как лучше", "посоветуй",
-    "архитектур", "подход", "мнение",
+    "архитектур", "какой подход", "мнение",
     "обсуди",
     "помоги разобраться", "как устроен", "в чём разница",
     "плюсы и минусы", "привет", "посоветуй"
 )
+
+
+def _mentions_any(keywords: tuple[str, ...], lowered: str) -> bool:
+    """A keyword may start a word and take any ending: "script" is not in "description"."""
+    return any(re.search(r"(?<!\w)" + re.escape(keyword), lowered) for keyword in keywords)
 
 
 def _keyword_route(user_goal: str) -> str:
@@ -517,14 +521,12 @@ def _keyword_route(user_goal: str) -> str:
         return "reader"
 
     # DevOps: infrastructure/deployment keywords
-    for keyword in _DEVOPS_KEYWORDS:
-        if keyword in lowered:
-            return "devops"
+    if _mentions_any(_DEVOPS_KEYWORDS, lowered):
+        return "devops"
 
     # Coder: creation/modification keywords
-    for keyword in _CODER_KEYWORDS:
-        if keyword in lowered:
-            return "coder"
+    if _mentions_any(_CODER_KEYWORDS, lowered):
+        return "coder"
 
     # Reader: "explain/summarize <artifact>" reads a workspace file, which
     # chat cannot do — checked after devops/coder (an action request that
@@ -534,9 +536,8 @@ def _keyword_route(user_goal: str) -> str:
             return "reader"
 
     # Chat: explanation/discussion keywords
-    for keyword in _CHAT_KEYWORDS:
-        if keyword in lowered:
-            return "chat"
+    if _mentions_any(_CHAT_KEYWORDS, lowered):
+        return "chat"
 
     # A change verb aimed at a named file ("add X to pricing.py") is an edit
     # even when no keyword above knows the verb. Checked after the chat
@@ -670,9 +671,8 @@ def route_role_decision_with_llm(
         )
         kw_role = _keyword_route(user_goal)
         if kw_role != _DEFAULT_ROLE or any(
-            kw in user_goal.casefold()
+            _mentions_any(kw_list, user_goal.casefold())
             for kw_list in (_DEVOPS_KEYWORDS, _CODER_KEYWORDS, _CHAT_KEYWORDS)
-            for kw in kw_list
         ):
             decision.role = kw_role
             decision.source = "keyword_fallback"

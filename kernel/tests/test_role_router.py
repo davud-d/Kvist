@@ -1062,6 +1062,36 @@ def test_no_write_request_that_only_asks_how_to_change_is_read_only(goal):
 @pytest.mark.parametrize(
     "goal",
     [
+        "write a short answer about what happens",
+        "make sure both options are clear",
+        "explain what a pipeline is in pandas",
+        "сделай объяснение про работу кэша",
+    ],
+)
+def test_a_topic_word_inside_another_word_does_not_pick_a_direct_role(goal):
+    # "app" in "happens", "bot" in "both" and a bare "pipeline" are not requests
+    # to build anything; the sentence goes on to the LLM router.
+    assert role_router._match_direct_rule(goal) is None
+
+
+@pytest.mark.parametrize(
+    "goal, role",
+    [
+        ("give me a description of this module", "default"),
+        ("why does the observer fire twice", "default"),
+        ("steps to reproduction of the crash", "default"),
+        ("Write a script that renames the files", "coder"),
+        ("deploy the app to the server", "devops"),
+    ],
+)
+def test_keyword_fallback_matches_word_starts_not_substrings(goal, role):
+    expected = role_router._DEFAULT_ROLE if role == "default" else role
+    assert role_router._keyword_route(goal) == expected
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
         "Tell me how to add logging to a service",
         "как мне исправить эту ошибку?",
         "don't delete the logs, just list them",
