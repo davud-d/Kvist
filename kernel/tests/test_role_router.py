@@ -1062,6 +1062,32 @@ def test_no_write_request_that_only_asks_how_to_change_is_read_only(goal):
 @pytest.mark.parametrize(
     "goal",
     [
+        "Tell me how to add logging to a service",
+        "как мне исправить эту ошибку?",
+        "don't delete the logs, just list them",
+        "не удали файл config.py, только покажи его",
+        "верни мне список файлов",
+    ],
+)
+def test_a_change_that_is_asked_about_or_ruled_out_is_not_a_change_request(goal):
+    assert role_router.has_change_verb(goal) is False
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
+        "don't delete the logs, but fix the parser",
+        "верни как было",
+        "откати последний коммит",
+    ],
+)
+def test_a_change_verb_outside_a_question_or_negation_still_counts(goal):
+    assert role_router.has_change_verb(goal) is True
+
+
+@pytest.mark.parametrize(
+    "goal",
+    [
         "don't change the tests, fix the parser",
         "не трогай CHANGELOG, исправь баг в main.py",
         "don't touch the tests, and show me how to fix it, then fix it",

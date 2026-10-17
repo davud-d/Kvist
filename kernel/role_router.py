@@ -95,7 +95,7 @@ _CHANGE_VERB_RE = re.compile(
     r"|очист|зачист|вычист|сотри|сотр[её]м"
     r"|исправ|измени|изменить|обнов|добав|отредактир|переделай|доработай"
     r"|переимен|замен|удали|удалить|почин|поправ|реализ|перепиш|переписать"
-    r"|мигрир|верни"
+    r"|мигрир|верни(?!\s+(?:мне|нам)\b)|откат(?:и|ить)"
     r")(?![a-z_])",
     re.IGNORECASE,
 )
@@ -180,19 +180,21 @@ def resume_role(user_goal: str, routed_role: str, session_history: list[dict]) -
     return routed_role
 
 
-def has_change_verb(text: str) -> bool:
-    """True when the request asks for something to be changed."""
-    lowered = text.casefold()
-    return bool(_CHANGE_VERB_RE.search(lowered) or _CHANGE_PHRASE_RE.search(lowered))
-
-
-# A change verb right after "how to" / "как" is the subject of a question, not
-# a request: "don't change anything, explain how to fix it" asks for words.
-_ASKED_HOW_TO_CHANGE_RE = re.compile(
-    r"(?:how\s+(?:to|do\s+i|can\s+i|should\s+i|would\s+you)|как(?:\s+(?:мне|можно|лучше|бы))*)\s+"
+# A change verb that is asked about or ruled out is not a request: "how to
+# fix it" wants words, "don't delete the logs" wants the logs kept.
+_NOT_A_REQUEST_RE = re.compile(
+    r"(?:how\s+(?:to|do\s+i|can\s+i|should\s+i|would\s+you)"
+    r"|как(?:\s+(?:мне|можно|лучше|бы))*"
+    r"|(?<!\w)(?:don'?t|do\s+not|never|не))\s+"
     r"(?:" + _CHANGE_VERB_RE.pattern + r")",
     re.IGNORECASE,
 )
+
+
+def has_change_verb(text: str) -> bool:
+    """True when the request asks for something to be changed."""
+    lowered = _NOT_A_REQUEST_RE.sub(" ", text.casefold())
+    return bool(_CHANGE_VERB_RE.search(lowered) or _CHANGE_PHRASE_RE.search(lowered))
 
 
 def has_no_write_marker(text: str) -> bool:
@@ -202,14 +204,12 @@ def has_no_write_marker(text: str) -> bool:
     run ("make all tests pass without modifying the tests"), so the marker
     only counts when nothing else in the request asks for a change. The
     markers themselves contain change verbs ("don't change"), so they are
-    removed before the request is checked for one, and so are verbs the
-    request only asks how to apply.
+    removed before the request is checked for one.
     """
     lowered = text.casefold()
     if not any(marker in lowered for marker in _NO_WRITE_MARKERS):
         return False
-    remainder = _ASKED_HOW_TO_CHANGE_RE.sub(" ", _strip_no_write_markers(lowered))
-    return not has_change_verb(remainder)
+    return not has_change_verb(_strip_no_write_markers(lowered))
 
 
 _DEFERRED_WRITE_RE = re.compile(
