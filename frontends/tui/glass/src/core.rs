@@ -94,29 +94,54 @@ impl Core {
         Ok(Core { child, argv: argv.to_vec(), workspace: workspace.to_path_buf(), stdin: Some(stdin), messages, log })
     }
 
-    /// Reads a session's journal in a one-shot core process: the running core
-    /// is busy with its own stream, and the journal is not part of it.
-    pub fn history(&self, session: &str) -> Receiver<Result<History, String>> {
+    /// Runs a one-shot core process (`--session-op …`) on a thread and sends
+    /// what `parse` makes of its stdout. The running core is busy with its
+    /// own stream, and these operations are not part of it.
+    fn operation<T: Send + 'static>(
+        &self,
+        extra: Vec<String>,
+        input: Option<String>,
+        parse: fn(&str) -> Result<T, String>,
+    ) -> Receiver<Result<T, String>> {
         let argv = self.argv.clone();
         let workspace = self.workspace.clone();
-        let session = session.to_string();
-        let (sender, history) = mpsc::channel();
+        let (sender, results) = mpsc::channel();
         thread::spawn(move || {
-            let output = Command::new(&argv[0])
+            let mut command = Command::new(&argv[0]);
+            command
                 .args(&argv[1..])
-                .args(["--workspace", &workspace.display().to_string(), "--session-op", "history"])
-                .args(["--session-name", &session, "--history-limit", HISTORY_LIMIT])
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .output();
-            let parsed = match output {
-                Ok(output) => parse_history(&String::from_utf8_lossy(&output.stdout)),
-                Err(error) => Err(error.to_string()),
-            };
-            // The receiver is gone when the person switched session again.
+                .args(["--workspace", &workspace.display().to_string()])
+                .args(&extra)
+                .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null());
+            let parsed = command.spawn().map_err(|error| error.to_string()).and_then(|mut child| {
+                if let (Some(text), Some(mut stdin)) = (input, child.stdin.take()) {
+                    stdin.write_all(text.as_bytes()).map_err(|error| error.to_string())?;
+                }
+                let output = child.wait_with_output().map_err(|error| error.to_string())?;
+                parse(&String::from_utf8_lossy(&output.stdout))
+            });
+            // The receiver is gone when the person moved on.
             let _ = sender.send(parsed);
         });
-        history
+        results
+    }
+
+    /// A session's journal (`--session-op history`, the newest events).
+    pub fn history(&self, session: &str) -> Receiver<Result<History, String>> {
+        let extra = ["--session-op", "history", "--session-name", session, "--history-limit", HISTORY_LIMIT];
+        self.operation(extra.map(String::from).to_vec(), None, parse_history)
+    }
+
+    /// The workspace's earlier inputs, oldest first (`--session-op input-history`).
+    pub fn input_history(&self) -> Receiver<Result<Vec<String>, String>> {
+        self.operation(vec!["--session-op".into(), "input-history".into()], None, parse_entries)
+    }
+
+    /// Records an input in the workspace's history; nothing waits for it.
+    pub fn remember_input(&self, text: &str) {
+        drop(self.operation(vec!["--session-op".into(), "input-history-add".into()], Some(text.to_string()), |_| Ok(())));
     }
 
     pub fn send(&mut self, message: &Value) -> io::Result<()> {
@@ -173,6 +198,17 @@ fn parse_history(stdout: &str) -> Result<History, String> {
     Ok(History { events, has_more: reply.get("has_more").and_then(Value::as_bool) == Some(true) })
 }
 
+/// The reply of `--session-op input-history`: `{"ok":true,"entries":[…]}`.
+fn parse_entries(stdout: &str) -> Result<Vec<String>, String> {
+    let line = stdout.trim().lines().next_back().unwrap_or("");
+    let reply: Value = serde_json::from_str(line).map_err(|error| format!("unreadable input history ({error})"))?;
+    if reply.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(reply.get("error").and_then(Value::as_str).unwrap_or("no input history").to_string());
+    }
+    let entries = reply.get("entries").and_then(Value::as_array);
+    Ok(entries.map(|all| all.iter().filter_map(|entry| entry.as_str().map(str::to_string)).collect()).unwrap_or_default())
+}
+
 /// `message` of a `command_result` is "English / Русский"; this picks one half.
 pub fn localized(message: &str, russian: bool) -> &str {
     match message.split_once(" / ") {
@@ -203,6 +239,12 @@ mod tests {
         assert!(history.has_more);
         let kinds: Vec<&str> = history.events.iter().filter_map(|e| e["type"].as_str()).collect();
         assert_eq!(kinds, ["user", "turn_end"]);
+    }
+
+    #[test]
+    fn the_input_history_reply_lists_entries_oldest_first() {
+        assert_eq!(parse_entries(r#"{"ok": true, "entries": ["a", "b"]}"#).unwrap(), ["a", "b"]);
+        assert!(parse_entries(r#"{"ok": false, "error": "x"}"#).is_err());
     }
 
     #[test]

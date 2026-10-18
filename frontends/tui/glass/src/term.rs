@@ -3,7 +3,7 @@
 
 use std::io::{self, Write};
 
-use crossterm::cursor::{Hide, Show};
+use crossterm::cursor::{Hide, SetCursorStyle, Show};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
@@ -21,19 +21,23 @@ pub fn enter() -> io::Result<()> {
         EnableBracketedPaste,
         PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES),
         Hide,
+        SetCursorStyle::BlinkingBar,
         SetTitle("Kvist"),
     )?;
+    // The cursor takes the interface's moonlight colour (OSC 12).
+    out.write_all(b"\x1b]12;#EFE3C2\x1b\\")?;
     install_panic_restore();
     Ok(())
 }
 
 pub fn leave() -> io::Result<()> {
     let mut out = io::stdout();
-    // Every picture this program placed with its data, the pointer shape, and
+    // Every picture this program placed with its data, the pointer shape, the cursor colour, and
     // the default background (changed to blend the padding with the photo).
-    out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b]22;default\x1b\\\x1b]111\x1b\\")?;
+    out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b]22;default\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\")?;
     execute!(
         out,
+        SetCursorStyle::DefaultUserShape,
         PopKeyboardEnhancementFlags,
         DisableBracketedPaste,
         DisableMouseCapture,

@@ -17,6 +17,16 @@ pub const HOVER: Color = Color::Rgb(0x22, 0x2D, 0x43);
 /// What text fades towards when it dims or before it appears.
 pub const NIGHT: Color = Color::Rgb(0x0A, 0x10, 0x1C);
 
+/// Code blocks: the pane behind them and the colours of what they hold.
+pub const CODE_BG: Color = Color::Rgb(0x16, 0x20, 0x34);
+pub const SYN_KEYWORD: Color = Color::Rgb(0xC7, 0x9B, 0xEA);
+pub const SYN_FUNCTION: Color = Color::Rgb(0x82, 0xAA, 0xF2);
+pub const SYN_TYPE: Color = Color::Rgb(0xE6, 0xC3, 0x7A);
+pub const SYN_NUMBER: Color = Color::Rgb(0xF0, 0x9A, 0x77);
+pub const SYN_OPERATOR: Color = Color::Rgb(0x7F, 0xD4, 0xE6);
+pub const SYN_COMMENT: Color = Color::Rgb(0x7B, 0x88, 0xA3);
+pub const LINK: Color = Color::Rgb(0x8E, 0xB4, 0xF0);
+
 /// Glass tint, as raw RGB for the compositor.
 pub const GLASS_TINT: [u8; 3] = [0x0C, 0x14, 0x24];
 

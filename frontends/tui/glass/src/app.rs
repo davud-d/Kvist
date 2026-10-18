@@ -24,11 +24,12 @@ use crate::model::{CoreEvent, Session};
 use crate::models::ModelPicker;
 use crate::pictures::{
     Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_HELPERS, SLOT_INPUT,
-    SLOT_LEFT, SLOT_READING, Scene, ThumbSpec, Worker,
+    SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, Worker,
 };
 use crate::probe::Caps;
 use crate::protocol;
 use crate::screen::Feed;
+use crate::slash::{self, Command, Enter};
 use crate::strings::{self, strings};
 use crate::term;
 use crate::view::{self, Hit};
@@ -105,6 +106,18 @@ pub struct App {
     pub toast: Option<Toast>,
     pub input: String,
     pub cursor: usize,
+    /// Earlier inputs of this workspace, oldest first.
+    history: Vec<String>,
+    /// The inputs on their way from the core.
+    history_in: Option<Receiver<Result<Vec<String>, String>>>,
+    /// How far back in `history` the box shows (0 = the newest); `None` while typing.
+    recall: Option<usize>,
+    /// What was typed before walking back through the history.
+    draft: String,
+    /// The slash menu's chosen row (clamped to the list; reset by every edit).
+    pick: usize,
+    /// 0 while the slash menu is closed, 1 once it has opened.
+    pub menu_in: Tween,
     pub last_typed: Instant,
     pub workspace: String,
     pub branch: String,
@@ -152,6 +165,12 @@ impl App {
             toast: None,
             input: String::new(),
             cursor: 0,
+            history: Vec::new(),
+            history_in: None,
+            recall: None,
+            draft: String::new(),
+            pick: 0,
+            menu_in: Tween::settled(0.0),
             last_typed: now,
             workspace: workspace_label(workspace),
             branch: git_branch(workspace).unwrap_or_default(),
@@ -210,6 +229,8 @@ impl App {
     fn tick(&mut self, now: Instant, pictures: &mut Pictures) {
         self.poll_core(now);
         self.poll_replay(now);
+        self.poll_input_history();
+        self.sync_menu(now);
         self.poll_feed(now, pictures);
         if matches!(self.phase, Phase::Splash) && self.splash_over(now, pictures) {
             self.phase = Phase::Main { since: now };
@@ -221,6 +242,31 @@ impl App {
         }
         if self.toast.as_ref().is_some_and(|t| now.saturating_duration_since(t.at) > TOAST) {
             self.toast = None;
+        }
+    }
+
+    /// The commands the input is asking for; none while a dialog is open or
+    /// the session is closed.
+    pub fn menu(&self) -> Vec<&'static Command> {
+        if self.modal.is_some() || self.session.closed.is_some() || !matches!(self.phase, Phase::Main { .. }) {
+            return Vec::new();
+        }
+        slash::suggest(&self.input)
+    }
+
+    /// The menu's chosen row.
+    pub fn chosen(&self) -> usize {
+        self.pick.min(self.menu().len().saturating_sub(1))
+    }
+
+    /// Opens the menu with a short animation when the list appears; it hides
+    /// at once when the list goes, since its rows are gone with it.
+    fn sync_menu(&mut self, now: Instant) {
+        let open = !self.menu().is_empty();
+        if open && self.menu_in.target() == 0.0 {
+            self.menu_in.go(1.0, now, 170, Ease::OutCubic);
+        } else if !open && self.menu_in.target() != 0.0 {
+            self.menu_in = Tween::settled(0.0);
         }
     }
 
@@ -276,6 +322,25 @@ impl App {
             self.notify(error, true, now);
         }
         self.web_aspect = pictures.web_aspect();
+    }
+
+    /// Asks the core for the workspace's earlier inputs, for the Up arrow.
+    fn load_input_history(&mut self) {
+        self.history_in = self.core.as_ref().map(Core::input_history);
+    }
+
+    fn poll_input_history(&mut self) {
+        let Some(incoming) = self.history_in.as_ref() else { return };
+        match incoming.try_recv() {
+            Err(TryRecvError::Empty) => {}
+            // What was typed and sent while the list was on its way is newer.
+            Ok(Ok(mut earlier)) => {
+                earlier.append(&mut self.history);
+                self.history = earlier;
+                self.history_in = None;
+            }
+            Ok(Err(_)) | Err(TryRecvError::Disconnected) => self.history_in = None,
+        }
     }
 
     fn poll_replay(&mut self, now: Instant) {
@@ -526,7 +591,7 @@ impl App {
     }
 
     fn animating(&self, now: Instant) -> bool {
-        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.modal_p];
+        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.modal_p, &self.menu_in];
         matches!(self.phase, Phase::Splash)
             || self.session.busy
             || self.command.is_some()
@@ -541,6 +606,9 @@ impl App {
         let drawn = view::draw(self, frame.buffer_mut(), now);
         self.hits = drawn.hits;
         self.reading = drawn.reading;
+        if let Some(position) = drawn.cursor {
+            frame.set_cursor_position(position);
+        }
     }
 
     fn scene(&self, now: Instant, pictures: &Pictures) -> Scene {
@@ -584,6 +652,13 @@ impl App {
         }
         let rise = (1.0 - self.input_rise.value(now)) * 8.0 * ch;
         cards.push(CardSpec { slot: SLOT_INPUT, style: style(CardStyle::Input), rect: self.layout.input, dx: 0.0, dy: rise });
+        let shown = self.menu().len();
+        let menu = layout::menu(self.layout.input, shown);
+        if menu.height > 0 {
+            let open = self.menu_in.value(now).clamp(0.0, 1.0);
+            let stage = (open * 2.0).round() as u8;
+            cards.push(CardSpec { slot: SLOT_MENU, style: CardStyle::Menu(stage), rect: menu, dx: 0.0, dy: (1.0 - open) * 0.8 * ch });
+        }
         if let Some(Modal::Ask(_) | Modal::Models(_)) = self.modal
             && modal > 0.05
         {
@@ -685,18 +760,36 @@ impl App {
             }
             return;
         }
+        let shown = self.menu().len();
+        // A recalled command keeps walking the history; the list is for typing one.
+        if shown > 0 && self.recall.is_none() && !ctrl && !alt {
+            match key.code {
+                KeyCode::Up | KeyCode::Down => {
+                    self.pick = slash::step(shown, self.chosen(), if key.code == KeyCode::Up { -1 } else { 1 });
+                    return;
+                }
+                KeyCode::Tab => {
+                    let name = self.menu()[self.chosen()].name;
+                    return self.fill(format!("/{name} "), now);
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Char('u') if ctrl => {
                 self.input.clear();
                 self.cursor = 0;
+                self.pick = 0;
+                self.recall = None;
             }
             KeyCode::Enter if shift || alt => self.insert("\n", now),
-            KeyCode::Enter => self.submit(now),
+            KeyCode::Enter => self.enter(now),
             KeyCode::Backspace if self.cursor > 0 => {
                 self.cursor -= 1;
                 self.remove_at(self.cursor);
             }
             KeyCode::Delete if self.cursor < self.input.chars().count() => self.remove_at(self.cursor),
+            KeyCode::Up | KeyCode::Down => self.move_vertically(key.code == KeyCode::Up, now),
             KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
             KeyCode::Right => self.cursor = (self.cursor + 1).min(self.input.chars().count()),
             KeyCode::Home => self.cursor = 0,
@@ -744,7 +837,71 @@ impl App {
         }
     }
 
+    /// Up/Down move the caret one drawn row, keeping its column. At the first
+    /// or last row of typed text they go to its start or end, and once there
+    /// Up walks back through the earlier inputs and Down forward again.
+    fn move_vertically(&mut self, up: bool, now: Instant) {
+        self.last_typed = now;
+        let width = self.layout.input.width.saturating_sub(6) as usize;
+        if let Some(cursor) = view::move_row(&self.input, self.cursor, width, up) {
+            self.cursor = cursor;
+            return;
+        }
+        if self.recall.is_none() && !self.input.is_empty() {
+            let edge = if up { 0 } else { self.input.chars().count() };
+            if self.cursor != edge {
+                self.cursor = edge;
+                return;
+            }
+            if !up {
+                return;
+            }
+        }
+        self.walk_history(up);
+    }
+
+    fn walk_history(&mut self, back: bool) {
+        let newest_last = self.history.len() as i64 - 1;
+        let current = self.recall.map_or(-1, |at| at as i64);
+        let next = (current + if back { 1 } else { -1 }).clamp(-1, newest_last);
+        if next == current {
+            return;
+        }
+        if self.recall.is_none() {
+            self.draft = self.input.clone();
+        }
+        self.recall = (next >= 0).then_some(next as usize);
+        self.input = match self.recall {
+            Some(at) => self.history[self.history.len() - 1 - at].clone(),
+            None => std::mem::take(&mut self.draft),
+        };
+        self.cursor = self.input.chars().count();
+    }
+
+    /// Replaces the input and puts the caret at its end.
+    fn fill(&mut self, text: String, now: Instant) {
+        self.cursor = text.chars().count();
+        self.input = text;
+        self.pick = 0;
+        self.recall = None;
+        self.last_typed = now;
+    }
+
+    /// Enter: while the slash menu is open it runs (or completes) the chosen
+    /// command; otherwise it sends what was typed.
+    fn enter(&mut self, now: Instant) {
+        match slash::resolve_enter(&self.input, self.chosen()) {
+            Enter::Fill(text) => self.fill(text, now),
+            Enter::Submit(text) => {
+                self.input = text;
+                self.submit(now);
+            }
+        }
+    }
+
     fn insert(&mut self, s: &str, now: Instant) {
+        self.pick = 0;
+        self.recall = None;
         let at = self.byte_at(self.cursor);
         self.input.insert_str(at, s);
         self.cursor += s.chars().count();
@@ -752,6 +909,8 @@ impl App {
     }
 
     fn remove_at(&mut self, index: usize) {
+        self.pick = 0;
+        self.recall = None;
         let at = self.byte_at(index);
         self.input.remove(at);
     }
@@ -765,6 +924,11 @@ impl App {
         let text = self.input.trim().to_string();
         if text.is_empty() {
             return;
+        }
+        self.recall = None;
+        self.history.push(text.clone());
+        if let Some(core) = self.core.as_ref() {
+            core.remember_input(&text);
         }
         if let Some(command) = text.strip_prefix('/') {
             let mut words = command.split_whitespace();
@@ -800,7 +964,7 @@ impl App {
     fn ask_frontend(&mut self, now: Instant) {
         let s = strings();
         let choices = [
-            ("glass", "Kvist Glass", s.frontend_glass),
+            ("glass", "Classic", s.frontend_glass),
             ("tui", "Ink", s.frontend_ink),
             ("claude", "Claude-style", s.frontend_claude),
             ("terminal", "Classic Legacy", s.frontend_classic),
@@ -906,6 +1070,7 @@ impl App {
             MouseEventKind::Moved => match (hit, self.modal.as_mut()) {
                 (Some(Hit::Choice(row)), Some(Modal::Ask(Some(ask)))) => ask.select_row(row),
                 (Some(Hit::ModelRow(row)), Some(Modal::Models(Some(picker)))) => picker.select_row(row),
+                (Some(Hit::Command(row)), None) => self.pick = row,
                 _ => {}
             },
             MouseEventKind::Down(MouseButton::Left) => self.click(hit, now),
@@ -973,6 +1138,10 @@ impl App {
                 Some(Hit::NewSession) => self.command("new", &[], now),
                 Some(Hit::Provider) => self.command("provider", &[], now),
                 Some(Hit::Models) => self.open_models(now),
+                Some(Hit::Command(row)) => {
+                    self.pick = row;
+                    self.enter(now);
+                }
                 _ => {}
             },
         }
@@ -1047,6 +1216,7 @@ type Screen = Terminal<CrosstermBackend<io::Stdout>>;
 fn run_loop(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
     let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
     terminal.clear()?;
+    crate::highlight::warm();
     let worker = Worker::spawn();
     let mut pictures = Pictures::new(Gpu::new(caps.temp_dir));
     let mut app = App::new(grid_now()?, Instant::now(), workspace);
@@ -1054,6 +1224,7 @@ fn run_loop(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
         Ok(core) => app.core = Some(core),
         Err(reason) => app.core_error = Some(reason),
     }
+    app.load_input_history();
     worker.request(app.grid.cols as u32 * app.grid.cw, app.grid.rows as u32 * app.grid.ch)?;
     let mut out = io::stdout();
     let period = Duration::from_secs_f64(1.0 / fps as f64);
@@ -1152,6 +1323,128 @@ mod tests {
         assert!(matches!(&app.session.items[..], [Item::User(_), Item::Tool { .. }, Item::Agent { .. }]));
         // The cut journal never reported the call's result.
         assert!(matches!(&app.session.items[1], Item::Tool { state: crate::model::CallState::Done { ok: false, .. }, .. }));
+    }
+
+    fn typing(app: &mut App, text: &str) {
+        for c in text.chars() {
+            app.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), Instant::now());
+        }
+    }
+
+    fn press(app: &mut App, code: KeyCode) {
+        app.key(KeyEvent::new(code, KeyModifiers::NONE), Instant::now());
+    }
+
+    fn main_app() -> App {
+        let mut app = app();
+        app.phase = Phase::Main { since: Instant::now() };
+        app
+    }
+
+    #[test]
+    fn the_arrows_choose_a_command_and_tab_completes_its_name() {
+        let mut app = main_app();
+        typing(&mut app, "/s");
+        assert_eq!(app.menu().len(), 4);
+        press(&mut app, KeyCode::Down);
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(app.input, "/style ");
+        assert_eq!(app.cursor, 7);
+        assert!(app.menu().is_empty());
+    }
+
+    #[test]
+    fn the_arrows_wrap_round_the_list() {
+        let mut app = main_app();
+        typing(&mut app, "/s");
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.chosen(), 3);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.chosen(), 0);
+    }
+
+    #[test]
+    fn typing_more_returns_the_choice_to_the_first_row() {
+        let mut app = main_app();
+        typing(&mut app, "/s");
+        press(&mut app, KeyCode::Down);
+        typing(&mut app, "e");
+        assert_eq!(app.chosen(), 0);
+    }
+
+    #[test]
+    fn enter_completes_a_command_that_needs_an_argument_and_runs_the_others() {
+        let mut app = main_app();
+        typing(&mut app, "/ren");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.input, "/rename ");
+        let mut app = main_app();
+        typing(&mut app, "/ne");
+        press(&mut app, KeyCode::Enter);
+        // Nothing is connected in the test, so the command is refused after it was taken from the box.
+        assert!(app.input.is_empty());
+        assert!(app.toast.is_some());
+    }
+
+    #[test]
+    fn up_and_down_walk_the_rows_of_a_multi_line_input() {
+        let mut app = main_app();
+        app.layout.input = Rect::new(10, 20, 80, 5);
+        typing(&mut app, "ab");
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT), Instant::now());
+        typing(&mut app, "cd");
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.cursor, 2);
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.cursor, 0);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.cursor, 3);
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.cursor, 5);
+    }
+
+    #[test]
+    fn up_recalls_what_was_sent_and_down_returns_to_the_draft() {
+        let mut app = main_app();
+        app.layout.input = Rect::new(10, 20, 80, 5);
+        app.history = vec!["first".into(), "second".into()];
+        typing(&mut app, "dra");
+        press(&mut app, KeyCode::Up); // to the start of the draft
+        assert_eq!((app.input.as_str(), app.cursor), ("dra", 0));
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.input, "second");
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.input, "first");
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.input, "first");
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.input, "second");
+        press(&mut app, KeyCode::Down);
+        assert_eq!(app.input, "dra");
+        assert_eq!(app.recall, None);
+    }
+
+    #[test]
+    fn up_in_an_empty_box_recalls_the_last_input_and_typing_ends_the_recall() {
+        let mut app = main_app();
+        app.layout.input = Rect::new(10, 20, 80, 5);
+        app.history = vec!["fix the tests".into()];
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.input, "fix the tests");
+        typing(&mut app, "!");
+        assert_eq!(app.recall, None);
+        assert_eq!(app.input, "fix the tests!");
+    }
+
+    #[test]
+    fn a_recalled_command_keeps_walking_the_history_instead_of_the_menu() {
+        let mut app = main_app();
+        app.layout.input = Rect::new(10, 20, 80, 5);
+        app.history = vec!["older".into(), "/style".into()];
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.input, "/style");
+        press(&mut app, KeyCode::Up);
+        assert_eq!(app.input, "older");
     }
 
     #[test]

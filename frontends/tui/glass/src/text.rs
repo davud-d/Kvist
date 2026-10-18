@@ -4,7 +4,7 @@
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use unicode_width::UnicodeWidthChar;
 
 use crate::theme;
@@ -35,34 +35,6 @@ pub fn fit(s: &str, max: usize) -> String {
         used += w;
     }
     out.push('…');
-    out
-}
-
-/// Splits **bold** and `code` out of plain text.
-pub fn markdown(text: &str, base: Style) -> Line {
-    let mut out: Line = Vec::new();
-    let mut rest = text;
-    while !rest.is_empty() {
-        let next_bold = rest.find("**");
-        let next_code = rest.find('`');
-        let (start, marker) = match (next_bold, next_code) {
-            (Some(b), Some(c)) if c < b => (c, "`"),
-            (Some(b), _) => (b, "**"),
-            (None, Some(c)) => (c, "`"),
-            (None, None) => break,
-        };
-        let after = &rest[start + marker.len()..];
-        let Some(end) = after.find(marker) else { break };
-        if start > 0 {
-            out.push((rest[..start].to_string(), base));
-        }
-        let style = if marker == "`" { base.fg(theme::MOON) } else { base.add_modifier(Modifier::BOLD) };
-        out.push((after[..end].to_string(), style));
-        rest = &after[end + marker.len()..];
-    }
-    if !rest.is_empty() {
-        out.push((rest.to_string(), base));
-    }
     out
 }
 
@@ -276,20 +248,7 @@ mod tests {
         assert_eq!(plain(&wrap(&line, 4)), vec!["abcd", "efgh", "ij"]);
     }
 
-    #[test]
-    fn markdown_marks_bold_and_code() {
-        let spans = markdown("a **b** `c` d", Style::default());
-        let texts: Vec<&str> = spans.iter().map(|(s, _)| s.as_str()).collect();
-        assert_eq!(texts, vec!["a ", "b", " ", "c", " d"]);
-        assert!(spans[1].1.add_modifier.contains(Modifier::BOLD));
-        assert_eq!(spans[3].1.fg, Some(theme::MOON));
-    }
 
-    #[test]
-    fn an_unclosed_marker_stays_literal() {
-        let spans = markdown("a **b", Style::default());
-        assert_eq!(spans, vec![("a **b".to_string(), Style::default())]);
-    }
 
     #[test]
     fn fit_cuts_by_display_width_and_marks_the_cut() {

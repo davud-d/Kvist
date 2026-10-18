@@ -23,9 +23,11 @@ pub const SLOT_HELPERS: u32 = 4;
 pub const SLOT_READING: u32 = 5;
 pub const SLOT_INPUT: u32 = 6;
 pub const SLOT_DIALOG: u32 = 7;
+pub const SLOT_MENU: u32 = 10;
 const SLOT_THUMB: u32 = 8;
 const SLOT_POPUP: u32 = 9;
-const CARD_SLOTS: [u32; 6] = [SLOT_LEFT, SLOT_BROWSER_CARD, SLOT_HELPERS, SLOT_READING, SLOT_INPUT, SLOT_DIALOG];
+const CARD_SLOTS: [u32; 7] =
+    [SLOT_LEFT, SLOT_BROWSER_CARD, SLOT_HELPERS, SLOT_READING, SLOT_INPUT, SLOT_DIALOG, SLOT_MENU];
 /// A cached picture unused for this many frames is freed.
 const KEEP_FRAMES: u64 = 180;
 
@@ -79,6 +81,8 @@ pub enum CardStyle {
     Input,
     Reading,
     Dialog,
+    /// The slash menu; 0 is clear glass and 2 fully frosted, so it blurs in as it opens.
+    Menu(u8),
     /// Any card while a dialog or the browser is open over it.
     Dimmed,
 }
@@ -308,6 +312,8 @@ impl Pictures {
             None => {
                 let source = match spec.style {
                     CardStyle::Dialog | CardStyle::Dimmed => &canvas.levels[LEVELS - 1],
+                    CardStyle::Menu(0) => &canvas.sharp,
+                    CardStyle::Menu(1) => &canvas.levels[0],
                     _ => &canvas.frost,
                 };
                 let card = backdrop::card(source, x as i64, y as i64, w as u32, h as u32, &glass(spec.style, grid.ch));
@@ -316,7 +322,7 @@ impl Pictures {
                 id
             }
         };
-        let z = if spec.style == CardStyle::Dialog { Z_DIALOG } else { Z_CARD };
+        let z = if matches!(spec.style, CardStyle::Dialog | CardStyle::Menu(_)) { Z_DIALOG } else { Z_CARD };
         Ok(clipped(image, x + spec.dx, y + spec.dy, w, h, grid, z))
     }
 
@@ -412,6 +418,7 @@ fn glass(style: CardStyle, ch: u32) -> Glass {
         CardStyle::Reading => Glass { tint: GLASS_TINT, alpha: 0.32, radius, rim: 0.05 },
         // Lighter than the blurred night around it, so the dialog reads as a pane.
         CardStyle::Dialog => Glass { tint: [0x26, 0x31, 0x4A], alpha: 0.80, radius, rim: 0.24 },
+        CardStyle::Menu(_) => Glass { tint: [0x14, 0x1E, 0x34], alpha: 0.74, radius, rim: 0.18 },
         CardStyle::Dimmed => Glass { tint: GLASS_TINT, alpha: 0.62, radius, rim: 0.03 },
     }
 }

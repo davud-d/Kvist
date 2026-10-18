@@ -1146,6 +1146,8 @@ Tab or Enter put the line in the box and a second Enter sends it. Not clickable:
 only selects text. Copy follows `KVIST_LANG`/`LANG`.
 
 ### Kvist Glass (`frontends/tui/glass/`, Rust: ratatui + crossterm)
+User-facing name: **Classic** (pickers, notices, READMEs); ids, paths and `--frontend glass` keep "glass".
+"Classic Legacy" is the prompt_toolkit terminal and keeps its name.
 A terminal interface drawn over a photograph with the kitty graphics protocol; public docs in
 its `README.md` / `README.ru.md`. It refuses a terminal without kitty graphics before taking
 the screen (`kvist-glass --check`, exit 3; tmux/screen/Zellij refused too) and runs the core as
@@ -1155,6 +1157,7 @@ below cell backgrounds), `backdrop` (photo fit, 4 blur levels, glass cards with 
 a rim, computed on a worker thread), `pictures` (scene → placements), `protocol` (core JSON →
 `model::CoreEvent`), `model`, `dialog` (every `input_request`: choice/text/secret/confirm, approvals
 with `subject` and Always via `remember_pattern`), `models` (Ctrl+P picker across providers),
+`markdown` + `highlight` (answers as CommonMark via pulldown-cmark; code colours from syntect/two-face scopes mapped to the palette; grammars load on a thread at start), `slash` (the `/` command list: the Ink app's `suggest`/`resolveEnter` behaviour, glass card that frosts in; the list is a copy of the core-routed names in `frontends/tui/ink/commands.ts` plus `tui`),
 `screen` (browser preview: fetches `screen.frame_url`, loopback only), `view`, `app`, `anim`
 (tweens, the 3-piece `Ease::Burst`, frame pacing; `KVIST_GLASS_FPS`, default 60).
 Core features it relies on (all in `docs/UI_API.md`): `action_result.lines_added/lines_removed`

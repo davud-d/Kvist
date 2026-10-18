@@ -12,8 +12,10 @@ use crate::app::{App, Modal, Phase};
 use crate::dialog::{Answer, Ask, Body};
 use crate::layout::{self, BROWSER_ASPECT, MARGIN_X};
 use crate::model::{CallState, Helper, HelperState, Item, ToolKind};
+use crate::markdown;
 use crate::models::{ModelPicker, Role, Row};
-use crate::strings::strings;
+use crate::slash;
+use crate::strings::{self, strings};
 use crate::text::{self, Line, Painter};
 use crate::theme::{self, DUSK, FOG, HOVER, INK, INK_SOFT, MIST, MOON, MOSS, NIGHT, ROSEHIP};
 
@@ -41,6 +43,8 @@ pub enum Hit {
     HelpersClose,
     /// A visible row of a choice dialog.
     Choice(usize),
+    /// A row of the slash menu, by its index in the suggestions.
+    Command(usize),
     /// A button of a confirmation.
     Answer(Answer),
     Input,
@@ -61,6 +65,8 @@ impl Hit {
 
 pub struct Drawn {
     pub hits: Vec<(Rect, Hit)>,
+    /// Where the text cursor goes, when the input has the keyboard.
+    pub cursor: Option<(u16, u16)>,
     /// The glass under the conversation, sized to its text.
     pub reading: Option<Rect>,
 }
@@ -74,7 +80,7 @@ fn span(s: impl Into<String>, color: Color) -> (String, Style) {
 }
 
 pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
-    let mut drawn = Drawn { hits: Vec::new(), reading: None };
+    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None };
     let area = app.grid.full();
     let ms = now.saturating_duration_since(app.started).as_millis();
     let mut p = Painter { buf, clip: area };
@@ -90,7 +96,8 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
     draw_browser_label(&mut p, app, now, &mut drawn);
     draw_helpers(&mut p, app, now, ms, &mut drawn);
     drawn.reading = draw_transcript(&mut p, app, now, ms);
-    draw_input(&mut p, app, now, ms, &mut drawn);
+    draw_input(&mut p, app, now, &mut drawn);
+    draw_menu(&mut p, app, now, &mut drawn);
     draw_hints(&mut p, app);
     draw_status(&mut p, app, now, &mut drawn);
     intro_cascade(p.buf, area, now.saturating_duration_since(since).as_millis() as f32);
@@ -398,9 +405,7 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Vec<Line
             Item::Agent { text: words, at } => {
                 let shown = (now.saturating_duration_since(*at).as_secs_f32() * REVEAL_PER_SECOND) as usize;
                 let visible: String = words.chars().take(shown.max(1)).collect();
-                for paragraph in visible.split('\n') {
-                    lines.extend(text::wrap(&text::markdown(paragraph, st(FOG)), width));
-                }
+                lines.extend(markdown::render(&visible, width));
             }
             Item::Tool { kind, label, state, .. } => lines.push(tool_line(*kind, label, state, width, ms)),
             Item::Error(message) => {
@@ -500,14 +505,20 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128) -> Option
 
 /// Lines of the input, wrapped by character, and where the caret sits.
 pub fn input_lines(input: &str, cursor: usize, width: usize) -> (Vec<String>, (usize, usize)) {
+    let (lines, carets) = input_layout(input, width);
+    let caret = carets[cursor.min(carets.len() - 1)];
+    (lines, caret)
+}
+
+/// The wrapped lines and, for every cursor position 0..=length, the (row,
+/// column) where the caret is drawn.
+fn input_layout(input: &str, width: usize) -> (Vec<String>, Vec<(usize, usize)>) {
     let width = width.max(4);
     let mut lines = vec![String::new()];
     let mut used = 0;
-    let mut caret = (0, 0);
-    for (index, c) in input.chars().enumerate() {
-        if index == cursor {
-            caret = (lines.len() - 1, used);
-        }
+    let mut carets = Vec::new();
+    for c in input.chars() {
+        carets.push((lines.len() - 1, used));
         if c == '\n' {
             lines.push(String::new());
             used = 0;
@@ -521,17 +532,29 @@ pub fn input_lines(input: &str, cursor: usize, width: usize) -> (Vec<String>, (u
         lines.last_mut().unwrap().push(c);
         used += w;
     }
-    if cursor >= input.chars().count() {
-        if used >= width {
-            lines.push(String::new());
-            used = 0;
-        }
-        caret = (lines.len() - 1, used);
+    if used >= width {
+        lines.push(String::new());
+        used = 0;
     }
-    (lines, caret)
+    carets.push((lines.len() - 1, used));
+    (lines, carets)
 }
 
-fn draw_input(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &mut Drawn) {
+/// The cursor position one drawn row above (`up`) or below the cursor, in the
+/// column nearest to where it is; `None` on the first or last row.
+pub fn move_row(input: &str, cursor: usize, width: usize, up: bool) -> Option<usize> {
+    let (_, carets) = input_layout(input, width);
+    let (row, column) = carets[cursor.min(carets.len() - 1)];
+    let target = if up { row.checked_sub(1)? } else { row + 1 };
+    carets
+        .iter()
+        .enumerate()
+        .filter(|(_, caret)| caret.0 == target && caret.1 <= column)
+        .max_by_key(|(index, caret)| (caret.1, *index))
+        .map(|(index, _)| index)
+}
+
+fn draw_input(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let card = app.layout.input;
     if let Some((notice, at)) = &app.session.closed {
         draw_closed(p, app, card, notice, *at, now, drawn);
@@ -548,16 +571,49 @@ fn draw_input(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &mut Dr
     for (i, line) in lines.iter().enumerate().take(8) {
         p.text(x, y + i as i32, line, st(FOG));
     }
-    let typed_recently = now.saturating_duration_since(app.last_typed).as_millis() < 600;
-    if app.modal.is_none() && (typed_recently || (ms / 530) % 2 == 0) {
-        let cx = x + caret.1 as i32;
-        let cy = y + caret.0 as i32;
-        p.fill(cx, cy, 1, MOON);
-        if let Some(cell) = p.buf.cell_mut((cx.max(0) as u16, cy.max(0) as u16)) {
-            cell.set_fg(INK);
-        }
+    // The terminal's own thin bar cursor blinks here (term.rs sets its shape and colour).
+    if app.modal.is_none() {
+        drawn.cursor = Some(((x + caret.1 as i32).max(0) as u16, (y + caret.0 as i32).max(0) as u16));
     }
     drawn.hits.push((card, Hit::Input));
+}
+
+/// The slash menu over the input: the commands the typed prefix leaves, the
+/// chosen one lit. Its text fades in as the glass behind it frosts.
+fn draw_menu(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
+    let shown = app.menu();
+    let card = layout::menu(app.layout.input, shown.len());
+    if card.height == 0 {
+        return;
+    }
+    p.clear(card);
+    let rows = card.height as usize - 2;
+    let chosen = app.chosen();
+    let first = slash::window_start(shown.len(), chosen, rows);
+    let russian = strings::russian();
+    let x = card.x as i32 + 3;
+    let right = card.right() as i32 - 3;
+    let hint_x = x + slash::name_width() as i32 + 4;
+    for (index, command) in shown.iter().enumerate().skip(first).take(rows) {
+        let y = card.y as i32 + 1 + (index - first) as i32;
+        let picked = index == chosen;
+        if picked {
+            p.fill(card.x as i32 + 1, y, card.width as i32 - 2, MOON);
+        }
+        let name = Style::default().fg(if picked { INK } else { FOG }).add_modifier(if picked { Modifier::BOLD } else { Modifier::empty() });
+        p.text(x, y, &format!("/{}", command.name), name);
+        let room = (right - hint_x).max(0) as usize;
+        if room >= 8 {
+            p.text(hint_x, y, &text::fit(command.hint(russian), room), st(if picked { INK_SOFT } else { DUSK }));
+        }
+        drawn.hits.push((Rect::new(card.x + 1, y.max(0) as u16, card.width - 2, 1), Hit::Command(index)));
+    }
+    if shown.len() > rows {
+        let counter = format!("{}/{}", chosen + 1, shown.len());
+        p.text(right - counter.len() as i32, card.bottom() as i32 - 1, &counter, st(DUSK));
+    }
+    let open = app.menu_in.value(now).clamp(0.0, 1.0);
+    text::fade(p.buf, card, 1.0 - open, NIGHT);
 }
 
 /// A closed session: the core's notice where the input was, and one button.
@@ -955,6 +1011,24 @@ mod tests {
         let (lines, caret) = input_lines("abcd", 4, 4);
         assert_eq!(lines, vec!["abcd", ""]);
         assert_eq!(caret, (1, 0));
+    }
+
+    #[test]
+    fn up_and_down_keep_the_column_and_stop_at_the_ends() {
+        let text = "abcdef\nxy\nklmnop";
+        // From the middle of the last line (column 3) up to the short line, then up again.
+        assert_eq!(move_row(text, 13, 20, true), Some(9));
+        assert_eq!(move_row(text, 9, 20, true), Some(2));
+        assert_eq!(move_row(text, 2, 20, true), None);
+        assert_eq!(move_row(text, 2, 20, false), Some(9));
+        assert_eq!(move_row(text, 9, 20, false), Some(12));
+        assert_eq!(move_row(text, 12, 20, false), None);
+    }
+
+    #[test]
+    fn up_and_down_follow_wrapped_rows_too() {
+        assert_eq!(move_row("abcdefgh", 6, 4, true), Some(2));
+        assert_eq!(move_row("abcdefgh", 2, 4, false), Some(6));
     }
 
     #[test]

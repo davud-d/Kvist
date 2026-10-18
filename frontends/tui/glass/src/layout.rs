@@ -109,6 +109,22 @@ pub fn browser_full(grid: &Grid, aspect: f32) -> Rect {
     Rect::new(x, y, cols, rows)
 }
 
+/// The most suggestions the slash menu lists at once; the rest scroll.
+pub const MENU_ROWS: usize = 8;
+
+/// The slash menu above the input: one row per suggestion (at most
+/// `MENU_ROWS`, fewer when the room above runs out) between two padding rows.
+/// Zero height when there is no room for even one.
+pub fn menu(input: Rect, count: usize) -> Rect {
+    let room = input.y.saturating_sub(TOP + 1 + 2) as usize;
+    let rows = count.min(MENU_ROWS).min(room);
+    if rows == 0 {
+        return Rect::new(input.x, input.y, input.width, 0);
+    }
+    let height = rows as u16 + 2;
+    Rect::new(input.x, input.y - 1 - height, input.width, height)
+}
+
 /// A dialog `height` rows tall (at most the window allows), centred.
 pub fn dialog(grid: &Grid, height: u16) -> Rect {
     let w = 66.min(grid.cols.saturating_sub(8));
@@ -162,6 +178,18 @@ mod tests {
             assert!((aspect - wanted).abs() < 0.08, "{aspect} for {wanted}");
             assert!(r.right() <= g.cols && r.bottom() <= g.rows && r.y >= 1);
         }
+    }
+
+    #[test]
+    fn the_menu_sits_above_the_input_and_is_capped_by_rows_and_room() {
+        let input = Rect::new(20, 30, 80, 3);
+        let menu_rect = menu(input, 19);
+        assert_eq!(menu_rect.height as usize, MENU_ROWS + 2);
+        assert_eq!(menu_rect.bottom() + 1, input.y);
+        assert_eq!((menu_rect.x, menu_rect.width), (input.x, input.width));
+        assert_eq!(menu(input, 3).height, 5);
+        assert!(menu(Rect::new(20, 5, 80, 3), 19).y >= TOP);
+        assert_eq!(menu(Rect::new(20, 4, 80, 3), 19).height, 0);
     }
 
     #[test]

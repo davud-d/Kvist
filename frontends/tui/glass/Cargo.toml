@@ -11,8 +11,11 @@ crossterm = "0.29.0"
 flate2 = "1.1.10"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 libc = "0.2.191"
+pulldown-cmark = { version = "0.13.4", default-features = false }
 ratatui = "0.30.2"
 serde_json = "1.0.154"
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
 unicode-width = "0.2.2"
 
 # Image work (resize, blur, compose) runs every animation frame; an unoptimised

@@ -1,4 +1,7 @@
-# Kvist Glass
+# Kvist Classic
+
+Users see this interface as **Classic**; the folder, the crate, `kvist-glass`, the
+`glass` frontend value and `KVIST_GLASS` keep the working name Glass.
 
 A terminal interface drawn over a photograph: the conversation sits on frosted
 glass cards, changed files and helpers on the left, a live preview of the
@@ -8,7 +11,7 @@ process speaking `--frontend stdio-multi` (`docs/UI_API.md` §8c).
 
 **Status: prototype, connected to the core.** The launcher starts it as one
 of the terminal interfaces: `kvist --frontend glass`, or pick it with `/tui`
-(the Ink app, Classic Legacy, or Glass itself) and it opens on every launch.
+(the Ink app, Classic Legacy, or Classic itself) and it opens on every launch.
 On a terminal it cannot draw on, or without a build, the launcher says why and
 opens the Ink UI instead.
 
@@ -71,6 +74,11 @@ the mouse.
 | Key | Mouse | Does |
 |---|---|---|
 | Enter | | send (Shift+Enter or Alt+Enter: new line) |
+| ↑ / ↓ | | move the cursor one row, keeping its column; at the first or last row go to the start or end of the text, and then ↑ walks back through earlier inputs (the workspace's, kept by the core) and ↓ forward to the draft |
+| `/` | | open the command list; typing narrows it to the names that start with the text |
+| ↑ / ↓ in the list | hover | choose a command (wraps round) |
+| Tab in the list | | complete the chosen name (`/style `) and type its arguments |
+| Enter in the list | click a row | run the chosen command, not the typed prefix; `/rename` is completed instead, as it needs a name |
 | `/name args` + Enter | | run a core command (`/provider`, `/models`, `/role`, `/effort`, `/new`…) |
 | Ctrl+P | click the model in the status row | choose a model of any connected provider |
 | | click the provider in the status row | choose the provider (`/provider`) |
@@ -80,6 +88,13 @@ the mouse.
 | Ctrl+T | click "Helpers" or a helper | open the helpers panel; Esc closes |
 | PageUp / PageDown | wheel | scroll the conversation |
 | Ctrl+C | | quit |
+
+The agent's answers are drawn as Markdown (pulldown-cmark): headings, lists
+with nesting, quotes, rules, links with their address, task lists, tables, and
+fenced code with syntax colours (syntect with the grammars of two-face:
+TypeScript, TOML, GLSL and the like). A single newline in the answer is a line
+break. The text cursor is the terminal's own blinking bar in the moonlight
+colour (OSC 12).
 
 Ctrl+P lists every connected provider's models (the core's `catalog`: a
 saved key or sign-in, its live model list) under the provider's name, the one
