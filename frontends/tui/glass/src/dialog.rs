@@ -43,6 +43,7 @@ pub struct Ask {
     pub request_id: String,
     pub title: String,
     pub text: String,
+    pub text_scroll: usize,
     pub help: String,
     pub body: Body,
 }
@@ -81,7 +82,7 @@ impl Ask {
             Some(subject) => subject,
             None => field("body"),
         };
-        Some(Ask { request_id: field("request_id"), title: field("title"), text, help: field("help_text"), body })
+        Some(Ask { request_id: field("request_id"), title: field("title"), text, text_scroll: 0, help: field("help_text"), body })
             .filter(|ask| !ask.request_id.is_empty())
     }
 
@@ -92,6 +93,7 @@ impl Ask {
             request_id: request_id.to_string(),
             title: title.to_string(),
             text: String::new(),
+            text_scroll: 0,
             help: String::new(),
             body: Body::Choice { query: String::new(), choices, selected, scroll: 0 },
         }

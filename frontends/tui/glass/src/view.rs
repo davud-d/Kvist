@@ -713,7 +713,7 @@ fn short_path(path: &str, max: usize) -> String {
 
 /// Rows a dialog needs for `ask`, padding included.
 pub fn ask_height(ask: &Ask, cols: u16) -> u16 {
-    let body = body_lines(ask, dialog_text_width(cols)).len() as u16;
+    let body = body_lines(ask, dialog_text_width(cols)).len().min(MAX_BODY_LINES) as u16;
     let body = if body > 0 { body + 1 } else { 0 };
     let answer = match &ask.body {
         Body::Choice { choices, .. } => 2 + (choices.len() as u16).clamp(1, MAX_LIST_ROWS),
@@ -726,7 +726,7 @@ pub fn ask_height(ask: &Ask, cols: u16) -> u16 {
 
 /// Rows of choices the dialog in `card` shows for `ask`.
 pub fn ask_list_rows(ask: &Ask, card: Rect) -> usize {
-    let body = body_lines(ask, card.width.saturating_sub(6) as usize).len();
+    let body = body_lines(ask, card.width.saturating_sub(6) as usize).len().min(ask_body_rows(ask, card));
     let body = if body > 0 { body + 1 } else { 0 };
     (card.height as usize).saturating_sub(8 + body)
 }
@@ -749,8 +749,20 @@ fn body_lines(ask: &Ask, width: usize) -> Vec<Line> {
             };
             text::wrap(&vec![span(paragraph, color)], width)
         })
-        .take(MAX_BODY_LINES)
         .collect()
+}
+
+fn ask_body_rows(ask: &Ask, card: Rect) -> usize {
+    let answer = match &ask.body {
+        Body::Choice { choices, .. } => 2 + choices.len().clamp(1, MAX_LIST_ROWS as usize),
+        Body::Text { .. } => 1 + usize::from(!ask.help.is_empty()),
+        Body::Confirm { .. } => 1,
+    };
+    (card.height as usize).saturating_sub(7 + answer).min(MAX_BODY_LINES)
+}
+
+pub fn ask_text_max_scroll(ask: &Ask, card: Rect) -> usize {
+    body_lines(ask, card.width.saturating_sub(6) as usize).len().saturating_sub(ask_body_rows(ask, card))
 }
 
 fn draw_ask(p: &mut Painter, app: &App, ask: Option<&Ask>, open: f32, ms: u128, drawn: &mut Drawn) {
@@ -775,7 +787,8 @@ fn draw_ask(p: &mut Painter, app: &App, ask: Option<&Ask>, open: f32, ms: u128, 
     let width = (right - x).max(8) as usize;
     let mut y = top + 2;
     let body = body_lines(ask, width);
-    for line in &body {
+    let offset = ask.text_scroll.min(ask_text_max_scroll(ask, card));
+    for line in body.iter().skip(offset).take(ask_body_rows(ask, card)) {
         p.line(x, y, line);
         y += 1;
     }
@@ -842,11 +855,14 @@ fn draw_ask(p: &mut Painter, app: &App, ask: Option<&Ask>, open: f32, ms: u128, 
             }
         }
     }
-    let footer = match ask.body {
+    let mut footer = match ask.body {
         Body::Choice { .. } => vec![span("enter", MIST), span(format!(" {}", s.choose), DUSK), span("    ↑↓", MIST), span("    esc", MIST)],
         Body::Text { .. } => vec![span("enter", MIST), span(format!(" {}", s.confirm), DUSK), span("    esc", MIST)],
         Body::Confirm { .. } => vec![span("←→", MIST), span("    enter", MIST), span(format!(" {}", s.confirm), DUSK), span("    esc", MIST)],
     };
+    if ask_text_max_scroll(ask, card) > 0 {
+        footer.push(span("  PgUp/PgDn", MIST));
+    }
     p.line(x, card.bottom() as i32 - 2 + dy, &footer);
 }
 

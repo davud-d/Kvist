@@ -18,6 +18,7 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         "reasoning_start" => vec![CoreEvent::Thinking],
         "reasoning_commit" => vec![CoreEvent::ThinkingDone],
         "stream_chunk" | "stream_commit" => vec![CoreEvent::Stream { id: text("stream_id"), text: text("text") }],
+        "plan" => vec![CoreEvent::Say(text("markdown"))],
         "message" => vec![CoreEvent::Say(text("markdown"))],
         "final" => vec![CoreEvent::Say(text("message"))],
         "step" => step(event),

@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::anim::{self, Ease, Tween};
 use crate::backdrop::LEVELS;
 use crate::core::{self, Core, History, Message};
-use crate::dialog::{Ask, Choice};
+use crate::dialog::{Ask, Body, Choice};
 use crate::edit;
 use crate::kitty::Gpu;
 use crate::layout::{self, BROWSER_ASPECT, Grid, Layout, MARGIN_X, Shape};
@@ -127,6 +127,7 @@ pub struct App {
     pub input_rise: Tween,
     pub helpers_in: Tween,
     pub browser_in: Tween,
+    pending_plan: Option<String>,
     pub modal: Option<Modal>,
     pub modal_p: Tween,
     /// Where the open dialog is; kept while the core works, so the pane
@@ -180,6 +181,7 @@ impl App {
             input_rise: Tween::settled(0.0),
             helpers_in: Tween::settled(0.0),
             browser_in: Tween::settled(0.0),
+            pending_plan: None,
             modal: None,
             modal_p: Tween::settled(0.0),
             dialog_rect: Rect::default(),
@@ -418,6 +420,16 @@ impl App {
                 self.agent.effort = text("effort");
                 self.take_models(event.get("models"));
             }
+            "plan" => {
+                self.pending_plan = Some(text("markdown"));
+                for change in protocol::translate(event) {
+                    self.on_session(change, now);
+                }
+            }
+            "wake" => {
+                self.pending_plan = None;
+                self.on_session(crate::model::CoreEvent::TurnStarted, now);
+            }
             "input_request" => self.on_request(event, now),
             "command_result" => self.on_command_result(event, now),
             // An error outside a turn (a failed command) is only a notice.
@@ -442,7 +454,7 @@ impl App {
     }
 
     fn on_request(&mut self, event: &Value, now: Instant) {
-        let Some(ask) = Ask::from_request(event) else {
+        let Some(mut ask) = Ask::from_request(event) else {
             // A dialog this interface cannot draw must still be answered, or
             // the core waits for ever.
             let id = event.get("request_id").cloned().unwrap_or(Value::Null);
@@ -450,6 +462,13 @@ impl App {
             self.notify(strings().unsupported_dialog.to_string(), true, now);
             return;
         };
+        if let Body::Choice { choices, .. } = &ask.body
+            && choices.iter().any(|choice| choice.value == "accept")
+            && choices.iter().any(|choice| choice.value == "revise")
+            && let Some(plan) = self.pending_plan.take()
+        {
+            ask.text = plan;
+        }
         let opening = !matches!(self.modal, Some(Modal::Ask(_))) || self.modal_p.target() == 0.0;
         self.modal = Some(Modal::Ask(Some(ask)));
         if opening {
@@ -815,6 +834,11 @@ impl App {
         let rows = view::ask_list_rows(ask, card);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let reply = match key.code {
+            KeyCode::PageUp => { ask.text_scroll = ask.text_scroll.saturating_sub(6); None }
+            KeyCode::PageDown => {
+                ask.text_scroll = (ask.text_scroll + 6).min(view::ask_text_max_scroll(ask, card));
+                None
+            }
             KeyCode::Esc => Some(ask.cancel()),
             KeyCode::Enter => ask.accept(),
             KeyCode::Up => {
@@ -1334,6 +1358,28 @@ mod tests {
     fn app() -> App {
         let grid = Grid { cols: 120, rows: 36, cw: 10, ch: 20 };
         App::new(grid, Instant::now(), Path::new("/tmp"))
+    }
+
+    #[test]
+    fn plan_is_visible_in_the_feed_and_the_acceptance_dialog() {
+        let mut app = app();
+        let now = Instant::now();
+        let plan = (0..40).map(|n| format!("Step {n}\n")).collect::<String>();
+        app.on_core(&json!({"type": "plan", "markdown": plan}), now);
+        assert!(!app.session.items.is_empty());
+        app.on_core(&json!({"type": "input_request", "request_id": "plan", "kind": "choice",
+            "title": "Accept this plan?", "options": [
+                {"value": "accept", "label": "Accept"}, {"value": "revise", "label": "Revise"}
+            ]}), now);
+        let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
+        assert_eq!(ask.text, plan);
+        app.dialog_rect = layout::dialog(&app.grid, view::ask_height(ask, app.grid.cols));
+        app.ask_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now);
+        let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
+        assert_eq!(ask.text_scroll, 6);
+        for _ in 0..20 { app.ask_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now); }
+        let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
+        assert_eq!(ask.text_scroll, view::ask_text_max_scroll(ask, app.dialog_rect));
     }
 
     fn journal() -> History {
