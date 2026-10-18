@@ -1145,6 +1145,51 @@ earlier run left typed history (`history` is read first, so they do not flash); 
 Tab or Enter put the line in the box and a second Enter sends it. Not clickable: the Pointer layer
 only selects text. Copy follows `KVIST_LANG`/`LANG`.
 
+### Kvist Glass (`frontends/tui/glass/`, Rust: ratatui + crossterm)
+A terminal interface drawn over a photograph with the kitty graphics protocol; public docs in
+its `README.md` / `README.ru.md`. It refuses a terminal without kitty graphics before taking
+the screen (`kvist-glass --check`, exit 3; tmux/screen/Zellij refused too) and runs the core as
+`--frontend stdio-multi --wake` (`core.rs`; `KVIST_CORE_CMD` or the checkout's `.venv`).
+Modules: `probe` (terminal check), `kitty` (upload once, then place/move by id; z-layers
+below cell backgrounds), `backdrop` (photo fit, 4 blur levels, glass cards with AA corners and
+a rim, computed on a worker thread), `pictures` (scene → placements), `protocol` (core JSON →
+`model::CoreEvent`), `model`, `dialog` (every `input_request`: choice/text/secret/confirm, approvals
+with `subject` and Always via `remember_pattern`), `models` (Ctrl+P picker across providers),
+`screen` (browser preview: fetches `screen.frame_url`, loopback only), `view`, `app`, `anim`
+(tweens, the 3-piece `Ease::Burst`, frame pacing; `KVIST_GLASS_FPS`, default 60).
+Core features it relies on (all in `docs/UI_API.md`): `action_result.lines_added/lines_removed`
+(executor's `line_changes`), the live-only `helper_activity` event (`helpers._HelperUI`
+forwards each helper call), the `catalog` command and `models PROVIDER FAST SMART`.
+Launcher: `--frontend glass` / saved `glass` → `main.launch_glass` (`KVIST_GLASS`, then PATH,
+then `_GLASS_BUILD`, which is also where `kvist.spec` packs the build in a frozen binary);
+`--check` must see the real tty (only stderr is captured); any refusal falls back to the Ink UI.
+`/tui` inside Glass is local (`local:frontend`, exit 64 + `KVIST_SWITCH_FILE`). Installer:
+`install_rust.py` (C compiler + rustup; not on Windows), `install_cli.py::build_glass`, release
+CI builds it for Linux/macOS. Windows is not supported by design (no kitty graphics).
+Verify visually on a private `Xvfb :97` running kitty (`import -window <id>`), never by
+screenshotting the user's desktop; live core runs need a copy of the config (`KVIST_CONFIG_DIR`)
+and a fresh scratch workspace (a reused one remembers denied approvals).
+
+**Open work (as of Oct 18 2026; commits 64c04a1 and 863c031 are on `main`, not pushed to relay):**
+- Session history: after `/session` (switch) the feed starts empty; replay the journal with
+  `--session-op history` like the Ink app's `sessionHistory` → `restore`.
+- First-run setup screen (`frontends/tui/ink/setup/flow.ts` `INTERFACES`) does not offer Glass;
+  offer it only where the setup screen detected kitty graphics (its picture mode).
+- Not verified live: the browser preview (needs the browser skill installed and a real
+  `screen` event), Esc Esc stop, mouse clicks on the preview and helper rows, an overwrite
+  approval (`subject.kind == "overwrite"` diff), Ghostty (only kitty 0.49 was run).
+- The launcher's `--role`, `--approval-mode`, `--resume`, `--provider` and model overrides
+  are not passed to Glass; `/resume` is not handled.
+- Model picker: the provider header scrolls away above a deep selection (make it sticky).
+- `install_rust.py` prints the sudo command when a password is needed; the installer screen
+  could hand the terminal over for `sudo -v` like the release setup screen does.
+- Release: the first CI run with the "Build Kvist Glass" step has not happened; check that
+  `kvist-linux-x64` / `kvist-macos-*` carry `frontends/tui/glass/target/release/kvist-glass`.
+- Pre-existing failures found on the way, not caused by Glass: `test_chat_reasoning_stream`
+  (its fake agent lacks `_context_ledger`) and `test_pyproject_modules`
+  (`kernel.skills_bundled.design.references` is missing from `pyproject.toml`, so an installed
+  package lacks the design skill's reference pages).
+
 ### IDE chat panel (`frontends/ide/vscode/webview/`, shared with `frontends/ide/jetbrains/`)
 One Preact panel serves both IDEs. VS Code hosts it in a webview view
 (`frontends/ide/vscode/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
