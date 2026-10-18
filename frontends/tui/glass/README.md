@@ -125,8 +125,9 @@ same.
 - The helpers panel shows each helper's calls as they run, with the end of
   their output (`helper_activity`); the left card shows what each helper is
   doing now.
-- Not done yet: **session history on a switch.** After `/session` the feed starts empty;
-  replaying the journal (`--session-op history`) is not done here yet.
+- After `/session` the feed is refilled from the session's journal
+  (`--session-op history`, the newest 500 events). Calls and helpers the journal
+  left unfinished are shown as stopped, and a toast says when older events are not shown.
 
 ## Tests
 

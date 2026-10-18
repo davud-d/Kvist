@@ -20,8 +20,21 @@ pub enum Message {
     Gone(String),
 }
 
+/// A session's journal as `--session-op history` returns it (docs/UI_API.md §8).
+pub struct History {
+    /// The §7 event objects, oldest first.
+    pub events: Vec<Value>,
+    /// Older events exist than the page holds.
+    pub has_more: bool,
+}
+
+/// Newest journal events asked for when a session is redrawn.
+const HISTORY_LIMIT: &str = "500";
+
 pub struct Core {
     child: Child,
+    argv: Vec<String>,
+    workspace: PathBuf,
     /// `None` once closed, which tells the core to finish.
     stdin: Option<ChildStdin>,
     pub messages: Receiver<Message>,
@@ -78,7 +91,32 @@ impl Core {
             // The receiver may already be gone when the interface quits first.
             let _ = sender.send(Message::Gone("the core exited".to_string()));
         });
-        Ok(Core { child, stdin: Some(stdin), messages, log })
+        Ok(Core { child, argv: argv.to_vec(), workspace: workspace.to_path_buf(), stdin: Some(stdin), messages, log })
+    }
+
+    /// Reads a session's journal in a one-shot core process: the running core
+    /// is busy with its own stream, and the journal is not part of it.
+    pub fn history(&self, session: &str) -> Receiver<Result<History, String>> {
+        let argv = self.argv.clone();
+        let workspace = self.workspace.clone();
+        let session = session.to_string();
+        let (sender, history) = mpsc::channel();
+        thread::spawn(move || {
+            let output = Command::new(&argv[0])
+                .args(&argv[1..])
+                .args(["--workspace", &workspace.display().to_string(), "--session-op", "history"])
+                .args(["--session-name", &session, "--history-limit", HISTORY_LIMIT])
+                .stdin(Stdio::null())
+                .stderr(Stdio::null())
+                .output();
+            let parsed = match output {
+                Ok(output) => parse_history(&String::from_utf8_lossy(&output.stdout)),
+                Err(error) => Err(error.to_string()),
+            };
+            // The receiver is gone when the person switched session again.
+            let _ = sender.send(parsed);
+        });
+        history
     }
 
     pub fn send(&mut self, message: &Value) -> io::Result<()> {
@@ -120,6 +158,21 @@ impl Drop for Core {
     }
 }
 
+/// The reply of `--session-op history`: JSON on the last line of stdout.
+fn parse_history(stdout: &str) -> Result<History, String> {
+    let line = stdout.trim().lines().next_back().unwrap_or("");
+    let reply: Value = serde_json::from_str(line).map_err(|error| format!("unreadable session history ({error})"))?;
+    if reply.get("ok").and_then(Value::as_bool) != Some(true) {
+        return Err(reply.get("error").and_then(Value::as_str).unwrap_or("no session history").to_string());
+    }
+    let events = reply
+        .get("events")
+        .and_then(Value::as_array)
+        .map(|entries| entries.iter().filter_map(|entry| entry.get("event").cloned()).collect())
+        .unwrap_or_default();
+    Ok(History { events, has_more: reply.get("has_more").and_then(Value::as_bool) == Some(true) })
+}
+
 /// `message` of a `command_result` is "English / Русский"; this picks one half.
 pub fn localized(message: &str, russian: bool) -> &str {
     match message.split_once(" / ") {
@@ -139,6 +192,23 @@ mod tests {
         assert!(command(Some("kvist-core")).is_err());
         let default = command(None).unwrap();
         assert!(default[0].ends_with(".venv/bin/python") && default[1].ends_with("kernel/__main__.py"));
+    }
+
+    #[test]
+    fn a_history_reply_gives_its_events_oldest_first() {
+        let reply = r#"{"ok": true, "has_more": true, "events": [
+            {"seq": 1, "turn": 1, "event": {"type": "user", "text": "hi"}},
+            {"seq": 2, "turn": 1, "event": {"type": "turn_end"}}]}"#;
+        let history = parse_history(&format!("noise\n{}", reply.replace('\n', " "))).unwrap();
+        assert!(history.has_more);
+        let kinds: Vec<&str> = history.events.iter().filter_map(|e| e["type"].as_str()).collect();
+        assert_eq!(kinds, ["user", "turn_end"]);
+    }
+
+    #[test]
+    fn a_failed_history_reply_says_why() {
+        assert_eq!(parse_history(r#"{"ok": false, "error": "unknown session"}"#).err().as_deref(), Some("unknown session"));
+        assert!(parse_history("").is_err());
     }
 
     #[test]

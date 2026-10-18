@@ -4,6 +4,7 @@
 
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -15,7 +16,7 @@ use serde_json::{Value, json};
 
 use crate::anim::{self, Ease, Tween};
 use crate::backdrop::LEVELS;
-use crate::core::{self, Core, Message};
+use crate::core::{self, Core, History, Message};
 use crate::dialog::{Ask, Choice};
 use crate::kitty::Gpu;
 use crate::layout::{self, BROWSER_ASPECT, Grid, Layout, MARGIN_X, Shape};
@@ -36,6 +37,9 @@ use crate::view::{self, Hit};
 const SPLASH_MIN: Duration = Duration::from_millis(2400);
 /// How long it takes to rise from black.
 const RISE: Duration = Duration::from_millis(800);
+/// A replayed journal counts as shown this long ago, so its answers appear at
+/// once instead of typing out again.
+const LONG_AGO: Duration = Duration::from_secs(3600);
 /// Redraw interval while nothing moves (the caret still blinks).
 const IDLE_FRAME: Duration = Duration::from_millis(90);
 /// How long a notice stays in the status row.
@@ -96,6 +100,8 @@ pub struct App {
     pub agent: Agent,
     /// The slash command the core is running.
     command: Option<String>,
+    /// The journal of the session just switched to, on its way.
+    replay: Option<Receiver<Result<History, String>>>,
     pub toast: Option<Toast>,
     pub input: String,
     pub cursor: usize,
@@ -142,6 +148,7 @@ impl App {
             core_error: None,
             agent: Agent::default(),
             command: None,
+            replay: None,
             toast: None,
             input: String::new(),
             cursor: 0,
@@ -202,6 +209,7 @@ impl App {
 
     fn tick(&mut self, now: Instant, pictures: &mut Pictures) {
         self.poll_core(now);
+        self.poll_replay(now);
         self.poll_feed(now, pictures);
         if matches!(self.phase, Phase::Splash) && self.splash_over(now, pictures) {
             self.phase = Phase::Main { since: now };
@@ -268,6 +276,44 @@ impl App {
             self.notify(error, true, now);
         }
         self.web_aspect = pictures.web_aspect();
+    }
+
+    fn poll_replay(&mut self, now: Instant) {
+        let Some(replay) = self.replay.as_ref() else { return };
+        let reply = match replay.try_recv() {
+            Ok(reply) => reply,
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => {
+                self.replay = None;
+                return;
+            }
+        };
+        self.replay = None;
+        match reply {
+            Ok(history) => self.show_history(history, now),
+            Err(error) => self.notify(error, true, now),
+        }
+    }
+
+    /// Fills the feed from a journal, unless the person already started on
+    /// the new session: their own turn is the newer truth.
+    fn show_history(&mut self, history: History, now: Instant) {
+        if self.session.busy || !self.session.items.is_empty() || history.events.is_empty() {
+            return;
+        }
+        let past = now.checked_sub(LONG_AGO).unwrap_or(now);
+        for event in &history.events {
+            for change in protocol::translate(event) {
+                self.session.apply(change, past);
+            }
+        }
+        self.session.settle();
+        if !self.session.files.is_empty() || !self.session.helpers.is_empty() {
+            self.left_in.go(1.0, now, 480, Ease::Burst);
+        }
+        if history.has_more {
+            self.notify(strings().earlier_not_shown.to_string(), false, now);
+        }
     }
 
     fn poll_core(&mut self, now: Instant) {
@@ -356,9 +402,15 @@ impl App {
         }
         let effects = event.get("effects");
         if let Some(effects) = effects {
-            // `/new` and switching sessions: the feed starts over.
+            // `/new` and switching sessions: the feed starts over, and a
+            // switch refills it from the session's journal.
             if effects.get("changed").and_then(Value::as_bool) == Some(true) {
                 self.reset_view(now);
+                let name = event.get("name").and_then(Value::as_str);
+                let session = effects.get("session").and_then(Value::as_str);
+                if let (Some(core), Some(session), true) = (self.core.as_ref(), session, name != Some("new")) {
+                    self.replay = Some(core.history(session));
+                }
             }
             if let Some(provider) = effects.get("provider").and_then(Value::as_str) {
                 self.agent.provider = provider.to_string();
@@ -793,6 +845,7 @@ impl App {
     /// back to the middle.
     fn reset_view(&mut self, now: Instant) {
         self.session = Session::fresh();
+        self.replay = None;
         self.feed = None;
         self.web_closed = true;
         self.input.clear();
@@ -1068,5 +1121,44 @@ fn wait_for_events(
         if app.quit || !animating {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Item;
+
+    fn app() -> App {
+        let grid = Grid { cols: 120, rows: 36, cw: 10, ch: 20 };
+        App::new(grid, Instant::now(), Path::new("/tmp"))
+    }
+
+    fn journal() -> History {
+        let events = [
+            json!({"type": "user", "text": "fix it"}),
+            json!({"type": "usage", "kind": "turn"}),
+            json!({"type": "step", "step": 1, "call_id": "c1", "action_type": "read_file", "user_message": ""}),
+            json!({"type": "final", "message": "Done."}),
+        ];
+        History { events: events.to_vec(), has_more: false }
+    }
+
+    #[test]
+    fn a_switched_to_session_is_redrawn_from_its_journal() {
+        let mut app = app();
+        app.show_history(journal(), Instant::now());
+        assert!(!app.session.busy);
+        assert!(matches!(&app.session.items[..], [Item::User(_), Item::Tool { .. }, Item::Agent { .. }]));
+        // The cut journal never reported the call's result.
+        assert!(matches!(&app.session.items[1], Item::Tool { state: crate::model::CallState::Done { ok: false, .. }, .. }));
+    }
+
+    #[test]
+    fn a_session_the_person_already_typed_into_keeps_its_own_feed() {
+        let mut app = app();
+        app.session.submit("new request".into(), Instant::now());
+        app.show_history(journal(), Instant::now());
+        assert_eq!(app.session.items.len(), 1);
     }
 }

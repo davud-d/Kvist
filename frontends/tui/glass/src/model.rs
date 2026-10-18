@@ -25,6 +25,8 @@ pub enum HelperState {
 pub enum CoreEvent {
     /// A turn began that the person did not type (`wake`).
     TurnStarted,
+    /// A request from a session's journal; the live stream never carries one.
+    User(String),
     Thinking,
     ThinkingDone,
     /// The cumulative text of a streamed answer (a snapshot, not a delta).
@@ -122,6 +124,7 @@ impl Session {
     pub fn apply(&mut self, event: CoreEvent, now: Instant) {
         match event {
             CoreEvent::TurnStarted => self.begin_turn(now),
+            CoreEvent::User(text) => self.items.push(Item::User(text)),
             CoreEvent::Thinking => self.thinking_since = Some(now),
             CoreEvent::ThinkingDone => {}
             CoreEvent::Stream { id, text } => self.stream(id, text, now),
@@ -242,6 +245,29 @@ impl Session {
         self.files.iter().fold((0, 0), |(a, r), f| (a + f.added, r + f.removed))
     }
 
+    /// Ends everything a replayed journal left running: a journal cut off by a
+    /// crash has calls and helpers with no result, and nothing is running now.
+    pub fn settle(&mut self) {
+        let stopped = |state: &mut CallState| {
+            if *state == CallState::Running {
+                *state = CallState::Done { ok: false, summary: String::new(), diff: None };
+            }
+        };
+        for item in &mut self.items {
+            if let Item::Tool { state, .. } = item {
+                stopped(state);
+            }
+        }
+        for helper in &mut self.helpers {
+            if helper.state == HelperState::Running {
+                helper.state = HelperState::Failed;
+            }
+            for call in &mut helper.calls {
+                stopped(&mut call.state);
+            }
+        }
+    }
+
     /// A fresh session on the same connection: the core is still ready.
     pub fn fresh() -> Self {
         Session { ready: true, ..Session::default() }
@@ -322,6 +348,18 @@ mod tests {
         assert_eq!(session.helpers[0].state, HelperState::Running);
         assert!(matches!(&call.state, CallState::Done { ok: true, .. }));
         assert_eq!(call.output, "48 passed");
+    }
+
+    #[test]
+    fn settling_ends_calls_and_helpers_a_cut_journal_left_running() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "a".into() }, now);
+        session.apply(CoreEvent::HelperStep { id: "h1".into(), call: "x".into(), kind: ToolKind::Shell, label: "t".into() }, now);
+        session.settle();
+        assert!(matches!(&session.items[0], Item::Tool { state: CallState::Done { ok: false, .. }, .. }));
+        assert_eq!(session.helpers[0].state, HelperState::Failed);
+        assert!(matches!(session.helpers[0].calls[0].state, CallState::Done { ok: false, .. }));
     }
 
     #[test]

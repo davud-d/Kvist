@@ -1171,10 +1171,10 @@ screenshotting the user's desktop; live core runs need a copy of the config (`KV
 and a fresh scratch workspace (a reused one remembers denied approvals).
 
 **Open work (as of Oct 18 2026; commits 64c04a1 and 863c031 are on `main`, not pushed to relay):**
-- Session history: after `/session` (switch) the feed starts empty; replay the journal with
-  `--session-op history` like the Ink app's `sessionHistory` → `restore`.
 - First-run setup screen (`frontends/tui/ink/setup/flow.ts` `INTERFACES`) does not offer Glass;
   offer it only where the setup screen detected kitty graphics (its picture mode).
+- Session switch replays the journal (`Core::history` → `App::show_history`, newest 500 events,
+  settled so no call or helper stays "running"); covered by unit tests, **not yet seen in a live kitty**.
 - Not verified live: the browser preview (needs the browser skill installed and a real
   `screen` event), Esc Esc stop, mouse clicks on the preview and helper rows, an overwrite
   approval (`subject.kind == "overwrite"` diff), Ghostty (only kitty 0.49 was run).

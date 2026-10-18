@@ -13,6 +13,8 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
     let text = |key: &str| event.get(key).and_then(Value::as_str).unwrap_or("").to_string();
     match event.get("type").and_then(Value::as_str).unwrap_or("") {
         "wake" => vec![CoreEvent::TurnStarted],
+        // Only a journal has these; a wake-up turn's request has no text.
+        "user" if !text("text").is_empty() => vec![CoreEvent::User(text("text"))],
         "reasoning_start" => vec![CoreEvent::Thinking],
         "reasoning_commit" => vec![CoreEvent::ThinkingDone],
         "stream_chunk" | "stream_commit" => vec![CoreEvent::Stream { id: text("stream_id"), text: text("text") }],
@@ -192,6 +194,12 @@ mod tests {
             vec![CoreEvent::SessionEnded { notice: "Закрыт".into() }]
         );
         assert!(translate(&json!({"type": "session", "session": "s"})).is_empty());
+    }
+
+    #[test]
+    fn a_journaled_request_is_shown_unless_it_is_a_wake_up() {
+        assert_eq!(translate(&json!({"type": "user", "text": "fix it"})), vec![CoreEvent::User("fix it".into())]);
+        assert!(translate(&json!({"type": "user", "text": "", "woken": true})).is_empty());
     }
 
     #[test]
