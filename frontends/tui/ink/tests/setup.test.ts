@@ -149,6 +149,18 @@ test("a provider with a key leads through the key to the interface choice", () =
   assert.deepEqual(send(done, key("enter")).effect, { type: "finish", outcome: { kind: "frontend", value: "claude" } })
 })
 
+test("Classic is offered after Claude-style only where the terminal shows pictures", () => {
+  const atInterface = (glass: boolean): SetupState => ({ ...ready(), step: "interface", connected: "openai", glass })
+  const shown = (state: SetupState) =>
+    renderScene({ state, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.doesNotMatch(shown(atInterface(false)), /Classic {2,}A photograph/)
+  assert.match(shown(atInterface(true)), /2 {2}Classic {2,}A photograph/)
+  const second = send(atInterface(true), key("down")).state
+  assert.deepEqual(send(second, key("enter")).effect, { type: "finish", outcome: { kind: "frontend", value: "glass" } })
+  assert.deepEqual(send(atInterface(true), key("char", "4")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
+  assert.deepEqual(send(atInterface(false), key("char", "3")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
+})
+
 test("an empty key on AnyModel opens registration instead of complaining", () => {
   const state = send(send(ready(), key("enter")).state, key("enter")).state
   assert.equal(state.provider?.id, "anymodel")

@@ -5,7 +5,8 @@ import { BOLD, Canvas, DIM, INVERSE, UNDERLINE, type Style } from "./canvas.js"
 import { mix, pack, scale, unpack, type ColorLevel, type RGB } from "./color.js"
 import { DRIVES, breadthOf, crumbsOf, isRoot, rootOf, rowsOf, tildePath, visibleDirs, type FolderTarget } from "./folders.js"
 import {
-  INTERFACES,
+  interfaces,
+  type InterfaceId,
   KEY_PAGES,
   MORE_PROVIDERS,
   RECOMMENDED_PROVIDER,
@@ -188,11 +189,12 @@ function failureLines(state: SetupState, strings: Strings, width: number): Panel
 }
 
 // What the highlighted interface looks like at the prompt, as far as it can be said in three rows.
-function previewLines(index: number, strings: Strings, width: number): PanelLine[] {
+function previewLines(id: InterfaceId, strings: Strings, width: number): PanelLine[] {
   const span = Math.min(38, width - 2)
   const ask = "❯ Ask Kvist, or / for commands"
-  if (index === 0) return [text(` ${"─".repeat(span)}`, "dim"), text(` ${ask}`, "text"), text(` ${"─".repeat(span)}`, "dim")]
-  if (index === 1) return [text(` ╭${"─".repeat(span - 2)}╮`, "dim"), text(` │ ${ask.padEnd(span - 3)}│`, "text"), text(` ╰${"─".repeat(span - 2)}╯`, "dim")]
+  if (id === "claude") return [text(` ${"─".repeat(span)}`, "dim"), text(` ${ask}`, "text"), text(` ${"─".repeat(span)}`, "dim")]
+  if (id === "tui") return [text(` ╭${"─".repeat(span - 2)}╮`, "dim"), text(` │ ${ask.padEnd(span - 3)}│`, "text"), text(` ╰${"─".repeat(span - 2)}╯`, "dim")]
+  if (id === "glass") return [blank(), text(` ${strings.previewGlass}`, "dim"), blank()]
   return [blank(), text(` ${strings.previewClassic}`, "dim"), blank()]
 }
 
@@ -648,15 +650,21 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       }
     }
     case "interface": {
-      const labels = [strings.interfaceClaude, strings.interfaceInk, strings.interfaceClassic]
+      const labels: Record<InterfaceId, readonly string[]> = {
+        claude: strings.interfaceClaude,
+        glass: strings.interfaceGlass,
+        tui: strings.interfaceInk,
+        terminal: strings.interfaceClassic,
+      }
+      const ids = interfaces(state.glass)
       const lines: PanelLine[] = [
         ...(state.connected ? [text(`✓ ${strings.connected(state.connected)}`, "ok"), blank()] : []),
         text(strings.interfaceTitle, "title"),
         ...paragraph(strings.interfaceBody, width, "dim"),
         blank(),
       ]
-      INTERFACES.forEach((_, index) => {
-        const [label = "", blurb = ""] = labels[index] ?? []
+      ids.forEach((id, index) => {
+        const [label = "", blurb = ""] = labels[id]
         lines.push(optionRow(index, state.interfaceIndex === index, label, blurb, "", width, 14))
       })
       // The preview is a luxury of tall windows; the list and the button come first.
@@ -665,9 +673,9 @@ function build(input: SceneInput, width: number, listRows: number): Built {
         // Where the demo video can play, its slot is reserved for every interface so the panel does
         // not change height when the highlight moves; the video itself shows only on the first one.
         const fit = input.video ? videoFit(width, input.rows - 12 - lines.length, input.video) : null
-        const preview = previewLines(state.interfaceIndex, strings, width)
+        const preview = previewLines(ids[state.interfaceIndex] ?? "claude", strings, width)
         lines.push(blank())
-        if (fit && state.interfaceIndex === 0) {
+        if (fit && ids[state.interfaceIndex] === "claude") {
           video = { line: lines.length, ...fit }
           for (let row = 0; row < fit.rows; row++) lines.push(blank())
         } else {

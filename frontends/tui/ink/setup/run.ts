@@ -125,7 +125,7 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 
   return new Promise((resolve) => {
     const script = options.install ?? null
-    let state: SetupState = initialState(startFolder, home, process.platform === "win32", options.scope ?? "full", script !== null)
+    let state: SetupState = { ...initialState(startFolder, home, process.platform === "win32", options.scope ?? "full", script !== null), glass: image }
     let hits: Hit[] = []
     let painted: string[] | null = null
     let paintedSize = ""

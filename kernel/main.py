@@ -75,7 +75,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
             "the Node/Ink terminal UI (frontends/tui/ink), 'claude' for the same app drawn "
-            "like Claude Code, 'glass' for the Rust interface over a photograph "
+            "like Claude Code, 'glass' for Classic, the Rust interface over a photograph "
             "(frontends/tui/glass; kitty graphics only), 'terminal' for the Classic Legacy UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
@@ -985,7 +985,7 @@ TUI_FRONTENDS = ("tui", "claude")
 _TUI_SAVED_NOTICE = {
     "tui": "The Ink terminal UI will open on the next launch.",
     "claude": "The Claude-style terminal UI will open on the next launch.",
-    "glass": "Kvist Glass will open on the next launch (kitty or Ghostty).",
+    "glass": "Classic will open on the next launch (kitty or Ghostty).",
     "terminal": "Classic Legacy will open on the next launch.",
 }
 # Kvist Glass (frontends/tui/glass): a Rust program, built with `cargo build --release`.
@@ -1019,14 +1019,14 @@ def launch_glass(args: argparse.Namespace) -> int | None:
         return None
     if os.name == "nt":
         print(
-            "Kvist Glass needs kitty graphics, which Windows terminals do not have. Using the Ink UI.",
+            "Classic needs kitty graphics, which Windows terminals do not have. Using the Ink UI.",
             file=sys.stderr,
         )
         return None
     glass = find_glass()
     if glass is None:
         print(
-            "Kvist Glass is not built: run `cargo build --release` in frontends/tui/glass "
+            "Classic is not built: run `cargo build --release` in frontends/tui/glass "
             "(or set KVIST_GLASS). Using the Ink UI.",
             file=sys.stderr,
         )

@@ -63,8 +63,13 @@ export const KEY_PAGES: Readonly<Record<string, string>> = {
 
 // The interfaces the launcher can save, newcomers' favourite first (Claude Code's look is the
 // one most people already know).
-export const INTERFACES = ["claude", "tui", "terminal"] as const
-export type InterfaceId = (typeof INTERFACES)[number]
+export type InterfaceId = "claude" | "glass" | "tui" | "terminal"
+
+// Classic (the Rust interface over a photograph, saved as "glass") draws with the kitty graphics protocol,
+// so it is offered only where this screen found a terminal that shows pictures.
+export function interfaces(glass: boolean): readonly InterfaceId[] {
+  return glass ? ["claude", "glass", "tui", "terminal"] : ["claude", "tui", "terminal"]
+}
 
 // "done" ends a provider-only setup: the provider is saved and there is no interface to choose.
 export type Outcome = { kind: "frontend"; value: InterfaceId } | { kind: "classic" } | { kind: "quit" } | { kind: "done" }
@@ -138,6 +143,8 @@ export interface SetupState {
   // The provider that has just connected, for the confirmation on the last screen.
   connected: string
   interfaceIndex: number
+  // The terminal shows pictures, so the interface list includes Classic.
+  glass: boolean
 }
 
 export function initialState(workspace = "", home = "", drives = false, scope: "full" | "provider" = "full", withInstall = false): SetupState {
@@ -167,6 +174,7 @@ export function initialState(workspace = "", home = "", drives = false, scope: "
     reveal: false,
     connected: "",
     interfaceIndex: 0,
+    glass: false,
   }
 }
 
@@ -414,7 +422,7 @@ function press(state: SetupState, strings: { keyEmpty: string }): Update {
     case "models":
       return state.models.status === "loading" ? { state } : submitModel(state)
     case "interface":
-      return { state, effect: { type: "finish", outcome: { kind: "frontend", value: INTERFACES[state.interfaceIndex] ?? "claude" } } }
+      return { state, effect: { type: "finish", outcome: { kind: "frontend", value: interfaces(state.glass)[state.interfaceIndex] ?? "claude" } } }
     case "installing":
     case "working":
     case "starting":
@@ -432,7 +440,7 @@ function move(state: SetupState, delta: number): SetupState {
     case "models":
       return { ...state, modelIndex: wrap(state.modelIndex, delta, filteredModels(state).length) }
     case "interface":
-      return { ...state, interfaceIndex: wrap(state.interfaceIndex, delta, INTERFACES.length) }
+      return { ...state, interfaceIndex: wrap(state.interfaceIndex, delta, interfaces(state.glass).length) }
     default:
       return state
   }
@@ -475,8 +483,8 @@ function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string
     if (state.step === "broad" && (event.text === "u" || event.text === "U")) return keepWide(state)
     const digit = Number(event.text)
     if (state.step === "provider" && digit >= 1 && digit <= providerOptionCount(state)) return chooseProvider(state, digit - 1)
-    if (state.step === "interface" && digit >= 1 && digit <= INTERFACES.length) {
-      return { state: { ...state, interfaceIndex: digit - 1 }, effect: { type: "finish", outcome: { kind: "frontend", value: INTERFACES[digit - 1]! } } }
+    if (state.step === "interface" && digit >= 1 && digit <= interfaces(state.glass).length) {
+      return { state: { ...state, interfaceIndex: digit - 1 }, effect: { type: "finish", outcome: { kind: "frontend", value: interfaces(state.glass)[digit - 1]! } } }
     }
   }
   return { state }
@@ -504,7 +512,7 @@ function onClick(state: SetupState, target: Target, strings: { keyEmpty: string 
   if (state.step === "provider") return chooseProvider(state, target.index)
   if (state.step === "models") return submitModel({ ...state, modelIndex: target.index })
   if (state.step === "interface") {
-    const value = INTERFACES[target.index]
+    const value = interfaces(state.glass)[target.index]
     return value
       ? { state: { ...state, interfaceIndex: target.index }, effect: { type: "finish", outcome: { kind: "frontend", value } } }
       : { state }
