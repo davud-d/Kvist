@@ -75,6 +75,8 @@ the mouse.
 |---|---|---|
 | Enter | | send (Shift+Enter or Alt+Enter: new line) |
 | ↑ / ↓ | | move the cursor one row, keeping its column; at the first or last row go to the start or end of the text, and then ↑ walks back through earlier inputs (the workspace's, kept by the core) and ↓ forward to the draft |
+| Alt or Ctrl + ← / → | | move the cursor by word (Alt+b / Alt+f do the same) |
+| Alt or Ctrl + Backspace / Delete | | delete the word before / after the cursor |
 | `/` | | open the command list; typing narrows it to the names that start with the text |
 | ↑ / ↓ in the list | hover | choose a command (wraps round) |
 | Tab in the list | | complete the chosen name (`/style `) and type its arguments |

@@ -1157,7 +1157,7 @@ below cell backgrounds), `backdrop` (photo fit, 4 blur levels, glass cards with 
 a rim, computed on a worker thread), `pictures` (scene → placements), `protocol` (core JSON →
 `model::CoreEvent`), `model`, `dialog` (every `input_request`: choice/text/secret/confirm, approvals
 with `subject` and Always via `remember_pattern`), `models` (Ctrl+P picker across providers),
-`markdown` + `highlight` (answers as CommonMark via pulldown-cmark; code colours from syntect/two-face scopes mapped to the palette; grammars load on a thread at start), `slash` (the `/` command list: the Ink app's `suggest`/`resolveEnter` behaviour, glass card that frosts in; the list is a copy of the core-routed names in `frontends/tui/ink/commands.ts` plus `tui`),
+`edit` (word boundaries for Alt/Ctrl+arrows, Backspace and Delete: letters, digits and `_`), `markdown` + `highlight` (answers as CommonMark via pulldown-cmark; code colours from syntect/two-face scopes mapped to the palette; grammars load on a thread at start), `slash` (the `/` command list: the Ink app's `suggest`/`resolveEnter` behaviour, glass card that frosts in; the list is a copy of the core-routed names in `frontends/tui/ink/commands.ts` plus `tui`),
 `screen` (browser preview: fetches `screen.frame_url`, loopback only), `view`, `app`, `anim`
 (tweens, the 3-piece `Ease::Burst`, frame pacing; `KVIST_GLASS_FPS`, default 60).
 Core features it relies on (all in `docs/UI_API.md`): `action_result.lines_added/lines_removed`

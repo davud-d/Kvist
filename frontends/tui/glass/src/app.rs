@@ -18,6 +18,7 @@ use crate::anim::{self, Ease, Tween};
 use crate::backdrop::LEVELS;
 use crate::core::{self, Core, History, Message};
 use crate::dialog::{Ask, Choice};
+use crate::edit;
 use crate::kitty::Gpu;
 use crate::layout::{self, BROWSER_ASPECT, Grid, Layout, MARGIN_X, Shape};
 use crate::model::{CoreEvent, Session};
@@ -784,6 +785,13 @@ impl App {
             }
             KeyCode::Enter if shift || alt => self.insert("\n", now),
             KeyCode::Enter => self.enter(now),
+            KeyCode::Left if ctrl || alt => self.cursor = edit::word_start(&self.input, self.cursor),
+            KeyCode::Right if ctrl || alt => self.cursor = edit::word_end(&self.input, self.cursor),
+            // Readline's spelling of the same two moves, which some terminals send for Alt+arrows.
+            KeyCode::Char('b') if alt && !ctrl => self.cursor = edit::word_start(&self.input, self.cursor),
+            KeyCode::Char('f') if alt && !ctrl => self.cursor = edit::word_end(&self.input, self.cursor),
+            KeyCode::Backspace if ctrl || alt => self.delete_chars(edit::word_start(&self.input, self.cursor), self.cursor, now),
+            KeyCode::Delete if ctrl || alt => self.delete_chars(self.cursor, edit::word_end(&self.input, self.cursor), now),
             KeyCode::Backspace if self.cursor > 0 => {
                 self.cursor -= 1;
                 self.remove_at(self.cursor);
@@ -905,6 +913,19 @@ impl App {
         let at = self.byte_at(self.cursor);
         self.input.insert_str(at, s);
         self.cursor += s.chars().count();
+        self.last_typed = now;
+    }
+
+    /// Removes the characters `from..to` and leaves the cursor at `from`.
+    fn delete_chars(&mut self, from: usize, to: usize, now: Instant) {
+        if from >= to {
+            return;
+        }
+        self.pick = 0;
+        self.recall = None;
+        let (start, end) = (self.byte_at(from), self.byte_at(to));
+        self.input.replace_range(start..end, "");
+        self.cursor = from;
         self.last_typed = now;
     }
 
@@ -1445,6 +1466,70 @@ mod tests {
         assert_eq!(app.input, "/style");
         press(&mut app, KeyCode::Up);
         assert_eq!(app.input, "older");
+    }
+
+    fn press_with(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+        app.key(KeyEvent::new(code, modifiers), Instant::now());
+    }
+
+    #[test]
+    fn alt_and_ctrl_backspace_delete_the_word_before_the_cursor() {
+        for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL] {
+            let mut app = main_app();
+            typing(&mut app, "fix the тесты");
+            press_with(&mut app, KeyCode::Backspace, modifiers);
+            assert_eq!((app.input.as_str(), app.cursor), ("fix the ", 8));
+            press_with(&mut app, KeyCode::Backspace, modifiers);
+            assert_eq!((app.input.as_str(), app.cursor), ("fix ", 4));
+        }
+    }
+
+    #[test]
+    fn deleting_a_word_in_the_middle_keeps_the_rest_and_ends_a_recall() {
+        let mut app = main_app();
+        app.history = vec!["one two three".into()];
+        press(&mut app, KeyCode::Up);
+        assert!(app.recall.is_some());
+        app.cursor = 7;
+        press_with(&mut app, KeyCode::Backspace, KeyModifiers::ALT);
+        assert_eq!((app.input.as_str(), app.cursor, app.recall), ("one  three", 4, None));
+    }
+
+    #[test]
+    fn alt_and_ctrl_delete_remove_the_word_after_the_cursor() {
+        let mut app = main_app();
+        typing(&mut app, "one two three");
+        app.cursor = 4;
+        press_with(&mut app, KeyCode::Delete, KeyModifiers::CONTROL);
+        assert_eq!((app.input.as_str(), app.cursor), ("one  three", 4));
+    }
+
+    #[test]
+    fn alt_and_ctrl_arrows_jump_by_word() {
+        for modifiers in [KeyModifiers::ALT, KeyModifiers::CONTROL] {
+            let mut app = main_app();
+            typing(&mut app, "один два три");
+            press_with(&mut app, KeyCode::Left, modifiers);
+            assert_eq!(app.cursor, 9);
+            press_with(&mut app, KeyCode::Left, modifiers);
+            assert_eq!(app.cursor, 5);
+            press_with(&mut app, KeyCode::Right, modifiers);
+            assert_eq!(app.cursor, 8);
+            press_with(&mut app, KeyCode::Right, modifiers);
+            assert_eq!(app.cursor, 12);
+            press_with(&mut app, KeyCode::Right, modifiers);
+            assert_eq!(app.cursor, 12);
+        }
+    }
+
+    #[test]
+    fn alt_b_and_alt_f_are_the_readline_spelling_and_type_nothing() {
+        let mut app = main_app();
+        typing(&mut app, "ab cd");
+        press_with(&mut app, KeyCode::Char('b'), KeyModifiers::ALT);
+        assert_eq!(app.cursor, 3);
+        press_with(&mut app, KeyCode::Char('f'), KeyModifiers::ALT);
+        assert_eq!((app.cursor, app.input.as_str()), (5, "ab cd"));
     }
 
     #[test]

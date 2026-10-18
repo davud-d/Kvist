@@ -11,6 +11,7 @@ mod app;
 mod backdrop;
 mod core;
 mod dialog;
+mod edit;
 mod highlight;
 mod kitty;
 mod layout;
