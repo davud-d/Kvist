@@ -639,13 +639,13 @@ class LocalAgent:
             self._cancel_event.set()
 
     def _stop_paused_task(self) -> None:
-        from kernel.agent_runtime import _end_of_turn_resources
+        from kernel.agent_runtime import _end_of_turn_resources, cleanup_summary
 
         self.control.request_cancel("user_cancelled")
         self.control.reached_safe_point()
-        report = _end_of_turn_resources(self)
-        if report is not None and report.summary(self._state.response_language or "en"):
-            self._ui.print_result(report.summary(self._state.response_language or "en"))
+        summary = cleanup_summary(self, _end_of_turn_resources(self))
+        if summary:
+            self._ui.print_result(summary)
 
     def request_pause(self) -> bool:
         """Pause the main agent and its helpers at their next safe point, keeping the task's state.

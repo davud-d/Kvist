@@ -28,6 +28,7 @@ from kernel.frontend_protocol import (
     LiveStartEvent,
     LiveStopEvent,
     MessageEvent,
+    NarrationEvent,
     PlanEvent,
     ReasoningChunkEvent,
     ReasoningCommitEvent,
@@ -207,6 +208,9 @@ class EventStreamUI:
                 command.batch_id,
             )
         )
+
+    def print_narration(self, text: str) -> None:
+        self._channel.emit(NarrationEvent(redact_text(text)))
 
     def debug_print(self, message: str) -> None:
         self._channel.emit(DebugEvent(redact_text(message)))
@@ -392,7 +396,7 @@ class EventStreamUI:
         ))
 
     def print_skill_message(self, skill: str, label: str, markdown: str) -> None:
-        self._channel.emit(MessageEvent(f"**{label}:** {redact_text(markdown)}"))
+        self._channel.emit(MessageEvent(f"**{label}:** {redact_text(markdown)}", "skill"))
 
     def print_session_ended(self, payload: dict) -> None:
         self._channel.emit(
@@ -463,7 +467,7 @@ class EventStreamUI:
         return redact_text(message)
 
     def print_user_markdown(self, message: str) -> None:
-        self._channel.emit(MessageEvent(redact_text(message)))
+        self._channel.emit(MessageEvent(redact_text(message), "reply"))
 
     def print_final(
         self, final_message: str, user_messages: list[str] | None = None, outcome: str = "done"
@@ -481,7 +485,7 @@ class EventStreamUI:
         )
 
     def print_result(self, message: str) -> None:
-        self._channel.emit(MessageEvent(redact_text(message)))
+        self._channel.emit(MessageEvent(redact_text(message), "notice"))
 
     def print_error(self, message: str) -> None:
         self._channel.emit(ErrorEvent(redact_text(message)))

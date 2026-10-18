@@ -109,6 +109,16 @@ def test_message_and_result_and_debug_events():
     assert drained[2].message == "trace"
 
 
+def test_a_message_says_what_it_is_so_that_only_replies_are_read_aloud():
+    ch = FrontendChannel()
+    ui = EventStreamUI(ch)
+    ui.print_user_markdown("Готово.")
+    ui.print_result("Kvist closed the task's processes: browser.")
+    ui.print_skill_message("browser", "Browser", "opened a page")
+    sources = [event.to_dict()["source"] for event in ch.drain()]
+    assert sources == ["reply", "notice", "skill"]
+
+
 def test_print_error_emits_error_event():
     ch = FrontendChannel()
     ui = EventStreamUI(ch)

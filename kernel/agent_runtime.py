@@ -561,7 +561,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
         )
 
     paused = self.control.state == PAUSED
-    summary = cleanup.summary(self._state.response_language or "en") if cleanup is not None else ""
+    summary = cleanup_summary(self, cleanup)
     if summary and not report_rendered:
         final_message = f"{final_message}\n\n_{summary}_"
     elif summary:
@@ -575,6 +575,23 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
     if not paused:
         self.control.finish()
     return final_message
+
+
+def cleanup_summary(self, cleanup: CleanupReport | None) -> str:
+    """The line telling the person what the task closed at its end; empty when there is nothing to say.
+
+    A voice frontend reads the answer aloud, and "Kvist closed the task's
+    processes: browser, screen viewer" is a ledger the listener did not ask
+    for. There only a failure to stop something is worth saying; the plain
+    list goes to the debug channel.
+    """
+    if cleanup is None:
+        return ""
+    summary = cleanup.summary(self._state.response_language or "en")
+    if summary and self.config.voice_mode and cleanup.ok:
+        self._ui.debug_print(summary)
+        return ""
+    return summary
 
 
 def _collect_job_note(self) -> None:

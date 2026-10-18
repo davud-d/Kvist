@@ -78,6 +78,15 @@ class AgentConfig:
     # headless runs and helpers: a question then reports "no_interactive_user"
     # and an approval is refused instead of waiting for nobody.
     interactive: bool = False
+    # The person hears the answers (a voice frontend): the role prompts get the
+    # VOICE MODE section and a fast model narrates while the strong one thinks.
+    voice_mode: bool = False
+    # The narrator stays quiet for the first seconds of a model call, since a
+    # quick call needs no company, then speaks at most once per interval.
+    narrator_delay_seconds: float = 4.0
+    narrator_interval_seconds: float = 6.0
+    # How much of the work so far the narrator is shown, newest steps first.
+    narrator_context_tokens: int = 2000
 
 
 PLAN_OFFERED = "offered"

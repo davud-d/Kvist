@@ -29,6 +29,7 @@ from kernel.agent_context import (
     split_prompt_into_sections,
 )
 from kernel.context_meter import begin_call, context_usage, end_call, mute_generation, note_generated
+from kernel.narrator import narrating
 from kernel.context_budget import (
     derived_prompt_budget,
     env_prompt_budget,
@@ -399,6 +400,24 @@ def _load_plan_mode_section() -> str:
     return _PROMPT_CACHE[_PLAN_MODE_KEY]
 
 
+_VOICE_MODE_KEY = "\x00voice_mode"
+_NARRATOR_KEY = "\x00narrator"
+
+
+def _load_voice_mode_section() -> str:
+    """The VOICE MODE guidance for the roles whose answers are spoken."""
+    if _VOICE_MODE_KEY not in _PROMPT_CACHE:
+        _PROMPT_CACHE[_VOICE_MODE_KEY] = (_PROMPT_DIR / "voice_mode.txt").read_text(encoding="utf-8").strip()
+    return _PROMPT_CACHE[_VOICE_MODE_KEY]
+
+
+def load_narrator_prompt() -> str:
+    """The narrator's own system prompt: it is not a role and never sees the role prompts."""
+    if _NARRATOR_KEY not in _PROMPT_CACHE:
+        _PROMPT_CACHE[_NARRATOR_KEY] = (_PROMPT_DIR / "narrator_prompt.txt").read_text(encoding="utf-8").strip()
+    return _PROMPT_CACHE[_NARRATOR_KEY]
+
+
 def _load_constitution() -> str:
     """The layer above every role: what the work is, what outranks what.
 
@@ -454,6 +473,8 @@ def build_role_system_prompt(
         base = f"{base}\n\n{_load_plan_mode_section()}"
     if role != "chat":
         base = f"{base}\n\n{_load_extensions_section()}"
+        if self.config.voice_mode:
+            base = f"{base}\n\n{_load_voice_mode_section()}"
     style = _style_context(self, role)
     if style:
         base = f"{base}\n\n{style}"
@@ -474,6 +495,8 @@ def build_report_system_prompt(self) -> str:
     """
     from kernel.slash_commands import slash_commands_context
     base = f"{_load_constitution()}\n\n{_load_role_prompt('report')}\n\n{slash_commands_context()}"
+    if self.config.voice_mode:
+        base = f"{base}\n\n{_load_voice_mode_section()}"
     style = _style_context(self, "report")
     return f"{base}\n\n{style}" if style else base
 
@@ -668,7 +691,8 @@ def call_native_action_model(
         begin_call(self, input_tokens)
         _throttle_request_rate(self)
         try:
-            turn = _request_native_turn(self, model, messages, tools)
+            with narrating(self, model):
+                turn = _request_native_turn(self, model, messages, tools)
         except RunCancelled:
             raise
         except Exception as error:
@@ -1087,20 +1111,21 @@ def call_model(
             _throttle_request_rate(self)
             request_start = time.monotonic()
             try:
-                if self.config.stream:
-                    content = self._call_model_streaming(current_model, messages, json_mode)
-                else:
-                    response = call_cancellable(
-                        self._cancel_event,
-                        lambda: self._create_json_completion(
-                            model=current_model,
-                            messages=messages,
-                            json_mode=json_mode,
-                        ),
-                    )
-                    content = safe_extract_completion_content(
-                        response, self.config.provider, current_model
-                    )
+                with narrating(self, current_model) if usage_kind == "step" else contextlib.nullcontext():
+                    if self.config.stream:
+                        content = self._call_model_streaming(current_model, messages, json_mode)
+                    else:
+                        response = call_cancellable(
+                            self._cancel_event,
+                            lambda: self._create_json_completion(
+                                model=current_model,
+                                messages=messages,
+                                json_mode=json_mode,
+                            ),
+                        )
+                        content = safe_extract_completion_content(
+                            response, self.config.provider, current_model
+                        )
                 total_duration = time.monotonic() - request_start
                 if not content:
                     raise RuntimeError("Model returned an empty response")
@@ -1260,6 +1285,9 @@ def _note_thinking(self, text: str) -> None:
     Optional capability: UIs without ``set_thinking`` (headless, tests) are
     skipped, exactly like the ``print_usage`` usage channel.
     """
+    narrator = getattr(self, "_narrator", None)
+    if narrator is not None:
+        narrator.note_reasoning(text)
     notify = getattr(self._ui, "set_thinking", None)
     if notify is not None:
         notify(text)

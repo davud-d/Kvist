@@ -221,6 +221,7 @@ session by its id (the file name without `.json`).
 | `AGENT_NATIVE_TOOLS` | `0` forces the JSON protocol |
 | `AGENT_SANDBOX_MODE`, `AGENT_SANDBOX_NET` | Sandbox type and network policy |
 | `AGENT_VISION_MODEL` | Image-understanding model on the same provider |
+| `AGENT_VOICE_MODE` | `1` for a voice frontend: short spoken answers and a narrator while the strong model thinks |
 | `AGENT_VERBOSE`, `AGENT_PERSIST_LOGS` | Diagnostics and run logs |
 
 Prefer `/provider`, `/models`, `/role` and `/effort` for interactive setup.

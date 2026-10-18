@@ -30,6 +30,8 @@ frontends/
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
   ide/jetbrains/        IntelliJ plugin (separate Gradle build)
   zed/                  Zed ACP frontend (acp_frontend, acp_events, acp_stdio) + tests/
+  voice/                the voice frontend: screen/ (Rust, the orb and the menu), ears (faster-whisper, wake
+                        word "Kvist"), voice (Silero or MOSS-TTS-Nano), kvist-voice launcher (not bundled)
   kvide/                commit-message generator for the kvide editor (adapter over --commit-message) + tests/
   tray/                 Electron tray icon + read-only mini chat (own package.json, tests/)
 scripts/                installer/ (+ tests/), run_task.py, package_script.py, tests/
@@ -227,6 +229,7 @@ configured in-repo.
   `context_budget.py`),
   `AGENT_NATIVE_TOOLS` (0 keeps every run on the JSON protocol and skips the
   native tool-calling probe),
+  `AGENT_VOICE_MODE` (1 = a voice frontend hears the answers: `AgentConfig.voice_mode`),
   `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
   `AGENT_SANDBOX_NET` (allow|deny, default deny under bubblewrap),
   `AGENT_CHILD_ENV_ALLOW` (comma-separated safe child variables),
@@ -1215,6 +1218,66 @@ and a fresh scratch workspace (a reused one remembers denied approvals).
   (`kernel.skills_bundled.design.references` is missing from `pyproject.toml`, so an installed
   package lacks the design skill's reference pages).
 
+### Voice (`frontends/voice/`: the screen, the ears, the voice)
+A separate frontend with its own folder. **Do not put voice code into `frontends/tui/glass`:** the conversation screen
+stays as it is. The screen is its own Rust crate, `frontends/voice/screen/` (`kvist-voice-screen`), and shares no
+source with Glass, so a change in one cannot break the other. `anim backdrop core dialog diff highlight kitty layout
+probe strings term text theme` began as copies of Glass's files and are maintained in the voice crate from now on (a fix
+to such a file in one frontend is made in the other by hand); the screen's own files are `orb.rs`, `voice.rs`,
+`voice_overlay.rs`, `voice_strings.rs` and `icons.rs`. `frontends/voice/kvist-voice` starts it (and the ears and the
+voice) with the right environment.
+
+**The screen** (`screen/src/`): an orb (a planet of clouds after `assets/orb-reference-dusk-valley.png`) drawn per
+pixel into an RGBA picture each frame (30 fps at most, `ORB_FPS`) over the photograph; under it a frosted-glass card
+made like the conversation screen's cards (`backdrop::blur` + `backdrop::card`, regenerated only when its cells
+change) with the state's Codicons icon and a `text::shimmer` label, the words, a dim line with what the room sounded
+like (the ears' `heard` event), the result of a command and a problem; a footer with provider, model, session and a
+context meter. Text goes through the shared `Painter`. `Voice` is pure state: `on_core`/`on_ears`/`on_voice` take
+events and put `Out` messages in an outbox that the run loop delivers, so every priority is unit-tested without a
+process. The core runs with `AGENT_VOICE_MODE=1` (set in the screen's environment); the two helpers are optional
+commands from `KVIST_VOICE_STT_CMD` / `KVIST_VOICE_TTS_CMD` (JSON arrays, JSON lines both ways, protocol in
+`frontends/voice/README.md`). State priority (`Voice::resolve`): offline, error, the person's own voice, a question
+waiting, the assistant speaking, the turn (thinking/working), loading, waiting. A state is a `Look` and the shown look
+eases towards it, so colours flow into each other; the planet's clouds turn at the state's pace and colours sway
+around each state's own hue (`drift`), never round the wheel, or amber would turn green; the halo reaches zero before
+the texture's edge, or a faint square shows. The voice mutes the ears while it talks, and the person's voice cuts the
+voice off. Without a voice process the orb "speaks" for `speech_estimate`. A `message` event is spoken only when its
+`source` is `reply`. `Voice::on_ask` takes every `input_request` as the conversation screen's own `dialog::Ask` (list
+with search, text, secret, yes/no; read aloud and answered by "да"/"нет" when the agent asks), so a command's wizard
+(`models`, `provider`, `change-api`, `web-search-provider`, `session`...) needs no screen of its own: `Tab` opens
+`voice_overlay::MENU`, each item sends `{"type":"command","name":...}`, the core asks through dialogs and ends with
+`command_result` (shown as a toast; `effects.cancelled` shows nothing). A dialog that belongs to a command (`pending`)
+is not an approval: it does not turn the orb gold and is not read aloud, and speech is never a goal while a dialog or
+the menu is open. The screen opens a fresh session at `hello` (`new` command, silent; `--continue` skips it), because
+the core itself continues the last one and its context kept answering. `kvist-voice-screen --demo` walks through every
+state, `--orb-preview FILE` writes a PNG sheet. Verify visually on a private Xvfb with kitty (see the Glass section),
+with stand-in core/ears/voice scripts: no tokens, no microphone.
+
+**Conversation** (ears and screen together): the ears end a phrase after a pause that grows with the speech
+(`endpointing.silence_to_end`; a fixed 1.2 s cut long sentences in two and the second half, without the wake word, was
+dropped), take a further phrase for 6 s after a delivered command, and the screen opens a window without the wake word
+by `{"type":"converse"}` once the assistant has finished speaking (`Voice::open_conversation`: only after the voice has
+begun, never while it talks) or asked a question; stray words, thinking sounds and Whisper's silence-subtitles are
+filtered (`is_real_phrase`).
+
+**The ears** (`app.py`): CTranslate2 needs libcublas.so.12, which a CUDA 13 system lacks, so `cuda_libs.preload()`
+loads pip's copies by path before faster-whisper is imported; every model is tried on a second of silence
+(`LOAD_CHAIN`), because loading succeeds where the first real phrase would die; the large model never runs on the CPU
+(gigabytes of RAM and swap) and is not even loaded when `nvidia-smi` shows too little free VRAM (a failed GPU load
+leaves its staging copy in RAM): the small model then recognizes commands too; `trim_memory()` (malloc_trim) returned
+1.5 GB after loading. The gate asks Whisper twice (no hint, then with the language's hint) because one pass loses a
+short first word 17-22% of the time and two passes lost it 0 of 36; its language is chosen among `WHISPER_LANGUAGES`
+(ru,en), not all of Whisper's, and the main one stays unless another wins by a factor of three. An exception on one
+phrase is logged, never fatal. Another program on the GPU decides what fits: the author's own SoundToText dictation
+holds 3.9 GB of the 8.
+
+**The voice** (`speak.py`, engines `silero_tts.py` and `moss_nano.py`): Silero v5 (default speaker baya) silently drops
+digits, symbols and Latin words, which is what made it unintelligible "sometimes" (slower rate and pauses measured
+useless): `speech_ru.py` writes them out before synthesis, with tests for every kind. MOSS-TTS v1.5 (8B, about 17 GB)
+does not fit an 8 GB GPU; MOSS-TTS-Nano (0.1B, CPU) does, but has no Russian built-in voice (Russian is
+garbled in an English voice, partly intelligible in a Chinese one) and synthesizes about 1.2-1.5x slower than real
+time on a Ryzen 5 3600. Another engine replaces an engine module.
+
 ### IDE chat panel (`frontends/ide/vscode/webview/`, shared with `frontends/ide/jetbrains/`)
 One Preact panel serves both IDEs. VS Code hosts it in a webview view
 (`frontends/ide/vscode/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
@@ -1296,6 +1359,33 @@ the user's comments, key order and line endings survive — and it never builds 
 copies the binary (that is `install_cli.py`'s job; a missing `kvist-core` is a
 loud refusal). It is registered in `scripts/installer/install.py` with `after=("cli",)`,
 which is what keeps a parallel `--all` run from racing for that binary.
+
+### Voice mode and the narrator (`voice_mode.txt`, `narrator.py`)
+`AgentConfig.voice_mode` (from `AGENT_VOICE_MODE=1`; a voice frontend sets it, nothing else does) changes two things.
+`build_role_system_prompt` appends `kernel/prompts/system/voice_mode.txt` for the action roles and
+`build_report_system_prompt` for the reporter; the chat role is left alone. The text describes the listener's
+situation (no scrollback, no skimming, attention that cannot be refunded) and what a capable friend says after a
+favour, instead of listing rules: the answer is the news, in one breath, and an action that leaves the room (a
+message to a client, a payment) is said out and confirmed first. Keep it principles; a rule gets added only when a
+measured failure needs one.
+The **narrator** speaks while the *strong* model works. `narrating(agent, model)` wraps the action-model call in
+both paths (`call_model` for `usage_kind == "step"`, `call_native_action_model`); `_note_thinking` feeds it the
+cumulative reasoning. A fast-model call is never narrated (it takes seconds), nor is anything before
+`narrator_delay_seconds`; then a daemon thread asks the **fast** model for one breath-sized line at most every
+`narrator_interval_seconds`, with reasoning switched off. Material: the person's request, the newest
+`rolling_summaries` that fit `narrator_context_tokens`, the reasoning since its last line, and its own recent lines.
+Providers that stream no reasoning (OpenAI) leave the narrator the request and the earlier steps, and a call whose
+material did not change is not asked about again. The honesty rule lives in `narrator_prompt.txt`: a turn of thought
+("hm, and if the other way?") is voiced only when the material shows it, and `SILENCE` is a valid reply. Output goes
+out as the live-only `narration` event (`print_narration`, in `_TRANSIENT_EVENTS`), never into a model request, so
+"model-visible ⟺ logged" does not apply; a line still being written when the call ends is dropped. A provider
+failure is a `[narrator]` debug line and silence for that call. A `message` event carries `source` (`reply` from
+`print_user_markdown`, `notice` from `print_result`, `skill` from `print_skill_message`; missing means reply) so a
+frontend that reads aloud reads only the assistant's replies: warnings, clean-up lines and skills' messages are neither
+spoken nor shown by the voice screen. In voice mode the closing ledger the core appends to a
+final answer ("Kvist closed the task's processes: …", `resources.CleanupReport.summary`) goes to the debug channel
+(`agent_runtime.cleanup_summary`): the listener did not ask for it; a stop that could not be confirmed is still said. `JournalingUI.print_narration` is unconditional, so
+set `voice_mode` only where a frontend speaks it. Tests: `kernel/tests/test_narrator.py`.
 
 ### Role routing (`role_router.py`)
 Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins

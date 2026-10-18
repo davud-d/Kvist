@@ -227,6 +227,7 @@ echo '{"files": [{"path": "app.py", "patch": "+print(1)"}]}' \
 | `AGENT_NATIVE_TOOLS` | `0` включает JSON-протокол принудительно |
 | `AGENT_SANDBOX_MODE`, `AGENT_SANDBOX_NET` | Тип песочницы и политика сети |
 | `AGENT_VISION_MODEL` | Модель для изображений у того же провайдера |
+| `AGENT_VOICE_MODE` | `1` для голосового фронтенда: короткие ответы вслух и рассказчик, пока думает сильная модель |
 | `AGENT_VERBOSE`, `AGENT_PERSIST_LOGS` | Диагностика и логи запусков |
 
 Для интерактивной настройки используйте `/provider`, `/models`, `/role` и

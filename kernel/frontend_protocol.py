@@ -325,10 +325,14 @@ class ArtifactEvent:
 @dataclass(slots=True)
 class MessageEvent:
     markdown: str
+    # What the message is: "reply" is the assistant speaking to the person (a chat
+    # reply, a report), "notice" a note of the runtime (a warning, a clean-up line),
+    # "skill" a skill's message. A frontend that reads replies aloud reads only the first.
+    source: str = "reply"
     type: ClassVar[str] = "message"
 
     def to_dict(self) -> dict:
-        return {"type": self.type, "markdown": self.markdown}
+        return {"type": self.type, "markdown": self.markdown, "source": self.source}
 
 
 @dataclass(slots=True)
@@ -411,6 +415,17 @@ class ReasoningCommitEvent:
             "stream_id": self.stream_id,
             "duration_seconds": self.duration_seconds,
         }
+
+
+@dataclass(slots=True)
+class NarrationEvent:
+    """One spoken line from the narrator while the strong model thinks (live-only)."""
+
+    text: str
+    type: ClassVar[str] = "narration"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "text": self.text}
 
 
 @dataclass(slots=True)

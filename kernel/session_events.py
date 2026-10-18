@@ -62,7 +62,7 @@ _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
 
 # Live-only state: a frontend never needs it to redraw a finished conversation.
 _TRANSIENT_EVENTS = frozenset(
-    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output", "context"}
+    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output", "context", "narration"}
 )
 _ANSWER_EVENTS = frozenset({"final", "message", "stream_commit"})
 _ESSENTIAL_EVENTS = _ANSWER_EVENTS | {"error", "journal_notice", "turn_end", "session_ended"}
@@ -615,6 +615,11 @@ class JournalingUI:
     def print_usage(self, usage: dict) -> None:
         self._events.print_usage(usage)
         self._forward("print_usage", usage)
+
+    def print_narration(self, text: str) -> None:
+        # Live only: the narrator's lines are for the person's ears in the moment.
+        self._events.print_narration(text)
+        self._forward("print_narration", text)
 
     def set_thinking(self, text: str) -> None:
         self._forward("set_thinking", text)
