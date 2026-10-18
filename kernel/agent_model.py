@@ -54,7 +54,6 @@ from kernel import end_session, plan_mode
 from kernel.agent_state import RunCancelled
 from kernel.cancellable_call import call_cancellable, iterate_cancellable
 from kernel.parser import speakable_prefix
-from kernel.task_intent import is_complex_goal
 from kernel.native_tools import (
     NativeToolsRejected,
     NativeTurn,
@@ -1843,8 +1842,6 @@ def _truncate_section_text(text: str, target_tokens: int, count_tokens) -> str:
 
 
 def prefer_smart_model(self) -> bool:
-    if is_complex_goal(self._state.user_goal):
-        return True
     if self._state.consecutive_errors > 0:
         return True
     if self._state.parse_errors > 0:

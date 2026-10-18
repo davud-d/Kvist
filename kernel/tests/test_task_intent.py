@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.task_intent import asks_for_explanation, infer_task_kind, is_complex_goal, is_create_goal
+from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 
 
 def test_infer_task_kind_catches_verbless_report_phrases():
@@ -30,19 +30,6 @@ def test_a_change_that_asks_for_an_explanation_owes_it():
     assert not asks_for_explanation("исправь баг в main.py")
 
 
-def test_is_complex_goal_heuristic():
-    assert is_complex_goal("small edit") is False
-    assert is_complex_goal("architect a production system") is True
-    assert is_complex_goal("x" * 181) is True
-
-
-def test_a_topic_noun_alone_does_not_start_a_run_on_the_smart_model():
-    assert not is_complex_goal("what is my system date")
-    assert not is_complex_goal("show the project name")
-    assert is_complex_goal("рефактор модуля оплаты")
-    assert is_complex_goal("change the config in multiple files")
-
-
 def test_build_runs_a_build_and_asking_how_to_create_creates_nothing():
     assert not is_create_goal("build the project and run the tests")
     assert not is_create_goal("how to create a parser?")
@@ -54,3 +41,17 @@ def test_build_runs_a_build_and_asking_how_to_create_creates_nothing():
 def test_a_report_marker_must_start_a_word():
     assert not asks_for_explanation("open the preview tab")
     assert asks_for_explanation("review this module")
+
+
+def test_a_long_request_still_starts_on_the_fast_model(agent_factory):
+    agent = agent_factory()
+    agent._state.user_goal = "refactor " + "x" * 400
+
+    assert agent._prefer_smart_model() is False
+
+
+def test_stagnation_escalates_to_the_smart_model(agent_factory):
+    agent = agent_factory()
+    agent._state.stagnation_count = 1
+
+    assert agent._prefer_smart_model() is True

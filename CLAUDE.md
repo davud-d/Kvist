@@ -586,9 +586,9 @@ the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
   calls the action model, parses, executes via `SafeExecutor`, registers feedback,
   tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
   consecutive errors, repeated-action blocking, write-required-on-create-tasks).
-  What a request expects (`change` / `report` / `action`) and whether it starts on the
-  smart model are keyword guesses in `task_intent.py` (`infer_task_kind`, `is_complex_goal`);
-  they add or relax completion accounting and never block a write by themselves.
+  What a request expects (`change` / `report` / `action`) is a keyword guess in
+  `task_intent.py` (`infer_task_kind`); it adds or relaxes completion accounting and
+  never blocks a write by itself.
 
 ### Step budget (`AGENT_MAX_STEPS`, default 150)
 `run_loop` counts against `RunState.step_budget`, seeded from `config.max_steps`.
@@ -1437,9 +1437,11 @@ every rendered header is a known key.
 
 ### Model tiers (`agent_model.py`)
 Two models per provider: **fast** and **smart** (`llm_clients.MODEL_ROLES`; a `planner`
-key in an older `~/.kvist/config.json` is ignored). A run uses fast by default
-and escalates to smart when `task_intent.is_complex_goal` flags the request, or on parse
-errors, consecutive errors, or stagnation — unless the user explicitly pinned a model.
+key in an older `~/.kvist/config.json` is ignored). A run always starts on fast
+(a request's length or wording never picks the tier: a real task is longer than any
+sane threshold, so a length rule sent nearly every run to smart from step 1) and
+escalates to smart, once and never back, on parse errors, consecutive errors, or
+stagnation — unless the user explicitly pinned a model.
 Role system prompts are loaded and cached from `kernel/prompts/system/`:
 `{chat,coder,commit,complete,devops,reader,report,router,universal}_prompt.txt`, plus
 `constitution.txt`, `native_tools.txt`, `plan_mode.txt`, `end_session.txt` and

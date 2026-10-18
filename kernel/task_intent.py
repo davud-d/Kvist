@@ -34,18 +34,6 @@ _CREATE_VERB_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Words that name work spanning the codebase. Topic nouns ("system", "project",
-# "agent") are not here: they appear in plain questions as often as in hard tasks,
-# and errors or stagnation escalate to the smart model on their own.
-_COMPLEX_KEYWORDS: tuple[str, ...] = (
-    "architect",
-    "refactor",
-    "multiple files",
-    "несколько файлов",
-    "архитектур",
-    "рефактор",
-)
-
 
 def is_create_goal(user_goal: str) -> bool:
     return asks_for(_CREATE_VERB_RE, user_goal)
@@ -65,8 +53,3 @@ def infer_task_kind(user_goal: str) -> str:
     if has_change_verb(user_goal) or is_create_goal(user_goal):
         return "change"
     return "report" if asks_for_explanation(user_goal) else "action"
-
-
-def is_complex_goal(user_goal: str) -> bool:
-    """Whether the request starts on the smart model instead of the fast one."""
-    return len(user_goal) > 180 or mentions_any(_COMPLEX_KEYWORDS, user_goal.casefold())
