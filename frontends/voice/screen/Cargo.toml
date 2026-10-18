@@ -1,0 +1,28 @@
+[package]
+name = "kvist-voice-screen"
+version = "0.1.0"
+edition = "2024"
+description = "Kvist's voice screen: an orb, the microphone and a voice (kitty graphics protocol only)"
+publish = false
+
+# The screen uses the conversation screen's plumbing (pictures, glass, dialogs, text, theme)
+# straight from its source, so these are the dependencies those files have.
+[dependencies]
+base64 = "0.23.1"
+crossterm = "0.29.0"
+flate2 = "1.1.10"
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+libc = "0.2.191"
+ratatui = "0.30.2"
+serde_json = "1.0.154"
+syntect = { version = "5.3.0", default-features = false, features = ["parsing", "regex-fancy"] }
+two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
+unicode-width = "0.2.2"
+
+# The orb and the glass cards are drawn per frame; an unoptimised build makes a debug
+# run look broken rather than slow.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1

@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Starts Kvist's voice screen: the orb, the microphone and the voice.
+#
+#   frontends/voice/kvist-voice [screen options, e.g. --workspace DIR, --continue, --demo]
+#
+# Environment:
+#   KVIST_VOICE_STT_PYTHON   Python with the requirements of this folder;
+#                            default frontends/voice/.venv/bin/python, else python3
+#   KVIST_VOICE_TTS_PYTHON   Python of the voice engine (tts_setup.sh makes it);
+#                            without it the screen shows answers and stays silent
+#   KVIST_VOICE_TTS          0 switches the voice off (its model takes about 1.5 GB of memory)
+#   KVIST_VOICE_HOME         data folder; default $XDG_DATA_HOME/kvist/voice
+#   KVIST_VOICE_SCREEN       the kvist-voice-screen binary; default the checkout's release build
+#                            (cargo build --release in frontends/voice/screen)
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+home="${KVIST_VOICE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/kvist/voice}"
+screen="${KVIST_VOICE_SCREEN:-$here/screen/target/release/kvist-voice-screen}"
+stt_python="${KVIST_VOICE_STT_PYTHON:-$here/.venv/bin/python}"
+tts_python="${KVIST_VOICE_TTS_PYTHON:-$home/venv-tts/bin/python}"
+
+[ -x "$screen" ] || { echo "kvist-voice: $screen is missing; build it: cargo build --release in $here/screen" >&2; exit 1; }
+[ -x "$stt_python" ] || stt_python=python3
+
+json_command() {
+    python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@"
+}
+
+export KVIST_VOICE_STT_CMD="$(json_command "$stt_python" "$here/main.py")"
+if [ "${KVIST_VOICE_TTS:-1}" = 0 ]; then
+    :  # the voice is switched off: its model takes about 1.5 GB of memory
+elif [ -x "$tts_python" ]; then
+    export KVIST_VOICE_TTS_CMD="$(json_command "$tts_python" "$here/speak.py")"
+else
+    echo "kvist-voice: no voice engine at $tts_python (run tts_setup.sh); answers will be shown, not spoken" >&2
+fi
+
+exec "$screen" "$@"
