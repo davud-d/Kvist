@@ -1,0 +1,1072 @@
+// The interface's state and its loop: core events in, keyboard and mouse in,
+// cells drawn by ratatui, pictures placed through kitty. The core runs as a
+// child process speaking `--frontend stdio-multi` (core.rs).
+
+use std::io::{self, Write};
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::terminal;
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use serde_json::{Value, json};
+
+use crate::anim::{self, Ease, Tween};
+use crate::backdrop::LEVELS;
+use crate::core::{self, Core, Message};
+use crate::dialog::{Ask, Choice};
+use crate::kitty::Gpu;
+use crate::layout::{self, BROWSER_ASPECT, Grid, Layout, MARGIN_X, Shape};
+use crate::model::{CoreEvent, Session};
+use crate::models::ModelPicker;
+use crate::pictures::{
+    Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_HELPERS, SLOT_INPUT,
+    SLOT_LEFT, SLOT_READING, Scene, ThumbSpec, Worker,
+};
+use crate::probe::Caps;
+use crate::protocol;
+use crate::screen::Feed;
+use crate::strings::{self, strings};
+use crate::term;
+use crate::view::{self, Hit};
+
+/// The photograph stays alone on screen at least this long.
+const SPLASH_MIN: Duration = Duration::from_millis(2400);
+/// How long it takes to rise from black.
+const RISE: Duration = Duration::from_millis(800);
+/// Redraw interval while nothing moves (the caret still blinks).
+const IDLE_FRAME: Duration = Duration::from_millis(90);
+/// How long a notice stays in the status row.
+const TOAST: Duration = Duration::from_millis(4500);
+/// The request id of `/tui`, a dialog answered here and never sent to the core.
+const FRONTEND_REQUEST: &str = "local:frontend";
+/// Exit status that asks the launcher to start another interface.
+const SWITCH_FRONTEND: u8 = 64;
+/// A second Esc within this time stops the running turn.
+const STOP_CONFIRM: Duration = Duration::from_secs(3);
+
+pub enum Phase {
+    Splash,
+    Main { since: Instant },
+}
+
+pub enum Modal {
+    /// A dialog of the core; `None` while the core works on the answer.
+    Ask(Option<Ask>),
+    /// The model picker across providers; `None` while the catalog loads
+    /// or the chosen models are applied.
+    Models(Option<ModelPicker>),
+    Browser,
+}
+
+pub struct Toast {
+    pub text: String,
+    pub error: bool,
+    pub at: Instant,
+}
+
+/// What the core reported about the agent it runs.
+#[derive(Default)]
+pub struct Agent {
+    pub provider: String,
+    pub fast: String,
+    pub smart: String,
+    pub effort: String,
+}
+
+pub struct App {
+    pub grid: Grid,
+    pub started: Instant,
+    pub phase: Phase,
+    canvas_at: Option<Instant>,
+    pub session: Session,
+    core: Option<Core>,
+    /// Frames of the agent's browser, while it has one.
+    feed: Option<Feed>,
+    /// The browser closed: its pictures are to be dropped.
+    web_closed: bool,
+    /// Width / height of the browser's latest frame.
+    pub web_aspect: Option<f32>,
+    /// When Esc was pressed once during a turn.
+    stop_armed: Option<Instant>,
+    /// Why the core is not available, with where its log is.
+    pub core_error: Option<String>,
+    pub agent: Agent,
+    /// The slash command the core is running.
+    command: Option<String>,
+    pub toast: Option<Toast>,
+    pub input: String,
+    pub cursor: usize,
+    pub last_typed: Instant,
+    pub workspace: String,
+    pub branch: String,
+    pub left_in: Tween,
+    pub input_pos: Tween,
+    pub input_rise: Tween,
+    pub helpers_in: Tween,
+    pub browser_in: Tween,
+    pub modal: Option<Modal>,
+    pub modal_p: Tween,
+    /// Where the open dialog is; kept while the core works, so the pane
+    /// does not jump between two questions.
+    pub dialog_rect: Rect,
+    pub helper_focus: Option<usize>,
+    pub hover: Option<Hit>,
+    last_mouse: (u16, u16),
+    hand: bool,
+    hand_sent: Option<bool>,
+    hits: Vec<(Rect, Hit)>,
+    reading: Option<Rect>,
+    pub scroll: usize,
+    pub layout: Layout,
+    quit: bool,
+    /// What the program exits with: 0, or 64 to start another interface.
+    exit_code: u8,
+}
+
+impl App {
+    fn new(grid: Grid, now: Instant, workspace: &Path) -> Self {
+        App {
+            grid,
+            started: now,
+            phase: Phase::Splash,
+            canvas_at: None,
+            session: Session::default(),
+            core: None,
+            feed: None,
+            web_closed: false,
+            web_aspect: None,
+            stop_armed: None,
+            core_error: None,
+            agent: Agent::default(),
+            command: None,
+            toast: None,
+            input: String::new(),
+            cursor: 0,
+            last_typed: now,
+            workspace: workspace_label(workspace),
+            branch: git_branch(workspace).unwrap_or_default(),
+            left_in: Tween::settled(0.0),
+            input_pos: Tween::settled(0.0),
+            input_rise: Tween::settled(0.0),
+            helpers_in: Tween::settled(0.0),
+            browser_in: Tween::settled(0.0),
+            modal: None,
+            modal_p: Tween::settled(0.0),
+            dialog_rect: Rect::default(),
+            helper_focus: None,
+            hover: None,
+            last_mouse: (0, 0),
+            hand: false,
+            hand_sent: None,
+            hits: Vec::new(),
+            reading: None,
+            scroll: 0,
+            layout: Layout::default(),
+            quit: false,
+            exit_code: 0,
+        }
+    }
+
+    fn shape(&self, input_lines: u16, now: Instant) -> Shape {
+        let files = self.session.files.len() as u16;
+        let helpers = self.session.helpers.len() as u16;
+        let mut left_rows = if files > 0 { files + 1 } else { 0 };
+        if helpers > 0 {
+            left_rows += helpers + 1 + u16::from(files > 0);
+        }
+        Shape {
+            left_rows,
+            browser: self.session.browser.as_ref().map(|_| self.web_aspect.unwrap_or(BROWSER_ASPECT)),
+            input_lines,
+            input_at_bottom: self.input_pos.value(now),
+        }
+    }
+
+    fn relayout(&mut self, now: Instant) {
+        let mut shape = self.shape(1, now);
+        let first = layout::compute(&self.grid, &shape);
+        let (lines, _) = view::input_lines(&self.input, self.cursor, first.input.width.saturating_sub(6) as usize);
+        shape.input_lines = lines.len() as u16;
+        self.layout = layout::compute(&self.grid, &shape);
+        match &self.modal {
+            Some(Modal::Ask(Some(ask))) => {
+                self.dialog_rect = layout::dialog(&self.grid, view::ask_height(ask, self.grid.cols));
+            }
+            Some(Modal::Models(_)) => self.dialog_rect = layout::dialog(&self.grid, view::MODELS_HEIGHT),
+            _ => {}
+        }
+    }
+
+    fn tick(&mut self, now: Instant, pictures: &mut Pictures) {
+        self.poll_core(now);
+        self.poll_feed(now, pictures);
+        if matches!(self.phase, Phase::Splash) && self.splash_over(now, pictures) {
+            self.phase = Phase::Main { since: now };
+            self.input_rise.go(1.0, now, 600, Ease::Burst);
+            pictures.drop_rise();
+        }
+        if self.modal.is_some() && self.modal_p.target() == 0.0 && !self.modal_p.running(now) {
+            self.modal = None;
+        }
+        if self.toast.as_ref().is_some_and(|t| now.saturating_duration_since(t.at) > TOAST) {
+            self.toast = None;
+        }
+    }
+
+    fn splash_over(&self, now: Instant, pictures: &Pictures) -> bool {
+        let risen = self.canvas_at.is_some_and(|at| now.saturating_duration_since(at) >= RISE);
+        let long_enough = now.saturating_duration_since(self.started) >= SPLASH_MIN;
+        self.session.ready && risen && long_enough && pictures.has_canvas_for(&self.grid)
+    }
+
+    /// Applies one session event, starting the motion it causes.
+    fn on_session(&mut self, event: CoreEvent, now: Instant) {
+        match &event {
+            CoreEvent::FileChanged { .. } | CoreEvent::Helper { .. } => self.left_in.go(1.0, now, 480, Ease::Burst),
+            CoreEvent::Screen { frame_url, .. } => {
+                if self.feed.as_ref().is_none_or(|feed| feed.url != *frame_url) {
+                    match Feed::start(frame_url) {
+                        Ok(feed) => self.feed = Some(feed),
+                        Err(error) => self.notify(error, true, now),
+                    }
+                }
+                self.browser_in.go(1.0, now, 520, Ease::OutBack);
+            }
+            CoreEvent::ScreenClosed => {
+                self.feed = None;
+                self.web_closed = true;
+                self.browser_in = Tween::settled(0.0);
+                if matches!(self.modal, Some(Modal::Browser)) {
+                    self.close_modal(now);
+                }
+            }
+            _ => {}
+        }
+        self.session.apply(event, now);
+    }
+
+    fn poll_feed(&mut self, now: Instant, pictures: &mut Pictures) {
+        if std::mem::take(&mut self.web_closed) {
+            pictures.set_web(None);
+        }
+        let mut failure = None;
+        if let Some(feed) = self.feed.as_ref() {
+            while let Ok(frame) = feed.frames.try_recv() {
+                match frame {
+                    Ok(frame) => pictures.set_web(Some(frame)),
+                    Err(error) => failure = Some(error),
+                }
+            }
+        }
+        if let Some(error) = failure {
+            // One failed fetch ends this preview; the next `screen` event
+            // starts a fresh one.
+            self.feed = None;
+            self.notify(error, true, now);
+        }
+        self.web_aspect = pictures.web_aspect();
+    }
+
+    fn poll_core(&mut self, now: Instant) {
+        let Some(core) = self.core.as_ref() else { return };
+        let mut events = Vec::new();
+        let mut gone = None;
+        while let Ok(message) = core.messages.try_recv() {
+            match message {
+                Message::Event(event) => events.push(event),
+                Message::Gone(reason) => {
+                    gone = Some(format!("{reason}. {}: {}", strings().core_log, core.log.display()));
+                    break;
+                }
+            }
+        }
+        for event in events {
+            self.on_core(&event, now);
+        }
+        if let Some(reason) = gone {
+            self.core = None;
+            self.command = None;
+            if matches!(self.modal, Some(Modal::Ask(_))) {
+                self.close_modal(now);
+            }
+            self.notify(format!("{}: {reason}", strings().core_gone), true, now);
+            self.core_error = Some(reason);
+        }
+    }
+
+    fn on_core(&mut self, event: &Value, now: Instant) {
+        let text = |key: &str| event.get(key).and_then(Value::as_str).unwrap_or("").to_string();
+        match event.get("type").and_then(Value::as_str).unwrap_or("") {
+            "hello" => {
+                self.session.ready = true;
+                self.agent.provider = text("provider");
+                self.agent.effort = text("effort");
+                self.take_models(event.get("models"));
+            }
+            "input_request" => self.on_request(event, now),
+            "command_result" => self.on_command_result(event, now),
+            // An error outside a turn (a failed command) is only a notice.
+            "error" if !self.session.busy => self.notify(text("message"), true, now),
+            _ => {
+                for change in protocol::translate(event) {
+                    self.on_session(change, now);
+                }
+            }
+        }
+    }
+
+    fn take_models(&mut self, models: Option<&Value>) {
+        let Some(models) = models else { return };
+        let field = |key: &str| models.get(key).and_then(Value::as_str).map(str::to_string);
+        if let Some(fast) = field("fast") {
+            self.agent.fast = fast;
+        }
+        if let Some(smart) = field("smart") {
+            self.agent.smart = smart;
+        }
+    }
+
+    fn on_request(&mut self, event: &Value, now: Instant) {
+        let Some(ask) = Ask::from_request(event) else {
+            // A dialog this interface cannot draw must still be answered, or
+            // the core waits for ever.
+            let id = event.get("request_id").cloned().unwrap_or(Value::Null);
+            self.send(&json!({"request_id": id, "value": null}), now);
+            self.notify(strings().unsupported_dialog.to_string(), true, now);
+            return;
+        };
+        let opening = !matches!(self.modal, Some(Modal::Ask(_))) || self.modal_p.target() == 0.0;
+        self.modal = Some(Modal::Ask(Some(ask)));
+        if opening {
+            self.modal_p.go(1.0, now, 200, Ease::OutCubic);
+        }
+    }
+
+    fn on_command_result(&mut self, event: &Value, now: Instant) {
+        self.command = None;
+        let ok = event.get("ok").and_then(Value::as_bool).unwrap_or(false);
+        if event.get("name").and_then(Value::as_str) == Some("catalog") && ok {
+            return self.open_catalog(event.get("effects"), now);
+        }
+        if matches!(self.modal, Some(Modal::Ask(_) | Modal::Models(_))) {
+            self.close_modal(now);
+        }
+        let effects = event.get("effects");
+        if let Some(effects) = effects {
+            // `/new` and switching sessions: the feed starts over.
+            if effects.get("changed").and_then(Value::as_bool) == Some(true) {
+                self.reset_view(now);
+            }
+            if let Some(provider) = effects.get("provider").and_then(Value::as_str) {
+                self.agent.provider = provider.to_string();
+            }
+            if let Some(effort) = effects.get("effort").and_then(Value::as_str) {
+                self.agent.effort = effort.to_string();
+            }
+            self.take_models(effects.get("models"));
+        }
+        let message = event.get("message").and_then(Value::as_str).unwrap_or("");
+        let mut text = core::localized(message, strings::russian()).to_string();
+        let warnings: Vec<&str> = effects
+            .and_then(|e| e.get("warnings"))
+            .and_then(Value::as_array)
+            .map(|w| w.iter().filter_map(Value::as_str).collect())
+            .unwrap_or_default();
+        if let Some(first) = warnings.first() {
+            text = format!("{text} {first}");
+        }
+        self.notify(text, !ok, now);
+    }
+
+    /// Ctrl+P: the pane opens at once and waits for the core's catalog of
+    /// every connected provider's models.
+    fn open_models(&mut self, now: Instant) {
+        if self.core.is_none() || self.command.is_some() || self.session.busy {
+            self.command("catalog", &[], now);
+            return;
+        }
+        self.modal = Some(Modal::Models(None));
+        self.modal_p.go(1.0, now, 200, Ease::OutCubic);
+        self.command("catalog", &[], now);
+    }
+
+    fn open_catalog(&mut self, effects: Option<&Value>, now: Instant) {
+        if !matches!(self.modal, Some(Modal::Models(None))) || self.modal_p.target() == 0.0 {
+            // The pane was closed while the catalog loaded.
+            return;
+        }
+        match effects.and_then(ModelPicker::from_catalog) {
+            Some(picker) => {
+                self.modal = Some(Modal::Models(Some(picker)));
+                self.follow_models();
+            }
+            None => {
+                self.close_modal(now);
+                self.notify(strings().no_providers.to_string(), true, now);
+            }
+        }
+    }
+
+    fn follow_models(&mut self) {
+        let rows = view::models_list_rows(self.dialog_rect);
+        if let Some(Modal::Models(Some(picker))) = self.modal.as_mut() {
+            picker.follow(rows);
+        }
+    }
+
+    /// Applies the highlighted model: provider, fast and smart in one rebuild.
+    fn choose_model(&mut self, now: Instant) {
+        let Some(Modal::Models(Some(picker))) = self.modal.as_ref() else { return };
+        let Some([provider, fast, smart]) = picker.choice() else { return };
+        self.modal = Some(Modal::Models(None));
+        self.command("models", &[&provider, &fast, &smart], now);
+    }
+
+    fn notify(&mut self, text: String, error: bool, now: Instant) {
+        if !text.trim().is_empty() {
+            self.toast = Some(Toast { text, error, at: now });
+        }
+    }
+
+    fn send(&mut self, message: &Value, now: Instant) {
+        let Some(core) = self.core.as_mut() else {
+            self.notify(strings().no_core.to_string(), true, now);
+            return;
+        };
+        if let Err(error) = core.send(message) {
+            self.notify(format!("{}: {error}", strings().core_gone), true, now);
+        }
+    }
+
+    /// Runs a slash command in the core; its dialogs arrive as
+    /// `input_request` and it ends with `command_result`.
+    fn command(&mut self, name: &str, args: &[&str], now: Instant) {
+        if self.core.is_none() {
+            self.notify(strings().no_core.to_string(), true, now);
+            return;
+        }
+        if self.command.is_some() || self.session.busy {
+            self.notify(strings().core_busy.to_string(), true, now);
+            return;
+        }
+        self.command = Some(name.to_string());
+        self.send(&json!({"type": "command", "name": name, "args": args}), now);
+    }
+
+    /// Sends a dialog's answer. A command may ask again, so its pane stays
+    /// (waiting) until `command_result`; a question asked during a turn (an
+    /// approval) closes at once.
+    fn answer(&mut self, reply: Value, now: Instant) {
+        if reply.get("request_id").and_then(Value::as_str) == Some(FRONTEND_REQUEST) {
+            return self.switch_frontend(reply.get("value").and_then(Value::as_str), now);
+        }
+        self.send(&reply, now);
+        if self.command.is_none() {
+            self.close_modal(now);
+            return;
+        }
+        if let Some(Modal::Ask(slot)) = self.modal.as_mut() {
+            *slot = None;
+        }
+    }
+
+    fn animating(&self, now: Instant) -> bool {
+        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.modal_p];
+        matches!(self.phase, Phase::Splash)
+            || self.session.busy
+            || self.command.is_some()
+            || tweens.iter().any(|t| t.running(now))
+            || view::revealing(self, now)
+            || self.session.files.iter().any(|f| now.saturating_duration_since(f.touched) < Duration::from_millis(1700))
+            || self.session.helpers.iter().any(|h| h.state == crate::model::HelperState::Running)
+    }
+
+    fn draw(&mut self, frame: &mut ratatui::Frame, now: Instant) {
+        self.relayout(now);
+        let drawn = view::draw(self, frame.buffer_mut(), now);
+        self.hits = drawn.hits;
+        self.reading = drawn.reading;
+    }
+
+    fn scene(&self, now: Instant, pictures: &Pictures) -> Scene {
+        let grid = &self.grid;
+        if matches!(self.phase, Phase::Splash) {
+            let backdrop = match self.canvas_at {
+                None => Backdrop::Black,
+                Some(at) => {
+                    let t = now.saturating_duration_since(at).as_secs_f32() / RISE.as_secs_f32();
+                    let frames = pictures.rise_frames();
+                    if t < 1.0 && frames > 0 { Backdrop::Rise((t * frames as f32) as usize) } else { Backdrop::Photo }
+                }
+            };
+            return Scene { backdrop, cards: Vec::new(), thumb: None, popup: None };
+        }
+        let modal = self.modal_p.value(now).clamp(0.0, 1.0);
+        let level = (modal * LEVELS as f32).round() as usize;
+        let backdrop = if level == 0 { Backdrop::Sharp } else { Backdrop::Level(level) };
+        let dim = modal > 0.35;
+        let style = |normal: CardStyle| if dim { CardStyle::Dimmed } else { normal };
+        let cw = grid.cw as f32;
+        let ch = grid.ch as f32;
+        let slide = |rect: Rect, v: f32| (1.0 - v) * (rect.width + MARGIN_X + 1) as f32 * cw;
+
+        let mut cards = Vec::new();
+        if let Some(rect) = self.layout.left {
+            cards.push(CardSpec { slot: SLOT_LEFT, style: style(CardStyle::Side), rect, dx: -slide(rect, self.left_in.value(now)), dy: 0.0 });
+        }
+        let browser_dx = self.layout.browser_card.map_or(0.0, |rect| slide(rect, self.browser_in.value(now)));
+        if let Some(rect) = self.layout.browser_card {
+            cards.push(CardSpec { slot: SLOT_BROWSER_CARD, style: style(CardStyle::Side), rect, dx: browser_dx, dy: 0.0 });
+        }
+        let helpers = self.helpers_in.value(now);
+        if let Some(rect) = self.layout.helpers
+            && helpers > 0.001
+        {
+            cards.push(CardSpec { slot: SLOT_HELPERS, style: style(CardStyle::Side), rect, dx: slide(rect, helpers), dy: 0.0 });
+        }
+        if let Some(rect) = self.reading {
+            cards.push(CardSpec { slot: SLOT_READING, style: style(CardStyle::Reading), rect, dx: 0.0, dy: 0.0 });
+        }
+        let rise = (1.0 - self.input_rise.value(now)) * 8.0 * ch;
+        cards.push(CardSpec { slot: SLOT_INPUT, style: style(CardStyle::Input), rect: self.layout.input, dx: 0.0, dy: rise });
+        if let Some(Modal::Ask(_) | Modal::Models(_)) = self.modal
+            && modal > 0.05
+        {
+            let dy = ((1.0 - modal) * 1.4).round() * ch;
+            cards.push(CardSpec { slot: SLOT_DIALOG, style: CardStyle::Dialog, rect: self.dialog_rect, dx: 0.0, dy });
+        }
+
+        let browser_open = matches!(self.modal, Some(Modal::Browser));
+        let thumb = match (self.layout.thumb, &self.session.browser) {
+            (Some(rect), Some(_)) if !(browser_open && self.modal_p.value(now) > 0.001) => {
+                Some(ThumbSpec { rect, dx: browser_dx, dim })
+            }
+            _ => None,
+        };
+        let popup = browser_open.then(|| self.popup(now)).flatten();
+        Scene { backdrop, cards, thumb, popup }
+    }
+
+    /// The browser growing from its thumbnail to the middle of the screen.
+    fn popup(&self, now: Instant) -> Option<PopupSpec> {
+        let open = self.modal_p.value(now);
+        if open <= 0.001 {
+            return None;
+        }
+        let grid = &self.grid;
+        let to = grid.px(layout::browser_full(grid, self.web_aspect.unwrap_or(BROWSER_ASPECT)));
+        let from = self.layout.thumb.map(|r| grid.px(r)).unwrap_or((to.0 + to.2 * 0.4, to.1 + to.3 * 0.4, to.2 * 0.2, to.3 * 0.2));
+        let lerp = |a: f32, b: f32| a + (b - a) * open;
+        let clamped = open.clamp(0.0, 1.0);
+        let sharpness = if clamped < 0.45 { 0 } else if clamped < 0.8 { 1 } else { 2 };
+        Some(PopupSpec { x: lerp(from.0, to.0), y: lerp(from.1, to.1), w: lerp(from.2, to.2), h: lerp(from.3, to.3), sharpness })
+    }
+
+    fn resize(&mut self, grid: Grid) {
+        self.grid = grid;
+        self.hover = None;
+    }
+
+    fn key(&mut self, key: KeyEvent, now: Instant) {
+        if key.kind == KeyEventKind::Release {
+            return;
+        }
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && key.code == KeyCode::Char('c') {
+            self.quit = true;
+            return;
+        }
+        if matches!(self.phase, Phase::Splash) {
+            return;
+        }
+        match self.modal {
+            Some(Modal::Ask(_)) => self.ask_key(key, now),
+            Some(Modal::Models(_)) => self.models_key(key, now),
+            Some(Modal::Browser) => {
+                if key.code == KeyCode::Esc {
+                    self.close_modal(now);
+                }
+            }
+            None => self.main_key(key, now),
+        }
+    }
+
+    fn models_key(&mut self, key: KeyEvent, now: Instant) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if key.code == KeyCode::Esc || (ctrl && key.code == KeyCode::Char('p')) {
+            return self.close_modal(now);
+        }
+        if key.code == KeyCode::Enter {
+            return self.choose_model(now);
+        }
+        let Some(Modal::Models(Some(picker))) = self.modal.as_mut() else { return };
+        match key.code {
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Left | KeyCode::Right => picker.toggle_role(),
+            KeyCode::Up => picker.step(-1),
+            KeyCode::Down => picker.step(1),
+            KeyCode::PageUp => picker.step(-10),
+            KeyCode::PageDown => picker.step(10),
+            KeyCode::Backspace => picker.backspace(),
+            KeyCode::Char(c) if !ctrl => picker.type_char(c),
+            _ => {}
+        }
+        self.follow_models();
+    }
+
+    fn main_key(&mut self, key: KeyEvent, now: Instant) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+        match key.code {
+            KeyCode::Char('p') if ctrl => return self.open_models(now),
+            KeyCode::Char('t') if ctrl => return self.toggle_helpers(None, now),
+            KeyCode::Esc if self.session.busy => return self.stop(now),
+            KeyCode::Esc if self.helpers_in.target() > 0.0 => return self.toggle_helpers(None, now),
+            _ => {}
+        }
+        if self.session.closed.is_some() {
+            if key.code == KeyCode::Enter {
+                self.command("new", &[], now);
+            }
+            return;
+        }
+        match key.code {
+            KeyCode::Char('u') if ctrl => {
+                self.input.clear();
+                self.cursor = 0;
+            }
+            KeyCode::Enter if shift || alt => self.insert("\n", now),
+            KeyCode::Enter => self.submit(now),
+            KeyCode::Backspace if self.cursor > 0 => {
+                self.cursor -= 1;
+                self.remove_at(self.cursor);
+            }
+            KeyCode::Delete if self.cursor < self.input.chars().count() => self.remove_at(self.cursor),
+            KeyCode::Left => self.cursor = self.cursor.saturating_sub(1),
+            KeyCode::Right => self.cursor = (self.cursor + 1).min(self.input.chars().count()),
+            KeyCode::Home => self.cursor = 0,
+            KeyCode::End => self.cursor = self.input.chars().count(),
+            KeyCode::PageUp => self.scroll += 8,
+            KeyCode::PageDown => self.scroll = self.scroll.saturating_sub(8),
+            KeyCode::Char(c) if !ctrl => self.insert(&c.to_string(), now),
+            _ => {}
+        }
+    }
+
+    fn ask_key(&mut self, key: KeyEvent, now: Instant) {
+        let card = self.dialog_rect;
+        let Some(Modal::Ask(Some(ask))) = self.modal.as_mut() else { return };
+        let rows = view::ask_list_rows(ask, card);
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let reply = match key.code {
+            KeyCode::Esc => Some(ask.cancel()),
+            KeyCode::Enter => ask.accept(),
+            KeyCode::Up => {
+                ask.step(-1);
+                None
+            }
+            KeyCode::Down | KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+                ask.step(if key.code == KeyCode::Left { -1 } else { 1 });
+                None
+            }
+            KeyCode::Backspace => {
+                ask.backspace();
+                None
+            }
+            KeyCode::Char('u') if ctrl => {
+                ask.clear();
+                None
+            }
+            KeyCode::Char(c) if !ctrl => {
+                ask.type_char(c);
+                None
+            }
+            _ => None,
+        };
+        ask.follow(rows);
+        if let Some(reply) = reply {
+            self.answer(reply, now);
+        }
+    }
+
+    fn insert(&mut self, s: &str, now: Instant) {
+        let at = self.byte_at(self.cursor);
+        self.input.insert_str(at, s);
+        self.cursor += s.chars().count();
+        self.last_typed = now;
+    }
+
+    fn remove_at(&mut self, index: usize) {
+        let at = self.byte_at(index);
+        self.input.remove(at);
+    }
+
+    fn byte_at(&self, index: usize) -> usize {
+        self.input.char_indices().nth(index).map_or(self.input.len(), |(i, _)| i)
+    }
+
+    /// Enter: a `/command` runs in the core; anything else is a request.
+    fn submit(&mut self, now: Instant) {
+        let text = self.input.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        if let Some(command) = text.strip_prefix('/') {
+            let mut words = command.split_whitespace();
+            let name = words.next().unwrap_or("").to_string();
+            let args: Vec<&str> = words.collect();
+            self.input.clear();
+            self.cursor = 0;
+            // `/tui` belongs to the launcher, not the core: it picks the interface.
+            if name == "tui" {
+                return self.ask_frontend(now);
+            }
+            self.command(&name, &args, now);
+            return;
+        }
+        if self.session.busy || self.command.is_some() {
+            self.notify(strings().core_busy.to_string(), true, now);
+            return;
+        }
+        if self.core.is_none() {
+            self.notify(strings().no_core.to_string(), true, now);
+            return;
+        }
+        self.send(&json!({"type": "goal", "text": text}), now);
+        self.session.submit(text, now);
+        self.input.clear();
+        self.cursor = 0;
+        self.scroll = 0;
+        self.input_pos.go(1.0, now, 540, Ease::Burst);
+    }
+
+    /// `/tui`: the terminal interfaces the launcher can start, this one first
+    /// highlighted. The same list as the Ink app's (frontends/tui/ink/commands.ts).
+    fn ask_frontend(&mut self, now: Instant) {
+        let s = strings();
+        let choices = [
+            ("glass", "Kvist Glass", s.frontend_glass),
+            ("tui", "Ink", s.frontend_ink),
+            ("claude", "Claude-style", s.frontend_claude),
+            ("terminal", "Classic Legacy", s.frontend_classic),
+        ]
+        .iter()
+        .map(|&(value, label, detail)| Choice { value: value.into(), label: label.into(), detail: detail.into() })
+        .collect();
+        self.modal = Some(Modal::Ask(Some(Ask::local_choice(FRONTEND_REQUEST, s.frontend_title, choices, "glass"))));
+        self.modal_p.go(1.0, now, 200, Ease::OutCubic);
+    }
+
+    /// Leaves for another interface: the launcher reads its name from
+    /// `KVIST_SWITCH_FILE` when this program exits with code 64.
+    fn switch_frontend(&mut self, chosen: Option<&str>, now: Instant) {
+        self.close_modal(now);
+        let Some(chosen) = chosen.filter(|value| *value != "glass") else { return };
+        let Some(path) = std::env::var_os("KVIST_SWITCH_FILE") else {
+            return self.notify(strings().frontend_needs_launcher.to_string(), true, now);
+        };
+        match std::fs::write(&path, format!("{chosen}\n")) {
+            Ok(()) => {
+                self.exit_code = SWITCH_FRONTEND;
+                self.quit = true;
+            }
+            Err(error) => self.notify(error.to_string(), true, now),
+        }
+    }
+
+    /// Esc once arms the stop and says so; Esc again within a few seconds
+    /// stops the turn and everything it started (`cancel`, §8f).
+    fn stop(&mut self, now: Instant) {
+        if self.stop_armed.is_some_and(|at| now.saturating_duration_since(at) < STOP_CONFIRM) {
+            self.stop_armed = None;
+            self.send(&json!({"type": "cancel"}), now);
+            return;
+        }
+        self.stop_armed = Some(now);
+        self.notify(strings().stop_hint.to_string(), false, now);
+    }
+
+    /// The core moved to another session: the cards go and the input glides
+    /// back to the middle.
+    fn reset_view(&mut self, now: Instant) {
+        self.session = Session::fresh();
+        self.feed = None;
+        self.web_closed = true;
+        self.input.clear();
+        self.cursor = 0;
+        self.scroll = 0;
+        self.helper_focus = None;
+        self.input_pos.go(0.0, now, 540, Ease::Burst);
+        self.left_in = Tween::settled(0.0);
+        self.browser_in = Tween::settled(0.0);
+        self.helpers_in.go(0.0, now, 300, Ease::Burst);
+    }
+
+    fn paste(&mut self, text: &str, now: Instant) {
+        if !matches!(self.phase, Phase::Main { .. }) {
+            return;
+        }
+        match self.modal.as_mut() {
+            Some(Modal::Ask(Some(ask))) => ask.paste(text),
+            Some(_) => {}
+            None if self.session.closed.is_none() => self.insert(&text.replace("\r\n", "\n"), now),
+            None => {}
+        }
+    }
+
+    fn open_browser(&mut self, now: Instant) {
+        if self.session.browser.is_none() {
+            return;
+        }
+        self.modal = Some(Modal::Browser);
+        self.modal_p.go(1.0, now, 460, Ease::OutBack);
+    }
+
+    fn close_modal(&mut self, now: Instant) {
+        match self.modal {
+            Some(Modal::Browser) => self.modal_p.go(0.0, now, 360, Ease::Burst),
+            _ => self.modal_p.go(0.0, now, 150, Ease::OutCubic),
+        }
+    }
+
+    fn toggle_helpers(&mut self, focus: Option<usize>, now: Instant) {
+        let open = self.helpers_in.target() > 0.0;
+        if open && (focus.is_none() || focus == self.helper_focus) {
+            self.helpers_in.go(0.0, now, 300, Ease::Burst);
+            return;
+        }
+        self.helper_focus = focus;
+        self.helpers_in.go(1.0, now, 420, Ease::Burst);
+    }
+
+    fn mouse(&mut self, m: MouseEvent, now: Instant) {
+        let hit = self.hit_at(m.column, m.row);
+        self.hover = hit;
+        self.hand = hit.is_some_and(Hit::clickable);
+        if matches!(self.phase, Phase::Splash) {
+            return;
+        }
+        match m.kind {
+            MouseEventKind::Moved => match (hit, self.modal.as_mut()) {
+                (Some(Hit::Choice(row)), Some(Modal::Ask(Some(ask)))) => ask.select_row(row),
+                (Some(Hit::ModelRow(row)), Some(Modal::Models(Some(picker)))) => picker.select_row(row),
+                _ => {}
+            },
+            MouseEventKind::Down(MouseButton::Left) => self.click(hit, now),
+            MouseEventKind::ScrollUp => self.wheel(-1),
+            MouseEventKind::ScrollDown => self.wheel(1),
+            _ => {}
+        }
+    }
+
+    fn wheel(&mut self, delta: i32) {
+        let card = self.dialog_rect;
+        match self.modal.as_mut() {
+            Some(Modal::Ask(Some(ask))) => {
+                ask.step(delta);
+                let rows = view::ask_list_rows(ask, card);
+                ask.follow(rows);
+            }
+            Some(Modal::Models(Some(picker))) => {
+                picker.step(delta);
+                picker.follow(view::models_list_rows(card));
+            }
+            Some(_) => {}
+            None if delta < 0 => self.scroll += 3,
+            None => self.scroll = self.scroll.saturating_sub(3),
+        }
+    }
+
+    fn click(&mut self, hit: Option<Hit>, now: Instant) {
+        match self.modal.as_mut() {
+            // A wizard of the core is never cancelled by a stray click; Esc
+            // or its own answers end it.
+            Some(Modal::Ask(Some(ask))) => {
+                let reply = match hit {
+                    Some(Hit::Choice(row)) => {
+                        ask.select_row(row);
+                        ask.accept()
+                    }
+                    Some(Hit::Answer(answer)) => {
+                        ask.pick(answer);
+                        ask.accept()
+                    }
+                    _ => None,
+                };
+                if let Some(reply) = reply {
+                    self.answer(reply, now);
+                }
+            }
+            Some(Modal::Ask(None) | Modal::Models(None)) => {}
+            Some(Modal::Models(Some(picker))) => match hit {
+                Some(Hit::ModelRow(row)) => {
+                    picker.select_row(row);
+                    self.choose_model(now);
+                }
+                Some(Hit::Role(role)) => picker.set_role(role),
+                Some(_) => {}
+                // A click outside the pane closes it; inside, nothing happens.
+                None if !contains(self.dialog_rect, self.last_mouse) => self.close_modal(now),
+                None => {}
+            },
+            Some(Modal::Browser) => self.close_modal(now),
+            None => match hit {
+                Some(Hit::Thumb) => self.open_browser(now),
+                Some(Hit::Helper(id)) => self.toggle_helpers(Some(id), now),
+                Some(Hit::HelpersTitle | Hit::HelpersClose) => self.toggle_helpers(None, now),
+                Some(Hit::NewSession) => self.command("new", &[], now),
+                Some(Hit::Provider) => self.command("provider", &[], now),
+                Some(Hit::Models) => self.open_models(now),
+                _ => {}
+            },
+        }
+    }
+
+    fn hit_at(&mut self, x: u16, y: u16) -> Option<Hit> {
+        self.last_mouse = (x, y);
+        self.hits.iter().rev().find(|(rect, _)| contains(*rect, (x, y))).map(|(_, hit)| *hit)
+    }
+
+    fn flush_pointer(&mut self, out: &mut impl Write) -> io::Result<()> {
+        if self.hand_sent == Some(self.hand) {
+            return Ok(());
+        }
+        out.write_all(term::pointer_shape(self.hand))?;
+        out.flush()?;
+        self.hand_sent = Some(self.hand);
+        Ok(())
+    }
+}
+
+fn contains(rect: Rect, (x, y): (u16, u16)) -> bool {
+    x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
+}
+
+fn workspace_label(workspace: &Path) -> String {
+    let path = workspace.display().to_string();
+    match std::env::var("HOME") {
+        Ok(home) if !home.is_empty() && path.starts_with(&home) => format!("~{}", &path[home.len()..]),
+        _ => path,
+    }
+}
+
+fn git_branch(dir: &Path) -> Option<String> {
+    let mut dir = std::fs::canonicalize(dir).ok()?;
+    loop {
+        let head = dir.join(".git/HEAD");
+        if let Ok(text) = std::fs::read_to_string(&head) {
+            return Some(text.trim().strip_prefix("ref: refs/heads/").unwrap_or("detached").to_string());
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+fn grid_now() -> io::Result<Grid> {
+    let size = terminal::window_size()?;
+    let cols = size.columns.max(1);
+    let rows = size.rows.max(1);
+    Ok(Grid { cols, rows, cw: (size.width / cols).max(1) as u32, ch: (size.height / rows).max(1) as u32 })
+}
+
+/// Starts the core, or says why it could not.
+fn start_core(workspace: &Path) -> Result<Core, String> {
+    let argv = core::command(std::env::var("KVIST_CORE_CMD").ok().as_deref())?;
+    Core::spawn(&argv, workspace).map_err(|error| format!("{}: {error}", argv.join(" ")))
+}
+
+/// Runs the interface; the result is the exit status (64: start the
+/// interface named in `KVIST_SWITCH_FILE`).
+pub fn run(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
+    term::enter()?;
+    let result = run_loop(caps, fps, workspace);
+    let restored = term::leave();
+    let code = result?;
+    restored.map(|()| code)
+}
+
+type Screen = Terminal<CrosstermBackend<io::Stdout>>;
+
+fn run_loop(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    terminal.clear()?;
+    let worker = Worker::spawn();
+    let mut pictures = Pictures::new(Gpu::new(caps.temp_dir));
+    let mut app = App::new(grid_now()?, Instant::now(), workspace);
+    match start_core(workspace) {
+        Ok(core) => app.core = Some(core),
+        Err(reason) => app.core_error = Some(reason),
+    }
+    worker.request(app.grid.cols as u32 * app.grid.cw, app.grid.rows as u32 * app.grid.ch)?;
+    let mut out = io::stdout();
+    let period = Duration::from_secs_f64(1.0 / fps as f64);
+    let mut due = Instant::now();
+
+    while !app.quit {
+        let now = Instant::now();
+        while let Ok(canvas) = worker.results.try_recv() {
+            if app.canvas_at.is_none() {
+                app.canvas_at = Some(now);
+            }
+            pictures.accept(canvas);
+            if let Some(osc) = pictures.padding_colour() {
+                out.write_all(osc.as_bytes())?;
+            }
+        }
+        app.tick(now, &mut pictures);
+        terminal.draw(|frame| app.draw(frame, now))?;
+        let scene = app.scene(now, &pictures);
+        pictures.show(&app.grid, &scene)?;
+        pictures.gpu.flush(&mut out)?;
+        app.flush_pointer(&mut out)?;
+
+        due = anim::next_frame(due, now, period);
+        let animating = app.animating(now);
+        let wake = if animating { due } else { now + IDLE_FRAME };
+        wait_for_events(&mut app, &mut terminal, &mut pictures, &worker, wake, animating)?;
+    }
+    Ok(app.exit_code)
+}
+
+/// Handles input until `wake`. While nothing moves, input is drawn at once;
+/// during an animation frames keep their beat.
+fn wait_for_events(
+    app: &mut App,
+    terminal: &mut Screen,
+    pictures: &mut Pictures,
+    worker: &Worker,
+    wake: Instant,
+    animating: bool,
+) -> io::Result<()> {
+    loop {
+        let left = wake.saturating_duration_since(Instant::now());
+        if left.is_zero() || !event::poll(left)? {
+            return Ok(());
+        }
+        while event::poll(Duration::ZERO)? {
+            let now = Instant::now();
+            match event::read()? {
+                Event::Resize(..) => {
+                    let grid = grid_now()?;
+                    if grid != app.grid {
+                        app.resize(grid);
+                        pictures.reset();
+                        terminal.clear()?;
+                        worker.request(grid.cols as u32 * grid.cw, grid.rows as u32 * grid.ch)?;
+                    }
+                }
+                Event::Key(key) => app.key(key, now),
+                Event::Mouse(mouse) => app.mouse(mouse, now),
+                Event::Paste(text) => app.paste(&text, now),
+                _ => {}
+            }
+        }
+        if app.quit || !animating {
+            return Ok(());
+        }
+    }
+}

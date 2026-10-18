@@ -548,6 +548,10 @@ class JournalingUI:
         elif payload.get("event") in ("started", "done", "failed", "stopped"):
             self._ui.print_result(f"[{payload['agent_id']}] {payload['event']}: {payload.get('summary') or payload.get('task') or ''}")
 
+    def print_helper_activity(self, payload: dict) -> None:
+        # Live only: the helper's own service session journals this activity.
+        self._forward("print_helper_activity", payload)
+
     def print_artifact(self, payload: dict) -> None:
         # The preview is a data URL: shown live, never stored in the journal.
         self._events.print_artifact({**payload, "preview": ""})

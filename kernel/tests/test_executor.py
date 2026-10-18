@@ -25,6 +25,29 @@ def _append_source_in_process(workspace: str, prefix: str, count: int) -> None:
         executor._append_file("process-events.log", f"{prefix}-{index}\n")
 
 
+def test_line_changes_count_a_line_diff():
+    assert executor_module.line_changes("", "a\nb\n") == (2, 0)
+    assert executor_module.line_changes("a\nb\nc\n", "a\nB\nc\nd\n") == (2, 1)
+    assert executor_module.line_changes("a\nb\n", "a\nb\n") == (0, 0)
+
+
+def test_writes_report_the_lines_they_added_and_removed(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    executor = SafeExecutor(tmp_path)
+
+    created = executor._write_file("a.py", "one\ntwo\nthree\n")
+    assert (created.data["lines_added"], created.data["lines_removed"]) == (3, 0)
+
+    rewritten = executor._write_file("a.py", "one\n2\nthree\nfour\n")
+    assert (rewritten.data["lines_added"], rewritten.data["lines_removed"]) == (2, 1)
+
+    appended = executor._append_file("a.py", "five\nsix\n")
+    assert (appended.data["lines_added"], appended.data["lines_removed"]) == (2, 0)
+
+    replaced = executor._replace_in_file("a.py", "five\nsix\n", "5\n")
+    assert (replaced.data["lines_added"], replaced.data["lines_removed"]) == (1, 2)
+
+
 @pytest.mark.offline_smoke
 def test_executor_file_lifecycle_and_search(tmp_path):
     executor = SafeExecutor(tmp_path)

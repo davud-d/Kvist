@@ -109,6 +109,29 @@ def test_a_coder_helper_changes_files(agent_factory):
     assert "may change files" in started["note"]
 
 
+def test_the_main_interface_sees_each_helper_call_as_it_starts_and_ends(agent_factory):
+    main = _main(agent_factory, ScriptedClient([
+        _call("write_file", {"path": "notes.txt", "content": "made by the helper\n"}),
+        "Created notes.txt.",
+    ]))
+    seen: list[dict] = []
+
+    class Watching(NullUI):
+        def print_helper_activity(self, payload):
+            seen.append(payload)
+
+    object.__setattr__(main._ui, "_ui", Watching())
+
+    started = main.helpers.start("create notes.txt", role="coder", context="", attachments=[], started_by="main")
+    main.helpers.wait(started["agent_id"], 10)
+
+    calls = [entry for entry in seen if entry["action_type"] == "write_file"]
+    assert [entry["phase"] for entry in calls] == ["step", "result"]
+    assert {entry["agent_id"] for entry in calls} == {started["agent_id"]}
+    assert calls[0]["call_id"] == calls[1]["call_id"]
+    assert calls[1]["ok"] is True and calls[1]["summary"]
+
+
 @pytest.mark.parametrize("limit", ["reader_role", "planning", "read_only_goal", "skill"])
 def test_a_helper_gets_no_more_than_the_agent_that_started_it(agent_factory, limit):
     main = _main(agent_factory, ScriptedClient([

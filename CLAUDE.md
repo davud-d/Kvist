@@ -22,6 +22,10 @@ frontends/
                         terminal_banner, banner, splash, …) + assets/ + tests/
   tui/ink/              Node/Ink terminal app, skins in ui/skins/{kvist,claude-code}/,
                         mascot/ (frames + generator), tests/ (npm test)
+  tui/glass/            Rust interface over a photograph (kitty graphics only,
+                        refuses other terminals; runs the core as stdio-multi --wake;
+                        the launcher starts it for --frontend glass / saved `glass`,
+                        falling back to the Ink UI when it cannot run)
   gui/electron/         Electron desktop app
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
   ide/jetbrains/        IntelliJ plugin (separate Gradle build)

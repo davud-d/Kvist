@@ -128,6 +128,22 @@ class ExecutionResult:
     data: dict[str, Any]
 
 
+def line_changes(old: str, new: str) -> tuple[int, int]:
+    """Lines added and removed going from ``old`` to ``new``, as a line diff counts them.
+
+    Frontends show these beside a changed file; a frontend cannot work them out
+    itself, because only the executor saw the text the write replaced.
+    """
+    matcher = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False)
+    added = removed = 0
+    for tag, old_start, old_end, new_start, new_end in matcher.get_opcodes():
+        if tag in ("replace", "delete"):
+            removed += old_end - old_start
+        if tag in ("replace", "insert"):
+            added += new_end - new_start
+    return added, removed
+
+
 def _validated_read_roots(
     raw_roots: tuple[str | Path, ...],
     workspace: Path,
@@ -1446,6 +1462,7 @@ class SafeExecutor:
         self._record_change_baseline(target, existed, old_text, content)
         self._atomic_replace_text(target, content, expected_identity)
         self._promote_change_baseline(target, content)
+        added, removed = line_changes(old_text or "", content)
 
         return ExecutionResult(
             ok=True,
@@ -1454,6 +1471,8 @@ class SafeExecutor:
                 "path": path,
                 "bytes_written": len(content_bytes),
                 "first_line": 1,
+                "lines_added": added,
+                "lines_removed": removed,
             },
         )
 
@@ -1498,6 +1517,10 @@ class SafeExecutor:
                 "path": path,
                 "bytes_appended": len(content.encode("utf-8")),
                 "first_line": old_text.count("\n") + 1,
+                # Appending only adds; diffing the whole file would cost a
+                # full pass over a long log for the same answer.
+                "lines_added": len(content.splitlines()),
+                "lines_removed": 0,
             },
         )
 
@@ -1559,6 +1582,8 @@ class SafeExecutor:
         self._record_change_baseline(target, True, original_text, updated_text)
         self._atomic_replace_text(target, updated_text, expected_identity)
         self._promote_change_baseline(target, updated_text)
+        # Only the replaced fragments differ, so diffing them is the whole diff.
+        added, removed = line_changes(old_text, new_text)
 
         return ExecutionResult(
             ok=True,
@@ -1569,6 +1594,8 @@ class SafeExecutor:
                 "occurrences_replaced": occurrences_replaced,
                 "bytes_written": updated_size,
                 "first_line": original_text.count("\n", 0, original_text.find(old_text)) + 1,
+                "lines_added": added * occurrences_replaced,
+                "lines_removed": removed * occurrences_replaced,
             },
         )
 

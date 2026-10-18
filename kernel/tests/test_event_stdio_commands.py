@@ -530,6 +530,63 @@ def test_models_refuses_an_invalid_selection_without_rebuilding(home, agent_fact
     assert result.ok is False
 
 
+def test_models_with_a_provider_switches_both_in_one_rebuild(home, agent_factory):
+    replacement = agent_factory()
+    calls: list[dict] = []
+
+    def rebuild(provider_override=None, models_override=None):
+        calls.append({"provider": provider_override, "models": models_override})
+        replacement.config.provider = provider_override
+        replacement.config.fast_model = models_override["fast"]
+        replacement.config.smart_model = models_override["smart"]
+        return replacement, replacement.config, []
+
+    result, requests, _ = _run_handler(
+        "models", agent_factory(), args=["deepseek", "deepseek-v4-flash", "deepseek-v4-pro"], rebuild=rebuild
+    )
+
+    assert requests == []
+    assert calls == [{"provider": "deepseek", "models": {"fast": "deepseek-v4-flash", "smart": "deepseek-v4-pro"}}]
+    assert result.ok and result.effects["provider"] == "deepseek"
+    assert _saved("llm_models")["deepseek"]["smart"] == "deepseek-v4-pro"
+
+
+def test_models_refuses_an_unknown_provider(home, agent_factory):
+    def rebuild(**kwargs):
+        raise AssertionError("must not rebuild")
+
+    result, _, _ = _run_handler("models", agent_factory(), args=["nowhere", "a", "b"], rebuild=rebuild)
+    assert result.ok is False and "nowhere" in result.message
+
+
+def test_catalog_lists_connected_providers_with_the_current_one_first(home, agent_factory, monkeypatch):
+    from kernel import config_info
+
+    def summary(provider, connected, saved=None):
+        return {"id": provider, "label": provider.title(), "custom": False, "has_credentials": connected,
+                "defaults": {"fast": f"{provider}-fast", "smart": f"{provider}-smart"},
+                "saved_models": saved or {"fast": "", "smart": ""}}
+
+    monkeypatch.setattr(config_info, "build_config_info", lambda: {
+        "providers": [summary("deepseek", True, {"fast": "", "smart": "deepseek-v4-pro"}),
+                      summary("anthropic", False), summary("openai", True)],
+        "custom_providers": [],
+    })
+    monkeypatch.setattr(main, "_model_picker_options", lambda provider: (
+        [{"value": f"{provider}-live", "label": "x"}], True))
+    agent = agent_factory()
+    agent.config.fast_model, agent.config.smart_model = "gpt-a", "gpt-b"
+
+    result, requests, _ = _run_handler("catalog", agent)
+
+    assert result.ok and requests == []
+    providers = result.effects["providers"]
+    assert [p["provider"] for p in providers] == ["openai", "deepseek"]
+    assert providers[0]["current"] and providers[0]["chosen"] == {"fast": "gpt-a", "smart": "gpt-b"}
+    assert providers[0]["models"] == ["gpt-a", "gpt-b", "openai-live"]
+    assert providers[1]["chosen"] == {"fast": "deepseek-fast", "smart": "deepseek-v4-pro"}
+
+
 def test_models_cancel_and_bad_usage(home, agent_factory, monkeypatch):
     monkeypatch.setattr(
         main, "_model_picker_options", lambda provider: ([{"value": "gpt-5.4", "label": "a"}], False)
@@ -559,7 +616,7 @@ def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
 
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
-        "role", "effort", "verbose", "style", "session", "new", "rename", "models",
+        "role", "effort", "verbose", "style", "session", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
         "strime", "revert", "bug", "commit-message", "web-search-provider", "context",
     }

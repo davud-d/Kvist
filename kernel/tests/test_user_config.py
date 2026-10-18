@@ -31,6 +31,8 @@ def test_frontend_preference_round_trips_without_clobbering_settings(tmp_path):
     assert user_config.load_user_config(path)["other"] == "kept"
     user_config.save_frontend("Claude", path)
     assert user_config.get_saved_frontend(path) == "claude"
+    user_config.save_frontend("glass", path)
+    assert user_config.get_saved_frontend(path) == "glass"
     user_config.save_frontend("terminal", path)
     assert user_config.get_saved_frontend(path) == "terminal"
     with pytest.raises(ValueError):

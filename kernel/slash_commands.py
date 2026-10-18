@@ -56,7 +56,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     ),
     SlashCommand("session", "Create, switch or delete saved sessions"),
     SlashCommand("style", "Select a style for chat/agent responses"),
-    SlashCommand("tui", "Choose the Ink, Claude-style or Classic Legacy terminal UI for the next launch"),
+    SlashCommand("tui", "Choose the Ink, Claude-style, Glass or Classic Legacy terminal UI for the next launch"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
     SlashCommand("changes", "Show agent file changes across all sessions"),

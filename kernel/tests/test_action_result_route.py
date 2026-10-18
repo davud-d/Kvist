@@ -54,9 +54,23 @@ def test_write_file_result_reports_lines_path_and_first_line():
         "exit_code": None,
         "path": "a.py",
         "first_line": 1,
+        "lines_added": None,
+        "lines_removed": None,
         "call_id": "",
         "batch_id": "",
     }
+
+
+def test_a_write_passes_on_the_executors_line_counts():
+    written = _build(
+        "write_file",
+        {"path": "a.py", "content": "x\n"},
+        _ok("write_file", {"path": "a.py", "first_line": 1, "lines_added": 4, "lines_removed": 2}),
+    )
+    assert (written["lines_added"], written["lines_removed"]) == (4, 2)
+
+    read = _build("read_file", {"path": "a.py"}, _ok("read_file", {"content": "x", "lines_added": 9}))
+    assert (read["lines_added"], read["lines_removed"]) == (None, None)
 
 
 def test_result_names_its_call_and_batch():
@@ -373,7 +387,7 @@ def test_event_stream_ui_emits_action_result_event_redacted():
     assert payload["exit_code"] == 0
     assert set(payload) == {
         "type", "step", "action_type", "ok", "summary", "output", "exit_code", "path", "first_line",
-        "call_id", "batch_id",
+        "lines_added", "lines_removed", "call_id", "batch_id",
     }
 
 

@@ -425,6 +425,8 @@ def test_installer_switch_starts_the_agent_instead_of_reopening_setup(monkeypatc
         ("/tui on", "terminal", "tui"),
         ("/tui <claude>", "terminal", "claude"),
         ("/tui off", "claude", "terminal"),
+        ("/tui glass", "terminal", "glass"),
+        ("/tui", "glass", "tui"),
         ("/tui hologram", "terminal", None),
         ("/tui on off", "terminal", None),
     ],
@@ -588,3 +590,69 @@ def test_acp_login_reports_what_the_setup_screen_did(monkeypatch, capsys):
     assert "nothing was changed" in capsys.readouterr().err
     monkeypatch.setattr(main, "launch_tui", lambda args, **kwargs: 3)
     assert main._acp_login(_acp_args()) == 3
+
+
+def _glass(monkeypatch, tmp_path, check_code=0, check_err=""):
+    """A fake kvist-glass: ``--check`` answers with ``check_code``; the run is recorded."""
+    glass = tmp_path / "kvist-glass"
+    glass.write_text("")
+    glass.chmod(0o755)
+    monkeypatch.setenv("KVIST_GLASS", str(glass))
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(main, "resolve_workspace_path", lambda raw: raw)
+    def check(command, stderr, text):
+        # The terminal check must see the real terminal: only stderr is captured.
+        assert command[-1] == "--check" and stderr == subprocess.PIPE
+        return subprocess.CompletedProcess(command, check_code, None, check_err)
+
+    monkeypatch.setattr(subprocess, "run", check)
+    return glass
+
+
+def test_glass_runs_with_this_program_as_its_core(monkeypatch, tmp_path):
+    glass = _glass(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(subprocess, "call", lambda command, env: calls.append((command, env)) or 0)
+
+    assert main.launch_glass(_tui_args(frontend="glass")) == 0
+
+    command, env = calls[0]
+    assert command == [str(glass), "--workspace", "ws"]
+    assert json.loads(env["KVIST_CORE_CMD"])[-1].endswith("__main__.py")
+    assert "KVIST_SWITCH_FILE" in env
+
+
+def test_glass_on_a_terminal_it_refuses_falls_back_with_the_reason(monkeypatch, tmp_path, capsys):
+    _glass(monkeypatch, tmp_path, check_code=3, check_err="no kitty graphics here")
+    monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
+
+    assert main.launch_glass(_tui_args(frontend="glass")) is None
+    assert "no kitty graphics here" in capsys.readouterr().err
+
+
+def test_glass_without_a_build_falls_back(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("KVIST_GLASS", str(tmp_path / "missing"))
+    monkeypatch.setattr(main, "_GLASS_BUILD", tmp_path / "missing")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+
+    assert main.launch_glass(_tui_args(frontend="glass")) is None
+    assert "cargo build --release" in capsys.readouterr().err
+
+
+def test_tui_inside_glass_starts_the_chosen_interface(monkeypatch, tmp_path):
+    _glass(monkeypatch, tmp_path)
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    monkeypatch.setattr(main, "launch_tui", lambda args: f"launched {args.frontend}")
+
+    def choose_ink(command, env):
+        Path(env["KVIST_SWITCH_FILE"]).write_text("tui\n", encoding="utf-8")
+        return main._TUI_SWITCH_CODE
+
+    monkeypatch.setattr(subprocess, "call", choose_ink)
+
+    assert main.launch_glass(_tui_args(frontend="glass")) == "launched tui"
+    assert saved == ["tui"]

@@ -49,6 +49,8 @@ def build_action_result(
         "exit_code": _exit_code(action_type, data),
         "path": _path(action_type, args, data),
         "first_line": _first_line(action_type, data, ok),
+        "lines_added": _line_count(action_type, data, ok, "lines_added"),
+        "lines_removed": _line_count(action_type, data, ok, "lines_removed"),
         "call_id": call_id,
         "batch_id": batch_id,
     }
@@ -232,6 +234,13 @@ def _first_line(action_type: str, data: dict[str, Any], ok: bool) -> int | None:
         return None
     line = data.get("first_line")
     return line if isinstance(line, int) and line >= 1 else None
+
+
+def _line_count(action_type: str, data: dict[str, Any], ok: bool, key: str) -> int | None:
+    if action_type not in _FILE_WRITE_ACTIONS or not ok:
+        return None
+    count = data.get(key)
+    return count if isinstance(count, int) and count >= 0 else None
 
 
 def _one_line(text: str) -> str:

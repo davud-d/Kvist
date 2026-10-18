@@ -12,6 +12,7 @@ from kernel.frontend_protocol import (
     ActionOutputEvent,
     ActionResultEvent,
     ArtifactEvent,
+    HelperActivityEvent,
     HelperEvent,
     ScreenEvent,
     SkillEvent,
@@ -339,6 +340,8 @@ class EventStreamUI:
                 exit_code=result.get("exit_code"),
                 path=None if path is None else redact_text(str(path)),
                 first_line=result.get("first_line"),
+                lines_added=result.get("lines_added"),
+                lines_removed=result.get("lines_removed"),
                 call_id=str(result.get("call_id") or ""),
                 batch_id=str(result.get("batch_id") or ""),
             )
@@ -369,6 +372,15 @@ class EventStreamUI:
             agent_id=str(payload["agent_id"]), event=str(payload["event"]), state=str(payload["state"]),
             session=str(payload.get("session") or ""), task=redact_text(str(payload.get("task") or "")),
             summary=redact_text(str(payload.get("summary") or "")), stopped_by=payload.get("stopped_by"),
+        ))
+
+    def print_helper_activity(self, payload: dict) -> None:
+        ok = payload.get("ok")
+        self._channel.emit(HelperActivityEvent(
+            agent_id=str(payload["agent_id"]), phase=str(payload["phase"]),
+            call_id=str(payload.get("call_id") or ""), action_type=str(payload.get("action_type") or ""),
+            label=redact_text(str(payload.get("label") or "")), ok=None if ok is None else bool(ok),
+            summary=redact_text(str(payload.get("summary") or "")), output=redact_text(str(payload.get("output") or "")),
         ))
 
     def print_artifact(self, payload: dict) -> None:

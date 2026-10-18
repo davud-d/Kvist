@@ -42,6 +42,10 @@ MAX_ACTIVE_HELPERS = 1
 HELPER_MAX_STEPS = 40
 STOP_WAIT_SECONDS = 15.0
 NOTICE_CHARS = 300
+# How much of a helper call's output reaches the main interface live; the
+# whole output stays in the helper's service session.
+ACTIVITY_LINES = 3
+ACTIVITY_LINE_CHARS = 200
 
 # Helper lifecycle states, as the main agent and the interfaces see them.
 STARTING = "starting"
@@ -56,8 +60,22 @@ _ACTIVE = (STARTING, RUNNING, PAUSED)
 class _HelperUI:
     """What a helper shows: nothing of its own; its events go to its service session's journal.
 
-    The main interface only hears compact notices through the manager.
+    The main interface hears compact notices through the manager, plus each
+    call as it starts and ends (``report``), so a frontend can show what the
+    helper is doing while it works.
     """
+
+    def __init__(self, report: Any) -> None:
+        self._report = report
+
+    def print_step_header(self, step: int, command: Any, reasoning_seconds: float = 0.0) -> None:
+        self._report({"phase": "step", "call_id": command.call_id or f"step-{step}",
+                      "action_type": str(command.action.type), "label": command.action.description})
+
+    def print_action_result(self, result: dict) -> None:
+        self._report({"phase": "result", "call_id": result.get("call_id") or f"step-{result.get('step', 0)}",
+                      "action_type": str(result.get("action_type", "")), "ok": bool(result.get("ok")),
+                      "summary": str(result.get("summary", "")), "output": _last_lines(str(result.get("output", "")))})
 
     def start_live(self) -> None:
         return None
@@ -69,9 +87,6 @@ class _HelperUI:
         return None
 
     def print_plan(self, *args, **kwargs) -> None:
-        return None
-
-    def print_step_header(self, *args, **kwargs) -> None:
         return None
 
     def live_markdown(self):
@@ -244,7 +259,7 @@ class HelperManager:
         shared_gate = not read_only and getattr(main_gate, "answers_from_any_thread", False)
         executor = SafeExecutor(main.executor.workspace, approvals=main_gate if shared_gate else DenyApprovalGate(),
                                 read_roots=main.executor.read_roots)
-        agent = LocalAgent(main.client, executor, config, ui=_HelperUI(),
+        agent = LocalAgent(main.client, executor, config, ui=_HelperUI(lambda payload: self._activity(helper, payload)),
                            console=main.console,
                            service_session={"kind": "helper", "agent_id": helper.agent_id,
                                             "parent_session": main.current_session,
@@ -427,6 +442,11 @@ class HelperManager:
         if event in (DONE, FAILED):
             self._main._background_finished()
 
+    def _activity(self, helper: Helper, payload: dict[str, Any]) -> None:
+        printer = getattr(self._main._ui, "print_helper_activity", None)
+        if printer is not None:
+            printer({"agent_id": helper.agent_id, **payload})
+
     def has_finish_notice(self) -> bool:
         """Whether a helper ended on its own and the main model has not been told yet."""
         with self._cond:
@@ -461,6 +481,12 @@ class HelperManager:
     def person_wrote(self) -> None:
         """A new message from the person lifts the "do not restart a stopped helper" rule."""
         self._person_stopped_at_message = None
+
+
+def _last_lines(text: str) -> str:
+    """The end of a command's output: where a test run or a build says how it went."""
+    lines = [line for line in text.splitlines() if line.strip()]
+    return "\n".join(line[:ACTIVITY_LINE_CHARS] for line in lines[-ACTIVITY_LINES:])
 
 
 def _main_cannot_write(main: Any) -> bool:

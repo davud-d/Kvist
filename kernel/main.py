@@ -70,12 +70,13 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
-        choices=("terminal", "tui", "claude", "stdio", "stdio-multi"),
+        choices=("terminal", "tui", "claude", "glass", "stdio", "stdio-multi"),
         default=None,
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
             "the Node/Ink terminal UI (frontends/tui/ink), 'claude' for the same app drawn "
-            "like Claude Code, 'terminal' for the Classic Legacy UI, "
+            "like Claude Code, 'glass' for the Rust interface over a photograph "
+            "(frontends/tui/glass; kitty graphics only), 'terminal' for the Classic Legacy UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
             "per stdin line."
@@ -956,8 +957,8 @@ def parse_tui_choice(raw: str, current: str) -> str | None:
     value = parts[1].strip("<>").casefold()
     if value in {"true", "on", "1", "tui"}:
         return "tui"
-    if value == "claude":
-        return "claude"
+    if value in {"claude", "glass"}:
+        return value
     if value in {"false", "off", "0", "terminal"}:
         return "terminal"
     return None
@@ -984,8 +985,64 @@ TUI_FRONTENDS = ("tui", "claude")
 _TUI_SAVED_NOTICE = {
     "tui": "The Ink terminal UI will open on the next launch.",
     "claude": "The Claude-style terminal UI will open on the next launch.",
+    "glass": "Kvist Glass will open on the next launch (kitty or Ghostty).",
     "terminal": "Classic Legacy will open on the next launch.",
 }
+# Kvist Glass (frontends/tui/glass): a Rust program, built with `cargo build --release`.
+_GLASS_BUILD = _APP_ROOT / "frontends" / "tui" / "glass" / "target" / "release" / "kvist-glass"
+# kvist-glass --check: the terminal cannot show it (no kitty graphics, a multiplexer, …).
+_GLASS_REFUSED_CODE = 3
+
+
+def find_glass() -> str | None:
+    """The Kvist Glass program: ``KVIST_GLASS``, then ``kvist-glass`` on PATH, then a checkout's build."""
+    import shutil
+
+    for candidate in (os.environ.get("KVIST_GLASS"), shutil.which("kvist-glass"), str(_GLASS_BUILD)):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def launch_glass(args: argparse.Namespace) -> int | None:
+    """Run Kvist Glass with this program as its core; None when it cannot run here.
+
+    Glass draws with the kitty graphics protocol and refuses any other terminal itself
+    (``--check``), so the reason is printed and the caller falls back to the Ink UI.
+    Exit code 64 means the person picked another interface with ``/tui``.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    glass = find_glass()
+    if glass is None:
+        print(
+            "Kvist Glass is not built: run `cargo build --release` in frontends/tui/glass "
+            "(or set KVIST_GLASS). Using the Ink UI.",
+            file=sys.stderr,
+        )
+        return None
+    # The check asks the terminal itself, so only its reason (stderr) is captured.
+    check = subprocess.run([glass, "--check"], stderr=subprocess.PIPE, text=True)
+    if check.returncode != 0:
+        reason = check.stderr.strip() or f"kvist-glass --check exited with {check.returncode}"
+        print(f"{reason}\nUsing the Ink UI.", file=sys.stderr)
+        return None
+    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    command = [glass, "--workspace", str(resolve_workspace_path(args.workspace))]
+    with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
+        switch_file = Path(scratch) / "frontend"
+        env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file)}
+        try:
+            code = subprocess.call(command, env=env)
+        except KeyboardInterrupt:
+            return 130
+        if code != _TUI_SWITCH_CODE:
+            return code
+        return _switch_frontend(switch_file, args)
 
 
 def needs_setup(args: argparse.Namespace) -> bool:
@@ -1133,13 +1190,18 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     except ValueError:
         print(f"Unknown interface '{chosen}'; using Classic Legacy.", file=sys.stderr)
         return None
-    if chosen not in TUI_FRONTENDS:
+    if chosen not in TUI_FRONTENDS + ("glass",):
         return None
     args.frontend = chosen
     # Setup has just saved a provider; the interface it chose is the agent itself.
     # needs_setup() also reads args.installer, so leaving it set reopened the setup screen forever.
     args.setup = False
     args.installer = False
+    if chosen == "glass":
+        code = launch_glass(args)
+        if code is not None:
+            return code
+        args.frontend = "tui"
     return launch_tui(args)
 
 
@@ -3617,17 +3679,28 @@ def _provider_offers_model_list(provider: str) -> bool:
 
 
 def _stdio_models(ctx: CommandContext) -> CommandResult:
+    """``models``: the picker; ``models FAST SMART``; ``models PROVIDER FAST SMART``.
+
+    The three-argument form switches provider and models in one rebuild, for a
+    picker that lists every connected provider's models (``catalog``).
+    """
     agent = ctx.session.agent
     config = agent.config
-    if not _provider_offers_model_list(config.provider):
+    provider = config.provider
+    args = list(ctx.args)
+    if len(args) == len(MODEL_ROLES) + 1:
+        provider = _known_provider(args.pop(0))
+        if provider is None:
+            return CommandResult(False, f"Unknown provider: {ctx.args[0]}")
+    if not _provider_offers_model_list(provider):
         return CommandResult(
             False,
-            f"No models available for {provider_label(config.provider)}.",
+            f"No models available for {provider_label(provider)}.",
         )
-    if len(ctx.args) == len(MODEL_ROLES):
-        selected = dict(zip(MODEL_ROLES, ctx.args))
-    elif ctx.args:
-        return CommandResult(False, "Usage: models [FAST SMART]")
+    if len(args) == len(MODEL_ROLES):
+        selected = dict(zip(MODEL_ROLES, args))
+    elif args:
+        return CommandResult(False, "Usage: models [[PROVIDER] FAST SMART]")
     else:
         selected = select_models_interactively(config, config.verbose, ui=ctx.ui)
     if selected is None:
@@ -3636,12 +3709,12 @@ def _stdio_models(ctx: CommandContext) -> CommandResult:
     credentials = load_available_credentials(
         (OPENAI_API_KEY_KEY, "gemini_api_key", "groq_api_key", "omniroute_api_key", "openrouter_api_key")
     )
-    issues = validate_model_selection(config.provider, selected, credentials)
+    issues = validate_model_selection(provider, selected, credentials)
     if issues:
         return CommandResult(False, "\n".join(sanitize_display_text(issue) for issue in issues))
     try:
         new_agent, new_config, warnings = ctx.rebuild(
-            provider_override=config.provider, models_override=selected
+            provider_override=provider, models_override=selected
         )
     except RuntimeError as error:
         return CommandResult(False, sanitize_display_text(str(error)))
@@ -3670,6 +3743,45 @@ def _stdio_models(ctx: CommandContext) -> CommandResult:
             "warnings": warnings,
         },
     )
+
+
+def _stdio_catalog(ctx: CommandContext) -> CommandResult:
+    """Every connected provider with its models, for a picker across providers.
+
+    A provider is connected when its key or sign-in is saved (``build_config_info``).
+    Each list is the provider's live catalog when it answers, else the curated
+    one, plus the models chosen for it; the lists are fetched in parallel, as
+    each is one ``/v1/models`` request. Nothing is changed; ``models PROVIDER
+    FAST SMART`` applies a choice.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from kernel.config_info import build_config_info
+
+    config = ctx.session.agent.config
+    info = build_config_info()
+    connected = [entry for entry in info["providers"] + info["custom_providers"] if entry["has_credentials"]]
+    connected.sort(key=lambda entry: entry["id"] != config.provider)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        catalogs = list(pool.map(_catalog_options, connected))
+    providers = []
+    for entry, options in zip(connected, catalogs):
+        current = entry["id"] == config.provider
+        if current:
+            chosen = {"fast": config.fast_model, "smart": config.smart_model}
+        else:
+            chosen = {role: entry["saved_models"][role] or entry["defaults"][role] for role in MODEL_ROLES}
+        models = sorted(set(options) | {model for model in chosen.values() if model})
+        providers.append({"provider": entry["id"], "label": entry["label"], "current": current,
+                          "chosen": chosen, "models": models})
+    return CommandResult(True, "", {"providers": providers})
+
+
+def _catalog_options(entry: dict) -> list[str]:
+    if entry["custom"]:
+        return []
+    options, _live = _model_picker_options(entry["id"])
+    return [option["value"] for option in options]
 
 
 def _stdio_changes(ctx: CommandContext) -> CommandResult:
@@ -4113,6 +4225,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "new": _stdio_new,
     "rename": _stdio_rename,
     "models": _stdio_models,
+    "catalog": _stdio_catalog,
     "changes": _stdio_changes,
     "context": _stdio_context,
     "provider": _stdio_provider,
@@ -4427,6 +4540,12 @@ def main() -> None:
     if args.installer and not os.environ.get("KVIST_INSTALL_SCRIPT"):
         print("--installer is started by scripts/release/install.sh, which sets KVIST_INSTALL_SCRIPT.", file=sys.stderr)
         raise SystemExit(2)
+    if not first_run and (args.frontend or get_saved_frontend()) == "glass" and not args.no_banner:
+        exit_code = launch_glass(args)
+        if exit_code is not None:
+            raise SystemExit(exit_code)
+        # Glass cannot run here and said why; the Ink UI is the nearest interface.
+        args.frontend = "tui"
     if (first_run or (args.frontend or get_saved_frontend()) in TUI_FRONTENDS) and not args.no_banner:
         # The reason for falling back to the classic terminal is always printed: a machine
         # without Node.js otherwise opens the old wizard with no hint why.
@@ -4588,7 +4707,7 @@ def main() -> None:
             if user_goal.split(maxsplit=1)[0].casefold() == "/tui":
                 selected_tui = parse_tui_choice(user_goal, get_saved_frontend())
                 if selected_tui is None:
-                    console.print("[yellow]Usage: /tui [on|off|claude][/yellow]")
+                    console.print("[yellow]Usage: /tui [on|off|claude|glass][/yellow]")
                     continue
                 try:
                     save_frontend(selected_tui)

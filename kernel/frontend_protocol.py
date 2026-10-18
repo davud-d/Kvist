@@ -278,6 +278,31 @@ class HelperEvent:
 
 
 @dataclass(slots=True)
+class HelperActivityEvent:
+    """One call of a helper as it happens: ``phase`` is ``step`` when it starts, ``result`` when it ends.
+
+    Live only, like ``action_output``: the helper's service session journals its
+    full activity, so the main session's journal keeps just the ``helper`` notices.
+    ``ok``, ``summary`` and ``output`` (the last lines, redacted) come with ``result``.
+    """
+
+    agent_id: str
+    phase: str
+    call_id: str
+    action_type: str
+    label: str = ""
+    ok: bool | None = None
+    summary: str = ""
+    output: str = ""
+    type: ClassVar[str] = "helper_activity"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "agent_id": self.agent_id, "phase": self.phase, "call_id": self.call_id,
+                "action_type": self.action_type, "label": self.label, "ok": self.ok,
+                "summary": self.summary, "output": self.output}
+
+
+@dataclass(slots=True)
 class ArtifactEvent:
     """A file or image a skill produced for the person; ``preview`` is a small JPEG data URL (live only)."""
 
@@ -469,7 +494,8 @@ class ActionResultEvent:
     command output or error text. ``exit_code`` is set for shell-like actions
     only. ``path``/``first_line`` are set for file writes: ``first_line`` is the
     1-based line of the resulting file where the written text begins, which lets
-    a frontend number the lines of a diff.
+    a frontend number the lines of a diff. ``lines_added``/``lines_removed`` are
+    the write's line diff, for a frontend that shows per-file counts.
     """
 
     step: int
@@ -480,6 +506,8 @@ class ActionResultEvent:
     exit_code: int | None = None
     path: str | None = None
     first_line: int | None = None
+    lines_added: int | None = None
+    lines_removed: int | None = None
     # Additive: the call this result answers (see StepEvent).
     call_id: str = ""
     batch_id: str = ""
@@ -496,6 +524,8 @@ class ActionResultEvent:
             "exit_code": self.exit_code,
             "path": self.path,
             "first_line": self.first_line,
+            "lines_added": self.lines_added,
+            "lines_removed": self.lines_removed,
             "call_id": self.call_id,
             "batch_id": self.batch_id,
         }

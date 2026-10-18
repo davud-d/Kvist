@@ -351,21 +351,21 @@ def get_saved_role(config_path: Path | None = None) -> str | None:
 FRONTEND_KEY = "frontend"
 
 
-SAVED_FRONTENDS = ("terminal", "tui", "claude")
+SAVED_FRONTENDS = ("terminal", "tui", "claude", "glass")
 
 
 def get_saved_frontend(config_path: Path | None = None) -> str:
     """Return the saved terminal frontend (plain terminal by default)."""
     payload = load_user_config(config_path)
     value = payload.get(FRONTEND_KEY)
-    return value if value in ("tui", "claude") else "terminal"
+    return value if value in SAVED_FRONTENDS else "terminal"
 
 
 def save_frontend(frontend: str, config_path: Path | None = None) -> None:
     """Persist the frontend used on the next launch."""
     normalized = str(frontend).strip().casefold()
     if normalized not in SAVED_FRONTENDS:
-        raise ValueError("Frontend must be 'terminal', 'tui' or 'claude'.")
+        raise ValueError("Frontend must be 'terminal', 'tui', 'claude' or 'glass'.")
 
     def update(payload: dict[str, object]) -> dict[str, object]:
         if normalized == "terminal":
