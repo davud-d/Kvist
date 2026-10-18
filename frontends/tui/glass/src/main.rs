@@ -28,6 +28,7 @@ mod term;
 mod text;
 mod theme;
 mod view;
+mod video;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

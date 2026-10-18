@@ -35,12 +35,17 @@ pub fn decode_photo() -> RgbImage {
 }
 
 pub fn build(source: &RgbImage, width: u32, height: u32, with_rise: bool) -> Canvas {
-    let photo = cover(source, width, height);
+    // Let the terminal scale the textures instead of rebuilding full-window blurs 24 times a second.
+    let scale = (960.0 / width as f32).min(540.0 / height as f32).min(1.0);
+    let photo = cover(source, (width as f32 * scale).round().max(1.0) as u32,
+        (height as f32 * scale).round().max(1.0) as u32);
     let sharp = vignette(&photo);
-    let frost = blur(&sharp, 6, 3);
-    let levels = [(3, 2, 0.93), (5, 2, 0.84), (8, 2, 0.75), (12, 3, 0.66)]
+    // Frosted textures have no fine detail; keeping them small avoids five redundant upscales per frame.
+    let soft = imageops::resize(&sharp, (sharp.width() / 4).max(1), (sharp.height() / 4).max(1), FilterType::Triangle);
+    let frost = blur(&soft, 2, 2);
+    let levels = [(1, 2, 0.93), (1, 3, 0.84), (2, 2, 0.75), (3, 3, 0.66)]
         .iter()
-        .map(|&(divisor, radius, light)| brightness(&blur(&sharp, divisor, radius), light))
+        .map(|&(divisor, radius, light)| brightness(&blur(&soft, divisor, radius), light))
         .collect();
     let rise = if with_rise {
         [0.08, 0.22, 0.40, 0.60, 0.80, 0.93].iter().map(|&light| brightness(&photo, light)).collect()
@@ -165,7 +170,7 @@ pub struct Glass {
 
 /// A glass card of `width`×`height` pixels whose top-left corner sits at
 /// (`x`, `y`) on `source`. Returns RGBA; the corners are transparent.
-pub fn card(source: &RgbImage, x: i64, y: i64, width: u32, height: u32, glass: &Glass) -> RgbaImage {
+pub fn card(source: &RgbImage, x: i64, y: i64, width: u32, height: u32, glass: &Glass, scale: (f32, f32)) -> RgbaImage {
     let mut out = RgbaImage::new(width, height);
     let (sw, sh) = (source.width() as i64, source.height() as i64);
     let half_w = width as f32 / 2.0;
@@ -177,7 +182,9 @@ pub fn card(source: &RgbImage, x: i64, y: i64, width: u32, height: u32, glass: &
         if coverage <= 0.0 {
             continue;
         }
-        let under = source.get_pixel((x + px as i64).clamp(0, sw - 1) as u32, (y + py as i64).clamp(0, sh - 1) as u32).0;
+        let sx = ((x + px as i64) as f32 * scale.0) as i64;
+        let sy = ((y + py as i64) as f32 * scale.1) as i64;
+        let under = source.get_pixel(sx.clamp(0, sw - 1) as u32, sy.clamp(0, sh - 1) as u32).0;
         let ring = (1.0 - (d + 1.0).abs()).clamp(0.0, 1.0);
         let fall = 1.0 - 0.8 * (py as f32 / height as f32);
         let light = ring * glass.rim * fall * 255.0;
@@ -264,7 +271,7 @@ mod tests {
     fn card_corners_are_transparent_and_middle_is_opaque() {
         let source = RgbImage::from_pixel(200, 100, image::Rgb([200, 200, 200]));
         let glass = Glass { tint: [0, 0, 0], alpha: 0.5, radius: 12.0, rim: 0.0 };
-        let card = card(&source, 10, 10, 120, 60, &glass);
+        let card = card(&source, 10, 10, 120, 60, &glass, (1.0, 1.0));
         assert_eq!(card.get_pixel(0, 0).0[3], 0);
         let middle = card.get_pixel(60, 30).0;
         assert_eq!(middle[3], 255);

@@ -6,8 +6,10 @@
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use ratatui::layout::Rect;
 
@@ -15,6 +17,7 @@ use crate::backdrop::{self, Canvas, Glass, LEVELS, WebFrame};
 use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG, Z_THUMB, Z_TOP};
 use crate::layout::Grid;
 use crate::theme::GLASS_TINT;
+use crate::video::{self, Video};
 
 pub const SLOT_BACKDROP: u32 = 1;
 pub const SLOT_LEFT: u32 = 2;
@@ -34,34 +37,80 @@ const KEEP_FRAMES: u64 = 180;
 pub struct Worker {
     requests: Sender<(u32, u32)>,
     pub results: Receiver<Arc<Canvas>>,
+    pub errors: Receiver<String>,
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl Worker {
     pub fn spawn() -> Self {
         let (requests, inbox) = mpsc::channel::<(u32, u32)>();
-        let (outbox, results) = mpsc::channel();
-        thread::spawn(move || {
-            let photo = backdrop::decode_photo();
+        let (outbox, results) = mpsc::sync_channel(1);
+        let (errors_out, errors) = mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = stop.clone();
+        let thread = thread::spawn(move || {
+            let mut video = match Video::start() {
+                Ok(video) => Some(video),
+                Err(error) => {
+                    let _ = errors_out.send(error.to_string());
+                    None
+                }
+            };
+            let mut photo = backdrop::decode_photo();
             let mut first = true;
-            while let Ok(mut size) = inbox.recv() {
-                // A window being dragged sends many sizes; only the last matters.
+            let mut size = (0, 0);
+            let mut dirty = false;
+            let mut rise_until = Instant::now();
+            let mut due = Instant::now();
+            while !stopped.load(Ordering::Relaxed) {
+                match inbox.recv_timeout(due.saturating_duration_since(Instant::now())) {
+                    Ok(newer) => { size = newer; dirty = true; }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+                due = Instant::now() + video::FRAME_TIME;
                 while let Ok(newer) = inbox.try_recv() {
                     size = newer;
+                    dirty = true;
                 }
+                if Instant::now() < rise_until { continue; }
+                if let Some(frame) = video.as_ref().and_then(Video::take) {
+                    match frame {
+                        Ok(frame) => { photo = frame; dirty = true; }
+                        Err(error) => {
+                            let _ = errors_out.send(error);
+                            video = None;
+                        }
+                    }
+                }
+                if !dirty || size.0 == 0 || size.1 == 0 { continue; }
                 let canvas = backdrop::build(&photo, size.0, size.1, first);
-                if outbox.send(Arc::new(canvas)).is_err() {
-                    return;
+                match outbox.try_send(Arc::new(canvas)) {
+                    Ok(()) => {
+                        if first { rise_until = Instant::now() + Duration::from_millis(800); }
+                        first = false;
+                        dirty = false;
+                    }
+                    Err(mpsc::TrySendError::Full(_)) => {}
+                    Err(mpsc::TrySendError::Disconnected(_)) => break,
                 }
-                first = false;
             }
         });
-        Worker { requests, results }
+        Worker { requests, results, errors, stop, thread: Some(thread) }
     }
 
     pub fn request(&self, width: u32, height: u32) -> io::Result<()> {
         self.requests
             .send((width, height))
             .map_err(|_| io::Error::other("the picture worker stopped"))
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() { let _ = thread.join(); }
     }
 }
 
@@ -120,12 +169,7 @@ pub struct Scene {
     pub popup: Option<PopupSpec>,
 }
 
-struct BackdropIds {
-    photo: u32,
-    sharp: u32,
-    levels: Vec<u32>,
-    rise: Vec<u32>,
-}
+type BackdropIds = HashMap<Backdrop, u32>;
 
 /// The current browser frame's three uploads.
 struct WebIds {
@@ -149,6 +193,7 @@ pub struct Pictures {
     web_ids: Option<WebIds>,
     /// Uploads of an older browser frame, freed once nothing shows them.
     stale_web: Vec<u32>,
+    stale_canvas: Vec<u32>,
     cards: HashMap<CardKey, (u32, u64)>,
     /// (frame version, width, height, dimmed) -> picture.
     thumbs: HashMap<(u64, u32, u32, bool), (u32, u64)>,
@@ -164,6 +209,7 @@ impl Pictures {
             backdrop: None,
             web_ids: None,
             stale_web: Vec::new(),
+            stale_canvas: Vec::new(),
             cards: HashMap::new(),
             thumbs: HashMap::new(),
             frame: 0,
@@ -214,27 +260,26 @@ impl Pictures {
         self.backdrop = None;
         self.web_ids = None;
         self.stale_web.clear();
+        self.stale_canvas.clear();
         self.cards.clear();
         self.thumbs.clear();
     }
 
     fn forget_canvas_pictures(&mut self) {
         if let Some(ids) = self.backdrop.take() {
-            for id in [ids.photo, ids.sharp].into_iter().chain(ids.levels).chain(ids.rise) {
-                self.gpu.free(id);
-            }
+            self.stale_canvas.extend(ids.into_values());
         }
         for (_, (id, _)) in self.cards.drain() {
-            self.gpu.free(id);
+            self.stale_canvas.push(id);
         }
     }
 
     /// The rising-from-black frames are only needed once.
     pub fn drop_rise(&mut self) {
         let Some(ids) = self.backdrop.as_mut() else { return };
-        for id in std::mem::take(&mut ids.rise) {
-            self.gpu.free(id);
-        }
+        ids.retain(|kind, id| {
+            if matches!(kind, Backdrop::Rise(_)) { self.stale_canvas.push(*id); false } else { true }
+        });
     }
 
     pub fn show(&mut self, grid: &Grid, scene: &Scene) -> io::Result<()> {
@@ -243,9 +288,8 @@ impl Pictures {
             return Ok(());
         }
         let Some(canvas) = self.canvas.clone() else { return Ok(()) };
-        self.upload_backdrop(&canvas)?;
-        let backdrop = self.backdrop_id(scene.backdrop);
-        self.gpu.set(SLOT_BACKDROP, backdrop.map(|image| Placement::at_px(image, 0.0, 0.0, grid.cw, grid.ch, None, Z_BACKDROP)));
+        let backdrop = self.backdrop_id(&canvas, scene.backdrop)?;
+        self.gpu.set(SLOT_BACKDROP, backdrop.map(|image| Placement::at_px(image, 0.0, 0.0, grid.cw, grid.ch, Some((grid.cols, grid.rows)), Z_BACKDROP)));
 
         for slot in CARD_SLOTS {
             let spec = scene.cards.iter().find(|c| c.slot == slot);
@@ -268,34 +312,27 @@ impl Pictures {
         for id in std::mem::take(&mut self.stale_web) {
             self.gpu.free(id);
         }
+        // Replace placements before freeing previous frames to avoid flashing between uploads.
+        for id in std::mem::take(&mut self.stale_canvas) {
+            self.gpu.free(id);
+        }
         self.sweep();
         Ok(())
     }
 
-    fn upload_backdrop(&mut self, canvas: &Canvas) -> io::Result<()> {
-        if self.backdrop.is_some() {
-            return Ok(());
-        }
-        let (w, h) = (canvas.width, canvas.height);
-        let mut upload = |image: &image::RgbImage| self.gpu.upload_rgb(w, h, image.as_raw());
-        let rise = canvas.rise.iter().map(&mut upload).collect::<io::Result<Vec<_>>>()?;
-        let photo = upload(&canvas.photo)?;
-        let sharp = upload(&canvas.sharp)?;
-        let levels = canvas.levels.iter().map(&mut upload).collect::<io::Result<Vec<_>>>()?;
-        self.backdrop = Some(BackdropIds { photo, sharp, levels, rise });
-        Ok(())
-    }
-
-    fn backdrop_id(&self, backdrop: Backdrop) -> Option<u32> {
-        let ids = self.backdrop.as_ref()?;
-        match backdrop {
-            Backdrop::Black => None,
-            Backdrop::Rise(i) => ids.rise.get(i).copied().or(Some(ids.photo)),
-            Backdrop::Photo => Some(ids.photo),
-            Backdrop::Sharp => Some(ids.sharp),
-            Backdrop::Level(0) => Some(ids.sharp),
-            Backdrop::Level(k) => ids.levels.get(k.min(LEVELS) - 1).copied(),
-        }
+    fn backdrop_id(&mut self, canvas: &Canvas, backdrop: Backdrop) -> io::Result<Option<u32>> {
+        let image = match backdrop {
+            Backdrop::Black => return Ok(None),
+            Backdrop::Rise(i) => canvas.rise.get(i).unwrap_or(&canvas.photo),
+            Backdrop::Photo => &canvas.photo,
+            Backdrop::Sharp | Backdrop::Level(0) => &canvas.sharp,
+            Backdrop::Level(k) => &canvas.levels[k.min(LEVELS) - 1],
+        };
+        let ids = self.backdrop.get_or_insert_with(HashMap::new);
+        if let Some(id) = ids.get(&backdrop) { return Ok(Some(*id)); }
+        let id = self.gpu.upload_rgb(image.width(), image.height(), image.as_raw())?;
+        ids.insert(backdrop, id);
+        Ok(Some(id))
     }
 
     fn card_placement(&mut self, canvas: &Canvas, grid: &Grid, spec: &CardSpec) -> io::Result<Option<Placement>> {
@@ -316,7 +353,8 @@ impl Pictures {
                     CardStyle::Menu(1) => &canvas.levels[0],
                     _ => &canvas.frost,
                 };
-                let card = backdrop::card(source, x as i64, y as i64, w as u32, h as u32, &glass(spec.style, grid.ch));
+                let scale = (source.width() as f32 / canvas.width as f32, source.height() as f32 / canvas.height as f32);
+                let card = backdrop::card(source, x as i64, y as i64, w as u32, h as u32, &glass(spec.style, grid.ch), scale);
                 let id = self.gpu.upload_rgba(w as u32, h as u32, card.as_raw())?;
                 self.cards.insert(key, (id, self.frame));
                 id
@@ -426,6 +464,61 @@ fn glass(style: CardStyle, ch: u32) -> Glass {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires ffmpeg; exercises video resize and worker shutdown"]
+    fn video_worker_resizes_and_stops() {
+        let worker = Worker::spawn();
+        worker.request(100, 80).unwrap();
+        assert_eq!(worker.results.recv_timeout(Duration::from_secs(3)).unwrap().width, 100);
+        worker.request(1920, 1080).unwrap();
+        let started = Instant::now();
+        let mut frames = 0;
+        while started.elapsed() < Duration::from_secs(3) {
+            let canvas = worker.results.recv_timeout(Duration::from_secs(3)).unwrap();
+            if canvas.width == 1920 {
+                assert_eq!(canvas.height, 1080);
+                frames += 1;
+            }
+        }
+        eprintln!("Full HD canvases in three seconds: {frames}");
+        assert!(frames > 1, "video frames must keep replacing the canvas after resize");
+        let stopped = Instant::now();
+        drop(worker);
+        assert!(stopped.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_new_video_frame_replaces_backdrop_and_cards_before_freeing_old_images() {
+        let grid = Grid { cols: 10, rows: 4, cw: 10, ch: 20 };
+        let source = image::RgbImage::from_pixel(100, 80, image::Rgb([20, 40, 60]));
+        let mut pictures = Pictures::new(Gpu::new(None));
+        let scene = Scene {
+            backdrop: Backdrop::Sharp,
+            cards: vec![CardSpec {
+                slot: SLOT_INPUT, style: CardStyle::Input,
+                rect: Rect::new(1, 1, 8, 2), dx: 0.0, dy: 0.0,
+            }],
+            thumb: None, popup: None,
+        };
+        pictures.accept(Arc::new(backdrop::build(&source, 100, 80, false)));
+        pictures.show(&grid, &scene).unwrap();
+        assert_eq!(pictures.backdrop.as_ref().unwrap().len(), 1, "upload only the visible blur level");
+        let old_backdrop = pictures.backdrop.as_ref().unwrap()[&Backdrop::Sharp];
+        let old_card = pictures.cards.values().next().unwrap().0;
+        pictures.gpu.flush(&mut Vec::new()).unwrap();
+        pictures.accept(Arc::new(backdrop::build(&source, 100, 80, false)));
+        pictures.show(&grid, &scene).unwrap();
+        let mut output = Vec::new();
+        pictures.gpu.flush(&mut output).unwrap();
+        let output = String::from_utf8(output).unwrap();
+        let placed = output.rfind("a=p,").unwrap();
+        for id in [old_backdrop, old_card] {
+            let freed = output.find(&format!("a=d,d=I,i={id},")).unwrap();
+            assert!(freed > placed, "the old frame stays visible until all new placements exist");
+        }
+        assert!(pictures.stale_canvas.is_empty());
+    }
 
     fn grid() -> Grid {
         Grid { cols: 100, rows: 40, cw: 10, ch: 20 }

@@ -42,8 +42,8 @@ const RISE: Duration = Duration::from_millis(800);
 /// A replayed journal counts as shown this long ago, so its answers appear at
 /// once instead of typing out again.
 const LONG_AGO: Duration = Duration::from_secs(3600);
-/// Redraw interval while nothing moves (the caret still blinks).
-const IDLE_FRAME: Duration = Duration::from_millis(90);
+/// The backdrop keeps moving even while the interface itself is idle.
+const IDLE_FRAME: Duration = crate::video::FRAME_TIME;
 /// How long a notice stays in the status row.
 const TOAST: Duration = Duration::from_millis(4500);
 /// The request id of `/tui`, a dialog answered here and never sent to the core.
@@ -1253,7 +1253,17 @@ fn run_loop(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
 
     while !app.quit {
         let now = Instant::now();
+        while matches!(app.phase, Phase::Main { .. }) && let Ok(error) = worker.errors.try_recv() {
+            let message = if strings::russian() {
+                format!("Видео фона недоступно, показан неподвижный кадр. Проверьте ffmpeg: {error}")
+            } else {
+                format!("Background video unavailable; showing a still frame. Check ffmpeg: {error}")
+            };
+            app.notify(message, true, now);
+        }
         while let Ok(canvas) = worker.results.try_recv() {
+            if canvas.width != app.grid.cols as u32 * app.grid.cw
+                || canvas.height != app.grid.rows as u32 * app.grid.ch { continue; }
             if app.canvas_at.is_none() {
                 app.canvas_at = Some(now);
             }

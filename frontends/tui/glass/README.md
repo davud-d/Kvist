@@ -3,7 +3,7 @@
 Users see this interface as **Classic**; the folder, the crate, `kvist-glass`, the
 `glass` frontend value and `KVIST_GLASS` keep the working name Glass.
 
-A terminal interface drawn over a photograph: the conversation sits on frosted
+A terminal interface drawn over a looping forest video: the conversation sits on frosted
 glass cards, changed files and helpers on the left, a live preview of the
 agent's browser on the right. Written in Rust (ratatui + crossterm); pictures
 go through the kitty graphics protocol. It runs the Kvist core as a child
@@ -63,7 +63,12 @@ checkout's build, and passes its own core in `KVIST_CORE_CMD`. Run directly,
   your monitor's refresh rate: kitty shows at most that (`sync_to_monitor`),
   and at most 100 with its default `repaint_delay 10`. Animations are timed in
   milliseconds, so the rate changes smoothness, never speed. While nothing
-  moves the screen is redrawn every 90 ms, and input is drawn at once.
+  moves the screen is redrawn at the video's 24 fps, and input is drawn at once.
+- The bundled `assets/backdrop-night-forest.mp4` loops without sound, with a
+  two-second crossfade joining the original tail to its beginning (about 8 s per loop). Playback
+  needs ffmpeg: `KVIST_FFMPEG`, then PATH, then the release installer's
+  `~/.local/share/kvist/ffmpeg/ffmpeg`. Without it, a still backdrop remains
+  and a notice explains why. The clip is embedded in the Rust binary.
 - Language follows `KVIST_LANG`, then `LC_ALL` / `LANG` (`ru` or English).
 
 ## Keys and mouse
@@ -115,16 +120,18 @@ same.
 
 ## How it is drawn
 
-- `backdrop.rs` fits the photograph to the window at full resolution and
-  prepares four blurred, darker versions of it on a worker thread.
-- Every card is its own picture: a crop of the blurred photograph under it,
+- `video.rs` decodes the looping clip to 960×540 RGB at 24 fps on a separate
+  thread, retaining only the newest frame. The decoder stops on exit.
+- `backdrop.rs` fits each frame to the window and prepares four blurred,
+  darker versions on a worker thread. Textures are capped at 960×540, with
+  smaller blur textures; kitty scales them to the window. Pending canvases are bounded to one.
+- Every card is its own picture: a crop of the blurred frame under it,
   tinted, with anti-aliased rounded corners and a thin rim of light. Cards
   slide by moving their placement, with pixel offsets, so motion is smoother
   than a cell.
-- A picture is uploaded once (as a file in `/dev/shm` when the terminal
-  accepts that, otherwise inline and compressed) and then only placed, moved
-  and removed. Opening a dialog switches the backdrop between the
-  pre-uploaded blur levels.
+- Only the visible backdrop level and cards are uploaded for each frame
+  (as files in `/dev/shm` when supported, otherwise inline and compressed).
+  Previous images are freed after their replacements are placed.
 - The browser preview is the core's `screen` event: `screen.rs` fetches its
   `frame_url` (loopback only) about once a second.
 - Motion uses "burst" timing (`anim.rs`): a slow start, a short fast middle
@@ -150,4 +157,5 @@ same.
 
 ```bash
 cargo test
+cargo test video_loops_and_cleans_up_on_drop -- --ignored  # requires ffmpeg, about 11 s
 ```
