@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Pick what to install and watch it happen.
 
-This is the front door: it offers the installers (`install_cli.py`,
-`install_web.py`, `install_jetbrains.py`, `install_vscode.py`, `install_gui.py`,
+This is the front door: it offers the installers (`install_rust.py`,
+`install_cli.py`, `install_web.py`, `install_jetbrains.py`, `install_vscode.py`, `install_gui.py`,
 `install_zed.py`, `install_kvide.py`) as an arrow-key list, all selected by default, and runs the
 ones you keep.
 
@@ -62,8 +62,14 @@ class Component:
     after: tuple[str, ...] = ()
 
 
+# Rust builds Kvist Glass, which needs kitty graphics; Windows terminals have none,
+# so there the component is not offered.
+_RUST = () if IS_WINDOWS else (Component("rust", "Rust toolchain — builds Kvist Glass", "install_rust.py"),)
+
 COMPONENTS = (
-    Component("cli", "CLI — the `kvist` command", "install_cli.py"),
+    *_RUST,
+    # Waits for Rust when both are chosen, so the binary carries Kvist Glass.
+    Component("cli", "CLI — the `kvist` command", "install_cli.py", after=("rust",)),
     Component("web", "Web control center — `kvist-web`", "install_web.py", after=("cli",)),
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),
     Component("vscode", "VS Code extension", "install_vscode.py"),

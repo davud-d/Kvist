@@ -118,6 +118,11 @@ jobs:
         working-directory: frontends/tui/ink
         run: npm ci && npm run build
 
+      # Kvist Glass (Rust) goes into the binary like the Ink UI; the runner image ships cargo.
+      - name: Build Kvist Glass
+        working-directory: frontends/tui/glass
+        run: cargo build --release --locked
+
       - name: Build binary with PyInstaller
         run: python -m PyInstaller kvist.spec
 
@@ -210,6 +215,11 @@ jobs:
       - name: Build the terminal UI
         working-directory: frontends/tui/ink
         run: npm ci && npm run build
+
+      # Kvist Glass (Rust) goes into the binary like the Ink UI; the runner image ships cargo.
+      - name: Build Kvist Glass
+        working-directory: frontends/tui/glass
+        run: cargo build --release --locked
 
       - name: Build Linux binary with PyInstaller
         run: python -m PyInstaller kvist.spec

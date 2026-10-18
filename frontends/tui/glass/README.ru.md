@@ -32,6 +32,10 @@
 
 ## Запуск
 
+Установщик собирает его в бинарник `kvist`: отметь «Rust toolchain» и «CLI» в
+`python scripts/installer/install.py` (Linux и macOS); релизные сборки тоже его
+содержат. Вручную:
+
 ```bash
 cd frontends/tui/glass && cargo build --release   # лаунчер найдёт target/release/kvist-glass
 kvist --frontend glass                              # или /tui glass, сохраняется на следующие запуски

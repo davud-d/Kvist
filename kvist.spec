@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
+import sys
 import pkgutil
 
 # Bundle every first-party module so the build never silently drops a source
@@ -64,12 +65,22 @@ _ui_datas = [(_UI_BUNDLE, 'frontends/tui/ink/dist-ui')] if os.path.isfile(_UI_BU
 if _ui_datas and os.path.isfile(_UI_CLIP):
     _ui_datas.append((_UI_CLIP, 'frontends/tui/ink/dist-ui'))
 
+# Kvist Glass is a Rust program made by `cargo build --release` in frontends/tui/glass;
+# optional like the Ink UI (no build, `--frontend glass` falls back to it). It keeps its
+# checkout path, where the launcher looks for it (main._GLASS_BUILD). Not on Windows:
+# its terminals have no kitty graphics.
+_GLASS_BIN = os.path.join(SPECPATH, 'frontends', 'tui', 'glass', 'target', 'release', 'kvist-glass')
+_glass_binaries = (
+    [(_GLASS_BIN, 'frontends/tui/glass/target/release')]
+    if sys.platform != 'win32' and os.path.isfile(_GLASS_BIN) else []
+)
+
 # Data keeps its path relative to the module that reads it: kernel modules
 # unpack under kernel/, the classic terminal's modules at the top level.
 a = Analysis(
     ['kernel/__main__.py'],
     pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR, os.path.join(SPECPATH, 'frontends', 'web-local')],
-    binaries=[],
+    binaries=_glass_binaries,
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
         ('kernel/themes', 'kernel/themes'),

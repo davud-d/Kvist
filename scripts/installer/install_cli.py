@@ -50,6 +50,8 @@ from _common import (
     spinner,
 )
 
+from install_rust import find_cargo
+
 if TYPE_CHECKING:
     from rich.status import Status
 
@@ -68,6 +70,9 @@ STEPS = {
     "build_ui": "Building the Ink terminal UI",
     "ui_no_npm": "[yellow]npm not found — the Ink terminal UI will not be included[/yellow]",
     "ui_failed": "[yellow]Ink terminal UI build failed — it will not be included (see the log)[/yellow]",
+    "build_glass": "Building Kvist Glass",
+    "glass_no_cargo": "[yellow]Rust not found — Kvist Glass will not be included (install Rust from the installer)[/yellow]",
+    "glass_failed": "[yellow]Kvist Glass build failed — it will not be included (see the log)[/yellow]",
     "build_binary": "Building binary",
     "build_done": "Binary built successfully",
     "copy_binary": "Copying binary to install directory",
@@ -83,6 +88,9 @@ SPEC_FILE = PROJECT_ROOT / "kvist.spec"
 # The Ink terminal UI as one file; kvist.spec packs it into the binary when present.
 UI_DIR = PROJECT_ROOT / "frontends" / "tui" / "ink"
 UI_BUNDLE = UI_DIR / "dist-ui" / "kvist-tui.mjs"
+# Kvist Glass, a Rust program; kvist.spec packs the release build into the binary when present.
+GLASS_DIR = PROJECT_ROOT / "frontends" / "tui" / "glass"
+GLASS_BINARY = GLASS_DIR / "target" / "release" / "kvist-glass"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 # Dedicated venv, kept separate from the project's own dev .venv so building
 # never touches (or has to match the interpreter of) the dev environment.
@@ -365,12 +373,37 @@ def build_terminal_ui(status: Status | None = None) -> bool:
     return UI_BUNDLE.is_file()
 
 
+def build_glass(status: Status | None = None) -> bool:
+    """Build Kvist Glass, which kvist.spec packs into the binary.
+
+    Optional like the Ink UI: it needs Rust (``install_rust.py``) at build time,
+    and Windows is skipped because its terminals have no kitty graphics. A
+    missing cargo or a failed build only costs the binary Glass (``--frontend
+    glass`` then falls back to the Ink UI). Returns whether a build exists.
+    """
+    if IS_WINDOWS:
+        return False
+    cargo = find_cargo()
+    if cargo is None:
+        show_step(status, STEPS["glass_no_cargo"])
+        return GLASS_BINARY.is_file()
+    show_step(status, STEPS["build_glass"])
+    try:
+        run_logged([cargo, "build", "--release", "--locked"], cwd=GLASS_DIR)
+    except InstallCommandError as error:
+        log(str(error))
+        show_step(status, STEPS["glass_failed"])
+        return False
+    return GLASS_BINARY.is_file()
+
+
 def build_binary(status: Status | None = None) -> Path:
     if not SPEC_FILE.is_file():
         raise SystemExit(f"error: spec file not found: {SPEC_FILE}")
 
     python_path = ensure_build_venv(status)
     build_terminal_ui(status)
+    build_glass(status)
 
     show_step(status, STEPS["build_binary"])
     run_logged(

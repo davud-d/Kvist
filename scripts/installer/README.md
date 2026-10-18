@@ -6,7 +6,8 @@ Windows (and, best-effort, macOS).
 | Script | What it does |
 | --- | --- |
 | `install.py` | The front door: offers the installers below as an arrow-key list, all selected by default, and runs the ones you keep. |
-| `install_cli.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). Formerly at the repo root, then `install.py`. |
+| `install_rust.py` | Installs what Kvist Glass is built with: a C compiler (apt-get, dnf, zypper or pacman under root or a passwordless sudo; otherwise it prints the commands) and Rust through rustup's official installer (minimal profile; an installed Rust is left alone). Not offered on Windows: Glass needs kitty graphics, which Windows terminals do not have. |
+| `install_cli.py` | Installs the `kvist` CLI launcher + standalone binary (builds it with PyInstaller if `dist/` has none). The build includes the Ink UI when npm is there and Kvist Glass (`cargo build --release` in `frontends/tui/glass`) when cargo is, on Linux and macOS; it waits for `install_rust.py` when both are chosen. Formerly at the repo root, then `install.py`. |
 | `install_jetbrains.py` | Finds every installed JetBrains IDE and unpacks the **Kvist Launcher** plugin into each one's `plugins/` folder. |
 | `install_vscode.py` | Finds VS Code, VS Code Insiders and VSCodium command-line launchers and installs the Kvist `.vsix` into each editor. |
 | `install_gui.py` | Installs the Electron GUI as a desktop app: Start Menu + Desktop shortcut on Windows, hicolor icons + `.desktop` entry on Linux, `Kvist.app` copied into `~/Applications` on macOS. |
@@ -22,6 +23,7 @@ python scripts/installer/install.py                      # pick with the arrow k
 python scripts/installer/install.py --all                # everything, no questions
 python scripts/installer/install.py --cli --gui          # named components, no questions
 
+python scripts/installer/install_rust.py                 # Rust + a C compiler, for Kvist Glass
 python scripts/installer/install_cli.py                  # or run one on its own
 python scripts/installer/install_jetbrains.py            # --build to build the plugin ZIP first
 python scripts/installer/install_jetbrains.py --uninstall

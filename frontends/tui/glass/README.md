@@ -32,6 +32,10 @@ it can start), so a launcher can decide before it runs anything.
 
 ## Run
 
+The installer builds it into the `kvist` binary: tick "Rust toolchain" and "CLI"
+in `python scripts/installer/install.py` (Linux and macOS), and release builds
+carry it too. By hand:
+
 ```bash
 cd frontends/tui/glass && cargo build --release   # the launcher finds target/release/kvist-glass
 kvist --frontend glass                              # or /tui glass, saved for the next launches

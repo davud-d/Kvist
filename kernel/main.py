@@ -1017,6 +1017,12 @@ def launch_glass(args: argparse.Namespace) -> int | None:
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
+    if os.name == "nt":
+        print(
+            "Kvist Glass needs kitty graphics, which Windows terminals do not have. Using the Ink UI.",
+            file=sys.stderr,
+        )
+        return None
     glass = find_glass()
     if glass is None:
         print(
