@@ -255,14 +255,35 @@ def _compacted(raw: bytes) -> tuple[bytes, _Stats]:
     return b"".join(lines), stats
 
 
-def _encode(seq: int, turn: int, event: dict[str, Any]) -> bytes:
-    record = {"seq": seq, "turn": turn, "ts": round(time.time(), 3), "event": event}
+def _encode(seq: int, turn: int, event: dict[str, Any], ts: float | None = None) -> bytes:
+    record = {"seq": seq, "turn": turn, "ts": round(time.time() if ts is None else ts, 3), "event": event}
     return (json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n").encode(
         "utf-8"
     )
 
 
 # --- Writing ------------------------------------------------------------------
+
+
+def write_imported_turns(
+    path: Path,
+    workspace: Path,
+    turns: list[tuple[float, list[dict[str, Any]]]],
+) -> None:
+    """Write finished turns taken from another agent into a new session's journal.
+
+    Each turn is its time and its events. The journal's own size limits apply
+    as they do to a live one: the oldest turns are dropped and a notice says
+    how many.
+    """
+    lines: list[bytes] = []
+    seq = 1
+    for number, (ts, events) in enumerate(turns, start=1):
+        for event in events:
+            lines.append(_encode(seq, number, cap_event(event), ts))
+            seq += 1
+    raw, _stats = _compacted(b"".join(lines))
+    append_private_bytes(path, raw, boundary=workspace, sync=True)
 
 
 class SessionJournal:

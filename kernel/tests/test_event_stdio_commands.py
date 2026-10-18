@@ -616,7 +616,7 @@ def test_bug_saves_a_report_and_returns_its_path(home, agent_factory):
 
 def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
-        "role", "effort", "verbose", "style", "session", "new", "rename", "models", "catalog",
+        "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
         "strime", "revert", "bug", "commit-message", "web-search-provider", "context",
     }
@@ -1105,3 +1105,26 @@ def test_build_agent_collects_a_missing_secret_through_the_interactive_ui(home, 
     assert config.provider == "deepseek"
     assert len(ui.titles) == 1 and secret not in ui.titles[0]
     assert _saved("deepseek_api_key") == secret
+
+
+def test_export_wizard_imports_through_input_requests(home, agent_factory):
+    session_file = home / ".claude" / "projects" / "-p" / "s1.jsonl"
+    session_file.parent.mkdir(parents=True)
+    cwd = str(agent_factory().executor.workspace)
+    session_file.write_text(
+        "\n".join(
+            json.dumps(record)
+            for record in (
+                {"type": "user", "cwd": cwd, "message": {"role": "user", "content": "hello"}},
+                {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "Hi."}]}},
+            )
+        ),
+        encoding="utf-8",
+    )
+    agent = agent_factory()
+    result, requests, _ctx = _run_handler("export", agent, answers=["claude-code", "s1"])
+
+    assert [r.kind for r in requests] == ["choice", "choice"]
+    assert result.ok
+    assert [item["session"] for item in result.effects["imported"]] == ["cc-s1"]
+    assert "cc-s1" in agent._list_sessions()

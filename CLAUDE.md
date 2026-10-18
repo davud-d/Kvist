@@ -539,6 +539,28 @@ assistant message), and `trim_chat_messages_to_token_limit` does the cutting. Th
 10-turn cap on stored entries and the per-output caps in `_harvest_run_outputs`
 still apply.
 
+### Importing other agents' sessions (`session_import/`, `/export`, alias `/import`)
+One module per agent reads its on-disk format into the neutral `ImportedSession` (requests, last
+answer, files changed, command count — never tool output): `claude_code` (`projects/*/*.jsonl`;
+sub-agent, `isMeta`, compact-summary records and any user record whose `origin.kind` is not `human`,
+e.g. background-task notices, are not requests), `codex` (`item_completed` events, or `response_item`
+messages in older files), `opencode` (SQLite, current `session_message` rows else the earlier
+`message`/`part` rows), `cursor` (`state.vscdb` bubbles; the text only), `qwen_code`, `continue_dev`,
+`aider` (`.aider.chat.history.md` of the workspace only). Each file is read read-only. `Source.find(home,
+workspace)` is cheap (a file head, a SQL row); `load` parses one session. `writer.import_session`
+creates a session named `<prefix>-<last 16 alphanumerics of the source id>` through `create_session(fields=…)`
+plus `write_imported_turns`: the journal gets every turn (it is display-only and obeys the usual
+turn/byte caps), `session_history`/`chat_history` get the last 10 turns (`HISTORY_TURNS`, the runtime's
+own cap, because those reach the model), and the message ledger numbers all of them. The same
+name means the same conversation: an existing session is skipped, never overwritten, since it may
+have been continued in Kvist. A journal that cannot be written deletes the half-made session.
+`wizard.run_export` is shared by the classic REPL and `STDIO_COMMANDS["export"]`; by default only
+sessions whose folder is the workspace or below it are offered ("Other folders…" / `everywhere`
+widens it). Verified on real files: Claude Code, Codex, OpenCode (both schemas), Cursor
+(`state.vscdb`), Qwen Code, Continue. Aider and the older Codex layout are covered by synthetic
+fixtures only; Cursor's `agent-transcripts/*.jsonl`, Gemini CLI and OpenCode's pre-SQLite JSON
+files are not read. Tests: `kernel/tests/test_session_import.py`.
+
 ### Request flow
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
 the request into **coder / reader / devops / chat** → `LocalAgent.run()`:

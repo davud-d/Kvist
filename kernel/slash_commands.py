@@ -55,6 +55,11 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         aliases=("web_search_provider", "websearch"),
     ),
     SlashCommand("session", "Create, switch or delete saved sessions"),
+    SlashCommand(
+        "export",
+        "Import sessions from Claude Code, Codex, OpenCode, Cursor and other agents",
+        aliases=("import",),
+    ),
     SlashCommand("style", "Select a style for chat/agent responses"),
     SlashCommand("tui", "Choose the Ink, Claude-style, Classic or Classic Legacy terminal UI for the next launch"),
     SlashCommand("resume", "Continue the latest saved checkpoint"),

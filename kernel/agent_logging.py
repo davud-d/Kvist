@@ -302,12 +302,13 @@ def rotate_to_new_session(self) -> str:
     return session
 
 
-def create_session(self, session: str) -> bool:
+def create_session(self, session: str, fields: dict[str, Any] | None = None) -> bool:
+    """Create an empty session; ``fields`` start it with content (an import)."""
     if not is_valid_session_name(session):
         raise ValueError(f"Invalid session name: {session!r}")
     created = create_json_object(
         get_state_path(self, session),
-        _empty_session_document(session),
+        {**_empty_session_document(session), **(fields or {})},
         boundary=self.executor.workspace,
     )
     if created:

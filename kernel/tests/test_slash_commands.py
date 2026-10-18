@@ -62,7 +62,7 @@ def test_completion_filters_case_insensitively():
 def test_completion_exposes_supported_aliases():
     assert _completion_rows("/ab")[0][0] == "/about"
     assert _completion_rows("/i")[0][0] == "/info"
-    assert _completion_rows("/ex")[0][0] == "/exit"
+    assert _completion_rows("/exi")[0][0] == "/exit"
     assert _completion_rows("/q")[0][0] == "/quit"
 
 

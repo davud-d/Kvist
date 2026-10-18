@@ -47,6 +47,7 @@ kvist-web-bridge = "kvist_web.bridge_cli:main"
 packages = [
     "kernel",
     "kernel.providers",
+    "kernel.session_import",
     "kernel.prompts",
     "kernel.prompts.system",
     "kernel.prompts.styles",

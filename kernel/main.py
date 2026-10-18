@@ -3657,6 +3657,15 @@ def _closed_notice(agent) -> str | None:
     return closed_notice(closure_language(agent)) if agent.is_session_closed() else None
 
 
+def _stdio_export(ctx: CommandContext) -> CommandResult:
+    from kernel.session_import.wizard import run_export
+
+    outcome = run_export(ctx.session.agent, ctx.ui, ctx.args)
+    if outcome is None:
+        return _command_cancelled()
+    return CommandResult(outcome.ok, sanitize_display_text(outcome.message), outcome.effects)
+
+
 def _stdio_new(ctx: CommandContext) -> CommandResult:
     ctx.args = ["new", *ctx.args[:1]]
     return _stdio_session(ctx)
@@ -4228,6 +4237,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "verbose": _stdio_verbose,
     "style": _stdio_style,
     "session": _stdio_session,
+    "export": _stdio_export,
     "new": _stdio_new,
     "rename": _stdio_rename,
     "models": _stdio_models,
@@ -5506,6 +5516,17 @@ def main() -> None:
                             "dim",
                         )
                     )
+                continue
+
+            if (user_goal.lower().split() or [""])[0] in ("/export", "/import"):
+                from kernel.session_import.wizard import run_export
+
+                with paused_interactive_screen(interactive_screen):
+                    outcome = run_export(agent, TerminalBannerUI(console=console, verbose=verbose), user_goal.split()[1:])
+                if outcome is None:
+                    console.print("[yellow]Export cancelled.[/yellow]")
+                else:
+                    console.print(_display_text(outcome.message, "green" if outcome.ok else "yellow"))
                 continue
 
             if user_goal.strip().lower().startswith("/rename"):
