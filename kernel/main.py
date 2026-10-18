@@ -70,13 +70,14 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
-        choices=("terminal", "tui", "claude", "glass", "stdio", "stdio-multi"),
+        choices=("terminal", "tui", "claude", "glass", "voice", "stdio", "stdio-multi"),
         default=None,
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
             "the Node/Ink terminal UI (frontends/tui/ink), 'claude' for the same app drawn "
             "like Claude Code, 'glass' for Classic, the Rust interface over a photograph "
-            "(frontends/tui/glass; kitty graphics only), 'terminal' for the Classic Legacy UI, "
+            "(frontends/tui/glass; kitty graphics only), 'voice' for the voice screen "
+            "(frontends/voice; kitty graphics only), 'terminal' for the Classic Legacy UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
             "per stdin line."
@@ -957,7 +958,7 @@ def parse_tui_choice(raw: str, current: str) -> str | None:
     value = parts[1].strip("<>").casefold()
     if value in {"true", "on", "1", "tui"}:
         return "tui"
-    if value in {"claude", "glass"}:
+    if value in {"claude", "glass", "voice"}:
         return value
     if value in {"false", "off", "0", "terminal"}:
         return "terminal"
@@ -986,6 +987,7 @@ _TUI_SAVED_NOTICE = {
     "tui": "The Ink terminal UI will open on the next launch.",
     "claude": "The Claude-style terminal UI will open on the next launch.",
     "glass": "Classic will open on the next launch (kitty or Ghostty).",
+    "voice": "Voice will open on the next launch (kitty or Ghostty).",
     "terminal": "Classic Legacy will open on the next launch.",
 }
 # Kvist Glass (frontends/tui/glass): a Rust program, built with `cargo build --release`.
@@ -1049,6 +1051,68 @@ def launch_glass(args: argparse.Namespace) -> int | None:
         if code != _TUI_SWITCH_CODE:
             return code
         return _switch_frontend(switch_file, args)
+
+
+# The voice screen (frontends/voice/screen): a Rust program, built with `cargo build --release`.
+# frontends/voice/kvist-voice starts it together with the ears and the voice when it is present.
+_VOICE_DIR = _APP_ROOT / "frontends" / "voice"
+_VOICE_SCREEN_BUILD = _VOICE_DIR / "screen" / "target" / "release" / "kvist-voice-screen"
+
+
+def find_voice_screen() -> str | None:
+    """The voice screen: ``KVIST_VOICE_SCREEN``, then ``kvist-voice-screen`` on PATH, then a checkout's build."""
+    import shutil
+
+    for candidate in (
+        os.environ.get("KVIST_VOICE_SCREEN"),
+        shutil.which("kvist-voice-screen"),
+        str(_VOICE_SCREEN_BUILD),
+    ):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def launch_voice(args: argparse.Namespace) -> int | None:
+    """Run the voice screen with this program as its core; None when it cannot run here.
+
+    The screen draws with the kitty graphics protocol and refuses any other terminal itself
+    (``--check``), so the reason is printed and the caller falls back to the Ink UI. The
+    ``kvist-voice`` launcher, when it ships beside the screen, adds the ears and the voice.
+    """
+    import json
+    import subprocess
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    if os.name == "nt":
+        print(
+            "Voice needs kitty graphics, which Windows terminals do not have. Using the Ink UI.",
+            file=sys.stderr,
+        )
+        return None
+    screen = find_voice_screen()
+    if screen is None:
+        print(
+            "Voice is not built: run `cargo build --release` in frontends/voice/screen "
+            "(or set KVIST_VOICE_SCREEN). Using the Ink UI.",
+            file=sys.stderr,
+        )
+        return None
+    check = subprocess.run([screen, "--check"], stderr=subprocess.PIPE, text=True)
+    if check.returncode != 0:
+        reason = check.stderr.strip() or f"kvist-voice-screen --check exited with {check.returncode}"
+        print(f"{reason}\nUsing the Ink UI.", file=sys.stderr)
+        return None
+    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    launcher = _VOICE_DIR / "kvist-voice"
+    program = str(launcher) if launcher.is_file() and os.access(launcher, os.X_OK) else screen
+    command = [program, "--workspace", str(resolve_workspace_path(args.workspace))]
+    env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_VOICE_SCREEN": screen}
+    try:
+        return subprocess.call(command, env=env)
+    except KeyboardInterrupt:
+        return 130
 
 
 def needs_setup(args: argparse.Namespace) -> bool:
@@ -1196,7 +1260,7 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     except ValueError:
         print(f"Unknown interface '{chosen}'; using Classic Legacy.", file=sys.stderr)
         return None
-    if chosen not in TUI_FRONTENDS + ("glass",):
+    if chosen not in TUI_FRONTENDS + ("glass", "voice"):
         return None
     args.frontend = chosen
     # Setup has just saved a provider; the interface it chose is the agent itself.
@@ -1205,6 +1269,11 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     args.installer = False
     if chosen == "glass":
         code = launch_glass(args)
+        if code is not None:
+            return code
+        args.frontend = "tui"
+    if chosen == "voice":
+        code = launch_voice(args)
         if code is not None:
             return code
         args.frontend = "tui"
@@ -4563,6 +4632,11 @@ def main() -> None:
             raise SystemExit(exit_code)
         # Glass cannot run here and said why; the Ink UI is the nearest interface.
         args.frontend = "tui"
+    if not first_run and (args.frontend or get_saved_frontend()) == "voice" and not args.no_banner:
+        exit_code = launch_voice(args)
+        if exit_code is not None:
+            raise SystemExit(exit_code)
+        args.frontend = "tui"
     if (first_run or (args.frontend or get_saved_frontend()) in TUI_FRONTENDS) and not args.no_banner:
         # The reason for falling back to the classic terminal is always printed: a machine
         # without Node.js otherwise opens the old wizard with no hint why.
@@ -4724,7 +4798,7 @@ def main() -> None:
             if user_goal.split(maxsplit=1)[0].casefold() == "/tui":
                 selected_tui = parse_tui_choice(user_goal, get_saved_frontend())
                 if selected_tui is None:
-                    console.print("[yellow]Usage: /tui [on|off|claude|glass][/yellow]")
+                    console.print("[yellow]Usage: /tui [on|off|claude|glass|voice][/yellow]")
                     continue
                 try:
                     save_frontend(selected_tui)

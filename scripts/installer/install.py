@@ -62,13 +62,13 @@ class Component:
     after: tuple[str, ...] = ()
 
 
-# Rust builds Kvist Glass, which needs kitty graphics; Windows terminals have none,
+# Rust builds Kvist Glass and the voice screen, which need kitty graphics; Windows terminals have none,
 # so there the component is not offered.
-_RUST = () if IS_WINDOWS else (Component("rust", "Rust toolchain — builds Kvist Glass", "install_rust.py"),)
+_RUST = () if IS_WINDOWS else (Component("rust", "Rust toolchain — builds Kvist Glass and the voice screen", "install_rust.py"),)
 
 COMPONENTS = (
     *_RUST,
-    # Waits for Rust when both are chosen, so the binary carries Kvist Glass.
+    # Waits for Rust when both are chosen, so the binary carries Kvist Glass and the voice screen.
     Component("cli", "CLI — the `kvist` command", "install_cli.py", after=("rust",)),
     Component("web", "Web control center — `kvist-web`", "install_web.py", after=("cli",)),
     Component("jetbrains", "JetBrains plugin", "install_jetbrains.py"),

@@ -51,7 +51,7 @@ fn install_panic_restore() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         if let Err(error) = leave() {
-            eprintln!("kvist-glass: could not restore the terminal: {error}");
+            eprintln!("kvist-voice: could not restore the terminal: {error}");
         }
         previous(info);
     }));

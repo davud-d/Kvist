@@ -1226,6 +1226,12 @@ probe strings term text theme` began as copies of Glass's files and are maintain
 to such a file in one frontend is made in the other by hand); the screen's own files are `orb.rs`, `voice.rs`,
 `voice_overlay.rs`, `voice_strings.rs` and `icons.rs`. `frontends/voice/kvist-voice` starts it (and the ears and the
 voice) with the right environment.
+It is also an interface of the launcher: `--frontend voice` / saved `voice` / `/tui voice` → `main.launch_voice`
+(`KVIST_VOICE_SCREEN`, then `kvist-voice-screen` on PATH, then `_VOICE_SCREEN_BUILD`; `--check` first; it starts
+`frontends/voice/kvist-voice` when that ships beside the screen, else the screen alone; any refusal falls back to the Ink
+UI). `install_cli.py::build_voice_screen` builds it next to Glass, `kvist.spec` packs the binary and the ears'/voice's
+Python files (never the models or their environments), the release workflow has its own build step. The picker inside
+Glass (`app.rs`) is not changed and does not list Voice.
 
 **The screen** (`screen/src/`): an orb (a planet of clouds after `assets/orb-reference-dusk-valley.png`) drawn per
 pixel into an RGBA picture each frame (30 fps at most, `ORB_FPS`) over the photograph; under it a frosted-glass card

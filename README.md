@@ -154,6 +154,9 @@ interrupted task stays in the session, so `/resume` or a new message picks it up
 - **Terminal.** The default. Four looks of the same app: Ink, a Claude Code
   style, Classic (over a photograph, kitty or Ghostty) and the Classic Legacy
   prompt_toolkit one; `/tui` switches between them.
+- **Voice.** An orb you talk to: say "Kvist" and it listens, short spoken
+  answers (`/tui voice`, kitty or Ghostty;
+  [`frontends/voice`](frontends/voice/README.md)).
 - **Electron app.** `scripts/installer/install_gui.py`, or
   [`frontends/gui/electron`](frontends/gui/electron/README.md).
 - **Browser.** `kvist-web` opens `http://127.0.0.1:9671` and guides you through

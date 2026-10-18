@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Install what building Kvist Glass needs: a C compiler and Rust.
+"""Install what building Kvist Glass and the voice screen needs: a C compiler and Rust.
 
-Kvist Glass (``frontends/tui/glass``) is a Rust program. ``install_cli.py``
-builds it into the ``kvist`` binary whenever ``cargo`` is there, so the CLI
-installer waits for this one when both are chosen.
+Kvist Glass (``frontends/tui/glass``) and the voice screen (``frontends/voice/screen``)
+are Rust programs. ``install_cli.py`` builds them into the ``kvist`` binary whenever
+``cargo`` is there, so the CLI installer waits for this one when both are chosen.
 
     python scripts/installer/install_rust.py
 
@@ -15,7 +15,7 @@ installer waits for this one when both are chosen.
   with the minimal profile. rustup adds ``~/.cargo/bin`` to the shell's PATH
   the way it always does. A Rust that is already installed is left as it is.
 
-Glass draws with the kitty graphics protocol, which Windows terminals do not
+Both draw with the kitty graphics protocol, which Windows terminals do not
 have, so on Windows this installer does nothing.
 """
 from __future__ import annotations
@@ -71,7 +71,7 @@ def _as_root(commands: list[list[str]]) -> list[list[str]]:
         return [["sudo", "-n", *command] for command in commands]
     by_hand = "\n".join("    sudo " + " ".join(command) for command in commands)
     raise SystemExit(
-        "error: a C compiler is needed to build Kvist Glass, and installing one needs your password.\n"
+        "error: a C compiler is needed to build Kvist Glass and the voice screen, and installing one needs your password.\n"
         f"Run:\n{by_hand}\nthen run this installer again."
     )
 
@@ -111,7 +111,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.parse_args()
     if IS_WINDOWS:
-        print("Kvist Glass needs kitty graphics, which Windows terminals do not have; nothing to install.")
+        print("Kvist Glass and the voice screen need kitty graphics, which Windows terminals do not have; nothing to install.")
         return
     try:
         install_compiler()
@@ -119,7 +119,7 @@ def main() -> None:
     except InstallCommandError as error:
         report_command_failure(error)
         sys.exit(1)
-    print(f"Done. Rust is ready ({cargo}); the CLI installer builds Kvist Glass with it.")
+    print(f"Done. Rust is ready ({cargo}); the CLI installer builds Kvist Glass and the voice screen with it.")
 
 
 if __name__ == "__main__":

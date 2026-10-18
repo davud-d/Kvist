@@ -161,6 +161,6 @@ test("/tui offers every interface, the running one is among them, and the values
   const values: string[] = FRONTENDS.map((f) => f.value)
   assert.ok(values.includes(frontendOf("ink")))
   assert.ok(values.includes(frontendOf("claude")))
-  assert.deepEqual(values, ["tui", "claude", "glass", "terminal"])
+  assert.deepEqual(values, ["tui", "claude", "glass", "voice", "terminal"])
   assert.equal(new Set(values).size, values.length)
 })

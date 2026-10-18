@@ -123,6 +123,11 @@ jobs:
         working-directory: frontends/tui/glass
         run: cargo build --release --locked
 
+      # The voice screen (Rust) is packed the same way, with the ears' and the voice's Python files.
+      - name: Build the Kvist voice screen
+        working-directory: frontends/voice/screen
+        run: cargo build --release --locked
+
       - name: Build binary with PyInstaller
         run: python -m PyInstaller kvist.spec
 
@@ -219,6 +224,11 @@ jobs:
       # Kvist Glass (Rust) goes into the binary like the Ink UI; the runner image ships cargo.
       - name: Build Kvist Glass
         working-directory: frontends/tui/glass
+        run: cargo build --release --locked
+
+      # The voice screen (Rust) is packed the same way, with the ears' and the voice's Python files.
+      - name: Build the Kvist voice screen
+        working-directory: frontends/voice/screen
         run: cargo build --release --locked
 
       - name: Build Linux binary with PyInstaller

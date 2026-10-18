@@ -76,12 +76,30 @@ _glass_binaries = (
     if sys.platform != 'win32' and os.path.isfile(_GLASS_BIN) else []
 )
 
+# The voice screen (frontends/voice/screen) is packed the same way, and the Python programs the
+# kvist-voice launcher starts with it (the ears and the voice) go along as plain files: they run
+# under their own interpreter, not inside this binary. Models are never packed (tts_setup.sh).
+_VOICE_DIR = os.path.join(SPECPATH, 'frontends', 'voice')
+_VOICE_BIN = os.path.join(_VOICE_DIR, 'screen', 'target', 'release', 'kvist-voice-screen')
+_voice_binaries = (
+    [(_VOICE_BIN, 'frontends/voice/screen/target/release')]
+    if sys.platform != 'win32' and os.path.isfile(_VOICE_BIN) else []
+)
+_voice_datas = (
+    [(os.path.join(_VOICE_DIR, name), 'frontends/voice')
+     for name in sorted(os.listdir(_VOICE_DIR))
+     if os.path.isfile(os.path.join(_VOICE_DIR, name))
+     and (name.endswith('.py') or name in ('kvist-voice', 'tts_setup.sh', 'requirements.txt'))
+     and not name.startswith('test_')]
+    if _voice_binaries else []
+)
+
 # Data keeps its path relative to the module that reads it: kernel modules
 # unpack under kernel/, the classic terminal's modules at the top level.
 a = Analysis(
     ['kernel/__main__.py'],
     pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR, os.path.join(SPECPATH, 'frontends', 'web-local')],
-    binaries=_glass_binaries,
+    binaries=_glass_binaries + _voice_binaries,
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
         ('kernel/themes', 'kernel/themes'),
@@ -95,6 +113,7 @@ a = Analysis(
         # metadata exists inside a frozen build either).
         ('pyproject.toml', '.'),
         *_ui_datas,
+        *_voice_datas,
     ],
     hiddenimports=local_hiddenimports,
     hookspath=[],

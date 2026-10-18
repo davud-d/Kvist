@@ -1,4 +1,4 @@
-// The voice screen (`kvist-glass --voice`): the orb in the middle of a
+// The voice screen (`kvist-voice-screen`): the orb in the middle of a
 // photograph, a line saying what it is doing, what was heard or said, and the
 // model and context below. Three child processes feed it:
 //
@@ -730,7 +730,7 @@ struct Sidecar {
 
 impl Sidecar {
     fn spawn(name: &str, argv: &[String]) -> io::Result<Sidecar> {
-        let log = std::env::temp_dir().join(format!("kvist-glass-{name}-{}.log", std::process::id()));
+        let log = std::env::temp_dir().join(format!("kvist-voice-{name}-{}.log", std::process::id()));
         let mut child = Command::new(&argv[0])
             .args(&argv[1..])
             .stdin(Stdio::piped())
@@ -770,7 +770,7 @@ impl Drop for Sidecar {
         if let Err(error) = self.child.kill() {
             // Already exited is the usual case; anything else is worth a line.
             if error.kind() != io::ErrorKind::InvalidInput {
-                eprintln!("kvist-glass: could not stop a voice process: {error}");
+                eprintln!("kvist-voice: could not stop a voice process: {error}");
             }
         }
         // Reaps the child so it does not stay a zombie until the screen exits.

@@ -55,7 +55,7 @@ pub fn probe() -> Result<Caps, Refusal> {
         return Err(Refusal::Multiplexer(name));
     }
     let temp_dir = temp_dir();
-    let probe_file = temp_dir.join(format!("kvist-glass-{TEMP_MARKER}-probe-{}", std::process::id()));
+    let probe_file = temp_dir.join(format!("kvist-voice-{TEMP_MARKER}-probe-{}", std::process::id()));
     let temp_ok = fs::write(&probe_file, [0u8, 0, 0]).is_ok();
 
     terminal::enable_raw_mode().map_err(|_| Refusal::NotTerminal)?;
@@ -98,7 +98,7 @@ fn forget_probe_file(path: &Path) {
         Ok(()) => {}
         // The terminal deletes a temporary file once it has read it.
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => eprintln!("kvist-glass: could not remove {}: {error}", path.display()),
+        Err(error) => eprintln!("kvist-voice: could not remove {}: {error}", path.display()),
     }
 }
 

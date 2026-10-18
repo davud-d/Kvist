@@ -8,7 +8,7 @@ The voice side of Kvist: ears that wait for the wake word, a voice that speaks t
 | Voice | `speak.py`, `moss_nano.py` | Speaks the lines it is sent (MOSS-TTS-Nano, on the CPU) and reports its loudness |
 | Screen | [`screen/`](screen/README.md) (`kvist-voice-screen`, Rust) | The orb, the words, the menu; runs the core and both helpers |
 
-Start everything with `frontends/voice/kvist-voice` (see "Run the voice screen").
+Start everything with `frontends/voice/kvist-voice` (see "Run the voice screen"), or `kvist --frontend voice` / `/tui voice`: the CLI installer builds the screen and packs these files into the `kvist` binary, but not the models or the Python environments of the ears and the voice (see "Run" below).
 
 [Русская версия](README.ru.md)
 

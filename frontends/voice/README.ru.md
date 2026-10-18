@@ -8,7 +8,7 @@
 | Голос | `speak.py`, `moss_nano.py` | Произносит присланные строки (MOSS-TTS-Nano на процессоре) и сообщает громкость |
 | Экран | [`screen/`](screen/README.ru.md) (`kvist-voice-screen`, Rust) | Орб, слова, меню; запускает ядро и обоих помощников |
 
-Всё запускается одной командой `frontends/voice/kvist-voice` (см. «Запуск экрана голоса»).
+Всё запускается одной командой `frontends/voice/kvist-voice` (см. «Запуск экрана голоса») или `kvist --frontend voice` / `/tui voice`: установщик CLI собирает экран и кладёт эти файлы в бинарник `kvist`, но не модели и не окружения Python для ушей и голоса (см. «Запуск» ниже).
 
 [English version](README.md)
 

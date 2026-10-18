@@ -73,6 +73,9 @@ STEPS = {
     "build_glass": "Building Kvist Glass",
     "glass_no_cargo": "[yellow]Rust not found — Kvist Glass will not be included (install Rust from the installer)[/yellow]",
     "glass_failed": "[yellow]Kvist Glass build failed — it will not be included (see the log)[/yellow]",
+    "build_voice": "Building the Kvist voice screen",
+    "voice_no_cargo": "[yellow]Rust not found — the Kvist voice screen will not be included (install Rust from the installer)[/yellow]",
+    "voice_failed": "[yellow]Kvist voice screen build failed — it will not be included (see the log)[/yellow]",
     "build_binary": "Building binary",
     "build_done": "Binary built successfully",
     "copy_binary": "Copying binary to install directory",
@@ -91,6 +94,9 @@ UI_BUNDLE = UI_DIR / "dist-ui" / "kvist-tui.mjs"
 # Kvist Glass, a Rust program; kvist.spec packs the release build into the binary when present.
 GLASS_DIR = PROJECT_ROOT / "frontends" / "tui" / "glass"
 GLASS_BINARY = GLASS_DIR / "target" / "release" / "kvist-glass"
+# The voice screen, another Rust program of its own; kvist.spec packs it the same way.
+VOICE_SCREEN_DIR = PROJECT_ROOT / "frontends" / "voice" / "screen"
+VOICE_SCREEN_BINARY = VOICE_SCREEN_DIR / "target" / "release" / "kvist-voice-screen"
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 # Dedicated venv, kept separate from the project's own dev .venv so building
 # never touches (or has to match the interpreter of) the dev environment.
@@ -373,6 +379,26 @@ def build_terminal_ui(status: Status | None = None) -> bool:
     return UI_BUNDLE.is_file()
 
 
+def _build_rust_screen(
+    status: Status | None, directory: Path, binary: Path, steps: tuple[str, str, str]
+) -> bool:
+    """Run ``cargo build --release`` in ``directory``; ``steps`` are the STEPS keys for
+    building, no cargo and failed. Returns whether ``binary`` exists afterwards."""
+    building, no_cargo, failed = steps
+    cargo = find_cargo()
+    if cargo is None:
+        show_step(status, STEPS[no_cargo])
+        return binary.is_file()
+    show_step(status, STEPS[building])
+    try:
+        run_logged([cargo, "build", "--release", "--locked"], cwd=directory)
+    except InstallCommandError as error:
+        log(str(error))
+        show_step(status, STEPS[failed])
+        return False
+    return binary.is_file()
+
+
 def build_glass(status: Status | None = None) -> bool:
     """Build Kvist Glass, which kvist.spec packs into the binary.
 
@@ -383,18 +409,26 @@ def build_glass(status: Status | None = None) -> bool:
     """
     if IS_WINDOWS:
         return False
-    cargo = find_cargo()
-    if cargo is None:
-        show_step(status, STEPS["glass_no_cargo"])
-        return GLASS_BINARY.is_file()
-    show_step(status, STEPS["build_glass"])
-    try:
-        run_logged([cargo, "build", "--release", "--locked"], cwd=GLASS_DIR)
-    except InstallCommandError as error:
-        log(str(error))
-        show_step(status, STEPS["glass_failed"])
+    return _build_rust_screen(
+        status, GLASS_DIR, GLASS_BINARY, ("build_glass", "glass_no_cargo", "glass_failed")
+    )
+
+
+def build_voice_screen(status: Status | None = None) -> bool:
+    """Build the voice screen (``--frontend voice``), which kvist.spec packs into the binary.
+
+    Optional in the same way as Glass: no Rust, a failed build or Windows only costs the
+    binary this interface. The ears and the voice are Python programs with their own
+    environment (``frontends/voice/README.md``) and are not built here.
+    """
+    if IS_WINDOWS:
         return False
-    return GLASS_BINARY.is_file()
+    return _build_rust_screen(
+        status,
+        VOICE_SCREEN_DIR,
+        VOICE_SCREEN_BINARY,
+        ("build_voice", "voice_no_cargo", "voice_failed"),
+    )
 
 
 def build_binary(status: Status | None = None) -> Path:
@@ -404,6 +438,7 @@ def build_binary(status: Status | None = None) -> Path:
     python_path = ensure_build_venv(status)
     build_terminal_ui(status)
     build_glass(status)
+    build_voice_screen(status)
 
     show_step(status, STEPS["build_binary"])
     run_logged(

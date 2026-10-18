@@ -153,8 +153,12 @@ kvist
 
 ## Интерфейсы
 
-- **Терминал.** Основной. Три вида одного приложения: Ink, в стиле Claude Code
-  и классический на prompt_toolkit; переключение — `/tui`.
+- **Терминал.** Основной. Четыре вида одного приложения: Ink, в стиле Claude Code,
+  Classic (поверх фотографии, kitty или Ghostty) и Classic Legacy на
+  prompt_toolkit; переключение — `/tui`.
+- **Голос.** Шар, с которым разговариваешь: скажи «Kvist», и она слушает,
+  отвечает коротко вслух (`/tui voice`, kitty или Ghostty;
+  [`frontends/voice`](frontends/voice/README.ru.md)).
 - **Приложение Electron.** `scripts/installer/install_gui.py` или
   [`frontends/gui/electron`](frontends/gui/electron/README.md).
 - **Браузер.** `kvist-web` открывает `http://127.0.0.1:9671` и помогает подключить

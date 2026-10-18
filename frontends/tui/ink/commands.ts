@@ -51,6 +51,7 @@ export const FRONTENDS = [
   { value: "tui", label: "Ink terminal", description: "Panels and a boxed input" },
   { value: "claude", label: "Claude-style terminal", description: "The Claude Code look: ● calls, ⎿ results, ruled input" },
   { value: "glass", label: "Classic", description: "Over a photograph, glass cards and a live browser (kitty, Ghostty)" },
+  { value: "voice", label: "Voice", description: "Talk to Kvist: an orb, a microphone and a voice (kitty, Ghostty)" },
   { value: "terminal", label: "Classic Legacy", description: "The original prompt_toolkit interface" },
 ] as const
 

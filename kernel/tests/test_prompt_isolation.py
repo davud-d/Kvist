@@ -19,7 +19,7 @@ def test_action_model_uses_current_agent_role_prompt(tmp_path):
     captured = {}
 
     class Agent:
-        config = SimpleNamespace(provider="openai", fast_model="fast", smart_model="smart")
+        config = SimpleNamespace(provider="openai", fast_model="fast", smart_model="smart", voice_mode=False)
         executor = SimpleNamespace(workspace=tmp_path)
         _ui = SimpleNamespace()
         _state = SimpleNamespace(
@@ -63,7 +63,7 @@ def test_constitution_precedes_every_acting_role(tmp_path):
     """
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
-        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5"),
+        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5", voice_mode=False),
         _session_styles={},
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role="coder", plan_phase="", read_only_goal=False),
@@ -84,7 +84,7 @@ def test_roles_receive_current_command_reference(tmp_path, role):
 
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
-        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5"),
+        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5", voice_mode=False),
         _session_styles={},
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role=role, plan_phase="", read_only_goal=False),
@@ -106,6 +106,7 @@ def test_roles_receive_current_command_reference(tmp_path, role):
 
 def _report_agent(workspace, agents_style):
     return SimpleNamespace(
+        config=SimpleNamespace(voice_mode=False),
         executor=SimpleNamespace(workspace=workspace),
         _session_styles={"agents": agents_style, "chat": "Default"},
     )
@@ -220,7 +221,7 @@ def test_the_reporter_never_gets_the_workspace_instructions(tmp_path):
     (tmp_path / "KVIST.md").write_text("# Rules\n\nAlways end reports with a haiku.\n", encoding="utf-8")
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
-        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5"),
+        config=SimpleNamespace(end_session_enabled=False, provider="openai", smart_model="gpt-5", voice_mode=False),
         _session_styles={},
         _ui=SimpleNamespace(),
         _state=SimpleNamespace(current_agent_role="coder", plan_phase="", read_only_goal=False),

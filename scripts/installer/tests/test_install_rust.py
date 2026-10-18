@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""The Rust installer (for Kvist Glass) and the Glass build inside the CLI installer."""
+"""The Rust installer (for Kvist Glass and the voice screen) and their builds inside the CLI installer."""
 from __future__ import annotations
 
 import importlib
@@ -100,3 +100,50 @@ def test_windows_builds_no_glass(monkeypatch):
     monkeypatch.setattr(cli, "IS_WINDOWS", True)
     monkeypatch.setattr(cli, "find_cargo", lambda: pytest.fail("must not look for cargo"))
     assert cli.build_glass() is False
+
+
+def test_the_cli_build_includes_the_voice_screen_when_cargo_is_there(monkeypatch, tmp_path):
+    built = tmp_path / "kvist-voice-screen"
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "VOICE_SCREEN_BINARY", built)
+    monkeypatch.setattr(cli, "find_cargo", lambda: "/usr/bin/cargo")
+    commands = []
+
+    def build(command, cwd=None):
+        commands.append((command, cwd))
+        built.write_text("")
+
+    monkeypatch.setattr(cli, "run_logged", build)
+    assert cli.build_voice_screen() is True
+    assert commands == [(["/usr/bin/cargo", "build", "--release", "--locked"], cli.VOICE_SCREEN_DIR)]
+
+
+def test_a_failed_voice_screen_build_is_reported_and_does_not_stop_the_install(monkeypatch, tmp_path):
+    steps = []
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "VOICE_SCREEN_BINARY", tmp_path / "missing")
+    monkeypatch.setattr(cli, "find_cargo", lambda: "/usr/bin/cargo")
+    monkeypatch.setattr(cli, "show_step", lambda status, text: steps.append(text))
+
+    def fail(command, cwd=None):
+        raise cli.InstallCommandError("cargo failed")
+
+    monkeypatch.setattr(cli, "run_logged", fail)
+    assert cli.build_voice_screen() is False
+    assert steps == [cli.STEPS["build_voice"], cli.STEPS["voice_failed"]]
+
+
+def test_the_cli_build_goes_on_without_rust_for_the_voice_screen_too(monkeypatch, tmp_path):
+    steps = []
+    monkeypatch.setattr(cli, "IS_WINDOWS", False)
+    monkeypatch.setattr(cli, "VOICE_SCREEN_BINARY", tmp_path / "missing")
+    monkeypatch.setattr(cli, "find_cargo", lambda: None)
+    monkeypatch.setattr(cli, "show_step", lambda status, text: steps.append(text))
+    assert cli.build_voice_screen() is False
+    assert steps == [cli.STEPS["voice_no_cargo"]]
+
+
+def test_windows_builds_no_voice_screen(monkeypatch):
+    monkeypatch.setattr(cli, "IS_WINDOWS", True)
+    monkeypatch.setattr(cli, "find_cargo", lambda: pytest.fail("must not look for cargo"))
+    assert cli.build_voice_screen() is False

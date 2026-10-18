@@ -173,6 +173,7 @@ Kvist. `AGENT_NATIVE_TOOLS=0` включает JSON-протокол прину�
 .venv/bin/python -m kernel --frontend tui      # Ink
 .venv/bin/python -m kernel --frontend claude   # скин в стиле Claude Code того же приложения
 .venv/bin/python -m kernel --frontend terminal # классический терминал
+.venv/bin/python -m kernel --frontend voice    # экран голоса (kitty/Ghostty; сначала соберите, см. frontends/voice/README.ru.md)
 ```
 
 `/tui` сохраняет выбор. Если нет Node.js, собранного файла, провайдера или TTY,

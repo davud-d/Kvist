@@ -426,6 +426,8 @@ def test_installer_switch_starts_the_agent_instead_of_reopening_setup(monkeypatc
         ("/tui <claude>", "terminal", "claude"),
         ("/tui off", "claude", "terminal"),
         ("/tui glass", "terminal", "glass"),
+        ("/tui voice", "terminal", "voice"),
+        ("/tui", "voice", "tui"),
         ("/tui", "glass", "tui"),
         ("/tui hologram", "terminal", None),
         ("/tui on off", "terminal", None),
@@ -656,3 +658,76 @@ def test_tui_inside_glass_starts_the_chosen_interface(monkeypatch, tmp_path):
 
     assert main.launch_glass(_tui_args(frontend="glass")) == "launched tui"
     assert saved == ["tui"]
+
+
+def _voice(monkeypatch, tmp_path, check_code=0, check_err=""):
+    screen = tmp_path / "kvist-voice-screen"
+    screen.write_text("")
+    screen.chmod(0o755)
+    monkeypatch.setenv("KVIST_VOICE_SCREEN", str(screen))
+    monkeypatch.setattr(main, "_VOICE_DIR", tmp_path / "no-launcher")
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(main, "resolve_workspace_path", lambda raw: raw)
+    monkeypatch.setattr(
+        subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(command, check_code, None, check_err)
+    )
+    return screen
+
+
+def test_voice_runs_the_screen_with_this_program_as_its_core(monkeypatch, tmp_path):
+    screen = _voice(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(subprocess, "call", lambda command, env: calls.append((command, env)) or 0)
+
+    assert main.launch_voice(_tui_args(frontend="voice")) == 0
+
+    command, env = calls[0]
+    assert command == [str(screen), "--workspace", "ws"]
+    assert json.loads(env["KVIST_CORE_CMD"])[-1].endswith("__main__.py")
+
+
+def test_voice_starts_through_its_launcher_when_it_ships_beside_the_screen(monkeypatch, tmp_path):
+    screen = _voice(monkeypatch, tmp_path)
+    folder = tmp_path / "voice"
+    folder.mkdir()
+    launcher = folder / "kvist-voice"
+    launcher.write_text("")
+    launcher.chmod(0o755)
+    monkeypatch.setattr(main, "_VOICE_DIR", folder)
+    calls = []
+    monkeypatch.setattr(subprocess, "call", lambda command, env: calls.append((command, env)) or 0)
+
+    assert main.launch_voice(_tui_args(frontend="voice")) == 0
+
+    command, env = calls[0]
+    assert command[0] == str(launcher)
+    assert env["KVIST_VOICE_SCREEN"] == str(screen)
+
+
+def test_voice_on_a_terminal_it_refuses_falls_back_with_the_reason(monkeypatch, tmp_path, capsys):
+    _voice(monkeypatch, tmp_path, check_code=3, check_err="no kitty graphics here")
+    monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
+
+    assert main.launch_voice(_tui_args(frontend="voice")) is None
+    assert "no kitty graphics here" in capsys.readouterr().err
+
+
+def test_voice_without_a_build_falls_back(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("KVIST_VOICE_SCREEN", str(tmp_path / "missing"))
+    monkeypatch.setattr(main, "_VOICE_SCREEN_BUILD", tmp_path / "missing")
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+
+    assert main.launch_voice(_tui_args(frontend="voice")) is None
+    assert "frontends/voice/screen" in capsys.readouterr().err
+
+
+def test_tui_switch_to_voice_starts_it(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "save_frontend", lambda value: None)
+    monkeypatch.setattr(main, "launch_voice", lambda args: 7)
+    switch = tmp_path / "frontend"
+    switch.write_text("voice\n", encoding="utf-8")
+
+    assert main._switch_frontend(switch, _tui_args(frontend="tui")) == 7

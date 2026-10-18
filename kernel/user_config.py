@@ -351,7 +351,7 @@ def get_saved_role(config_path: Path | None = None) -> str | None:
 FRONTEND_KEY = "frontend"
 
 
-SAVED_FRONTENDS = ("terminal", "tui", "claude", "glass")
+SAVED_FRONTENDS = ("terminal", "tui", "claude", "glass", "voice")
 
 
 def get_saved_frontend(config_path: Path | None = None) -> str:
@@ -365,7 +365,7 @@ def save_frontend(frontend: str, config_path: Path | None = None) -> None:
     """Persist the frontend used on the next launch."""
     normalized = str(frontend).strip().casefold()
     if normalized not in SAVED_FRONTENDS:
-        raise ValueError("Frontend must be 'terminal', 'tui', 'claude' or 'glass'.")
+        raise ValueError("Frontend must be 'terminal', 'tui', 'claude', 'glass' or 'voice'.")
 
     def update(payload: dict[str, object]) -> dict[str, object]:
         if normalized == "terminal":

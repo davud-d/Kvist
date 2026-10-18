@@ -365,7 +365,7 @@ fn fbm(x: f32, y: f32) -> f32 {
 }
 
 /// All states side by side on a dark ground, for a visual check
-/// (`kvist-glass --orb-preview FILE`). Returns (width, height, RGB).
+/// (`kvist-voice-screen --orb-preview FILE`). Returns (width, height, RGB).
 pub fn contact_sheet(t: f32, side: usize) -> (u32, u32, Vec<u8>) {
     let columns = 4usize;
     let rows = ALL_STATES.len().div_ceil(columns);

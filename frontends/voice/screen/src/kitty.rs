@@ -88,7 +88,7 @@ impl Gpu {
         self.uploads += 1;
         match self.temp_dir.clone() {
             Some(dir) => {
-                let path = dir.join(format!("kvist-glass-{TEMP_MARKER}-{}-{}", std::process::id(), self.uploads));
+                let path = dir.join(format!("kvist-voice-{TEMP_MARKER}-{}-{}", std::process::id(), self.uploads));
                 fs::write(&path, data)?;
                 let encoded = STANDARD.encode(path.as_os_str().as_encoded_bytes());
                 self.out.extend_from_slice(

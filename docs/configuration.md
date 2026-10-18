@@ -168,6 +168,7 @@ From source:
 .venv/bin/python -m kernel --frontend tui      # Ink
 .venv/bin/python -m kernel --frontend claude   # Claude Code style skin of the same app
 .venv/bin/python -m kernel --frontend terminal # Classic Legacy terminal
+.venv/bin/python -m kernel --frontend voice    # voice screen (kitty/Ghostty; build it first, see frontends/voice/README.md)
 ```
 
 `/tui` saves the choice. If Node.js, the built file, a provider or a TTY is
