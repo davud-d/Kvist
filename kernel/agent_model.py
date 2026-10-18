@@ -1934,6 +1934,12 @@ def _should_retry_model_error(error: Exception) -> bool:
         "unauthorized",
         "does not exist",
         "not found",
+        # A sign-in that was refused or is missing stays that way between retries
+        # (ChatGPTAuthError: with max_retries=10 the person waited minutes for it).
+        "sign in again",
+        "continue with chatgpt first",
+        # A spent subscription allowance returns only when its window resets.
+        "plan usage",
         # An empty account stays empty between retries.
         "insufficient balance",
         "insufficient credit",

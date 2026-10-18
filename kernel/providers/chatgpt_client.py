@@ -9,7 +9,7 @@ from types import SimpleNamespace as NS
 from typing import Any
 
 import httpx
-from openai import AuthenticationError, OpenAI
+from openai import APIStatusError, AuthenticationError, OpenAI
 
 from kernel.providers import chatgpt_auth as auth
 
@@ -105,13 +105,33 @@ def _tool_call(item: Any, index: int) -> NS:
               function=NS(name=item.name, arguments=item.arguments))
 
 
+# Error codes that mean the subscription's usage allowance is spent or cannot be read;
+# neither changes by retrying, so the message names the page where the person sees it.
+_USAGE_LIMIT_CODES = frozenset({
+    "subscription_sharing_usage_limit_exceeded",
+    "subscription_sharing_usage_unavailable",
+    "usage_limit_reached",
+    "usage_not_included",
+})
+
+
+def _usage_limit_error() -> RuntimeError:
+    return RuntimeError("ChatGPT plan usage is unavailable or its limit was reached. "
+                        "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
+
+
+def _http_error_code(error: APIStatusError) -> str:
+    body = error.body if isinstance(error.body, dict) else {}
+    detail = body.get("error") if isinstance(body.get("error"), dict) else body
+    return str(detail.get("code") or detail.get("type") or "")
+
+
 def _response_error(event: Any) -> RuntimeError:
     response = getattr(event, "response", None)
     error = getattr(response, "error", None) or getattr(event, "error", None)
     code = getattr(error, "code", None) or getattr(event, "code", None) or event.type
-    if code in {"subscription_sharing_usage_limit_exceeded", "subscription_sharing_usage_unavailable"}:
-        return RuntimeError("ChatGPT plan usage is unavailable or its limit was reached. "
-                            "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
+    if code in _USAGE_LIMIT_CODES:
+        return _usage_limit_error()
     # Server error text can echo inputs; expose only the structured code.
     return RuntimeError(f"ChatGPT response failed ({code}) / Ответ ChatGPT не завершён.")
 
@@ -149,6 +169,10 @@ class ChatGPTClient:
             except AuthenticationError:
                 if attempt:
                     raise auth.ChatGPTAuthError("ChatGPT access was revoked. Sign in again / Войдите в ChatGPT снова.") from None
+            except APIStatusError as error:
+                if _http_error_code(error) in _USAGE_LIMIT_CODES:
+                    raise _usage_limit_error() from None
+                raise
 
     def _stream_request(self, request: dict, token: str):
         completed, call_index = False, 0

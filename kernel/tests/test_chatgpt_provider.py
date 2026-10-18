@@ -297,6 +297,34 @@ def test_partial_answer_is_not_reported_as_success(monkeypatch, terminal):
     assert closed == ["stream", "client"]
 
 
+@pytest.mark.parametrize("body", [{"error": {"code": "usage_limit_reached"}}, {"error": {"type": "usage_limit_reached"}},
+    {"code": "subscription_sharing_usage_limit_exceeded"}])
+def test_a_spent_subscription_allowance_over_http_names_the_usage_page(monkeypatch, body):
+    saved_account()
+    response = httpx.Response(429, request=httpx.Request("POST", "https://example.test/responses"))
+    class Client:
+        def __init__(self, **kwargs): self.responses = self
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def create(self, **kwargs): raise transport.APIStatusError("limit", response=response, body=body)
+    monkeypatch.setattr(transport, "OpenAI", Client)
+    with pytest.raises(RuntimeError, match="chatgpt.com/settings/usage"):
+        transport.ChatGPTClient().create(model="test", messages=[{"role": "user", "content": "hi"}])
+
+
+def test_another_http_error_passes_through_unchanged(monkeypatch):
+    saved_account()
+    response = httpx.Response(500, request=httpx.Request("POST", "https://example.test/responses"))
+    class Client:
+        def __init__(self, **kwargs): self.responses = self
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+        def create(self, **kwargs): raise transport.APIStatusError("boom", response=response, body=None)
+    monkeypatch.setattr(transport, "OpenAI", Client)
+    with pytest.raises(transport.APIStatusError):
+        transport.ChatGPTClient().create(model="test", messages=[{"role": "user", "content": "hi"}])
+
+
 def test_account_specific_catalog_does_not_reuse_another_accounts_models(monkeypatch):
     saved_account()
     seen = []

@@ -210,6 +210,43 @@ def test_empty_account_402_is_not_retried_and_is_terminal(agent_factory, monkeyp
     assert "insufficient balance or credits" in agent._normalize_error_for_model(str(caught.value))
 
 
+def test_refused_chatgpt_sign_in_is_not_retried_and_is_terminal(agent_factory, monkeypatch):
+    from kernel.providers.chatgpt_auth import ChatGPTAuthError
+
+    agent = agent_factory(stream=False, max_retries=10)
+    monkeypatch.setattr(agent_model.time, "sleep", lambda _: None)
+    calls = []
+
+    def fail(**kwargs):
+        calls.append(kwargs)
+        raise ChatGPTAuthError("ChatGPT authorization expired or was refused. Sign in again / Войдите в ChatGPT снова.")
+
+    agent.client.chat.completions.create = fail
+    with pytest.raises(RuntimeError, match="Failed to get model response") as caught:
+        agent._call_model("model", "system", "user")
+
+    assert len(calls) == 1
+    assert agent_runtime._is_terminal_model_error(str(caught.value))
+
+
+def test_spent_subscription_allowance_is_not_retried_and_is_terminal(agent_factory, monkeypatch):
+    agent = agent_factory(stream=False, max_retries=10)
+    monkeypatch.setattr(agent_model.time, "sleep", lambda _: None)
+    calls = []
+
+    def fail(**kwargs):
+        calls.append(kwargs)
+        raise RuntimeError("ChatGPT plan usage is unavailable or its limit was reached. "
+                           "Check https://chatgpt.com/settings/usage / Проверьте лимиты подписки ChatGPT.")
+
+    agent.client.chat.completions.create = fail
+    with pytest.raises(RuntimeError, match="Failed to get model response") as caught:
+        agent._call_model("model", "system", "user")
+
+    assert len(calls) == 1
+    assert agent_runtime._is_terminal_model_error(str(caught.value))
+
+
 class _ReasoningClient:
     """Streams reasoning deltas before the answer, like OpenRouter/Kimi do."""
 
