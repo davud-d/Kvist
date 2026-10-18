@@ -18,14 +18,15 @@ use crate::anim::{self, Ease, Tween};
 use crate::backdrop::LEVELS;
 use crate::core::{self, Core, History, Message};
 use crate::dialog::{Ask, Body, Choice};
+use crate::diff;
 use crate::edit;
 use crate::kitty::Gpu;
 use crate::layout::{self, BROWSER_ASPECT, Grid, Layout, MARGIN_X, Shape};
 use crate::model::{CoreEvent, Session};
 use crate::models::ModelPicker;
 use crate::pictures::{
-    Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_HELPERS, SLOT_INPUT,
-    SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, Worker,
+    Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_DIFF, SLOT_HELPERS,
+    SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, Worker,
 };
 use crate::probe::Caps;
 use crate::protocol;
@@ -127,6 +128,9 @@ pub struct App {
     pub input_rise: Tween,
     pub helpers_in: Tween,
     pub browser_in: Tween,
+    /// The file whose diff is open on the right; it stays until the panel has slid out.
+    pub diff: Option<diff::View>,
+    pub diff_in: Tween,
     pending_plan: Option<String>,
     pub modal: Option<Modal>,
     pub modal_p: Tween,
@@ -181,6 +185,8 @@ impl App {
             input_rise: Tween::settled(0.0),
             helpers_in: Tween::settled(0.0),
             browser_in: Tween::settled(0.0),
+            diff: None,
+            diff_in: Tween::settled(0.0),
             pending_plan: None,
             modal: None,
             modal_p: Tween::settled(0.0),
@@ -211,6 +217,7 @@ impl App {
             browser: self.session.browser.as_ref().map(|_| self.web_aspect.unwrap_or(BROWSER_ASPECT)),
             input_lines,
             input_at_bottom: self.input_pos.value(now),
+            diff: self.diff.is_some(),
         }
     }
 
@@ -220,13 +227,31 @@ impl App {
         let (lines, _) = view::input_lines(&self.input, self.cursor, first.input.width.saturating_sub(6) as usize);
         shape.input_lines = lines.len() as u16;
         self.layout = layout::compute(&self.grid, &shape);
+        self.sync_diff();
         match &self.modal {
             Some(Modal::Ask(Some(ask))) => {
-                self.dialog_rect = layout::dialog(&self.grid, view::ask_height(ask, self.grid.cols));
+                self.dialog_rect = layout::dialog(&self.grid, view::ask_width(ask), view::ask_height(ask, self.grid.cols));
             }
-            Some(Modal::Models(_)) => self.dialog_rect = layout::dialog(&self.grid, view::MODELS_HEIGHT),
+            Some(Modal::Models(_)) => self.dialog_rect = layout::dialog(&self.grid, layout::DIALOG_WIDTH, view::MODELS_HEIGHT),
             _ => {}
         }
+    }
+
+    /// Builds the open diff's rows for the panel's width. A panel that does
+    /// not fit (the window narrowed) is dropped.
+    fn sync_diff(&mut self) {
+        let Some(view) = self.diff.as_mut() else { return };
+        let Some(panel) = self.layout.diff else {
+            self.diff = None;
+            return;
+        };
+        let patches = self.session.files.iter().find(|f| f.path == view.path).map_or(&[][..], |f| f.patches.as_slice());
+        view.sync(patches, panel.width.saturating_sub(4) as usize, strings().diff_cut);
+    }
+
+    /// Rows of the open diff's text: the panel without its header, footer and padding.
+    pub fn diff_rows(&self) -> usize {
+        self.layout.diff.map_or(0, |panel| panel.height.saturating_sub(5) as usize)
     }
 
     fn tick(&mut self, now: Instant, pictures: &mut Pictures) {
@@ -243,6 +268,7 @@ impl App {
         if self.modal.is_some() && self.modal_p.target() == 0.0 && !self.modal_p.running(now) {
             self.modal = None;
         }
+        self.drop_closed_diff(now);
         if self.toast.as_ref().is_some_and(|t| now.saturating_duration_since(t.at) > TOAST) {
             self.toast = None;
         }
@@ -611,7 +637,7 @@ impl App {
     }
 
     fn animating(&self, now: Instant) -> bool {
-        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.modal_p, &self.menu_in];
+        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.diff_in, &self.modal_p, &self.menu_in];
         matches!(self.phase, Phase::Splash)
             || self.session.busy
             || self.command.is_some()
@@ -666,6 +692,12 @@ impl App {
             && helpers > 0.001
         {
             cards.push(CardSpec { slot: SLOT_HELPERS, style: style(CardStyle::Side), rect, dx: slide(rect, helpers), dy: 0.0 });
+        }
+        let diff = self.diff_in.value(now);
+        if let Some(rect) = self.layout.diff
+            && diff > 0.001
+        {
+            cards.push(CardSpec { slot: SLOT_DIFF, style: style(CardStyle::Side), rect, dx: slide(rect, diff), dy: 0.0 });
         }
         if let Some(rect) = self.reading {
             cards.push(CardSpec { slot: SLOT_READING, style: style(CardStyle::Reading), rect, dx: 0.0, dy: 0.0 });
@@ -770,6 +802,7 @@ impl App {
         match key.code {
             KeyCode::Char('p') if ctrl => return self.open_models(now),
             KeyCode::Char('t') if ctrl => return self.toggle_helpers(None, now),
+            KeyCode::Esc if self.diff_in.target() > 0.0 => return self.close_diff(now),
             KeyCode::Esc if self.session.busy => return self.stop(now),
             KeyCode::Esc if self.helpers_in.target() > 0.0 => return self.toggle_helpers(None, now),
             _ => {}
@@ -841,6 +874,12 @@ impl App {
             }
             KeyCode::Esc => Some(ask.cancel()),
             KeyCode::Enter => ask.accept(),
+            KeyCode::Up | KeyCode::Down if ask.diff.is_some() => {
+                let most = view::ask_text_max_scroll(ask, card);
+                let delta = if key.code == KeyCode::Up { -1 } else { 1 };
+                ask.text_scroll = (ask.text_scroll as i32 + delta).clamp(0, most as i32) as usize;
+                None
+            }
             KeyCode::Up => {
                 ask.step(-1);
                 None
@@ -1094,7 +1133,37 @@ impl App {
         }
     }
 
+    /// Opens the diff of the file at `index` of the left card; clicking the
+    /// file that is open closes it. The diff takes the helpers panel's place.
+    fn open_diff(&mut self, index: usize, now: Instant) {
+        let Some(file) = self.session.files.get(index) else { return };
+        let showing = self.diff_in.target() > 0.0;
+        if showing && self.diff.as_ref().is_some_and(|view| view.path == file.path) {
+            return self.close_diff(now);
+        }
+        self.diff = Some(diff::View::new(file.path.clone()));
+        self.helpers_in = Tween::settled(0.0);
+        if !showing {
+            self.diff_in.go(1.0, now, 420, Ease::Burst);
+        }
+    }
+
+    fn close_diff(&mut self, now: Instant) {
+        self.diff_in.go(0.0, now, 300, Ease::Burst);
+    }
+
+    /// Forgets the diff once its panel has slid out.
+    fn drop_closed_diff(&mut self, now: Instant) {
+        if self.diff.is_some() && self.diff_in.target() == 0.0 && !self.diff_in.running(now) {
+            self.diff = None;
+        }
+    }
+
     fn toggle_helpers(&mut self, focus: Option<usize>, now: Instant) {
+        if self.diff.is_some() {
+            self.diff = None;
+            self.diff_in = Tween::settled(0.0);
+        }
         let open = self.helpers_in.target() > 0.0;
         if open && (focus.is_none() || focus == self.helper_focus) {
             self.helpers_in.go(0.0, now, 300, Ease::Burst);
@@ -1128,6 +1197,11 @@ impl App {
     fn wheel(&mut self, delta: i32) {
         let card = self.dialog_rect;
         match self.modal.as_mut() {
+            // A diff to read scrolls; the buttons below it are reached by the arrows.
+            Some(Modal::Ask(Some(ask))) if ask.diff.is_some() => {
+                let most = view::ask_text_max_scroll(ask, card);
+                ask.text_scroll = (ask.text_scroll as i32 + delta * 3).clamp(0, most as i32) as usize;
+            }
             Some(Modal::Ask(Some(ask))) => {
                 ask.step(delta);
                 let rows = view::ask_list_rows(ask, card);
@@ -1138,6 +1212,12 @@ impl App {
                 picker.follow(view::models_list_rows(card));
             }
             Some(_) => {}
+            None if self.layout.diff.is_some_and(|panel| contains(panel, self.last_mouse)) => {
+                let rows = self.diff_rows();
+                if let Some(view) = self.diff.as_mut() {
+                    view.scroll_by(delta * 3, rows);
+                }
+            }
             None if delta < 0 => self.scroll += 3,
             None => self.scroll = self.scroll.saturating_sub(3),
         }
@@ -1178,6 +1258,8 @@ impl App {
             Some(Modal::Browser) => self.close_modal(now),
             None => match hit {
                 Some(Hit::Thumb) => self.open_browser(now),
+                Some(Hit::File(index)) => self.open_diff(index, now),
+                Some(Hit::DiffClose) => self.close_diff(now),
                 Some(Hit::Helper(id)) => self.toggle_helpers(Some(id), now),
                 Some(Hit::HelpersTitle | Hit::HelpersClose) => self.toggle_helpers(None, now),
                 Some(Hit::NewSession) => self.command("new", &[], now),
@@ -1373,7 +1455,7 @@ mod tests {
             ]}), now);
         let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
         assert_eq!(ask.text, plan);
-        app.dialog_rect = layout::dialog(&app.grid, view::ask_height(ask, app.grid.cols));
+        app.dialog_rect = layout::dialog(&app.grid, layout::DIALOG_WIDTH, view::ask_height(ask, app.grid.cols));
         app.ask_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now);
         let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
         assert_eq!(ask.text_scroll, 6);
@@ -1416,6 +1498,131 @@ mod tests {
         let mut app = app();
         app.phase = Phase::Main { since: Instant::now() };
         app
+    }
+
+    const PATCH: &str = "--- a/kernel/helpers.py\n+++ b/kernel/helpers.py\n@@ -10,3 +10,3 @@\n keep\n-total = price * 2\n+total = price * 3\n keep too";
+
+    /// A wide window with one file the agent changed, drawn once so its rows are clickable.
+    fn changed_app() -> (App, Instant) {
+        let mut app = main_app();
+        app.grid = Grid { cols: 180, rows: 50, cw: 10, ch: 20 };
+        let now = Instant::now();
+        app.session.apply(
+            CoreEvent::FileChanged { path: "kernel/helpers.py".into(), added: 1, removed: 1, patch: Some(PATCH.into()) },
+            now,
+        );
+        app.left_in = Tween::settled(1.0);
+        app.input_rise = Tween::settled(1.0);
+        draw_once(&mut app, now);
+        (app, now)
+    }
+
+    fn draw_once(app: &mut App, now: Instant) {
+        app.relayout(now);
+        let mut buffer = ratatui::buffer::Buffer::empty(app.grid.full());
+        app.hits = view::draw(app, &mut buffer, now).hits;
+    }
+
+    fn click_on(app: &mut App, hit: impl Fn(&Hit) -> bool, now: Instant) {
+        let (rect, _) = *app.hits.iter().find(|(_, h)| hit(h)).expect("a clickable row");
+        let target = app.hit_at(rect.x + 1, rect.y);
+        app.click(target, now);
+    }
+
+    #[test]
+    fn clicking_a_changed_file_opens_its_diff_on_the_right_and_a_second_click_closes_it() {
+        let (mut app, now) = changed_app();
+        click_on(&mut app, |h| matches!(h, Hit::File(0)), now);
+        assert_eq!(app.diff.as_ref().map(|view| view.path.as_str()), Some("kernel/helpers.py"));
+        draw_once(&mut app, now + Duration::from_secs(1));
+        let panel = app.layout.diff.expect("the panel");
+        assert!(panel.x > app.layout.input.right());
+        let text: String = app.diff.as_ref().unwrap().lines.iter().flatten().map(|(s, _)| s.as_str()).collect();
+        assert!(text.contains("price * 3") && text.contains("price * 2"));
+
+        click_on(&mut app, |h| matches!(h, Hit::File(0)), now + Duration::from_secs(1));
+        assert_eq!(app.diff_in.target(), 0.0);
+        app.drop_closed_diff(now + Duration::from_secs(3));
+        assert!(app.diff.is_none());
+    }
+
+    #[test]
+    fn escape_closes_the_diff_before_it_stops_a_running_turn() {
+        let (mut app, now) = changed_app();
+        app.open_diff(0, now);
+        app.session.busy = true;
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.diff_in.target(), 0.0);
+        assert!(app.stop_armed.is_none());
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_diff_only_while_the_pointer_is_over_it() {
+        let (mut app, now) = changed_app();
+        let long: String = (1..=80).map(|n| format!("+line {n}\n")).collect();
+        app.session.apply(
+            CoreEvent::FileChanged { path: "kernel/helpers.py".into(), added: 80, removed: 0, patch: Some(format!("@@ -0,0 +1,80 @@\n{long}")) },
+            now,
+        );
+        app.open_diff(0, now);
+        draw_once(&mut app, now + Duration::from_secs(1));
+        let panel = app.layout.diff.unwrap();
+        app.last_mouse = (panel.x + 5, panel.y + 5);
+        app.wheel(1);
+        assert_eq!(app.diff.as_ref().unwrap().scroll, 3);
+        app.last_mouse = (app.layout.input.x + 2, app.layout.input.y);
+        app.wheel(-1);
+        assert_eq!(app.diff.as_ref().unwrap().scroll, 3);
+        assert_eq!(app.scroll, 3);
+    }
+
+    #[test]
+    fn opening_the_helpers_panel_replaces_the_diff() {
+        let (mut app, now) = changed_app();
+        app.open_diff(0, now);
+        app.toggle_helpers(None, now);
+        assert!(app.diff.is_none());
+        assert!(app.helpers_in.target() > 0.0);
+    }
+
+    #[test]
+    fn an_overwrite_approval_shows_the_old_file_beside_the_new_one() {
+        let mut app = main_app();
+        app.grid = Grid { cols: 180, rows: 50, cw: 10, ch: 20 };
+        let now = Instant::now();
+        app.on_core(
+            &json!({"type": "input_request", "request_id": "w", "kind": "confirm", "title": "File overwrite",
+                "subject": {"kind": "overwrite", "path": "kernel/helpers.py", "diff": PATCH}}),
+            now,
+        );
+        app.modal_p = Tween::settled(1.0);
+        app.relayout(now);
+        assert_eq!(app.dialog_rect.width, layout::DIFF_DIALOG_WIDTH);
+        let mut buffer = ratatui::buffer::Buffer::empty(app.grid.full());
+        view::draw(&app, &mut buffer, now);
+        let row = (0..buffer.area.height)
+            .map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol().to_string()).collect::<String>())
+            .find(|line| line.contains("price * 2"))
+            .expect("the removed line is drawn");
+        assert!(row.find("price * 2") < row.find('│') && row.find('│') < row.find("price * 3"), "{row}");
+    }
+
+    #[test]
+    fn arrows_scroll_an_overwrites_diff_instead_of_moving_the_buttons() {
+        let mut app = main_app();
+        let now = Instant::now();
+        let rows: String = (1..=60).map(|n| format!("+line {n}\n")).collect();
+        app.on_core(
+            &json!({"type": "input_request", "request_id": "w", "kind": "confirm", "title": "File overwrite",
+                "subject": {"kind": "overwrite", "path": "a.py", "diff": format!("@@ -0,0 +1,60 @@\n{rows}")}}),
+            now,
+        );
+        app.modal_p = Tween::settled(1.0);
+        app.relayout(now);
+        press(&mut app, KeyCode::Down);
+        let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
+        assert_eq!(ask.text_scroll, 1);
+        assert_eq!(ask.picked(), Some(crate::dialog::Answer::No));
     }
 
     #[test]

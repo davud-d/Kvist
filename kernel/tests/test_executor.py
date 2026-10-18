@@ -48,6 +48,55 @@ def test_writes_report_the_lines_they_added_and_removed(tmp_path, monkeypatch):
     assert (replaced.data["lines_added"], replaced.data["lines_removed"]) == (1, 2)
 
 
+def test_a_patch_numbers_its_hunks_by_the_files_own_lines():
+    old = "".join(f"line {n}\n" for n in range(1, 41))
+    new = old.replace("line 20\n", "twenty\nextra\n")
+    patch = executor_module.unified_patch("big.py", old, new)
+    assert patch.splitlines() == [
+        "--- a/big.py",
+        "+++ b/big.py",
+        "@@ -17,7 +17,8 @@",
+        " line 17",
+        " line 18",
+        " line 19",
+        "-line 20",
+        "+twenty",
+        "+extra",
+        " line 21",
+        " line 22",
+        " line 23",
+    ]
+
+
+def test_a_patch_of_a_new_file_is_all_additions_and_of_no_change_is_empty():
+    assert executor_module.unified_patch("n.py", None, "a\nb\n").splitlines() == [
+        "--- /dev/null", "+++ b/n.py", "@@ -0,0 +1,2 @@", "+a", "+b",
+    ]
+    assert executor_module.unified_patch("n.py", "a\n", "a\n") == ""
+
+
+def test_a_huge_patch_is_cut_at_a_line_and_says_so(monkeypatch):
+    monkeypatch.setattr(executor_module, "_MAX_PATCH_CHARS", 50)
+    patch = executor_module.unified_patch("n.py", None, "".join(f"row {n}\n" for n in range(100)))
+    assert patch.endswith("\n\\ patch truncated")
+    assert len(patch) < 100
+
+
+def test_writes_return_their_patch_beside_the_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
+    executor = SafeExecutor(tmp_path)
+
+    created = executor._write_file("a.py", "one\ntwo\n")
+    assert created.patch.splitlines()[:2] == ["--- /dev/null", "+++ b/a.py"]
+    assert "patch" not in created.data
+
+    appended = executor._append_file("a.py", "three\n")
+    assert appended.patch.splitlines()[2:] == ["@@ -1,2 +1,3 @@", " one", " two", "+three"]
+
+    replaced = executor._replace_in_file("a.py", "two\n", "2\n")
+    assert replaced.patch.splitlines()[-3:] == ["-two", "+2", " three"]
+
+
 @pytest.mark.offline_smoke
 def test_executor_file_lifecycle_and_search(tmp_path):
     executor = SafeExecutor(tmp_path)

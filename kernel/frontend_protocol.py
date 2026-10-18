@@ -496,6 +496,8 @@ class ActionResultEvent:
     1-based line of the resulting file where the written text begins, which lets
     a frontend number the lines of a diff. ``lines_added``/``lines_removed`` are
     the write's line diff, for a frontend that shows per-file counts.
+    ``patch`` is the write's unified diff (redacted, capped), for a frontend
+    that shows what changed in a file.
     """
 
     step: int
@@ -508,6 +510,7 @@ class ActionResultEvent:
     first_line: int | None = None
     lines_added: int | None = None
     lines_removed: int | None = None
+    patch: str | None = None
     # Additive: the call this result answers (see StepEvent).
     call_id: str = ""
     batch_id: str = ""
@@ -526,6 +529,7 @@ class ActionResultEvent:
             "first_line": self.first_line,
             "lines_added": self.lines_added,
             "lines_removed": self.lines_removed,
+            "patch": self.patch,
             "call_id": self.call_id,
             "batch_id": self.batch_id,
         }

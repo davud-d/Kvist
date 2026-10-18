@@ -10,6 +10,7 @@ use ratatui::style::{Color, Modifier, Style};
 use crate::anim::Ease;
 use crate::app::{App, Modal, Phase};
 use crate::dialog::{Answer, Ask, Body};
+use crate::diff;
 use crate::layout::{self, BROWSER_ASPECT, MARGIN_X};
 use crate::model::{CallState, Helper, HelperState, Item, ToolKind};
 use crate::markdown;
@@ -26,6 +27,8 @@ const MAX_LIST_ROWS: u16 = 14;
 /// The most lines of a dialog's explanation (or an approval's diff) shown
 /// above its answer.
 const MAX_BODY_LINES: usize = 12;
+/// The most rows of an overwrite's diff shown at once; the rest scroll.
+const MAX_DIFF_LINES: usize = 30;
 /// A helper's latest calls in the helpers panel; earlier ones are in its
 /// service session.
 const HELPER_CALLS_SHOWN: usize = 6;
@@ -41,6 +44,7 @@ pub enum Hit {
     Thumb,
     PopupClose,
     HelpersClose,
+    DiffClose,
     /// A visible row of a choice dialog.
     Choice(usize),
     /// A row of the slash menu, by its index in the suggestions.
@@ -95,6 +99,7 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
     draw_left(&mut p, app, now, &mut drawn);
     draw_browser_label(&mut p, app, now, &mut drawn);
     draw_helpers(&mut p, app, now, ms, &mut drawn);
+    draw_diff(&mut p, app, now, &mut drawn);
     drawn.reading = draw_transcript(&mut p, app, now, ms);
     draw_input(&mut p, app, now, &mut drawn);
     draw_menu(&mut p, app, now, &mut drawn);
@@ -174,7 +179,8 @@ fn draw_left(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
         y += 1;
         for (index, file) in session.files.iter().enumerate() {
             let row = Rect::new(card.x, y as u16, card.width, 1);
-            if app.hover == Some(Hit::File(index)) {
+            let open = app.diff.as_ref().is_some_and(|view| view.path == file.path);
+            if open || app.hover == Some(Hit::File(index)) {
                 p.fill(card.x as i32 + 1 + off, y, card.width as i32 - 2, HOVER);
             }
             let since = now.saturating_duration_since(file.touched).as_millis() as f32;
@@ -232,6 +238,63 @@ fn draw_left(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
 
 fn helper_name(index: usize) -> String {
     format!("{} {}", strings().helper_name, index + 1)
+}
+
+/// The diff of the file chosen in the left card: its name and counts, then
+/// every edit of this session as numbered, coloured rows.
+fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
+    let (Some(panel), Some(view)) = (app.layout.diff, app.diff.as_ref()) else { return };
+    let open = app.diff_in.value(now);
+    if open <= 0.001 {
+        return;
+    }
+    let s = strings();
+    let off = slide_cols(panel, open);
+    let x = panel.x as i32 + 2 + off;
+    let right = panel.right() as i32 - 2 + off;
+    let top = panel.y as i32 + 1;
+    let file = app.session.files.iter().find(|file| file.path == view.path);
+
+    let close_hover = app.hover == Some(Hit::DiffClose);
+    p.text(right - 1, top, theme::I_CLOSE, st(if close_hover { MOON } else { DUSK }));
+    drawn.hits.push((Rect::new((right - 2).max(0) as u16, top.max(0) as u16, 3, 1), Hit::DiffClose));
+    let numbers = file.map(|file| counts(file.added, file.removed)).unwrap_or_default();
+    let numbers_w = text::line_width(&numbers) as i32;
+    p.line_right(right - 3, top, &numbers);
+
+    let (icon, icon_color) = theme::file_icon(&view.path);
+    let (dir, name) = view.path.rsplit_once('/').unwrap_or(("", &view.path));
+    let room = (right - 3 - numbers_w - x - 4).max(4) as usize;
+    let cx = p.text(x, top, icon, st(icon_color));
+    let cx = p.text(cx + 1, top, &text::fit(name, room), Style::default().fg(FOG).add_modifier(Modifier::BOLD));
+    let dir_room = (right - 3 - numbers_w - cx - 3).max(0) as usize;
+    if let Some(dir) = folder_label(dir, dir_room) {
+        p.text(cx + 2, top, &dir, st(DUSK));
+    }
+
+    let body_top = top + 2;
+    let rows = app.diff_rows();
+    if view.lines.is_empty() {
+        let width = (right - x).max(8) as usize;
+        for (i, line) in text::wrap(&vec![span(s.diff_none, DUSK)], width).iter().enumerate() {
+            p.line(x, body_top + i as i32, line);
+        }
+        return;
+    }
+    for (i, line) in view.lines.iter().skip(view.scroll).take(rows).enumerate() {
+        p.line(x, body_top + i as i32, line);
+    }
+    let edits = file.map_or(0, |file| file.patches.len());
+    let from = view.scroll + 1;
+    let to = (view.scroll + rows).min(view.lines.len());
+    let footer = vec![
+        span(format!("{}: {edits}", s.diff_edits), MIST),
+        span(format!("    {from}–{to}/{}", view.lines.len()), DUSK),
+        span(format!("    {}", s.diff_scroll), MIST),
+        span("    esc", MIST),
+        span(format!(" {}", s.diff_close), DUSK),
+    ];
+    p.line(x, panel.bottom() as i32 - 2, &footer);
 }
 
 /// "+12 −3", leaving out a side that is zero.
@@ -711,9 +774,19 @@ fn short_path(path: &str, max: usize) -> String {
     format!("…/{tail}")
 }
 
+/// Columns the dialog for `ask` wants: wide when it shows a diff.
+pub fn ask_width(ask: &Ask) -> u16 {
+    if ask.diff.is_some() { layout::DIFF_DIALOG_WIDTH } else { layout::DIALOG_WIDTH }
+}
+
+/// The most lines of explanation `ask` shows above its answer.
+fn body_cap(ask: &Ask) -> usize {
+    if ask.diff.is_some() { MAX_DIFF_LINES } else { MAX_BODY_LINES }
+}
+
 /// Rows a dialog needs for `ask`, padding included.
 pub fn ask_height(ask: &Ask, cols: u16) -> u16 {
-    let body = body_lines(ask, dialog_text_width(cols)).len().min(MAX_BODY_LINES) as u16;
+    let body = body_lines(ask, ask_text_width(ask, cols)).len().min(body_cap(ask)) as u16;
     let body = if body > 0 { body + 1 } else { 0 };
     let answer = match &ask.body {
         Body::Choice { choices, .. } => 2 + (choices.len() as u16).clamp(1, MAX_LIST_ROWS),
@@ -731,25 +804,34 @@ pub fn ask_list_rows(ask: &Ask, card: Rect) -> usize {
     (card.height as usize).saturating_sub(8 + body)
 }
 
-fn dialog_text_width(cols: u16) -> usize {
-    layout::dialog(&crate::layout::Grid { cols, rows: 100, cw: 1, ch: 1 }, 1).width.saturating_sub(6) as usize
+fn ask_text_width(ask: &Ask, cols: u16) -> usize {
+    layout::dialog(&crate::layout::Grid { cols, rows: 100, cw: 1, ch: 1 }, ask_width(ask), 1).width.saturating_sub(6) as usize
 }
 
-/// The explanation, coloured by line: a command ("$ …") in moonlight, a
-/// diff's added and removed lines in moss and rosehip.
+/// The explanation, coloured by line: a command ("$ …") in moonlight, text
+/// that looks like a diff in moss and rosehip; for an overwrite, the file and
+/// its diff, the old file beside the new one when `width` allows.
 fn body_lines(ask: &Ask, width: usize) -> Vec<Line> {
-    ask.text
-        .split('\n')
-        .flat_map(|paragraph| {
-            let color = match paragraph.chars().next() {
-                Some('$') => MOON,
-                Some('+') if !paragraph.starts_with("+++") => MOSS,
-                Some('-') if !paragraph.starts_with("---") => ROSEHIP,
-                _ => MIST,
-            };
-            text::wrap(&vec![span(paragraph, color)], width)
-        })
-        .collect()
+    let Some(patch) = &ask.diff else {
+        return ask
+            .text
+            .split('\n')
+            .flat_map(|paragraph| {
+                let color = match paragraph.chars().next() {
+                    Some('$') => MOON,
+                    Some('+') if !paragraph.starts_with("+++") => MOSS,
+                    Some('-') if !paragraph.starts_with("---") => ROSEHIP,
+                    _ => MIST,
+                };
+                text::wrap(&vec![span(paragraph, color)], width)
+            })
+            .collect();
+    };
+    let (icon, icon_color) = theme::file_icon(&ask.text);
+    let mut lines = vec![vec![span(icon, icon_color), span(format!(" {}", ask.text), MOON)], Vec::new()];
+    let cut = strings().diff_cut;
+    lines.extend(if width >= diff::SPLIT_MIN_WIDTH { diff::split(patch, width, cut) } else { diff::inline(patch, width, cut) });
+    lines
 }
 
 fn ask_body_rows(ask: &Ask, card: Rect) -> usize {
@@ -758,7 +840,7 @@ fn ask_body_rows(ask: &Ask, card: Rect) -> usize {
         Body::Text { .. } => 1 + usize::from(!ask.help.is_empty()),
         Body::Confirm { .. } => 1,
     };
-    (card.height as usize).saturating_sub(7 + answer).min(MAX_BODY_LINES)
+    (card.height as usize).saturating_sub(7 + answer).min(body_cap(ask))
 }
 
 pub fn ask_text_max_scroll(ask: &Ask, card: Rect) -> usize {
@@ -1011,7 +1093,7 @@ mod tests {
         let small = ask_height(&ask(3), 160);
         assert_eq!(ask_height(&ask(4), 160), small + 1);
         assert_eq!(ask_height(&ask(40), 160), ask_height(&ask(80), 160));
-        let card = layout::dialog(&layout::Grid { cols: 160, rows: 60, cw: 1, ch: 1 }, small);
+        let card = layout::dialog(&layout::Grid { cols: 160, rows: 60, cw: 1, ch: 1 }, layout::DIALOG_WIDTH, small);
         assert_eq!(ask_list_rows(&ask(3), card), 3);
     }
 

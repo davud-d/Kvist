@@ -4,6 +4,8 @@
 
 use serde_json::{Value, json};
 
+use crate::diff::{self, Patch};
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Choice {
     pub value: String,
@@ -43,6 +45,8 @@ pub struct Ask {
     pub request_id: String,
     pub title: String,
     pub text: String,
+    /// What an overwrite approval would change, shown under `text` (the path).
+    pub diff: Option<Patch>,
     pub text_scroll: usize,
     pub help: String,
     pub body: Body,
@@ -78,11 +82,11 @@ impl Ask {
             }
             _ => return None,
         };
-        let text = match subject_text(event.get("subject")) {
+        let (text, diff) = match subject_text(event.get("subject")) {
             Some(subject) => subject,
-            None => field("body"),
+            None => (field("body"), None),
         };
-        Some(Ask { request_id: field("request_id"), title: field("title"), text, text_scroll: 0, help: field("help_text"), body })
+        Some(Ask { request_id: field("request_id"), title: field("title"), text, diff, text_scroll: 0, help: field("help_text"), body })
             .filter(|ask| !ask.request_id.is_empty())
     }
 
@@ -93,6 +97,7 @@ impl Ask {
             request_id: request_id.to_string(),
             title: title.to_string(),
             text: String::new(),
+            diff: None,
             text_scroll: 0,
             help: String::new(),
             body: Body::Choice { query: String::new(), choices, selected, scroll: 0 },
@@ -247,14 +252,21 @@ impl Ask {
     }
 }
 
-/// What an approval is about, as text: the command (a line starting "$ ")
-/// and the reason, or the file and the diff of an overwrite.
-fn subject_text(subject: Option<&Value>) -> Option<String> {
+/// What an approval is about: the command (a line starting "$ ") and the
+/// reason, or the file of an overwrite with its diff. A diff with no hunk to
+/// show (the core cut it to nothing) stays text under the path.
+fn subject_text(subject: Option<&Value>) -> Option<(String, Option<Patch>)> {
     let subject = subject?;
     let field = |key: &str| subject.get(key).and_then(Value::as_str).unwrap_or("");
     match field("kind") {
-        "command" => Some(format!("$ {}\n{}", field("command"), field("reason")).trim_end().to_string()),
-        "overwrite" => Some(format!("{}\n{}", field("path"), field("diff")).trim_end().to_string()),
+        "command" => Some((format!("$ {}\n{}", field("command"), field("reason")).trim_end().to_string(), None)),
+        "overwrite" => {
+            let patch = Patch::parse(field("diff"), diff::language(field("path")));
+            if patch.is_empty() {
+                return Some((format!("{}\n{}", field("path"), field("diff")).trim_end().to_string(), None));
+            }
+            Some((field("path").to_string(), Some(patch)))
+        }
         _ => None,
     }
 }
@@ -333,6 +345,17 @@ mod tests {
         let ask = Ask::from_request(&json!({"request_id": "a", "kind": "confirm", "subject": {"kind": "overwrite", "path": "a.py", "diff": "-x\n+y"}})).unwrap();
         assert_eq!(ask.body.answers(), vec![Answer::Yes, Answer::No]);
         assert_eq!(ask.text, "a.py\n-x\n+y");
+        assert!(ask.diff.is_none());
+    }
+
+    #[test]
+    fn an_overwrite_shows_its_path_and_a_diff_to_read() {
+        let diff = "--- a/a.py\n+++ b/a.py\n@@ -3,3 +3,3 @@\n keep\n-x = 1\n+x = 2\n keep";
+        let ask = Ask::from_request(&json!({"request_id": "a", "kind": "confirm", "title": "File overwrite",
+            "subject": {"kind": "overwrite", "path": "a.py", "diff": diff}}))
+        .unwrap();
+        assert_eq!(ask.text, "a.py");
+        assert_eq!(ask.diff.unwrap().entries.len(), 5);
     }
 
     #[test]

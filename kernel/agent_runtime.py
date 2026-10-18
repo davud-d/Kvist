@@ -1462,11 +1462,14 @@ def execute_command(self, command: AgentCommand) -> dict[str, Any]:
 
     if result.ok:
         safe_data = redact_value(result.data)
-        return {
+        feedback = {
             "ok": True,
             "action_type": result.action_type,
             "data": safe_data,
         }
+        if result.patch:
+            feedback["patch"] = redact_text(result.patch)
+        return feedback
 
     error_text = "Action failed"
     if isinstance(result.data, dict):

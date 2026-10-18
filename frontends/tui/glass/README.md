@@ -114,9 +114,22 @@ Every question the core asks (a choice, a text, a key, a confirmation) opens
 the same glass dialog: type to filter a list, arrows and Enter to answer, Esc
 to cancel. A command approval shows the command and the core's risk note;
 its answers are Yes, Always (only when the core offers to remember the
-pattern) and No, and No is preselected. A closed session replaces the input
+pattern) and No, and No is preselected. An approval to overwrite a file shows
+the change as a wide dialog with the old file on the left and the new one on
+the right: line numbers of both files, syntax colours, removed and added rows
+tinted, and the part of a rewritten line that differs marked. The wheel or
+Up and Down scroll it; Left and Right choose the answer. A closed session replaces the input
 with the core's notice and one button, "New session" (`/new`); Enter does the
 same.
+
+Click a file in the "Changed" card to open what the agent did to it in a panel
+on the right (windows of at least 124 columns): every edit of this session in
+order, as numbered rows with syntax colours, removed and added lines tinted, and
+the changed stretch of a rewritten line marked. The wheel over the panel
+scrolls; clicking the file again, the cross or Esc closes it. The panel takes
+the place of the browser and helpers cards while it is open. Diffs come from the
+core with each write, so a file changed in a session saved before the core sent
+them shows the counts only.
 
 ## How it is drawn
 
@@ -145,7 +158,9 @@ same.
 ## From the core
 
 - Lines added and removed per file come from `action_result`
-  (`lines_added`, `lines_removed`): the executor's own line diff.
+  (`lines_added`, `lines_removed`): the executor's own line diff. The same
+  event's `patch` is the write's unified diff, and an overwrite approval's
+  `subject.diff` is another; `diff.rs` reads both.
 - The helpers panel shows each helper's calls as they run, with the end of
   their output (`helper_activity`); the left card shows what each helper is
   doing now.

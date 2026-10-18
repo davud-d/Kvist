@@ -51,6 +51,7 @@ def build_action_result(
         "first_line": _first_line(action_type, data, ok),
         "lines_added": _line_count(action_type, data, ok, "lines_added"),
         "lines_removed": _line_count(action_type, data, ok, "lines_removed"),
+        "patch": _patch(action_type, feedback, ok),
         "call_id": call_id,
         "batch_id": batch_id,
     }
@@ -241,6 +242,13 @@ def _line_count(action_type: str, data: dict[str, Any], ok: bool, key: str) -> i
         return None
     count = data.get(key)
     return count if isinstance(count, int) and count >= 0 else None
+
+
+def _patch(action_type: str, feedback: dict[str, Any], ok: bool) -> str | None:
+    if action_type not in _FILE_WRITE_ACTIONS or not ok:
+        return None
+    patch = feedback.get("patch")
+    return patch if isinstance(patch, str) and patch else None
 
 
 def _one_line(text: str) -> str:

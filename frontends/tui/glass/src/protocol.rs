@@ -67,7 +67,8 @@ fn result(event: &Value) -> Vec<CoreEvent> {
     let mut out = vec![CoreEvent::Result { call: call_id(event), ok, summary, diff }];
     let path = event.get("path").and_then(Value::as_str).filter(|p| !p.is_empty());
     if let (Some((added, removed)), Some(path)) = (diff, path) {
-        out.push(CoreEvent::FileChanged { path: path.to_string(), added, removed });
+        let patch = event.get("patch").and_then(Value::as_str).filter(|p| !p.is_empty()).map(str::to_string);
+        out.push(CoreEvent::FileChanged { path: path.to_string(), added, removed, patch });
     }
     out
 }
@@ -146,14 +147,21 @@ mod tests {
             "action_description": "edits a.py", "user_message": ""});
         assert_eq!(translate(&step), vec![CoreEvent::Step { call: "c3".into(), kind: ToolKind::Write, label: "edits a.py".into() }]);
         let result = json!({"type": "action_result", "call_id": "c3", "ok": true, "summary": "Replaced",
-            "path": "a.py", "lines_added": 3, "lines_removed": 2});
+            "path": "a.py", "lines_added": 3, "lines_removed": 2, "patch": "@@ -1 +1 @@\n-x\n+y"});
         assert_eq!(
             translate(&result),
             vec![
                 CoreEvent::Result { call: "c3".into(), ok: true, summary: "Replaced".into(), diff: Some((3, 2)) },
-                CoreEvent::FileChanged { path: "a.py".into(), added: 3, removed: 2 },
+                CoreEvent::FileChanged { path: "a.py".into(), added: 3, removed: 2, patch: Some("@@ -1 +1 @@\n-x\n+y".into()) },
             ]
         );
+    }
+
+    #[test]
+    fn a_journal_from_before_patches_still_changes_its_files() {
+        let result = json!({"type": "action_result", "call_id": "c3", "ok": true, "summary": "Replaced",
+            "path": "a.py", "lines_added": 1, "lines_removed": 0, "patch": null});
+        assert_eq!(translate(&result)[1], CoreEvent::FileChanged { path: "a.py".into(), added: 1, removed: 0, patch: None });
     }
 
     #[test]

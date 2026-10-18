@@ -126,6 +126,60 @@ class ExecutionResult:
     ok: bool
     action_type: str
     data: dict[str, Any]
+    # A write's unified diff for the frontend's change view. It stays out of
+    # ``data`` because ``data`` is what the model reads back.
+    patch: str = ""
+
+
+_PATCH_CONTEXT = 3
+_MAX_PATCH_CHARS = 200_000
+_HUNK_HEADER = re.compile(r"^@@ -(\d+)((?:,\d+)?) \+(\d+)((?:,\d+)?) @@")
+
+
+def unified_patch(path: str, old: str | None, new: str) -> str:
+    """Unified diff of one write; ``old`` is ``None`` for a file that did not exist.
+
+    Only the lines between the common head and tail go through difflib, so a
+    small edit of a long file costs a comparison pass, not a diff of the file.
+    The patch is cut at a line boundary past ``_MAX_PATCH_CHARS`` and says so.
+    """
+    before = (old or "").splitlines()
+    after = new.splitlines()
+    shortest = min(len(before), len(after))
+    head = 0
+    while head < shortest and before[head] == after[head]:
+        head += 1
+    tail = 0
+    while tail < shortest - head and before[-1 - tail] == after[-1 - tail]:
+        tail += 1
+    if head == len(before) == len(after):
+        return ""
+    skip = max(0, head - _PATCH_CONTEXT)
+    keep_tail = min(tail, _PATCH_CONTEXT)
+    diff = difflib.unified_diff(
+        before[skip : len(before) - tail + keep_tail],
+        after[skip : len(after) - tail + keep_tail],
+        fromfile=f"a/{path}" if old is not None else "/dev/null",
+        tofile=f"b/{path}",
+        lineterm="",
+    )
+    lines: list[str] = []
+    size = 0
+    for line in diff:
+        match = _HUNK_HEADER.match(line)
+        if match and skip:
+            # difflib numbers lines of the slice; an empty range is already
+            # "the line before", so the same offset is right for both kinds.
+            line = (
+                f"@@ -{int(match[1]) + skip}{match[2]} "
+                f"+{int(match[3]) + skip}{match[4]} @@"
+            )
+        size += len(line) + 1
+        if size > _MAX_PATCH_CHARS:
+            lines.append("\\ patch truncated")
+            break
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def line_changes(old: str, new: str) -> tuple[int, int]:
@@ -1474,6 +1528,7 @@ class SafeExecutor:
                 "lines_added": added,
                 "lines_removed": removed,
             },
+            patch=unified_patch(path, old_text, content),
         )
 
     def _append_file(self, path: str, content: str) -> ExecutionResult:
@@ -1522,6 +1577,7 @@ class SafeExecutor:
                 "lines_added": len(content.splitlines()),
                 "lines_removed": 0,
             },
+            patch=unified_patch(path, old_text if existed else None, updated_text),
         )
 
     def _replace_in_file(
@@ -1597,6 +1653,7 @@ class SafeExecutor:
                 "lines_added": added * occurrences_replaced,
                 "lines_removed": removed * occurrences_replaced,
             },
+            patch=unified_patch(path, original_text, updated_text),
         )
 
     def _list_dir(self, path: str | None) -> ExecutionResult:

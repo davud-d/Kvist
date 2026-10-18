@@ -58,6 +58,11 @@ pub struct Strings {
     pub refuse_next: &'static str,
     pub bad_fps: &'static str,
     pub bad_workspace: &'static str,
+    pub diff_cut: &'static str,
+    pub diff_none: &'static str,
+    pub diff_edits: &'static str,
+    pub diff_scroll: &'static str,
+    pub diff_close: &'static str,
 }
 
 const RU: Strings = Strings {
@@ -115,6 +120,11 @@ const RU: Strings = Strings {
     refuse_next: "Запусти Kvist в kitty (0.28 и новее) или Ghostty, либо выбери другой интерфейс: kvist --frontend tui.",
     bad_fps: "KVIST_GLASS_FPS=\"{value}\": нужно целое число кадров в секунду от {min} до {max}, например 60 или 100.",
     bad_workspace: "--workspace \"{value}\": такой папки нет.",
+    diff_cut: "дифф обрезан",
+    diff_none: "Правка этого файла не записана: она сделана в сессии, где ядро ещё не присылало дифф.",
+    diff_edits: "правок",
+    diff_scroll: "колесо",
+    diff_close: "закрыть",
 };
 
 const EN: Strings = Strings {
@@ -172,6 +182,11 @@ const EN: Strings = Strings {
     refuse_next: "Run Kvist in kitty (0.28 or newer) or Ghostty, or pick another interface: kvist --frontend tui.",
     bad_fps: "KVIST_GLASS_FPS=\"{value}\": expected whole frames per second from {min} to {max}, such as 60 or 100.",
     bad_workspace: "--workspace \"{value}\": no such folder.",
+    diff_cut: "diff cut off",
+    diff_none: "No diff was recorded for this file: its edits were made before the core sent diffs.",
+    diff_edits: "edits",
+    diff_scroll: "wheel",
+    diff_close: "close",
 };
 
 pub fn russian() -> bool {

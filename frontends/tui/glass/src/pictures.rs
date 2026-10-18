@@ -27,10 +27,11 @@ pub const SLOT_READING: u32 = 5;
 pub const SLOT_INPUT: u32 = 6;
 pub const SLOT_DIALOG: u32 = 7;
 pub const SLOT_MENU: u32 = 10;
+pub const SLOT_DIFF: u32 = 11;
 const SLOT_THUMB: u32 = 8;
 const SLOT_POPUP: u32 = 9;
-const CARD_SLOTS: [u32; 7] =
-    [SLOT_LEFT, SLOT_BROWSER_CARD, SLOT_HELPERS, SLOT_READING, SLOT_INPUT, SLOT_DIALOG, SLOT_MENU];
+const CARD_SLOTS: [u32; 8] =
+    [SLOT_LEFT, SLOT_BROWSER_CARD, SLOT_HELPERS, SLOT_READING, SLOT_INPUT, SLOT_DIALOG, SLOT_MENU, SLOT_DIFF];
 /// A cached picture unused for this many frames is freed.
 const KEEP_FRAMES: u64 = 180;
 

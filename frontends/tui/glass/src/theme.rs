@@ -25,6 +25,12 @@ pub const SYN_TYPE: Color = Color::Rgb(0xE6, 0xC3, 0x7A);
 pub const SYN_NUMBER: Color = Color::Rgb(0xF0, 0x9A, 0x77);
 pub const SYN_OPERATOR: Color = Color::Rgb(0x7F, 0xD4, 0xE6);
 pub const SYN_COMMENT: Color = Color::Rgb(0x7B, 0x88, 0xA3);
+/// Diff rows: the tint of an added or removed line, and the stronger tint of
+/// the part of it that differs from the line it replaced.
+pub const DIFF_ADD: Color = Color::Rgb(0x14, 0x30, 0x2C);
+pub const DIFF_ADD_STRONG: Color = Color::Rgb(0x22, 0x58, 0x45);
+pub const DIFF_DEL: Color = Color::Rgb(0x35, 0x1B, 0x2B);
+pub const DIFF_DEL_STRONG: Color = Color::Rgb(0x6A, 0x2B, 0x3C);
 pub const LINK: Color = Color::Rgb(0x8E, 0xB4, 0xF0);
 
 /// Glass tint, as raw RGB for the compositor.

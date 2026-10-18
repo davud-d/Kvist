@@ -56,9 +56,46 @@ def test_write_file_result_reports_lines_path_and_first_line():
         "first_line": 1,
         "lines_added": None,
         "lines_removed": None,
+        "patch": None,
         "call_id": "",
         "batch_id": "",
     }
+
+
+def test_a_successful_write_carries_its_patch_and_nothing_else_does():
+    patch = "--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y"
+    feedback = {**_ok("replace_in_file", {"path": "a.py", "first_line": 1}), "patch": patch}
+    assert _build("replace_in_file", {"path": "a.py"}, feedback)["patch"] == patch
+    assert _build("replace_in_file", {"path": "a.py"}, {**feedback, "ok": False})["patch"] is None
+    assert _build("read_file", {"path": "a.py"}, {**_ok("read_file", {}), "patch": patch})["patch"] is None
+    assert _build("write_file", {"path": "a.py"}, {**feedback, "patch": ""})["patch"] is None
+
+
+def test_a_write_patch_reaches_the_frontend_but_not_the_models_result():
+    class Executor:
+        def execute(self, command):
+            return ExecutionResult(
+                ok=True, action_type="write_file", data={"path": "a.py", "first_line": 1}, patch="@@ -1 +1 @@\n-x\n+y"
+            )
+
+    from kernel.agent_runtime import execute_command
+
+    agent = type("Agent", (), {"executor": Executor()})()
+    feedback = execute_command(agent, make_command("write_file", {"path": "a.py", "content": "y"}))
+    assert feedback["patch"] == "@@ -1 +1 @@\n-x\n+y"
+    assert "patch" not in feedback["data"]
+
+
+def test_a_secret_in_a_patch_is_redacted():
+    class Executor:
+        def execute(self, command):
+            return ExecutionResult(ok=True, action_type="write_file", data={}, patch=f"+token={SYNTHETIC_KEY}")
+
+    from kernel.agent_runtime import execute_command
+
+    agent = type("Agent", (), {"executor": Executor()})()
+    feedback = execute_command(agent, make_command("write_file", {"path": "a.py", "content": "y"}))
+    assert SYNTHETIC_KEY not in feedback["patch"]
 
 
 def test_a_write_passes_on_the_executors_line_counts():
@@ -387,7 +424,7 @@ def test_event_stream_ui_emits_action_result_event_redacted():
     assert payload["exit_code"] == 0
     assert set(payload) == {
         "type", "step", "action_type", "ok", "summary", "output", "exit_code", "path", "first_line",
-        "lines_added", "lines_removed", "call_id", "batch_id",
+        "lines_added", "lines_removed", "patch", "call_id", "batch_id",
     }
 
 

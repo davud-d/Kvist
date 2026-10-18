@@ -10,6 +10,11 @@ pub const TOP: u16 = 1;
 /// The browser's proportions until its first frame arrives (the browser
 /// skill's default viewport is 16:10).
 pub const BROWSER_ASPECT: f32 = 1280.0 / 800.0;
+/// The columns kept between the conversation and an open diff.
+const DIFF_GAP: u16 = 3;
+/// The narrowest conversation and diff that still read well.
+const CONVERSATION_MIN: u16 = 40;
+const DIFF_MIN: u16 = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Grid {
@@ -43,6 +48,9 @@ pub struct Shape {
     pub input_lines: u16,
     /// 0 = input in the middle of the screen (empty session), 1 = at the bottom.
     pub input_at_bottom: f32,
+    /// A file's diff is open on the right; it takes the place of the browser
+    /// and helpers cards and narrows the conversation.
+    pub diff: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -51,6 +59,7 @@ pub struct Layout {
     pub browser_card: Option<Rect>,
     pub thumb: Option<Rect>,
     pub helpers: Option<Rect>,
+    pub diff: Option<Rect>,
     pub transcript: Rect,
     pub input: Rect,
     pub hints_row: u16,
@@ -65,9 +74,29 @@ pub fn compute(grid: &Grid, shape: &Shape) -> Layout {
         124..=149 => 32,
         _ => 0,
     };
-    let center_w = if side > 0 { (cols - 2 * (MARGIN_X + side + 3)).min(104) } else { cols.saturating_sub(2 * MARGIN_X) };
-    let center_x = (cols - center_w) / 2;
     let status_row = rows - 2;
+    // The diff takes the right part of the space between the left card and the edge.
+    let diff_rect = (shape.diff && side > 0).then(|| {
+        let from = MARGIN_X + side + 3;
+        let room = cols.saturating_sub(MARGIN_X + from);
+        let width = (room * 55 / 100).min(room.saturating_sub(DIFF_GAP + CONVERSATION_MIN)).max(DIFF_MIN);
+        Rect::new(cols - MARGIN_X - width, TOP, width, status_row.saturating_sub(TOP + 1))
+    });
+    let (center_w, center_x) = match diff_rect {
+        Some(diff) => {
+            let from = MARGIN_X + side + 3;
+            let width = diff.x.saturating_sub(DIFF_GAP + from).min(104);
+            (width, from)
+        }
+        None if side > 0 => {
+            let width = (cols - 2 * (MARGIN_X + side + 3)).min(104);
+            (width, (cols - width) / 2)
+        }
+        None => {
+            let width = cols.saturating_sub(2 * MARGIN_X);
+            (width, (cols - width) / 2)
+        }
+    };
 
     let input_h = shape.input_lines.clamp(1, 8) + 2;
     let bottom_y = status_row.saturating_sub(1 + input_h) as f32;
@@ -80,7 +109,7 @@ pub fn compute(grid: &Grid, shape: &Shape) -> Layout {
         .then(|| Rect::new(MARGIN_X, TOP, side, (shape.left_rows + 2).min(status_row.saturating_sub(TOP + 1))));
 
     let right_x = cols.saturating_sub(MARGIN_X + side);
-    let (browser_card, thumb) = if let (true, Some(aspect)) = (side > 0, shape.browser) {
+    let (browser_card, thumb) = if let (true, false, Some(aspect)) = (side > 0, diff_rect.is_some(), shape.browser) {
         let inner_w = side - 4;
         let thumb_h = ((inner_w as f32 * grid.cw as f32 / aspect) / grid.ch as f32).round().clamp(3.0, 16.0) as u16;
         let card = Rect::new(right_x, TOP, side, thumb_h + 3);
@@ -88,12 +117,12 @@ pub fn compute(grid: &Grid, shape: &Shape) -> Layout {
     } else {
         (None, None)
     };
-    let helpers = (side > 0).then(|| {
+    let helpers = (side > 0 && diff_rect.is_none()).then(|| {
         let y = browser_card.map_or(TOP, |card| card.bottom() + 1);
         Rect::new(right_x, y, side, status_row.saturating_sub(y + 1))
     });
 
-    Layout { left, browser_card, thumb, helpers, transcript, input, hints_row: input.bottom() + 1, status_row }
+    Layout { left, browser_card, thumb, helpers, diff: diff_rect, transcript, input, hints_row: input.bottom() + 1, status_row }
 }
 
 /// The opened browser: as large as fits in 82% × 78% of the window, with the
@@ -125,9 +154,15 @@ pub fn menu(input: Rect, count: usize) -> Rect {
     Rect::new(input.x, input.y - 1 - height, input.width, height)
 }
 
-/// A dialog `height` rows tall (at most the window allows), centred.
-pub fn dialog(grid: &Grid, height: u16) -> Rect {
-    let w = 66.min(grid.cols.saturating_sub(8));
+/// The width of a dialog that has no diff to show.
+pub const DIALOG_WIDTH: u16 = 66;
+/// The width of an approval that shows a diff: room for two files side by side.
+pub const DIFF_DIALOG_WIDTH: u16 = 124;
+
+/// A dialog `width` columns wide and `height` rows tall (at most the window
+/// allows), centred.
+pub fn dialog(grid: &Grid, width: u16, height: u16) -> Rect {
+    let w = width.min(grid.cols.saturating_sub(8));
     let h = height.min(grid.rows.saturating_sub(4));
     Rect::new((grid.cols - w) / 2, (grid.rows - h) / 2, w, h)
 }
@@ -141,7 +176,29 @@ mod tests {
     }
 
     fn shape(at_bottom: f32) -> Shape {
-        Shape { left_rows: 5, browser: Some(BROWSER_ASPECT), input_lines: 1, input_at_bottom: at_bottom }
+        Shape { left_rows: 5, browser: Some(BROWSER_ASPECT), input_lines: 1, input_at_bottom: at_bottom, diff: false }
+    }
+
+    #[test]
+    fn an_open_diff_takes_the_right_side_and_the_conversation_moves_aside() {
+        for cols in [124, 160, 180, 240] {
+            let mut open = shape(1.0);
+            open.diff = true;
+            let layout = compute(&grid(cols, 50), &open);
+            let diff = layout.diff.unwrap();
+            assert!(layout.left.unwrap().right() < layout.input.x, "{cols}");
+            assert!(layout.input.right() < diff.x, "{cols}");
+            assert!(diff.width >= DIFF_MIN && diff.right() == cols - MARGIN_X, "{cols}");
+            assert!(layout.input.width >= CONVERSATION_MIN, "{cols}");
+            assert!(layout.browser_card.is_none() && layout.helpers.is_none(), "{cols}");
+        }
+    }
+
+    #[test]
+    fn a_window_without_side_columns_has_no_diff_panel() {
+        let mut open = shape(1.0);
+        open.diff = true;
+        assert!(compute(&grid(90, 30), &open).diff.is_none());
     }
 
     #[test]
@@ -194,7 +251,9 @@ mod tests {
 
     #[test]
     fn a_dialog_is_as_tall_as_asked_but_fits_the_window() {
-        assert_eq!(dialog(&grid(180, 50), 12).height, 12);
-        assert_eq!(dialog(&grid(180, 20), 30).height, 16);
+        assert_eq!(dialog(&grid(180, 50), DIALOG_WIDTH, 12).height, 12);
+        assert_eq!(dialog(&grid(180, 20), DIALOG_WIDTH, 30).height, 16);
+        assert_eq!(dialog(&grid(180, 50), 120, 12).width, 120);
+        assert_eq!(dialog(&grid(90, 50), 120, 12).width, 82);
     }
 }

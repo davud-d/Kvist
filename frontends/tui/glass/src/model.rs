@@ -34,7 +34,8 @@ pub enum CoreEvent {
     Say(String),
     Step { call: String, kind: ToolKind, label: String },
     Result { call: String, ok: bool, summary: String, diff: Option<(u32, u32)> },
-    FileChanged { path: String, added: u32, removed: u32 },
+    /// A successful write; `patch` is its unified diff when the core sent one.
+    FileChanged { path: String, added: u32, removed: u32, patch: Option<String> },
     Screen { title: String, frame_url: String },
     ScreenClosed,
     Helper { id: String, task: String, state: HelperState, summary: String },
@@ -70,6 +71,8 @@ pub struct FileChange {
     /// When the counts last changed: the row glows and counts up from here.
     pub touched: Instant,
     pub previous: (u32, u32),
+    /// The unified diff of each of this session's writes to the file, oldest first.
+    pub patches: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -134,7 +137,7 @@ impl Session {
                 self.thinking_since = None;
             }
             CoreEvent::Result { call, ok, summary, diff } => self.finish_call(&call, CallState::Done { ok, summary, diff }, now),
-            CoreEvent::FileChanged { path, added, removed } => self.change_file(path, added, removed, now),
+            CoreEvent::FileChanged { path, added, removed, patch } => self.change_file(path, added, removed, patch, now),
             // The frames themselves are fetched by the interface (screen.rs).
             CoreEvent::Screen { title, .. } => self.browser = Some(Browser { title }),
             CoreEvent::ScreenClosed => self.browser = None,
@@ -200,15 +203,17 @@ impl Session {
         self.thinking_since = Some(now);
     }
 
-    fn change_file(&mut self, path: String, added: u32, removed: u32, now: Instant) {
+    fn change_file(&mut self, path: String, added: u32, removed: u32, patch: Option<String>, now: Instant) {
         if let Some(file) = self.files.iter_mut().find(|f| f.path == path) {
             file.previous = (file.added, file.removed);
             file.added += added;
             file.removed += removed;
             file.touched = now;
+            file.patches.extend(patch);
             return;
         }
-        self.files.push(FileChange { path, added, removed, touched: now, previous: (0, 0) });
+        let patches = patch.into_iter().collect();
+        self.files.push(FileChange { path, added, removed, touched: now, previous: (0, 0), patches });
     }
 
     fn update_helper(&mut self, id: String, task: String, state: HelperState, summary: String) {
@@ -282,11 +287,21 @@ mod tests {
     fn a_second_write_to_a_file_adds_to_its_counts() {
         let now = Instant::now();
         let mut session = Session::default();
-        session.apply(CoreEvent::FileChanged { path: "a.py".into(), added: 3, removed: 1 }, now);
-        session.apply(CoreEvent::FileChanged { path: "a.py".into(), added: 2, removed: 0 }, now);
+        session.apply(CoreEvent::FileChanged { path: "a.py".into(), added: 3, removed: 1, patch: Some("one".into()) }, now);
+        session.apply(CoreEvent::FileChanged { path: "a.py".into(), added: 2, removed: 0, patch: Some("two".into()) }, now);
         assert_eq!(session.files.len(), 1);
         assert_eq!((session.files[0].added, session.files[0].removed), (5, 1));
         assert_eq!(session.files[0].previous, (3, 1));
+        assert_eq!(session.files[0].patches, ["one", "two"]);
+    }
+
+    #[test]
+    fn a_write_the_core_sent_no_patch_for_still_counts() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        session.apply(CoreEvent::FileChanged { path: "a.py".into(), added: 1, removed: 0, patch: None }, now);
+        assert_eq!(session.files[0].added, 1);
+        assert!(session.files[0].patches.is_empty());
     }
 
     #[test]

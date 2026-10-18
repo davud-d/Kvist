@@ -342,6 +342,7 @@ class EventStreamUI:
                 first_line=result.get("first_line"),
                 lines_added=result.get("lines_added"),
                 lines_removed=result.get("lines_removed"),
+                patch=result.get("patch"),
                 call_id=str(result.get("call_id") or ""),
                 batch_id=str(result.get("batch_id") or ""),
             )
