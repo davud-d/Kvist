@@ -109,6 +109,7 @@ class RunState:
     system_shell: str = ""
     system_project: str = ""
     system_git: str = ""
+    system_git_details: str = ""
     system_workspace: str = ""
     system_sandbox: str = ""
     system_host: str = ""

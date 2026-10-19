@@ -612,7 +612,9 @@ class LocalAgent:
         self._state.system_os = current_os_context()
         self._state.system_shell = current_shell_context()
         self._state.system_project = current_project_context(self.executor.workspace) or ""
-        self._state.system_git = self.executor.git_context_summary() or ""
+        git_header, git_details = self.executor.git_context() or ("", "")
+        self._state.system_git = git_header
+        self._state.system_git_details = git_details
         self._state.system_workspace = current_workspace_context(self.executor.workspace)
         self._state.system_sandbox = current_sandbox_context(
             self.executor.sandbox_mode, False

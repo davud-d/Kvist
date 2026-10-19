@@ -132,6 +132,16 @@ class ExecutionResult:
 
 
 _PATCH_CONTEXT = 3
+# The git block rides along with every request, so it is a glance, not a dump.
+_GIT_CONTEXT_FILES = 10
+_GIT_CONTEXT_COMMITS = 5
+_GIT_CONTEXT_LINE_CHARS = 200
+
+
+def _cut_line(line: str) -> str:
+    if len(line) <= _GIT_CONTEXT_LINE_CHARS:
+        return line
+    return line[:_GIT_CONTEXT_LINE_CHARS] + "…"
 _MAX_PATCH_CHARS = 200_000
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)((?:,\d+)?) \+(\d+)((?:,\d+)?) @@")
 
@@ -1951,11 +1961,18 @@ class SafeExecutor:
         }
 
     def git_context_summary(self) -> str | None:
-        """One-line 'branch (clean|N uncommitted)' summary for prompt context.
+        """One-line 'branch (clean|N uncommitted)' summary for prompt context."""
+        context = self.git_context()
+        return context[0] if context else None
+
+    def git_context(self) -> tuple[str, str] | None:
+        """('branch (clean|N uncommitted)', details) for the prompt, or None.
 
         Reuses the sandboxed ``git status`` path used by the ``git_status``
         action, so this pays the same cost/policy as a real action rather than
-        opening a second, unsandboxed way to shell out to git.
+        opening a second, unsandboxed way to shell out to git. The details
+        (changed paths, recent commit subjects) come from the repository, so
+        the caller must present them as untrusted data.
         """
         result = self._git_status(ask_user=False)
         if not result.data.get("git_available"):
@@ -1964,9 +1981,34 @@ class SafeExecutor:
         if not lines:
             return None
         branch = lines[0].lstrip("#").strip().split("...")[0].strip() or "HEAD"
-        dirty = len(lines) - 1
-        status = "clean" if dirty == 0 else f"{dirty} uncommitted"
-        return f"{branch} ({status})"
+        changed = lines[1:]
+        status = "clean" if not changed else f"{len(changed)} uncommitted"
+        return f"{branch} ({status})", self._git_context_details(changed)
+
+    def _git_context_details(self, changed: list[str]) -> str:
+        parts: list[str] = []
+        if changed:
+            shown = changed[:_GIT_CONTEXT_FILES]
+            parts.append("Changed files:")
+            parts.extend(f"  {_cut_line(line)}" for line in shown)
+            if len(changed) > len(shown):
+                parts.append(f"  … and {len(changed) - len(shown)} more")
+        commits = self._recent_commit_subjects()
+        if commits:
+            parts.append("Recent commits:")
+            parts.extend(f"  {_cut_line(line)}" for line in commits)
+        return self._sanitize_internal_paths_in_text("\n".join(parts))
+
+    def _recent_commit_subjects(self) -> list[str]:
+        try:
+            result = self._terminal.run(
+                ["git", "log", f"-{_GIT_CONTEXT_COMMITS}", "--format=%h %s"], ask_user=False
+            )
+        except TerminalError:
+            return []
+        if result.returncode != 0:
+            return []
+        return [line for line in result.stdout.splitlines() if line.strip()]
 
     def _git_status(self, ask_user: bool = True) -> ExecutionResult:
         try:

@@ -141,6 +141,15 @@ _RUNTIME_TEXT = {
 }
 
 
+def _untrusted_git_details(details: str) -> str:
+    # Paths and commit subjects are written by whoever controls the repository.
+    return (
+        '<UNTRUSTED_TOOL_OUTPUT source="git_context">\n'
+        f"{defang_prompt_boundary_tags(details)}\n"
+        "</UNTRUSTED_TOOL_OUTPUT>"
+    )
+
+
 def _plan_mode_block(state: Any) -> str:
     """What plan mode currently means for the run, or nothing outside it."""
     if state.plan_phase == PLAN_PLANNING:
@@ -296,6 +305,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             system_lines.append(f"- Project: {self._state.system_project}")
         if self._state.system_git:
             system_lines.append(f"- Git: {self._state.system_git}")
+        if self._state.system_git_details:
+            system_lines.append(_untrusted_git_details(self._state.system_git_details))
         if self._state.system_workspace:
             system_lines.append(f"- Workspace: {self._state.system_workspace}")
         if self._state.system_host:
