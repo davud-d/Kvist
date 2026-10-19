@@ -94,7 +94,21 @@ the mouse.
 | | click the browser preview | open the browser in the middle; Esc closes |
 | Ctrl+T | click "Helpers" or a helper | open the helpers panel; Esc closes |
 | PageUp / PageDown | wheel | scroll the conversation |
+| | press and drag over the conversation | pour water on the text: the selection flows after the pointer and is copied when the button is released |
+| | double / triple click | pour over a word / a line and copy it |
+| Esc | click elsewhere | let the water drain (while a pool is on the glass, Esc drains it first) |
 | Ctrl+C | | quit |
+
+Selecting text is pouring water on the glass. The left button lets a drop fall
+where it is pressed; dragging pours, and the water runs along the text after
+the pointer — it lags behind a fast one and catches up — then settles into a
+pool with a rounded rim that catches the light. The pool is a translucent
+picture drawn above the cell backgrounds and below the text (kitty's z-index),
+so the words stay sharp, and the letters under it brighten. On release the text
+goes to the clipboard through the terminal (OSC 52; icons and the quote bar are
+left out) and "Copied" shows in the status row. Holding the drag above or below
+the conversation scrolls it. Shift+drag still reaches the terminal's own
+selection.
 
 The agent's answers are drawn as Markdown (pulldown-cmark): headings, lists
 with nesting, quotes, rules, links with their address, task lists, tables, and

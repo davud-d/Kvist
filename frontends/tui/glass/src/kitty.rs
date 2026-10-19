@@ -22,6 +22,8 @@ pub const Z_BACKDROP: i32 = -1_100_000_000;
 pub const Z_CARD: i32 = -1_090_000_000;
 pub const Z_DIALOG: i32 = -1_085_000_000;
 pub const Z_THUMB: i32 = -1_080_000_000;
+/// Above the cell backgrounds, below the text: the water lies on the glass, the words stay sharp.
+pub const Z_WATER: i32 = -1000;
 /// Above text: the opened browser hides whatever cells are under it.
 pub const Z_TOP: i32 = 100;
 

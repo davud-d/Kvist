@@ -57,7 +57,34 @@ fn install_panic_restore() {
     }));
 }
 
-/// The pointer shape (OSC 22): a hand over what can be clicked.
-pub fn pointer_shape(clickable: bool) -> &'static [u8] {
-    if clickable { b"\x1b]22;pointer\x1b\\" } else { b"\x1b]22;default\x1b\\" }
+/// The pointer shape (OSC 22): a hand over what can be clicked, a bar over text.
+pub fn pointer_shape(clickable: bool, text: bool) -> &'static [u8] {
+    match (clickable, text) {
+        (true, _) => b"\x1b]22;pointer\x1b\\",
+        (false, true) => b"\x1b]22;text\x1b\\",
+        (false, false) => b"\x1b]22;default\x1b\\",
+    }
+}
+
+/// Puts `text` on the system clipboard (OSC 52), through the terminal.
+pub fn copy_to_clipboard(text: &str) -> Vec<u8> {
+    use base64::Engine;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+    format!("\x1b]52;c;{encoded}\x1b\\").into_bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_clipboard_gets_the_text_in_base64() {
+        assert_eq!(copy_to_clipboard("hi"), b"\x1b]52;c;aGk=\x1b\\");
+    }
+
+    #[test]
+    fn the_pointer_is_a_hand_before_a_bar() {
+        assert_eq!(pointer_shape(true, true), b"\x1b]22;pointer\x1b\\");
+        assert_eq!(pointer_shape(false, true), b"\x1b]22;text\x1b\\");
+    }
 }

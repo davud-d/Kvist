@@ -26,7 +26,7 @@ use crate::model::{CoreEvent, Session};
 use crate::models::ModelPicker;
 use crate::pictures::{
     Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_DIFF, SLOT_HELPERS,
-    SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, Worker,
+    SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, WaterSpec, Worker,
 };
 use crate::probe::Caps;
 use crate::protocol;
@@ -35,6 +35,7 @@ use crate::slash::{self, Command, Enter};
 use crate::strings::{self, strings};
 use crate::term;
 use crate::view::{self, Hit};
+use crate::water::{self, Pos, Pour, TextView};
 
 /// The photograph stays alone on screen at least this long.
 const SPLASH_MIN: Duration = Duration::from_millis(2400);
@@ -53,6 +54,12 @@ const FRONTEND_REQUEST: &str = "local:frontend";
 const SWITCH_FRONTEND: u8 = 64;
 /// A second Esc within this time stops the running turn.
 const STOP_CONFIRM: Duration = Duration::from_secs(3);
+/// Two presses on the same cell this close are a double click (a word), three a line.
+const MULTI_CLICK: Duration = Duration::from_millis(400);
+/// While a drag stays above or below the text, it scrolls one line this often.
+const DRAG_SCROLL: Duration = Duration::from_millis(45);
+/// Seconds the caustics of a pool keep drifting.
+const CAUSTIC_LIFE: f32 = 2.5;
 
 pub enum Phase {
     Splash,
@@ -141,9 +148,24 @@ pub struct App {
     pub hover: Option<Hit>,
     last_mouse: (u16, u16),
     hand: bool,
-    hand_sent: Option<bool>,
+    /// The pointer is over the conversation's text.
+    over_text: bool,
+    hand_sent: Option<(bool, bool)>,
     hits: Vec<(Rect, Hit)>,
     reading: Option<Rect>,
+    /// The water poured on the conversation by the left button, if any.
+    pour: Option<Pour>,
+    /// The conversation as the last frame drew it.
+    text_view: Option<TextView>,
+    widths: Vec<usize>,
+    plain: Vec<String>,
+    /// The pool to draw this frame.
+    water: Option<water::Shape>,
+    /// The last press: when, where, and how many in a row.
+    last_press: Option<(Instant, Pos, u8)>,
+    last_drag_scroll: Instant,
+    /// Text on its way to the clipboard.
+    clipboard: Option<String>,
     pub scroll: usize,
     pub layout: Layout,
     quit: bool,
@@ -195,9 +217,18 @@ impl App {
             hover: None,
             last_mouse: (0, 0),
             hand: false,
+            over_text: false,
             hand_sent: None,
             hits: Vec::new(),
             reading: None,
+            pour: None,
+            text_view: None,
+            widths: Vec::new(),
+            plain: Vec::new(),
+            water: None,
+            last_press: None,
+            last_drag_scroll: now,
+            clipboard: None,
             scroll: 0,
             layout: Layout::default(),
             quit: false,
@@ -269,6 +300,7 @@ impl App {
             self.modal = None;
         }
         self.drop_closed_diff(now);
+        self.keep_pouring(now);
         if self.toast.as_ref().is_some_and(|t| now.saturating_duration_since(t.at) > TOAST) {
             self.toast = None;
         }
@@ -643,6 +675,7 @@ impl App {
             || self.command.is_some()
             || tweens.iter().any(|t| t.running(now))
             || view::revealing(self, now)
+            || self.pour.as_ref().is_some_and(|pour| pour.moving(now))
             || self.session.files.iter().any(|f| now.saturating_duration_since(f.touched) < Duration::from_millis(1700))
             || self.session.helpers.iter().any(|h| h.state == crate::model::HelperState::Running)
     }
@@ -652,6 +685,10 @@ impl App {
         let drawn = view::draw(self, frame.buffer_mut(), now);
         self.hits = drawn.hits;
         self.reading = drawn.reading;
+        self.text_view = drawn.text;
+        self.widths = drawn.widths;
+        self.plain = drawn.plain;
+        self.wet_the_text(frame.buffer_mut(), now);
         if let Some(position) = drawn.cursor {
             frame.set_cursor_position(position);
         }
@@ -668,7 +705,7 @@ impl App {
                     if t < 1.0 && frames > 0 { Backdrop::Rise((t * frames as f32) as usize) } else { Backdrop::Photo }
                 }
             };
-            return Scene { backdrop, cards: Vec::new(), thumb: None, popup: None };
+            return Scene { backdrop, cards: Vec::new(), thumb: None, popup: None, water: None };
         }
         let modal = self.modal_p.value(now).clamp(0.0, 1.0);
         let level = (modal * LEVELS as f32).round() as usize;
@@ -726,7 +763,11 @@ impl App {
             _ => None,
         };
         let popup = browser_open.then(|| self.popup(now)).flatten();
-        Scene { backdrop, cards, thumb, popup }
+        // The caustics drift while the pool is young and then hold still, so a
+        // pool at rest costs no redrawing.
+        let clock = self.pour.as_ref().map_or(0.0, |pour| pour.age(now).min(CAUSTIC_LIFE));
+        let water = self.water.clone().map(|shape| WaterSpec { shape, clock });
+        Scene { backdrop, cards, thumb, popup, water }
     }
 
     /// The browser growing from its thumbnail to the middle of the screen.
@@ -802,6 +843,7 @@ impl App {
         match key.code {
             KeyCode::Char('p') if ctrl => return self.open_models(now),
             KeyCode::Char('t') if ctrl => return self.toggle_helpers(None, now),
+            KeyCode::Esc if self.pour.is_some() => return self.drain_water(now),
             KeyCode::Esc if self.diff_in.target() > 0.0 => return self.close_diff(now),
             KeyCode::Esc if self.session.busy => return self.stop(now),
             KeyCode::Esc if self.helpers_in.target() > 0.0 => return self.toggle_helpers(None, now),
@@ -1178,6 +1220,7 @@ impl App {
         let hit = self.hit_at(m.column, m.row);
         self.hover = hit;
         self.hand = hit.is_some_and(Hit::clickable);
+        self.over_text = hit.is_none() && self.modal.is_none() && self.text_view.is_some_and(|view| view.holds(m.column, m.row));
         if matches!(self.phase, Phase::Splash) {
             return;
         }
@@ -1188,11 +1231,124 @@ impl App {
                 (Some(Hit::Command(row)), None) => self.pick = row,
                 _ => {}
             },
-            MouseEventKind::Down(MouseButton::Left) => self.click(hit, now),
+            MouseEventKind::Down(MouseButton::Left) => {
+                if !self.drop_water(hit, m.column, m.row, now) {
+                    self.click(hit, now);
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) => self.pour_to(m.column, m.row),
+            MouseEventKind::Up(MouseButton::Left) => self.lift_button(now),
             MouseEventKind::ScrollUp => self.wheel(-1),
             MouseEventKind::ScrollDown => self.wheel(1),
             _ => {}
         }
+    }
+
+    /// A press on the conversation's text lets a drop fall there. Returns
+    /// false when the press was elsewhere and the water, if any, drained.
+    fn drop_water(&mut self, hit: Option<Hit>, column: u16, row: u16, now: Instant) -> bool {
+        let view = self.text_view.filter(|view| hit.is_none() && self.modal.is_none() && view.holds(column, row));
+        let Some(at) = view.and_then(|view| view.locate(column, row, &self.widths)) else {
+            self.drain_water(now);
+            return false;
+        };
+        let presses = match self.last_press {
+            Some((then, there, count)) if there == at && now.saturating_duration_since(then) < MULTI_CLICK => count + 1,
+            _ => 1,
+        };
+        self.last_press = Some((now, at, presses));
+        let width = self.widths.get(at.line).copied().unwrap_or(0);
+        let text = self.plain.get(at.line).map(String::as_str).unwrap_or("");
+        self.pour = Some(match presses {
+            1 => Pour::begin(at, now),
+            2 => {
+                let (from, to) = water::word_around(text, at.col);
+                Pour::choose(Pos { line: at.line, col: from }, Pos { line: at.line, col: to }, now)
+            }
+            _ => Pour::choose(Pos { line: at.line, col: 0 }, Pos { line: at.line, col: width.saturating_sub(1) }, now),
+        });
+        if presses > 1 {
+            self.copy_water(now);
+        }
+        true
+    }
+
+    fn pour_to(&mut self, column: u16, row: u16) {
+        let Some(view) = self.text_view else { return };
+        let Some(pour) = self.pour.as_mut().filter(|pour| pour.pouring()) else { return };
+        if let Some(at) = view.locate(column, row, &self.widths) {
+            pour.drag(at);
+        }
+    }
+
+    /// The button went up: the pool settles, and what it covers is copied.
+    fn lift_button(&mut self, now: Instant) {
+        let Some(pour) = self.pour.as_mut().filter(|pour| pour.pouring()) else { return };
+        pour.release();
+        if !pour.is_empty() {
+            self.copy_water(now);
+        }
+    }
+
+    fn copy_water(&mut self, now: Instant) {
+        let Some(pour) = self.pour.as_ref() else { return };
+        let text = water::selected_text(pour, &self.plain);
+        if text.is_empty() {
+            return;
+        }
+        self.clipboard = Some(text);
+        self.notify(strings().copied.to_string(), false, now);
+    }
+
+    fn drain_water(&mut self, now: Instant) {
+        if let Some(pour) = self.pour.as_mut() {
+            pour.drain(now);
+        }
+    }
+
+    /// Per tick: a drag held above or below the text scrolls it, and the
+    /// water follows the pointer; a dialog drains the pool.
+    fn keep_pouring(&mut self, now: Instant) {
+        if self.modal.is_some() {
+            return self.drain_water(now);
+        }
+        let Some(view) = self.text_view else { return };
+        if !self.pour.as_ref().is_some_and(Pour::pouring) {
+            return;
+        }
+        let (column, row) = self.last_mouse;
+        let above = (row as i32) < view.top;
+        let below = (row as i32) >= view.top + view.rows as i32;
+        if (above || below) && now.saturating_duration_since(self.last_drag_scroll) >= DRAG_SCROLL {
+            self.last_drag_scroll = now;
+            self.scroll = if above { self.scroll + 1 } else { self.scroll.saturating_sub(1) };
+        }
+        self.pour_to(column, row);
+    }
+
+    /// Lets the water flow, draws its pool for this frame and lights the
+    /// letters it covers.
+    fn wet_the_text(&mut self, buf: &mut ratatui::buffer::Buffer, now: Instant) {
+        self.water = None;
+        let Some(view) = self.text_view else { return };
+        let Some(pour) = self.pour.as_mut() else { return };
+        pour.advance(now, &self.widths);
+        let stale = pour.range().is_some_and(|(_, last)| last.line >= self.widths.len());
+        if stale || pour.gone(now) {
+            self.pour = None;
+            return;
+        }
+        let shape = pour.shape(&view, &self.widths, now);
+        for span in &shape.spans {
+            for column in span.a.floor() as i32..span.b.ceil() as i32 {
+                let Some(cell) = u16::try_from(column).ok().zip(u16::try_from(span.row).ok()).and_then(|at| buf.cell_mut(at)) else {
+                    continue;
+                };
+                let base = if cell.fg == ratatui::style::Color::Reset { crate::theme::FOG } else { cell.fg };
+                cell.set_fg(crate::theme::mix(base, ratatui::style::Color::Rgb(255, 255, 255), 0.55 * shape.level));
+            }
+        }
+        self.water = Some(shape);
     }
 
     fn wheel(&mut self, delta: i32) {
@@ -1281,12 +1437,17 @@ impl App {
     }
 
     fn flush_pointer(&mut self, out: &mut impl Write) -> io::Result<()> {
-        if self.hand_sent == Some(self.hand) {
+        if let Some(text) = self.clipboard.take() {
+            out.write_all(&term::copy_to_clipboard(&text))?;
+            out.flush()?;
+        }
+        let shape = (self.hand, self.over_text);
+        if self.hand_sent == Some(shape) {
             return Ok(());
         }
-        out.write_all(term::pointer_shape(self.hand))?;
+        out.write_all(term::pointer_shape(shape.0, shape.1))?;
         out.flush()?;
-        self.hand_sent = Some(self.hand);
+        self.hand_sent = Some(shape);
         Ok(())
     }
 }
@@ -1470,6 +1631,66 @@ mod tests {
         for _ in 0..20 { app.ask_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE), now); }
         let Some(Modal::Ask(Some(ask))) = &app.modal else { panic!("missing dialog") };
         assert_eq!(ask.text_scroll, view::ask_text_max_scroll(ask, app.dialog_rect));
+    }
+
+    fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }
+    }
+
+    /// An app that has drawn two lines of text at column 3, rows 5 and 6.
+    fn app_with_text() -> App {
+        let mut app = app();
+        app.phase = Phase::Main { since: Instant::now() };
+        app.text_view = Some(TextView { x: 3, top: 5, first: 0, rows: 2 });
+        app.plain = vec!["water on glass".to_string(), "holds in a lens".to_string()];
+        app.widths = app.plain.iter().map(|line| line.len()).collect();
+        app
+    }
+
+    #[test]
+    fn dragging_over_text_pours_water_and_copies_it_on_release() {
+        let mut app = app_with_text();
+        let now = Instant::now();
+        app.mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 3 + 6, 5), now);
+        app.mouse(mouse_event(MouseEventKind::Drag(MouseButton::Left), 3 + 3, 6), now);
+        assert!(app.clipboard.is_none(), "nothing is copied while the button is down");
+        app.mouse(mouse_event(MouseEventKind::Up(MouseButton::Left), 3 + 3, 6), now);
+        assert_eq!(app.clipboard.as_deref(), Some("on glass\nhold"));
+    }
+
+    #[test]
+    fn a_press_without_a_drag_copies_nothing() {
+        let mut app = app_with_text();
+        let now = Instant::now();
+        app.mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5), now);
+        app.mouse(mouse_event(MouseEventKind::Up(MouseButton::Left), 5, 5), now);
+        assert!(app.clipboard.is_none());
+        assert!(app.pour.is_some(), "the drop still ripples");
+    }
+
+    #[test]
+    fn a_double_click_takes_a_word_and_a_third_press_the_line() {
+        let mut app = app_with_text();
+        let now = Instant::now();
+        let down = mouse_event(MouseEventKind::Down(MouseButton::Left), 3 + 9, 5);
+        app.mouse(down, now);
+        app.mouse(down, now);
+        assert_eq!(app.clipboard.take().as_deref(), Some("glass"));
+        app.mouse(down, now);
+        assert_eq!(app.clipboard.as_deref(), Some("water on glass"));
+    }
+
+    #[test]
+    fn a_press_outside_the_text_lets_the_water_drain() {
+        let mut app = app_with_text();
+        let now = Instant::now();
+        app.mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 4, 5), now);
+        app.mouse(mouse_event(MouseEventKind::Up(MouseButton::Left), 4, 5), now);
+        app.mouse(mouse_event(MouseEventKind::Down(MouseButton::Left), 1, 30), now);
+        let later = now + Duration::from_secs(2);
+        let mut buf = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 120, 36));
+        app.wet_the_text(&mut buf, later);
+        assert!(app.pour.is_none());
     }
 
     fn journal() -> History {

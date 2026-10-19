@@ -31,6 +31,7 @@ mod text;
 mod theme;
 mod view;
 mod video;
+mod water;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

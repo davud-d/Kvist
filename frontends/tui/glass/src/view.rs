@@ -18,6 +18,7 @@ use crate::models::{ModelPicker, Role, Row};
 use crate::slash;
 use crate::strings::{self, strings};
 use crate::text::{self, Line, Painter};
+use crate::water::TextView;
 use crate::theme::{self, DUSK, FOG, HOVER, INK, INK_SOFT, MIST, MOON, MOSS, NIGHT, ROSEHIP};
 
 /// Typewriter speed for the agent's words, characters per second.
@@ -73,6 +74,11 @@ pub struct Drawn {
     pub cursor: Option<(u16, u16)>,
     /// The glass under the conversation, sized to its text.
     pub reading: Option<Rect>,
+    /// Where the conversation's lines are, for the pointer.
+    pub text: Option<TextView>,
+    /// The display width and the plain text of every line of the conversation.
+    pub widths: Vec<usize>,
+    pub plain: Vec<String>,
 }
 
 fn st(color: Color) -> Style {
@@ -84,7 +90,7 @@ fn span(s: impl Into<String>, color: Color) -> (String, Style) {
 }
 
 pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
-    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None };
+    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new() };
     let area = app.grid.full();
     let ms = now.saturating_duration_since(app.started).as_millis();
     let mut p = Painter { buf, clip: area };
@@ -100,7 +106,7 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
     draw_browser_label(&mut p, app, now, &mut drawn);
     draw_helpers(&mut p, app, now, ms, &mut drawn);
     draw_diff(&mut p, app, now, &mut drawn);
-    drawn.reading = draw_transcript(&mut p, app, now, ms);
+    drawn.reading = draw_transcript(&mut p, app, now, ms, &mut drawn);
     draw_input(&mut p, app, now, &mut drawn);
     draw_menu(&mut p, app, now, &mut drawn);
     draw_hints(&mut p, app);
@@ -546,13 +552,15 @@ pub fn revealing(app: &App, now: Instant) -> bool {
     })
 }
 
-fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128) -> Option<Rect> {
+fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &mut Drawn) -> Option<Rect> {
     let area = app.layout.transcript;
     if app.session.items.is_empty() || area.height < 4 {
         return None;
     }
     let width = area.width.saturating_sub(6) as usize;
     let lines = transcript_lines(app, width, now, ms);
+    drawn.widths = lines.iter().map(text::line_width).collect();
+    drawn.plain = lines.iter().map(|line| line.iter().map(|(s, _)| s.as_str()).collect()).collect();
     let avail = (area.height - 2) as usize;
     let scroll = app.scroll.min(lines.len().saturating_sub(avail));
     let end = lines.len() - scroll;
@@ -563,6 +571,7 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128) -> Option
     for (i, line) in lines[start..end].iter().enumerate() {
         p.line(card.x as i32 + 3, card.y as i32 + 1 + i as i32, line);
     }
+    drawn.text = Some(TextView { x: card.x as i32 + 3, top: card.y as i32 + 1, first: start, rows: shown });
     Some(card)
 }
 

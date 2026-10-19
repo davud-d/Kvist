@@ -14,10 +14,11 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 
 use crate::backdrop::{self, Canvas, Glass, LEVELS, WebFrame};
-use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG, Z_THUMB, Z_TOP};
+use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG, Z_THUMB, Z_TOP, Z_WATER};
 use crate::layout::Grid;
 use crate::theme::GLASS_TINT;
 use crate::video::{self, Video};
+use crate::water;
 
 pub const SLOT_BACKDROP: u32 = 1;
 pub const SLOT_LEFT: u32 = 2;
@@ -28,6 +29,7 @@ pub const SLOT_INPUT: u32 = 6;
 pub const SLOT_DIALOG: u32 = 7;
 pub const SLOT_MENU: u32 = 10;
 pub const SLOT_DIFF: u32 = 11;
+const SLOT_WATER: u32 = 12;
 const SLOT_THUMB: u32 = 8;
 const SLOT_POPUP: u32 = 9;
 const CARD_SLOTS: [u32; 8] =
@@ -163,11 +165,18 @@ pub struct PopupSpec {
     pub sharpness: u8,
 }
 
+/// The pool poured by a selection, and the clock its caustics drift by.
+pub struct WaterSpec {
+    pub shape: water::Shape,
+    pub clock: f32,
+}
+
 pub struct Scene {
     pub backdrop: Backdrop,
     pub cards: Vec<CardSpec>,
     pub thumb: Option<ThumbSpec>,
     pub popup: Option<PopupSpec>,
+    pub water: Option<WaterSpec>,
 }
 
 type BackdropIds = HashMap<Backdrop, u32>;
@@ -196,6 +205,8 @@ pub struct Pictures {
     stale_web: Vec<u32>,
     stale_canvas: Vec<u32>,
     cards: HashMap<CardKey, (u32, u64)>,
+    /// The picture of the pool now shown, by what it was drawn from.
+    water: Option<(u64, u32)>,
     /// (frame version, width, height, dimmed) -> picture.
     thumbs: HashMap<(u64, u32, u32, bool), (u32, u64)>,
     frame: u64,
@@ -212,6 +223,7 @@ impl Pictures {
             stale_web: Vec::new(),
             stale_canvas: Vec::new(),
             cards: HashMap::new(),
+            water: None,
             thumbs: HashMap::new(),
             frame: 0,
         }
@@ -263,6 +275,7 @@ impl Pictures {
         self.stale_web.clear();
         self.stale_canvas.clear();
         self.cards.clear();
+        self.water = None;
         self.thumbs.clear();
     }
 
@@ -310,6 +323,14 @@ impl Pictures {
             None => None,
         };
         self.gpu.set(SLOT_POPUP, popup);
+        let water = match &scene.water {
+            Some(spec) => self.water_placement(grid, spec)?,
+            None => {
+                self.stale_canvas.extend(self.water.take().map(|(_, id)| id));
+                None
+            }
+        };
+        self.gpu.set(SLOT_WATER, water);
         for id in std::mem::take(&mut self.stale_web) {
             self.gpu.free(id);
         }
@@ -363,6 +384,23 @@ impl Pictures {
         };
         let z = if matches!(spec.style, CardStyle::Dialog | CardStyle::Menu(_)) { Z_DIALOG } else { Z_CARD };
         Ok(clipped(image, x + spec.dx, y + spec.dy, w, h, grid, z))
+    }
+
+    /// The pool over the cells it covers; drawn again only when it changed.
+    fn water_placement(&mut self, grid: &Grid, spec: &WaterSpec) -> io::Result<Option<Placement>> {
+        let Some(area) = water::bounds(&spec.shape, grid.cols, grid.rows) else { return Ok(None) };
+        let key = water::signature(&spec.shape, spec.clock);
+        let image = match self.water {
+            Some((shown, id)) if shown == key => id,
+            _ => {
+                let picture = water::render(&spec.shape, area, grid.cw, grid.ch, spec.clock);
+                let id = self.gpu.upload_rgba(picture.width(), picture.height(), picture.as_raw())?;
+                self.stale_canvas.extend(self.water.replace((key, id)).map(|(_, old)| old));
+                id
+            }
+        };
+        let (x, y, _, _) = grid.px(area);
+        Ok(Some(Placement::at_px(image, x, y, grid.cw, grid.ch, Some((area.width, area.height)), Z_WATER)))
     }
 
     fn thumb_placement(&mut self, grid: &Grid, spec: &ThumbSpec) -> io::Result<Option<Placement>> {
@@ -500,7 +538,7 @@ mod tests {
                 slot: SLOT_INPUT, style: CardStyle::Input,
                 rect: Rect::new(1, 1, 8, 2), dx: 0.0, dy: 0.0,
             }],
-            thumb: None, popup: None,
+            thumb: None, popup: None, water: None,
         };
         pictures.accept(Arc::new(backdrop::build(&source, 100, 80, false)));
         pictures.show(&grid, &scene).unwrap();
