@@ -25,6 +25,7 @@ local_hiddenimports = sorted(
     _module_names(os.path.join(SPECPATH, 'kernel'), 'kernel.')
     + _module_names(os.path.join(SPECPATH, 'kernel', 'providers'), 'kernel.providers.')
     + _module_names(os.path.join(SPECPATH, 'kernel', 'session_import'), 'kernel.session_import.')
+    + _module_names(os.path.join(SPECPATH, 'kernel', 'memory'), 'kernel.memory.')
     + _module_names(_CLASSIC_DIR)
     + _module_names(_ZED_DIR)
     + _module_names(_WEB_DIR, 'kvist_web.')

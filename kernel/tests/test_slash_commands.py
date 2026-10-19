@@ -45,10 +45,10 @@ def test_empty_slash_lists_every_canonical_command_with_description():
 
 
 def test_completion_filters_case_insensitively():
-    assert _completion_rows("/m") == [
+    assert _completion_rows("/mo") == [
         ("/models", "Select fast and smart models")
     ]
-    assert _completion_rows("/M") == [
+    assert _completion_rows("/MO") == [
         ("/models", "Select fast and smart models")
     ]
     assert _completion_rows("/ver") == [

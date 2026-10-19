@@ -728,7 +728,9 @@ content, and add `img-src http://127.0.0.1:*` (and the same for `frame-src` if y
 **Management operations (headless, then exit; JSON on stdout when it is not a terminal, or with
 `--json`; on a terminal `--skill-op` prints a formatted view instead):**
 `--skill-op list|show|install|approve|revoke|install-deps|rollback|uninstall|remove-version|reset-data|check`
-(with `--skill`, `--skill-path`, `--skill-version`, `--yes`), `--memory-op list|add|update|delete`,
+(with `--skill`, `--skill-path`, `--skill-version`, `--yes`),
+`--memory-op status|list|search|get|explain|remember|update|forget|link|pause|resume` (payload in
+`--memory-payload` or on stdin; a refusal carries `code`: `privacy`, `permission`, `conflict`, …),
 `--mcp-op list|add|remove` and `--connection-op list|add|remove` (secrets on stdin, never
 in argv). Details and semantics are in [SKILLS.md](SKILLS.md).
 

@@ -110,7 +110,8 @@ frontends/ide/jetbrains/.claude
 .claude/
 Kvist.zip
 reports/
-memory/
+# Anchored: an unanchored rule also hid the kernel/memory/ package.
+/memory/
 kvist_repomix.md
 CYBER_WALL_REPORT.md
 progress.json

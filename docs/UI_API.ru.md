@@ -716,7 +716,9 @@ MCP-серверов, ни аудио- и image-промптов. Что кон�
 **Операции управления (без интерфейса, затем выход; JSON в stdout, если это не терминал или
 указан `--json`; на терминале `--skill-op` печатает оформленный вид):**
 `--skill-op list|show|install|approve|revoke|install-deps|rollback|uninstall|remove-version|reset-data|check`
-(с `--skill`, `--skill-path`, `--skill-version`, `--yes`), `--memory-op list|add|update|delete`,
+(с `--skill`, `--skill-path`, `--skill-version`, `--yes`),
+`--memory-op status|list|search|get|explain|remember|update|forget|link|pause|resume` (данные в
+`--memory-payload` или через stdin; отказ несёт `code`: `privacy`, `permission`, `conflict`, …),
 `--mcp-op list|add|remove` и `--connection-op list|add|remove` (секреты через stdin, никогда в
 argv). Подробности и смысл — в [SKILLS.ru.md](SKILLS.ru.md).
 

@@ -45,6 +45,7 @@ from kernel.agent_logging import (
     save_session,
     store_session_title,
 )
+from kernel.agent_tools import memory_prompt_section
 from kernel.context_meter import ContextLedger, begin_call, note_generated, note_pending
 from kernel.agent_model import (
     call_action_model,
@@ -1404,8 +1405,11 @@ class LocalAgent:
             if offer_tag
             else ""
         )
+        # Built per turn and never stored in the chat history, so a record is not repeated turn after turn.
+        memory = memory_prompt_section(self, user_goal)
+        memory_note = f"{memory}\n\n" if memory else ""
         return (
-            model_note + host_note + workspace_note + message_note + self._chat_session_context()
+            model_note + host_note + workspace_note + message_note + memory_note + self._chat_session_context()
             + _REPLY_END_NOTE + user_goal
         )
 

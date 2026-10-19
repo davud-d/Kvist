@@ -177,7 +177,7 @@ def execute(tool_name: str, arguments: dict, ctx) -> dict:
 | `connections.use` | использовать настроенное подключение по имени (scope `connections`) | | да |
 | `ui.notify`, `ui.ask`, `ui.present` | статусы, вопросы, показ изображений и файлов | | |
 | `sessions.read` | читать и искать прошлые разговоры этого проекта | | |
-| `memory.read`, `memory.write` | читать / добавлять и менять заметки проекта (но не `decision`) | | |
+| `memory.read`, `memory.write` | читать / добавлять и менять память этого проекта (как `observed` или `inferred`, никогда от имени человека) | | |
 | `storage` | собственные данные скилла (ключ-значение) | | |
 | `artifacts` | сохранять файлы результатов | | |
 | `agents.manage` | запускать помощницу только для чтения | | |
@@ -209,8 +209,8 @@ def execute(tool_name: str, arguments: dict, ctx) -> dict:
 | `ctx.connections` | `list()`, `request(name, method, path, ...)` |
 | `ctx.ui` | `notify`, `message`, `error`, `stream`, `choose`, `ask`, `confirm`, `present` |
 | `ctx.sessions` | `list()`, `read(session, before, limit)`, `search(query)` |
-| `ctx.memory` | `search`, `list`, `add`, `update`, `delete` |
-| `ctx.storage` | `get`, `set` (необязательный `expected_version`), `delete`, `keys`; область `workspace` или `global` |
+| `ctx.memory` | `search(query, kinds, include_inactive)`, `get(id)`, `explain(id)`, `list()`, `remember(content, kind, basis, topic, files)`, `update(id, expected_version, reason, …)`, `link(source_id, target_id, relation, reason)`, `forget(id)` |
+| `ctx.storage` | `get`, `set` (необязательные `expected_version`, `ttl_seconds`), `compare_and_set(key, expected_version, value)`, `delete`, `keys`; область `call`, `task`, `session` или `workspace` |
 | `ctx.runtime` | `status()`, `check()`, `sleep(seconds)`, `progress(text)`, `register_resource`, `release_resource` |
 | `ctx.events` | `poll(after, timeout)` — события задачи, подтверждаются передачей `next` в `after` |
 | `ctx.agents` | `start`, `message`, `update`, `status`, `wait`, `inspect`, `result`, `stop` |
@@ -327,10 +327,25 @@ def execute(tool_name: str, arguments: dict, ctx) -> dict:
   идут через inbox: `sent → received → applied`. `wait` не тратит вызовы модели. Помощница,
   остановленная человеком, остаётся остановленной, пока человек не напишет снова. Лимит
   шагов: 40.
-* **Заметки проекта** (инструмент `memory`, `ctx.memory`): решения, наблюдения, допущения.
-  `decision` может создать только человек. Заметки относятся к проекту, очищаются от
-  секретов и в промптах цитируются как недоверенные. Управление: `--memory-op
-  list|add|update|delete`.
+* **Память** (инструмент `memory`, `ctx.memory`, `/memory`): записи, которые переживают
+  сессию, — `project_fact`, `decision` (что выбрали и почему) и `preference` (всегда
+  человека). Каждая говорит, откуда взялась: `person` (подтвердил человек), `observed` или
+  `inferred`. Скилл пишет только `observed` или `inferred` и видит только записи своего
+  проекта, но не предпочтения человека для всех проектов. У записей есть источники, связи
+  (`supersedes`, `contradicts`, `resolved_by`, …), версии и история; для изменения нужна
+  прочитанная версия (`expected_version`) и причина. Текст с ключом или личными данными
+  отклоняется, а не маскируется. `forget` убирает текст из базы и её индекса; агент или скилл
+  не сможет сохранить то же самое снова. Пока человек держит память на паузе
+  (`/memory pause`), запись падает с кодом `permission`. Подходящие записи попадают в промпт
+  как справка, не как указания. Человек управляет памятью через `/memory` или
+  `--memory-op status|list|search|get|explain|remember|update|forget|link|pause|resume`.
+  `/memory process` просит fast-модель выбрать устойчивые выводы из законченных ходов сессии
+  (запросы, ответы, итоги шагов; мысли модели и сырой вывод не отправляются, а строки, похожие
+  на секреты, вырезаются). Согласие спрашивается один раз; такие записи всегда `inferred`.
+* **Хранилище** (`ctx.storage`) — техническое состояние скилла (курсоры, чекпоинты, кэши), в
+  промпт оно не попадает. `compare_and_set` не даёт записать, если ключ уже изменился,
+  значение с `ttl_seconds` после истечения читается как отсутствующее, а значение с ключом или
+  личными данными отклоняется так же, как запись памяти.
 * **Сессии** (инструмент `sessions`, `ctx.sessions`): список, чтение и поиск по прошлым
   разговорам этого проекта (журнал событий), но не других проектов. Найденное сообщение —
   недоверенные данные.

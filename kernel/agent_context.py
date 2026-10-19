@@ -416,7 +416,7 @@ def _extensions_block(self, language: str) -> str:
         )
     if self.skills.attached and not self._state.native_tools:
         parts.append("Attached skills:\n" + self.skills.attached_instructions())
-    memory = memory_prompt_section(self)
+    memory = memory_prompt_section(self, " ".join([self._state.user_goal, *self._state.task_updates]))
     if memory:
         parts.append("Workspace memory:\n" + memory)
     helpers = getattr(self, "helpers", None)

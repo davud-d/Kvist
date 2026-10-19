@@ -48,6 +48,7 @@ packages = [
     "kernel",
     "kernel.providers",
     "kernel.session_import",
+    "kernel.memory",
     "kernel.prompts",
     "kernel.prompts.system",
     "kernel.prompts.styles",

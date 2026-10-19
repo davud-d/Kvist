@@ -42,12 +42,13 @@ from kernel.plugins.host import RunnerHost, ServiceError
 from kernel.plugins.manifest import ToolDef
 from kernel.plugins.registry import CatalogEntry
 from kernel.plugins.schema import SchemaError, check_schema, validate
-from kernel.plugins.storage import SkillStorage, StorageError
+from kernel.plugins.storage import MAX_TTL_SECONDS, SkillStorage, StorageError
 from kernel.protocol import Action, AgentCommand
 from kernel.redaction import redact_text, redact_value
 from kernel.resources import Owner
 from kernel.session_search import SessionSearchError, list_sessions, read_session, search_sessions
-from kernel.workspace_memory import NoteError, WorkspaceMemory
+from kernel.memory import MemoryService, MemoryStoreError, Source
+from kernel.memory.schema import KINDS as MEMORY_KINDS
 
 MAX_TEXT_PARAM = 200_000
 MAX_MODEL_PROMPT_CHARS = 400_000
@@ -173,10 +174,13 @@ METHODS: dict[str, tuple[str | None, bool]] = {
     "sessions.read": ("sessions.read", False),
     "sessions.search": ("sessions.read", False),
     "memory.search": ("memory.read", False),
+    "memory.get": ("memory.read", False),
+    "memory.explain": ("memory.read", False),
     "memory.list": ("memory.read", False),
-    "memory.add": ("memory.write", False),
+    "memory.remember": ("memory.write", False),
     "memory.update": ("memory.write", False),
-    "memory.delete": ("memory.write", False),
+    "memory.link": ("memory.write", False),
+    "memory.forget": ("memory.write", False),
     "storage.get": ("storage", False),
     "storage.set": ("storage", False),
     "storage.delete": ("storage", False),
@@ -267,7 +271,7 @@ class CoreServices:
         workspace = Path(agent.executor.workspace)
         self.attachments = AttachmentStore(workspace)
         self.artifacts = ArtifactStore(workspace)
-        self.memory = WorkspaceMemory(workspace)
+        self.memory = MemoryService(workspace, with_user_scope=False)
         self._model_streams: dict[str, dict[str, Any]] = {}
         self._host_opens: dict[str, int] = {}
 
@@ -300,8 +304,10 @@ class CoreServices:
             return handler(call, params)
         except (AttachmentGone,) as error:
             raise ServiceError("gone", str(error)) from None
-        except (AttachmentError, ArtifactError, NoteError, SessionSearchError) as error:
+        except (AttachmentError, ArtifactError, SessionSearchError) as error:
             raise ServiceError("error", str(error)) from None
+        except MemoryStoreError as error:
+            raise ServiceError(error.code, str(error)) from None
         except StorageError as error:
             raise ServiceError(error.code, str(error)) from None
 
@@ -1019,34 +1025,53 @@ class CoreServices:
                                limit=_int(params, "limit", 20, 1, 100) or 20)
 
     def _memory_search(self, call: SkillCall, params: dict[str, Any]) -> list[dict[str, Any]]:
-        return [{"score": score, **note.public()} for score, note in
-                self.memory.search(_str(params, "query", limit=1000), limit=_int(params, "limit", 10, 1, 50) or 10)]
+        kinds = tuple(_str_list(params, "kinds", required=False, limit=len(MEMORY_KINDS))) or MEMORY_KINDS
+        return self.memory.search(_str(params, "query", required=False, limit=1000), kinds=kinds,
+                                  include_inactive=bool(params.get("include_inactive")),
+                                  limit=_int(params, "limit", 10, 1, 50) or 10)
+
+    def _memory_get(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        return self.memory.get(_str(params, "id", limit=40))
+
+    def _memory_explain(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        return self.memory.explain(_str(params, "id", limit=40))
 
     def _memory_list(self, call: SkillCall, params: dict[str, Any]) -> list[dict[str, Any]]:
-        return [note.public() for note in self.memory.list(bool(params.get("include_outdated")))]
+        return self.memory.search("", include_inactive=bool(params.get("include_inactive")),
+                                  limit=_int(params, "limit", 50, 1, 200) or 50)
 
-    def _memory_add(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
-        kind = _str(params, "kind", required=False, limit=20) or "observation"
-        note = self.memory.add(
-            _str(params, "text", limit=4000), kind=kind, author=f"skill:{call.skill.id}",
-            topic=_str(params, "topic", required=False, limit=200), files=_str_list(params, "files", required=False),
-            source={"session": call.session, "run_id": call.run_id, "skill": call.skill.id},
+    def _memory_remember(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        # A skill never speaks for the person: its records are what it observed or inferred.
+        basis = _str(params, "basis", required=False, limit=20) or "observed"
+        if basis not in ("observed", "inferred"):
+            raise ServiceError("denied", "a skill remembers what it observed or inferred; only the person confirms")
+        return self.memory.remember(
+            _str(params, "content", limit=4000), kind=_str(params, "kind", required=False, limit=20) or "project_fact",
+            trust=basis, actor=f"skill:{call.skill.id}", topic=_str(params, "topic", required=False, limit=200),
+            files=_str_list(params, "files", required=False),
+            sources=[Source(origin=f"skill:{call.skill.id}", session=call.session or "", run_id=call.run_id or "")],
         )
-        return note.public()
 
     def _memory_update(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
-        note = self.memory.update(
-            _str(params, "id", limit=40), author=f"skill:{call.skill.id}",
-            text=params.get("text") if isinstance(params.get("text"), str) else None,
+        files = _str_list(params, "files", required=False) if params.get("files") is not None else None
+        expected_version = _int(params, "expected_version", None, 1, 10**9)
+        if expected_version is None:
+            raise _bad("expected_version is required: the version you read, so a concurrent change is not lost")
+        return self.memory.update(
+            _str(params, "id", limit=40), actor=f"skill:{call.skill.id}", expected_version=expected_version,
+            reason=_str(params, "reason", limit=1000),
+            content=params.get("content") if isinstance(params.get("content"), str) else None,
             topic=params.get("topic") if isinstance(params.get("topic"), str) else None,
-            status=params.get("status") if isinstance(params.get("status"), str) else None,
-            reason=_str(params, "reason", required=False, limit=1000),
+            files=files, status=params.get("status") if isinstance(params.get("status"), str) else None,
         )
-        return note.public()
 
-    def _memory_delete(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
-        self.memory.delete(_str(params, "id", limit=40), author=f"skill:{call.skill.id}")
-        return {"deleted": True}
+    def _memory_link(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        return self.memory.link(_str(params, "source_id", limit=40), _str(params, "target_id", limit=40),
+                                _str(params, "relation", limit=40), actor=f"skill:{call.skill.id}",
+                                reason=_str(params, "reason", required=False, limit=1000))
+
+    def _memory_forget(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        return self.memory.forget(_str(params, "id", limit=40), actor=f"skill:{call.skill.id}")
 
     # --- storage ---------------------------------------------------------
 
@@ -1064,7 +1089,8 @@ class CoreServices:
         scope = _str(params, "scope", required=False, limit=20) or "workspace"
         expected = _int(params, "expected_version", None, 0, 10**12)
         return self._storage(call).set(scope, self._owner_key(call, scope), _str(params, "key", limit=200),
-                                       params.get("value"), expected)
+                                       params.get("value"), expected,
+                                       ttl_seconds=_int(params, "ttl_seconds", None, 1, MAX_TTL_SECONDS))
 
     def _storage_delete(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
         scope = _str(params, "scope", required=False, limit=20) or "workspace"

@@ -112,4 +112,6 @@ def test_reader_prompt_stays_within_token_budget():
     # states the reason is kept whole rather than squeezed to fit a ceiling.
     # → 3100 for the wait and schedule tools: a read-only task ("collect the
     # AI news every morning") is routed to the reader, so it needs them too.
-    assert tokens <= 3100, f"reader prompt is {tokens} tokens (budget 3100)"
+    # → 3150 for memory: "запомни …"/"forget …" is routed to the reader (chat
+    # has no tool), so its memory schema needs preference, person and forget.
+    assert tokens <= 3150, f"reader prompt is {tokens} tokens (budget 3150)"

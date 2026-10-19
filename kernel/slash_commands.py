@@ -66,6 +66,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
     SlashCommand("verbose", "Enable or disable verbose runtime output"),
     SlashCommand("changes", "Show agent file changes across all sessions"),
     SlashCommand("context", "Show the model's context size and how much of it is used"),
+    SlashCommand("memory", "Inspect, explain, forget or pause what Kvist remembers between sessions"),
     SlashCommand("diff", "Show agent file changes recorded in this session"),
     SlashCommand("revert", "Restore agent-changed files to their baselines"),
     SlashCommand(
@@ -137,6 +138,10 @@ def slash_commands_context() -> str:
         "portable: do not assume it is available. /role offers auto, coder, reader, "
         "devops, chat and universal. Known portable argument forms are "
         "/verbose true|false, /strime true|false (custom providers only), "
+        "/memory status|pause|resume, /memory inspect <words>, /memory why <id>, /memory forget <id>, "
+        "/memory remember <text> (this project), /memory remember-global <text> (every project), "
+        "/memory process (pick what is worth keeping from this session; asks consent once), "
+        "/memory processing on|off, "
         + ("" if ink else "/permissions <shell command> (explain its permission decision, not execute it), /bug <report text>, ")
         + "where supported in the list below. Angle-bracket text denotes a placeholder; "
         "true|false denotes alternatives, not literal input. For other argument "

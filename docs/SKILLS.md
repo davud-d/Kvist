@@ -173,7 +173,7 @@ content, starts with no grants**.
 | `connections.use` | use a configured connection by name (scope `connections`) | | yes |
 | `ui.notify`, `ui.ask`, `ui.present` | status lines, questions, show images/files | | |
 | `sessions.read` | read/search earlier conversations of this workspace | | |
-| `memory.read`, `memory.write` | read / add and change workspace notes (never a `decision`) | | |
+| `memory.read`, `memory.write` | read / add to and change this workspace's memory (as `observed` or `inferred`, never on the person's behalf) | | |
 | `storage` | the skill's own key-value data | | |
 | `artifacts` | save result files | | |
 | `agents.manage` | start a read-only helper | | |
@@ -206,8 +206,8 @@ the grant, the call's budget and the cancel/pause state; a denied call raises `D
 | `ctx.connections` | `list()`, `request(name, method, path, ...)` |
 | `ctx.ui` | `notify`, `message`, `error`, `stream`, `choose`, `ask`, `confirm`, `present` |
 | `ctx.sessions` | `list()`, `read(session, before, limit)`, `search(query)` |
-| `ctx.memory` | `search`, `list`, `add`, `update`, `delete` |
-| `ctx.storage` | `get`, `set` (optional `expected_version`), `delete`, `keys`; scope `workspace` or `global` |
+| `ctx.memory` | `search(query, kinds, include_inactive)`, `get(id)`, `explain(id)`, `list()`, `remember(content, kind, basis, topic, files)`, `update(id, expected_version, reason, …)`, `link(source_id, target_id, relation, reason)`, `forget(id)` |
+| `ctx.storage` | `get`, `set` (optional `expected_version`, `ttl_seconds`), `compare_and_set(key, expected_version, value)`, `delete`, `keys`; scope `call`, `task`, `session` or `workspace` |
 | `ctx.runtime` | `status()`, `check()`, `sleep(seconds)`, `progress(text)`, `register_resource`, `release_resource` |
 | `ctx.events` | `poll(after, timeout)` — task events, acknowledged by passing `next` as `after` |
 | `ctx.agents` | `start`, `message`, `update`, `status`, `wait`, `inspect`, `result`, `stop` |
@@ -325,9 +325,25 @@ One task, one life cycle: `running`, `pause_requested`, `paused`, `resuming`,
   in the event frontends and is refused in the classic terminal. Messages travel through an inbox:
   `sent → received → applied`. `wait` costs no model calls. A helper that the person stopped
   stays stopped until the person writes again. Step limit: 40.
-* **Workspace notes** (`memory` tool, `ctx.memory`): decisions, observations, assumptions.
-  Only the person can create a `decision`. Notes are per workspace, redacted and quoted as
-  untrusted in prompts. Manage them with `--memory-op list|add|update|delete`.
+* **Memory** (`memory` tool, `ctx.memory`, `/memory`): records that outlive a session —
+  `project_fact`, `decision` (what was chosen and why) and `preference` (always the person's).
+  Each says how it came to be: `person` (confirmed by the person), `observed` or `inferred`.
+  A skill writes `observed` or `inferred` only and sees only its workspace's records, never
+  the person's preferences for every project. Records carry sources, links (`supersedes`,
+  `contradicts`, `resolved_by`, …), versions and a history; a change needs the version you
+  read (`expected_version`) and a reason. Text with a credential or personal data is refused,
+  not redacted. `forget` removes the text from the database and its index; an agent or skill
+  cannot store the same content again. While the person has memory paused
+  (`/memory pause`), writes fail with code `permission`. Relevant records are quoted in
+  prompts as reference, never as instructions. The person manages it with `/memory` or
+  `--memory-op status|list|search|get|explain|remember|update|forget|link|pause|resume`.
+  `/memory process` has the fast model pick durable findings out of the session's finished turns
+  (requests, answers, step summaries; never thoughts or raw output, and lines that look like
+  secrets are withheld). It asks the person's consent once; such records are always `inferred`.
+* **Storage** (`ctx.storage`) is a skill's technical state (cursors, checkpoints, caches), never
+  put in a prompt. `compare_and_set` refuses a write when the key moved on, a value with
+  `ttl_seconds` reads as absent once it expires, and a value holding a credential or personal
+  data is refused like a memory record.
 * **Sessions** (`sessions` tool, `ctx.sessions`): list, read and search this workspace's
   earlier conversations (the event journal), never other workspaces. A found message is
   untrusted data.

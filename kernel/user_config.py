@@ -398,6 +398,48 @@ def save_tray_enabled(enabled: bool, config_path: Path | None = None) -> None:
     _update_user_config(update, config_path)
 
 
+MEMORY_PROCESSING_KEY = "memory_processing"
+
+
+def get_memory_processing_allowed(config_path: Path | None = None) -> bool:
+    """Whether the person agreed to send filtered conversation events to the provider for memory extraction."""
+    return load_user_config(config_path).get(MEMORY_PROCESSING_KEY) is True
+
+
+def save_memory_processing_allowed(allowed: bool, config_path: Path | None = None) -> None:
+    """Persist the consent; only the non-default ``true`` is stored, so revoking leaves no trace."""
+
+    def update(payload: dict[str, object]) -> dict[str, object]:
+        if allowed:
+            payload[MEMORY_PROCESSING_KEY] = True
+        else:
+            payload.pop(MEMORY_PROCESSING_KEY, None)
+        return payload
+
+    _update_user_config(update, config_path)
+
+
+MEMORY_PAUSED_KEY = "memory_paused"
+
+
+def get_memory_paused(config_path: Path | None = None) -> bool:
+    """Whether agents and skills are kept from writing memory (`/memory pause`); off by default."""
+    return load_user_config(config_path).get(MEMORY_PAUSED_KEY) is True
+
+
+def save_memory_paused(paused: bool, config_path: Path | None = None) -> None:
+    """Persist the pause; only the non-default ``true`` is stored."""
+
+    def update(payload: dict[str, object]) -> dict[str, object]:
+        if paused:
+            payload[MEMORY_PAUSED_KEY] = True
+        else:
+            payload.pop(MEMORY_PAUSED_KEY, None)
+        return payload
+
+    _update_user_config(update, config_path)
+
+
 def save_role_selection(role: str, config_path: Path | None = None) -> None:
     """Save the role selection. Use 'auto' for automatic role detection."""
     normalized_role = role.strip()

@@ -17,6 +17,9 @@ from kernel.protocol import (
     ModelResponse,
     ToolCallRequest,
 )
+from kernel.memory.schema import KINDS as MEMORY_KINDS
+from kernel.memory.schema import OPERATIONS as MEMORY_OPERATIONS
+from kernel.memory.schema import RELATIONS as MEMORY_RELATIONS
 from kernel.scheduler import MAX_WAIT_SECONDS, WEEKDAYS
 
 ALLOWED_ACTIONS = {
@@ -57,8 +60,8 @@ ALLOWED_ACTIONS = {
 }
 SKILL_CALL = "skill_call"
 _SKILL_OPS = ("list", "attach", "detach", "read", "status", "scaffold", "check", "install")
-_MEMORY_OPS = ("search", "add", "update")
-_MEMORY_KINDS = ("observation", "assumption", "decision")
+_MEMORY_OPS = MEMORY_OPERATIONS
+_MEMORY_BASES = ("observed", "inferred", "person")
 _SESSION_OPS = ("list", "search", "read")
 _HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
 _HELPER_ROLES = ("reader", "coder", "devops", "universal")
@@ -582,27 +585,76 @@ def _validate_skills(args: dict[str, Any]) -> None:
 def _validate_memory(args: dict[str, Any]) -> None:
     op = _require_op(args, _MEMORY_OPS)
     if op == "search":
-        require_only_allowed_keys(args, {"op", "query", "limit"})
+        require_only_allowed_keys(args, {"op", "query", "kinds", "include_inactive", "limit"})
         require_optional_str(args, "query")
+        _optional_choices(args, "kinds", MEMORY_KINDS)
+        _optional_bool(args, "include_inactive")
         _optional_int(args, "limit", 1, 50)
-    elif op == "add":
-        require_keys(args, {"text"})
-        require_only_allowed_keys(args, {"op", "text", "kind", "topic", "files"})
-        require_str(args, "text")
-        if args.get("kind", "observation") not in _MEMORY_KINDS:
-            raise CommandValidationError(f"'kind' must be one of: {', '.join(_MEMORY_KINDS)}")
-        require_optional_str(args, "topic")
+    elif op == "remember":
+        _validate_memory_remember(args)
+    elif op == "update":
+        require_keys(args, {"id", "expected_version", "reason"})
+        require_only_allowed_keys(args, {"op", "id", "expected_version", "reason", "content", "topic", "files",
+                                         "status"})
+        require_str(args, "id")
+        require_str(args, "reason")
+        _optional_int(args, "expected_version", 1, 10**9)
+        for key in ("content", "topic"):
+            require_optional_str(args, key)
         _optional_str_list(args, "files", limit=20)
+        if args.get("status") not in (None, "active", "stale"):
+            raise CommandValidationError("'status' must be active or stale; link records to supersede or contradict")
+    elif op == "link":
+        require_keys(args, {"source_id", "target_id", "relation"})
+        require_only_allowed_keys(args, {"op", "source_id", "target_id", "relation", "reason"})
+        require_str(args, "source_id")
+        require_str(args, "target_id")
+        if args.get("relation") not in MEMORY_RELATIONS:
+            raise CommandValidationError(f"'relation' must be one of: {', '.join(MEMORY_RELATIONS)}")
+        require_optional_str(args, "reason")
     else:
         require_keys(args, {"id"})
-        require_only_allowed_keys(args, {"op", "id", "text", "topic", "status", "reason"})
+        require_only_allowed_keys(args, {"op", "id"})
         require_str(args, "id")
-        for key in ("text", "topic", "reason"):
-            require_optional_str(args, key)
-        if args.get("status") not in (None, "active", "outdated"):
-            raise CommandValidationError("'status' must be active or outdated")
-        if args.get("status") == "outdated" and not str(args.get("reason") or "").strip():
-            raise CommandValidationError("marking a note outdated needs a 'reason'")
+
+
+def _validate_memory_remember(args: dict[str, Any]) -> None:
+    require_keys(args, {"content"})
+    require_only_allowed_keys(args, {"op", "content", "kind", "basis", "scope", "topic", "files", "sources"})
+    require_str(args, "content")
+    if args.get("kind", "project_fact") not in MEMORY_KINDS:
+        raise CommandValidationError(f"'kind' must be one of: {', '.join(MEMORY_KINDS)}")
+    if args.get("basis", "inferred") not in _MEMORY_BASES:
+        raise CommandValidationError(f"'basis' must be one of: {', '.join(_MEMORY_BASES)}")
+    if args.get("scope", "workspace") not in ("workspace", "user"):
+        raise CommandValidationError("'scope' must be workspace or user")
+    require_optional_str(args, "topic")
+    _optional_str_list(args, "files", limit=20)
+    sources = args.get("sources")
+    if sources is None:
+        return
+    if not isinstance(sources, list) or len(sources) > 10:
+        raise CommandValidationError("'sources' must be a list of at most 10 {session, seq} objects")
+    for source in sources:
+        valid = (isinstance(source, dict) and set(source) == {"session", "seq"}
+                 and isinstance(source["session"], str) and source["session"].strip()
+                 and isinstance(source["seq"], int) and not isinstance(source["seq"], bool) and source["seq"] >= 1)
+        if not valid:
+            raise CommandValidationError("each source is {\"session\": <name>, \"seq\": <event number>} "
+                                         "from a sessions search or read")
+
+
+def _optional_choices(args: dict[str, Any], key: str, choices: tuple[str, ...]) -> None:
+    value = args.get(key)
+    if value is None:
+        return
+    if not isinstance(value, list) or not value or not all(item in choices for item in value):
+        raise CommandValidationError(f"'{key}' must be a non-empty list of: {', '.join(choices)}")
+
+
+def _optional_bool(args: dict[str, Any], key: str) -> None:
+    if args.get(key) is not None and not isinstance(args[key], bool):
+        raise CommandValidationError(f"'{key}' must be true or false")
 
 
 def _validate_sessions(args: dict[str, Any]) -> None:

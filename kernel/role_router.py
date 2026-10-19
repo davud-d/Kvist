@@ -321,6 +321,14 @@ _DIRECT_READER_PATTERNS: tuple[tuple[str, str], ...] = (
     ("(?:explain|tell me about|summarize|summarise|show me|read)\\s.*\\b(?:log\\w*|file\\w*|diff|status|output\\w*|dump\\w*|trace\\w*|incident\\w*)\\b", "explain-artifact"),
 )
 
+# A request that opens with "remember"/"forget" is about memory, and chat has no
+# memory tool: it could only say "I can't". Reader keeps records without touching
+# files. Checked after devops/coder, so "remember to fix X" still goes to coder.
+_DIRECT_MEMORY_PATTERNS: tuple[tuple[str, str], ...] = (
+    ("^\\W*(?:пожалуйста\\W+)?(?:запомни|запомните|забудь|забудьте)\\b", "memory request"),
+    ("^\\W*(?:please\\W+)?(?:remember\\b|forget\\s+(?:that|this|what|my|the|about\\s+my)\\b)", "memory request"),
+)
+
 _DIRECT_DEVOPS_PATTERNS: tuple[tuple[str, str], ...] = (
     # Russian: service status / inspection
     ("проверь\\s+.*(?:статус|состояние).*\\b(?:systemd|systemctl|nginx|apache|docker|сервис\\w*|служб\\w*|демон\\w*)\\b", "service status"),
@@ -452,6 +460,10 @@ def _match_direct_rule(user_goal: str) -> tuple[str, str, str] | None:
     for pattern, label in _DIRECT_CODER_PATTERNS:
         if re.search(pattern, lowered):
             return ("coder", label, pattern)
+
+    for pattern, label in _DIRECT_MEMORY_PATTERNS:
+        if re.search(pattern, lowered):
+            return ("reader", label, pattern)
 
     # Checked after devops/coder: "restart the service and show me the
     # logs" is a devops action that happens to mention "logs", not a

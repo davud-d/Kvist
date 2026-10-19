@@ -289,21 +289,39 @@ class Sessions(_Group):
 
 
 class Memory(_Group):
-    def search(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
-        return self._call("search", query=query, limit=limit)
+    """This workspace's long-term memory. A skill's records are what it observed or inferred, never the person's."""
 
-    def list(self, include_outdated: bool = False) -> list[dict[str, Any]]:
-        return self._call("list", include_outdated=include_outdated)
+    def search(self, query: str = "", *, kinds: list[str] | None = None, include_inactive: bool = False,
+               limit: int = 10) -> list[dict[str, Any]]:
+        """Records with relevance_score; relevance is not trust, so read ``trust`` and ``status`` too."""
+        return self._call("search", query=query, kinds=kinds, include_inactive=include_inactive, limit=limit)
 
-    def add(self, text: str, *, kind: str = "observation", topic: str = "", files: list[str] | None = None) -> dict[str, Any]:
-        return self._call("add", text=text, kind=kind, topic=topic, files=files)
+    def get(self, memory_id: str) -> dict[str, Any]:
+        return self._call("get", id=memory_id)
 
-    def update(self, note_id: str, *, text: str | None = None, status: str | None = None,
-               topic: str | None = None) -> dict[str, Any]:
-        return self._call("update", id=note_id, text=text, status=status, topic=topic)
+    def explain(self, memory_id: str) -> dict[str, Any]:
+        """{record, sources (with available), relations, history}, built only from what is stored."""
+        return self._call("explain", id=memory_id)
 
-    def delete(self, note_id: str) -> dict[str, Any]:
-        return self._call("delete", id=note_id)
+    def list(self, include_inactive: bool = False, limit: int = 50) -> list[dict[str, Any]]:
+        return self._call("list", include_inactive=include_inactive, limit=limit)
+
+    def remember(self, content: str, *, kind: str = "project_fact", basis: str = "observed", topic: str = "",
+                 files: list[str] | None = None) -> dict[str, Any]:
+        """{result: accepted | merged, record}; refused content raises with the reason."""
+        return self._call("remember", content=content, kind=kind, basis=basis, topic=topic, files=files)
+
+    def update(self, memory_id: str, *, expected_version: int, reason: str, content: str | None = None,
+               topic: str | None = None, files: list[str] | None = None, status: str | None = None) -> dict[str, Any]:
+        """Fails with code "conflict" when the record changed after ``expected_version`` was read."""
+        return self._call("update", id=memory_id, expected_version=expected_version, reason=reason,
+                          content=content, topic=topic, files=files, status=status)
+
+    def link(self, source_id: str, target_id: str, relation: str, reason: str = "") -> dict[str, Any]:
+        return self._call("link", source_id=source_id, target_id=target_id, relation=relation, reason=reason)
+
+    def forget(self, memory_id: str) -> dict[str, Any]:
+        return self._call("forget", id=memory_id)
 
 
 class Storage(_Group):
@@ -313,9 +331,18 @@ class Storage(_Group):
         """{value, version}; version 0 means the key does not exist."""
         return self._call("get", key=key, scope=scope)
 
-    def set(self, key: str, value: Any, scope: str = "workspace", expected_version: int | None = None) -> dict[str, Any]:
-        """Write ``value``; with ``expected_version`` the write fails if someone changed the key meanwhile."""
-        return self._call("set", key=key, value=value, scope=scope, expected_version=expected_version)
+    def set(self, key: str, value: Any, scope: str = "workspace", expected_version: int | None = None,
+            ttl_seconds: int | None = None) -> dict[str, Any]:
+        """Write ``value``; with ``expected_version`` the write fails if someone changed the key meanwhile.
+
+        With ``ttl_seconds`` the value reads as absent once that time has passed.
+        """
+        return self._call("set", key=key, value=value, scope=scope, expected_version=expected_version,
+                          ttl_seconds=ttl_seconds)
+
+    def compare_and_set(self, key: str, expected_version: int, value: Any, scope: str = "workspace") -> dict[str, Any]:
+        """``set`` that never overwrites silently: raises with code "conflict" when the version moved on."""
+        return self.set(key, value, scope=scope, expected_version=expected_version)
 
     def delete(self, key: str, scope: str = "workspace") -> dict[str, Any]:
         return self._call("delete", key=key, scope=scope)

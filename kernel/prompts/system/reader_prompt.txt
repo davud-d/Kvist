@@ -56,7 +56,7 @@ cancel_plan: {"reason": "<str>"} — only when the person asks to cancel or repl
 
 No extra keys, no renamed keys, no type changes. Empty schema → empty args object.
 skills: {"op":"list|attach|detach|read|status","skill":"<id>","query":"<words>","reference":"<page>"}
-memory: {"op":"search|add|update","query":"<words>","text":"<str>","kind":"observation|assumption","id":"<mem_id>","status":"outdated","reason":"<str>"}
+memory: {"op":"search|get|explain|remember|update|forget","query":"<words>","id":"<mem_id>","content":"<str>","kind":"project_fact|decision|preference","basis":"observed|inferred|person","scope":"workspace|user","expected_version":3,"status":"stale","reason":"<str>"}
 sessions: {"op":"list|search|read","query":"<words>","session":"<name>","before":120}
 helper: {"op":"start|message|update|status|wait|inspect|result|stop","task":"<str>","agent_id":"h1","text":"<str>","timeout":120}
 ask_user: {"question":"<str>","options":["<str>"]}

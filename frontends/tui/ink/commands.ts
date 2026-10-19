@@ -26,6 +26,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "verbose", route: "core", hint: "Toggle verbose mode (on | off)" },
   { name: "changes", route: "core", hint: "Files the agent changed, across sessions" },
   { name: "context", route: "core", hint: "Context size of the model and how much is used" },
+  { name: "memory", route: "core", hint: "What Kvist remembers: inspect, why <id>, forget <id>, remember <text>, pause" },
   { name: "revert", route: "core", hint: "Undo the agent's changes" },
   { name: "resume", route: "core", hint: "Continue an interrupted run" },
   { name: "provider", route: "core", hint: "Switch or configure the provider" },

@@ -1282,3 +1282,23 @@ def test_reading_a_named_file_is_not_a_direct_coder_rule():
     # sentence, and the keyword fallback sends it to the read-only role.
     assert role_router._match_direct_rule("прочитай utils.py и скажи что там") is None
     assert role_router._keyword_route("прочитай utils.py и скажи что там") == "reader"
+
+
+@pytest.mark.parametrize(
+    ("goal", "role"),
+    [
+        ("запомни: коммиты в этом проекте пишем по-английски", "reader"),
+        ("Пожалуйста, забудь, что я говорил про редактор", "reader"),
+        ("Remember that the e2e tests need postgres", "reader"),
+        ("forget what you saved about my editor", "reader"),
+        # A change in the same request still needs a role that writes.
+        ("запомни и поправь баг в main.py", "coder"),
+    ],
+)
+def test_a_request_to_remember_or_forget_reaches_a_role_with_memory(goal, role):
+    # Chat has no memory tool: routed there, "запомни" could only be answered with "I can't".
+    assert role_router._match_direct_rule(goal)[0] == role
+
+
+def test_forget_it_as_a_figure_of_speech_is_not_a_memory_request():
+    assert role_router._match_direct_rule("forget it, let's talk about the weather") is None

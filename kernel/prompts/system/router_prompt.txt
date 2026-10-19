@@ -60,6 +60,9 @@ Choose reader when the request:
 - inspects code/config to answer a question, with no modification requested
 - explicitly forbids changes ("don't modify", "read-only", "ничего не меняй",
   "без изменений", "не трогай", "только прочитай")
+- asks Kvist to remember or forget something for later conversations (a
+  preference, a fact about the project): reader keeps memory records, and
+  chat cannot
 - diagnoses why a concrete thing on THIS machine/project is broken — an app
   that won't start, a build that fails, a process that crashes — and reports
   the cause, without applying a fix yet (even if the user's own wording uses
@@ -81,6 +84,8 @@ User: "Evaluate my installers in the Installer folder, read the docs and the scr
 User: "Review the auth module and tell me if it's solid" -> reader
 User: "Total invoice.csv including tax, client needs the final number now" -> reader
 User: "Сколько строк в access.log" -> reader
+User: "Запомни: коммиты в этом проекте пишем по-английски" -> reader
+User: "Forget what you saved about my editor" -> reader
 
 devops:
 Use devops only when the request requires deployment, server, infrastructure, or system operations:

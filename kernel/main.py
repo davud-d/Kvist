@@ -151,8 +151,8 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="Print the --skill-op result as JSON even on a terminal.")
     parser.add_argument(
         "--memory-op",
-        choices=("list", "add", "update", "delete"),
-        help="Manage this workspace's notes as the person (payload JSON on stdin or --memory-payload), print JSON, exit.",
+        choices=("status", "list", "search", "get", "explain", "remember", "update", "forget", "link", "pause", "resume"),
+        help="Manage memory as the person (payload JSON on stdin or --memory-payload), print JSON, exit.",
     )
     parser.add_argument("--memory-payload", help="JSON payload for --memory-op.")
     parser.add_argument(
@@ -3891,6 +3891,28 @@ def _stdio_changes(ctx: CommandContext) -> CommandResult:
     return CommandResult(True, report)
 
 
+def _stdio_memory(ctx: CommandContext) -> CommandResult:
+    from kernel.agent_tools import memory_model
+    from kernel.memory import MemoryStoreError
+    from kernel.memory.commands import run_slash
+
+    agent = ctx.session.agent
+    try:
+        ok, text = run_slash(agent.executor.workspace, ctx.args, lambda title, details: bool(ctx.ui.confirm(title, details)),
+                             _speaks_russian(agent), model=memory_model(agent), session=agent.current_session)
+    except MemoryStoreError as error:
+        return CommandResult(False, sanitize_display_text(str(error)), {"code": error.code})
+    return CommandResult(ok, sanitize_display_text(text))
+
+
+def _speaks_russian(agent) -> bool:
+    """The language of the person's last request, else the system locale."""
+    language = getattr(agent._state, "response_language", "") or ""
+    if language:
+        return language == "ru"
+    return os.environ.get("LANG", "").lower().startswith("ru")
+
+
 def _stdio_context(ctx: CommandContext) -> CommandResult:
     from kernel.context_meter import context_usage, describe
 
@@ -4326,6 +4348,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "catalog": _stdio_catalog,
     "changes": _stdio_changes,
     "context": _stdio_context,
+    "memory": _stdio_memory,
     "provider": _stdio_provider,
     "change-api": _stdio_change_api,
     "del-provider": _stdio_del_provider,
@@ -5270,6 +5293,25 @@ def main() -> None:
                     title="Agent changes in this workspace (all sessions)",
                     border_style="bright_cyan",
                 ))
+                continue
+
+            if user_goal.lower() == "/memory" or user_goal.lower().startswith("/memory "):
+                from kernel.agent_tools import memory_model
+                from kernel.memory import MemoryStoreError
+                from kernel.memory.commands import run_slash
+
+                def confirm_memory(title: str, details: str) -> bool:
+                    with paused_interactive_screen(interactive_screen):
+                        return bool(agent._ui.confirm(title, details))
+
+                try:
+                    ok, text = run_slash(agent.executor.workspace, user_goal.split()[1:], confirm_memory,
+                                         _speaks_russian(agent), model=memory_model(agent),
+                                         session=agent.current_session)
+                except MemoryStoreError as error:
+                    ok, text = False, str(error)
+                console.print(Panel(Text(sanitize_display_text(text)), title="/memory",
+                                    border_style="bright_cyan" if ok else "red"))
                 continue
 
             if user_goal.lower() == "/context":

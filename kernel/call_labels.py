@@ -39,7 +39,7 @@ _TEMPLATES: dict[str, tuple[str, str]] = {
     "edit_plan": ("изменяет план", "updates the plan"),
     "cancel_plan": ("отменяет задачу", "cancels the task"),
     "skills": ("скиллы: {target}", "skills: {target}"),
-    "memory": ("заметки проекта: {target}", "project notes: {target}"),
+    "memory": ("память: {target}", "memory: {target}"),
     "sessions": ("прошлые разговоры: {target}", "past conversations: {target}"),
     "helper": ("помощница: {target}", "helper: {target}"),
     "ask_user": ("спрашивает вас", "asks you"),
@@ -87,7 +87,8 @@ def _target(action_type: str, args: dict[str, Any], language: str) -> str:
     if action_type == "wait":
         return _wait_duration(args.get("seconds"), language)
     if action_type in {"skills", "memory", "sessions", "helper", "schedule"}:
-        detail = args.get("skill") or args.get("query") or args.get("session") or args.get("agent_id") or args.get("id") or ""
+        detail = (args.get("skill") or args.get("query") or args.get("session") or args.get("agent_id")
+                  or args.get("id") or args.get("source_id") or "")
         return f"{_text(args.get('op'))} {_text(detail)}".strip()
     return path or ("." if action_type in {"list_dir", "list_tree"} else "")
 

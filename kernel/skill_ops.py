@@ -29,7 +29,7 @@ from kernel.plugins.manifest import ManifestError
 
 SKILL_OPS = ("list", "show", "install", "approve", "revoke", "install-deps", "rollback", "uninstall",
              "remove-version", "reset-data", "check")
-MEMORY_OPS = ("list", "add", "update", "delete")
+_MEMORY_OPS_WITHOUT_PAYLOAD = ("status", "list", "pause", "resume")
 
 
 class OpError(RuntimeError):
@@ -185,29 +185,10 @@ def _ask(text: str) -> None:
 
 
 def run_memory_op(op: str, *, workspace: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    """Notes as the person manages them: they may record, correct and delete decisions too."""
-    from kernel.workspace_memory import WorkspaceMemory
+    """Memory as the person manages it: they may confirm, rewrite and forget anything, and pause the rest."""
+    from kernel.memory.commands import run_op
 
-    memory = WorkspaceMemory(workspace)
-    if op == "list":
-        return {"ok": True, "notes": [note.public() for note in memory.list(include_outdated=True)]}
-    if op == "add":
-        note = memory.add(str(payload.get("text", "")), kind=str(payload.get("kind") or "decision"),
-                          author="person", topic=str(payload.get("topic") or ""), files=payload.get("files"),
-                          source={"by": "person"})
-        return {"ok": True, "note": note.public()}
-    if op == "update":
-        note = memory.update(str(payload.get("id", "")), author="person",
-                             text=payload.get("text") if isinstance(payload.get("text"), str) else None,
-                             topic=payload.get("topic") if isinstance(payload.get("topic"), str) else None,
-                             status=payload.get("status") if isinstance(payload.get("status"), str) else None,
-                             kind=payload.get("kind") if isinstance(payload.get("kind"), str) else None,
-                             reason=str(payload.get("reason") or ""))
-        return {"ok": True, "note": note.public()}
-    if op == "delete":
-        memory.delete(str(payload.get("id", "")), author="person")
-        return {"ok": True, "deleted": payload.get("id")}
-    raise OpError(f"unknown memory op {op!r}")
+    return run_op(op, workspace, payload)
 
 
 def run_mcp_op(op: str, *, name: str | None, payload: dict[str, Any]) -> dict[str, Any]:
@@ -306,16 +287,19 @@ def _print_result(op: str, payload: dict[str, Any], for_person: bool, language: 
 
 
 def main_memory_op(args) -> None:
-    from kernel.workspace_memory import NoteError
+    from kernel.memory import MemoryStoreError
 
     try:
         raw = args.memory_payload if args.memory_payload is not None else (
-            sys.stdin.read() if args.memory_op != "list" else "{}")
+            sys.stdin.read() if args.memory_op not in _MEMORY_OPS_WITHOUT_PAYLOAD else "{}")
         payload = json.loads(raw or "{}")
         if not isinstance(payload, dict):
             raise OpError("the payload must be a JSON object")
         result = run_memory_op(args.memory_op, workspace=Path(args.workspace or ".").resolve(), payload=payload)
-    except (OpError, NoteError, json.JSONDecodeError, OSError) as error:
+    except MemoryStoreError as error:
+        print(json.dumps({"ok": False, "error": str(error), "code": error.code}, ensure_ascii=False))
+        raise SystemExit(1) from error
+    except (OpError, json.JSONDecodeError, OSError) as error:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         raise SystemExit(1) from error
     print(json.dumps(result, ensure_ascii=False))

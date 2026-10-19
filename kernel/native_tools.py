@@ -14,6 +14,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from kernel.memory.schema import KINDS as MEMORY_KINDS
+from kernel.memory.schema import OPERATIONS as MEMORY_OPS
+from kernel.memory.schema import RELATIONS as MEMORY_RELATIONS
 from kernel.protocol import ToolCallRequest
 
 _STRING: dict[str, Any] = {"type": "string"}
@@ -251,19 +254,35 @@ ACTION_TOOLS.update({
         ("op",),
     ),
     "memory": ToolSpec(
-        "Notes of this workspace from earlier tasks: search them, add one, or update one (mark it outdated with a "
-        "reason). kind: observation (you saw it), assumption (your inference), decision (the person confirms it "
-        "in a dialog). Never store secrets.",
+        "Long-term memory kept across sessions: project facts, decisions with their reasons, and the person's "
+        "preferences. search or get records, explain where one came from, remember a durable finding, update one "
+        "(with the version you read and a reason), link records (supersedes replaces an older decision, "
+        "contradicts marks a conflict) or forget one (the person confirms). basis says how you know: observed (a "
+        "tool result showed it), inferred (your conclusion), person (they confirm it in a dialog; a preference "
+        "always is). Never store secrets or personal data.",
         {
-            "op": {"type": "string", "enum": ["search", "add", "update"]},
+            "op": {"type": "string", "enum": list(MEMORY_OPS)},
             "query": _STRING,
-            "text": _STRING,
-            "kind": {"type": "string", "enum": ["observation", "assumption", "decision"]},
+            "kinds": {"type": "array", "items": {"type": "string", "enum": list(MEMORY_KINDS)}},
+            "include_inactive": {"type": "boolean", "description": "search: also superseded records."},
+            "id": _STRING,
+            "content": _STRING,
+            "kind": {"type": "string", "enum": list(MEMORY_KINDS)},
+            "basis": {"type": "string", "enum": ["observed", "inferred", "person"]},
+            "scope": {"type": "string", "enum": ["workspace", "user"],
+                      "description": "remember: user is a preference for every project; anything else stays here."},
             "topic": _STRING,
             "files": _STRINGS,
-            "id": _STRING,
-            "status": {"type": "string", "enum": ["active", "outdated"]},
+            "sources": {"type": "array", "description": "remember: earlier events this rests on, as a sessions "
+                                                        "search or read returned them.",
+                        "items": {"type": "object", "properties": {"session": _STRING, "seq": _integer(1, 10**9)},
+                                  "required": ["session", "seq"]}},
+            "expected_version": _integer(1, 10**9),
+            "status": {"type": "string", "enum": ["active", "stale"]},
             "reason": _STRING,
+            "source_id": _STRING,
+            "target_id": _STRING,
+            "relation": {"type": "string", "enum": list(MEMORY_RELATIONS)},
             "limit": _integer(1, 50),
         },
         ("op",),

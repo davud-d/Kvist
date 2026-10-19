@@ -1,4 +1,6 @@
-"""Core services behind skills and the agent: memory, storage, attachments, questions, resources, network, viewer."""
+"""Core services behind skills and the agent: storage, attachments, questions, resources, network, viewer.
+
+Memory has its own file, test_memory.py."""
 from __future__ import annotations
 
 import http.server
@@ -7,6 +9,7 @@ import os
 import socket
 import struct
 import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -20,61 +23,6 @@ from kernel.plugins.screen import ScreenViewer
 from kernel.plugins.storage import SkillStorage, StorageError
 from kernel.resources import ManagedProcess, Owner, ResourceManager
 from kernel.tests.conftest import NullUI
-from kernel.workspace_memory import NoteError, WorkspaceMemory
-
-
-# --- memory ------------------------------------------------------------------
-
-
-def test_notes_never_cross_workspaces(tmp_path):
-    first, second = tmp_path / "a", tmp_path / "b"
-    first.mkdir()
-    second.mkdir()
-    WorkspaceMemory(first).add("The tests need a local postgres", kind="observation", author="agent")
-
-    assert WorkspaceMemory(second).search("postgres") == []
-    assert WorkspaceMemory(first).search("postgres")[0][1].text == "The tests need a local postgres"
-
-
-def test_concurrent_note_writes_lose_nothing(tmp_path):
-    memory = WorkspaceMemory(tmp_path)
-    errors: list[Exception] = []
-
-    def add(index: int) -> None:
-        try:
-            WorkspaceMemory(tmp_path).add(f"fact number {index}", kind="observation", author="agent")
-        except Exception as error:  # noqa: BLE001 - collected for the assertion
-            errors.append(error)
-
-    threads = [threading.Thread(target=add, args=(index,)) for index in range(20)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
-
-    assert errors == []
-    assert len(memory.list()) == 20
-
-
-def test_only_the_person_makes_or_rewrites_a_decision_and_outdated_notes_keep_their_reason(tmp_path):
-    memory = WorkspaceMemory(tmp_path)
-    with pytest.raises(NoteError, match="only the person"):
-        memory.add("Use tabs", kind="decision", author="agent")
-    decision = memory.add("Use tabs", kind="decision", author="person")
-    with pytest.raises(NoteError, match="only by the person"):
-        memory.update(decision.id, author="agent", text="Use spaces")
-
-    outdated = memory.update(decision.id, author="agent", status="outdated", reason="the team moved to spaces")
-
-    assert outdated.status == "outdated" and outdated.outdated_reason == "the team moved to spaces"
-    assert memory.list() == []
-    assert memory.list(include_outdated=True)[0].text == "Use tabs"
-
-
-def test_secrets_are_redacted_before_a_note_is_stored(tmp_path):
-    note = WorkspaceMemory(tmp_path).add("The key is sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789",
-                                         kind="observation", author="agent")
-    assert "abcdefghijklmnopqrstuvwxyz" not in note.text
 
 
 # --- skill storage -----------------------------------------------------------
@@ -89,6 +37,30 @@ def test_storage_versions_detect_a_lost_update_and_scopes_stay_apart(tmp_path):
         storage.set("workspace", "workspace", "cookies", {"n": 3}, expected_version=first["version"])
     assert conflict.value.code == "conflict"
     assert storage.get("task", "run-1", "cookies") == {"value": None, "version": 0}
+
+
+def test_an_expired_value_reads_as_absent_but_keeps_its_version(tmp_path, monkeypatch):
+    storage = SkillStorage(tmp_path, "scanner", "1.0.0")
+    written = storage.set("workspace", "workspace", "cache", {"count": 12}, None, ttl_seconds=300)
+    later = time.time() + 301
+    monkeypatch.setattr("kernel.plugins.storage.time.time", lambda: later)
+
+    assert storage.get("workspace", "workspace", "cache") == {"value": None, "version": written["version"]}
+    assert storage.keys("workspace", "workspace") == []
+    # A holder of the old version still loses the race instead of silently overwriting.
+    with pytest.raises(StorageError) as conflict:
+        storage.set("workspace", "workspace", "cache", {"count": 1}, expected_version=0)
+    assert conflict.value.code == "conflict"
+
+
+def test_storage_is_no_way_around_the_secret_rule(tmp_path):
+    storage = SkillStorage(tmp_path, "scanner", "1.0.0")
+    with pytest.raises(StorageError) as refused:
+        storage.set("workspace", "workspace", "auth", {"token": "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123"}, None)
+    assert refused.value.code == "privacy"
+    assert "abcdefghijklmnop" not in str(refused.value)
+    # Opaque technical state such as a cursor is still fine for storage.
+    storage.set("workspace", "workspace", "cursor", {"next": "aB3dE5fG7hJ9kL1mN3pQ5rS7tU9vW1xY3z"}, None)
 
 
 def test_an_older_version_refuses_state_a_newer_one_wrote(tmp_path):

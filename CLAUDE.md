@@ -569,6 +569,74 @@ widens it). Verified on real files: Claude Code, Codex, OpenCode (both schemas),
 fixtures only; Cursor's `agent-transcripts/*.jsonl`, Gemini CLI and OpenCode's pre-SQLite JSON
 files are not read. Tests: `kernel/tests/test_session_import.py`.
 
+### Long-term memory (`kernel/memory/`)
+Records that outlive a session: `project_fact`, `decision` (what was chosen and why) and
+`preference`. One SQLite file per place, never a `workspace_id` column:
+`<workspace>/.kvist/memory/memory.db` (ids `mem_…`) and `<config dir>/memory.db` for the person's
+preferences in every project (ids `memu_…`, preferences only). The id names the store, so no
+argument can reach another project. `store.py` holds every rule, `privacy.py` the gate,
+`retrieval.py` what a prompt gets, `service.py` the one facade the model's `memory` tool
+(`agent_tools._memory`), `ctx.memory` (`CoreServices`, `with_user_scope=False`) and the person
+(`commands.py`: `/memory`, `--memory-op`) call. Spec: stages 1–4 of the memory design are built
+(storage, privacy, permissions, manual memory, retrieval, the tool, the extractor); the background
+worker, queue, budgets and consolidation beyond exact duplicates are not.
+- **Extractor** (`extractor.py`, `/memory process [session]`, only with a running agent): reads the
+  session journal's *finished* turns after `processing.last_seq`, keeping requests, answers, plans,
+  each step's `user_message` and a tool result's one-line summary — never thoughts or raw output;
+  every line passes the privacy gate (a refused line becomes "[a line was withheld…]"). Batches of
+  ≤12k tokens, ≤4 calls per run, through `agent_tools.memory_model` (the session's fast model,
+  effort `low`, JSON mode where supported, prompt `prompts/system/memory_extract_prompt.txt`), with up
+  to 15 known records beside the events so it does not restate them. A candidate must be
+  `project_fact`/`decision` (never a preference: those need the person) and cite events of its own
+  batch; each is validated alone, the valid ones are stored with the checkpoint in one transaction
+  under `idempotency_key(POLICY_VERSION, EXTRACTION_VERSION, session, range)` — raise
+  `EXTRACTION_VERSION` when the prompt or collector changes. A non-JSON reply or a provider error
+  (`MemoryProviderError`) stores nothing and keeps the checkpoint. Extracted records are always
+  `inferred`, actor `extractor`; a later observation merges and raises them. Sending needs the
+  person's consent, asked once (`memory_processing` in `config.json`, `/memory processing off`).
+- "запомни …"/"забудь …"/"remember …" route to **reader** (`role_router._DIRECT_MEMORY_PATTERNS`,
+  after devops/coder rules): chat has no memory tool. A confirmed `forget` from the tool runs as
+  the person, so it removes their own records too.
+- **Trust is who stated it, set by the caller's code**: `person` only for actor `person` (the
+  person, or the agent after `ui.confirm` said yes; non-interactive = refused), `observed`,
+  `inferred`. A preference is always `person`. A record the person confirmed is rewritten,
+  forgotten or superseded only by the person; anyone may mark it `stale` (with a reason) or link
+  `contradicts`, which makes both `conflicted`. A skill writes `observed`/`inferred` only.
+- **Lifecycle**: `active | stale | conflicted | superseded`; `superseded`/`conflicted` come only
+  from `link` (`supersedes` needs an active source and refuses cycles, as do all directed
+  relations). `update` needs `expected_version` and a reason (optimistic concurrency, history row).
+  An exact duplicate (normalized `content_hash`) merges and adds the source instead of a new row.
+- **Forget** deletes the row (sources, links, history cascade), rebuilds the FTS index, runs with
+  `secure_delete` and truncates the WAL (`log_cleared` is false if another process holds it), and
+  keeps only the hash in `forgotten`, so an agent or skill cannot store the same text again (the
+  person can). Records that rested on the forgotten one (replaced by it, or contradicted only by
+  it) become `stale` instead of orphaned. The model's `forget` asks the person first.
+- **Privacy gate refuses, never redacts** (a record with a hole teaches nothing): `redact_text`
+  hits, e-mails (except example/noreply domains), `+`-prefixed phones, Luhn-valid cards, mod-97
+  IBANs, coordinates, and long mixed-case random strings (off for `ctx.storage`, where cursors
+  are normal). The message names the kind, never the value. Health, intimate details and home
+  addresses have no textual form rules can catch: that rule lives in the prompts. `files` must
+  exist and pass `journal_path_violation`. A cited `{session, seq}` must exist in that journal.
+- **Retrieval** (`memory_prompt_section`, rebuilt per step, and per chat turn in
+  `_chat_turn_message`, never stored in chat history): all active preferences plus project records
+  sharing ≥2 query terms (≥1 for a ≤4-term query), scored `0.6·relevance + 0.25·trust +
+  0.15·freshness`, whole records until 8 or 1500 tokens. FTS5 uses the **trigram** tokenizer and
+  `text.query_terms` cuts 1–2 letters off longer words, because Russian endings defeat exact
+  matching ("тесты" must find "тестов"). A record whose `files` changed after `verified_at` is
+  flagged, not changed. Content is defanged; the block says records are reference, not orders.
+  A memory error is a `debug` line and an empty section, never a failed turn.
+- **Storage safety**: a read never creates the file; the first setup (WAL switch + migrations)
+  runs under `exclusive_storage_lock`, because switching a fresh file to WAL fails at once, without
+  the busy timeout, while another connection does the same. A schema newer than
+  `SCHEMA_VERSION` or a damaged file raises `MemoryStorageError` and is left untouched. The old
+  `.kvist/memory/notes.json` is imported once on first open (ids kept; observation→observed fact,
+  assumption→inferred fact, decision→person decision, outdated→stale) and then deleted with its
+  `.bak`, so a forgotten note cannot survive there.
+- `/memory pause` (`memory_paused` in `config.json`) stops agent and skill writes; reading and the
+  person's own changes go on. `ctx.storage` gained `ttl_seconds` (expired = absent, version kept,
+  cleaned on the next write), `compare_and_set` and the same privacy gate.
+Tests: `kernel/tests/test_memory.py`.
+
 ### Request flow
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
 the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
