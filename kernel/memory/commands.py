@@ -154,6 +154,13 @@ def _process_text(summary: dict[str, Any], ru: bool) -> str:
     if summary["accepted"]:
         lines.append(("Новые: " if ru else "New: ") + ", ".join(summary["accepted"])
                      + (" (/memory why <id>)"))
+    for link in summary.get("links", []):
+        if link["result"] == "refused":
+            continue
+        verb = {"supersedes": ("заменила", "replaces"), "contradicts": ("противоречит", "contradicts")}.get(
+            link["relation"], (link["relation"], link["relation"]))
+        check = (" — нужна проверка" if ru else " — needs a check") if link["relation"] == "contradicts" else ""
+        lines.append(f"- {link['source']} {verb[0 if ru else 1]} {link['target']}{check}")
     for item in summary["rejected"][:5]:
         lines.append(f"- {'отклонено' if ru else 'rejected'}: {item['content'][:100]} — {item['reason']}")
     if summary["problem"]:

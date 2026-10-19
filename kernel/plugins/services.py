@@ -54,6 +54,7 @@ MAX_TEXT_PARAM = 200_000
 MAX_MODEL_PROMPT_CHARS = 400_000
 MAX_LOG_LINES = 500
 MAX_HOST_OPENS_PER_RUN = 12
+MAX_SKILL_FORGETS_PER_TASK = 5
 _EXCHANGE_IN = "in"
 _EXCHANGE_OUT_LIMIT = 50 * 1024 * 1024
 _SKIP = "__kvist_skip__"
@@ -274,6 +275,7 @@ class CoreServices:
         self.memory = MemoryService(workspace, with_user_scope=False)
         self._model_streams: dict[str, dict[str, Any]] = {}
         self._host_opens: dict[str, int] = {}
+        self._memory_forgets: dict[str, int] = {}
 
     # --- entry -----------------------------------------------------------
 
@@ -1071,7 +1073,14 @@ class CoreServices:
                                 reason=_str(params, "reason", required=False, limit=1000))
 
     def _memory_forget(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
-        return self.memory.forget(_str(params, "id", limit=40), actor=f"skill:{call.skill.id}")
+        # One wrong record is a skill's business; wiping memory is not, so a task may forget only a few.
+        key = f"{call.skill.id}:{call.run_id}"
+        if self._memory_forgets.get(key, 0) >= MAX_SKILL_FORGETS_PER_TASK:
+            raise ServiceError("denied", f"a skill forgets at most {MAX_SKILL_FORGETS_PER_TASK} records per task; "
+                               "the person can forget more with /memory forget")
+        result = self.memory.forget(_str(params, "id", limit=40), actor=f"skill:{call.skill.id}")
+        self._memory_forgets[key] = self._memory_forgets.get(key, 0) + 1
+        return result
 
     # --- storage ---------------------------------------------------------
 

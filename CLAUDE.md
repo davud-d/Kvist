@@ -577,9 +577,10 @@ preferences in every project (ids `memu_…`, preferences only). The id names th
 argument can reach another project. `store.py` holds every rule, `privacy.py` the gate,
 `retrieval.py` what a prompt gets, `service.py` the one facade the model's `memory` tool
 (`agent_tools._memory`), `ctx.memory` (`CoreServices`, `with_user_scope=False`) and the person
-(`commands.py`: `/memory`, `--memory-op`) call. Spec: stages 1–4 of the memory design are built
-(storage, privacy, permissions, manual memory, retrieval, the tool, the extractor); the background
-worker, queue, budgets and consolidation beyond exact duplicates are not.
+(`commands.py`: `/memory`, `--memory-op`) call. Of the memory design's nine stages, 1–7 and 9 are
+built; stage 8 has the session integration and `/memory` in every frontend, but no memory screen and
+no mascot events yet. Not built by decision: a USD budget (no price table; calls are capped instead),
+disk encryption, a vector index.
 - **Extractor** (`extractor.py`, `/memory process [session]`, only with a running agent): reads the
   session journal's *finished* turns after `processing.last_seq`, keeping requests, answers, plans,
   each step's `user_message` and a tool result's one-line summary — never thoughts or raw output;
@@ -594,6 +595,23 @@ worker, queue, budgets and consolidation beyond exact duplicates are not.
   (`MemoryProviderError`) stores nothing and keeps the checkpoint. Extracted records are always
   `inferred`, actor `extractor`; a later observation merges and raises them. Sending needs the
   person's consent, asked once (`memory_processing` in `config.json`, `/memory processing off`).
+- **Consolidation** (`store._consolidate`, inside the batch transaction): a candidate may carry
+  `relation: {type, to, reason}` to a record it was *shown* (the extractor lists up to 15 by id,
+  kind, trust, status) or to another candidate (`c0`, renumbered after rejections). `duplicates`
+  only adds sources to the target (never rewrites it); `supersedes` is downgraded to `contradicts`
+  by the extractor unless a cited event is a successful `action_result` (`Event.tool_ok`), and by
+  the store when the target is the person's (`_extracted_link` → result `conflict`); other
+  relations go through `_link_in` (all checks before the first write, so a refused link leaves
+  the batch clean). An id the model was not shown rejects the candidate.
+- **Connections** are reused per thread and path (`_reusable`: same inode, same `user_version`,
+  else reopened): closing the last connection to a WAL database checkpoints, syncs and deletes
+  the log, which cost a spinning disk ~130 ms per write. `synchronous = NORMAL`: never corrupts,
+  survives a killed process, may lose the last commits on a power cut; `forget` stays durable
+  through its TRUNCATE checkpoint. `close_connections()` for scratch folders on Windows.
+- **Measured** (`scripts/memory_bench.py`, 2000 records, HDD, p95): get 0.23 ms, remember 0.7 ms,
+  search 4.6 ms, prompt block 7 ms. `ctx.storage` (`durable_json`, several fsyncs) is 1.2 s p95 on
+  the HDD against the design's 20 ms — open. Retrieval on the labelled set in
+  `test_memory_resilience.py`: MRR 0.96, recall@3 0.92, precision@3 0.72 (the test guards these).
 - **Session recaps** (schema v3, kind `session_recap`, column `session`; written only by the
   extractor, never offered to the model's tool or `ctx.memory`): one per session, "what it was
   for, what got done, what is left", rewritten as the session goes on (the extractor gets the
@@ -652,7 +670,10 @@ worker, queue, budgets and consolidation beyond exact duplicates are not.
 - `/memory pause` (`memory_paused` in `config.json`) stops agent and skill writes; reading and the
   person's own changes go on. `ctx.storage` gained `ttl_seconds` (expired = absent, version kept,
   cleaned on the next write), `compare_and_set` and the same privacy gate.
-Tests: `kernel/tests/test_memory.py`.
+Tests: `kernel/tests/test_memory.py`, `test_memory_consolidation.py`, `test_memory_resilience.py`
+(SIGKILL inside a commit, key blocks and split secrets, a skill posing as the person or forgetting
+more than `MAX_SKILL_FORGETS_PER_TASK` = 5 records per task, retrieval metrics, a `slow` latency
+guard).
 
 ### Request flow
 `main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies

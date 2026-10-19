@@ -27,6 +27,7 @@ _IBAN_RE = re.compile(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b")
 _COORDINATES_RE = re.compile(r"(?<![\d.])-?\d{1,2}\.\d{4,}\s*,\s*-?\d{1,3}\.\d{4,}(?![\d.])")
 _RANDOM_TOKEN_RE = re.compile(r"[A-Za-z0-9+/_=-]{32,}")
 _HEX_RE = re.compile(r"[0-9a-fA-F]+")
+_KEY_HEADER_RE = re.compile(r"-----BEGIN [^-\n]*(?:PRIVATE KEY|KEY BLOCK)-----")
 
 
 def check_text(text: str, field: str, *, flag_random_strings: bool = True) -> None:
@@ -54,7 +55,8 @@ def check_files(workspace: Path, files: list[str]) -> None:
 
 
 def _sensitive_kind(text: str, flag_random_strings: bool) -> str:
-    if redact_text(text) != text:
+    # A key block cut off before its END line is not redacted, but it is still a key.
+    if redact_text(text) != text or _KEY_HEADER_RE.search(text):
         return "a credential (a key, token, password or private key)"
     if any(not _harmless_email(match.group(1)) for match in _EMAIL_RE.finditer(text)):
         return "an e-mail address"

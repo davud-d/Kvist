@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -56,6 +57,8 @@ MAX_RECORDS = 2000
 PERSON = "person"
 WORKSPACE_PREFIX = "mem_"
 USER_PREFIX = "memu_"
+# Not a stored relation: the extractor's "this candidate says what that record says".
+DUPLICATE = "duplicates"
 _TRUST_RANK = {"inferred": 0, "observed": 1, "person": 2}
 _UPDATABLE_STATUSES = ("active", "stale")
 
@@ -106,6 +109,9 @@ class NewRecord:
     topic: str
     files: list[str]
     sources: list[Source]
+    # A proposed relation to a known record ("mem_…") or to another candidate of the
+    # same batch ("c0"): (relation or "duplicates", target, reason). The store decides.
+    link: tuple[str, str, str] | None = None
 
 
 class MemoryStore:
@@ -170,17 +176,12 @@ class MemoryStore:
         the session's recap, unless the person had it forgotten.
         """
         now = time.time()
-        outcome: dict[str, Any] = {"accepted": [], "merged": [], "rejected": [], "already": False, "recap": None}
+        outcome: dict[str, Any] = {"accepted": [], "merged": [], "rejected": [], "links": [], "already": False,
+                                   "recap": None}
         with self._write() as db:
             if db.execute("SELECT 1 FROM processed_batches WHERE idempotency_key = ?", (key,)).fetchone():
                 return {**outcome, "already": True}
-            for record in records:
-                try:
-                    result, stored = self._remember_in(db, record, actor)
-                except (MemoryValidationError, MemoryQuotaExceeded) as error:
-                    outcome["rejected"].append({"content": record.content, "reason": str(error)})
-                    continue
-                outcome[result].append(stored.id)
+            self._consolidate(db, records, actor, outcome)
             if recap is not None and not _is_forgotten(db, recap_marker(session)):
                 outcome["recap"] = self._upsert_recap(db, session, recap, actor)
             db.execute("INSERT INTO processed_batches (idempotency_key, session, first_seq, last_seq, accepted, merged, "
@@ -191,6 +192,64 @@ class MemoryStore:
                        "ON CONFLICT(session) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq), "
                        "updated_at = excluded.updated_at", (session, last_seq, now))
         return outcome
+
+    def _consolidate(self, db: sqlite3.Connection, records: list["NewRecord"], actor: str,
+                     outcome: dict[str, Any]) -> None:
+        """NEW, MERGE, LINK, CONFLICT, SUPERSEDE or REJECT for each extracted record, inside the batch's transaction.
+
+        A model's "this says the same as mem_x" only adds sources to mem_x: it never
+        rewrites it, so a wrong guess costs a citation, not a fact. Links are applied
+        after every record exists, so one candidate may point at another ("c0").
+        """
+        stored_ids: dict[str, str] = {}
+        links: list[tuple[str, tuple[str, str, str]]] = []
+        for index, record in enumerate(records):
+            twin = self._duplicate_target(db, record)
+            if twin is not None:
+                self._add_sources(db, twin, record.sources)
+                db.execute("UPDATE records SET version = version + 1, updated_at = ? WHERE id = ?", (time.time(), twin))
+                _history(db, twin, actor, "merged", "an extracted finding said the same")
+                outcome["merged"].append(twin)
+                stored_ids[f"c{index}"] = twin
+                continue
+            try:
+                result, stored = self._remember_in(db, record, actor)
+            except (MemoryValidationError, MemoryQuotaExceeded) as error:
+                outcome["rejected"].append({"content": record.content, "reason": str(error)})
+                continue
+            outcome[result].append(stored.id)
+            stored_ids[f"c{index}"] = stored.id
+            if record.link is not None:
+                links.append((stored.id, record.link))
+        for source_id, (relation, target, reason) in links:
+            outcome["links"].append(self._extracted_link(db, source_id, stored_ids.get(target, target), relation,
+                                                         actor, reason))
+
+    def _duplicate_target(self, db: sqlite3.Connection, record: "NewRecord") -> str | None:
+        if record.link is None or record.link[0] != DUPLICATE or not record.link[1].startswith(self.prefix):
+            return None
+        row = db.execute("SELECT id FROM records WHERE id = ? AND status != 'superseded' AND kind != 'session_recap'",
+                         (record.link[1],)).fetchone()
+        return row["id"] if row else None
+
+    def _extracted_link(self, db: sqlite3.Connection, source_id: str, target_id: str, relation: str, actor: str,
+                        reason: str) -> dict[str, str]:
+        """Apply a proposed link; a replacement the rules refuse becomes a recorded conflict instead."""
+        result = {"source": source_id, "relation": relation, "target": target_id}
+        if source_id == target_id:
+            return {**result, "result": "refused", "reason": "a record cannot be linked to itself"}
+        try:
+            self._link_in(db, source_id, target_id, relation, actor, reason)
+            return {**result, "result": "linked"}
+        except MemoryPermissionError as error:
+            if relation != "supersedes":
+                return {**result, "result": "refused", "reason": str(error)}
+        except (MemoryValidationError, MemoryNotFound) as error:
+            return {**result, "result": "refused", "reason": str(error)}
+        # The record it would replace is the person's: say they disagree, and the person decides.
+        self._link_in(db, source_id, target_id, "contradicts", actor, reason)
+        return {**result, "relation": "contradicts", "result": "conflict",
+                "reason": f"{target_id} was confirmed by the person, so it is marked as contradicted, not replaced"}
 
     def recaps(self, *, limit: int, exclude_session: str = "") -> list[Record]:
         """The newest session recaps, never the one of ``exclude_session`` (it is that session's own history)."""
@@ -372,21 +431,26 @@ class MemoryStore:
             raise MemoryValidationError("a record cannot be linked to itself")
         reason = self._checked_reason(reason, required=relation in ("supersedes", "contradicts"))
         with self._write() as db:
-            source, target = self._row(db, source_id), self._row(db, target_id)
-            if _linked(db, source_id, target_id, relation):
-                return {"linked": False, "already": True, "relation": relation}
-            if relation in DIRECTED_RELATIONS and _reaches(db, target_id, source_id, relation):
-                raise MemoryValidationError(f"{target_id} already leads back to {source_id} through {relation}; "
-                                            "the link would make a cycle")
-            if relation == "supersedes":
-                self._supersede(db, source, target, actor, reason)
-            if relation == "contradicts":
-                self._mark_conflicted(db, (source, target), actor, reason)
-            db.execute("INSERT INTO relations (source_id, target_id, relation, author, reason, created_at) "
-                       "VALUES (?, ?, ?, ?, ?, ?)", (source_id, target_id, relation, actor, reason, time.time()))
-            _history(db, source_id, actor, "linked", f"{relation} {target_id}")
-            return {"linked": True, "relation": relation, "source": self._row(db, source_id).public(),
-                    "target": self._row(db, target_id).public()}
+            return self._link_in(db, source_id, target_id, relation, actor, reason)
+
+    def _link_in(self, db: sqlite3.Connection, source_id: str, target_id: str, relation: str, actor: str,
+                 reason: str) -> dict[str, Any]:
+        """Every check runs before the first write, so a refused link leaves the transaction clean."""
+        source, target = self._row(db, source_id), self._row(db, target_id)
+        if _linked(db, source_id, target_id, relation):
+            return {"linked": False, "already": True, "relation": relation}
+        if relation in DIRECTED_RELATIONS and _reaches(db, target_id, source_id, relation):
+            raise MemoryValidationError(f"{target_id} already leads back to {source_id} through {relation}; "
+                                        "the link would make a cycle")
+        if relation == "supersedes":
+            self._supersede(db, source, target, actor, reason)
+        if relation == "contradicts":
+            self._mark_conflicted(db, (source, target), actor, reason)
+        db.execute("INSERT INTO relations (source_id, target_id, relation, author, reason, created_at) "
+                   "VALUES (?, ?, ?, ?, ?, ?)", (source_id, target_id, relation, actor, reason, time.time()))
+        _history(db, source_id, actor, "linked", f"{relation} {target_id}")
+        return {"linked": True, "relation": relation, "source": self._row(db, source_id).public(),
+                "target": self._row(db, target_id).public()}
 
     # --- reading --------------------------------------------------------
 
@@ -635,16 +699,32 @@ class MemoryStore:
         try:
             yield db
         except sqlite3.DatabaseError as error:
+            # A connection that failed is not trusted again.
+            _evict(self.path)
             raise _storage_error(error) from None
-        finally:
-            db.close()
 
     def _open(self) -> sqlite3.Connection:
+        """This thread's connection to the database, reused while it still points at the same file.
+
+        Opening one per operation cost a spinning disk ~130 ms per write: when the last
+        connection to a WAL database closes, SQLite checkpoints it, syncs and deletes the
+        log, every time. A connection is reused only while the file keeps its inode (a
+        deleted database must not be written into a ghost) and its schema version (a
+        newer Kvist may have migrated it meanwhile).
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         try:
             validate_storage_path(self.path, self.boundary)
         except (JsonStorageError, OSError) as error:
             raise MemoryStorageError(f"the memory database path is unsafe: {error}") from None
+        cached = _reusable(self.path)
+        if cached is not None:
+            return cached
+        db = self._connect()
+        _remember_connection(self.path, db)
+        return db
+
+    def _connect(self) -> sqlite3.Connection:
         created = not self.path.exists()
         try:
             db = sqlite3.connect(self.path, timeout=5.0, isolation_level=None)
@@ -667,6 +747,11 @@ class MemoryStore:
         db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys = ON")
         db.execute("PRAGMA secure_delete = ON")
+        # With WAL, NORMAL never corrupts and survives a killed process; a power cut may lose
+        # the last few commits. A record can be learned again; a forget cannot be undone that
+        # way, because forget ends with a TRUNCATE checkpoint, which syncs the file. FULL cost
+        # a spinning disk 40 ms per write against 0.4 ms.
+        db.execute("PRAGMA synchronous = NORMAL")
         if created:
             os.chmod(self.path, 0o600)
         # Checked on every open, not cached: a file deleted meanwhile is recreated with its schema.
@@ -697,6 +782,47 @@ class MemoryStore:
 def _history(db: sqlite3.Connection, record_id: str, actor: str, action: str, detail: str) -> None:
     db.execute("INSERT INTO history (record_id, at, actor, action, detail) VALUES (?, ?, ?, ?, ?)",
                (record_id, time.time(), actor, action, detail))
+
+
+_THREAD = threading.local()
+
+
+def _connections() -> dict[str, tuple[sqlite3.Connection, int]]:
+    if not hasattr(_THREAD, "connections"):
+        _THREAD.connections = {}
+    return _THREAD.connections
+
+
+def _reusable(path: Path) -> sqlite3.Connection | None:
+    entry = _connections().get(str(path))
+    if entry is None:
+        return None
+    db, inode = entry
+    try:
+        same_file = path.stat().st_ino == inode
+        current = same_file and db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    except (OSError, sqlite3.DatabaseError):
+        current = False
+    if current:
+        return db
+    _evict(path)
+    return None
+
+
+def _remember_connection(path: Path, db: sqlite3.Connection) -> None:
+    _connections()[str(path)] = (db, path.stat().st_ino)
+
+
+def _evict(path: Path) -> None:
+    entry = _connections().pop(str(path), None)
+    if entry is not None:
+        entry[0].close()
+
+
+def close_connections() -> None:
+    """Close this thread's memory connections (a scratch folder can then be removed on Windows)."""
+    for key in list(_connections()):
+        _evict(Path(key))
 
 
 def recap_marker(session: str) -> str:

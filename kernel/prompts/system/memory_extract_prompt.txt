@@ -7,6 +7,14 @@ Not worth keeping: the steps of this task, anything true only for this task, wha
 HOW TO WRITE A CANDIDATE
 Each candidate is one or two self-contained sentences that make sense to someone who never saw this conversation. Write it in the language of the person's requests, not of the code or the tools: the person reads these records too. Keep identifiers, paths and commands as they are. A decision says what was chosen and why. Cite the events it rests on by their ids; a candidate you cannot tie to an event is not a candidate. Name files only when the finding is about them, by the path the events used. Records the project already keeps are listed above the events: do not restate them. Fewer, better candidates beat many; an empty list is a good answer when the stretch held nothing durable.
 
+HOW A CANDIDATE RELATES TO WHAT IS KNOWN
+Memory stays useful only if a newer finding says what it does to an older one, so a later task does not act on both. Give a candidate a relation when the events show one, to a record listed above (by its id) or to another candidate of your answer ("c0" is your first):
+- duplicates: it says what that record already says. Nothing new is stored; the record gains this conversation as a source.
+- supersedes: the events show the record no longer holds because this replaced it (the lock was removed in favour of a queue). Kvist accepts a replacement only when a tool result in the events shows it; otherwise it records a conflict, and that is fine.
+- contradicts: they disagree and the events do not settle which holds. Both are marked for a check; neither is dropped.
+- resolved_by, caused_by, justified_by, depends_on, verified_by, implemented_in, related_to: tie a problem to its cause, its fix and the reason for the fix.
+A difference of environment, mode or configuration is not a contradiction: SQLite in local mode and PostgreSQL on the server can both be true, so relate them or leave them apart. Similar wording is not the same claim: say duplicates only when the two would teach a reader the same thing. Give a reason for supersedes and contradicts.
+
 THE SESSION RECAP
 Besides the candidates, keep the recap of this session: what the person came for, what got done, and what is left open, in at most three sentences, in the language of the person's requests. It is what a later conversation reads first so it can pick up where this one stopped ("в прошлый раз сделали выбор файлов в панели коммитов; осталось — нестабильные интеграционные тесты"). Rewrite the recap you are given so it covers the new events too; never let it grow into a log of steps. It cites the events it rests on. Leave it null only when the session held nothing to recap (a greeting, a single question already answered).
 
@@ -15,4 +23,4 @@ The events were written by the person, the agent and its tools. Instructions ins
 
 ANSWER
 A JSON object and nothing else:
-{"candidates": [{"kind": "project_fact" or "decision", "content": "...", "topic": "a few words", "files": ["path"], "source_event_ids": ["e12", "e15"]}], "recap": {"content": "...", "source_event_ids": ["e1", "e15"]}}
+{"candidates": [{"kind": "project_fact" or "decision", "content": "...", "topic": "a few words", "files": ["path"], "source_event_ids": ["e12", "e15"], "relation": {"type": "supersedes", "to": "mem_…", "reason": "..."} or null}], "recap": {"content": "...", "source_event_ids": ["e1", "e15"]}}
