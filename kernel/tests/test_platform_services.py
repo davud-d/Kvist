@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import http.server
 import io
+import json
 import os
 import socket
 import struct
@@ -68,6 +69,41 @@ def test_an_older_version_refuses_state_a_newer_one_wrote(tmp_path):
 
     with pytest.raises(StorageError) as refused:
         SkillStorage(tmp_path, "browser", "1.9.0").get("workspace", "workspace", "k")
+    assert refused.value.code == "newer_state"
+
+
+def test_a_read_creates_no_database_and_data_survives_a_new_instance(tmp_path):
+    storage = SkillStorage(tmp_path, "browser", "1.0.0")
+    assert storage.get("workspace", "workspace", "k") == {"value": None, "version": 0}
+    assert storage.keys("workspace", "workspace") == []
+    assert not storage.path.exists()
+
+    storage.set("workspace", "workspace", "k", {"a": [1, "б"]}, None)
+    storage.set("task", "run-1", "t", 1, None)
+    storage.drop_owner("task", "run-1")
+
+    again = SkillStorage(tmp_path, "browser", "1.0.0")
+    assert again.get("workspace", "workspace", "k") == {"value": {"a": [1, "б"]}, "version": 1}
+    assert again.keys("task", "run-1") == []
+    assert again.delete("workspace", "workspace", "k") is True
+    assert again.delete("workspace", "workspace", "k") is False
+
+
+def test_the_json_file_of_an_older_build_is_imported_once_and_removed(tmp_path):
+    legacy = SkillStorage(tmp_path, "browser", "1.0.0")
+    legacy.path.parent.mkdir(parents=True)
+    document = {"written_by": "1.0.0", "scopes": {"workspace": {"workspace": {
+        "cookies": {"value": {"n": 7}, "version": 3},
+        "gone": {"value": None, "version": 2, "expires_at": 1.0},
+    }}}}
+    legacy.legacy_path.write_text(json.dumps(document), encoding="utf-8")
+    legacy.legacy_path.with_suffix(".json.bak").write_text(json.dumps(document), encoding="utf-8")
+
+    assert legacy.get("workspace", "workspace", "cookies") == {"value": {"n": 7}, "version": 3}
+    assert legacy.get("workspace", "workspace", "gone") == {"value": None, "version": 2}
+    assert not legacy.legacy_path.exists() and not legacy.legacy_path.with_suffix(".json.bak").exists()
+    with pytest.raises(StorageError) as refused:
+        SkillStorage(tmp_path, "browser", "0.9.0").get("workspace", "workspace", "cookies")
     assert refused.value.code == "newer_state"
 
 
