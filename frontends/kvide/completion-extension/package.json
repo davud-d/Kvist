@@ -1,0 +1,7 @@
+{
+  "name": "kvist-kvide-completion",
+  "version": "0.1.0",
+  "main": "./extension.cjs",
+  "engines": { "vscode": "^1.80.0" },
+  "activationEvents": ["*"]
+}

@@ -30,6 +30,9 @@ from install_cli import CORE_NAME, DEFAULT_LIB_DIR
 ADAPTER_SOURCE = REPO_ROOT / "frontends" / "kvide" / "kvist_generator.py"
 INSTALL_DIR_NAME = "kvide"
 ADAPTER_NAME = ADAPTER_SOURCE.name
+COMPLETION_SOURCE = REPO_ROOT / "frontends" / "kvide" / "completion-extension"
+COMPLETION_DIR_NAME = "completion-extension"
+CORE_FILE_NAME = "core.json"
 CONFIG_NAME = "generators.toml"
 # First line of every file this installer writes; it is how a later run tells
 # its own file from one the user wrote.
@@ -136,6 +139,26 @@ def install(lib_dir: Path, user_config: Path) -> tuple[Path, bool]:
     return user_config, True
 
 
+def install_completion(lib_dir: Path) -> Path:
+    """Copy the completion extension next to the adapter and record the core it runs.
+
+    kvide has no user file for extensions, so the directory is passed with
+    ``--completion-extension`` by hand.
+
+    :param lib_dir: where ``install_cli.py`` put the binary.
+    :returns: the extension directory for ``kvide --completion-extension``.
+    """
+    core = resolve_core(lib_dir)
+    target = lib_dir / INSTALL_DIR_NAME / COMPLETION_DIR_NAME
+    target.mkdir(parents=True, exist_ok=True)
+    for source in COMPLETION_SOURCE.iterdir():
+        if source.is_file():
+            shutil.copy2(source, target / source.name)
+    (target / CORE_FILE_NAME).write_text(json.dumps({"core": str(core)}), encoding="utf-8")
+    log(f"wrote {target}")
+    return target
+
+
 def uninstall(lib_dir: Path, user_config: Path) -> bool:
     """Remove the files this installer created.
 
@@ -175,10 +198,12 @@ def main() -> None:
         print("\nDone. The kvide generator is removed.")
         return
     config, is_default = install(args.lib_dir, user_config)
+    extension = install_completion(args.lib_dir)
     if is_default:
         print("\nDone. A plain `kvide` now shows the Kvist button.")
     else:
         print(f"\nDone. {user_config} is yours, so start kvide with: kvide --generators {config}")
+    print(f"Autocomplete (runs JavaScript, enable it knowingly): kvide --completion-extension {extension}")
 
 
 if __name__ == "__main__":

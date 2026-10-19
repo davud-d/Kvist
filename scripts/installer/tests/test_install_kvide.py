@@ -2,6 +2,7 @@
 """The kvide installer wires kvide to the installed core and removes only its own files."""
 from __future__ import annotations
 
+import json
 import sys
 import tomllib
 from pathlib import Path
@@ -98,3 +99,20 @@ def test_user_config_path_follows_xdg_then_home(monkeypatch, tmp_path):
     monkeypatch.delenv("XDG_CONFIG_HOME")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert install_kvide.user_config_path() == tmp_path / ".config" / "kvide" / "generators.toml"
+
+
+def test_install_completion_copies_the_extension_and_records_the_core(lib_dir):
+    extension = install_kvide.install_completion(lib_dir)
+
+    assert extension == lib_dir / "kvide" / "completion-extension"
+    assert (extension / "extension.cjs").is_file() and (extension / "package.json").is_file()
+    assert json.loads((extension / "core.json").read_text(encoding="utf-8")) == {"core": str(lib_dir / CORE_NAME)}
+
+
+def test_uninstall_removes_the_completion_extension(lib_dir, user_config):
+    install_kvide.install(lib_dir, user_config)
+    install_kvide.install_completion(lib_dir)
+
+    install_kvide.uninstall(lib_dir, user_config)
+
+    assert not (lib_dir / "kvide").exists()

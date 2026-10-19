@@ -37,3 +37,22 @@ kvide                                       # кнопка Kvist уже на м�
   `{"error": {"code", "message"}}`.
 
 Тесты: `frontends/kvide/tests`, `scripts/installer/tests/test_install_kvide.py`.
+
+## Автокомплит
+
+`completion-extension/` — inline-расширение для kvide. Оно запускает
+`kvist-core --complete-server` (тот же процесс, что у плагинов IDE) и показывает
+одну подсказку серым текстом после курсора, как в VS Code: Tab принимает, Esc
+убирает, ввод тех же символов укорачивает её. Показывается и вставляется только
+первая строка; следующая подсказка приходит после очередной паузы.
+
+```bash
+python scripts/installer/install_kvide.py   # заодно копирует расширение и записывает путь к ядру
+kvide --completion-extension ~/.local/share/kvist/kvide/completion-extension
+```
+
+У kvide нет пользовательского файла для расширений, а расширение — это JavaScript
+с твоими правами, поэтому оно включается только этим флагом. `KVIST_CORE`
+переопределяет записанный путь к ядру. Первая подсказка ждёт запуска ядра
+(около 1,5 с) и модели; ответ дольше 12 с отбрасывается без сообщения.
+Тесты: `frontends/kvide/tests`.
