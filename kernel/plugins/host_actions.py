@@ -53,6 +53,18 @@ def open_url(url: str) -> None:
         raise ServiceError("unavailable", "no default browser could be started")
 
 
+def open_visualization(path: Path) -> None:
+    """Only the core renderer calls this, with its newly saved HTML artifact."""
+    if sys.platform.startswith("linux") and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        raise ServiceError("unavailable", "no graphical desktop; open the saved HTML file on your computer")
+    try:
+        opened = webbrowser.open(path.resolve().as_uri(), new=2)
+    except (OSError, webbrowser.Error) as error:
+        raise ServiceError("unavailable", f"could not open the visualization: {error}") from None
+    if not opened:
+        raise ServiceError("unavailable", "no default browser could be started; open the saved HTML file")
+
+
 # --- applications ------------------------------------------------------------
 
 

@@ -60,7 +60,7 @@ _TOP_LEVEL_KEYS = frozenset({
 })
 # Core tool groups a bundled skill may name: its tools are run by the core itself (CoreServices methods
 # "<group>.<tool>"), so there is no package code and no sandbox. Never available to a package the person installs.
-CORE_GROUPS = frozenset({"host"})
+CORE_GROUPS = frozenset({"host", "visualize"})
 _TOOL_KEYS = frozenset({"name", "summary", "parameters", "result", "readonly", "timeout_seconds", "max_result_bytes"})
 
 
@@ -198,6 +198,15 @@ def read_package_file(root: Path, relative: str, max_bytes: int) -> bytes:
     parts = Path(relative).parts
     if not parts or any(part in ("", ".", "..") for part in parts) or Path(relative).is_absolute():
         raise ManifestError(f"{relative!r} is not a path inside the package")
+    if os.name == "nt":
+        from kernel.plugins.package_windows import read_file
+
+        if any(":" in part for part in parts):
+            raise ManifestError("package paths may not contain drive prefixes or alternate data streams")
+        try:
+            return read_file(root / relative, max_bytes)
+        except OSError as error:
+            raise ManifestError(f"{relative} cannot be read: {error}") from None
     directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         for part in parts[:-1]:
@@ -240,7 +249,7 @@ def package_files(root: Path) -> list[tuple[str, Path]]:
                 if entry.name in _SKIPPED_NAMES or entry.name.endswith(".pyc"):
                     continue
                 relative = Path(entry.path).relative_to(root).as_posix()
-                if entry.is_symlink():
+                if entry.is_symlink() or getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400:
                     raise ManifestError(f"{relative} is a symbolic link; packages may not contain links")
                 if entry.is_dir(follow_symlinks=False):
                     pending.append(Path(entry.path))

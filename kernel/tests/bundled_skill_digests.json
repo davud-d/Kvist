@@ -8,5 +8,6 @@
   "project_overview": {"version": "0.1.0", "digest": "sha256:7c44b6c7f01f9c8572afca0fac233849b003ebcd05c1e101d44f1aec316f3190"},
   "skill_authoring": {"version": "0.1.1", "digest": "sha256:3277ceda8d676bca444ebd83cdcab737d3ffbd771d4f1ea8527a747c9ba70a23"},
   "static_checks": {"version": "0.1.0", "digest": "sha256:f87caff902a36e93bd1bbf7b4e47455bd4a0deda80e89224f2b4878397f91b73"},
-  "test_runner": {"version": "0.1.0", "digest": "sha256:2dfdc712ed0694fb35f11f1cf1d5bc9e7d1c289a62552fc76ec2a6818149a03f"}
+  "test_runner": {"version": "0.1.0", "digest": "sha256:2dfdc712ed0694fb35f11f1cf1d5bc9e7d1c289a62552fc76ec2a6818149a03f"},
+  "visualize": {"version": "0.1.0", "digest": "sha256:489f70f372ff57ec1a8920f50bc71c2c0e725087ad054f1efebdd90b2886f140"}
 }

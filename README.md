@@ -200,7 +200,17 @@ that run in an OS sandbox with only the permissions you approve. The bundled
 **browser** skill gives the agent its own Chromium on a virtual screen. It opens
 the page it built, clicks through it, reads console and network errors and takes
 screenshots, while you watch a live preview. Other bundled skills run tests,
-read PDF, xlsx and docx files and navigate code. Skills work on Linux only.
+read PDF, xlsx and docx files and navigate code. Sandboxed tool skills need Linux.
+
+The bundled **visualize** skill works on Linux, macOS and Windows without extra
+dependencies. The model attaches it and supplies a structured page description:
+large zoomable architecture diagrams, charts with data tables and CSV export,
+or interactive 3D boxes, spheres and cones with connections. The skill validates
+the description, saves a standalone HTML artifact and opens it in the system's
+default browser. The file works offline after Kvist exits. If no graphical
+browser is available, the saved file and opening error are returned. Example:
+“Explain this project's architecture as a large interactive diagram and open
+it in my browser.” Skill permissions are requested on first use.
 
 ```bash
 kvist --skill-op install --skill-path bundled:browser

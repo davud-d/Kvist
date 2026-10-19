@@ -1,0 +1,27 @@
+{
+  "manifest_version": 1,
+  "id": "visualize",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Visual explanations", "ru": "Наглядные объяснения"},
+  "summary": {
+    "en": "Explain architecture, relationships and data with spacious interactive pages: large zoomable diagrams, charts, tables and rotatable 3D scenes. Validates a structured description, saves an offline HTML page and opens the system's default browser.",
+    "ru": "Объяснять архитектуру, связи и данные на просторных интерактивных страницах: большие масштабируемые схемы, графики, таблицы и вращаемые 3D-сцены. Проверяет описание, сохраняет автономную HTML-страницу и открывает системный браузер по умолчанию."
+  },
+  "instructions": "SKILL.md",
+  "core_group": "visualize",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {"required": [
+    {"name": "artifacts", "reason": "to save the visualization as an offline HTML file you can keep"},
+    {"name": "host.open", "reason": "to automatically open the generated page in your system's default browser"}
+  ]},
+  "limits": {"call_timeout_seconds": 30, "max_result_bytes": 65536, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {"name": "validate", "summary": "Check a page description without saving or opening anything. Returns valid and errors with field paths. Read references/format.md for section schemas.", "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["page"], "properties": {"page": {"type": "object", "description": "Page with title, summary, language (en/ru), theme (dark/light), demo and sections. Sections: text, metrics, diagram, chart, table, scene3d. Read references/format.md first."}}}},
+    {"name": "show", "summary": "Validate, generate and save an offline HTML page; automatically open it in the user's default browser. Invalid descriptions create no file and open nothing. Returns artifact, opened, and any open_error.", "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["page"], "properties": {"page": {"type": "object", "description": "The same structured page as validate; follow references/format.md."}, "open_browser": {"type": "boolean", "default": true, "description": "False only when the person wants a file without opening it."}}}}
+  ]
+}

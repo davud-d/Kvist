@@ -332,7 +332,10 @@ def _copy_package(source: Path, target: Path) -> None:
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         data = read_package_file(source, relative, MAX_PACKAGE_BYTES)
-        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        # O_EXCL refuses an existing final component on Windows too; O_BINARY
+        # preserves package digests by preventing newline translation there.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        descriptor = os.open(destination, flags, 0o600)
         try:
             view = memoryview(data)
             while view:

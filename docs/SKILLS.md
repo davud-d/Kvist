@@ -436,6 +436,7 @@ out skills this OS can never run; `--skill-op list` shows them with the reason.
 | --- | --- |
 | `browser` | Chromium + Playwright on its own X11 screen: open pages (workspace files via a local server, task services, granted domains), snapshot, click, type, select, press, scroll, wait, screenshot (described by the Vision model when given a `question`), console/network errors, tabs, upload. `emulate` sets the viewport, the colour scheme and reduced motion; `check_page` measures sideways scroll and its cause, clipped text, contrast below WCAG AA, small targets, unnamed controls, images without alt, heading jumps, `lang`, the character set and failed fonts. Preview in the GUI, viewer link. Needs `xorg-server-xvfb`, `i3` and Chromium; Playwright is installed into the skill's own env. |
 | `desktop` | **core tools**, no runner: open an http(s) address in the person's own browser, start an installed application by name, list / focus / close windows (closing asks the person). Text over GUI: the agent finds the exact address with web search and opens it. Works on Linux, macOS and Windows; windows on Linux need Hyprland, Sway, niri, i3, X11 with `wmctrl`, GNOME with the Window Calls extension or KDE with `kdotool`. No arbitrary commands, typing or clicks, and no tabs of a running browser. |
+| `visualize` | **core tools**, no runner or extra dependencies: validate structured descriptions and show offline pages with large zoomable diagrams, line/bar/donut charts, data tables/CSV and interactive 3D primitives. Saves an HTML artifact and automatically opens the default system browser. Linux, macOS, Windows; browser failure leaves the saved file available. |
 | `test_runner` | pytest / `node --test` / `npm test` with structured results and a log artifact. |
 | `documents` | read PDF pages, spreadsheet sheets and ranges (xlsx, csv) and Word paragraphs (docx) with exact page, sheet, cell and paragraph references. |
 | `code_nav` | **Python only**: go to definition, find usages, file outline, preview a rename as diffs, pyflakes diagnostics. |
@@ -451,7 +452,7 @@ out skills this OS can never run; `--skill-op list` shows them with the reason.
 * **Executable skills are Linux-only.** Without Bubblewrap and a trusted system Python
   they are reported unavailable; Kvist never falls back to running skill code with the
   person's rights. Instruction-only skills work everywhere.
-* macOS and Windows: not verified; no executable skills. The macOS, Windows, GNOME, KDE and niri backends of `desktop` are covered by unit tests with faked commands only, and the package reader of the skills platform itself still uses POSIX file flags, so skills do not load on Windows yet.
+* macOS and Windows: not verified; no executable skills. The macOS, Windows, GNOME, KDE and niri backends of `desktop` are covered by unit tests with faked commands only, and the Windows package reader is covered by mocked native-handle tests. Package reads use native Windows handles and reject reparse points; real Windows/macOS end-to-end runs remain unverified.
 * The browser skill needs Xvfb, i3 and Chromium on the host.
 * The ctx file API has no delete, move or binary write. MCP is stdio only.
 * ACP (Zed) shows skill, screen, helper and artifact events as text and has no pause.

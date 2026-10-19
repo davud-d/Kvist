@@ -210,6 +210,8 @@ METHODS: dict[str, tuple[str | None, bool]] = {
     "host.windows": ("host.windows", False),
     "host.focus": ("host.windows", True),
     "host.close": ("host.windows", True),
+    "visualize.validate": (None, False),
+    "visualize.show": ("artifacts", True),
     "network.proxy": (None, False),
     "network.services": (None, False),
 }
@@ -286,6 +288,8 @@ class CoreServices:
         capability, changes = spec
         if method.startswith("host.") and call.skill.manifest.core_group != "host":
             raise ServiceError("denied", "the person's desktop is reached only through Kvist's own desktop skill")
+        if method.startswith("visualize.") and call.skill.manifest.core_group != "visualize":
+            raise ServiceError("denied", "visualizations are reached only through Kvist's own visualize skill")
         if capability is not None and not call.skill.allows(capability):
             raise ServiceError("denied", f"{call.skill.id} was not granted {capability}; "
                                "ask for it with ctx.permissions.request if the task needs it")
@@ -1257,6 +1261,37 @@ class CoreServices:
                 "state": host.screen.state}
 
     # --- host (the person's own desktop) ---------------------------------
+
+    def _visualize_validate(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        from kernel.skills_bundled.visualize.renderer import validate_page
+
+        errors = validate_page(params.get("page"))
+        return {"valid": not errors, "errors": errors}
+
+    def _visualize_show(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        from kernel.skills_bundled.visualize.renderer import render_page, validate_page
+
+        page = params.get("page")
+        errors = validate_page(page)
+        if errors:
+            return {"valid": False, "errors": errors, "opened": False}
+        should_open = params.get("open_browser", True)
+        if should_open and not call.skill.allows("host.open"):
+            raise ServiceError("denied", "visualize was not granted host.open")
+        if should_open:
+            self._count_host_open(call)
+        artifact = self.artifacts.save_bytes(
+            render_page(page).encode("utf-8"), name="visualization.html", kind="visualization",
+            caption=page["title"], origin=self._origin(call),
+        )
+        result = {"valid": True, "artifact": artifact.public(), "opened": False}
+        if should_open:
+            try:
+                host_actions.open_visualization(Path(artifact.path))
+                result["opened"] = True
+            except ServiceError as error:
+                result["open_error"] = error.message
+        return result
 
     def _host_open_url(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
         url = _str(params, "url", limit=2000)
