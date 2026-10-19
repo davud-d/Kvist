@@ -594,6 +594,23 @@ worker, queue, budgets and consolidation beyond exact duplicates are not.
   (`MemoryProviderError`) stores nothing and keeps the checkpoint. Extracted records are always
   `inferred`, actor `extractor`; a later observation merges and raises them. Sending needs the
   person's consent, asked once (`memory_processing` in `config.json`, `/memory processing off`).
+- **Session recaps** (schema v3, kind `session_recap`, column `session`; written only by the
+  extractor, never offered to the model's tool or `ctx.memory`): one per session, "what it was
+  for, what got done, what is left", rewritten as the session goes on (the extractor gets the
+  current recap and returns the new one in the same call). Retrieval puts the 3 newest recaps of
+  *other* sessions into every prompt with no word in common needed (`relevant(session=)`), so
+  "continue" in a new session has something to refer to. Forgetting a recap stores
+  `recap_marker(session)` in `forgotten`, so that session is never summed up again. v3 rebuilt
+  `records` (SQLite cannot change a CHECK): `migrate` turns foreign keys off around the transaction
+  and runs `foreign_key_check` before committing, or the DROP would cascade sources and history.
+- **Background reading** (`auto.py`, `AgentConfig.memory_auto_processing`, set with
+  `end_session` by the interactive frontends only, never helpers, headless runs or tests): one
+  daemon worker; a session is read 10 min after its last turn (a new turn restarts the wait), at
+  once when the person leaves it (`/new`, a switch), and at launch for the 3 latest other sessions
+  (`start_fresh_session` → `catch_up`); `shutdown` never waits. Each job re-checks consent and
+  pause, takes a 5-min `leases` row (another core reading it → skipped) and draws on 40 model
+  calls per workspace per day (`take_model_calls`, reserved only once there is something to read).
+  Turn hooks: `LocalAgent._announce_turn_started/_finished` (tray + memory).
 - "запомни …"/"забудь …"/"remember …" route to **reader** (`role_router._DIRECT_MEMORY_PATTERNS`,
   after devops/coder rules): chat has no memory tool. A confirmed `forget` from the tool runs as
   the person, so it removes their own records too.

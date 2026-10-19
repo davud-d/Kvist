@@ -12,7 +12,8 @@ import sqlite3
 
 from kernel.memory.errors import MemoryStorageError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+# What a model, a skill or the person can store; a session recap is written by the extractor alone.
 KINDS = ("project_fact", "decision", "preference")
 STATUSES = ("active", "stale", "conflicted", "superseded")
 TRUST_LEVELS = ("person", "observed", "inferred")
@@ -28,13 +29,14 @@ def _quoted(values: tuple[str, ...]) -> str:
     return ", ".join(f"'{value}'" for value in values)
 
 
-# ``seq`` is the explicit integer key the full-text index follows: an implicit
-# rowid may be renumbered by VACUUM, which would point the index at other rows.
-_V1 = f"""
-CREATE TABLE records (
+def _records_table(name: str, kinds: tuple[str, ...], extra_columns: str = "") -> str:
+    # ``seq`` is the explicit integer key the full-text index follows: an implicit
+    # rowid may be renumbered by VACUUM, which would point the index at other rows.
+    return f"""
+CREATE TABLE {name} (
     seq INTEGER PRIMARY KEY,
     id TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL CHECK (kind IN ({_quoted(KINDS)})),
+    kind TEXT NOT NULL CHECK (kind IN ({_quoted(kinds)})),
     content TEXT NOT NULL,
     topic TEXT NOT NULL DEFAULT '',
     files TEXT NOT NULL DEFAULT '[]',
@@ -47,11 +49,34 @@ CREATE TABLE records (
     superseded_by TEXT REFERENCES records(id) ON DELETE SET NULL,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL,
-    verified_at REAL
+    verified_at REAL{extra_columns}
 );
+"""
+
+
+_RECORD_INDEXES = """
 CREATE INDEX records_status ON records(status);
 CREATE INDEX records_hash ON records(content_hash);
+"""
 
+_FTS_TRIGGERS = """
+CREATE TRIGGER records_fts_insert AFTER INSERT ON records BEGIN
+    INSERT INTO records_fts(rowid, content, topic, files) VALUES (new.seq, new.content, new.topic, new.files);
+END;
+CREATE TRIGGER records_fts_delete AFTER DELETE ON records BEGIN
+    INSERT INTO records_fts(records_fts, rowid, content, topic, files)
+    VALUES ('delete', old.seq, old.content, old.topic, old.files);
+END;
+CREATE TRIGGER records_fts_update AFTER UPDATE OF content, topic, files ON records BEGIN
+    INSERT INTO records_fts(records_fts, rowid, content, topic, files)
+    VALUES ('delete', old.seq, old.content, old.topic, old.files);
+    INSERT INTO records_fts(rowid, content, topic, files) VALUES (new.seq, new.content, new.topic, new.files);
+END;
+"""
+
+# Frozen: a migration says what that version was, whatever the constants above become.
+_V1_KINDS = ("project_fact", "decision", "preference")
+_V1 = _records_table("records", _V1_KINDS) + _RECORD_INDEXES + f"""
 CREATE TABLE sources (
     id INTEGER PRIMARY KEY,
     record_id TEXT NOT NULL REFERENCES records(id) ON DELETE CASCADE,
@@ -93,19 +118,7 @@ CREATE TABLE forgotten (
 CREATE VIRTUAL TABLE records_fts USING fts5(
     content, topic, files, content='records', content_rowid='seq', tokenize='trigram'
 );
-CREATE TRIGGER records_fts_insert AFTER INSERT ON records BEGIN
-    INSERT INTO records_fts(rowid, content, topic, files) VALUES (new.seq, new.content, new.topic, new.files);
-END;
-CREATE TRIGGER records_fts_delete AFTER DELETE ON records BEGIN
-    INSERT INTO records_fts(records_fts, rowid, content, topic, files)
-    VALUES ('delete', old.seq, old.content, old.topic, old.files);
-END;
-CREATE TRIGGER records_fts_update AFTER UPDATE OF content, topic, files ON records BEGIN
-    INSERT INTO records_fts(records_fts, rowid, content, topic, files)
-    VALUES ('delete', old.seq, old.content, old.topic, old.files);
-    INSERT INTO records_fts(rowid, content, topic, files) VALUES (new.seq, new.content, new.topic, new.files);
-END;
-
+""" + _FTS_TRIGGERS + """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
@@ -130,28 +143,65 @@ CREATE TABLE processed_batches (
 );
 """
 
-MIGRATIONS = {1: _V1, 2: _V2}
+# A recap of one session ("what it was about, what got done, what is left") so a
+# later session is not a goldfish. SQLite cannot change a CHECK in place, so the
+# table is rebuilt (the documented 12-step way: foreign keys are off while it runs,
+# see migrate) with the new kind and the session a recap belongs to. Leases keep
+# two cores from paying to read the same session at once.
+_V3_KINDS = ("project_fact", "decision", "preference", "session_recap")
+_V3 = _records_table("records_v3", _V3_KINDS, ",\n    session TEXT NOT NULL DEFAULT ''") + """
+INSERT INTO records_v3 (seq, id, kind, content, topic, files, status, status_reason, trust, author, version,
+                        content_hash, superseded_by, created_at, updated_at, verified_at)
+SELECT seq, id, kind, content, topic, files, status, status_reason, trust, author, version,
+       content_hash, superseded_by, created_at, updated_at, verified_at FROM records;
+DROP TABLE records;
+ALTER TABLE records_v3 RENAME TO records;
+""" + _RECORD_INDEXES + _FTS_TRIGGERS + """
+CREATE INDEX records_session ON records(session, kind);
+INSERT INTO records_fts(records_fts) VALUES ('rebuild');
+
+CREATE TABLE leases (
+    session TEXT PRIMARY KEY,
+    holder TEXT NOT NULL,
+    expires_at REAL NOT NULL
+);
+"""
+
+MIGRATIONS = {1: _V1, 2: _V2, 3: _V3}
+RECORD_KINDS = _V3_KINDS
 
 
 def migrate(connection: sqlite3.Connection) -> None:
     """Bring the database to ``SCHEMA_VERSION``; refuse one from a newer Kvist."""
+    # A table rebuild drops the old table; with foreign keys on, that would delete every
+    # source, link and history row with it. The pragma is ignored inside a transaction.
+    connection.execute("PRAGMA foreign_keys = OFF")
     connection.execute("BEGIN IMMEDIATE")
     try:
-        current = connection.execute("PRAGMA user_version").fetchone()[0]
-        if current > SCHEMA_VERSION:
-            raise MemoryStorageError(
-                f"the memory database has schema {current}, newer than this Kvist knows ({SCHEMA_VERSION}); "
-                "it was left untouched — update Kvist to use it"
-            )
-        for version in range(current + 1, SCHEMA_VERSION + 1):
-            # executescript would commit the open transaction; statements run one by one instead.
-            for statement in _statements(MIGRATIONS[version]):
-                connection.execute(statement)
-            connection.execute(f"PRAGMA user_version = {version}")
+        _apply_migrations(connection)
+        broken = connection.execute("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            raise MemoryStorageError(f"a migration would leave {len(broken)} broken references; nothing was changed")
         connection.execute("COMMIT")
     except BaseException:
         connection.execute("ROLLBACK")
         raise
+    finally:
+        connection.execute("PRAGMA foreign_keys = ON")
+
+
+def _apply_migrations(connection: sqlite3.Connection) -> None:
+    current = connection.execute("PRAGMA user_version").fetchone()[0]
+    if current > SCHEMA_VERSION:
+        raise MemoryStorageError(
+            f"the memory database has schema {current}, newer than this Kvist knows ({SCHEMA_VERSION}); "
+            "it was left untouched — update Kvist to use it"
+        )
+    for version in range(current + 1, SCHEMA_VERSION + 1):
+        # executescript would commit the open transaction; statements run one by one instead.
+        for statement in _statements(MIGRATIONS[version]):
+            connection.execute(statement)
+        connection.execute(f"PRAGMA user_version = {version}")
 
 
 def _statements(script: str) -> list[str]:

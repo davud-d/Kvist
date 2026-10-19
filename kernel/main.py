@@ -1800,6 +1800,7 @@ def build_agent(
         end_session_enabled=end_session,
         # The frontends that offer end_session have a person answering dialogs.
         interactive=end_session,
+        memory_auto_processing=end_session,
         voice_mode=os.getenv("AGENT_VOICE_MODE", "").strip() == "1",
     )
     apply_api_settings(config)

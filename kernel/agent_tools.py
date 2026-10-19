@@ -326,7 +326,7 @@ def memory_model(agent: Any) -> ModelAccess:
 def memory_prompt_section(agent: Any, text: str) -> str:
     """Records relevant to ``text`` for a prompt; empty when none, or when memory cannot be read."""
     try:
-        return memory_service(agent).prompt_block(text, agent._count_tokens)
+        return memory_service(agent).prompt_block(text, agent._count_tokens, getattr(agent, "current_session", ""))
     except MemoryStoreError as error:
         # Memory is help, never a reason for a turn to fail.
         agent._ui.debug_print(f"[memory] not used in this prompt: {error}")

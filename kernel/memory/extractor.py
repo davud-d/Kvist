@@ -42,7 +42,7 @@ from kernel.redaction import defang_prompt_boundary_tags
 ACTOR = "extractor"
 # Raise when the prompt, the collector or the gate changes what a batch yields:
 # the idempotency key then lets the same events be read again under the new rules.
-EXTRACTION_VERSION = 2
+EXTRACTION_VERSION = 3
 POLICY_VERSION = 1
 MAX_BATCH_TOKENS = 12_000
 MAX_CALLS_PER_RUN = 4
@@ -74,21 +74,27 @@ class ModelAccess:
     count_tokens: Callable[[str], int]
 
 
-def process_session(store: MemoryStore, session: str, model: ModelAccess) -> dict[str, Any]:
-    """Read the session's new finished turns in batches and store what they yield."""
+def process_session(store: MemoryStore, session: str, model: ModelAccess,
+                    reserve: Callable[[int], int] | None = None) -> dict[str, Any]:
+    """Read the session's new finished turns in batches and store what they yield.
+
+    ``reserve(wanted)`` grants how many model calls this run may make (a background
+    run draws on a daily cap); it is asked only once there is something to read.
+    """
     events, boundary = collect(store, session, store.processed_up_to(session))
     summary: dict[str, Any] = {"session": session, "events": len(events), "batches": 0, "accepted": [],
-                               "merged": [], "rejected": [], "left": 0, "problem": ""}
+                               "merged": [], "rejected": [], "recap": None, "left": 0, "problem": ""}
     if boundary is None:
         return summary
     groups = batches(events, model.count_tokens)
     if not groups:
-        # Finished turns with nothing worth reading (only thoughts): move the checkpoint past them.
-        after = store.processed_up_to(session)
-        store.apply_extraction(session=session, first_seq=after + 1, last_seq=boundary,
-                               key=idempotency_key(session, after + 1, boundary), records=[], actor=ACTOR)
+        _skip_to(store, session, boundary)
         return summary
-    for index, batch in enumerate(groups[:MAX_CALLS_PER_RUN]):
+    wanted = min(len(groups), MAX_CALLS_PER_RUN)
+    granted = reserve(wanted) if reserve is not None else wanted
+    if granted == 0:
+        summary["problem"] = "today's limit of background memory calls is used up; it continues tomorrow"
+    for index, batch in enumerate(groups[:granted]):
         last_seq = boundary if index == len(groups) - 1 else batch[-1].seq
         try:
             outcome = _process_batch(store, session, batch, last_seq, model)
@@ -97,11 +103,18 @@ def process_session(store: MemoryStore, session: str, model: ModelAccess) -> dic
             summary["problem"] = str(error)
             break
         summary["batches"] += 1
+        summary["recap"] = outcome["recap"] or summary["recap"]
         for key in ("accepted", "merged", "rejected"):
             summary[key].extend(outcome[key])
-    done = summary["batches"]
-    summary["left"] = sum(len(batch) for batch in groups[done:])
+    summary["left"] = sum(len(batch) for batch in groups[summary["batches"]:])
     return summary
+
+
+def _skip_to(store: MemoryStore, session: str, boundary: int) -> None:
+    """Finished turns with nothing worth reading (only thoughts): move the checkpoint past them."""
+    after = store.processed_up_to(session)
+    store.apply_extraction(session=session, first_seq=after + 1, last_seq=boundary,
+                           key=idempotency_key(session, after + 1, boundary), records=[], actor=ACTOR)
 
 
 def collect(store: MemoryStore, session: str, after_seq: int) -> tuple[list[Event], int | None]:
@@ -156,16 +169,18 @@ def batches(events: list[Event], count_tokens: Callable[[str], int],
     return groups
 
 
-def build_messages(batch: list[Event], known: list[str]) -> list[dict[str, str]]:
+def build_messages(batch: list[Event], known: list[str], recap: str = "") -> list[dict[str, str]]:
     known_block = "\n".join(f"- {line}" for line in known) or "(none yet)"
     events_block = "\n".join(event.line() for event in batch)
     user = (
         "Records this project already keeps (do not restate them):\n"
         f"{defang_prompt_boundary_tags(known_block)}\n\n"
+        "Recap of this session so far (rewrite it to cover the events below too):\n"
+        f"{defang_prompt_boundary_tags(recap) or '(none yet: this is where the session starts)'}\n\n"
         '<UNTRUSTED_TOOL_OUTPUT source="session_events">\n'
         f"{defang_prompt_boundary_tags(events_block)}\n"
         "</UNTRUSTED_TOOL_OUTPUT>\n\n"
-        'Answer with the JSON object only: {"candidates": [...]}.'
+        'Answer with the JSON object only: {"candidates": [...], "recap": {...} or null}.'
     )
     return [{"role": "system", "content": _PROMPT_PATH.read_text(encoding="utf-8").strip()},
             {"role": "user", "content": user}]
@@ -202,21 +217,47 @@ def _process_batch(store: MemoryStore, session: str, batch: list[Event], last_se
     known = [f"{record.id}: {record.content}" for _score, record in
              store.search(" ".join(event.text for event in batch), statuses=("active", "stale", "conflicted"),
                           limit=_KNOWN_RECORDS)]
-    reply = model.ask(build_messages(batch, known))
+    previous = store.recap_of(session)
+    reply = model.ask(build_messages(batch, known, previous.content if previous else ""))
     records, rejected = parse_candidates(reply, batch, store, session)
+    recap, recap_problem = parse_recap(reply, batch, store, session)
+    if recap_problem:
+        rejected.append({"content": "(session recap)", "reason": recap_problem})
     outcome = store.apply_extraction(session=session, first_seq=batch[0].seq, last_seq=last_seq, key=key,
-                                     records=records, actor=ACTOR)
+                                     records=records, actor=ACTOR, recap=recap)
     outcome["rejected"] = rejected + outcome["rejected"]
     return outcome
 
 
-def _candidate_items(reply: str) -> list[Any]:
+def parse_recap(reply: str, batch: list[Event], store: MemoryStore, session: str) -> tuple[NewRecord | None, str]:
+    """The session's updated recap, or None with the reason it was dropped ("" when the model gave none)."""
+    payload = json.loads(_unfenced(reply))
+    recap = payload.get("recap") if isinstance(payload, dict) else None
+    if not recap:
+        return None, ""
+    if not isinstance(recap, dict) or not isinstance(recap.get("content"), str):
+        return None, 'the recap must be {"content": ..., "source_event_ids": [...]}'
+    known_ids = {f"e{event.seq}": event.seq for event in batch}
+    cited = [ref for ref in recap.get("source_event_ids") or [] if ref in known_ids]
+    if not cited:
+        return None, "the recap must cite events of this batch"
+    sources = [Source(origin=ACTOR, session=session, event_seq=known_ids[ref], seen_in_journal=True)
+               for ref in dict.fromkeys(cited)]
+    try:
+        return store.checked_recap(recap["content"], sources), ""
+    except (MemoryValidationError, MemoryPrivacyError) as error:
+        return None, str(error)
+
+
+def _unfenced(reply: str) -> str:
     text = reply.strip()
     fenced = _FENCE_RE.match(text)
-    if fenced:
-        text = fenced.group(1)
+    return fenced.group(1) if fenced else text
+
+
+def _candidate_items(reply: str) -> list[Any]:
     try:
-        payload = json.loads(text)
+        payload = json.loads(_unfenced(reply))
     except json.JSONDecodeError:
         raise MemoryValidationError("the memory model did not answer with JSON; nothing from this batch was "
                                     "stored and it will be read again next time") from None

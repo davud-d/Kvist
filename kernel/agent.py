@@ -45,7 +45,8 @@ from kernel.agent_logging import (
     save_session,
     store_session_title,
 )
-from kernel.agent_tools import memory_prompt_section
+from kernel.agent_tools import memory_model, memory_prompt_section
+from kernel.memory.auto import AutoProcessor
 from kernel.context_meter import ContextLedger, begin_call, note_generated, note_pending
 from kernel.agent_model import (
     call_action_model,
@@ -287,6 +288,11 @@ class LocalAgent:
         self._tray = (
             TrayLink(executor.workspace, lambda: self.current_session, debug=lambda message: self._ui.debug_print(message))
             if is_terminal_host() and not self.is_helper
+            else None
+        )
+        self._memory_auto = (
+            AutoProcessor(executor.workspace, lambda: memory_model(self), lambda message: self._ui.debug_print(message))
+            if self.config.memory_auto_processing and not self.is_helper
             else None
         )
         self.resources = ResourceManager(executor.workspace)
@@ -553,6 +559,7 @@ class LocalAgent:
         self._restore_session_document({})
         self._pending_action = None
         self._discard_session_if_empty(previous)
+        self._memory_session_left(previous)
         return resolved
 
     def start_fresh_session(self) -> tuple[str, str | None]:
@@ -568,7 +575,10 @@ class LocalAgent:
             resumable = self._find_resumable_session()
         except JsonStorageCorruptError:
             resumable = None
-        return self.new_session(), resumable
+        session = self.new_session()
+        if self._memory_auto is not None:
+            self._memory_auto.catch_up(exclude=session)
+        return session, resumable
 
     def _save_session_marker(self) -> None:
         """Keep compatibility with callers that create an empty session marker."""
@@ -602,6 +612,12 @@ class LocalAgent:
         self._reset_run_state()
         self._restore_session_document(target_document)
         self._discard_session_if_empty(previous)
+        self._memory_session_left(previous)
+
+    def _memory_session_left(self, session: str) -> None:
+        """The person moved on: read the session they left while they work in the next one."""
+        if self._memory_auto is not None:
+            self._memory_auto.session_left(session)
 
     def _set_environment_facts(self) -> None:
         """Recompute the cheap, per-run environment facts shown in the prompt.
@@ -721,18 +737,20 @@ class LocalAgent:
         if not self.wake_due():
             return None
         self._journal.begin_turn("", woken=True)
-        self._tray_turn_started()
+        self._announce_turn_started()
         try:
             goal = SCHEDULE_WAKE_GOAL if self.scheduler is not None and self.scheduler.has_due() else WAKE_GOAL
             return self._run_turn(goal, self._background_role or None, woken=True)
         finally:
             self._journal.end_turn()
-            self._tray_turn_finished()
+            self._announce_turn_finished()
 
     def shutdown(self, reason: str = "app_closed") -> None:
         """The process is ending: stop helpers, skills, jobs and every owned resource; keep the checkpoint."""
         # Nothing stopped from here on may start a turn.
         self.wake_listener = None
+        if self._memory_auto is not None:
+            self._memory_auto.close()
         if self.helpers is not None:
             self.helpers.stop_all(reason)
         self.skills.finish_task(reason)
@@ -761,14 +779,14 @@ class LocalAgent:
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
         note_pending(self, user_goal)
         self._journal.begin_turn(f"{user_goal} {labels}".strip())
-        self._tray_turn_started()
+        self._announce_turn_started()
         try:
             if active_task:
                 return self._resume_turn(user_goal, attachments)
             return self._run_turn(user_goal, routed_role, attachments)
         finally:
             self._journal.end_turn()
-            self._tray_turn_finished()
+            self._announce_turn_finished()
 
     def _store_attachments(self, images: list[dict]) -> None:
         """Keep each attached image's original privately and give it an id; drop the bytes from the dict."""
@@ -933,20 +951,25 @@ class LocalAgent:
         if refusal is not None:
             return refusal
         self._journal.begin_turn("", resumed=True)
-        self._tray_turn_started()
+        self._announce_turn_started()
         try:
             return self._resume_turn()
         finally:
             self._journal.end_turn()
-            self._tray_turn_finished()
+            self._announce_turn_finished()
 
-    def _tray_turn_started(self) -> None:
+    def _announce_turn_started(self) -> None:
+        """Tell the tray icon and background memory that a turn runs."""
         if self._tray is not None:
             self._tray.turn_started()
+        if self._memory_auto is not None:
+            self._memory_auto.turn_started()
 
-    def _tray_turn_finished(self) -> None:
+    def _announce_turn_finished(self) -> None:
         if self._tray is not None:
             self._tray.turn_finished()
+        if self._memory_auto is not None:
+            self._memory_auto.turn_finished(self.current_session)
 
     def _resume_turn(self, instruction: str = "", images: list[dict] | None = None) -> str | None:
         self._reset_cancel()

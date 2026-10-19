@@ -340,6 +340,11 @@ One task, one life cycle: `running`, `pause_requested`, `paused`, `resuming`,
   `/memory process` has the fast model pick durable findings out of the session's finished turns
   (requests, answers, step summaries; never thoughts or raw output, and lines that look like
   secrets are withheld). It asks the person's consent once; such records are always `inferred`.
+  After that the interactive interfaces do it by themselves: a session is read when it has been
+  quiet for 10 minutes, when the person leaves it, and at launch (at most 40 calls a day per
+  project). Each session also gets a short recap (what it was for, what got done, what is left);
+  a new session sees the recaps of the three latest others, so "continue" means something.
+  Recaps are not visible to skills.
 * **Storage** (`ctx.storage`) is a skill's technical state (cursors, checkpoints, caches), never
   put in a prompt. `compare_and_set` refuses a write when the key moved on, a value with
   `ttl_seconds` reads as absent once it expires, and a value holding a credential or personal

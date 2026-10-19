@@ -14,7 +14,7 @@ from typing import Any
 
 from kernel.memory.errors import MemoryValidationError
 from kernel.memory.extractor import ModelAccess, process_session
-from kernel.memory.schema import STATUSES
+from kernel.memory.schema import RECORD_KINDS, STATUSES
 from kernel.memory.service import MemoryService
 from kernel.memory.store import PERSON, MemoryStore
 from kernel.user_config import (
@@ -39,9 +39,10 @@ def run_op(op: str, workspace: Path, payload: dict[str, Any]) -> dict[str, Any]:
         save_memory_paused(op == "pause")
         return {"ok": True, "paused": op == "pause"}
     if op == "list":
-        return {"ok": True, "records": memory.search("", include_inactive=True, limit=int(payload.get("limit") or 200))}
+        return {"ok": True, "records": memory.search("", kinds=RECORD_KINDS, include_inactive=True,
+                                                     limit=int(payload.get("limit") or 200))}
     if op == "search":
-        return {"ok": True, "records": memory.search(str(payload.get("query") or ""),
+        return {"ok": True, "records": memory.search(str(payload.get("query") or ""), kinds=RECORD_KINDS,
                                                      include_inactive=bool(payload.get("include_inactive")))}
     if op == "get":
         return {"ok": True, "record": memory.get(str(payload.get("id") or ""))}
@@ -84,7 +85,7 @@ def run_slash(workspace: Path, args: list[str], confirm: Callable[[str, str], bo
         save_memory_paused(command == "pause")
         return True, _PAUSE_TEXT[(command, ru)]
     if command == "inspect":
-        return True, _records_text(memory.search(rest, include_inactive=True, limit=30), ru)
+        return True, _records_text(memory.search(rest, kinds=RECORD_KINDS, include_inactive=True, limit=30), ru)
     if command == "why" and rest:
         return True, explain_text(memory.explain(rest), ru)
     if command in ("remember", "remember-global") and rest:
@@ -177,9 +178,15 @@ def _status_text(status: dict[str, Any], ru: bool) -> str:
     lines = [("Память: на паузе" if status["paused"] else "Память: включена") if ru else
              ("Memory: paused" if status["paused"] else "Memory: on")]
     allowed = status["processing_allowed"]
-    lines.append(("Разбор разговоров: " + ("разрешён" if allowed else "не разрешён (/memory process спросит)"))
+    lines.append(("Разбор разговоров: " + ("разрешён, идёт сам в фоне" if allowed else
+                                           "не разрешён (/memory process или /memory processing on)"))
                  if ru else
-                 ("Conversation processing: " + ("allowed" if allowed else "not allowed (/memory process asks)")))
+                 ("Conversation processing: " + ("allowed, runs by itself in the background" if allowed else
+                                                 "not allowed (/memory process or /memory processing on)")))
+    last = status.get("last_processed")
+    if last:
+        lines.append((f"Последний разбор: {last['session']}, {_date(last['updated_at'])}" if ru else
+                      f"Last read: {last['session']}, {_date(last['updated_at'])}"))
     names = {"workspace": ("этот проект", "this project"), "user": ("все проекты", "every project")}
     for scope, counts in status["stores"].items():
         parts = [f"{counts['by_status'].get(state, 0)} {state}" for state in STATUSES if counts["by_status"].get(state)]
@@ -191,10 +198,16 @@ def _records_text(records: list[dict[str, Any]], ru: bool) -> str:
     if not records:
         return "Записей нет." if ru else "No records."
     return "\n".join(
-        f"{record['id']}  {record['kind']} · {record['trust']} · {record['status']} · v{record['version']}"
+        f"{record['id']}  {_kind_text(record, ru)} · {record['trust']} · {record['status']} · v{record['version']}"
         f" · {_date(record['updated_at'])}\n    {record['content']}"
         for record in records
     )
+
+
+def _kind_text(record: dict[str, Any], ru: bool) -> str:
+    if record["kind"] == "session_recap":
+        return f"{'итог сессии' if ru else 'recap of'} {record['session']}"
+    return record["kind"]
 
 
 def explain_text(explanation: dict[str, Any], ru: bool) -> str:

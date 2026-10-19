@@ -71,10 +71,11 @@ class MemoryService:
         if self.user is not None:
             stores["user"] = self.user.counts()
         return {"paused": get_memory_paused(), "processing_allowed": get_memory_processing_allowed(),
-                "stores": stores}
+                "last_processed": self.workspace.last_processed(), "stores": stores}
 
-    def prompt_block(self, text: str, count_tokens: Callable[[str], int]) -> str:
-        return render_block(relevant(self._stores(), text, count_tokens))
+    def prompt_block(self, text: str, count_tokens: Callable[[str], int], session: str = "") -> str:
+        """``session`` is the conversation the prompt is for; its own recap is not shown back to it."""
+        return render_block(relevant(self._stores(), text, count_tokens, session=session))
 
     def _stores(self) -> list[MemoryStore]:
         return [self.workspace] + ([self.user] if self.user is not None else [])

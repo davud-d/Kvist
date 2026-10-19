@@ -77,6 +77,8 @@ class Record:
     created_at: float
     updated_at: float
     verified_at: float | None
+    # The session a recap sums up; empty for every other kind.
+    session: str = ""
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
@@ -145,6 +147,11 @@ class MemoryStore:
                          topic=self._checked_topic(topic), files=self._checked_files(files or []),
                          sources=list(sources or []))
 
+    def checked_recap(self, content: str, sources: list[Source]) -> "NewRecord":
+        """A session recap passes the same content and privacy checks as any record."""
+        return NewRecord(content=self._checked_content(content), kind="session_recap", trust="inferred", topic="",
+                         files=[], sources=list(sources))
+
     def processed_up_to(self, session: str) -> int:
         """The last journal event of ``session`` the extractor took in; 0 when none."""
         if not self._has_data():
@@ -154,15 +161,16 @@ class MemoryStore:
         return int(row[0]) if row else 0
 
     def apply_extraction(self, *, session: str, first_seq: int, last_seq: int, key: str, records: list["NewRecord"],
-                         actor: str) -> dict[str, Any]:
+                         actor: str, recap: "NewRecord | None" = None) -> dict[str, Any]:
         """Store one batch of extracted records with the session's new checkpoint, all in one transaction.
 
         A record the store refuses (forgotten, over quota) is listed as rejected and the
         rest go in; a database failure stores nothing and leaves the checkpoint where it was.
-        A batch whose ``key`` is already recorded is not stored again.
+        A batch whose ``key`` is already recorded is not stored again. ``recap`` replaces
+        the session's recap, unless the person had it forgotten.
         """
         now = time.time()
-        outcome: dict[str, Any] = {"accepted": [], "merged": [], "rejected": [], "already": False}
+        outcome: dict[str, Any] = {"accepted": [], "merged": [], "rejected": [], "already": False, "recap": None}
         with self._write() as db:
             if db.execute("SELECT 1 FROM processed_batches WHERE idempotency_key = ?", (key,)).fetchone():
                 return {**outcome, "already": True}
@@ -173,6 +181,8 @@ class MemoryStore:
                     outcome["rejected"].append({"content": record.content, "reason": str(error)})
                     continue
                 outcome[result].append(stored.id)
+            if recap is not None and not _is_forgotten(db, recap_marker(session)):
+                outcome["recap"] = self._upsert_recap(db, session, recap, actor)
             db.execute("INSERT INTO processed_batches (idempotency_key, session, first_seq, last_seq, accepted, merged, "
                        "rejected, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                        (key, session, first_seq, last_seq, len(outcome["accepted"]), len(outcome["merged"]),
@@ -181,6 +191,78 @@ class MemoryStore:
                        "ON CONFLICT(session) DO UPDATE SET last_seq = MAX(last_seq, excluded.last_seq), "
                        "updated_at = excluded.updated_at", (session, last_seq, now))
         return outcome
+
+    def recaps(self, *, limit: int, exclude_session: str = "") -> list[Record]:
+        """The newest session recaps, never the one of ``exclude_session`` (it is that session's own history)."""
+        if not self._has_data():
+            return []
+        with self._read() as db:
+            rows = db.execute("SELECT * FROM records WHERE kind = 'session_recap' AND status = 'active' "
+                              "AND session != ? ORDER BY updated_at DESC LIMIT ?", (exclude_session, limit)).fetchall()
+        return [self._record(row) for row in rows]
+
+    def recap_of(self, session: str) -> Record | None:
+        if not self._has_data():
+            return None
+        with self._read() as db:
+            row = db.execute("SELECT * FROM records WHERE kind = 'session_recap' AND session = ?", (session,)).fetchone()
+        return self._record(row) if row else None
+
+    def try_lease(self, session: str, holder: str, seconds: float) -> bool:
+        """Claim the right to process ``session`` for a while; False when another core holds it."""
+        now = time.time()
+        with self._write() as db:
+            row = db.execute("SELECT holder, expires_at FROM leases WHERE session = ?", (session,)).fetchone()
+            if row is not None and row["holder"] != holder and row["expires_at"] > now:
+                return False
+            db.execute("INSERT INTO leases (session, holder, expires_at) VALUES (?, ?, ?) ON CONFLICT(session) "
+                       "DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at",
+                       (session, holder, now + seconds))
+        return True
+
+    def release_lease(self, session: str, holder: str) -> None:
+        with self._write() as db:
+            db.execute("DELETE FROM leases WHERE session = ? AND holder = ?", (session, holder))
+
+    def take_model_calls(self, day: str, wanted: int, limit: int) -> int:
+        """Reserve up to ``wanted`` model calls under the day's ``limit``; returns how many were granted."""
+        key = f"model_calls:{day}"
+        with self._write() as db:
+            row = db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+            used = int(row[0]) if row else 0
+            granted = max(0, min(wanted, limit - used))
+            db.execute("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                       (key, str(used + granted)))
+        return granted
+
+    def last_processed(self) -> dict[str, Any] | None:
+        if not self._has_data():
+            return None
+        with self._read() as db:
+            row = db.execute("SELECT session, updated_at FROM processing ORDER BY updated_at DESC LIMIT 1").fetchone()
+        return dict(row) if row else None
+
+    def _upsert_recap(self, db: sqlite3.Connection, session: str, recap: "NewRecord", actor: str) -> str:
+        """One recap per session, rewritten as the session grows; its history keeps each rewrite."""
+        now = time.time()
+        existing = db.execute("SELECT id, content FROM records WHERE kind = 'session_recap' AND session = ?",
+                              (session,)).fetchone()
+        if existing is None:
+            record_id = f"{self.prefix}{uuid.uuid4().hex[:12]}"
+            db.execute(
+                "INSERT INTO records (id, kind, content, topic, files, status, trust, author, content_hash, created_at, "
+                "updated_at, session) VALUES (?, 'session_recap', ?, '', '[]', 'active', 'inferred', ?, ?, ?, ?, ?)",
+                (record_id, recap.content, actor, content_hash(recap.content), now, now, session))
+            _history(db, record_id, actor, "created", "session recap")
+        else:
+            record_id = existing["id"]
+            if existing["content"] == recap.content:
+                return record_id
+            db.execute("UPDATE records SET content = ?, content_hash = ?, version = version + 1, updated_at = ? "
+                       "WHERE id = ?", (recap.content, content_hash(recap.content), now, record_id))
+            _history(db, record_id, actor, "updated", "the session went on")
+        self._add_sources(db, record_id, recap.sources)
+        return record_id
 
     def _remember_in(self, db: sqlite3.Connection, record: "NewRecord", actor: str) -> tuple[str, Record]:
         digest = content_hash(record.content)
@@ -272,6 +354,10 @@ class MemoryStore:
             digest = db.execute("SELECT content_hash FROM records WHERE id = ?", (record_id,)).fetchone()[0]
             db.execute("INSERT OR REPLACE INTO forgotten (content_hash, forgotten_at, actor) VALUES (?, ?, ?)",
                        (digest, time.time(), actor))
+            if current.kind == "session_recap":
+                # A forgotten recap means "do not sum up this session", not just "not this wording".
+                db.execute("INSERT OR REPLACE INTO forgotten (content_hash, forgotten_at, actor) VALUES (?, ?, ?)",
+                           (recap_marker(current.session), time.time(), actor))
             reopened = _reopen_dependents(db, record_id, actor)
             db.execute("DELETE FROM records WHERE id = ?", (record_id,))
             # The index keeps deleted rows' tokens in old segments until they are merged; a rebuild drops them.
@@ -521,6 +607,7 @@ class MemoryStore:
             files=json.loads(row["files"]), status=row["status"], status_reason=row["status_reason"],
             trust=row["trust"], author=row["author"], version=row["version"], superseded_by=row["superseded_by"],
             created_at=row["created_at"], updated_at=row["updated_at"], verified_at=row["verified_at"],
+            session=row["session"],
         )
 
     @contextmanager
@@ -610,6 +697,11 @@ class MemoryStore:
 def _history(db: sqlite3.Connection, record_id: str, actor: str, action: str, detail: str) -> None:
     db.execute("INSERT INTO history (record_id, at, actor, action, detail) VALUES (?, ?, ?, ?, ?)",
                (record_id, time.time(), actor, action, detail))
+
+
+def recap_marker(session: str) -> str:
+    """The forgotten-table key that keeps a session from being summed up again."""
+    return content_hash(f"session recap of {session}")
 
 
 def _is_forgotten(db: sqlite3.Connection, digest: str) -> bool:

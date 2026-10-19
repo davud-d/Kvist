@@ -254,6 +254,7 @@ class HelperManager:
         config = copy.copy(main.config)
         config.interactive = False
         config.end_session_enabled = False
+        config.memory_auto_processing = False
         config.max_steps = min(config.max_steps, HELPER_MAX_STEPS)
         main_gate = main.executor.approvals
         shared_gate = not read_only and getattr(main_gate, "answers_from_any_thread", False)

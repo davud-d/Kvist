@@ -74,6 +74,10 @@ class AgentConfig:
     # Set only by the interactive frontends (classic terminal, stdio-multi,
     # ACP): end_session needs a person reading the conversation.
     end_session_enabled: bool = False
+    # Read finished sessions into memory in the background (kernel/memory/auto.py).
+    # Only the interactive frontends: a headless run or a test must never call a
+    # model on its own, and the person's consent is asked in a dialog.
+    memory_auto_processing: bool = False
     # A person answers dialogs (the GUI, the terminals, ACP). False for
     # headless runs and helpers: a question then reports "no_interactive_user"
     # and an approval is refused instead of waiting for nobody.

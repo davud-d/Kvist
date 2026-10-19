@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 
 import pytest
 
@@ -765,3 +766,201 @@ def test_processing_asks_for_consent_once_and_respects_pause(tmp_path):
 
     run_slash(tmp_path, ["processing", "off"], lambda *_: True, ru=False)
     assert not get_memory_processing_allowed()
+
+
+# --- schema migration --------------------------------------------------------------
+
+
+def test_a_version_2_database_keeps_its_records_links_and_history_through_the_rebuild(tmp_path):
+    from kernel.memory.schema import MIGRATIONS, _statements
+
+    path = tmp_path / ".kvist" / "memory" / "memory.db"
+    path.parent.mkdir(parents=True)
+    db = sqlite3.connect(path, isolation_level=None)
+    for version in (1, 2):
+        for statement in _statements(MIGRATIONS[version]):
+            db.execute(statement)
+    db.execute("PRAGMA user_version = 2")
+    for record_id, content in (("mem_aaaaaaaaaaaa", "Old lock"), ("mem_bbbbbbbbbbbb", "New queue")):
+        db.execute("INSERT INTO records (id, kind, content, status, trust, author, content_hash, created_at, "
+                   "updated_at) VALUES (?, 'decision', ?, 'active', 'observed', 'agent', 'h', 1, 1)",
+                   (record_id, content))
+        db.execute("INSERT INTO sources (record_id, origin, added_at) VALUES (?, 'agent', 1)", (record_id,))
+        db.execute("INSERT INTO history (record_id, at, actor, action) VALUES (?, 1, 'agent', 'created')", (record_id,))
+    db.execute("INSERT INTO relations (source_id, target_id, relation, author, created_at) "
+               "VALUES ('mem_bbbbbbbbbbbb', 'mem_aaaaaaaaaaaa', 'related_to', 'agent', 1)")
+    db.close()
+
+    store = MemoryStore.for_workspace(tmp_path)
+    explained = store.explain("mem_bbbbbbbbbbbb")
+
+    assert store.get("mem_aaaaaaaaaaaa").session == ""
+    assert len(explained["sources"]) == 1 and len(explained["history"]) == 1
+    assert explained["relations"][0]["target_id"] == "mem_aaaaaaaaaaaa"
+    assert [record.id for _score, record in store.search("queue")] == ["mem_bbbbbbbbbbbb"]
+    with sqlite3.connect(path) as check:
+        assert check.execute("PRAGMA user_version").fetchone()[0] == 3
+
+
+# --- session recaps ----------------------------------------------------------------
+
+
+def _recap(content, *ids):
+    return {"content": content, "source_event_ids": list(ids)}
+
+
+def test_one_recap_per_session_rewritten_as_the_session_goes_on(tmp_path):
+    from kernel.memory.extractor import process_session
+
+    store = MemoryStore.for_workspace(tmp_path)
+    _journal(tmp_path, [_turn("build the commit panel", "File selection works.")])
+    first = FakeModel(json.dumps({"candidates": [], "recap": _recap("Built file selection in the commit panel.",
+                                                                     "e1", "e2")}))
+    process_session(store, _SESSION, first.access())
+    _journal(tmp_path, [_turn("build the commit panel", "File selection works."),
+                        _turn("now the generators", "Generators run; flaky tests remain.")])
+    second = FakeModel(json.dumps({"candidates": [], "recap": _recap(
+        "Built file selection and generators in the commit panel; flaky integration tests remain.", "e5")}))
+    process_session(store, _SESSION, second.access())
+
+    recap = store.recap_of(_SESSION)
+    assert recap.version == 2 and "flaky" in recap.content and recap.session == _SESSION
+    assert "Built file selection in the commit panel." in second.asked[0][1]["content"]
+    assert store.counts()["by_kind"] == {"session_recap": 1}
+
+
+def test_a_forgotten_recap_is_not_written_again_for_that_session(tmp_path):
+    from kernel.memory.extractor import process_session
+
+    store = MemoryStore.for_workspace(tmp_path)
+    _journal(tmp_path, [_turn("private chat", "ok")])
+    process_session(store, _SESSION, FakeModel(json.dumps({"candidates": [], "recap": _recap("A chat.", "e1")}))
+                    .access())
+    store.forget(store.recap_of(_SESSION).id, actor="person")
+    _journal(tmp_path, [_turn("private chat", "ok"), _turn("more", "sure")])
+
+    process_session(store, _SESSION, FakeModel(json.dumps({"candidates": [], "recap": _recap("More chat.", "e5")}))
+                    .access())
+
+    assert store.recap_of(_SESSION) is None
+
+
+def test_a_new_session_sees_the_latest_other_recaps_but_not_its_own(tmp_path):
+    store = MemoryStore.for_workspace(tmp_path)
+    for index in range(5):
+        session = f"chat-2026101{index}-100000"
+        recap = store.checked_recap(f"Session {index} built part {index}.", [])
+        store.apply_extraction(session=session, first_seq=1, last_seq=2, key=f"k{index}", records=[],
+                               actor="extractor", recap=recap)
+
+    block = MemoryService(tmp_path, with_user_scope=False).prompt_block("hello", _tokens,
+                                                                         session="chat-20261014-100000")
+
+    assert "Session 3 built" in block and "Session 2 built" in block and "Session 1 built" in block
+    assert "Session 4 built" not in block and "Session 0 built" not in block
+    assert block.index("Session 3") < block.index("Session 2") < block.index("Session 1")
+
+
+def test_recaps_appear_in_inspect_but_not_in_the_models_search(tmp_path):
+    from kernel.memory.commands import run_slash
+
+    store = MemoryStore.for_workspace(tmp_path)
+    store.apply_extraction(session=_SESSION, first_seq=1, last_seq=2, key="k", records=[], actor="extractor",
+                           recap=store.checked_recap("Reviewed the release scripts.", []))
+
+    assert "recap of" in run_slash(tmp_path, ["inspect"], lambda *_: True, ru=False)[1]
+    assert MemoryService(tmp_path, with_user_scope=True).search("release scripts") == []
+
+
+# --- background processing ---------------------------------------------------------
+
+
+def _auto(tmp_path, model):
+    from kernel.memory.auto import AutoProcessor
+
+    notes: list[str] = []
+    return AutoProcessor(tmp_path, model.access, notes.append), notes
+
+
+def test_background_reading_needs_consent_and_stops_on_pause(tmp_path):
+    from kernel.user_config import save_memory_paused, save_memory_processing_allowed
+
+    _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
+    model = FakeModel(_candidates(), _candidates())
+    auto, _notes = _auto(tmp_path, model)
+
+    assert auto.run_once(_SESSION) is None and model.asked == []
+    save_memory_processing_allowed(True)
+    save_memory_paused(True)
+    assert auto.run_once(_SESSION) is None and model.asked == []
+    save_memory_paused(False)
+    assert auto.run_once(_SESSION)["events"] == 2 and len(model.asked) == 1
+
+
+def test_another_core_holding_the_lease_is_left_alone(tmp_path):
+    from kernel.user_config import save_memory_processing_allowed
+
+    save_memory_processing_allowed(True)
+    _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
+    MemoryStore.for_workspace(tmp_path).try_lease(_SESSION, "other-core", 300)
+    model = FakeModel(_candidates())
+    auto, notes = _auto(tmp_path, model)
+
+    assert auto.run_once(_SESSION) is None and model.asked == []
+    assert "another Kvist" in notes[-1]
+
+
+def test_the_daily_cap_bounds_background_calls(tmp_path, monkeypatch):
+    from kernel.user_config import save_memory_processing_allowed
+
+    save_memory_processing_allowed(True)
+    monkeypatch.setattr("kernel.memory.auto.DAILY_CALLS", 1)
+    _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
+    store = MemoryStore.for_workspace(tmp_path)
+    store.take_model_calls(time.strftime("%Y-%m-%d"), 1, 1)
+    model = FakeModel(_candidates())
+    auto, _notes = _auto(tmp_path, model)
+
+    summary = auto.run_once(_SESSION)
+
+    assert "limit" in summary["problem"] and model.asked == []
+    assert store.processed_up_to(_SESSION) == 0
+
+
+def test_a_quiet_session_is_read_after_the_pause_and_a_new_turn_postpones_it(tmp_path, monkeypatch):
+    from kernel.user_config import save_memory_processing_allowed
+
+    save_memory_processing_allowed(True)
+    monkeypatch.setattr("kernel.memory.auto.IDLE_SECONDS", 0.2)
+    _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
+    model = FakeModel(_candidates())
+    auto, _notes = _auto(tmp_path, model)
+
+    auto.turn_finished(_SESSION)
+    auto.turn_started()
+    time.sleep(0.4)
+    assert model.asked == []
+
+    auto.turn_finished(_SESSION)
+    deadline = time.time() + 5
+    while not model.asked and time.time() < deadline:
+        time.sleep(0.05)
+    auto.close()
+    assert len(model.asked) == 1
+
+
+def test_only_interactive_cores_read_in_the_background(agent_factory):
+    assert agent_factory()._memory_auto is None
+    assert agent_factory(memory_auto_processing=True)._memory_auto is not None
+
+
+def test_leaving_a_session_hands_it_to_background_reading(agent_factory, monkeypatch):
+    agent = agent_factory(memory_auto_processing=True)
+    left: list[str] = []
+    monkeypatch.setattr(agent._memory_auto, "session_left", left.append)
+    previous = agent.current_session
+    agent.save_session()
+
+    agent.new_session()
+
+    assert left == [previous]
