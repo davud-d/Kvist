@@ -13,6 +13,7 @@ mod core;
 mod dialog;
 mod diff;
 mod edit;
+mod farewell;
 mod highlight;
 mod kitty;
 mod layout;

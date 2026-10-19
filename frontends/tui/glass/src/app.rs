@@ -1051,6 +1051,7 @@ impl App {
             ("glass", "Classic", s.frontend_glass),
             ("tui", "Ink", s.frontend_ink),
             ("claude", "Claude-style", s.frontend_claude),
+            ("voice", "Voice", s.frontend_voice),
             ("terminal", "Classic Legacy", s.frontend_classic),
         ]
         .iter()
@@ -1335,7 +1336,14 @@ pub fn run(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
     let result = run_loop(caps, fps, workspace);
     let restored = term::leave();
     let code = result?;
-    restored.map(|()| code)
+    restored?;
+    // Switching interfaces keeps the terminal busy; only a real exit says goodbye.
+    if code != SWITCH_FRONTEND
+        && let Ok(core) = core::command(std::env::var("KVIST_CORE_CMD").ok().as_deref())
+    {
+        crate::farewell::print(&core, workspace);
+    }
+    Ok(code)
 }
 
 type Screen = Terminal<CrosstermBackend<io::Stdout>>;

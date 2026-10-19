@@ -1230,8 +1230,8 @@ It is also an interface of the launcher: `--frontend voice` / saved `voice` / `/
 (`KVIST_VOICE_SCREEN`, then `kvist-voice-screen` on PATH, then `_VOICE_SCREEN_BUILD`; `--check` first; it starts
 `frontends/voice/kvist-voice` when that ships beside the screen, else the screen alone; any refusal falls back to the Ink
 UI). `install_cli.py::build_voice_screen` builds it next to Glass, `kvist.spec` packs the binary and the ears'/voice's
-Python files (never the models or their environments), the release workflow has its own build step. The picker inside
-Glass (`app.rs`) is not changed and does not list Voice.
+Python files (never the models or their environments), the release workflow has its own build step. The `/tui` picker inside
+Glass (`app.rs`, `ask_frontend`) lists Voice like the Ink app's.
 
 **The screen** (`screen/src/`): an orb (a planet of clouds after `assets/orb-reference-dusk-valley.png`) drawn per
 pixel into an RGBA picture each frame (30 fps at most, `ORB_FPS`) over the photograph; under it a frosted-glass card
