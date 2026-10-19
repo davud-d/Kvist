@@ -447,3 +447,118 @@ def execute(tool_name, arguments, context):
     assert DEFANGED_TAG in detail
     assert "<SKILL_INSTRUCTIONS>" not in detail
     agent.skills.finish_task("test")
+
+
+# --- core tools: the bundled desktop skill runs in the core, not in a sandbox ---------------------
+
+
+def _install_bundled_desktop(registry):
+    from kernel.plugins.bundled import BUNDLED_ROOT
+
+    result = registry.install(BUNDLED_ROOT / "desktop", origin="bundled")
+    registry.activate(result.skill_id, result.version, result.digest)
+
+
+def test_desktop_tools_are_the_core_methods_they_dispatch_to():
+    from kernel.plugins.bundled import BUNDLED_ROOT
+    from kernel.plugins.manifest import load_manifest
+    from kernel.plugins.services import METHODS
+
+    manifest = load_manifest(BUNDLED_ROOT / "desktop")
+
+    assert manifest.core_group == "host" and manifest.entrypoint == ""
+    assert {f"host.{tool.name}" for tool in manifest.tools} == {name for name in METHODS if name.startswith("host.")}
+    assert set(manifest.platforms) == {"linux", "darwin", "win32"}
+
+
+def test_a_package_the_person_installs_cannot_use_core_tools(registry, tmp_path):
+    from kernel.plugins.registry import RegistryError
+
+    source = write_skill(tmp_path / "src", "sneaky", extra={"core_group": "host"})
+
+    with pytest.raises(RegistryError, match="only the skills Kvist ships"):
+        registry.install(source, origin="local")
+
+
+def test_a_sandboxed_skill_cannot_reach_the_desktop_even_with_the_capability(agent_factory, registry, tmp_path):
+    from kernel.plugins.host import ServiceError
+    from kernel.plugins.services import CoreServices
+
+    install(registry, write_skill(tmp_path / "src", capabilities=["host.open"]))
+    agent, _ui = _agent(agent_factory)
+    entry = registry.entry("echo")
+    call = type("Call", (), {"skill": type("Skill", (), {"manifest": entry.manifest,
+                                                          "allows": lambda self, name: True})()})()
+
+    with pytest.raises(ServiceError, match="only through Kvist's own desktop skill"):
+        CoreServices.handle(agent.skills.services, call, "host.open_url", {"url": "https://example.com/"})
+
+
+def test_a_core_tool_is_attached_with_approval_and_runs_without_a_runner(agent_factory, registry, monkeypatch):
+    from kernel.plugins import host_actions
+
+    opened = []
+    monkeypatch.setattr(host_actions, "open_url", opened.append)
+    _install_bundled_desktop(registry)
+    agent, ui = _agent(agent_factory)
+    _script(agent, [
+        _call("skills", {"op": "attach", "skill": "desktop"}),
+        _call("desktop__open_url", {"url": "https://www.youtube.com/watch?v=abc"}),
+        "Opened it.",
+    ])
+
+    agent._run_loop("open this video for me", start_step=1)
+
+    assert ui.confirms, "the person approves the skill before its first tool runs"
+    call = _feedback(agent, "skill_call")[0]["feedback"]
+    assert call["ok"] is True and call["data"]["result"] == {"opened": "https://www.youtube.com/watch?v=abc"}
+    assert opened == ["https://www.youtube.com/watch?v=abc"]
+
+
+def test_a_core_tool_that_changes_things_is_refused_for_a_read_only_task(agent_factory, registry, monkeypatch):
+    from kernel.agent_runtime import _is_read_only_violation
+    from kernel.plugins import host_actions
+    from kernel.protocol import Action, AgentCommand
+
+    opened = []
+    monkeypatch.setattr(host_actions, "open_url", opened.append)
+    _install_bundled_desktop(registry)
+    agent, _ui = _agent(agent_factory)
+    grant_all(agent.skills.grants, registry, "desktop", agent.executor.workspace)
+    agent.skills.attach("desktop")
+    agent._state.current_agent_role = "reader"
+    agent._state.read_only_goal = True
+
+    def command(tool, arguments):
+        return AgentCommand("inspect", Action("skill_call", {"skill": "desktop", "tool": tool, "arguments": arguments}))
+
+    assert _is_read_only_violation(agent, command("open_url", {"url": "https://example.com/"})) is True
+    assert _is_read_only_violation(agent, command("windows", {})) is False
+    # Even called directly, the core refuses a changing tool for a read-only task.
+    refused = agent.skills.call("desktop", "open_url", {"url": "https://example.com/"}, "c1")
+
+    assert refused["ok"] is False and "read-only" in refused["error"] and opened == []
+
+
+def test_what_is_missing_reaches_the_model_in_full_so_it_can_tell_the_person(agent_factory, registry, monkeypatch):
+    from kernel.plugins import host_actions
+
+    for name in ("HYPRLAND_INSTANCE_SIGNATURE", "SWAYSOCK", "NIRI_SOCKET", "I3SOCK", "DISPLAY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(host_actions.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CURRENT_DESKTOP", "KDE")
+    monkeypatch.setattr(host_actions.shutil, "which", lambda name: None)
+    _install_bundled_desktop(registry)
+    agent, _ui = _agent(agent_factory)
+    prompts = _script(agent, [
+        _call("skills", {"op": "attach", "skill": "desktop"}),
+        _call("desktop__windows", {}),
+        "Close the window yourself: KDE needs kdotool.",
+    ])
+
+    agent._run_loop("which windows are open?", start_step=1)
+
+    failure = _feedback(agent, "skill_call")[0]["feedback"]
+    assert failure["ok"] is False
+    assert "unavailable" in failure["error"] and "install kdotool" in failure["error"]
+    assert any("install kdotool" in prompt for prompt in prompts[2:]), "the next model request carries the hint"

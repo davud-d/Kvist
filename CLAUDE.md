@@ -806,6 +806,21 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages
   (`EventApprovalGate`), else `DenyApprovalGate`, so a classic-terminal helper cannot
   overwrite existing files. `delegate_task` is not a helper: it starts nobody, and its
   descriptions say so, because a model once took it for one and reported work that never ran.
+- **The person's desktop** (`host_actions.py`, bundled `desktop` skill with `core_group: "host"`): a **core
+  tool** skill. Its tools are run by the core (`SkillManager._call_core` → `CoreServices.handle("host.<tool>")`),
+  with no package code and no runner, so it works on Linux, macOS and Windows. Same grant, read-only and plan checks
+  as any skill; `core_group` is accepted from `origin="bundled"` only and `host.*` is refused for every other skill.
+  The set is closed: open an http(s) address (`webbrowser`, new tab), start an app by name (Linux `.desktop` +
+  `gtk-launch <id>.desktop` — the suffix matters, macOS `open -a`, Windows Start Menu `.lnk`; `id:<id>` disambiguates
+  entries sharing a name), list/focus/close windows (Hyprland `hyprctl`, Sway `swaymsg`, niri `niri msg`, i3 `i3-msg`, GNOME via the
+  Window Calls extension over `gdbus`, KDE `kdotool`, X11 `wmctrl` (never on Wayland: it sees only XWayland),
+  macOS JXA, Windows PowerShell; ids come from the live list; `_no_backend_hint` says what to install; GNOME and KDE
+  have no window API of their own). `host.open` is capped at 12 per
+  run and refuses an address `redact_text` would change; `close` always asks via `ui.confirm`. **Tabs of the
+  person's browser are not reachable** (needs a debugging port; `:9222` on a test machine is Spotify's CEF,
+  never probe it). macOS/Windows/GNOME/KDE/niri backends have only faked-command tests (kdotool output format and Window Calls arg types come from READMEs, not from a run), and the skills package reader is still
+  POSIX-only, so skills do not load on Windows yet. Tests: `kernel/tests/test_host_actions.py`, the core-tool tests
+  at the end of `test_skill_runtime.py`.
 - **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox, with
   destination policy (task-exposed ports, granted domains, no private addresses,
   redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and serves a

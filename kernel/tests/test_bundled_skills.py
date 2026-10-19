@@ -128,7 +128,8 @@ def test_the_model_is_not_shown_skills_this_os_can_never_run(registry, monkeypat
     shown = manager.prompt_section("en")
 
     assert "- design (instructions only)" in shown and "- debugging (instructions only)" in shown
-    assert "browser" not in shown and "not supported" not in shown
+    assert "- browser (" not in shown and "not supported" not in shown
+    assert "- desktop (5 tools)" in shown
     assert any(row["id"] == "browser" for row in manager.list_page("", 1, "en")["skills"])
 
 

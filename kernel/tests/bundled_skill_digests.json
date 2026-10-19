@@ -1,8 +1,9 @@
 {
-  "browser": {"version": "0.2.0", "digest": "sha256:9dba8fd6d72b984338cb9a0d659f8559d5f0632fe9cd8b6122478c620e62be67"},
+  "browser": {"version": "0.2.1", "digest": "sha256:a98249869546a675051eee96d4fc688119cf36596d7fdfed2870fc0488a0b5f5"},
   "code_nav": {"version": "0.1.0", "digest": "sha256:5d118c6ebcf101d0b4930ca41d73d967e77b436f8972777331f16f032b823ce6"},
   "debugging": {"version": "0.1.0", "digest": "sha256:3a7fcac2c719895558fdd6060c3cb477e6893010aaa11b5cb5e7db285217d4d3"},
   "design": {"version": "0.2.0", "digest": "sha256:f3b94c916673aba9738d6c4a98753b39b0b2951272d4557b5f25c84afd28825a"},
+  "desktop": {"version": "0.2.2", "digest": "sha256:733606961b9bbe698c1a1ba5251b74cff57ab47ee79d11abfd33eae909a23f5c"},
   "documents": {"version": "0.1.1", "digest": "sha256:ea2179111f836b3dc23b6f8e749de5b54b6d56ffd46d8b0b9c45846514921eba"},
   "project_overview": {"version": "0.1.0", "digest": "sha256:7c44b6c7f01f9c8572afca0fac233849b003ebcd05c1e101d44f1aec316f3190"},
   "skill_authoring": {"version": "0.1.1", "digest": "sha256:3277ceda8d676bca444ebd83cdcab737d3ffbd771d4f1ea8527a747c9ba70a23"},

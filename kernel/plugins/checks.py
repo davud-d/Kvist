@@ -114,7 +114,7 @@ def check_package(path: Path | None, *, registry: SkillRegistry | None = None, r
     _static_checks(path, manifest, report)
     if registry is not None:
         report.similar = similar_skills(manifest, registry)
-    if manifest.kind != KIND_TOOLS or not run_sandbox:
+    if manifest.kind != KIND_TOOLS or manifest.core_group or not run_sandbox:
         return report
     reason = runner_unavailable_reason()
     if reason:

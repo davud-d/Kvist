@@ -36,6 +36,7 @@ from kernel.agent_state import PLAN_PLANNING
 from kernel.artifacts import ArtifactError, ArtifactStore
 from kernel.attachments import AttachmentError, AttachmentGone, AttachmentStore
 from kernel.plugins import capabilities as caps
+from kernel.plugins import host_actions
 from kernel.plugins.grants import Grant
 from kernel.plugins.host import RunnerHost, ServiceError
 from kernel.plugins.manifest import ToolDef
@@ -51,6 +52,7 @@ from kernel.workspace_memory import NoteError, WorkspaceMemory
 MAX_TEXT_PARAM = 200_000
 MAX_MODEL_PROMPT_CHARS = 400_000
 MAX_LOG_LINES = 500
+MAX_HOST_OPENS_PER_RUN = 12
 _EXCHANGE_IN = "in"
 _EXCHANGE_OUT_LIMIT = 50 * 1024 * 1024
 _SKIP = "__kvist_skip__"
@@ -203,6 +205,11 @@ METHODS: dict[str, tuple[str | None, bool]] = {
     "log.write": (None, False),
     "display.info": ("display", False),
     "display.screenshot": ("display", False),
+    "host.open_url": ("host.open", True),
+    "host.open_app": ("host.open", True),
+    "host.windows": ("host.windows", False),
+    "host.focus": ("host.windows", True),
+    "host.close": ("host.windows", True),
     "network.proxy": (None, False),
     "network.services": (None, False),
 }
@@ -260,6 +267,7 @@ class CoreServices:
         self.artifacts = ArtifactStore(workspace)
         self.memory = WorkspaceMemory(workspace)
         self._model_streams: dict[str, dict[str, Any]] = {}
+        self._host_opens: dict[str, int] = {}
 
     # --- entry -----------------------------------------------------------
 
@@ -276,6 +284,8 @@ class CoreServices:
         if spec is None:
             raise ServiceError("unknown_method", f"{method} is not part of plugin API v1")
         capability, changes = spec
+        if method.startswith("host.") and call.skill.manifest.core_group != "host":
+            raise ServiceError("denied", "the person's desktop is reached only through Kvist's own desktop skill")
         if capability is not None and not call.skill.allows(capability):
             raise ServiceError("denied", f"{call.skill.id} was not granted {capability}; "
                                "ask for it with ctx.permissions.request if the task needs it")
@@ -1245,6 +1255,50 @@ class CoreServices:
             raise ServiceError("unavailable", "this skill has no virtual screen")
         return {"display": ":99", "size": self._agent_screen_size(), "viewer_url": host.screen.url,
                 "state": host.screen.state}
+
+    # --- host (the person's own desktop) ---------------------------------
+
+    def _host_open_url(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        url = _str(params, "url", limit=2000)
+        # An address is the one thing that leaves for a site the page owner reads, so a secret in it is refused.
+        if redact_text(url) != url:
+            raise ServiceError("denied", "the address contains what looks like a secret, so it is not opened")
+        self._count_host_open(call)
+        host_actions.open_url(url)
+        self._ui_notify(call, {"text": f"{'открыто' if self._ru() else 'opened'} {url[:200]}"})
+        return {"opened": url}
+
+    def _host_open_app(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        self._count_host_open(call)
+        name = host_actions.open_app(_str(params, "name", limit=200))
+        self._ui_notify(call, {"text": f"{'запущено' if self._ru() else 'started'} {name}"})
+        return {"started": name}
+
+    def _count_host_open(self, call: SkillCall) -> None:
+        opened = self._host_opens.get(call.run_id, 0) + 1
+        if opened > MAX_HOST_OPENS_PER_RUN:
+            raise ServiceError("denied", f"at most {MAX_HOST_OPENS_PER_RUN} addresses or applications are opened "
+                               "in one task; ask the person before opening more")
+        self._host_opens[call.run_id] = opened
+
+    def _host_windows(self, call: SkillCall, params: dict[str, Any]) -> list[dict[str, Any]]:
+        return [{**item, "title": redact_text(str(item["title"]))} for item in host_actions.windows()]
+
+    def _host_focus(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        host_actions.focus_window(_str(params, "window", limit=40))
+        return {"focused": True}
+
+    def _host_close(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
+        target = host_actions.window(_str(params, "window", limit=40))
+        if not self._interactive():
+            raise ServiceError("denied", "closing a window needs the person's answer and nobody is here to ask")
+        title = redact_text(str(target["title"]))[:200]
+        question = (f"Закрыть окно «{target['app']}: {title}»? Несохранённое может пропасть." if self._ru()
+                    else f"Close the window “{target['app']}: {title}”? Unsaved work may be lost.")
+        if not self._ask(lambda ui: ui.confirm(f"{self._label(call)}: {question}", "")):
+            return {"closed": False, "reason": "the person declined"}
+        host_actions.close_window(str(target["id"]))
+        return {"closed": True}
 
     def _agent_screen_size(self) -> str:
         return getattr(self._manager, "screen_size", "1280x800")

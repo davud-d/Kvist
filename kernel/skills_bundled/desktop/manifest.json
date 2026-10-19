@@ -1,0 +1,67 @@
+{
+  "manifest_version": 1,
+  "id": "desktop",
+  "version": "0.2.2",
+  "plugin_api": 1,
+  "kind": "tools",
+  "name": {"en": "Desktop", "ru": "Рабочий стол"},
+  "summary": {
+    "en": "When the person wants to see or use something on their own computer: any web address (page, video, map, document, mail, service) or installed app. Opens the exact address in THEIR browser, starts apps, raises or closes windows. No clicking around.",
+    "ru": "Когда пользователь хочет сам что-то увидеть или использовать: любой веб-адрес (страница, видео, карта, документ, почта, сервис) или установленное приложение. Открывает точный адрес в ЕГО браузере, запускает приложения, выводит вперёд и закрывает окна. Без кликов по страницам."
+  },
+  "instructions": "SKILL.md",
+  "core_group": "host",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.2"},
+  "capabilities": {
+    "required": [
+      {"name": "host.open", "reason": "to open web addresses in your own browser, where you are signed in, and to start applications you have installed"},
+      {"name": "host.windows", "reason": "to see your open windows (their titles can show what you are reading), bring one to the front, and close one only after asking you"}
+    ]
+  },
+  "limits": {"call_timeout_seconds": 30, "max_result_bytes": 65536, "model_calls_per_task": 0, "model_tokens_per_task": 0},
+  "tools": [
+    {
+      "name": "open_url",
+      "summary": "Open an http(s) address in a new tab of the person's own browser and return at once. This is the way to show the person any page: a site, a search or map page, a document, one exact video; nothing is read back from the page.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["url"], "properties": {
+        "url": {"type": "string", "maxLength": 2000, "description": "A full http or https address, without a login inside it."}
+      }},
+      "result": {"type": "object", "required": ["opened"], "properties": {"opened": {"type": "string"}}}
+    },
+    {
+      "name": "open_app",
+      "summary": "Start an installed application by its name (for example \"Telegram\" or \"Firefox\"). Only applications that have a desktop entry can be started; an ambiguous name is answered with the candidates.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["name"], "properties": {
+        "name": {"type": "string", "maxLength": 200}
+      }},
+      "result": {"type": "object", "required": ["started"], "properties": {"started": {"type": "string"}}}
+    },
+    {
+      "name": "windows",
+      "summary": "List the person's open windows: id, application, title, workspace and which one has focus. A browser window's title is its active tab's title.",
+      "readonly": true,
+      "parameters": {"type": "object", "additionalProperties": false, "properties": {}}
+    },
+    {
+      "name": "focus",
+      "summary": "Bring a window to the front, by the id from windows.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["window"], "properties": {
+        "window": {"type": "string", "maxLength": 40}
+      }},
+      "result": {"type": "object", "required": ["focused"], "properties": {"focused": {"type": "boolean"}}}
+    },
+    {
+      "name": "close",
+      "summary": "Close a window, by the id from windows. The person is asked first and may refuse. Closing a browser window closes every tab in it.",
+      "readonly": false,
+      "parameters": {"type": "object", "additionalProperties": false, "required": ["window"], "properties": {
+        "window": {"type": "string", "maxLength": 40}
+      }},
+      "result": {"type": "object", "required": ["closed"], "properties": {"closed": {"type": "boolean"}, "reason": {"type": "string"}}}
+    }
+  ]
+}

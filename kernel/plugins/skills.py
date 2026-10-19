@@ -28,7 +28,7 @@ from typing import Any
 from kernel.plugins import capabilities as caps
 from kernel.plugins.builder import BuildLedger
 from kernel.plugins.grants import GrantStore
-from kernel.plugins.host import RunnerHost, RunnerStartError
+from kernel.plugins.host import RunnerHost, RunnerStartError, ServiceError
 from kernel.plugins.manifest import KIND_TOOLS, MAX_INSTRUCTIONS_BYTES, ManifestError, ToolDef
 from kernel.plugins.mcp import AttachedServer, McpClient, McpError, ServerConfig, load_servers, render_result, tools_digest, wire_tool_name
 from kernel.plugins.registry import CatalogEntry, RegistryError, SkillRegistry, reference_path
@@ -368,11 +368,13 @@ class SkillManager:
         errors = validate(arguments, tool.parameters)
         if errors:
             return _failed(f"arguments of {skill_id}.{tool_name}: " + "; ".join(errors[:5]))
+        agent = self._agent
+        if skill.manifest.core_group:
+            return self._call_core(skill, tool, arguments)
         try:
             host = self._ensure_host(skill)
         except RunnerStartError as error:
             return _failed(f"{skill_id} could not start: {redact_text(str(error))}")
-        agent = self._agent
         call = SkillCall(skill=skill, tool=tool, call_id=f"skc_{uuid.uuid4().hex[:12]}",
                          run_id=str(getattr(agent, "_run_id", "") or "run"), session=agent.current_session)
         skill.calls += 1
@@ -396,6 +398,20 @@ class SkillManager:
         if not ok:
             feedback["error"] = f"{skill_id}.{tool_name} {outcome.status}: {data.get('error') or outcome.error_code}"
         return feedback
+
+    def _call_core(self, skill: AttachedSkill, tool: ToolDef, arguments: dict[str, Any]) -> dict[str, Any]:
+        """A tool the core itself runs (``core_group``): the same grant and read-only checks, no runner process."""
+        agent = self._agent
+        call = SkillCall(skill=skill, tool=tool, call_id=f"skc_{uuid.uuid4().hex[:12]}",
+                         run_id=str(getattr(agent, "_run_id", "") or "run"), session=agent.current_session)
+        skill.calls += 1
+        try:
+            value = self.services.handle(call, f"{skill.manifest.core_group}.{tool.name}", arguments)
+        except ServiceError as error:
+            return _failed(f"{skill.id}.{tool.name} {error.code}: {redact_text(error.message)}")
+        data = {"skill": skill.id, "version": skill.version, "tool": tool.name, "status": "success",
+                "result": value, "untrusted": True}
+        return {"ok": True, "action_type": "skill_call", "data": data}
 
     def _ensure_host(self, skill: AttachedSkill) -> RunnerHost:
         if skill.host is not None and skill.host.alive:

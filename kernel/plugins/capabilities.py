@@ -74,6 +74,12 @@ _CATALOG = (
     Capability("agents.manage", "Start a read-only helper agent", "Запускать помощницу только для чтения"),
     Capability("display", "Run programs on its own virtual screen, separate from yours",
                "Запускать программы на собственном виртуальном экране, отдельном от вашего"),
+    Capability("host.open", "Open web addresses in your own browser and start applications installed on this computer",
+               "Открывать веб-адреса в вашем браузере и запускать установленные на этом компьютере приложения",
+               writes=True),
+    Capability("host.windows", "See your open windows (their titles), bring one to the front and close one after asking you",
+               "Видеть ваши открытые окна (их заголовки), выводить окно вперёд и закрывать окно, спросив вас",
+               writes=True),
     Capability("permissions.request", "Ask you for extra access during a task",
                "Просить у вас дополнительный доступ во время задачи"),
 )

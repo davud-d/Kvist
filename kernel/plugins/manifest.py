@@ -56,8 +56,11 @@ _LIMIT_BOUNDS: dict[str, tuple[float, float, float]] = {
 }
 _TOP_LEVEL_KEYS = frozenset({
     "manifest_version", "id", "version", "plugin_api", "kind", "name", "summary", "instructions",
-    "entrypoint", "platforms", "dependencies", "capabilities", "limits", "tools", "source", "settings",
+    "entrypoint", "platforms", "dependencies", "capabilities", "limits", "tools", "source", "settings", "core_group",
 })
+# Core tool groups a bundled skill may name: its tools are run by the core itself (CoreServices methods
+# "<group>.<tool>"), so there is no package code and no sandbox. Never available to a package the person installs.
+CORE_GROUPS = frozenset({"host"})
 _TOOL_KEYS = frozenset({"name", "summary", "parameters", "result", "readonly", "timeout_seconds", "max_result_bytes"})
 
 
@@ -103,6 +106,7 @@ class Manifest:
     tools: tuple[ToolDef, ...]
     source: dict[str, str]
     settings: dict[str, Any] | None
+    core_group: str = ""
     raw: dict[str, Any] = field(repr=False, compare=False, default_factory=dict)
 
     def label(self, language: str) -> str:
@@ -130,7 +134,7 @@ def load_manifest(version_dir: Path) -> Manifest:
         raise ManifestError(f"manifest.json is not valid JSON: {error}") from None
     manifest = parse_manifest(data)
     read_package_file(version_dir, manifest.instructions, MAX_INSTRUCTIONS_BYTES)
-    if manifest.kind == KIND_TOOLS:
+    if manifest.kind == KIND_TOOLS and not manifest.core_group:
         read_package_file(version_dir, manifest.entrypoint, MAX_PACKAGE_BYTES)
     return manifest
 
@@ -157,8 +161,11 @@ def parse_manifest(data: Any) -> Manifest:
     if kind not in (KIND_INSTRUCTIONS, KIND_TOOLS):
         raise ManifestError("kind must be 'instructions' or 'tools'")
     instructions = _relative_file(data.get("instructions", "SKILL.md"), "instructions")
+    core_group = data.get("core_group", "")
+    if core_group and (kind != KIND_TOOLS or core_group not in CORE_GROUPS or data.get("dependencies")):
+        raise ManifestError(f"core_group must be one of {sorted(CORE_GROUPS)} on a tools skill without dependencies")
     entrypoint = ""
-    if kind == KIND_TOOLS:
+    if kind == KIND_TOOLS and not core_group:
         entrypoint = _relative_file(data.get("entrypoint", "plugin.py"), "entrypoint")
         if not entrypoint.endswith(".py"):
             raise ManifestError("entrypoint must be a .py file")
@@ -181,6 +188,7 @@ def parse_manifest(data: Any) -> Manifest:
         tools=tools,
         source=_source(data.get("source")),
         settings=_settings(data.get("settings")),
+        core_group=core_group,
         raw=data,
     )
 

@@ -168,7 +168,7 @@ class SkillRegistry:
                     f"this Kvist provides {_api_version()}")
         if sys.platform not in manifest.platforms:
             return f"not supported on {sys.platform} (supports {', '.join(manifest.platforms)})"
-        if manifest.kind != KIND_TOOLS:
+        if manifest.kind != KIND_TOOLS or manifest.core_group:
             return ""
         from kernel.plugins.sandbox import runner_unavailable_reason
 
@@ -203,6 +203,8 @@ class SkillRegistry:
         """Copy a package into ``versions/`` without activating it."""
         source = Path(source).resolve(strict=True)
         manifest = load_manifest(source)
+        if manifest.core_group and origin != "bundled":
+            raise RegistryError("core tools run without a sandbox, so only the skills Kvist ships may use them")
         folder = self.root / manifest.id
         (folder / VERSIONS_DIR).mkdir(parents=True, exist_ok=True, mode=0o700)
         target = folder / VERSIONS_DIR / manifest.version

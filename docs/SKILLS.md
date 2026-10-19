@@ -178,6 +178,8 @@ content, starts with no grants**.
 | `artifacts` | save result files | | |
 | `agents.manage` | start a read-only helper | | |
 | `display` | run programs on its own virtual screen | | |
+| `host.open` | open http(s) addresses in the person's own browser, start installed applications (at most 12 per task, an address with a secret in it is refused). **Core tools only**, see below | yes | |
+| `host.windows` | list the person's windows, focus one, close one after the person confirms (Hyprland, Sway, niri, i3, X11 with `wmctrl`, GNOME with the Window Calls extension, KDE with `kdotool`, macOS, Windows). **Core tools only** | yes | |
 | `permissions.request` | ask for more access during a task | | |
 
 Capabilities that write are refused in reader runs and plan mode whatever the grant says.
@@ -433,6 +435,7 @@ out skills this OS can never run; `--skill-op list` shows them with the reason.
 | Id | What it does |
 | --- | --- |
 | `browser` | Chromium + Playwright on its own X11 screen: open pages (workspace files via a local server, task services, granted domains), snapshot, click, type, select, press, scroll, wait, screenshot (described by the Vision model when given a `question`), console/network errors, tabs, upload. `emulate` sets the viewport, the colour scheme and reduced motion; `check_page` measures sideways scroll and its cause, clipped text, contrast below WCAG AA, small targets, unnamed controls, images without alt, heading jumps, `lang`, the character set and failed fonts. Preview in the GUI, viewer link. Needs `xorg-server-xvfb`, `i3` and Chromium; Playwright is installed into the skill's own env. |
+| `desktop` | **core tools**, no runner: open an http(s) address in the person's own browser, start an installed application by name, list / focus / close windows (closing asks the person). Text over GUI: the agent finds the exact address with web search and opens it. Works on Linux, macOS and Windows; windows on Linux need Hyprland, Sway, niri, i3, X11 with `wmctrl`, GNOME with the Window Calls extension or KDE with `kdotool`. No arbitrary commands, typing or clicks, and no tabs of a running browser. |
 | `test_runner` | pytest / `node --test` / `npm test` with structured results and a log artifact. |
 | `documents` | read PDF pages, spreadsheet sheets and ranges (xlsx, csv) and Word paragraphs (docx) with exact page, sheet, cell and paragraph references. |
 | `code_nav` | **Python only**: go to definition, find usages, file outline, preview a rename as diffs, pyflakes diagnostics. |
@@ -444,10 +447,11 @@ out skills this OS can never run; `--skill-op list` shows them with the reason.
 
 ## Platforms and limits
 
+* **Core tools** (`core_group` in the manifest) are tools the core runs itself, with the same grant, read-only and plan-mode checks but no package code and no runner. Only a skill Kvist ships may use them (the registry refuses the manifest from any other origin, and `host.*` requests from a sandboxed skill are refused), so they work on every platform the core runs on.
 * **Executable skills are Linux-only.** Without Bubblewrap and a trusted system Python
   they are reported unavailable; Kvist never falls back to running skill code with the
   person's rights. Instruction-only skills work everywhere.
-* macOS and Windows: not verified; no executable skills.
+* macOS and Windows: not verified; no executable skills. The macOS, Windows, GNOME, KDE and niri backends of `desktop` are covered by unit tests with faked commands only, and the package reader of the skills platform itself still uses POSIX file flags, so skills do not load on Windows yet.
 * The browser skill needs Xvfb, i3 and Chromium on the host.
 * The ctx file API has no delete, move or binary write. MCP is stdio only.
 * ACP (Zed) shows skill, screen, helper and artifact events as text and has no pause.
