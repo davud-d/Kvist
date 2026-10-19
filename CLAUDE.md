@@ -1222,7 +1222,7 @@ and a fresh scratch workspace (a reused one remembers denied approvals).
 A separate frontend with its own folder. **Do not put voice code into `frontends/tui/glass`:** the conversation screen
 stays as it is. The screen is its own Rust crate, `frontends/voice/screen/` (`kvist-voice-screen`), and shares no
 source with Glass, so a change in one cannot break the other. `anim backdrop core dialog diff highlight kitty layout
-probe strings term text theme` began as copies of Glass's files and are maintained in the voice crate from now on (a fix
+probe slash strings term text theme` began as copies of Glass's files and are maintained in the voice crate from now on (a fix
 to such a file in one frontend is made in the other by hand); the screen's own files are `orb.rs`, `voice.rs`,
 `voice_overlay.rs`, `voice_strings.rs` and `icons.rs`. `frontends/voice/kvist-voice` starts it (and the ears and the
 voice) with the right environment.
@@ -1237,8 +1237,10 @@ Glass (`app.rs`, `ask_frontend`) lists Voice like the Ink app's.
 pixel into an RGBA picture each frame (30 fps at most, `ORB_FPS`) over the photograph; under it a frosted-glass card
 made like the conversation screen's cards (`backdrop::blur` + `backdrop::card`, regenerated only when its cells
 change) with the state's Codicons icon and a `text::shimmer` label, the words, a dim line with what the room sounded
-like (the ears' `heard` event), the result of a command and a problem; a footer with provider, model, session and a
-context meter. Text goes through the shared `Painter`. `Voice` is pure state: `on_core`/`on_ears`/`on_voice` take
+like (the ears' `heard` event), the result of a command and a problem; a footer with provider, model, session and the
+keys, and the context meter right-aligned on the row above it; the window title is `Kvist` until the core's
+`session_title` arrives, then `Kvist | <title>`; a `/` lists the commands over the input like Glass's slash menu.
+Text goes through the shared `Painter`. `Voice` is pure state: `on_core`/`on_ears`/`on_voice` take
 events and put `Out` messages in an outbox that the run loop delivers, so every priority is unit-tested without a
 process. The core runs with `AGENT_VOICE_MODE=1` (set in the screen's environment); the two helpers are optional
 commands from `KVIST_VOICE_STT_CMD` / `KVIST_VOICE_TTS_CMD` (JSON arrays, JSON lines both ways, protocol in

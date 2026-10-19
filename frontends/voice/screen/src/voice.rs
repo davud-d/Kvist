@@ -41,7 +41,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use serde_json::{Value, json};
 
-use crate::anim;
+use crate::anim::{self, Ease, Tween};
 use crate::backdrop::{self, Glass};
 use crate::core::{self, Core, Message};
 use crate::dialog::{Ask, Body, Choice};
@@ -49,6 +49,7 @@ use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG};
 use crate::layout::Grid;
 use crate::orb::{ALL_STATES, Orb, OrbState};
 use crate::probe::Caps;
+use crate::slash;
 use crate::voice_strings::{Strings, strings};
 use crate::text::{self, Painter};
 use crate::icons;
@@ -60,6 +61,9 @@ const BACKDROP_SLOT: u32 = 1;
 const ORB_SLOT: u32 = 2;
 const CARD_SLOT: u32 = 3;
 const OVERLAY_SLOT: u32 = 4;
+const MENU_SLOT: u32 = 5;
+/// The most commands the slash list shows at once; the rest scroll.
+const SLASH_ROWS: usize = 8;
 /// After an answer is spoken, the person may talk on for this long without the wake word,
 /// with at least this many words: a stray word is not a reply.
 const CONVERSE_SECONDS: f32 = 12.0;
@@ -180,6 +184,14 @@ pub struct Voice {
     /// The result of the last command, and whether it worked.
     toast: Option<(String, bool, Instant)>,
     session: String,
+    /// The core's name of the open session, to tell whose title an event brings.
+    session_id: String,
+    /// The open session's generated title; empty until the core has one.
+    title: String,
+    /// The slash list's chosen row.
+    pick: usize,
+    /// 0 while the slash list is closed, 1 once it has opened.
+    menu_in: Tween,
     /// Start a new session when the core says hello (not with `--continue`).
     fresh_session: bool,
     error_until: Option<Instant>,
@@ -226,6 +238,10 @@ impl Voice {
             converse: None,
             toast: None,
             session: String::new(),
+            session_id: String::new(),
+            title: String::new(),
+            pick: 0,
+            menu_in: Tween::settled(0.0),
             fresh_session: true,
             error_until: None,
             voice_busy: false,
@@ -309,6 +325,7 @@ impl Voice {
         if let Some(ask) = &mut self.ask {
             ask.follow(LIST_ROWS);
         }
+        self.sync_menu(now);
         self.open_conversation(now);
         let state = self.resolve(now);
         self.orb.set_state(state);
@@ -389,7 +406,15 @@ impl Voice {
             "session" | "session_title" => {
                 let title = text("title");
                 let name = if title.is_empty() { text("session") } else { title };
-                if !name.is_empty() {
+                // A title can arrive for a session the person has already left.
+                let current = self.session_id.is_empty() || text("session") == self.session_id;
+                if text("type") == "session" {
+                    self.session_id = text("session").to_string();
+                    self.title = title.to_string();
+                } else if current {
+                    self.title = title.to_string();
+                }
+                if !name.is_empty() && current {
                     self.session = name.to_string();
                 }
             }
@@ -558,8 +583,11 @@ impl Voice {
         }
         let moved = effect("changed").and_then(Value::as_bool) == Some(true) || (ok && name == "new");
         if moved && matches!(name, "new" | "session") {
-            let title = effect("title").and_then(Value::as_str).or_else(|| effect("session").and_then(Value::as_str));
-            self.session = title.unwrap_or("").to_string();
+            let title = effect("title").and_then(Value::as_str);
+            let id = effect("session").and_then(Value::as_str);
+            self.session = title.or(id).unwrap_or("").to_string();
+            self.session_id = id.unwrap_or("").to_string();
+            self.title = title.unwrap_or("").to_string();
             self.reset_conversation();
         }
         // A dialog the person closed is not news.
@@ -718,7 +746,11 @@ impl Voice {
             KeyCode::Char('q') if self.demo.is_some() => self.quit = true,
             KeyCode::Char(' ') | KeyCode::Right if self.demo.is_some() => self.step_demo(1, now),
             KeyCode::Left if self.demo.is_some() => self.step_demo(ALL_STATES.len() - 1, now),
-            KeyCode::Char(c) if !ctrl && self.demo.is_none() => self.input = Some(c.to_string()),
+            KeyCode::Char(c) if !ctrl && self.demo.is_none() => {
+                self.input = Some(c.to_string());
+                self.pick = 0;
+                self.sync_menu(now);
+            }
             _ => {}
         }
     }
@@ -741,9 +773,51 @@ impl Voice {
         self.toast(message, true, now);
     }
 
+    /// The commands the typed line asks for; none unless it starts with `/`.
+    fn suggestions(&self) -> Vec<&'static slash::Command> {
+        if self.ask.is_some() || self.menu.is_some() {
+            return Vec::new();
+        }
+        self.input.as_deref().map(slash::suggest).unwrap_or_default()
+    }
+
+    /// The slash list's chosen row.
+    fn chosen(&self) -> usize {
+        self.pick.min(self.suggestions().len().saturating_sub(1))
+    }
+
+    /// Opens the slash list with a short animation when it appears; it goes at once when the
+    /// list is gone, since its rows are gone with it.
+    fn sync_menu(&mut self, now: Instant) {
+        let open = !self.suggestions().is_empty();
+        if open && self.menu_in.target() == 0.0 {
+            self.menu_in.go(1.0, now, 170, Ease::OutCubic);
+        } else if !open && self.menu_in.target() != 0.0 {
+            self.menu_in = Tween::settled(0.0);
+        }
+    }
+
     /// Keys in the input line: typing, Backspace, Ctrl+U to clear, Enter sends, Esc drops the line.
+    /// While the slash list is open the arrows walk it, Tab completes the name and Enter runs the chosen command.
     fn input_key(&mut self, code: KeyCode, ctrl: bool, now: Instant) {
+        let shown = self.suggestions().len();
         match code {
+            KeyCode::Up | KeyCode::Down if shown > 0 => {
+                self.pick = slash::step(shown, self.chosen(), if code == KeyCode::Up { -1 } else { 1 });
+                return;
+            }
+            KeyCode::Tab if shown > 0 => {
+                self.input = Some(format!("/{} ", self.suggestions()[self.chosen()].name));
+                self.pick = 0;
+                return self.sync_menu(now);
+            }
+            KeyCode::Enter if shown > 0 => match slash::resolve_enter(self.input.as_deref().unwrap_or(""), self.chosen()) {
+                slash::Enter::Fill(line) => self.input = Some(line),
+                slash::Enter::Submit(line) => {
+                    self.input = Some(line);
+                    self.submit_input(now);
+                }
+            },
             KeyCode::Esc => self.input = None,
             KeyCode::Enter => self.submit_input(now),
             KeyCode::Backspace => {
@@ -759,6 +833,8 @@ impl Voice {
             }
             _ => {}
         }
+        self.pick = 0;
+        self.sync_menu(now);
     }
 
     fn step_demo(&mut self, by: usize, now: Instant) {
@@ -1108,6 +1184,60 @@ impl Voice {
         Some(OverlayPlan { rect: Rect::new(x, y, width as u16, height), rows })
     }
 
+    /// The slash list's card above the input line, or `None` when no list is open or there is no room for a row.
+    fn menu_plan(&self, grid: Grid) -> Option<Rect> {
+        let count = self.suggestions().len();
+        let input = self.overlay_plan(grid)?.rect;
+        let rows = count.min(SLASH_ROWS).min(input.y.saturating_sub(4) as usize);
+        if rows == 0 {
+            return None;
+        }
+        let height = rows as u16 + 2;
+        Some(Rect::new(input.x, input.y - 1 - height, input.width, height))
+    }
+
+    /// The slash list over the input: the commands the typed prefix leaves, the chosen one lit.
+    /// Its text fades in as the glass behind it frosts.
+    fn draw_menu(&self, p: &mut Painter, card: Rect, now: Instant) {
+        let shown = self.suggestions();
+        let rows = card.height as usize - 2;
+        let chosen = self.chosen();
+        let first = slash::window_start(shown.len(), chosen, rows);
+        let russian = crate::strings::russian();
+        let x = card.x as i32 + 3;
+        let right = card.right() as i32 - 3;
+        let hint_x = x + slash::name_width() as i32 + 4;
+        for (index, command) in shown.iter().enumerate().skip(first).take(rows) {
+            let y = card.y as i32 + 1 + (index - first) as i32;
+            let picked = index == chosen;
+            if picked {
+                p.fill(card.x as i32 + 1, y, card.width as i32 - 2, theme::MOON);
+            }
+            let name = Style::default()
+                .fg(if picked { theme::INK } else { theme::FOG })
+                .add_modifier(if picked { Modifier::BOLD } else { Modifier::empty() });
+            p.text(x, y, &format!("/{}", command.name), name);
+            let room = (right - hint_x).max(0) as usize;
+            if room >= 8 {
+                let hint = Style::default().fg(if picked { theme::INK_SOFT } else { theme::DUSK });
+                p.text(hint_x, y, &text::fit(command.hint(russian), room), hint);
+            }
+        }
+        if shown.len() > rows {
+            let counter = format!("{}/{}", chosen + 1, shown.len());
+            p.text(right - counter.len() as i32, card.bottom() as i32 - 1, &counter, Style::default().fg(theme::DUSK));
+        }
+        let open = self.menu_in.value(now).clamp(0.0, 1.0);
+        text::fade(p.buf, card, 1.0 - open, theme::NIGHT);
+    }
+
+    /// The text of the window title: `Kvist | <title>` once the session has one.
+    fn window_title(&self) -> String {
+        let clean: String = self.title.chars().filter(|c| !c.is_control()).collect();
+        let clean = clean.trim();
+        if clean.is_empty() { "Kvist".to_string() } else { format!("Kvist | {}", clean.chars().take(80).collect::<String>()) }
+    }
+
     fn draw(&self, frame: &mut ratatui::Frame, grid: Grid, now: Instant) {
         let s = strings();
         let area = frame.area();
@@ -1117,6 +1247,9 @@ impl Voice {
         match self.overlay_plan(grid) {
             Some(plan) => Self::draw_overlay(&mut p, &plan),
             None => self.draw_card(&mut p, grid, ms),
+        }
+        if let Some(card) = self.menu_plan(grid) {
+            self.draw_menu(&mut p, card, now);
         }
 
         // The footer, laid out like the conversation screen's: where it runs, how full it is, how to leave.
@@ -1142,7 +1275,8 @@ impl Voice {
                 ("━".repeat(CELLS - filled), Style::default().fg(theme::INK_SOFT)),
                 (format!("  {:.0}%", fraction * 100.0), dim),
             ];
-            p.line(area.width as i32 / 2 - text::line_width(&bar) as i32 / 2 + 8, bottom, &bar);
+            // Right-aligned on the row above the key hints, where nothing else is drawn.
+            p.line_right(area.width as i32 - 3, bottom - 1, &bar);
         }
         let hint = if self.demo.is_some() { format!("{} · {}", s.voice_demo, s.voice_hint_demo) } else { s.voice_hint.to_string() };
         p.line_right(area.width as i32 - 3, bottom, &vec![(hint, dim)]);
@@ -1222,10 +1356,15 @@ struct Scene {
     backdrop: Option<u32>,
     /// The photograph blurred, which the glass cards lie over.
     frosted: Option<RgbImage>,
+    /// The photograph unblurred and lightly blurred: the slash list's glass frosts from one to the other to `frosted`.
+    sharp: Option<RgbImage>,
+    soft: Option<RgbImage>,
     orb_image: Option<u32>,
     /// The cards now on screen: their cells and their pictures.
     card: Option<(Rect, u32)>,
     overlay: Option<(Rect, u32)>,
+    /// The slash list: its cells, how frosted its glass is (0..=2) and its picture.
+    menu: Option<(Rect, u8, u32)>,
 }
 
 /// How a kind of glass card is made and where it is placed.
@@ -1271,7 +1410,7 @@ fn show_glass(
 
 impl Scene {
     fn new(caps: Caps) -> Self {
-        Scene { gpu: Gpu::new(caps.temp_dir), backdrop: None, frosted: None, orb_image: None, card: None, overlay: None }
+        Scene { gpu: Gpu::new(caps.temp_dir), backdrop: None, frosted: None, sharp: None, soft: None, orb_image: None, card: None, overlay: None, menu: None }
     }
 
     fn show_backdrop(&mut self, grid: Grid) -> io::Result<()> {
@@ -1282,6 +1421,8 @@ impl Scene {
         self.gpu.set(BACKDROP_SLOT, Some(placement));
         self.backdrop = Some(id);
         self.frosted = Some(backdrop::blur(&image, 4, 8));
+        self.soft = Some(backdrop::blur(&image, 4, 3));
+        self.sharp = Some(image);
         Ok(())
     }
 
@@ -1323,9 +1464,51 @@ impl Scene {
         self.gpu.reset();
         self.backdrop = None;
         self.frosted = None;
+        self.sharp = None;
+        self.soft = None;
         self.orb_image = None;
         self.card = None;
         self.overlay = None;
+        self.menu = None;
+    }
+
+    /// The slash list's glass: clear at first, frosting as it opens (`open` 0..=1), and sliding up
+    /// into place by under a row. A new frost stage makes a new picture; the slide only moves it.
+    fn show_menu(&mut self, grid: Grid, rect: Option<Rect>, open: f32) -> io::Result<()> {
+        let Some(rect) = rect else {
+            self.gpu.set(MENU_SLOT, None);
+            if let Some((_, _, old)) = self.menu.take() {
+                self.gpu.free(old);
+            }
+            return Ok(());
+        };
+        let stage: u8 = if open < 0.34 { 0 } else if open < 0.67 { 1 } else { 2 };
+        let source = match stage {
+            0 => self.sharp.as_ref(),
+            1 => self.soft.as_ref(),
+            _ => self.frosted.as_ref(),
+        };
+        let Some(source) = source else { return Ok(()) };
+        let id = match self.menu {
+            Some((cells, shown, id)) if cells == rect && shown == stage => id,
+            _ => {
+                let glass = Glass { tint: [0x14, 0x1E, 0x34], alpha: 0.74, radius: grid.ch as f32 * 0.6, rim: 0.18 };
+                let (window_w, window_h) = (grid.cols as f32 * grid.cw as f32, grid.rows as f32 * grid.ch as f32);
+                let scale = (source.width() as f32 / window_w, source.height() as f32 / window_h);
+                let (x, y) = (rect.x as i64 * grid.cw as i64, rect.y as i64 * grid.ch as i64);
+                let (w, h) = (rect.width as u32 * grid.cw, rect.height as u32 * grid.ch);
+                let picture = backdrop::card(source, x, y, w, h, &glass, scale);
+                let id = self.gpu.upload_rgba(w, h, picture.as_raw())?;
+                if let Some((_, _, old)) = self.menu.replace((rect, stage, id)) {
+                    self.gpu.free(old);
+                }
+                id
+            }
+        };
+        let slide = ((1.0 - open) * 0.8 * grid.ch as f32) as u32;
+        let placement = Placement { image: id, col: rect.x, row: rect.y, x_off: 0, y_off: slide, cells: Some((rect.width, rect.height)), crop: None, z: Z_DIALOG };
+        self.gpu.set(MENU_SLOT, Some(placement));
+        Ok(())
     }
 }
 
@@ -1409,6 +1592,7 @@ fn run_loop(
     let period = Duration::from_secs_f64(1.0 / frame_rate as f64);
     let mut due = Instant::now();
     let mut last = Instant::now();
+    let mut shown_title = String::from("Kvist");
     let mut out = io::stdout();
 
     while !voice.quit {
@@ -1450,8 +1634,14 @@ fn run_loop(
         let clock = now.duration_since(started).as_secs_f32();
         voice.tick(now, dt, clock);
         terminal.draw(|frame| voice.draw(frame, grid, now))?;
+        let title = voice.window_title();
+        if title != shown_title {
+            crate::term::set_title(&title)?;
+            shown_title = title;
+        }
         let overlay = voice.overlay_plan(grid).map(|plan| plan.rect);
         scene.show_overlay(grid, overlay)?;
+        scene.show_menu(grid, voice.menu_plan(grid), voice.menu_in.value(now))?;
         scene.show_card(grid, overlay.is_none().then(|| voice.card_plan(grid).rect))?;
         scene.show_orb(&voice, grid, clock)?;
         scene.gpu.flush(&mut out)?;
@@ -2068,6 +2258,44 @@ mod tests {
         assert_eq!(voice.session, "chat-2");
         voice.on_core(&json!({"type": "session_title", "session": "chat-2", "title": "Про голос"}), now);
         assert_eq!(voice.session, "Про голос");
+    }
+
+    #[test]
+    fn the_window_is_named_after_the_session_only_once_it_has_a_title() {
+        let now = Instant::now();
+        let mut voice = voice();
+        assert_eq!(voice.window_title(), "Kvist");
+        voice.on_core(&json!({"type": "session", "session": "chat-2", "has_checkpoint": false}), now);
+        assert_eq!(voice.window_title(), "Kvist");
+        voice.on_core(&json!({"type": "session_title", "session": "chat-1", "title": "Not this one"}), now);
+        assert_eq!(voice.window_title(), "Kvist", "a title for another session is not this window's");
+        voice.on_core(&json!({"type": "session_title", "session": "chat-2", "title": "Про голос\u{7}"}), now);
+        assert_eq!(voice.window_title(), "Kvist | Про голос");
+    }
+
+    #[test]
+    fn a_slash_opens_the_command_list_and_tab_enter_and_the_arrows_work_it() {
+        let now = Instant::now();
+        let grid = Grid { cols: 120, rows: 36, cw: 10, ch: 20 };
+        let mut voice = voice();
+        let press = |voice: &mut Voice, code: KeyCode| voice.key(KeyEvent::new(code, KeyModifiers::NONE), now);
+        assert!(voice.menu_plan(grid).is_none());
+        press(&mut voice, KeyCode::Char('/'));
+        assert_eq!(voice.menu_in.target(), 1.0);
+        let card = voice.menu_plan(grid).expect("the list opens above the input");
+        assert!(card.bottom() < voice.overlay_plan(grid).unwrap().rect.y);
+
+        press(&mut voice, KeyCode::Char('s'));
+        press(&mut voice, KeyCode::Down);
+        press(&mut voice, KeyCode::Tab);
+        assert_eq!(voice.input.as_deref(), Some("/style "));
+        assert!(voice.menu_plan(grid).is_none(), "typed arguments close the list");
+        assert_eq!(voice.menu_in.target(), 0.0);
+
+        voice.input = Some("/ne".into());
+        voice.sync_menu(now);
+        press(&mut voice, KeyCode::Enter);
+        assert_eq!(voice.take_outbox(), vec![Out::Core(json!({"type": "command", "name": "new", "args": []}))]);
     }
 
     #[test]

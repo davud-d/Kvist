@@ -24,6 +24,8 @@ pub fn enter() -> io::Result<()> {
         SetCursorStyle::BlinkingBar,
         SetTitle("Kvist"),
     )?;
+    // Saves the title the terminal had (XTWINOPS 22), so `leave` can give it back.
+    out.write_all(b"\x1b[22;2t")?;
     // The cursor takes the interface's moonlight colour (OSC 12).
     out.write_all(b"\x1b]12;#EFE3C2\x1b\\")?;
     install_panic_restore();
@@ -35,6 +37,7 @@ pub fn leave() -> io::Result<()> {
     // Every picture this program placed with its data, the pointer shape, the cursor colour, and
     // the default background (changed to blend the padding with the photo).
     out.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\\x1b]22;default\x1b\\\x1b]111\x1b\\\x1b]112\x1b\\")?;
+    out.write_all(b"\x1b[23;2t")?;
     execute!(
         out,
         SetCursorStyle::DefaultUserShape,
@@ -45,6 +48,11 @@ pub fn leave() -> io::Result<()> {
         Show,
     )?;
     terminal::disable_raw_mode()
+}
+
+/// Names the window `title` (OSC 2), so a window manager shows the session.
+pub fn set_title(title: &str) -> io::Result<()> {
+    execute!(io::stdout(), SetTitle(title))
 }
 
 fn install_panic_restore() {

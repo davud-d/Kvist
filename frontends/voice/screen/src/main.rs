@@ -13,7 +13,7 @@
 //
 // The screen is a separate program with no code shared with the conversation screen
 // (frontends/tui/glass). anim, backdrop, core, dialog, diff, highlight, kitty, layout, probe,
-// strings, term, text and theme began as copies of that screen's files and are maintained
+// slash, strings, term, text and theme began as copies of that screen's files and are maintained
 // here from now on.
 
 #[allow(dead_code)]
@@ -34,6 +34,8 @@ mod kitty;
 mod layout;
 #[allow(dead_code)]
 mod probe;
+#[allow(dead_code)]
+mod slash;
 #[allow(dead_code)]
 mod strings;
 #[allow(dead_code)]
