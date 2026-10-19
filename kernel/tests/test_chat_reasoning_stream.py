@@ -5,6 +5,7 @@ import threading
 from types import SimpleNamespace
 
 from kernel.agent import LocalAgent
+from kernel.context_meter import ContextLedger
 from kernel.event_stream_ui import EventStreamUI
 from kernel.frontend_protocol import (
     FrontendChannel,
@@ -26,6 +27,7 @@ def _consume(stream):
     fake_self = SimpleNamespace(
         _ui=EventStreamUI(channel),
         _cancel_event=threading.Event(),
+        _context_ledger=ContextLedger(),
     )
     answer = LocalAgent._consume_chat_stream(fake_self, stream)
     return answer, channel.drain()

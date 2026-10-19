@@ -30,10 +30,11 @@ def test_error_sanitizer_redacts_credential_forms(message):
     assert "[REDACTED]" in sanitized
 
 
-def test_select_action_model_prefers_smart_for_complex_or_error(agent_factory):
+def test_select_action_model_starts_fast_and_escalates_on_errors(agent_factory):
+    # The wording or length of a request never picks the tier.
     complex_run = agent_factory(fast_model="fast", smart_model="smart")
     complex_run._state.user_goal = "refactor the whole project"
-    assert complex_run._select_action_model_for_run() == "smart"
+    assert complex_run._select_action_model_for_run() == "fast"
 
     simple_run = agent_factory(fast_model="fast", smart_model="smart")
     simple_run._state.user_goal = "rename x"
