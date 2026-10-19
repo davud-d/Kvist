@@ -28,7 +28,7 @@ pub struct MenuItem {
     pub label: fn(&Strings) -> &'static str,
 }
 
-pub const MENU: [MenuItem; 9] = [
+pub const MENU: [MenuItem; 13] = [
     MenuItem { icon: "\u{ea60}", key: 'n', command: "new", label: |s| s.voice_menu_new },
     MenuItem { icon: "\u{eac7}", key: 's', command: "session", label: |s| s.voice_menu_sessions },
     MenuItem { icon: "\u{ec19}", key: 'm', command: "models", label: |s| s.voice_menu_model },
@@ -38,6 +38,11 @@ pub const MENU: [MenuItem; 9] = [
     MenuItem { icon: "\u{eacd}", key: 'e', command: "effort", label: |s| s.voice_menu_effort },
     MenuItem { icon: "\u{ea67}", key: 'r', command: "role", label: |s| s.voice_menu_role },
     MenuItem { icon: "\u{eb5c}", key: 't', command: "style", label: |s| s.voice_menu_style },
+    MenuItem { icon: crate::icons::I_TOOLS, key: 'a', command: "settings-api", label: |s| s.voice_menu_api },
+    MenuItem { icon: theme::I_BRANCH, key: 'c', command: "changes", label: |s| s.voice_menu_changes },
+    MenuItem { icon: theme::I_CLOSE, key: 'v', command: "revert", label: |s| s.voice_menu_revert },
+    // Not a core command: the launcher starts the interface (`Voice::ask_frontend`).
+    MenuItem { icon: theme::I_TERMINAL, key: 'i', command: "tui", label: |s| s.voice_menu_interface },
 ];
 
 /// A line of the overlay: text, and a background the whole row takes when it is highlighted.
@@ -90,6 +95,17 @@ pub fn menu_rows(selected: usize, values: &[String], s: &Strings, width: usize) 
     rows.push(Row::blank());
     rows.push(Row::plain(vec![(s.voice_hint_menu.to_string(), style(theme::DUSK))]));
     rows
+}
+
+/// The input line: the field, what Enter does with it, how to leave it.
+pub fn input_rows(line: &str, s: &Strings, width: usize) -> Vec<Row> {
+    let shown = text::fit_end(line, width.saturating_sub(4));
+    let field: Line = vec![(format!("{}  ", theme::I_EDIT), style(theme::MIST)), (format!("{shown}{CURSOR}"), style(theme::FOG))];
+    vec![
+        Row { line: field, fill: Some(theme::HOVER) },
+        Row::blank(),
+        Row::plain(vec![(s.voice_hint_input.to_string(), style(theme::DUSK))]),
+    ]
 }
 
 fn title_icon(body: &Body) -> &'static str {
@@ -241,7 +257,11 @@ mod tests {
 
     #[test]
     fn every_menu_item_is_a_command_the_core_has_and_has_its_own_letter() {
-        let commands = ["new", "session", "models", "provider", "change-api", "web-search-provider", "effort", "role", "style"];
+        // "tui" is the launcher's, not the core's: the screen opens the interface picker itself.
+        let commands = [
+            "new", "session", "models", "provider", "change-api", "web-search-provider", "effort", "role", "style", "settings-api",
+            "changes", "revert", "tui",
+        ];
         let named: Vec<&str> = MENU.iter().map(|item| item.command).collect();
         assert_eq!(named, commands);
         let mut keys: Vec<char> = MENU.iter().map(|item| item.key).collect();

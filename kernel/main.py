@@ -1079,9 +1079,11 @@ def launch_voice(args: argparse.Namespace) -> int | None:
     The screen draws with the kitty graphics protocol and refuses any other terminal itself
     (``--check``), so the reason is printed and the caller falls back to the Ink UI. The
     ``kvist-voice`` launcher, when it ships beside the screen, adds the ears and the voice.
+    Exit code 64 means the person picked another interface with ``/tui``.
     """
     import json
     import subprocess
+    import tempfile
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
@@ -1108,11 +1110,21 @@ def launch_voice(args: argparse.Namespace) -> int | None:
     launcher = _VOICE_DIR / "kvist-voice"
     program = str(launcher) if launcher.is_file() and os.access(launcher, os.X_OK) else screen
     command = [program, "--workspace", str(resolve_workspace_path(args.workspace))]
-    env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_VOICE_SCREEN": screen}
-    try:
-        return subprocess.call(command, env=env)
-    except KeyboardInterrupt:
-        return 130
+    with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
+        switch_file = Path(scratch) / "frontend"
+        env = {
+            **os.environ,
+            "KVIST_CORE_CMD": json.dumps(core),
+            "KVIST_VOICE_SCREEN": screen,
+            "KVIST_SWITCH_FILE": str(switch_file),
+        }
+        try:
+            code = subprocess.call(command, env=env)
+        except KeyboardInterrupt:
+            return 130
+        if code != _TUI_SWITCH_CODE:
+            return code
+        return _switch_frontend(switch_file, args)
 
 
 def needs_setup(args: argparse.Namespace) -> bool:

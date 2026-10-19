@@ -73,7 +73,7 @@ frontends/voice/kvist-voice --workspace /path/to/project
 | `KVIST_TTS_ENGINE` | `silero` | `silero` or `moss` |
 | `KVIST_VOICE_SCREEN` | the checkout's release build | The `kvist-voice-screen` binary |
 
-A launch opens a new session (the core would otherwise continue the last one and answer from its context); `kvist-voice --continue` keeps the last one. `Tab` opens the menu: new session, sessions, model, provider, API key, web search, thinking effort, role, style (see [`screen/README.md`](screen/README.md)).
+A launch opens a new session (the core would otherwise continue the last one and answer from its context); `kvist-voice --continue` keeps the last one. `Tab` opens the menu: new session, sessions, model, provider, API key, web search, thinking effort, role, style, API settings, file changes, revert, interface (`/tui`); typing opens an input line for requests and `/commands`; `Esc` switches the microphone, `Ctrl+C` twice quits (see [`screen/README.md`](screen/README.md)).
 
 `kvist-voice-screen --demo` shows every orb state without any of this.
 

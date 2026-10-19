@@ -38,6 +38,27 @@ pub fn fit(s: &str, max: usize) -> String {
     out
 }
 
+/// The end of `s` that fits in `max` columns, with `…` where the start was cut: a line being
+/// typed keeps its newest characters in view.
+pub fn fit_end(s: &str, max: usize) -> String {
+    if width(s) <= max {
+        return s.to_string();
+    }
+    let mut kept: Vec<char> = Vec::new();
+    let mut used = 1;
+    for c in s.chars().rev() {
+        let w = c.width().unwrap_or(0);
+        if used + w > max {
+            break;
+        }
+        kept.push(c);
+        used += w;
+    }
+    kept.push('…');
+    kept.reverse();
+    kept.into_iter().collect()
+}
+
 /// Greedy word wrap of styled spans into lines of at most `max` columns.
 pub fn wrap(spans: &Line, max: usize) -> Vec<Line> {
     let max = max.max(4);

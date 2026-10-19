@@ -685,6 +685,23 @@ def test_voice_runs_the_screen_with_this_program_as_its_core(monkeypatch, tmp_pa
     command, env = calls[0]
     assert command == [str(screen), "--workspace", "ws"]
     assert json.loads(env["KVIST_CORE_CMD"])[-1].endswith("__main__.py")
+    assert "KVIST_SWITCH_FILE" in env
+
+
+def test_tui_inside_voice_starts_the_chosen_interface(monkeypatch, tmp_path):
+    _voice(monkeypatch, tmp_path)
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    monkeypatch.setattr(main, "launch_tui", lambda args: f"launched {args.frontend}")
+
+    def choose_ink(command, env):
+        Path(env["KVIST_SWITCH_FILE"]).write_text("tui\n", encoding="utf-8")
+        return main._TUI_SWITCH_CODE
+
+    monkeypatch.setattr(subprocess, "call", choose_ink)
+
+    assert main.launch_voice(_tui_args(frontend="voice")) == "launched tui"
+    assert saved == ["tui"]
 
 
 def test_voice_starts_through_its_launcher_when_it_ships_beside_the_screen(monkeypatch, tmp_path):

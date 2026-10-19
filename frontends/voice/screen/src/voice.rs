@@ -44,7 +44,7 @@ use serde_json::{Value, json};
 use crate::anim;
 use crate::backdrop::{self, Glass};
 use crate::core::{self, Core, Message};
-use crate::dialog::{Ask, Body};
+use crate::dialog::{Ask, Body, Choice};
 use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG};
 use crate::layout::Grid;
 use crate::orb::{ALL_STATES, Orb, OrbState};
@@ -68,6 +68,12 @@ const CONVERSE_MIN_WORDS: u32 = 2;
 const QUESTION_SECONDS: f32 = 20.0;
 /// How long the result of a command stays on the card.
 const TOAST_SECONDS: u64 = 5;
+/// Request id of the interface picker, which this screen asks itself and never sends to the core.
+const FRONTEND_REQUEST: &str = "local:frontend";
+/// Exit status that asks the launcher to start the interface named in `KVIST_SWITCH_FILE`.
+const SWITCH_FRONTEND: u8 = 64;
+/// A second Ctrl+C within this long quits.
+const QUIT_CONFIRM: Duration = Duration::from_secs(3);
 /// The orb is drawn at most this often: each frame is a new picture for the terminal.
 const ORB_FPS: u32 = 30;
 /// The widest side of the orb's picture in pixels; the terminal scales it up.
@@ -161,6 +167,14 @@ pub struct Voice {
     ask: Option<Ask>,
     /// The menu is open, on this item.
     menu: Option<usize>,
+    /// The line being typed: a request, or a `/command` with its words.
+    input: Option<String>,
+    /// The first Ctrl+C of a quit, waiting for its second.
+    quit_armed: Option<Instant>,
+    /// The person switched the microphone off with Esc.
+    mic_off: bool,
+    /// What the ears were last told about muting.
+    mute_sent: bool,
     pending: Option<Pending>,
     converse: Option<Converse>,
     /// The result of the last command, and whether it worked.
@@ -187,6 +201,8 @@ pub struct Voice {
     overheard: Option<(String, Instant)>,
     outbox: Vec<Out>,
     pub quit: bool,
+    /// The status the program exits with.
+    exit_code: u8,
 }
 
 impl Voice {
@@ -202,6 +218,10 @@ impl Voice {
             turn: Turn::Idle,
             ask: None,
             menu: None,
+            input: None,
+            quit_armed: None,
+            mic_off: false,
+            mute_sent: false,
             pending: None,
             converse: None,
             toast: None,
@@ -224,6 +244,7 @@ impl Voice {
             overheard: None,
             outbox: Vec::new(),
             quit: false,
+            exit_code: 0,
         }
     }
 
@@ -264,7 +285,7 @@ impl Voice {
 
     /// The agent waits for a yes or a no (a dialog that belongs to a command is not that).
     fn asks_the_person(&self) -> bool {
-        self.ask.is_some() && self.pending.is_none()
+        self.pending.is_none() && self.ask.as_ref().is_some_and(|ask| ask.request_id != FRONTEND_REQUEST)
     }
 
     fn speaking(&self, now: Instant) -> bool {
@@ -418,8 +439,86 @@ impl Voice {
     }
 
     fn start_command(&mut self, command: &str, silent: bool) {
+        self.start_command_with(command, &[], silent);
+    }
+
+    fn start_command_with(&mut self, command: &str, args: &[&str], silent: bool) {
         self.pending = Some(Pending { silent });
-        self.outbox.push(Out::Core(json!({"type": "command", "name": command, "args": []})));
+        self.outbox.push(Out::Core(json!({"type": "command", "name": command, "args": args})));
+    }
+
+    /// A request typed instead of spoken: the same path as heard words.
+    fn send_goal(&mut self, text: &str) {
+        self.caption = text.to_string();
+        self.caption_from_person = true;
+        self.converse = None;
+        self.stop_voice();
+        self.outbox.push(Out::Core(json!({"type": "goal", "text": text})));
+        self.turn = Turn::Thinking;
+        self.stream_text.clear();
+    }
+
+    fn toast(&mut self, message: &str, ok: bool, now: Instant) {
+        self.toast = Some((message.to_string(), ok, now));
+    }
+
+    /// Enter in the input line: `/tui` opens the interface picker (the launcher's, not the core's),
+    /// any other `/command` runs in the core with its words, anything else is a request.
+    fn submit_input(&mut self, now: Instant) {
+        let Some(line) = self.input.take() else { return };
+        let line = line.trim().to_string();
+        if line.is_empty() {
+            return;
+        }
+        let Some(command) = line.strip_prefix('/') else {
+            return self.send_goal(&line);
+        };
+        let mut words = command.split_whitespace();
+        let name = words.next().unwrap_or("");
+        if name == "tui" {
+            return self.ask_frontend();
+        }
+        if self.pending.is_some() {
+            self.input = Some(line);
+            return self.toast(strings().voice_busy, false, now);
+        }
+        let args: Vec<&str> = words.collect();
+        self.start_command_with(name, &args, false);
+    }
+
+    /// The terminal interfaces the launcher can start, this one first highlighted.
+    /// The list of the Ink app's `/tui` (frontends/tui/ink/commands.ts).
+    fn ask_frontend(&mut self) {
+        let s = strings();
+        let others = crate::strings::strings();
+        let choices = [
+            ("glass", "Classic", s.voice_frontend_classic),
+            ("tui", "Ink", others.frontend_ink),
+            ("claude", "Claude-style", others.frontend_claude),
+            ("voice", "Voice", s.voice_frontend_here),
+            ("terminal", "Classic Legacy", others.frontend_classic),
+        ]
+        .iter()
+        .map(|&(value, label, detail)| Choice { value: value.into(), label: label.into(), detail: detail.into() })
+        .collect();
+        self.menu = None;
+        self.ask = Some(Ask::local_choice(FRONTEND_REQUEST, others.frontend_title, choices, "voice"));
+    }
+
+    /// Leaves for another interface: the launcher reads its name from `KVIST_SWITCH_FILE`
+    /// when this program exits with status 64.
+    fn switch_frontend(&mut self, chosen: Option<&str>, now: Instant) {
+        let Some(chosen) = chosen.filter(|value| *value != "voice") else { return };
+        let Some(path) = std::env::var_os("KVIST_SWITCH_FILE") else {
+            return self.toast(strings().voice_needs_launcher, false, now);
+        };
+        match std::fs::write(&path, format!("{chosen}\n")) {
+            Ok(()) => {
+                self.exit_code = SWITCH_FRONTEND;
+                self.quit = true;
+            }
+            Err(error) => self.toast(&error.to_string(), false, now),
+        }
     }
 
     /// A dialog of the core. One this screen cannot show is cancelled, and the person is told.
@@ -522,7 +621,9 @@ impl Voice {
         self.overheard = None;
         // While a dialog is open or a command runs, speech is never a task: at most it answers a question.
         if let Some(ask) = &self.ask {
-            if let Some(reply) = voice_overlay::voice_reply(heard, ask) {
+            // The interface picker is typed, never answered by a stray "no".
+            let reply = if ask.request_id == FRONTEND_REQUEST { None } else { voice_overlay::voice_reply(heard, ask) };
+            if let Some(reply) = reply {
                 self.converse = None;
                 self.caption = heard.to_string();
                 self.caption_from_person = true;
@@ -531,16 +632,10 @@ impl Voice {
             }
             return;
         }
-        if self.menu.is_some() || self.pending.is_some() {
+        if self.menu.is_some() || self.pending.is_some() || self.input.is_some() {
             return;
         }
-        self.caption = heard.to_string();
-        self.caption_from_person = true;
-        self.converse = None;
-        self.stop_voice();
-        self.outbox.push(Out::Core(json!({"type": "goal", "text": heard})));
-        self.turn = Turn::Thinking;
-        self.stream_text.clear();
+        self.send_goal(heard);
     }
 
     fn on_voice(&mut self, event: &Value) {
@@ -575,9 +670,16 @@ impl Voice {
 
     /// The ears are muted while the voice talks: its own words must not be heard as the wake word.
     fn set_voice_busy(&mut self, busy: bool) {
-        if self.voice_busy != busy {
-            self.voice_busy = busy;
-            self.outbox.push(Out::Ears(json!({"type": "mute", "value": busy})));
+        self.voice_busy = busy;
+        self.sync_mute();
+    }
+
+    /// The ears are muted while the voice talks and while the person has the microphone off.
+    fn sync_mute(&mut self) {
+        let muted = self.voice_busy || self.mic_off;
+        if self.mute_sent != muted {
+            self.mute_sent = muted;
+            self.outbox.push(Out::Ears(json!({"type": "mute", "value": muted})));
         }
     }
 
@@ -594,23 +696,67 @@ impl Voice {
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
-            self.quit = true;
+            self.quit_or_arm(now);
             return;
         }
         if self.ask.is_some() {
-            self.ask_key(key.code, ctrl);
+            self.ask_key(key.code, ctrl, now);
             return;
         }
         if let Some(selected) = self.menu {
             self.menu_key(selected, key.code);
             return;
         }
+        if self.input.is_some() {
+            self.input_key(key.code, ctrl, now);
+            return;
+        }
         match key.code {
-            KeyCode::Esc => self.quit = true,
-            KeyCode::Tab | KeyCode::Char('/') => self.menu = Some(0),
+            KeyCode::Esc if self.demo.is_some() => self.quit = true,
+            KeyCode::Esc => self.toggle_microphone(now),
+            KeyCode::Tab => self.menu = Some(0),
             KeyCode::Char('q') if self.demo.is_some() => self.quit = true,
             KeyCode::Char(' ') | KeyCode::Right if self.demo.is_some() => self.step_demo(1, now),
             KeyCode::Left if self.demo.is_some() => self.step_demo(ALL_STATES.len() - 1, now),
+            KeyCode::Char(c) if !ctrl && self.demo.is_none() => self.input = Some(c.to_string()),
+            _ => {}
+        }
+    }
+
+    /// Ctrl+C once arms the quit and says so; Ctrl+C again within a few seconds leaves.
+    fn quit_or_arm(&mut self, now: Instant) {
+        if self.demo.is_some() || self.quit_armed.is_some_and(|at| now.saturating_duration_since(at) < QUIT_CONFIRM) {
+            self.quit = true;
+            return;
+        }
+        self.quit_armed = Some(now);
+        self.toast(strings().voice_quit_hint, true, now);
+    }
+
+    /// Esc switches the microphone off and on; typing still works while it is off.
+    fn toggle_microphone(&mut self, now: Instant) {
+        self.mic_off = !self.mic_off;
+        self.sync_mute();
+        let message = if self.mic_off { strings().voice_mic_off } else { strings().voice_mic_on };
+        self.toast(message, true, now);
+    }
+
+    /// Keys in the input line: typing, Backspace, Ctrl+U to clear, Enter sends, Esc drops the line.
+    fn input_key(&mut self, code: KeyCode, ctrl: bool, now: Instant) {
+        match code {
+            KeyCode::Esc => self.input = None,
+            KeyCode::Enter => self.submit_input(now),
+            KeyCode::Backspace => {
+                if let Some(line) = self.input.as_mut() {
+                    line.pop();
+                }
+            }
+            KeyCode::Char('u') if ctrl => self.input = Some(String::new()),
+            KeyCode::Char(c) if !ctrl => {
+                if let Some(line) = self.input.as_mut() {
+                    line.push(c);
+                }
+            }
             _ => {}
         }
     }
@@ -623,7 +769,7 @@ impl Voice {
     }
 
     /// Keys in a dialog: arrows choose, typing searches or fills the field, Enter answers, Esc cancels.
-    fn ask_key(&mut self, code: KeyCode, ctrl: bool) {
+    fn ask_key(&mut self, code: KeyCode, ctrl: bool, now: Instant) {
         let mut reply = None;
         if let Some(ask) = self.ask.as_mut() {
             match code {
@@ -639,10 +785,12 @@ impl Voice {
                 _ => {}
             }
         }
-        if let Some(reply) = reply {
-            self.outbox.push(Out::Core(reply));
-            self.ask = None;
+        let Some(reply) = reply else { return };
+        self.ask = None;
+        if reply.get("request_id").and_then(Value::as_str) == Some(FRONTEND_REQUEST) {
+            return self.switch_frontend(reply.get("value").and_then(Value::as_str), now);
         }
+        self.outbox.push(Out::Core(reply));
     }
 
     /// Keys in the menu: arrows and Enter, or the letter of an item; Esc closes it.
@@ -666,6 +814,9 @@ impl Voice {
         if self.demo.is_some() {
             return;
         }
+        if MENU[index].command == "tui" {
+            return self.ask_frontend();
+        }
         self.start_command(MENU[index].command, false);
     }
 
@@ -673,6 +824,9 @@ impl Voice {
     fn paste(&mut self, text: &str) {
         if let Some(ask) = &mut self.ask {
             ask.paste(text);
+        } else if self.menu.is_none() {
+            let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            self.input.get_or_insert_with(String::new).push_str(&flat);
         }
     }
 
@@ -942,10 +1096,11 @@ impl Voice {
         let s = strings();
         let width = (grid.cols as usize).saturating_sub(6).clamp(44, 84).min(grid.cols as usize);
         let inner = width.saturating_sub(2 * CARD_PAD_X as usize);
-        let rows = match (&self.ask, self.menu) {
-            (Some(ask), _) => voice_overlay::ask_rows(ask, s, inner),
-            (None, Some(selected)) => voice_overlay::menu_rows(selected, &self.menu_values(), s, inner),
-            (None, None) => return None,
+        let rows = match (&self.ask, self.menu, &self.input) {
+            (Some(ask), _, _) => voice_overlay::ask_rows(ask, s, inner),
+            (None, Some(selected), _) => voice_overlay::menu_rows(selected, &self.menu_values(), s, inner),
+            (None, None, Some(line)) => voice_overlay::input_rows(line, s, inner),
+            (None, None, None) => return None,
         };
         let height = (rows.len() as u16 + 2 * CARD_PAD_Y).min(grid.rows.saturating_sub(3));
         let x = (grid.cols - width as u16) / 2;
@@ -973,6 +1128,9 @@ impl Voice {
         if !self.session.is_empty() {
             left.push((format!("   {} ", icons::I_COMMENT), dim));
             left.push((text::fit(&self.session, 28), dim));
+        }
+        if self.mic_off {
+            left.push((format!("   {} {}", icons::I_MIC, s.voice_mic_off_short), Style::default().fg(theme::ROSEHIP)));
         }
         p.line(3, bottom, &left);
         if let Some(fraction) = self.context {
@@ -1182,7 +1340,15 @@ pub fn run(caps: Caps, fps: u32, workspace: &Path, demo: bool, keep_session: boo
     let result = run_loop(caps, fps, workspace, demo, keep_session, ears_cmd, voice_cmd);
     let restored = crate::term::leave();
     let code = result?;
-    restored.map(|()| code)
+    restored?;
+    // Switching interfaces keeps the terminal busy; only a real exit says goodbye.
+    if code != SWITCH_FRONTEND
+        && !demo
+        && let Ok(core) = core::command(std::env::var("KVIST_CORE_CMD").ok().as_deref())
+    {
+        crate::farewell::print(&core, workspace);
+    }
+    Ok(code)
 }
 
 fn run_loop(
@@ -1316,7 +1482,7 @@ fn run_loop(
             }
         }
     }
-    Ok(0)
+    Ok(voice.exit_code)
 }
 
 #[cfg(test)]
@@ -1700,16 +1866,111 @@ mod tests {
         assert!(voice.menu.is_none() && voice.pending == Some(Pending { silent: false }));
 
         voice.pending = None;
-        voice.key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE), now);
+        voice.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now);
         voice.key(KeyEvent::new(KeyCode::Char('K'), KeyModifiers::NONE), now);
         assert_eq!(voice.take_outbox(), vec![Out::Core(json!({"type": "command", "name": "change-api", "args": []}))]);
 
         voice.pending = None;
         voice.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now);
         voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
-        assert!(voice.menu.is_none() && !voice.quit, "Esc closes the menu first");
+        assert!(voice.menu.is_none() && !voice.mic_off, "Esc closes the menu first");
+    }
+
+    fn type_line(voice: &mut Voice, line: &str, now: Instant) {
+        for c in line.chars() {
+            voice.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), now);
+        }
+        voice.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+    }
+
+    #[test]
+    fn a_typed_line_is_a_request_and_a_slash_line_is_a_command_with_its_words() {
+        let now = Instant::now();
+        let mut voice = voice();
+        type_line(&mut voice, "fix the build", now);
+        assert_eq!(voice.take_outbox(), vec![Out::Core(json!({"type": "goal", "text": "fix the build"}))]);
+        assert_eq!(voice.turn, Turn::Thinking);
+        assert!(voice.input.is_none());
+
+        type_line(&mut voice, "/rename my idea", now);
+        assert_eq!(voice.take_outbox(), vec![Out::Core(json!({"type": "command", "name": "rename", "args": ["my", "idea"]}))]);
+        assert_eq!(voice.pending, Some(Pending { silent: false }));
+
+        type_line(&mut voice, "/export", now);
+        assert!(voice.take_outbox().is_empty(), "a command waits for the one before it");
+        assert_eq!(voice.input.as_deref(), Some("/export"));
+        assert!(voice.toast.as_ref().is_some_and(|(_, ok, _)| !ok));
+    }
+
+    #[test]
+    fn esc_drops_a_typed_line_and_speech_is_not_a_task_while_typing() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE), now);
+        voice.on_heard("open youtube", now);
+        assert!(voice.take_outbox().is_empty());
         voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+        assert!(voice.input.is_none() && !voice.mic_off);
+    }
+
+    #[test]
+    fn esc_switches_the_microphone_and_ctrl_c_needs_a_second_press() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+        assert!(voice.mic_off && !voice.quit);
+        assert_eq!(voice.take_outbox(), vec![Out::Ears(json!({"type": "mute", "value": true}))]);
+        voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+        assert!(!voice.mic_off);
+        assert_eq!(voice.take_outbox(), vec![Out::Ears(json!({"type": "mute", "value": false}))]);
+
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        voice.key(ctrl_c, now);
+        assert!(!voice.quit, "the first Ctrl+C only asks");
+        voice.key(ctrl_c, now + Duration::from_secs(1));
         assert!(voice.quit);
+
+        let mut late = self::voice();
+        late.key(ctrl_c, now);
+        late.key(ctrl_c, now + QUIT_CONFIRM + Duration::from_secs(1));
+        assert!(!late.quit, "an old question is asked again");
+    }
+
+    #[test]
+    fn the_microphone_stays_off_while_the_voice_talks_and_after_it_stops() {
+        let now = Instant::now();
+        let mut voice = voice();
+        voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+        voice.take_outbox();
+        voice.set_voice_busy(true);
+        voice.set_voice_busy(false);
+        assert!(voice.take_outbox().is_empty(), "the person's mute outlasts the voice");
+    }
+
+    #[test]
+    fn the_interface_picker_leaves_with_the_chosen_name_and_stays_on_cancel() {
+        let now = Instant::now();
+        let mut voice = voice();
+        type_line(&mut voice, "/tui", now);
+        let ask = voice.ask.as_ref().expect("the picker opens");
+        assert_eq!(ask.request_id, FRONTEND_REQUEST);
+        assert_ne!(voice.resolve(now), OrbState::Approval, "the picker is not an approval");
+        voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
+        assert!(voice.ask.is_none() && !voice.quit && voice.take_outbox().is_empty());
+
+        let file = std::env::temp_dir().join(format!("kvist-voice-switch-{}", std::process::id()));
+        // SAFETY: only this test reads KVIST_SWITCH_FILE.
+        unsafe { std::env::set_var("KVIST_SWITCH_FILE", &file) };
+        voice.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now);
+        voice.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), now);
+        for c in "Ink".chars() {
+            voice.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), now);
+        }
+        voice.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
+        assert!(voice.quit && voice.exit_code == SWITCH_FRONTEND);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "tui\n");
+        assert!(voice.take_outbox().is_empty(), "the choice never goes to the core");
+        let _ = std::fs::remove_file(&file);
     }
 
     #[test]

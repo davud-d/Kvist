@@ -43,6 +43,7 @@ mod text;
 #[allow(dead_code)]
 mod theme;
 
+mod farewell;
 mod icons;
 mod orb;
 mod voice;
