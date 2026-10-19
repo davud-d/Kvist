@@ -225,6 +225,11 @@ configured in-repo.
   `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`,
   `AGENT_REASONING_EFFORT` (`false|low|medium|high|xhigh|max`; overrides the
   persisted `reasoning_effort` preference — runtime-toggled by `/effort`),
+  `KVIST_REQUEST_LOG=<file>` (`request_log.py`: one JSON line per HTTP exchange of the
+  OpenAI-compatible clients — full redacted request body, status, response headers with the
+  request id, head and tail of the reply, mid-stream errors; off by default, for handing a
+  provider's support the exact request; asks for an uncompressed reply and, being a custom
+  transport, ignores proxy variables),
   `AGENT_MAX_CONTEXT_TOKENS` (overrides the per-model prompt budget derived in
   `context_budget.py`),
   `AGENT_NATIVE_TOOLS` (0 keeps every run on the JSON protocol and skips the

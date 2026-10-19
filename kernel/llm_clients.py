@@ -1511,15 +1511,19 @@ def required_secret_keys_for_provider(provider: str, models: list[str] | tuple[s
 def _build_openai_client(api_key: str, base_url: str | None = None, api_timeout: float = 60.0) -> Any:
     """Build an OpenAI-compatible client with explicit timeouts and HTTP-level retry."""
     import httpx
+    from kernel.request_log import request_log_path, wrap_transport
 
-    http_client = httpx.Client(
-        timeout=httpx.Timeout(
+    client_kwargs: dict[str, Any] = {
+        "timeout": httpx.Timeout(
             connect=10.0,
             read=api_timeout,
             write=30.0,
             pool=10.0,
         ),
-    )
+    }
+    if request_log_path():
+        client_kwargs["transport"] = wrap_transport(httpx.HTTPTransport())
+    http_client = httpx.Client(**client_kwargs)
     kwargs: dict[str, Any] = {"api_key": api_key, "max_retries": 1, "http_client": http_client}
     if base_url:
         kwargs["base_url"] = base_url
