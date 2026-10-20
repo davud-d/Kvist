@@ -162,6 +162,10 @@ pub struct App {
     /// The pointer is over the conversation's text.
     over_text: bool,
     hand_sent: Option<(bool, bool)>,
+    /// The active session and its title, for the window name.
+    session_id: String,
+    session_title: String,
+    title_sent: Option<String>,
     hits: Vec<(Rect, Hit)>,
     reading: Option<Rect>,
     /// The water poured on the conversation by the left button, if any.
@@ -235,6 +239,9 @@ impl App {
             hand: false,
             over_text: false,
             hand_sent: None,
+            session_id: String::new(),
+            session_title: String::new(),
+            title_sent: None,
             hits: Vec::new(),
             reading: None,
             pour: None,
@@ -549,6 +556,20 @@ impl App {
             "wake" => {
                 self.pending_plan = None;
                 self.on_session(crate::model::CoreEvent::TurnStarted, now);
+            }
+            "session" => {
+                self.session_id = text("session");
+                self.session_title = text("title");
+                // A closed session still reports its end through the common translation.
+                for change in protocol::translate(event) {
+                    self.on_session(change, now);
+                }
+            }
+            // A title can arrive for a session the person has already left.
+            "session_title" => {
+                if self.session_id.is_empty() || text("session") == self.session_id {
+                    self.session_title = text("title");
+                }
             }
             "input_request" => self.on_request(event, now),
             "command_result" => self.on_command_result(event, now),
@@ -1573,6 +1594,23 @@ impl App {
         self.hits.iter().rev().find(|(rect, _)| contains(*rect, (x, y))).map(|(_, hit)| *hit)
     }
 
+    /// `Kvist | <title>` once the session has one.
+    fn window_title(&self) -> String {
+        let clean: String = self.session_title.chars().filter(|c| !c.is_control()).collect();
+        let clean = clean.trim();
+        if clean.is_empty() { "Kvist".to_string() } else { format!("Kvist | {}", clean.chars().take(80).collect::<String>()) }
+    }
+
+    fn flush_title(&mut self) -> io::Result<()> {
+        let title = self.window_title();
+        if self.title_sent.as_ref() == Some(&title) {
+            return Ok(());
+        }
+        term::set_title(&title)?;
+        self.title_sent = Some(title);
+        Ok(())
+    }
+
     fn flush_pointer(&mut self, out: &mut impl Write) -> io::Result<()> {
         if let Some(text) = self.clipboard.take() {
             out.write_all(&term::copy_to_clipboard(&text))?;
@@ -1690,6 +1728,7 @@ fn run_loop(caps: Caps, fps: u32, workspace: &Path) -> io::Result<u8> {
         pictures.show(&app.grid, &scene)?;
         pictures.gpu.flush(&mut out)?;
         app.flush_pointer(&mut out)?;
+        app.flush_title()?;
 
         due = anim::next_frame(due, now, period);
         let animating = app.animating(now);

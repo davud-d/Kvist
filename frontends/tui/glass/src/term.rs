@@ -57,6 +57,10 @@ fn install_panic_restore() {
     }));
 }
 
+pub fn set_title(title: &str) -> io::Result<()> {
+    execute!(io::stdout(), SetTitle(title))
+}
+
 /// The pointer shape (OSC 22): a hand over what can be clicked, a bar over text.
 pub fn pointer_shape(clickable: bool, text: bool) -> &'static [u8] {
     match (clickable, text) {
