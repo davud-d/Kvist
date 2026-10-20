@@ -26,6 +26,7 @@ from rich.text import Text
 
 from kernel.redaction import redact_value, sanitize_display_text
 from kernel.terminal import is_hitl_active
+from math_text import replace_math
 from window_title import set_window_title
 
 try:
@@ -634,7 +635,7 @@ class TerminalBannerUI:
         if Markdown is None:
             return Text(message, style=fallback_style)
         try:
-            return Markdown(message)
+            return Markdown(replace_math(message))
         except Exception:
             return Text(message, style=fallback_style)
 
