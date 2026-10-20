@@ -43,6 +43,8 @@ pub enum Hit {
     Helper(usize),
     HelpersTitle,
     Thumb,
+    /// An attached picture, by the N of its marker.
+    Attachment(u32),
     PopupClose,
     HelpersClose,
     DiffClose,
@@ -108,6 +110,7 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
     draw_diff(&mut p, app, now, &mut drawn);
     drawn.reading = draw_transcript(&mut p, app, now, ms, &mut drawn);
     draw_input(&mut p, app, now, &mut drawn);
+    draw_strip(&mut p, app, now, &mut drawn);
     draw_menu(&mut p, app, now, &mut drawn);
     draw_hints(&mut p, app);
     draw_status(&mut p, app, now, &mut drawn);
@@ -125,6 +128,9 @@ pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
         // hang where the browser is not.
         Some(Modal::Browser) if app.modal_p.target() == 1.0 && !app.modal_p.running(now) => {
             draw_popup_title(&mut p, app, &mut drawn)
+        }
+        Some(Modal::Image(id)) if app.modal_p.target() == 1.0 && !app.modal_p.running(now) => {
+            draw_image_title(&mut p, app, *id, &mut drawn)
         }
         _ => {}
     }
@@ -634,7 +640,7 @@ fn draw_input(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     }
     let dy = (((1.0 - app.input_rise.value(now)) * 8.0).round()) as i32;
     let x = card.x as i32 + 3;
-    let y = card.y as i32 + 1 + dy;
+    let y = card.y as i32 + 1 + dy + app.layout.attach_rows as i32;
     let width = card.width.saturating_sub(6) as usize;
     let (lines, caret) = input_lines(&app.input, app.cursor, width);
     if app.input.is_empty() {
@@ -648,6 +654,26 @@ fn draw_input(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
         drawn.cursor = Some(((x + caret.1 as i32).max(0) as u16, (y + caret.0 as i32).max(0) as u16));
     }
     drawn.hits.push((card, Hit::Input));
+}
+
+/// What the pictures over the input leave to draw in cells: a hint on the one
+/// pointed at, and how many did not fit. The pictures themselves are kitty's.
+fn draw_strip(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
+    let (shown, hidden) = app.strip(now);
+    let dy = (((1.0 - app.input_rise.value(now)) * 8.0).round()) as i32;
+    for (rect, attachment) in &shown {
+        let hovered = app.hover == Some(Hit::Attachment(attachment.id));
+        if hovered {
+            p.text(rect.right() as i32 - 2, rect.y as i32 + dy, theme::I_EXPAND, st(MOON));
+        }
+        drawn.hits.push((*rect, Hit::Attachment(attachment.id)));
+    }
+    if hidden > 0 {
+        let card = app.layout.input;
+        let x = shown.last().map_or(card.x + 3, |(rect, _)| rect.right() + 2);
+        let y = card.y as i32 + 1 + dy + (layout::STRIP_ROWS as i32 - 1) / 2;
+        p.text(x as i32, y, &format!("+{hidden}"), st(MIST));
+    }
 }
 
 /// The slash menu over the input: the commands the typed prefix leaves, the
@@ -715,7 +741,7 @@ fn draw_hints(p: &mut Painter, app: &App) {
     }
     let s = strings();
     let mut line: Line = Vec::new();
-    for (i, (key, word)) in [("enter", s.hint_send), ("ctrl+p", s.hint_model), ("ctrl+t", s.hint_helpers)]
+    for (i, (key, word)) in [("enter", s.hint_send), ("ctrl+p", s.hint_model), ("ctrl+t", s.hint_helpers), ("ctrl+v", s.hint_image)]
         .iter()
         .enumerate()
     {
@@ -1060,6 +1086,19 @@ fn draw_popup_title(p: &mut Painter, app: &App, drawn: &mut Drawn) {
     p.clear(Rect::new(rect.x.saturating_sub(1), y.max(0) as u16, rect.width + 2, 1));
     let cx = p.text(rect.x as i32, y, theme::I_GLOBE, st(MOON));
     p.text(cx + 1, y, &browser.title, st(FOG));
+    let hovered = app.hover == Some(Hit::PopupClose);
+    let close_x = rect.right() as i32 - 1;
+    p.text(close_x, y, theme::I_CLOSE, st(if hovered { MOON } else { MIST }));
+    drawn.hits.push((Rect::new(close_x.max(1) as u16 - 1, y.max(0) as u16, 3, 1), Hit::PopupClose));
+}
+
+fn draw_image_title(p: &mut Painter, app: &App, id: u32, drawn: &mut Drawn) {
+    let Some(attachment) = app.attachment(id) else { return };
+    let rect = layout::browser_full(&app.grid, attachment.aspect);
+    let y = rect.y as i32 - 1;
+    p.clear(Rect::new(rect.x.saturating_sub(1), y.max(0) as u16, rect.width + 2, 1));
+    let cx = p.text(rect.x as i32, y, theme::I_EYE, st(MOON));
+    p.text(cx + 1, y, &attachment.name, st(FOG));
     let hovered = app.hover == Some(Hit::PopupClose);
     let close_x = rect.right() as i32 - 1;
     p.text(close_x, y, theme::I_CLOSE, st(if hovered { MOON } else { MIST }));

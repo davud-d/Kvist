@@ -8,6 +8,7 @@
 
 mod anim;
 mod app;
+mod attach;
 mod backdrop;
 mod core;
 mod dialog;

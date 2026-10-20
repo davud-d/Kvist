@@ -31,6 +31,8 @@ pub const SLOT_MENU: u32 = 10;
 pub const SLOT_DIFF: u32 = 11;
 const SLOT_WATER: u32 = 12;
 const SLOT_THUMB: u32 = 8;
+/// The first of the slots of the pictures attached to a request.
+pub const SLOT_ATTACH: u32 = 20;
 const SLOT_POPUP: u32 = 9;
 const CARD_SLOTS: [u32; 8] =
     [SLOT_LEFT, SLOT_BROWSER_CARD, SLOT_HELPERS, SLOT_READING, SLOT_INPUT, SLOT_DIALOG, SLOT_MENU, SLOT_DIFF];
@@ -151,6 +153,9 @@ pub struct CardSpec {
 pub struct ThumbSpec {
     pub rect: Rect,
     pub dx: f32,
+    pub dy: f32,
+    /// The picture to show; `None` is the agent's browser.
+    pub frame: Option<Arc<WebFrame>>,
     /// Darkened, while a dialog is open over it.
     pub dim: bool,
 }
@@ -163,6 +168,8 @@ pub struct PopupSpec {
     pub h: f32,
     /// 0 = most blurred, 2 = sharp.
     pub sharpness: u8,
+    /// The picture to show; `None` is the agent's browser.
+    pub frame: Option<Arc<WebFrame>>,
 }
 
 /// The pool poured by a selection, and the clock its caustics drift by.
@@ -175,6 +182,8 @@ pub struct Scene {
     pub backdrop: Backdrop,
     pub cards: Vec<CardSpec>,
     pub thumb: Option<ThumbSpec>,
+    /// The attached pictures, each in its own slot from `SLOT_ATTACH`.
+    pub attachments: Vec<(u32, ThumbSpec)>,
     pub popup: Option<PopupSpec>,
     pub water: Option<WaterSpec>,
 }
@@ -318,6 +327,13 @@ impl Pictures {
             None => None,
         };
         self.gpu.set(SLOT_THUMB, thumb);
+        for slot in SLOT_ATTACH..SLOT_ATTACH + crate::attach::MAX_IMAGES as u32 {
+            let placement = match scene.attachments.iter().find(|(s, _)| *s == slot) {
+                Some((_, spec)) => self.thumb_placement(grid, spec)?,
+                None => None,
+            };
+            self.gpu.set(slot, placement);
+        }
         let popup = match &scene.popup {
             Some(spec) => self.popup_placement(grid, spec)?,
             None => None,
@@ -404,7 +420,7 @@ impl Pictures {
     }
 
     fn thumb_placement(&mut self, grid: &Grid, spec: &ThumbSpec) -> io::Result<Option<Placement>> {
-        let Some(web) = self.web.clone() else { return Ok(None) };
+        let Some(web) = spec.frame.clone().or_else(|| self.web.clone()) else { return Ok(None) };
         let (x, y, w, h) = grid.px(spec.rect);
         let key = (web.version, w as u32, h as u32, spec.dim);
         let image = match self.thumbs.get_mut(&key) {
@@ -420,11 +436,11 @@ impl Pictures {
                 id
             }
         };
-        Ok(clipped(image, x + spec.dx, y, w, h, grid, Z_THUMB))
+        Ok(clipped(image, x + spec.dx, y + spec.dy, w, h, grid, Z_THUMB))
     }
 
     fn popup_placement(&mut self, grid: &Grid, spec: &PopupSpec) -> io::Result<Option<Placement>> {
-        let Some(web) = self.web.clone() else { return Ok(None) };
+        let Some(web) = spec.frame.clone().or_else(|| self.web.clone()) else { return Ok(None) };
         if self.web_ids.as_ref().is_none_or(|ids| ids.version != web.version) {
             let mut upload = |image: &image::RgbaImage| self.gpu.upload_rgba(image.width(), image.height(), image.as_raw());
             let fresh = WebIds { version: web.version, sharp: upload(&web.sharp)?, soft: upload(&web.soft)?, softer: upload(&web.softer)? };
@@ -538,7 +554,7 @@ mod tests {
                 slot: SLOT_INPUT, style: CardStyle::Input,
                 rect: Rect::new(1, 1, 8, 2), dx: 0.0, dy: 0.0,
             }],
-            thumb: None, popup: None, water: None,
+            thumb: None, attachments: Vec::new(), popup: None, water: None,
         };
         pictures.accept(Arc::new(backdrop::build(&source, 100, 80, false)));
         pictures.show(&grid, &scene).unwrap();

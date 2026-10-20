@@ -51,6 +51,8 @@ pub struct Shape {
     /// A file's diff is open on the right; it takes the place of the browser
     /// and helpers cards and narrows the conversation.
     pub diff: bool,
+    /// Rows the attached pictures add to the top of the input card.
+    pub attach_rows: u16,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -62,6 +64,8 @@ pub struct Layout {
     pub diff: Option<Rect>,
     pub transcript: Rect,
     pub input: Rect,
+    /// The rows at the top of `input` that hold the attached pictures.
+    pub attach_rows: u16,
     pub hints_row: u16,
     pub status_row: u16,
 }
@@ -98,7 +102,7 @@ pub fn compute(grid: &Grid, shape: &Shape) -> Layout {
         }
     };
 
-    let input_h = shape.input_lines.clamp(1, 8) + 2;
+    let input_h = shape.input_lines.clamp(1, 8) + 2 + shape.attach_rows;
     let bottom_y = status_row.saturating_sub(1 + input_h) as f32;
     let middle_y = (rows / 2).saturating_sub(input_h / 2 + 1) as f32;
     let input_y = (middle_y + (bottom_y - middle_y) * shape.input_at_bottom.clamp(0.0, 1.0)).round() as u16;
@@ -122,7 +126,31 @@ pub fn compute(grid: &Grid, shape: &Shape) -> Layout {
         Rect::new(right_x, y, side, status_row.saturating_sub(y + 1))
     });
 
-    Layout { left, browser_card, thumb, helpers, diff: diff_rect, transcript, input, hints_row: input.bottom() + 1, status_row }
+    Layout { left, browser_card, thumb, helpers, diff: diff_rect, transcript, input, attach_rows: shape.attach_rows, hints_row: input.bottom() + 1, status_row }
+}
+
+/// Rows the strip of attached pictures adds to the input card once open: the
+/// pictures and a gap below them.
+pub const STRIP_ROWS: u16 = 6;
+const STRIP_GAP: u16 = 2;
+
+/// Where the attached pictures sit over the input's text: left to right, each
+/// as wide as its proportions ask, as many as fit. Also how many did not fit.
+pub fn strip(input: Rect, grid: &Grid, aspects: &[f32]) -> (Vec<Rect>, usize) {
+    let height = STRIP_ROWS - 1;
+    let right = input.right().saturating_sub(3);
+    let mut x = input.x + 3;
+    let mut rects = Vec::new();
+    for aspect in aspects {
+        let width = ((height as f32 * grid.ch as f32 * aspect / grid.cw as f32).round() as u16).clamp(6, 24);
+        if x + width > right {
+            break;
+        }
+        rects.push(Rect::new(x, input.y + 1, width, height));
+        x += width + STRIP_GAP;
+    }
+    let hidden = aspects.len() - rects.len();
+    (rects, hidden)
 }
 
 /// The opened browser: as large as fits in 82% × 78% of the window, with the
@@ -176,7 +204,7 @@ mod tests {
     }
 
     fn shape(at_bottom: f32) -> Shape {
-        Shape { left_rows: 5, browser: Some(BROWSER_ASPECT), input_lines: 1, input_at_bottom: at_bottom, diff: false }
+        Shape { left_rows: 5, browser: Some(BROWSER_ASPECT), input_lines: 1, input_at_bottom: at_bottom, diff: false, attach_rows: 0 }
     }
 
     #[test]
@@ -235,6 +263,26 @@ mod tests {
             assert!((aspect - wanted).abs() < 0.08, "{aspect} for {wanted}");
             assert!(r.right() <= g.cols && r.bottom() <= g.rows && r.y >= 1);
         }
+    }
+
+    #[test]
+    fn attached_pictures_raise_the_card_and_keep_its_bottom_edge() {
+        let plain = compute(&grid(180, 50), &shape(1.0)).input;
+        let mut with = shape(1.0);
+        with.attach_rows = STRIP_ROWS;
+        let raised = compute(&grid(180, 50), &with);
+        assert_eq!(raised.input.bottom(), plain.bottom());
+        assert_eq!(raised.input.height, plain.height + STRIP_ROWS);
+        assert_eq!(raised.attach_rows, STRIP_ROWS);
+    }
+
+    #[test]
+    fn the_strip_lists_what_fits_and_counts_the_rest() {
+        let input = Rect::new(20, 30, 60, 9);
+        let (rects, hidden) = strip(input, &grid(180, 50), &[1.6; 5]);
+        assert!(!rects.is_empty() && rects.len() + hidden == 5);
+        assert!(rects.iter().all(|r| r.x >= input.x + 3 && r.right() <= input.right() - 3));
+        assert!(rects.windows(2).all(|w| w[0].right() < w[1].x));
     }
 
     #[test]

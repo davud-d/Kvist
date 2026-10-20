@@ -12,6 +12,11 @@ and both terminal interfaces. Zed/ACP is unchanged.
   Wayland requires `wl-paste`; X11 requires `xclip`. macOS uses `osascript`,
   Windows uses PowerShell's clipboard API. Remote terminals without desktop
   clipboard access can attach a file present on that machine.
+- Classic (Glass): **Ctrl+V** attaches a clipboard image (PNG), or pastes the
+  clipboard's text when there is no image. A pasted or dropped path to a PNG or
+  JPEG file attaches it too. The input card grows upward to show a thumbnail per
+  image; click one to open it at full size, click again or press Esc to close.
+  Deleting its `[Image #N]` marker (one Backspace) detaches it.
 
 The independent `kernel/vision.py` service validates and describes images before
 passing their descriptions to the text agent. `read_file` and

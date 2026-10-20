@@ -4,6 +4,7 @@
 
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
@@ -15,7 +16,8 @@ use ratatui::layout::Rect;
 use serde_json::{Value, json};
 
 use crate::anim::{self, Ease, Tween};
-use crate::backdrop::LEVELS;
+use crate::attach::{self, Attachment};
+use crate::backdrop::{LEVELS, WebFrame};
 use crate::core::{self, Core, History, Message};
 use crate::dialog::{Ask, Body, Choice};
 use crate::diff;
@@ -26,7 +28,7 @@ use crate::model::{CoreEvent, Session};
 use crate::models::ModelPicker;
 use crate::pictures::{
     Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_DIFF, SLOT_HELPERS,
-    SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, WaterSpec, Worker,
+    SLOT_ATTACH, SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, WaterSpec, Worker,
 };
 use crate::probe::Caps;
 use crate::protocol;
@@ -46,6 +48,8 @@ const RISE: Duration = Duration::from_millis(800);
 const LONG_AGO: Duration = Duration::from_secs(3600);
 /// The backdrop keeps moving even while the interface itself is idle.
 const IDLE_FRAME: Duration = crate::video::FRAME_TIME;
+/// Shorter windows keep the input card as it is: the strip would not leave room for the conversation.
+const MIN_ROWS_FOR_STRIP: u16 = 24;
 /// How long a notice stays in the status row.
 const TOAST: Duration = Duration::from_millis(4500);
 /// The request id of `/tui`, a dialog answered here and never sent to the core.
@@ -73,6 +77,8 @@ pub enum Modal {
     /// or the chosen models are applied.
     Models(Option<ModelPicker>),
     Browser,
+    /// An attached picture opened to full size, by the N of its marker.
+    Image(u32),
 }
 
 pub struct Toast {
@@ -115,6 +121,11 @@ pub struct App {
     pub toast: Option<Toast>,
     pub input: String,
     pub cursor: usize,
+    /// Pictures pasted into the input; each is named by an `[Image #N]` marker in it.
+    attachments: Vec<Attachment>,
+    next_image: u32,
+    /// 0 while no picture is attached, 1 once the strip over the input has opened.
+    pub strip_in: Tween,
     /// Earlier inputs of this workspace, oldest first.
     history: Vec<String>,
     /// The inputs on their way from the core.
@@ -193,6 +204,9 @@ impl App {
             toast: None,
             input: String::new(),
             cursor: 0,
+            attachments: Vec::new(),
+            next_image: 1,
+            strip_in: Tween::settled(0.0),
             history: Vec::new(),
             history_in: None,
             recall: None,
@@ -249,6 +263,7 @@ impl App {
             input_lines,
             input_at_bottom: self.input_pos.value(now),
             diff: self.diff.is_some(),
+            attach_rows: self.strip_rows(now),
         }
     }
 
@@ -290,6 +305,7 @@ impl App {
         self.poll_replay(now);
         self.poll_input_history();
         self.sync_menu(now);
+        self.sync_strip(now);
         self.poll_feed(now, pictures);
         if matches!(self.phase, Phase::Splash) && self.splash_over(now, pictures) {
             self.phase = Phase::Main { since: now };
@@ -329,6 +345,49 @@ impl App {
         } else if !open && self.menu_in.target() != 0.0 {
             self.menu_in = Tween::settled(0.0);
         }
+    }
+
+    /// The pictures whose marker is still in the input, in the order of the markers.
+    pub fn attached(&self) -> Vec<&Attachment> {
+        attach::markers(&self.input).into_iter().filter_map(|id| self.attachment(id)).collect()
+    }
+
+    pub fn attachment(&self, id: u32) -> Option<&Attachment> {
+        self.attachments.iter().find(|a| a.id == id)
+    }
+
+    /// The rows the strip adds to the input card right now; none where the
+    /// window is too short to spare them.
+    fn strip_rows(&self, now: Instant) -> u16 {
+        if self.grid.rows < MIN_ROWS_FOR_STRIP {
+            return 0;
+        }
+        (layout::STRIP_ROWS as f32 * self.strip_in.value(now)).round() as u16
+    }
+
+    /// The pictures over the input once the strip has opened, each with its
+    /// place, and how many did not fit.
+    pub fn strip(&self, now: Instant) -> (Vec<(Rect, &Attachment)>, usize) {
+        let open = self.strip_rows(now) == layout::STRIP_ROWS;
+        if !open || self.session.closed.is_some() {
+            return (Vec::new(), 0);
+        }
+        let attached = self.attached();
+        let aspects: Vec<f32> = attached.iter().map(|a| a.aspect).collect();
+        let (rects, hidden) = layout::strip(self.layout.input, &self.grid, &aspects);
+        (rects.into_iter().zip(attached).collect(), hidden)
+    }
+
+    /// Opens the strip when a picture is attached and closes it when the last
+    /// marker is gone; pictures whose marker is nowhere (not even in the
+    /// draft a walk through the history keeps) are forgotten.
+    fn sync_strip(&mut self, now: Instant) {
+        let wanted = !self.attached().is_empty();
+        if wanted != (self.strip_in.target() > 0.0) {
+            self.strip_in.go(if wanted { 1.0 } else { 0.0 }, now, if wanted { 260 } else { 180 }, Ease::OutCubic);
+        }
+        let kept: Vec<u32> = attach::markers(&self.input).into_iter().chain(attach::markers(&self.draft)).collect();
+        self.attachments.retain(|a| kept.contains(&a.id));
     }
 
     fn splash_over(&self, now: Instant, pictures: &Pictures) -> bool {
@@ -669,7 +728,7 @@ impl App {
     }
 
     fn animating(&self, now: Instant) -> bool {
-        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.diff_in, &self.modal_p, &self.menu_in];
+        let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.diff_in, &self.modal_p, &self.menu_in, &self.strip_in];
         matches!(self.phase, Phase::Splash)
             || self.session.busy
             || self.command.is_some()
@@ -705,7 +764,7 @@ impl App {
                     if t < 1.0 && frames > 0 { Backdrop::Rise((t * frames as f32) as usize) } else { Backdrop::Photo }
                 }
             };
-            return Scene { backdrop, cards: Vec::new(), thumb: None, popup: None, water: None };
+            return Scene { backdrop, cards: Vec::new(), thumb: None, attachments: Vec::new(), popup: None, water: None };
         }
         let modal = self.modal_p.value(now).clamp(0.0, 1.0);
         let level = (modal * LEVELS as f32).round() as usize;
@@ -758,31 +817,54 @@ impl App {
         let browser_open = matches!(self.modal, Some(Modal::Browser));
         let thumb = match (self.layout.thumb, &self.session.browser) {
             (Some(rect), Some(_)) if !(browser_open && self.modal_p.value(now) > 0.001) => {
-                Some(ThumbSpec { rect, dx: browser_dx, dim })
+                Some(ThumbSpec { rect, dx: browser_dx, dy: 0.0, frame: None, dim })
             }
             _ => None,
         };
-        let popup = browser_open.then(|| self.popup(now)).flatten();
+        let opened = match self.modal {
+            Some(Modal::Image(id)) if self.modal_p.value(now) > 0.001 => Some(id),
+            _ => None,
+        };
+        let input_dy = (1.0 - self.input_rise.value(now)) * 8.0 * ch;
+        let attachments = self
+            .strip(now)
+            .0
+            .into_iter()
+            .enumerate()
+            .filter(|(_, (_, attachment))| Some(attachment.id) != opened)
+            .map(|(i, (rect, attachment))| {
+                let spec = ThumbSpec { rect, dx: 0.0, dy: input_dy, frame: Some(attachment.frame.clone()), dim };
+                (SLOT_ATTACH + i as u32, spec)
+            })
+            .collect();
+        let popup = match &self.modal {
+            Some(Modal::Browser) => self.popup(now, self.web_aspect.unwrap_or(BROWSER_ASPECT), self.layout.thumb, None),
+            Some(Modal::Image(id)) => self.attachment(*id).and_then(|a| {
+                let from = self.strip(now).0.into_iter().find(|(_, shown)| shown.id == a.id).map(|(rect, _)| rect);
+                self.popup(now, a.aspect, from, Some(a.frame.clone()))
+            }),
+            _ => None,
+        };
         // The caustics drift while the pool is young and then hold still, so a
         // pool at rest costs no redrawing.
         let clock = self.pour.as_ref().map_or(0.0, |pour| pour.age(now).min(CAUSTIC_LIFE));
         let water = self.water.clone().map(|shape| WaterSpec { shape, clock });
-        Scene { backdrop, cards, thumb, popup, water }
+        Scene { backdrop, cards, thumb, attachments, popup, water }
     }
 
-    /// The browser growing from its thumbnail to the middle of the screen.
-    fn popup(&self, now: Instant) -> Option<PopupSpec> {
+    /// A picture growing from its thumbnail to the middle of the screen.
+    fn popup(&self, now: Instant, aspect: f32, thumb: Option<Rect>, frame: Option<Arc<WebFrame>>) -> Option<PopupSpec> {
         let open = self.modal_p.value(now);
         if open <= 0.001 {
             return None;
         }
         let grid = &self.grid;
-        let to = grid.px(layout::browser_full(grid, self.web_aspect.unwrap_or(BROWSER_ASPECT)));
-        let from = self.layout.thumb.map(|r| grid.px(r)).unwrap_or((to.0 + to.2 * 0.4, to.1 + to.3 * 0.4, to.2 * 0.2, to.3 * 0.2));
+        let to = grid.px(layout::browser_full(grid, aspect));
+        let from = thumb.map(|r| grid.px(r)).unwrap_or((to.0 + to.2 * 0.4, to.1 + to.3 * 0.4, to.2 * 0.2, to.3 * 0.2));
         let lerp = |a: f32, b: f32| a + (b - a) * open;
         let clamped = open.clamp(0.0, 1.0);
         let sharpness = if clamped < 0.45 { 0 } else if clamped < 0.8 { 1 } else { 2 };
-        Some(PopupSpec { x: lerp(from.0, to.0), y: lerp(from.1, to.1), w: lerp(from.2, to.2), h: lerp(from.3, to.3), sharpness })
+        Some(PopupSpec { x: lerp(from.0, to.0), y: lerp(from.1, to.1), w: lerp(from.2, to.2), h: lerp(from.3, to.3), sharpness, frame })
     }
 
     fn resize(&mut self, grid: Grid) {
@@ -805,7 +887,7 @@ impl App {
         match self.modal {
             Some(Modal::Ask(_)) => self.ask_key(key, now),
             Some(Modal::Models(_)) => self.models_key(key, now),
-            Some(Modal::Browser) => {
+            Some(Modal::Browser | Modal::Image(_)) => {
                 if key.code == KeyCode::Esc {
                     self.close_modal(now);
                 }
@@ -843,6 +925,7 @@ impl App {
         match key.code {
             KeyCode::Char('p') if ctrl => return self.open_models(now),
             KeyCode::Char('t') if ctrl => return self.toggle_helpers(None, now),
+            KeyCode::Char('v') if ctrl && self.session.closed.is_none() => return self.paste_from_clipboard(now),
             KeyCode::Esc if self.pour.is_some() => return self.drain_water(now),
             KeyCode::Esc if self.diff_in.target() > 0.0 => return self.close_diff(now),
             KeyCode::Esc if self.session.busy => return self.stop(now),
@@ -886,6 +969,10 @@ impl App {
             KeyCode::Char('f') if alt && !ctrl => self.cursor = edit::word_end(&self.input, self.cursor),
             KeyCode::Backspace if ctrl || alt => self.delete_chars(edit::word_start(&self.input, self.cursor), self.cursor, now),
             KeyCode::Delete if ctrl || alt => self.delete_chars(self.cursor, edit::word_end(&self.input, self.cursor), now),
+            KeyCode::Backspace if attach::marker_before(&self.input, self.cursor).is_some() => {
+                let start = attach::marker_before(&self.input, self.cursor).unwrap_or(self.cursor);
+                self.delete_chars(start, self.cursor, now);
+            }
             KeyCode::Backspace if self.cursor > 0 => {
                 self.cursor -= 1;
                 self.remove_at(self.cursor);
@@ -1077,10 +1164,13 @@ impl App {
             self.notify(strings().no_core.to_string(), true, now);
             return;
         }
-        self.send(&json!({"type": "goal", "text": text}), now);
+        let goal = attach::pack(&text, &self.attached());
+        self.send(&json!({"type": "goal", "text": goal}), now);
         self.session.submit(text, now);
         self.input.clear();
         self.cursor = 0;
+        self.attachments.clear();
+        self.next_image = 1;
         self.scroll = 0;
         self.input_pos.go(1.0, now, 540, Ease::Burst);
     }
@@ -1141,6 +1231,9 @@ impl App {
         self.web_closed = true;
         self.input.clear();
         self.cursor = 0;
+        self.attachments.clear();
+        self.next_image = 1;
+        self.strip_in = Tween::settled(0.0);
         self.scroll = 0;
         self.helper_focus = None;
         self.input_pos.go(0.0, now, 540, Ease::Burst);
@@ -1156,9 +1249,48 @@ impl App {
         match self.modal.as_mut() {
             Some(Modal::Ask(Some(ask))) => ask.paste(text),
             Some(_) => {}
-            None if self.session.closed.is_none() => self.insert(&text.replace("\r\n", "\n"), now),
+            // A terminal that has only a picture to paste sends nothing at all.
+            None if self.session.closed.is_none() && text.is_empty() => self.paste_from_clipboard(now),
+            None if self.session.closed.is_none() => match attach::from_path(self.next_image, text) {
+                Some(made) => self.put_attachment(made, now),
+                None => self.insert(&text.replace("\r\n", "\n"), now),
+            },
             None => {}
         }
+    }
+
+    /// Ctrl+V: a picture on the clipboard is attached; otherwise its text is pasted.
+    fn paste_from_clipboard(&mut self, now: Instant) {
+        match attach::from_clipboard(self.next_image) {
+            Ok(Some(attachment)) => self.put_attachment(Ok(attachment), now),
+            Ok(None) => match attach::clipboard_text() {
+                Some(text) => self.paste(&text, now),
+                None => self.notify(strings().no_clipboard.to_string(), true, now),
+            },
+            Err(error) => self.notify(error, true, now),
+        }
+    }
+
+    fn put_attachment(&mut self, made: Result<Attachment, String>, now: Instant) {
+        let attachment = match made {
+            Ok(attachment) => attachment,
+            Err(error) => return self.notify(error, true, now),
+        };
+        if self.attached().len() >= attach::MAX_IMAGES {
+            return self.notify(strings().too_many_images.to_string(), true, now);
+        }
+        let marker = format!("[Image #{}] ", attachment.id);
+        self.next_image += 1;
+        self.attachments.push(attachment);
+        self.insert(&marker, now);
+    }
+
+    fn open_image(&mut self, id: u32, now: Instant) {
+        if self.attachment(id).is_none() {
+            return;
+        }
+        self.modal = Some(Modal::Image(id));
+        self.modal_p.go(1.0, now, 460, Ease::OutBack);
     }
 
     fn open_browser(&mut self, now: Instant) {
@@ -1171,7 +1303,7 @@ impl App {
 
     fn close_modal(&mut self, now: Instant) {
         match self.modal {
-            Some(Modal::Browser) => self.modal_p.go(0.0, now, 360, Ease::Burst),
+            Some(Modal::Browser | Modal::Image(_)) => self.modal_p.go(0.0, now, 360, Ease::Burst),
             _ => self.modal_p.go(0.0, now, 150, Ease::OutCubic),
         }
     }
@@ -1412,9 +1544,10 @@ impl App {
                 None if !contains(self.dialog_rect, self.last_mouse) => self.close_modal(now),
                 None => {}
             },
-            Some(Modal::Browser) => self.close_modal(now),
+            Some(Modal::Browser | Modal::Image(_)) => self.close_modal(now),
             None => match hit {
                 Some(Hit::Thumb) => self.open_browser(now),
+                Some(Hit::Attachment(id)) => self.open_image(id, now),
                 Some(Hit::File(index)) => self.open_diff(index, now),
                 Some(Hit::DiffClose) => self.close_diff(now),
                 Some(Hit::Helper(id)) => self.toggle_helpers(Some(id), now),
@@ -2030,5 +2163,66 @@ mod tests {
         app.session.submit("new request".into(), Instant::now());
         app.show_history(journal(), Instant::now());
         assert_eq!(app.session.items.len(), 1);
+    }
+    fn png_file(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("kvist-glass-app-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        image::RgbImage::from_pixel(48, 30, image::Rgb([20, 120, 220])).save(&path).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn a_pasted_picture_path_becomes_a_marker_and_a_strip_over_the_input() {
+        let mut app = app();
+        app.phase = Phase::Main { since: Instant::now() };
+        let now = Instant::now();
+        app.paste(&png_file("shot.png"), now);
+        assert_eq!(app.input, "[Image #1] ");
+        assert_eq!(app.attached().len(), 1);
+        app.sync_strip(now);
+        let later = now + Duration::from_secs(1);
+        app.relayout(later);
+        assert_eq!(app.layout.attach_rows, layout::STRIP_ROWS);
+        let (shown, hidden) = app.strip(later);
+        assert_eq!((shown.len(), hidden), (1, 0));
+        assert!(shown[0].0.y > app.layout.input.y && shown[0].0.bottom() <= app.layout.input.y + layout::STRIP_ROWS);
+    }
+
+    #[test]
+    fn plain_text_still_pastes_as_text() {
+        let mut app = app();
+        app.phase = Phase::Main { since: Instant::now() };
+        app.paste("just some words\nand a second line", Instant::now());
+        assert_eq!(app.input, "just some words\nand a second line");
+        assert!(app.attached().is_empty());
+    }
+
+    #[test]
+    fn deleting_the_marker_drops_the_picture_and_closes_the_strip() {
+        let mut app = app();
+        app.phase = Phase::Main { since: Instant::now() };
+        let now = Instant::now();
+        app.paste(&png_file("gone.png"), now);
+        app.sync_strip(now);
+        app.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE), now);
+        app.key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE), now);
+        assert_eq!(app.input, "");
+        app.sync_strip(now);
+        assert!(app.attachments.is_empty());
+        assert_eq!(app.strip_in.target(), 0.0);
+    }
+
+    #[test]
+    fn a_click_on_a_thumbnail_opens_the_picture_and_a_click_closes_it() {
+        let mut app = app();
+        app.phase = Phase::Main { since: Instant::now() };
+        let now = Instant::now();
+        app.paste(&png_file("open.png"), now);
+        app.sync_strip(now);
+        app.click(Some(Hit::Attachment(1)), now + Duration::from_secs(1));
+        assert!(matches!(app.modal, Some(Modal::Image(1))));
+        app.click(None, now + Duration::from_secs(2));
+        assert_eq!(app.modal_p.target(), 0.0);
     }
 }
