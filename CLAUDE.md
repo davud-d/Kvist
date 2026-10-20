@@ -53,10 +53,16 @@ Commits go to the backup relay server, never straight to GitHub.
 
 ## Branches (MANDATORY)
 
-- **Never create a branch or a git worktree unless the user explicitly asks.** Work on `main`
-  directly. This overrides any default "branch before committing" behavior.
-- If isolation seems necessary and was not asked for, stop and ask first.
-- Keep only `main` locally; feature and backup branches live on the `relay` remote.
+- **Two long-lived branches: `experimental` and `main`.** Every change is committed on `experimental`
+  first, never directly on `main`. It reaches `main` only after the user has checked it personally and
+  explicitly confirmed.
+- **`main` is always an ancestor of `experimental`.** Promote only with `git merge --ff-only experimental`
+  while on `main`, and first check `git merge-base --is-ancestor main experimental`. Never commit on
+  `main` or make it diverge.
+- **Never create any other branch or git worktree unless the user explicitly asks.** This overrides any
+  default "branch before committing" behavior. If isolation seems necessary and was not asked for, stop
+  and ask first.
+- Keep only `main` and `experimental` locally; feature and backup branches live on the `relay` remote.
 
 ## Commands
 
