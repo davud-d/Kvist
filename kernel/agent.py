@@ -1504,9 +1504,14 @@ class LocalAgent:
         try:
             if message_id is None:
                 return self._chat_words(model)
-            flagged = end_session.handle(self, _end_session_command({"message_id": message_id}), tag_syntax=True)
+            flag_args: dict[str, Any] = {"message_id": message_id}
+            if end_session.flag_tag_is_request(tag_reply):
+                flag_args["request"] = True
+            flagged = end_session.handle(self, _end_session_command(flag_args), tag_syntax=True)
             if flagged.log["answer"] == "warning":
                 return end_session.warning_text(self._state.response_language)
+            if flagged.log["answer"] == "notice":
+                return end_session.notice_text(self._state.response_language)
             if flagged.log["answer"] == "review":
                 # The review is answered with the tag, so it is never streamed.
                 exchange = [*wire_history, {"role": "assistant", "content": tag_reply}, _runtime_message(flagged.answer)]

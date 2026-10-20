@@ -419,7 +419,8 @@ Semantics (identical to the terminal `/session` and `/new` commands):
 
 In an interactive frontend (the classic terminal, `--frontend stdio-multi`,
 `--acp`) the model has one more tool, `end_session`, for a person who insults
-it or people after a warning. The core decides everything but that one
+it or people after a warning, or who asks to end the conversation (a notice that closing is final,
+then a confirming message and a review; never when the person may harm themselves or others). The core decides everything but that one
 judgement: the warning (a `message` event with fixed text), whether it is still
 fresh, and the closing. A closed session:
 

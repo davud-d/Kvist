@@ -225,6 +225,10 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
                 "minimum": 1,
                 "description": "The number of the person's message, as the conversation shows it (#N).",
             },
+            "request": {
+                "type": "boolean",
+                "description": "True only when the person themselves asked to close the conversation.",
+            },
             "confirm": {"type": "boolean"},
             "reason": {"type": "string", "description": "One line: which message, what it targets."},
         },

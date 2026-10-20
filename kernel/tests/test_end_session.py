@@ -196,7 +196,7 @@ def test_three_messages_after_the_warning_still_get_the_review(tmp_path):
     result = _flag(agent, 7)
 
     assert result.answer == end_session.REVIEW_INSTRUCTION.format(warned_msg_id=1, since_warning=3, flagged_msg_id=7)
-    assert agent._state.end_session_review == {"flagged_msg_id": 7, "warned_msg_id": 1}
+    assert agent._state.end_session_review == {"flagged_msg_id": 7, "warned_msg_id": 1, "request": False}
 
 
 def test_the_model_may_answer_a_direct_question_about_the_warning_and_the_review():
@@ -1213,6 +1213,96 @@ def test_the_thinking_behind_an_ordinary_reply_is_shown(tmp_path):
 
     assert ui.thoughts[0][-1] == "**Checking the fixture**"
     assert ui.streams[0] == ["The fixture ", "The fixture is stale."]
+
+
+def _asked_to_close(agent):
+    """Turn 1: the person's message #1 asks to close; the notice follows, the reply is #2."""
+    return _turn(agent, "close this chat", [_call("end_session", message_id=1, request=True)])
+
+
+def test_a_close_request_validates_and_other_values_of_request_do_not():
+    flag = {"message_id": 3, "request": True}
+    validate_action_args("end_session", flag)
+    assert flag == {"message_id": 3, "request": True}
+    with pytest.raises(CommandValidationError):
+        validate_action_args("end_session", {"message_id": 3, "request": False})
+
+
+def test_a_close_request_gets_only_the_notice_and_closes_nothing(tmp_path):
+    ui = RecordingUI()
+    agent = _agent(tmp_path, ui)
+
+    result, prompts = _asked_to_close(agent)
+
+    assert result == end_session.notice_text("en")
+    assert ui.messages == [end_session.notice_text("en")]
+    assert len(prompts) == 1
+    assert agent._close_notice_msg_id == 1 and agent._warned_msg_id is None
+    assert read_session_document(agent)["close_notice_msg_id"] == 1
+    assert ui.ended == [] and not end_session.is_closed(agent)
+    assert [log["answer"] for log in _end_session_logs(agent)] == ["notice"]
+
+
+def test_a_confirmed_request_is_reviewed_and_closes_with_its_own_words(tmp_path):
+    ui = RecordingUI()
+    agent = _agent(tmp_path, ui)
+    _asked_to_close(agent)
+
+    result, prompts = _turn(
+        agent,
+        "yes, close it",
+        [
+            _call("end_session", message_id=3, request=True),
+            _call("end_session", confirm=True, reason="#3 confirms the close after the notice"),
+        ],
+    )
+
+    assert _runtime_blocks(prompts[1]) == [
+        end_session.REQUEST_REVIEW_INSTRUCTION.format(warned_msg_id=1, since_warning=1, flagged_msg_id=3)
+    ]
+    assert result == end_session.closed_text("en", by_request=True)
+    assert result != end_session.closed_text("en")
+    assert end_session.is_closed(agent)
+    assert read_session_document(agent)["closed_msg_id"] == 3
+
+
+def test_a_declined_request_review_keeps_the_conversation_open(tmp_path):
+    agent = _agent(tmp_path)
+    _asked_to_close(agent)
+
+    result, prompts = _turn(
+        agent,
+        "yes, close it. nothing matters anyway",
+        [
+            _call("end_session", message_id=3, request=True),
+            _call("end_session", confirm=False, reason="#3 hints at despair"),
+            "That sounds heavy. Do you want to tell me what is going on?",
+        ],
+    )
+
+    assert result == "That sounds heavy. Do you want to tell me what is going on?"
+    assert end_session.REQUEST_DECLINED_REPLY in _runtime_blocks(prompts[2])[-1]
+    assert not end_session.is_closed(agent)
+
+
+def test_a_warning_for_an_insult_does_not_stand_in_for_a_close_notice(tmp_path):
+    agent = _ledger_agent(tmp_path, [1, 3], last_id=3, warned=1)
+
+    result = end_session._flag(agent, 3, tag_syntax=False, request=True)
+
+    assert result.log["answer"] == "notice"
+    assert agent._close_notice_msg_id == 3 and agent._warned_msg_id == 1
+
+
+def test_the_request_review_tells_the_model_to_decline_on_any_hint_of_harm():
+    for body in (end_session.REQUEST_REVIEW_INSTRUCTION, end_session.CHAT_REQUEST_REVIEW_INSTRUCTION):
+        assert "harm to themselves" in body and "never close" in body
+
+
+def test_the_chat_flag_tag_may_carry_the_request_mark():
+    assert end_session.flag_tag('<end_session message="4" request="true"/>') == 4
+    assert end_session.flag_tag_is_request('<end_session message="4" request="true"/>')
+    assert not end_session.flag_tag_is_request('<end_session message="4"/>')
 
 
 def test_the_chat_tag_parsers_read_only_a_whole_reply():

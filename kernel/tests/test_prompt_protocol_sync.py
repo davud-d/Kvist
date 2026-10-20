@@ -107,18 +107,19 @@ def test_end_session_is_offered_with_its_block_and_schema(role):
     assert "end_session" in listed
     assert listed - {"end_session"} == _extract_allowed_actions_block(_load_role_prompt(role))
     assert _PROMPT_FILE.read_text(encoding="utf-8").strip() in prompt_text
-    assert 'end_session: {"message_id": <int>}' in prompt_text
+    assert 'end_session: {"message_id": <int>, "request": true' in prompt_text
 
 
 def test_end_session_block_is_the_agreed_text():
     from kernel.end_session import _PROMPT_FILE
 
     text = _PROMPT_FILE.read_text(encoding="utf-8")
-    assert text.startswith("end_session: closes this conversation for good when the person insults you or people. Rare.")
+    assert text.startswith("end_session: closes this conversation for good, in two cases:")
     assert "The tool speaks." in text
     assert "The first call shows a warning and ends your turn; send nothing after it." in text
     assert "call end_session again with that NEW message's id" in text
-    assert text.rstrip().endswith("If it returns a warning, the same rule applies to subsequent messages.")
+    assert "If it returns a warning, the same rule applies to subsequent messages." in text
+    assert "request=true" in text and "may harm themselves or someone else" in text
 
 
 @pytest.mark.parametrize("role", ["coder", "reader", "devops", "universal"])

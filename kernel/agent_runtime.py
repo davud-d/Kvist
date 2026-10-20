@@ -1195,11 +1195,12 @@ def _run_end_session(self, step: int, command: AgentCommand) -> _ActionOutcome:
     tool output: it holds only numbers and the runtime's words.
     """
     result = end_session.handle(self, command, step=step)
-    if result.log["answer"] == "warning":
+    if result.log["answer"] in ("warning", "notice"):
         # The tool has already shown the entire reply; no model call or batch tail may follow it.
+        shown = end_session.notice_text if result.log["answer"] == "notice" else end_session.warning_text
         return _ActionOutcome(
             finished=True,
-            final_message=end_session.warning_text(self._state.response_language),
+            final_message=shown(self._state.response_language),
             report_rendered=True,
         )
     if not result.ok:

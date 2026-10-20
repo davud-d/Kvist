@@ -311,7 +311,10 @@ every phase.
 
 ### Closing a conversation (`end_session.py`)
 `end_session` closes a session for good when the person insults the agent or people after a fresh
-warning. The model judges one thing (does the flagged message attack what the agent or a person is);
+warning, or asks for it themselves: `end_session(message_id, request=true)` (chat tag `request="true"`) shows a
+fixed NOTICE that closing is final (own mark `close_notice_msg_id`, separate from `warned_msg_id`), and only a
+confirming message within `WARNING_FRESH_MESSAGES` opens `REQUEST_REVIEW_INSTRUCTION`, which declines on any hint of
+harm to themselves or others. Closed by request uses `closed_text(by_request=True)`. The model judges one thing (does the flagged message attack what the agent or a person is);
 the code owns the rest. Only interactive frontends offer it (`build_agent(end_session=True)` from the
 classic REPL; `launch_multi` and ACP set `AgentConfig.end_session_enabled`); elsewhere the tool is
 absent and a stray call is an unknown tool. The static role prompts never list it:

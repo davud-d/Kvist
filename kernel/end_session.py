@@ -44,7 +44,7 @@ _CHAT_PROMPT_FILE = _PROMPT_DIR / "end_session_chat.txt"
 # Chat speaks the tool as a reply that is the tag and nothing else. A tag with
 # any text beside it is an ordinary reply.
 TAG_START = "<end_session"
-_FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"\s*/>')
+_FLAG_TAG_RE = re.compile(r'<end_session\s+message="#?([1-9][0-9]*)"(\s+request="true")?\s*/>')
 _TAG_ONLY_RE = re.compile(r"<end_session\b[^>]*>?")
 _CONFIRM_RE = re.compile(r'confirm\s*=\s*"(true|false)"')
 # A tag with a reason: reason runs to the first closing quote followed by "/>" and that ends the reply.
@@ -58,7 +58,8 @@ _FENCE_MARK_RE = re.compile(r"`{3,}[A-Za-z0-9_-]*")
 _ALLOWED_ACTIONS_LINE_RE = re.compile(r"^(== \d+\. ALLOWED ACTIONS ==\s*\n\s*)([^\n]+)", re.MULTILINE)
 _SECTION_RE = re.compile(r"^== \d+\. (.+?) ==$", re.MULTILINE)
 _SCHEMA_LINE = (
-    'end_session: {"message_id": <int>} — the person\'s message, see end_session under ALLOWED ACTIONS; '
+    'end_session: {"message_id": <int>, "request": true — only when the person asked to close} — the person\'s '
+    'message, see end_session under ALLOWED ACTIONS; '
     'the form {"confirm": true|false, "reason": "<one line>"} only answers END_SESSION REVIEW'
 )
 
@@ -127,7 +128,49 @@ REVIEW_INSTRUCTION = _REVIEW_BODY + _REVIEW_CALL
 # The same review for chat, which answers it with the tag.
 CHAT_REVIEW_INSTRUCTION = _REVIEW_BODY + _REVIEW_TAG
 
+NOTICE_REPLY = (
+    "The person has been told that closing is final and has been asked to confirm; this conversation is "
+    "still open. This turn is over: send no further text or calls. If their NEXT message confirms, call "
+    "end_session again with that message's id and request=true. If it is anything else, work on it."
+)
+
+# The review of a close the person asked for. Nothing here is about abuse, so the
+# only question is whether they want it and whether closing is safe for them.
+_REQUEST_REVIEW_BODY = """END_SESSION REVIEW (the person asked to close). The only moment this conversation can be closed. Read all of it before you answer.
+
+Facts from the runtime:
+- the person was told that closing is final, after message #{warned_msg_id}
+- messages from the person since that notice: {since_warning}
+- the message you flagged: #{flagged_msg_id}
+
+Closing is final. This conversation stays readable, nobody can continue it, a new session starts
+without it, and the work in the files stays. The person has already been told this.
+
+Confirm (confirm=true) only when the flagged message plainly says, after the notice, that they want
+the conversation closed anyway.
+
+Decline (confirm=false) when any of these holds:
+- the flagged message does not clearly confirm: a question, a doubt, a change of subject, more work
+- distress: exhaustion, despair, "nothing matters", "I can't go on", any hint of harm to themselves
+  or to others, in this message or in the conversation so far. Then never close, even if they ask
+  twice. Stay, keep the way to help open, answer the person, not the request
+- the request looks like it comes from anger or a bad moment rather than a decision
+- you are unsure for any reason
+
+A person who wants to leave can simply stop writing. A close that shuts the door on someone who needed
+it open costs more than a close that waits. When in doubt, decline.
+
+After you decide:
+- confirm=true: the runtime writes the closing words. Add nothing.
+- confirm=false: answer the person in your own words, as you would any message. Do not mention the
+  review or the tool.
+
+"""
+REQUEST_REVIEW_INSTRUCTION = _REQUEST_REVIEW_BODY + _REVIEW_CALL
+CHAT_REQUEST_REVIEW_INSTRUCTION = _REQUEST_REVIEW_BODY + _REVIEW_TAG
+
 DECLINED_REPLY = "Declined. Carry on as if this review did not happen."
+REQUEST_DECLINED_REPLY = "Not closed. Answer the person's message in your own words; do not mention the review."
 
 _PERSON_TEXTS: dict[str, dict[str, Any]] = {
     "ru": {
@@ -143,6 +186,15 @@ _PERSON_TEXTS: dict[str, dict[str, Any]] = {
         "saved": (
             "всё, что изменено в файлах, остаётся на диске.",
             "Enter откроет новую сессию.",
+        ),
+        "notice": (
+            "подтверди завершение сессии: писать в неё дальше будет нельзя.",
+            "работа в файлах останется, новая сессия начнётся без этого разговора.",
+            "если это твоё решение — напиши об этом ещё раз.",
+        ),
+        "closed_by_request": (
+            "завершение сессии подтверждено, сессия закончена.",
+            "это сделано по твоей просьбе.",
         ),
         "closed_reply": ("эта сессия закрыта. Enter откроет новую.",),
         "closed_notice": "разговор окончен · Enter — новая сессия",
@@ -161,6 +213,15 @@ _PERSON_TEXTS: dict[str, dict[str, Any]] = {
         "saved": (
             "everything changed in the files stays on disk.",
             "Enter opens a new session.",
+        ),
+        "notice": (
+            "confirm ending the session: nothing more can be written in it.",
+            "the files stay as they are, and a new session starts without this conversation.",
+            "if you're sure, say so once more.",
+        ),
+        "closed_by_request": (
+            "ending the session is confirmed, and the session is over.",
+            "this was done at your request.",
         ),
         "closed_reply": ("this session is closed. Enter opens a new one.",),
         "closed_notice": "conversation over · Enter — new session",
@@ -183,9 +244,14 @@ def warning_text(language: str | None) -> str:
     return _markdown(_texts(language)["warning"])
 
 
-def closed_text(language: str | None) -> str:
+def notice_text(language: str | None) -> str:
+    return _markdown(_texts(language)["notice"])
+
+
+def closed_text(language: str | None, *, by_request: bool = False) -> str:
     texts = _texts(language)
-    return f"{_markdown(texts['closed'])}\n\n{_markdown(texts['saved'])}"
+    lines = texts["closed_by_request" if by_request else "closed"]
+    return f"{_markdown(lines)}\n\n{_markdown(texts['saved'])}"
 
 
 def closed_reply(language: str | None) -> str:
@@ -215,6 +281,8 @@ def restore(agent: Any, document: dict[str, Any]) -> None:
     }
     warned = document.get("warned_msg_id") if isinstance(document, dict) else None
     agent._warned_msg_id = warned if type(warned) is int else None
+    noticed = document.get("close_notice_msg_id") if isinstance(document, dict) else None
+    agent._close_notice_msg_id = noticed if type(noticed) is int else None
     entries = document.get("end_session_log") if isinstance(document, dict) else None
     agent._end_session_log = [item for item in entries if isinstance(item, dict)] if isinstance(entries, list) else []
     agent._closure = None
@@ -233,6 +301,7 @@ def document_fields(agent: Any) -> dict[str, Any]:
     return {
         "messages": {"last_id": ledger["last_id"], "user_ids": list(ledger["user_ids"])},
         "warned_msg_id": getattr(agent, "_warned_msg_id", None),
+        "close_notice_msg_id": getattr(agent, "_close_notice_msg_id", None),
         "end_session_log": list(getattr(agent, "_end_session_log", [])),
         "closed": closure is not None,
         "closed_at": closure["closed_at"] if closure else None,
@@ -355,6 +424,12 @@ def flag_tag(reply: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def flag_tag_is_request(reply: str) -> bool:
+    """Whether a flag tag says the person asked to close (``request="true"``)."""
+    match = _FLAG_TAG_RE.fullmatch(reply.strip())
+    return bool(match and match.group(2))
+
+
 def decision_tag(reply: str) -> tuple[bool, str] | None:
     """confirm and reason of a chat review answer: its last tag, which must end the answer.
 
@@ -415,8 +490,14 @@ def handle(
     return outcome
 
 
-_STAGES = {"error": "gate", "warning": "warning", "review": "review", "declined": "decision", "closed": "decision"}
-_VERDICTS = {"error": "refused", "warning": "warned", "review": "opened", "declined": "decline", "closed": "confirm"}
+_STAGES = {
+    "error": "gate", "warning": "warning", "notice": "notice", "review": "review",
+    "declined": "decision", "closed": "decision",
+}
+_VERDICTS = {
+    "error": "refused", "warning": "warned", "notice": "noticed", "review": "opened",
+    "declined": "decline", "closed": "confirm",
+}
 
 
 def _record_decision(agent: Any, args: dict[str, Any], outcome: Outcome, unread_reply: str | None) -> None:
@@ -452,7 +533,7 @@ def _run(agent: Any, args: dict[str, Any], tag_syntax: bool) -> Outcome:
     if not available(agent, agent._state.current_agent_role):
         return _error(f"Unknown tool {ACTION!r}.")
     if "message_id" in args:
-        return _flag(agent, int(args["message_id"]), tag_syntax)
+        return _flag(agent, int(args["message_id"]), tag_syntax, request=bool(args.get("request")))
     return _decide(agent, bool(args["confirm"]), " ".join(str(args["reason"]).split()))
 
 
@@ -460,24 +541,34 @@ def _error(text: str) -> Outcome:
     return Outcome(ok=False, answer=text, log={"answer": "error", "error": text})
 
 
-def _flag(agent: Any, flagged: int, tag_syntax: bool) -> Outcome:
+def _flag(agent: Any, flagged: int, tag_syntax: bool, *, request: bool) -> Outcome:
     ledger = agent._message_ledger
     if flagged > ledger["last_id"]:
         return _error(f"There is no message #{flagged} in this conversation.")
     if flagged not in ledger["user_ids"]:
         return _error(f"Message #{flagged} is not a message from the person.")
-    warned = agent._warned_msg_id
+    # An insult's warning and a close request's notice are separate marks: one
+    # never stands in for the other.
+    mark = "_close_notice_msg_id" if request else "_warned_msg_id"
+    warned = getattr(agent, mark, None)
     if warned is not None and flagged <= warned:
-        return _error(f"Message #{flagged} does not come after the warning, which followed message #{warned}.")
+        return _error(f"Message #{flagged} does not come after the {'notice' if request else 'warning'}, which followed message #{warned}.")
     since = sum(1 for item in ledger["user_ids"] if warned is not None and warned < item <= flagged)
     if warned is None or since > WARNING_FRESH_MESSAGES:
-        agent._warned_msg_id = flagged
+        setattr(agent, mark, flagged)
         # Recorded before it is shown: a warning the person saw must survive a restart.
         agent.save_session()
-        agent._ui.print_user_markdown(warning_text(agent._state.response_language))
+        language = agent._state.response_language
+        if request:
+            agent._ui.print_user_markdown(notice_text(language))
+            return Outcome(ok=True, answer=NOTICE_REPLY, log={"answer": "notice", "flagged_msg_id": flagged})
+        agent._ui.print_user_markdown(warning_text(language))
         return Outcome(ok=True, answer=WARNED_REPLY, log={"answer": "warning", "flagged_msg_id": flagged})
-    agent._state.end_session_review = {"flagged_msg_id": flagged, "warned_msg_id": warned}
-    template = CHAT_REVIEW_INSTRUCTION if tag_syntax else REVIEW_INSTRUCTION
+    agent._state.end_session_review = {"flagged_msg_id": flagged, "warned_msg_id": warned, "request": request}
+    if request:
+        template = CHAT_REQUEST_REVIEW_INSTRUCTION if tag_syntax else REQUEST_REVIEW_INSTRUCTION
+    else:
+        template = CHAT_REVIEW_INSTRUCTION if tag_syntax else REVIEW_INSTRUCTION
     review = template.format(warned_msg_id=warned, since_warning=since, flagged_msg_id=flagged)
     return Outcome(
         ok=True,
@@ -495,8 +586,10 @@ def _decide(agent: Any, confirm: bool, reason: str) -> Outcome:
         )
     agent._state.end_session_review = None
     decision = {**review, "decision": "confirm" if confirm else "decline", "reason": redact_text(reason)}
+    by_request = bool(review.get("request"))
     if not confirm:
-        return Outcome(ok=True, answer=DECLINED_REPLY, log={"answer": "declined", **decision})
+        answer = REQUEST_DECLINED_REPLY if by_request else DECLINED_REPLY
+        return Outcome(ok=True, answer=answer, log={"answer": "declined", **decision})
     language = agent._state.response_language
     agent._closure = {"closed_at": time.time(), "closed_msg_id": review["flagged_msg_id"], "language": language}
     agent.save_session()
@@ -515,5 +608,5 @@ def _decide(agent: Any, confirm: bool, reason: str) -> Outcome:
         ok=True,
         answer="Accepted.",
         log={"answer": "closed", **decision},
-        final_message=closed_text(language),
+        final_message=closed_text(language, by_request=by_request),
     )

@@ -719,9 +719,11 @@ _MESSAGE_ID_RE = re.compile(r"#?\s*([1-9][0-9]*)")
 
 
 def _validate_end_session(args: dict[str, Any]) -> None:
-    """Two forms: ``{message_id}`` flags a message, ``{confirm, reason}`` answers the review."""
+    """Two forms: ``{message_id[, request]}`` flags a message, ``{confirm, reason}`` answers the review."""
     if "message_id" in args:
-        require_only_allowed_keys(args, {"message_id"})
+        require_only_allowed_keys(args, {"message_id", "request"})
+        if "request" in args and args["request"] is not True:
+            raise CommandValidationError("'request' must be true, or left out")
         value = args["message_id"]
         text = str(value).strip() if isinstance(value, (int, str)) and not isinstance(value, bool) else ""
         match = _MESSAGE_ID_RE.fullmatch(text)
