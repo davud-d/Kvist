@@ -11,7 +11,7 @@ import type { Item } from "../state.js"
 import { ClaudeScreen } from "../ui/skins/claude-code/claude.js"
 import { ViewContext } from "../ui/context.js"
 
-import { MASCOT_OCTANTS, MASCOT_QUADRANTS } from "../ui/skins/claude-code/mascot-frames.js"
+import { MASCOT_OCTANTS, MASCOT_QUADRANTS, MASCOT_THINKING_QUADRANTS } from "../ui/skins/claude-code/mascot-frames.js"
 const MASCOT_FRAMES = MASCOT_QUADRANTS
 import { MASCOT_COLUMNS, MASCOT_FPS, MASCOT_ROWS, Mascot, MascotFrame, mascotGlyphs, runsOf } from "../ui/skins/claude-code/mascot.js"
 
@@ -180,4 +180,19 @@ test("the claude welcome block is present before hello and is not duplicated by 
   assert.deepEqual(ready.items, state.items, "hello updates details without restarting the welcome block")
   assert.equal(ready.info.model, "m")
   app.unmount()
+})
+
+test("the thinking squirrel is one frame of the same size as the animation", () => {
+  assert.equal(MASCOT_THINKING_QUADRANTS.length, 1)
+  const frame = MASCOT_THINKING_QUADRANTS[0]!
+  assert.equal(frame.length, MASCOT_ROWS)
+  for (const row of frame) assert.equal(row.length, MASCOT_COLUMNS)
+})
+
+test("a thinking mascot draws another squirrel than the one at rest", () => {
+  const rest = render(createElement(Mascot))
+  const thinking = render(createElement(Mascot, { thinking: true }))
+  assert.notEqual(plain(rest.lastFrame()), plain(thinking.lastFrame()))
+  rest.unmount()
+  thinking.unmount()
 })

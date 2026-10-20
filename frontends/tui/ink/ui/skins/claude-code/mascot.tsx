@@ -7,15 +7,19 @@
 // are left blank then. The picture is in the terminal's graphics layer and does not move
 // with the text, so `syncMascotImage` keeps it over the mascot's cells, cut to the part that is in
 // view while the rest is scrolled off, and removes it once none is left.
-import { Box, Text, measureElement, type DOMElement } from "ink"
+import { Box, Text, measureElement, useInput, type DOMElement } from "ink"
 import { useContext, useEffect, useRef, useState } from "react"
 
 import type { Pointer } from "../../../pointer.js"
 import { ViewContext } from "../../context.js"
-import { MASCOT_OCTANTS, MASCOT_QUADRANTS, type MascotCell, type MascotFrames } from "./mascot-frames.js"
-import { MASCOT_PNGS } from "./mascot-images.js"
+import { MASCOT_OCTANTS, MASCOT_QUADRANTS, MASCOT_THINKING_OCTANTS, MASCOT_THINKING_QUADRANTS, type MascotCell, type MascotFrames } from "./mascot-frames.js"
+import { MASCOT_PNGS, MASCOT_THINKING_PNG } from "./mascot-images.js"
 
 export const MASCOT_FPS = 2
+// With no key pressed for this long the squirrel sits and thinks, until the next key.
+export const MASCOT_IDLE_MS = 2 * 60 * 1000
+// The frame number of the thinking squirrel, which is not one of the animation's frames.
+export const THINKING_FRAME = -1
 export const MASCOT_ROWS = MASCOT_QUADRANTS[0]?.length ?? 0
 export const MASCOT_COLUMNS = MASCOT_QUADRANTS[0]?.[0]?.length ?? 0
 const FRAME_COUNT = MASCOT_QUADRANTS.length
@@ -52,6 +56,21 @@ export function runsOf(row: readonly MascotCell[]): Run[] {
 // Where the mascot's cells are, for `syncMascotImage`, and which frame is showing.
 export const mascotSlot: { node: DOMElement | null; frame: number } = { node: null, frame: 0 }
 
+// True once no key was pressed for `ms`; the next key makes it false again.
+export function useIdle(ms = MASCOT_IDLE_MS): boolean {
+  const [idle, setIdle] = useState(false)
+  const [keys, setKeys] = useState(0)
+  useInput(() => {
+    setIdle(false)
+    setKeys((count) => count + 1)
+  })
+  useEffect(() => {
+    const timer = setTimeout(() => setIdle(true), ms)
+    return () => clearTimeout(timer)
+  }, [keys, ms])
+  return idle
+}
+
 // The nearest ancestor that clips its children, whose rectangle is all that can be seen.
 function clippingAncestor(node: DOMElement): DOMElement | null {
   for (let parent = node.parentNode; parent; parent = parent.parentNode) {
@@ -72,11 +91,13 @@ export function syncMascotImage(pointer: Pointer | null): void {
   const skipTop = view ? Math.max(0, view.y - y) : 0
   const skipBottom = view ? Math.max(0, y + height - (view.y + view.height)) : 0
   if (width <= 0 || skipTop + skipBottom >= height) return pointer.showImage(null)
-  pointer.showImage({ png: MASCOT_PNGS[mascotSlot.frame] ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height, skipTop, skipBottom })
+  pointer.showImage({ png: (mascotSlot.frame === THINKING_FRAME ? MASCOT_THINKING_PNG : MASCOT_PNGS[mascotSlot.frame]) ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height, skipTop, skipBottom })
 }
 
-function mascotFrames(): MascotFrames {
-  return mascotGlyphs(process.env) === "octants" ? MASCOT_OCTANTS : MASCOT_QUADRANTS
+function mascotFrames(thinking = false): MascotFrames {
+  const octants = mascotGlyphs(process.env) === "octants"
+  if (thinking) return octants ? MASCOT_THINKING_OCTANTS : MASCOT_THINKING_QUADRANTS
+  return octants ? MASCOT_OCTANTS : MASCOT_QUADRANTS
 }
 
 export function MascotFrame({ index, frames = mascotFrames() }: { index: number; frames?: MascotFrames }) {
@@ -94,7 +115,7 @@ export function MascotFrame({ index, frames = mascotFrames() }: { index: number;
   )
 }
 
-export function Mascot() {
+export function Mascot({ thinking = false }: { thinking?: boolean }) {
   const { pointer } = useContext(ViewContext)
   const slot = useRef<DOMElement>(null)
   const [index, setIndex] = useState(0)
@@ -112,10 +133,10 @@ export function Mascot() {
     }
   }, [pointer])
   useEffect(() => {
-    mascotSlot.frame = index
+    mascotSlot.frame = thinking ? THINKING_FRAME : index
     syncMascotImage(pointer)
-  }, [index, pointer])
+  }, [index, pointer, thinking])
   // The cells stay empty under a picture, or the squirrel would show through its transparent parts.
   if (pictures) return <Box ref={slot} width={MASCOT_COLUMNS} height={MASCOT_ROWS} flexShrink={0} />
-  return <MascotFrame index={index} />
+  return <MascotFrame index={thinking ? 0 : index} frames={mascotFrames(thinking)} />
 }

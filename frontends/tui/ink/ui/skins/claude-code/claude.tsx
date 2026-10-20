@@ -8,7 +8,8 @@ import { diffLines, toLines } from "../../../diff.js"
 import { clip, clipLines, contextLabel, formatSeconds, outputLines } from "../../../format.js"
 import { actionTarget, requestIsRussian, type ActionResult, type ExploreCounts, type Item, type State } from "../../../state.js"
 import { ViewContext } from "../../context.js"
-import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage } from "./mascot.js"
+import { IDLE_THOUGHTS, IDLE_THOUGHT_MS } from "./idle-thoughts.js"
+import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage, useIdle } from "./mascot.js"
 import { jobFailed, jobLabel, jobsCopy, jobTail } from "../../jobs.js"
 import { Markdown, renderInline } from "../../markdown.js"
 import { color } from "../../theme.js"
@@ -98,24 +99,48 @@ export function exploreLine(counts: ExploreCounts, shells = 0, russian = false):
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
+// The bubble of the idle squirrel: a frame of block characters, the way the pixels of the picture look.
+const BUBBLE_BORDER = { topLeft: "▛", top: "▀", topRight: "▜", left: "▌", right: "▐", bottomLeft: "▙", bottom: "▄", bottomRight: "▟" }
+const BUBBLE_COLOR = "#ffe9cc"
+
+function IdleThought() {
+  const [at, setAt] = useState(() => Math.floor(Math.random() * IDLE_THOUGHTS.length))
+  useEffect(() => {
+    const timer = setInterval(() => setAt((current) => (current + 1) % IDLE_THOUGHTS.length), IDLE_THOUGHT_MS)
+    return () => clearInterval(timer)
+  }, [])
+  return (
+    <Box borderStyle={BUBBLE_BORDER} borderColor={BUBBLE_COLOR} paddingX={1} alignSelf="flex-start">
+      <Text color={BUBBLE_COLOR} wrap="truncate-end">{IDLE_THOUGHTS[at]}</Text>
+    </Box>
+  )
+}
+
 function Banner() {
   const { info, effort, workspace } = useContext(ViewContext)
+  const idle = useIdle()
   const reasoning = effort && effort !== "false" ? ` with ${effort} effort` : ""
   const detail = [`${info.model}${reasoning}`.trim(), info.provider].filter(Boolean).join(" · ")
   return (
     <Box marginTop={1} marginBottom={1}>
       <Box flexShrink={0} marginRight={2}>
-        <Mascot />
+        <Mascot thinking={idle} />
       </Box>
       <Rest taken={MASCOT_COLUMNS + 2}>
         {/* The three text rows sit in the middle of the squirrel. */}
         <Box height={Math.max(0, Math.floor((MASCOT_ROWS - 3) / 2))} />
-        <Text wrap="truncate-end">
-          <Text bold>Kvist</Text>
-          {info.kvistVersion ? <Text color={color.dim}> v{info.kvistVersion}</Text> : null}
-        </Text>
-        <Text color={color.dim} wrap="truncate-end">{detail}</Text>
-        <Text color={color.dim} wrap="truncate-end">{workspace}</Text>
+        {idle ? (
+          <IdleThought />
+        ) : (
+          <>
+            <Text wrap="truncate-end">
+              <Text bold>Kvist</Text>
+              {info.kvistVersion ? <Text color={color.dim}> v{info.kvistVersion}</Text> : null}
+            </Text>
+            <Text color={color.dim} wrap="truncate-end">{detail}</Text>
+            <Text color={color.dim} wrap="truncate-end">{workspace}</Text>
+          </>
+        )}
       </Rest>
     </Box>
   )
