@@ -1,6 +1,7 @@
 import { Box, Text } from "ink"
 import type { ReactNode } from "react"
 
+import { replaceMath } from "../math.js"
 import { color, currentSkin } from "./theme.js"
 
 const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]+\]\([^)\s]+\))|(\*[^*\s][^*\n]*\*)/g
@@ -36,7 +37,7 @@ export type Block =
 
 export function parseBlocks(source: string): Block[] {
   const blocks: Block[] = []
-  const lines = source.replace(/\r\n/g, "\n").split("\n")
+  const lines = replaceMath(source.replace(/\r\n/g, "\n")).split("\n")
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? ""
     const fence = /^\s*```(\S*)/.exec(line)
