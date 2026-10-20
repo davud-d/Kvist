@@ -46,6 +46,7 @@ use crate::backdrop::{self, Glass};
 use crate::core::{self, Core, Message};
 use crate::dialog::{Ask, Body, Choice};
 use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG};
+use crate::math;
 use crate::layout::Grid;
 use crate::orb::{ALL_STATES, Orb, OrbState};
 use crate::probe::Caps;
@@ -915,7 +916,7 @@ impl Voice {
 
 /// The words of a reply as they should be said: markdown marks and line breaks dropped.
 fn speakable(text: &str) -> String {
-    let plain: String = text.chars().filter(|c| !matches!(c, '`' | '*' | '#')).collect();
+    let plain: String = math::spoken(text).chars().filter(|c| !matches!(c, '`' | '*' | '#')).collect();
     plain.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -2383,6 +2384,11 @@ mod tests {
     fn speakable_text_loses_markdown_and_line_breaks() {
         assert_eq!(speakable("# Done\n\n- **one** `two`"), "Done - one two");
         assert_eq!(speakable("  \n "), "");
+    }
+
+    #[test]
+    fn a_formula_is_spoken_as_text_not_as_latex() {
+        assert_eq!(speakable("Ответ: $\\sqrt{9}\\approx3$, **готово**"), "Ответ: √9≈3, готово");
     }
 
     #[test]

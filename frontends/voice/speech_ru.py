@@ -160,7 +160,15 @@ def spell_latin(word: str) -> str:
 
 
 SYMBOLS = {"/": " слэш ", "\\": " бэкслэш ", "&": " и ", "+": " плюс ", "=": " равно ", "#": " решётка ", "@": " собака ",
-           "~": " тильда ", "->": " стрелка ", "=>": " стрелка ", "°": " градусов ", "_": " "}
+           "~": " тильда ", "->": " стрелка ", "=>": " стрелка ", "°": " градусов ", "_": " ",
+           # Math, as the screen writes a formula (`math.rs`): a minus is U+2212, so "5-3" stays a range.
+           "√": " корень из ", "≈": " приблизительно равно ", "·": " умножить на ", "×": " умножить на ",
+           "÷": " разделить на ", "−": " минус ", "±": " плюс-минус ", "≠": " не равно ", "≤": " меньше или равно ",
+           "≥": " больше или равно ", "→": " стрелка ", "∞": " бесконечность ", "π": " пи ", "∑": " сумма ",
+           "∫": " интеграл ", "…": " "}
+# Superscript digits as the screen writes a power: "x²" is "икс в квадрате".
+SUPERSCRIPT = re.compile(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+")
+SUPERSCRIPT_DIGITS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻", "0123456789−")
 DROPPED = "`*|<>{}[]^\""
 THOUSANDS = re.compile(r"\b\d{1,3}(?:[ \u00a0]\d{3})+\b")
 FILE_NAME = re.compile(r"\b([A-Za-z][A-Za-z0-9_-]*)\.([A-Za-z][A-Za-z0-9]{0,4})\b")
@@ -181,10 +189,17 @@ def _version(match: re.Match[str]) -> str:
     return f"ви {spoken}" if match.group(1) else spoken
 
 
+def _power(match: re.Match[str]) -> str:
+    exponent = match.group().translate(SUPERSCRIPT_DIGITS)
+    named = {"2": " в квадрате ", "3": " в кубе "}
+    return named.get(exponent, f" в степени {exponent} ")
+
+
 def speakable_russian(text: str) -> str:
     """`text` with everything the voice cannot read written out in words."""
     # "1 000 000" is one number, not three.
     text = THOUSANDS.sub(lambda match: re.sub(r"[ \u00a0]", "", match.group()), text)
+    text = SUPERSCRIPT.sub(_power, text)
     text = FILE_NAME.sub(_file, text)
     text = CLOCK.sub(_clock, text)
     text = PERCENT.sub(_percent, text)

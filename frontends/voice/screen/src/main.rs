@@ -47,6 +47,7 @@ mod theme;
 
 mod farewell;
 mod icons;
+mod math;
 mod orb;
 mod voice;
 mod voice_overlay;

@@ -40,6 +40,12 @@ class SpeakableTests(unittest.TestCase):
             "Готово: три файла, встреча в пятнадцать тридцать, две тысячи двадцать шесть год, сто двадцать восемь тестов, ноль ошибок.",
         )
 
+    def test_a_formula_from_the_screen_is_said_in_words(self):
+        self.assertEqual(speakable_russian("√6646021≈2577,9878"), "корень из шесть миллионов шестьсот сорок шесть тысяч двадцать один приблизительно равно две тысячи пятьсот семьдесят семь точка девять восемь семь восемь")
+        self.assertEqual(speakable_russian("2578²−8²"), "две тысячи пятьсот семьдесят восемь в квадрате минус восемь в квадрате")
+        self.assertEqual(speakable_russian("x⁻¹ и x³ и x¹⁰"), "икс в степени минус один и икс в кубе и икс в степени десять")
+        self.assertEqual(speakable_russian("2·3 ≠ 7"), "два умножить на три не равно семь")
+
     def test_times_and_percentages(self):
         self.assertEqual(speakable_russian("в 9:05"), "в девять ноль пять")
         self.assertEqual(speakable_russian("в 15:00"), "в пятнадцать ноль-ноль")
