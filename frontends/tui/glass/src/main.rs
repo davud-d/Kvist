@@ -63,7 +63,12 @@ fn main() -> ExitCode {
             return ExitCode::from(BAD_SETTING);
         }
     };
-    let caps = match probe::probe() {
+    // Forced startup uses inline graphics without relying on a probe reply.
+    let caps = match if args.iter().any(|arg| arg == "--force") {
+        Ok(probe::Caps { temp_dir: None })
+    } else {
+        probe::probe()
+    } {
         Ok(caps) => caps,
         Err(refusal) => {
             eprintln!("{}", refusal.message());

@@ -83,6 +83,11 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "per stdin line."
         ),
     )
+    parser.add_argument(
+        "--force-glass",
+        action="store_true",
+        help="Force Glass, bypass terminal capability checks and never fall back to Ink.",
+    )
     parser.add_argument("--provider", help="Provider override for the stdio frontend.")
     parser.add_argument("--fast-model", help="Fast model override for the stdio frontend.")
     parser.add_argument("--smart-model", help="Smart model override for the stdio frontend.")
@@ -1017,9 +1022,10 @@ def launch_glass(args: argparse.Namespace) -> int | None:
     import subprocess
     import tempfile
 
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+    force = getattr(args, "force_glass", False)
+    if not force and not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
-    if os.name == "nt":
+    if not force and os.name == "nt":
         print(
             "Classic needs kitty graphics, which Windows terminals do not have. Using the Ink UI.",
             file=sys.stderr,
@@ -1027,6 +1033,9 @@ def launch_glass(args: argparse.Namespace) -> int | None:
         return None
     glass = find_glass()
     if glass is None:
+        if force:
+            print("Glass is not built; build frontends/tui/glass or set KVIST_GLASS.", file=sys.stderr)
+            return 1
         print(
             "Classic is not built: run `cargo build --release` in frontends/tui/glass "
             "(or set KVIST_GLASS). Using the Ink UI.",
@@ -1034,13 +1043,16 @@ def launch_glass(args: argparse.Namespace) -> int | None:
         )
         return None
     # The check asks the terminal itself, so only its reason (stderr) is captured.
-    check = subprocess.run([glass, "--check"], stderr=subprocess.PIPE, text=True)
-    if check.returncode != 0:
-        reason = check.stderr.strip() or f"kvist-glass --check exited with {check.returncode}"
-        print(f"{reason}\nUsing the Ink UI.", file=sys.stderr)
-        return None
+    if not force:
+        check = subprocess.run([glass, "--check"], stderr=subprocess.PIPE, text=True)
+        if check.returncode != 0:
+            reason = check.stderr.strip() or f"kvist-glass --check exited with {check.returncode}"
+            print(f"{reason}\nUsing the Ink UI.", file=sys.stderr)
+            return None
     core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
     command = [glass, "--workspace", str(resolve_workspace_path(args.workspace))]
+    if force:
+        command.append("--force")
     with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
         switch_file = Path(scratch) / "frontend"
         env = {**os.environ, "KVIST_CORE_CMD": json.dumps(core), "KVIST_SWITCH_FILE": str(switch_file)}
@@ -4367,6 +4379,9 @@ def main() -> None:
         if _DIRECT_CLI_ARGS is not None
         else _build_cli_parser().parse_args()
     )
+    if args.force_glass:
+        args.frontend = "glass"
+        args.no_banner = False
     args.role = resolve_startup_role(args.role)
 
     if args.login and not args.acp:

@@ -748,3 +748,27 @@ def test_tui_switch_to_voice_starts_it(monkeypatch, tmp_path):
     switch.write_text("voice\n", encoding="utf-8")
 
     assert main._switch_frontend(switch, _tui_args(frontend="tui")) == 7
+
+
+def test_force_glass_skips_checks_and_propagates_exit(monkeypatch, tmp_path):
+    glass = _glass(monkeypatch, tmp_path)
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("must not probe"))
+    calls = []
+    monkeypatch.setattr(subprocess, "call", lambda command, env: calls.append(command) or 3)
+    args = _tui_args(frontend="glass")
+    args.force_glass = True
+    assert main.launch_glass(args) == 3
+    assert calls == [[str(glass), "--workspace", "ws", "--force"]]
+
+
+def test_force_glass_missing_binary_is_error(monkeypatch):
+    monkeypatch.setattr(main, "find_glass", lambda: None)
+    args = _tui_args(frontend="glass")
+    args.force_glass = True
+    assert main.launch_glass(args) == 1
+
+
+def test_force_glass_cli_flag():
+    assert main._build_cli_parser().parse_args(["--force-glass"]).force_glass
