@@ -170,6 +170,8 @@ pub struct App {
     text_view: Option<TextView>,
     widths: Vec<usize>,
     plain: Vec<String>,
+    /// The display formulas showing now, which the pictures draw over their reserved rows.
+    formulas: Vec<view::FormulaSpot>,
     /// The pool to draw this frame.
     water: Option<water::Shape>,
     /// The last press: when, where, and how many in a row.
@@ -239,6 +241,7 @@ impl App {
             text_view: None,
             widths: Vec::new(),
             plain: Vec::new(),
+            formulas: Vec::new(),
             water: None,
             last_press: None,
             last_drag_scroll: now,
@@ -747,6 +750,7 @@ impl App {
         self.text_view = drawn.text;
         self.widths = drawn.widths;
         self.plain = drawn.plain;
+        self.formulas = drawn.formulas;
         self.wet_the_text(frame.buffer_mut(), now);
         if let Some(position) = drawn.cursor {
             frame.set_cursor_position(position);
@@ -764,7 +768,7 @@ impl App {
                     if t < 1.0 && frames > 0 { Backdrop::Rise((t * frames as f32) as usize) } else { Backdrop::Photo }
                 }
             };
-            return Scene { backdrop, cards: Vec::new(), thumb: None, attachments: Vec::new(), popup: None, water: None };
+            return Scene { backdrop, cards: Vec::new(), thumb: None, attachments: Vec::new(), popup: None, water: None, formulas: Vec::new(), formulas_dim: false };
         }
         let modal = self.modal_p.value(now).clamp(0.0, 1.0);
         let level = (modal * LEVELS as f32).round() as usize;
@@ -849,7 +853,7 @@ impl App {
         // pool at rest costs no redrawing.
         let clock = self.pour.as_ref().map_or(0.0, |pour| pour.age(now).min(CAUSTIC_LIFE));
         let water = self.water.clone().map(|shape| WaterSpec { shape, clock });
-        Scene { backdrop, cards, thumb, attachments, popup, water }
+        Scene { backdrop, cards, thumb, attachments, popup, water, formulas: self.formulas.clone(), formulas_dim: dim }
     }
 
     /// A picture growing from its thumbnail to the middle of the screen.

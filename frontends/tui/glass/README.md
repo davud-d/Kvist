@@ -168,6 +168,11 @@ them shows the counts only.
   have a background colour, so a highlighted row covers the glass.
 - The terminal's own padding is painted with the photograph's edge colour
   (OSC 11) and given back on exit (OSC 111).
+- A display formula (`\[ … \]`, `$$ … $$`) is typeset by RaTeX (`math.rs`) and
+  drawn as a picture over rows the transcript reserves for it, centred in the
+  column and cropped with the text when scrolled. Inline formulas, and ones
+  RaTeX cannot read, are shown as text (`√9 ≈ 3`). Math typesetting: RaTeX
+  (MIT) with KaTeX fonts (SIL OFL 1.1); see [THIRD_PARTY.md](THIRD_PARTY.md).
 
 ## From the core
 

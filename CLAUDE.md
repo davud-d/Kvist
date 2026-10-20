@@ -859,7 +859,13 @@ Launcher: `--frontend glass` / saved `glass` → `main.launch_glass` (`KVIST_GLA
 `_GLASS_BUILD`, also where `kvist.spec` packs the build); `--check` must see the real tty; any refusal
 falls back to the Ink UI. `/tui` inside Glass is local (`local:frontend`, exit 64 + `KVIST_SWITCH_FILE`).
 Installer: `install_rust.py` (C compiler + rustup; not on Windows), `install_cli.py::build_glass`; release CI
-builds it for Linux/macOS. Windows is unsupported by design. Verify visually on a private `Xvfb :97` running
+builds it for Linux/macOS. Windows is unsupported by design. **Math:** `math.rs` cuts display formulas (`\[ \]`, `$$ $$`) out of the
+answer; `markdown::render_with_math` reserves rows for each, RaTeX (MIT) typesets it, `Pictures::show_formulas`
+draws it over those rows (z between the cards and the dialog, cropped by `hidden`/`shown` when scrolled); inline
+formulas and ones RaTeX cannot read are text. The other interfaces use the text converter only
+(`ink/math.ts`, `classic/math_text.py`, ports of `math::tex_to_text`: **a fix in one is made in all three**).
+The Voice screen has no transcript: `voice/screen/src/math.rs` (a copy of the text half, minus as U+2212, fraction as "разделить на") feeds `speakable`, and `voice/speech_ru.py` says the symbols. Licences of what the binary embeds (RaTeX MIT, KaTeX fonts OFL 1.1) are in `frontends/tui/glass/THIRD_PARTY.md`;
+ship that file with Glass binaries. Verify visually on a private `Xvfb :97` running
 kitty (`import -window <id>`), never by screenshotting the user's desktop; live core runs need a copy of the
 config (`KVIST_CONFIG_DIR`) and a fresh scratch workspace (a reused one remembers denied approvals).
 

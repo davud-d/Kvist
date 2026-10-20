@@ -16,6 +16,8 @@ use ratatui::layout::Rect;
 use crate::backdrop::{self, Canvas, Glass, LEVELS, WebFrame};
 use crate::kitty::{Gpu, Placement, Z_BACKDROP, Z_CARD, Z_DIALOG, Z_THUMB, Z_TOP, Z_WATER};
 use crate::layout::Grid;
+use crate::math;
+use crate::view::FormulaSpot;
 use crate::theme::GLASS_TINT;
 use crate::video::{self, Video};
 use crate::water;
@@ -34,6 +36,14 @@ const SLOT_THUMB: u32 = 8;
 /// The first of the slots of the pictures attached to a request.
 pub const SLOT_ATTACH: u32 = 20;
 const SLOT_POPUP: u32 = 9;
+/// The first of the slots of the formulas on screen.
+const SLOT_FORMULA: u32 = 100;
+/// Most formulas drawn at once; the rest of a very long answer shows as blank rows until scrolled.
+const MAX_FORMULAS: usize = 24;
+/// Above every card and below the dialog, so a menu or dialog covers a formula as it does the text.
+const Z_FORMULA: i32 = Z_CARD + 1_000_000;
+const FORMULA_INK: [u8; 3] = [0xDD, 0xE4, 0xEE];
+const FORMULA_INK_DIM: [u8; 3] = [0x6E, 0x7A, 0x92];
 const CARD_SLOTS: [u32; 8] =
     [SLOT_LEFT, SLOT_BROWSER_CARD, SLOT_HELPERS, SLOT_READING, SLOT_INPUT, SLOT_DIALOG, SLOT_MENU, SLOT_DIFF];
 /// A cached picture unused for this many frames is freed.
@@ -186,6 +196,9 @@ pub struct Scene {
     pub attachments: Vec<(u32, ThumbSpec)>,
     pub popup: Option<PopupSpec>,
     pub water: Option<WaterSpec>,
+    /// Display formulas to draw over the conversation; `dim` while a dialog is open over it.
+    pub formulas: Vec<FormulaSpot>,
+    pub formulas_dim: bool,
 }
 
 type BackdropIds = HashMap<Backdrop, u32>;
@@ -218,6 +231,9 @@ pub struct Pictures {
     water: Option<(u64, u32)>,
     /// (frame version, width, height, dimmed) -> picture.
     thumbs: HashMap<(u64, u32, u32, bool), (u32, u64)>,
+    /// Formula pictures by (tex, cols, rows, em, dimmed); `None` is a formula that would not draw.
+    formulas: HashMap<(String, u16, u16, u32, bool), (Option<u32>, u64)>,
+    formula_slots: usize,
     frame: u64,
 }
 
@@ -234,6 +250,8 @@ impl Pictures {
             cards: HashMap::new(),
             water: None,
             thumbs: HashMap::new(),
+            formulas: HashMap::new(),
+            formula_slots: 0,
             frame: 0,
         }
     }
@@ -286,6 +304,8 @@ impl Pictures {
         self.cards.clear();
         self.water = None;
         self.thumbs.clear();
+        self.formulas.clear();
+        self.formula_slots = 0;
     }
 
     fn forget_canvas_pictures(&mut self) {
@@ -334,6 +354,7 @@ impl Pictures {
             };
             self.gpu.set(slot, placement);
         }
+        self.show_formulas(grid, scene)?;
         let popup = match &scene.popup {
             Some(spec) => self.popup_placement(grid, spec)?,
             None => None,
@@ -439,6 +460,45 @@ impl Pictures {
         Ok(clipped(image, x + spec.dx, y + spec.dy, w, h, grid, Z_THUMB))
     }
 
+    fn show_formulas(&mut self, grid: &Grid, scene: &Scene) -> io::Result<()> {
+        let shown = scene.formulas.len().min(MAX_FORMULAS);
+        for (i, spot) in scene.formulas.iter().take(shown).enumerate() {
+            let placement = self.formula_placement(grid, spot, scene.formulas_dim)?;
+            self.gpu.set(SLOT_FORMULA + i as u32, placement);
+        }
+        for slot in shown..self.formula_slots {
+            self.gpu.set(SLOT_FORMULA + slot as u32, None);
+        }
+        self.formula_slots = shown;
+        Ok(())
+    }
+
+    fn formula_placement(&mut self, grid: &Grid, spot: &FormulaSpot, dim: bool) -> io::Result<Option<Placement>> {
+        let key = (spot.tex.clone(), spot.fit.cols, spot.fit.rows, spot.fit.em.to_bits(), dim);
+        let image = match self.formulas.get_mut(&key) {
+            Some(entry) => {
+                entry.1 = self.frame;
+                entry.0
+            }
+            None => {
+                let ink = if dim { FORMULA_INK_DIM } else { FORMULA_INK };
+                let id = match math::paint(&spot.tex, spot.fit, (grid.cw, grid.ch), ink) {
+                    Some(picture) => Some(self.gpu.upload_rgba(picture.width(), picture.height(), picture.as_raw())?),
+                    None => None,
+                };
+                self.formulas.insert(key, (id, self.frame));
+                id
+            }
+        };
+        let Some(image) = image else { return Ok(None) };
+        let (cw, ch) = (grid.cw, grid.ch);
+        let mut placement = Placement::at_px(image, (spot.col as u32 * cw) as f32, (spot.row as u32 * ch) as f32, cw, ch, None, Z_FORMULA);
+        if spot.hidden > 0 || spot.shown < spot.fit.rows {
+            placement.crop = Some((0, spot.hidden as u32 * ch, spot.fit.cols as u32 * cw, spot.shown as u32 * ch));
+        }
+        Ok(Some(placement))
+    }
+
     fn popup_placement(&mut self, grid: &Grid, spec: &PopupSpec) -> io::Result<Option<Placement>> {
         let Some(web) = spec.frame.clone().or_else(|| self.web.clone()) else { return Ok(None) };
         if self.web_ids.as_ref().is_none_or(|ids| ids.version != web.version) {
@@ -474,6 +534,13 @@ impl Pictures {
             let keep = frame - *used < KEEP_FRAMES;
             if !keep {
                 stale.push(*id);
+            }
+            keep
+        });
+        self.formulas.retain(|_, (id, used)| {
+            let keep = frame - *used < KEEP_FRAMES;
+            if !keep {
+                stale.extend(*id);
             }
             keep
         });
@@ -554,7 +621,7 @@ mod tests {
                 slot: SLOT_INPUT, style: CardStyle::Input,
                 rect: Rect::new(1, 1, 8, 2), dx: 0.0, dy: 0.0,
             }],
-            thumb: None, attachments: Vec::new(), popup: None, water: None,
+            thumb: None, attachments: Vec::new(), popup: None, water: None, formulas: Vec::new(), formulas_dim: false,
         };
         pictures.accept(Arc::new(backdrop::build(&source, 100, 80, false)));
         pictures.show(&grid, &scene).unwrap();

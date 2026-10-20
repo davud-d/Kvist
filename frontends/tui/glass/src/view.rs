@@ -14,6 +14,7 @@ use crate::diff;
 use crate::layout::{self, BROWSER_ASPECT, MARGIN_X};
 use crate::model::{CallState, Helper, HelperState, Item, ToolKind};
 use crate::markdown;
+use crate::math;
 use crate::models::{ModelPicker, Role, Row};
 use crate::slash;
 use crate::strings::{self, strings};
@@ -81,6 +82,21 @@ pub struct Drawn {
     /// The display width and the plain text of every line of the conversation.
     pub widths: Vec<usize>,
     pub plain: Vec<String>,
+    /// The display formulas showing in the conversation, to be drawn as pictures.
+    pub formulas: Vec<FormulaSpot>,
+}
+
+/// A display formula's picture: where it goes and how much of it shows (the rest is scrolled off).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FormulaSpot {
+    pub tex: String,
+    pub fit: math::Fit,
+    pub col: u16,
+    /// Screen row of the first visible row of the picture.
+    pub row: u16,
+    /// Rows of the picture above the visible part.
+    pub hidden: u16,
+    pub shown: u16,
 }
 
 fn st(color: Color) -> Style {
@@ -92,7 +108,7 @@ fn span(s: impl Into<String>, color: Color) -> (String, Style) {
 }
 
 pub fn draw(app: &App, buf: &mut Buffer, now: Instant) -> Drawn {
-    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new() };
+    let mut drawn = Drawn { hits: Vec::new(), cursor: None, reading: None, text: None, widths: Vec::new(), plain: Vec::new(), formulas: Vec::new() };
     let area = app.grid.full();
     let ms = now.saturating_duration_since(app.started).as_millis();
     let mut p = Painter { buf, clip: area };
@@ -458,8 +474,9 @@ fn helper_doing(helper: &Helper) -> &str {
 }
 
 /// Builds every line of the conversation for a column `width` wide.
-fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Vec<Line> {
+fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> (Vec<Line>, Vec<markdown::Formula>) {
     let mut lines: Vec<Line> = Vec::new();
+    let mut formulas: Vec<markdown::Formula> = Vec::new();
     let mut previous_tool = false;
     for item in &app.session.items {
         let is_tool = matches!(item, Item::Tool { .. });
@@ -480,7 +497,10 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Vec<Line
             Item::Agent { text: words, at } => {
                 let shown = (now.saturating_duration_since(*at).as_secs_f32() * REVEAL_PER_SECOND) as usize;
                 let visible: String = words.chars().take(shown.max(1)).collect();
-                lines.extend(markdown::render(&visible, width));
+                let (rendered, found) = markdown::render_with_math(&visible, width, Some((app.grid.cw, app.grid.ch)));
+                let base = lines.len();
+                formulas.extend(found.into_iter().map(|formula| markdown::Formula { line: formula.line + base, ..formula }));
+                lines.extend(rendered);
             }
             Item::Tool { kind, label, state, .. } => lines.push(tool_line(*kind, label, state, width, ms)),
             Item::Error(message) => {
@@ -506,7 +526,7 @@ fn transcript_lines(app: &App, width: usize, now: Instant, ms: u128) -> Vec<Line
         row.push(span(format!("  {secs} {}", s.seconds), DUSK));
         lines.push(row);
     }
-    lines
+    (lines, formulas)
 }
 
 fn tool_line(kind: ToolKind, label: &str, state: &CallState, width: usize, ms: u128) -> Line {
@@ -564,7 +584,7 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
         return None;
     }
     let width = area.width.saturating_sub(6) as usize;
-    let lines = transcript_lines(app, width, now, ms);
+    let (lines, formulas) = transcript_lines(app, width, now, ms);
     drawn.widths = lines.iter().map(text::line_width).collect();
     drawn.plain = lines.iter().map(|line| line.iter().map(|(s, _)| s.as_str()).collect()).collect();
     let avail = (area.height - 2) as usize;
@@ -577,6 +597,20 @@ fn draw_transcript(p: &mut Painter, app: &App, now: Instant, ms: u128, drawn: &m
     for (i, line) in lines[start..end].iter().enumerate() {
         p.line(card.x as i32 + 3, card.y as i32 + 1 + i as i32, line);
     }
+    drawn.formulas = formulas
+        .iter()
+        .filter_map(|formula| {
+            let (top, bottom) = (formula.line.max(start), (formula.line + formula.fit.rows as usize).min(end));
+            (top < bottom).then(|| FormulaSpot {
+                tex: formula.tex.clone(),
+                fit: formula.fit,
+                col: card.x + 3,
+                row: card.y + 1 + (top - start) as u16,
+                hidden: (top - formula.line) as u16,
+                shown: (bottom - top) as u16,
+            })
+        })
+        .collect();
     drawn.text = Some(TextView { x: card.x as i32 + 3, top: card.y as i32 + 1, first: start, rows: shown });
     Some(card)
 }

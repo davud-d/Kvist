@@ -19,6 +19,7 @@ mod highlight;
 mod kitty;
 mod layout;
 mod markdown;
+mod math;
 mod model;
 mod models;
 mod pictures;

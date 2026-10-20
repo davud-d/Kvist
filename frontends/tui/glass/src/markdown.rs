@@ -8,6 +8,7 @@ use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 
 use crate::highlight;
+use crate::math;
 use crate::text::{self, Line};
 use crate::theme::{CODE_BG, DUSK, FOG, LINK, MIST, MOON};
 
@@ -20,9 +21,72 @@ fn style(colour: ratatui::style::Color) -> Style {
     Style::default().fg(colour)
 }
 
-/// `source` as lines at most `width` columns wide.
+/// How tall a display formula is drawn, as a multiple of the cell height; the text around it is
+/// about 0.8 of a cell, and a formula reads better a little larger.
+const FORMULA_EM: f32 = 1.3;
+
+/// A display formula's place among the lines `render_with_math` returns: the rows from `line` on are
+/// empty, and the picture goes over them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Formula {
+    pub line: usize,
+    pub tex: String,
+    pub fit: math::Fit,
+}
+
+/// `source` as lines at most `width` columns wide, display formulas as text.
+#[cfg(test)]
 pub fn render(source: &str, width: usize) -> Vec<Line> {
-    let mut renderer = Renderer::new(width.max(12));
+    render_with_math(source, width, None).0
+}
+
+/// Like `render`, but with the cell size in pixels a display formula is reserved rows for and drawn
+/// as a picture; one RaTeX cannot read, or no cell size, is written as text.
+pub fn render_with_math(source: &str, width: usize, cell: Option<(u32, u32)>) -> (Vec<Line>, Vec<Formula>) {
+    let width = width.max(12);
+    let mut lines: Vec<Line> = Vec::new();
+    let mut formulas = Vec::new();
+    let mut gap_due = false;
+    for piece in math::split(source) {
+        let text = match piece {
+            math::Piece::Text(text) => text,
+            math::Piece::Display(tex) => {
+                let fit = cell.and_then(|cell| math::fit(&tex, cell.1 as f32 * FORMULA_EM, width as u32 * cell.0, cell));
+                let Some(fit) = fit else {
+                    gap_due = true;
+                    separate(&mut lines);
+                    lines.extend(render_text(math::tex_to_text(&tex).trim(), width));
+                    continue;
+                };
+                separate(&mut lines);
+                formulas.push(Formula { line: lines.len(), tex: tex.trim().to_string(), fit });
+                lines.extend(std::iter::repeat_n(Vec::new(), fit.rows as usize));
+                gap_due = true;
+                continue;
+            }
+        };
+        let rendered = render_text(&text, width);
+        if rendered.is_empty() {
+            continue;
+        }
+        if gap_due {
+            lines.push(Vec::new());
+            gap_due = false;
+        }
+        lines.extend(rendered);
+    }
+    (lines, formulas)
+}
+
+/// A blank line between a block and what comes next, unless there is one already.
+fn separate(lines: &mut Vec<Line>) {
+    if lines.last().is_some_and(|line| !line.is_empty()) {
+        lines.push(Vec::new());
+    }
+}
+
+fn render_text(source: &str, width: usize) -> Vec<Line> {
+    let mut renderer = Renderer::new(width);
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     for event in Parser::new_ext(source, options) {
         renderer.event(event);
@@ -394,6 +458,32 @@ mod tests {
 
     fn rendered(source: &str) -> Vec<String> {
         plain(&render(source, 40))
+    }
+
+    #[test]
+    fn a_display_formula_reserves_rows_and_is_reported_where_they_start() {
+        let (lines, formulas) = render_with_math("before\n\\[\n\\sqrt{9}=3\n\\]\nafter", 40, Some((10, 20)));
+        let [formula] = formulas.as_slice() else { panic!("one formula, got {formulas:?}") };
+        assert_eq!(plain(&lines)[0], "before");
+        assert_eq!(formula.line, 2, "a blank line separates it from the text before");
+        assert_eq!(formula.tex, "\\sqrt{9}=3");
+        let reserved = &plain(&lines)[formula.line..formula.line + formula.fit.rows as usize];
+        assert!(reserved.iter().all(String::is_empty));
+        assert_eq!(plain(&lines)[formula.line + formula.fit.rows as usize + 1], "after");
+    }
+
+    #[test]
+    fn a_formula_ending_the_answer_keeps_its_rows() {
+        let (lines, formulas) = render_with_math("so\n$$x^2$$", 40, Some((10, 20)));
+        assert_eq!(lines.len(), formulas[0].line + formulas[0].fit.rows as usize);
+    }
+
+    #[test]
+    fn without_a_cell_size_or_when_ratex_cannot_read_it_a_formula_is_text() {
+        assert_eq!(render("so\n\\[\\sqrt{9}\\approx3\\]", 40).iter().map(|l| l.iter().map(|(t, _)| t.as_str()).collect::<String>()).collect::<Vec<_>>(), ["so", "", "√9≈3"]);
+        let (lines, formulas) = render_with_math("\\[\\notacommand{\\]", 40, Some((10, 20)));
+        assert!(formulas.is_empty());
+        assert_eq!(plain(&lines), ["\\notacommand{}"]);
     }
 
     #[test]
