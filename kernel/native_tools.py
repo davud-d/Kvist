@@ -382,7 +382,9 @@ ELIDED_OUTPUT = "[output removed to fit the context window; run the action again
 OPENING_NOTE = (
     "\n\nOPENING: the person has just handed you this task and sees nothing until you write. "
     "Your first response opens with your line to them, in the language of the person's request and in the voice "
-    "your working style sets, before its first tool call."
+    "your working style sets, before its first tool call. If the request itself is funny (an absurd idea, a joke "
+    "of the person's own), that line is where you notice it: one remark about the specific absurd detail, in "
+    "words you have not used before, then the work, built in full. A request that is only ordinary gets no joke."
     "\nGENDER: in languages that mark the speaker's gender you are feminine in every message, "
     "including the last one after the tools finish (Russian: \"я прочитала\", \"перенесла\", never \"прочитал\")."
 )
