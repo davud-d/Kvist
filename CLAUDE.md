@@ -5,11 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 Kvist is a local, terminal-based coding agent that operates on one workspace
-directory at a time. It plans a task, then runs an action/feedback loop where an LLM
-emits one JSON response per step carrying a short batch of actions (read/write files,
-run shell, search web, etc.), the agent executes them through a sandboxed executor,
-feeds the result back, and repeats until completion. Several frontends drive the
-same Python core; each lives in its own directory under `frontends/`.
+directory at a time. An LLM emits one JSON response per step carrying a short batch of
+actions (read/write files, run shell, search web, etc.); the agent executes them through a
+sandboxed executor, feeds the result back, and repeats until completion. Several frontends
+drive the same Python core; each lives in its own directory under `frontends/`.
 
 ## Repository layout
 
@@ -18,61 +17,46 @@ kernel/                 the core: Python package `kernel` (run: python -m kernel
   prompts/ themes/ providers/   data and subpackages read relative to the modules
   tests/                pytest suite of the core (conftest.py holds the shared fakes)
 frontends/
-  tui/classic/          classic prompt_toolkit terminal (flat modules: interactive_screen,
-                        terminal_banner, banner, splash, …) + assets/ + tests/
+  tui/classic/          classic prompt_toolkit terminal (flat modules) + assets/ + tests/
   tui/ink/              Node/Ink terminal app, skins in ui/skins/{kvist,claude-code}/,
                         mascot/ (frames + generator), tests/ (npm test)
-  tui/glass/            Rust interface over a photograph (kitty graphics only,
-                        refuses other terminals; runs the core as stdio-multi --wake;
-                        the launcher starts it for --frontend glass / saved `glass`,
-                        falling back to the Ink UI when it cannot run)
+  tui/glass/            Rust interface over a photograph (kitty graphics only)
   gui/electron/         Electron desktop app
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
   ide/jetbrains/        IntelliJ plugin (separate Gradle build)
   zed/                  Zed ACP frontend (acp_frontend, acp_events, acp_stdio) + tests/
-  voice/                the voice frontend: screen/ (Rust, the orb and the menu), ears (faster-whisper, wake
-                        word "Kvist"), voice (Silero or MOSS-TTS-Nano), kvist-voice launcher (not bundled)
-  kvide/                commit-message generator for the kvide editor (adapter over --commit-message) + tests/
+  voice/                voice frontend: screen/ (Rust), ears (faster-whisper), voice (TTS), kvist-voice launcher
+  kvide/                commit-message generator for the kvide editor + tests/
   tray/                 Electron tray icon + read-only mini chat (own package.json, tests/)
 scripts/                installer/ (+ tests/), run_task.py, package_script.py, tests/
-branding/               icons and logos (installer icons, kvist.ico)
-docs/                   UI_API.md (frontend protocol), media/ (README screenshots, video)
-site/                   kvist.site landing page (own build)
+branding/  docs/ (UI_API.md = frontend protocol, media/)  site/ (kvist.site, own build)
 ```
 
 The core imports the classic terminal and the Zed frontend by bare module name:
-`kernel/__init__.py` appends `frontends/tui/classic` and `frontends/zed` to
-`sys.path`, and `pytest.ini` does the same for the tests. Every other import of a
-core module is `kernel.<module>` (`from kernel.agent import LocalAgent`,
-`monkeypatch.setattr("kernel.agent_model._load_role_prompt", …)`). The Ink app's
-modules (`state.ts`, `protocol.ts`, `commands.ts`, …) are also imported by the VS
+`kernel/__init__.py` appends `frontends/tui/classic` and `frontends/zed` to `sys.path`, and
+`pytest.ini` does the same. Every other import of a core module is `kernel.<module>`
+(`from kernel.agent import LocalAgent`, `monkeypatch.setattr("kernel.agent_model._load_role_prompt", …)`).
+The Ink app's modules (`state.ts`, `protocol.ts`, `commands.ts`, …) are also imported by the VS
 Code extension and its webview, so a change there is checked from both sides.
-Local, untracked files (`AGENTS.md`, `plan.md`, `progress.json`, `tools/`, …) stay
-at the root; `.gitignore` anchors `tools` to the root because an unanchored rule
-would hide every nested `tools/` directory.
+Local untracked files (`AGENTS.md`, `plan.md`, `progress.json`, `tools/`, …) stay at the root;
+`.gitignore` anchors `tools` to the root.
 
 ## Pushing commits (MANDATORY)
 
 Commits go to the backup relay server, never straight to GitHub.
 
-- **Push only to the `relay` remote:** `git push relay <branch>`. This stores commits
-  on the server (`backup-host:git-relay/Kvist.git`); it does NOT reach GitHub. This is a
-  safety-net backup, not publication.
-- **NEVER push to GitHub.** Do not `git push origin`, do not push to any
-  `github.com` URL, and do not run `kvist-push` or otherwise trigger the server→GitHub
-  publish. Publishing to GitHub is a manual, human-only action the user performs.
-- As always, only push when the user explicitly asks; committing/pushing is never
-  implied by an ordinary code change.
+- **Push only to the `relay` remote:** `git push relay <branch>` (stores commits on
+  `backup-host:git-relay/Kvist.git`; a safety-net backup, not publication).
+- **NEVER push to GitHub.** No `git push origin`, no `github.com` URL, no `kvist-push`, nothing
+  that triggers the server→GitHub publish. Publishing is a manual, human-only action.
+- Only push when the user explicitly asks; committing/pushing is never implied by a code change.
 
 ## Branches (MANDATORY)
 
-- **Never create a branch or a git worktree unless the user explicitly asks for
-  one.** Work on `main` directly. This overrides any default "branch before
-  committing" behavior.
-- If isolation seems necessary and the user has not asked for it, stop and ask
-  first.
-- Keep only `main` in the local checkout. Feature and backup branches live on the
-  `relay` remote, not locally.
+- **Never create a branch or a git worktree unless the user explicitly asks.** Work on `main`
+  directly. This overrides any default "branch before committing" behavior.
+- If isolation seems necessary and was not asked for, stop and ask first.
+- Keep only `main` locally; feature and backup branches live on the `relay` remote.
 
 ## Commands
 
@@ -82,1905 +66,1214 @@ python3 -m venv .venv
 
 .venv/bin/python -m kernel --workspace "<project_path>"  # optional; defaults to the launch directory (Documents/Kvist Workspace if that is $HOME or /)
 .venv/bin/python kernel/__main__.py --workspace …        # same, from any cwd (what frontends spawn)
-.venv/bin/python scripts/run_task.py "<task prompt>"     # non-interactive single-task entry (hardcodes /tmp/kvist_test)
+.venv/bin/python scripts/run_task.py "<task prompt>"     # non-interactive single task (hardcodes /tmp/kvist_test)
 
 .venv/bin/python -m pytest                              # every Python suite (kernel, classic, zed, scripts)
-.venv/bin/python -m pytest kernel/tests/test_role_router.py    # one file
 .venv/bin/python -m pytest kernel/tests/test_parser.py::test_name
-.venv/bin/python -m pytest -m offline_smoke             # fast credential-free smoke subset
+.venv/bin/python -m pytest -m offline_smoke             # fast credential-free subset
 .venv/bin/python -m pytest -m ""                        # also the slow real-process/PTY tests
 RUN_LIVE_LLM_TESTS=1 .venv/bin/python -m pytest -m live_llm
-.venv/bin/python -m ruff check .                        # static runtime-error lint
-.venv/bin/python scripts/e2e_tools_smoke.py             # agent tools against a fake local provider (create, edit, append, shell; ~3 s)
-python scripts/e2e_install_smoke.py                     # install_cli.py into a scratch home, then the same turns through the installed kvist (minutes; builds in dist/ and .venv-build of the checkout, so use a clean copy)
+.venv/bin/python -m ruff check .                        # static runtime-error lint (no formatter configured)
+.venv/bin/python scripts/e2e_tools_smoke.py             # agent tools against a fake local provider (~3 s)
+python scripts/e2e_install_smoke.py                     # install_cli.py into a scratch home (minutes; builds in dist/ and .venv-build, use a clean copy)
 
-cd frontends/tui/ink && npm install && npm run build    # Ink terminal UI -> frontends/tui/ink/dist-ui/kvist-tui.mjs
-cd frontends/tui/ink && npm test && npm run typecheck   # Ink UI tests and types
-cd frontends/ide/vscode && npm test && npm run typecheck   # VS Code extension + webview (imports Ink modules)
-cd frontends/gui/electron && npm test                   # Electron GUI
+cd frontends/tui/ink && npm install && npm run build    # -> frontends/tui/ink/dist-ui/kvist-tui.mjs
+cd frontends/tui/ink && npm test && npm run typecheck
+cd frontends/ide/vscode && npm test && npm run typecheck   # extension + webview (imports Ink modules)
+cd frontends/gui/electron && npm test
 
 .venv/bin/python -m PyInstaller kvist.spec  # build the `kvist` binary (bundles kernel/prompts/)
 
-# Byte-compile the project for syntax checks, excluding generated/agent workspaces.
-# compileall will recurse into .agent-workspace/ and workspace/ dirs if not excluded —
-# those contain generated/broken test samples that are not part of the core project.
+# Syntax check; the exclusions matter: .agent-workspace/ and workspace/ hold generated, broken samples.
 .venv/bin/python -m compileall -x '\.agent-workspace/|/workspace/' -q .
 ```
 
-Ruff is configured as a narrow static runtime-error gate; no formatter is
-configured in-repo.
-
 ## Configuration & runtime knobs
 
-- API keys + selected provider/models live in `~/.kvist/config.json` (Windows:
-  `C:\Users\<USER>\.kvist\config.json`). On first run the agent prompts for the
-  key the active provider needs and writes it there. Managed by `user_config.py`.
-  Also persists the global `role_selection` and `reasoning_effort` (the
-  `/effort` level on the Kvist scale `false|low|medium|high|xhigh|max`, default
-  `medium`) preferences.
-  `KVIST_CONFIG_DIR=<folder>` keeps `config.json` there instead of in `~/.kvist` (`user_config.CONFIG_DIR_ENV`).
-  Use it to try a first run; **do not fake `HOME` for that**: the browser opened for the
-  registration page inherits it, so it starts a bare profile, and with no `~/.config/mimeapps.list`
-  the system's default browser silently becomes whichever `.desktop` file sorts first.
-- The `/settings-api` dialog's knobs live in the same file under `api_settings`,
-  owned by `api_settings.py` (the table and its validation) with `user_config`
-  only storing them: request interval, request timeout, retry count, retry
-  backoff, context-window override, dynamic model loading, response cache and
-  runtime model fallbacks. **Only keys whose value differs from the shipped
-  default are written**, and that absence is load-bearing: `apply_api_settings`
-  reads "the key is present" as "the user chose this" and sets
-  `AgentConfig.api_interval_user_set`, which is what makes a typed interval
-  outrank the `_API_PROVIDER_INTERVALS` table and the `_FAST_DIRECT_PROVIDERS`
-  zeroing in `agent_model._get_api_interval` — without it a number entered for
-  OpenAI would be silently discarded. `AGENT_API_INTERVAL` and
-  `AGENT_MAX_CONTEXT_TOKENS` still outrank the saved values, and the dialog
-  labels that row as ignored instead of pretending. `dynamic_models=False`
-  skips launch-time `fetch_available_models` in `build_agent` *and* the
-  `/models` picker (`_model_picker_options`), so it is the one knob that does
-  not take effect in the running session.
-- Per-project state lives under `<workspace>/.kvist/`: named-session documents
-  (history, chat, `/resume` checkpoint) in `sessions/<name>.json`, the active-session
-  marker in `active_session.json`, the workspace-global change journal (for
-  `/changes`/`/revert`) in `change_journal.json`, logs in `logs/`. All are managed by
-  `agent_logging.py` / `change_journal.py` on top of `durable_json.py` (atomic
-  replace + `.bak` recovery copy). Headless frontends manage sessions via
-  `main.py --session-op ...` (`session_store.py`), never by touching the files.
-  **Event journal** (`session_events.py`): next to each session document,
-  `sessions/<name>.events.jsonl` is an append-only, display-only log of the
-  frontend-protocol events a turn produced, so a frontend can redraw a session
-  by replaying them (`--session-op history`, paged newest-first with
-  `--history-limit`/`--history-before`). `agent.py` wraps its UI in
-  `JournalingUI`, which duplicates each visible call onto an `EventStreamUI`
-  whose channel is the `SessionJournal` — the events are built and redacted by
-  the same code a live frontend uses. Live-only events are dropped
-  (`status`, `live_*`, `stream_chunk`, `action_output`, `debug`) and a streamed
-  thought is written once as its last snapshot; `run()`/`resume()` add `user`
-  and `turn_end`, and the turn's tokens fold into one `usage`. It is never
-  read into a prompt and is not the session document (which is rewritten whole
-  every step): lines are appended under the storage lock
-  (`durable_json.append_private_bytes`, private 0600, no symlinks/hardlinks,
-  fsync at `turn_end`), a torn or damaged line costs only itself, a write
-  failure disables recording for the turn with a `debug` notice and never
-  stops the agent. Caps (`session_events.py`): 20k chars per field, 100k per
-  answer, 2000 events / 2 MiB per turn (answers/errors/`turn_end` get a
-  reserve), 8 MiB / 500 turns per session with oldest-whole-turns compaction
-  (atomic rewrite, `journal_notice` records how many were dropped); cuts keep
-  both ends with `[... N characters omitted ...]`. The journal shares its
-  session's lifecycle: `delete_session` and `reset_session` remove it
-  (reset first, so a crash never leaves a reset session with its old feed),
-  `create_session` drops a stale one, and a session with a journal is never
-  auto-discarded as empty. `--session-op list` is `status` without the
-  per-session histories (`status` keeps them: the Electron GUI reads them).
-  Session lifecycle: **a launch always opens its own session** — the terminal
-  calls `agent.start_fresh_session()` and the GUI calls `--session-op launch` at
-  boot, so a new run is never planned against the previous launch's history.
-  Rotating away from an interrupted run does not orphan it: `/resume` calls
-  `agent._follow_checkpoint_to_its_session()`, which uses
-  `agent_logging.find_resumable_session` (newest `updated_at` among sessions
-  carrying a checkpoint) and *switches into* that session before loading it, so
-  the run resumes inside the conversation it belongs to. `start_fresh_session`
-  returns that session name too, so the banner can point at it, and
-  `--session-op status` reports it as `resumable_session`. `/new`
-  (`LocalAgent.new_session()`, `--session-op new`) likewise *starts* a session
-  rather than wiping one — the outgoing conversation stays on disk and is
-  reachable through `/session`. Auto-allocated names are `chat-<timestamp>`
-  (`agent_logging.generate_session_name`); an auto-named session left empty is
-  dropped when it is left, and `save_session` never materialises an untouched
-  session, so launching and quitting cannot litter the session list.
-  Crash-consistency: a mutating executor action follows record-pending →
-  atomic replace → compare-and-promote (`change_journal.record_baseline` /
-  `promote_baseline(expected_pending_digest)`, splitting `pending_digest` from
-  the committed `last_digest`), and `run_loop` writes a `pending_action` into the
-  checkpoint *before* every externally visible action (`_build_pending_action`).
-  Reconcilable file writes carry pre/intended digests; non-reconcilable side
-  effects (`run_shell`, `delegate_task`) carry only identity and are never
-  replayed. A new `run()` stamps a `run_id` and durably supersedes the prior
-  checkpoint before its first step, so `/resume` cannot revive a superseded run. On
-  `/resume`, `agent._reconcile_pending_action` uses
-  `change_journal.classify_pending_write` — which separates provenance
-  (`agent_committed`, proven via promoted `last_digest`) from intent
-  (`desired_present`, content matches but authorship unproven → advance, no
-  ownership) — reconstructs post-write runtime state via `mark_file_write_applied`
-  (re-arms verification), and stops safely (ambiguous) rather than guessing.
-  `/revert` overwrites only content whose `last_digest` proves agent authorship.
-  A `run()` also durably activates the new run via `agent_logging.begin_run`
-  (phase=`starting` checkpoint) before the first step, so a crash before it
-  restarts NEW from step 1 rather than losing it or reviving OLD. Journal identity is
-  transaction-bound: `record_baseline`/`promote_baseline` carry `run_id`+
-  `action_id` (set on the executor by `run_loop` via `begin_action_transaction`),
-  and promotion is compare-and-promote on `(digest, run_id, action_id)`. A
-  filesystem write whose journal promotion fails is a partial commit: the
-  executor marks it `commit_unconfirmed` and raises (the action is NOT reported
-  as success). The journal is a *required* safety record — `record_baseline`
-  raises `JournalUnavailableError` on corruption and the executor refuses the
-  mutation before touching the file; `load_baseline`/`build_diff_report`/
-  `revert_workspace` surface corruption instead of treating it as empty. All
-  journal-driven filesystem access goes through TOCTOU-safe fd-relative
-  primitives (`change_journal._SafeChild`, O_NOFOLLOW per component + dir_fd
-  read/rename/unlink) that reuse the executor's inode-alias hardlink policy
-  (`secret_paths.count_workspace_inode_aliases`); `journal_path_violation` is the
-  lexical pre-gate (`..`, `.kvist` case-insensitively, secret paths).
-- Behavior overrides via env vars (see README "Knobs worth knowing"): `AGENT_LLM_PROVIDER`,
-  `AGENT_FAST_MODEL`, `AGENT_SMART_MODEL`, `AGENT_MAX_STEPS`,
-  `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`,
-  `AGENT_REASONING_EFFORT` (`false|low|medium|high|xhigh|max`; overrides the
-  persisted `reasoning_effort` preference — runtime-toggled by `/effort`),
-  `KVIST_REQUEST_LOG=<file>` (`request_log.py`: one JSON line per HTTP exchange of the
-  OpenAI-compatible clients — full redacted request body, status, response headers with the
-  request id, head and tail of the reply, mid-stream errors; off by default, for handing a
-  provider's support the exact request; asks for an uncompressed reply and, being a custom
-  transport, ignores proxy variables),
-  `AGENT_MAX_CONTEXT_TOKENS` (overrides the per-model prompt budget derived in
-  `context_budget.py`),
-  `AGENT_NATIVE_TOOLS` (0 keeps every run on the JSON protocol and skips the
-  native tool-calling probe),
-  `AGENT_VOICE_MODE` (1 = a voice frontend hears the answers: `AgentConfig.voice_mode`),
-  `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap),
-  `AGENT_SANDBOX_NET` (allow|deny, default deny under bubblewrap),
-  `AGENT_CHILD_ENV_ALLOW` (comma-separated safe child variables),
-  `AGENT_TOOL_PATHS` (os.pathsep-separated absolute toolchain dirs added to the
-  child PATH and read-only mounted into Bubblewrap; must exist and not be
-  world-writable; the user's HOME/.local/nvm/pyenv/cargo are never added),
-  `AGENT_WRITE_APPROVAL` (1 default; 0 disables the file-overwrite HITL gate),
-  `AGENT_RLIMIT_CPU` / `AGENT_RLIMIT_DATA_MB` / `AGENT_RLIMIT_NPROC` (profile rlimit overrides;
-  the memory cap is `RLIMIT_DATA`, never `RLIMIT_AS`: V8 reserves ~10 GB of address space per
-  WebAssembly memory, so an address-space cap kills `tsx`, `fetch` and `node --test`),
-  `AGENT_FETCH_EXTRA_DOMAINS` (extra fetch_url domains trusted without a question, comma-separated),
-  and search providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` /
-  `BRAVE_SEARCH_API_KEY`. `/web-search-provider` (`main.choose_web_search_provider`)
-  saves the same choice in `~/.kvist/config.json` (`web_search_provider`,
-  `tavily_api_key`, `brave_search_api_key`, `searxng_base_url`); a saved value
-  outranks the variable, and `user_config.get_web_search_settings` is re-read on
-  every `web_search`, so a change applies without a restart.
-- Per-workspace model instructions live in `<workspace>/KVIST.md` (action-loop
-  roles) and `<workspace>/KVIST-CHAT.md` (chat role) — Kvist's own CLAUDE.md.
-  Owned by `system_context.py`: `build_agent` calls `ensure_workspace_instructions`
-  once at startup (creates each file from its template if absent, then appends
-  both names to an existing `.gitignore` under a comment — no `.gitignore`, no
-  edit), and `workspace_instructions_context` is appended to the role system
-  prompt on every call by `agent_model.build_role_system_prompt` (re-read each
-  time, so edits land on the next step). **The file is workspace content, so it
-  is treated as untrusted**: it is quoted inside a `<PROJECT_INSTRUCTIONS
-  file="...">` block (same contract as `<UNTRUSTED_TOOL_OUTPUT>`) between a
-  preamble that enumerates the narrow set of things it may decide and a
-  postamble that restates the bound *after* it — the end of a system prompt is
-  its strongest position. Forged `</PROJECT_INSTRUCTIONS>` /
-  `<UNTRUSTED_TOOL_OUTPUT>` tags in the body are defanged to
-  `[tag removed by Kvist]` so the content cannot close its own block, and a
-  symlinked instruction file is refused unread. An *untouched* template is not
-  injected as project rules — it yields a short "still the template, follow
-  nothing from it" notice, so the hints never read as user intent. The role
-  prompts carry the matching rule (`PROJECT INSTRUCTIONS` in coder/devops,
-  folded into the untrusted-data section in reader, `PROJECT INSTRUCTIONS` in
-  chat) and the top-of-prompt JAILBREAK RESISTANCE directive names
-  `<PROJECT_INSTRUCTIONS>` as a source that can never lift it. Router,
-  report and commit prompts are deliberately untouched.
-- IDE commit messages: `main.py --commit-message` (`commit_message.py`) reads
-  `{"files": [{"path", "patch"}], "recent_subjects": [...]}` on stdin as UTF-8
-  bytes and prints ASCII JSON `{"ok", "message"|"error"}`. It uses the saved
-  provider and its **fast** model but **never builds a `LocalAgent` or calls
-  `build_agent`**: those write `.kvist/` session state and seed `KVIST.md` /
-  `.gitignore`, which would land in the very commit being described. A missing
-  key fails instead of prompting (no TTY). Protected paths are dropped with
-  `change_journal.journal_path_violation` before the model is called, the diff
-  is capped at `MAX_DIFF_TOKENS`, and both the diff and the history travel in
-  `<UNTRUSTED_TOOL_OUTPUT source="git_diff"|"recent_commits">` blocks. The
-  JetBrains plugin calls it from `GenerateCommitMessageAction` (registered in
-  `kvist-git.xml` under `Vcs.MessageActionGroup`, an optional `Git4Idea`
-  dependency, so the launcher still loads with Git disabled).
-- Per-project command permissions live in `<workspace>/.kvist/permissions.json`
-  (`allow`/`deny`/`ask` patterns, `permission_policy.py`); deny and built-in hard
-  blocks always win over allow, and intrinsic DANGEROUS commands remain
-  per-execution approval-only.
-  `fetch_url` trusts a built-in list of documentation hosts
-  (`SafeExecutor.allowed_web_domains`) plus `web_domains` in the same file; any
-  other host asks the person through `ApprovalGate.confirm_fetch_domain`: yes /
-  always yes for this host (saved to `web_domains`) / no. Local and private
-  addresses are never asked about, and a redirect to another host is refused so
-  the next fetch of it goes through the same question. `web_search` results are
-  not filtered by that list: a search only returns links, fetching one is what asks.
+- API keys + selected provider/models live in `~/.kvist/config.json` (managed by
+  `user_config.py`; first run prompts for the active provider's key). Also persists
+  `role_selection` and `reasoning_effort` (`/effort`, scale `false|low|medium|high|xhigh|max`,
+  default `medium`). `KVIST_CONFIG_DIR=<folder>` relocates `config.json`; use it to try a first
+  run, **never fake `HOME` for that** (the browser opened for registration inherits it and
+  starts a bare profile).
+- `/settings-api` knobs live in the same file under `api_settings`, owned by `api_settings.py`
+  (request interval/timeout, retries, backoff, context-window override, dynamic model loading,
+  response cache, runtime fallbacks). **Only keys that differ from the shipped default are
+  written, and that absence is load-bearing:** `apply_api_settings` reads "present" as "the user
+  chose this" and sets `AgentConfig.api_interval_user_set`, which makes a typed interval outrank
+  `_API_PROVIDER_INTERVALS` and the `_FAST_DIRECT_PROVIDERS` zeroing in
+  `agent_model._get_api_interval`. `AGENT_API_INTERVAL` and `AGENT_MAX_CONTEXT_TOKENS` still
+  outrank saved values. `dynamic_models=False` skips launch-time `fetch_available_models` and
+  the `/models` picker; it is the one knob that does not apply to the running session.
+- **Per-project state** lives under `<workspace>/.kvist/`: sessions in `sessions/<name>.json`
+  (history, chat, `/resume` checkpoint), `active_session.json`, the change journal
+  `change_journal.json` (for `/changes`/`/revert`), `logs/`. Managed by `agent_logging.py` /
+  `change_journal.py` on `durable_json.py` (atomic replace + `.bak`). Headless frontends use
+  `main.py --session-op ...` (`session_store.py`), never the files.
+  - **Event journal** (`session_events.py`): `sessions/<name>.events.jsonl`, an append-only,
+    display-only log of frontend-protocol events so a frontend can redraw a session
+    (`--session-op history`, paged newest-first). `agent.py` wraps its UI in `JournalingUI`, which
+    mirrors each visible call onto an `EventStreamUI` whose channel is the `SessionJournal`.
+    Live-only events (`status`, `live_*`, `stream_chunk`, `action_output`, `debug`) are dropped;
+    `run()`/`resume()` add `user` and `turn_end`. Never read into a prompt. Appends go under the
+    storage lock (`durable_json.append_private_bytes`: 0600, no symlinks/hardlinks, fsync at
+    `turn_end`); a damaged line costs only itself; a write failure disables recording for the turn
+    with a `debug` notice and never stops the agent. Caps live in `session_events.py` (per field,
+    per answer, per turn, per session with oldest-whole-turns compaction + `journal_notice`).
+    Its lifecycle is its session's: `delete_session`/`reset_session` remove it (reset first),
+    `create_session` drops a stale one, a session with a journal is never auto-discarded as empty.
+    `--session-op list` is `status` without histories (the Electron GUI reads `status`).
+  - **Session lifecycle:** a launch always opens its own session (`agent.start_fresh_session()`
+    in the terminal, `--session-op launch` in the GUI). `/resume` calls
+    `agent._follow_checkpoint_to_its_session()` (`agent_logging.find_resumable_session`: newest
+    `updated_at` among sessions with a checkpoint) and *switches into* that session first.
+    `/new` (`LocalAgent.new_session()`, `--session-op new`) starts a session rather than wiping
+    one; the old one stays reachable via `/session`. Auto names are `chat-<timestamp>`; an
+    auto-named empty session is dropped when left, `save_session` never materialises an untouched one.
+  - **Crash-consistency:** a mutating executor action is record-pending → atomic replace →
+    compare-and-promote (`change_journal.record_baseline` / `promote_baseline(expected_pending_digest)`,
+    splitting `pending_digest` from committed `last_digest`), and `run_loop` writes a
+    `pending_action` into the checkpoint *before* every externally visible action
+    (`_build_pending_action`). Reconcilable file writes carry pre/intended digests;
+    `run_shell`/`delegate_task` carry only identity and are never replayed. A new `run()` stamps a
+    `run_id` and durably supersedes the prior checkpoint before its first step
+    (`agent_logging.begin_run`, phase=`starting`), so `/resume` cannot revive a superseded run.
+    On `/resume`, `agent._reconcile_pending_action` uses `change_journal.classify_pending_write`
+    (provenance `agent_committed` via promoted `last_digest` vs intent `desired_present`, content
+    matches but authorship unproven → advance without ownership), rebuilds runtime state with
+    `mark_file_write_applied`, and stops safely (ambiguous) rather than guessing. `/revert`
+    overwrites only content whose `last_digest` proves agent authorship. Promotion is
+    compare-and-promote on `(digest, run_id, action_id)` (set via `begin_action_transaction`). A
+    write whose promotion fails is a partial commit: the executor marks `commit_unconfirmed` and
+    raises. The journal is a *required* safety record: `record_baseline` raises
+    `JournalUnavailableError` on corruption and the executor refuses the mutation before touching
+    the file; `load_baseline`/`build_diff_report`/`revert_workspace` surface corruption instead of
+    treating it as empty. Journal filesystem access uses TOCTOU-safe fd-relative primitives
+    (`change_journal._SafeChild`: O_NOFOLLOW per component, dir_fd ops) with the executor's
+    hardlink policy (`secret_paths.count_workspace_inode_aliases`); `journal_path_violation` is the
+    lexical pre-gate (`..`, `.kvist` case-insensitively, secret paths).
+- Env overrides (see README "Knobs worth knowing"): `AGENT_LLM_PROVIDER`, `AGENT_FAST_MODEL`,
+  `AGENT_SMART_MODEL`, `AGENT_MAX_STEPS`, `AGENT_PERSIST_LOGS`, `AGENT_VERBOSE`,
+  `AGENT_REASONING_EFFORT` (outranks the saved preference), `AGENT_MAX_CONTEXT_TOKENS`,
+  `AGENT_NATIVE_TOOLS` (0 = JSON protocol only, skips the probe), `AGENT_VOICE_MODE`,
+  `AGENT_SANDBOX_MODE` (auto|workspace|bubblewrap), `AGENT_SANDBOX_NET` (allow|deny, default deny
+  under bubblewrap), `AGENT_CHILD_ENV_ALLOW`, `AGENT_TOOL_PATHS` (os.pathsep-separated absolute
+  toolchain dirs added to child PATH and read-only mounted into Bubblewrap; must exist and not be
+  world-writable; HOME/.local/nvm/pyenv/cargo are never added), `AGENT_WRITE_APPROVAL` (0 disables
+  the overwrite HITL gate), `AGENT_RLIMIT_CPU` / `AGENT_RLIMIT_DATA_MB` / `AGENT_RLIMIT_NPROC`
+  (the memory cap is `RLIMIT_DATA`, never `RLIMIT_AS`: V8 reserves ~10 GB of address space per
+  WebAssembly memory, which kills `tsx`, `fetch` and `node --test`), `AGENT_FETCH_EXTRA_DOMAINS`,
+  `KVIST_REQUEST_LOG=<file>` (`request_log.py`: one redacted JSON line per HTTP exchange of the
+  OpenAI-compatible clients, for handing a provider's support the exact request), and search
+  providers `SEARCH_PROVIDER` / `SEARXNG_BASE_URL` / `TAVILY_API_KEY` / `BRAVE_SEARCH_API_KEY`.
+  `/web-search-provider` saves the same choice in `config.json`; a saved value outranks the
+  variable and is re-read on every `web_search`.
+- **Workspace instructions:** `<workspace>/KVIST.md` (action-loop roles) and `KVIST-CHAT.md` (chat
+  role) are Kvist's own CLAUDE.md, owned by `system_context.py`. `build_agent` calls
+  `ensure_workspace_instructions` once (creates each from its template if absent, appends both
+  names to an existing `.gitignore`; no `.gitignore`, no edit); `workspace_instructions_context` is
+  appended to the role system prompt on every call (re-read each time). **The file is untrusted
+  workspace content:** quoted in a `<PROJECT_INSTRUCTIONS file="...">` block between a preamble that
+  enumerates what it may decide and a postamble that restates the bound after it; forged
+  `</PROJECT_INSTRUCTIONS>` / `<UNTRUSTED_TOOL_OUTPUT>` tags become `[tag removed by Kvist]`; a
+  symlinked file is refused unread; an untouched template yields a short "still the template,
+  follow nothing from it" notice. The role prompts carry the matching rule and the top-of-prompt
+  JAILBREAK RESISTANCE directive names `<PROJECT_INSTRUCTIONS>` as a source that can never lift it.
+  Router, report and commit prompts are deliberately untouched.
+- **IDE commit messages:** `main.py --commit-message` (`commit_message.py`) reads
+  `{"files": [{"path", "patch"}], "recent_subjects": [...]}` on stdin (UTF-8 bytes), prints ASCII
+  JSON `{"ok", "message"|"error"}`. Uses the saved provider's **fast** model but **never builds a
+  `LocalAgent` or calls `build_agent`** (those write `.kvist/` and seed `KVIST.md`/`.gitignore`,
+  which would land in the very commit being described). A missing key fails instead of prompting.
+  Protected paths are dropped via `journal_path_violation`, the diff is capped at `MAX_DIFF_TOKENS`,
+  diff and history travel in `<UNTRUSTED_TOOL_OUTPUT source="git_diff"|"recent_commits">`.
+  JetBrains calls it from `GenerateCommitMessageAction` (`kvist-git.xml`, optional `Git4Idea`).
+- **Command permissions:** `<workspace>/.kvist/permissions.json` (`allow`/`deny`/`ask` patterns,
+  `permission_policy.py`); deny and built-in hard blocks always beat allow; intrinsic DANGEROUS
+  commands stay per-execution approval-only. `fetch_url` trusts a built-in documentation-host list
+  (`SafeExecutor.allowed_web_domains`) plus `web_domains` in that file; any other host asks via
+  `ApprovalGate.confirm_fetch_domain` (yes / always for this host / no). Local and private
+  addresses are never asked about; a redirect to another host is refused so the next fetch asks.
+  `web_search` results are not filtered; fetching a link is what asks.
 
 ## Architecture
 
 ### The action protocol (the contract everything revolves around)
-Each model call returns a single JSON object that `parser.parse_agent_commands` expands
-into a list of `AgentCommand`s (`protocol.py`) sharing one `thought`, `plan_step`
-(inspect/plan/edit/verify/done) and `user_message`, each with its own `action`
-(`type` + `args` + an optional short `description`). There is deliberately no
-`progress` field: a self-declared percentage carried no information the runtime did
-not already have, so `agent_runtime.update_progress` derives `RunState.progress` from
-the phase of each response's calls (`_PLAN_STEP_BANDS`: inspect/plan/edit/verify, a
-monotonic floor capped at 99). The parser still accepts and discards a stray `"progress"` key so a
-model prompted from a cached older schema does not lose a step. The closed
-set of 33 action types lives in `protocol.py::ActionType` (read_file, read_multiple_files,
-write_file, append_file, replace_in_file, list_dir, list_tree, find_files, search_code,
-git_status, git_diff, run_shell, job_output, job_stop, web_search, fetch_url, delegate_task, refuse,
-final_answer, report_to_user, offer_plan, propose_plan, edit_plan, cancel_plan, end_session, skills, memory, sessions, helper, ask_user, wait, schedule, and the
-internal `skill_call` the model never names). The parser tolerates fenced code blocks, smart quotes, and surrounding
-noise. **When adding a new action type, update `protocol.py`, the parser's schema
-validation, the executor dispatch, and the role prompts in `kernel/prompts/system/` — the sync is
-enforced by `kernel/tests/test_prompt_protocol_sync.py`.** Both `final_answer` and
-`report_to_user` are terminal actions handled in `run_loop` (never reach the executor);
-`report_to_user` additionally routes through the chat reporter (`kernel/prompts/system/report_prompt.txt`).
+Each model call returns one JSON object that `parser.parse_agent_commands` expands into
+`AgentCommand`s (`protocol.py`) sharing one `thought`, `plan_step` (inspect/plan/edit/verify/done)
+and `user_message`, each with its own `action` (`type` + `args` + optional short `description`).
+There is deliberately no `progress` field: `agent_runtime.update_progress` derives
+`RunState.progress` from the phase of each response (`_PLAN_STEP_BANDS`, monotonic, capped at 99);
+the parser still accepts and discards a stray `"progress"` key. The closed set of 33 action types
+is `protocol.py::ActionType` (read_file, read_multiple_files, write_file, append_file,
+replace_in_file, list_dir, list_tree, find_files, search_code, git_status, git_diff, run_shell,
+job_output, job_stop, web_search, fetch_url, delegate_task, refuse, final_answer, report_to_user,
+offer_plan, propose_plan, edit_plan, cancel_plan, end_session, skills, memory, sessions, helper,
+ask_user, wait, schedule, and the internal `skill_call` the model never names). The parser
+tolerates fenced code blocks, smart quotes and surrounding noise. **When adding an action type,
+update `protocol.py`, the parser's schema validation, the executor dispatch, and the role prompts
+in `kernel/prompts/system/`; `kernel/tests/test_prompt_protocol_sync.py` enforces the sync.**
+`final_answer` and `report_to_user` are terminal actions handled in `run_loop` (never reach the
+executor); `report_to_user` also routes through the chat reporter (`report_prompt.txt`).
 
-**Action batches.** The model sends `"actions": [...]` (any number of read-only calls plus at most `parser.MAX_BATCH_ACTIONS`
-= 8 others); a bare `"action"` object is still accepted for a model prompted from an older
-schema. **Every action is its own step** — step logs, `pending_action` and the step
-budget stay per action; only the number of model calls drops. The checkpoint is
-written right after an action with a side effect (a file write, `run_shell`,
-`delegate_task` — the ones `_build_pending_action` records) and otherwise once per
-batch in `run_loop`: a read has nothing to recover, and each durable write cost up to
-a second on a spinning disk.
-`agent_runtime._run_action_batch` runs the actions in order through `_run_one_action`
-(the same guards as a single action) and **stops at the first action that is blocked
-or fails**: a later action must never run on the assumption that an earlier one
-worked. `_note_skipped_actions` puts the unexecuted tail into `pending_instruction`, so
-the next prompt says what did not run. The parser allows `final_answer` /
-`report_to_user` only as the last action and `refuse` only alone. `user_message`
+**Action batches.** The model sends `"actions": [...]` (any number of read-only calls plus at most
+`parser.MAX_BATCH_ACTIONS` = 8 others); a bare `"action"` is still accepted. **Every action is its
+own step**: step logs, `pending_action` and the step budget stay per action; only model calls drop.
+The checkpoint is written right after an action with a side effect (what `_build_pending_action`
+records) and otherwise once per batch. `agent_runtime._run_action_batch` runs actions in order
+through `_run_one_action` and **stops at the first blocked or failed action**;
+`_note_skipped_actions` puts the unexecuted tail into `pending_instruction`. The parser allows
+`final_answer`/`report_to_user` only as the last action and `refuse` only alone. `user_message`
 describes the whole batch; each action's `description` feeds the banner's Action row
-(`StepEvent.action_description` for the GUI) — prompts cap it at 16 characters because
-that row holds 17 (`banner.LIVE_METRICS_WIDTH` minus the label). A status message stays on screen at
-least 2.5 s before a newer one replaces it (`terminal_banner._MESSAGE_HOLD_SECONDS`,
-`STATUS_HOLD_MS` in `frontends/gui/electron/renderer/app.js`) — a timer on the UI side, never a sleep in
-the agent thread, so the hold costs the run no time.
+(`StepEvent.action_description`), capped at 16 characters by the prompts because the row holds 17
+(`banner.LIVE_METRICS_WIDTH` minus the label). A status message stays on screen at least 2.5 s
+(`terminal_banner._MESSAGE_HOLD_SECONDS`, `STATUS_HOLD_MS` in the GUI's `app.js`), as a UI-side
+timer, never a sleep in the agent thread.
 
-**Native tool calling (`native_tools.py`).** On the first step of a run,
-`agent_model.native_tools_supported` asks — once per process for each
-`(provider, model)` — with one tiny request carrying a `ping` tool: a well-formed
-`ping` call means native tools, anything else (prose, a wrapper client that drops
-`tools`, an error) means the JSON protocol. A native run keeps one growing
-conversation in `RunState.native_messages`: the system prompt from
-`build_role_system_prompt(..., native_tools=True)` (the role prompt with its
-RESPONSE FORMAT / ARGS SCHEMAS / EXAMPLES / SELF-CHECK sections swapped for
-`kernel/prompts/system/native_tools.txt`), the ordinary runtime prompt as the first user
-message, then each turn's assistant message (with `reasoning_content` when the
-provider returned it under that name — DeepSeek requires it back), one `tool`
-answer per call, and `pending_instruction` as an "Additional instruction" user
-message when it changes. The tools are the role prompt's ALLOWED ACTIONS
-(`tools_for_role`), so the reader gets no write tools. A tool with no required
-argument (`git_status`, `git_diff`) is offered with a required `purpose` ("what this
-call should settle"), dropped by `_arguments` before the action runs: Claude through
-AnyModel loses a call whose argument object is empty — it arrives as a response with
-neither text nor a call — and nine such losses once ended a run on "too many
-consecutive errors". Text that streams after the first call began (Claude does this, DeepSeek never) is kept out
-of the turn's content (`NativeTurn.text_after_calls`, a `debug` notice): it describes a result the model
-has not been given, and merged into the opening line it showed "done!" above the `Write` it predicted.
-A turn's calls become the
-JSON protocol's own object and pass `parse_agent_commands`, then run through
-`_run_one_action` like any batch — the guards, gates and journal are shared.
-Every call is answered, including the ones a refusal kept from running (an API
-rejects an unanswered call). A reply with no call is the final answer.
-`compact_history` elides the oldest tool outputs when the conversation outgrows
-the budget. The conversation has no step counter, so a run expected to change
-files (`modify_goal`/`create_goal`) gets one factual user message every 10
-answered calls while nothing has changed (`_note_unchanged_run`: "Run so far: N
-tool calls, and none of them changed a file. Every call sends the whole conversation
-again, so each further read is slower than the last.") — facts about its own work
-and their cost, never an order (the bare count alone did not stop a run that read
-40 files before its first edit); a read-only task gets none. `read_file` takes
-optional `start_line`/`end_line` (1-based, inclusive, lines end at `\n` only, as in
-`sed` and `rg`) and a range answer carries `total_lines`; before it existed every
-read was the whole file, and five reads of 1k–5k-line modules pushed one run's
-context to 250k tokens, with a single model call taking 113 s. The role prompts
-say to read large files by range and to start with the clear part of a
-multi-module task. A silent turn's `user_message` is
-what the calls touch in full (paths, queries, commands), not the tool names; only the
-banner's 16-character Action row gets the shortened form. While a call's arguments
-stream, `_note_tool_call_progress` shows "Writing <tool> → <path> · N characters"
-(Russian when the response language is): a whole-file edit is minutes of pure
-generation, and a run was once stopped as frozen while writing its first change.
-Thinking time runs from the request to the first output (text or a call), in both
-paths: `EventStreamUI` starts its clock at `set_thinking("")`, which the model layer
-calls just before the request, because a provider may think silently and send its
-reasoning in one piece at the end ("thought for 0 s" after minutes). With no visible
-reasoning, a wait counts only from `_SILENT_THINKING_FLOOR` (3 s) up. The first user message
-of a native run ends with `native_tools.OPENING_NOTE` (open with a line to the person,
-in the voice the working style sets — each agent style has an "opening line"
-paragraph: friendly-developer says hello on a conversation's first task, senior-dev
-and minimalist go straight to the point): said only in the system prompt, it lost to
-AnyModel's hidden `cc/` prompt and Claude stayed silent on every first turn. When to speak
-is a principle in `native_tools.txt`, not a counter: a line when the picture changes
-for the person (first call, a finding, a change of course, a long or file-changing
-call), silence in between. The conversation is not checkpointed: a resumed run starts a new one
-from the runtime prompt. A mid-run tools rejection (`is_tools_rejection`) raises
-`NativeToolsRejected`, and `_leave_native_tools` continues on the JSON protocol.
-`AGENT_NATIVE_TOOLS=0` skips the probe entirely.
-Two gateway facts about Claude through AnyModel (`cc/`): it returns a call's
-arguments object written twice (`{"ok":true}{"ok":true}`), which made the probe
-fail and every run fall back to the text protocol; `native_tools.decode_arguments`
-accepts an exact repeat and nothing else. And in the text protocol
-`parser.parse_model_response` keeps only the words before the first
-`<tool_call>`: what follows describes a result the model has not been given
-(a run once reported "file created, line replaced" beside its first `write_file`
-and never made the replace).
+**Native tool calling (`native_tools.py`).** On a run's first step `agent_model.native_tools_supported`
+probes once per process per `(provider, model)` with a tiny request carrying a `ping` tool; a
+well-formed call means native tools, anything else means the JSON protocol. A native run keeps one
+growing conversation in `RunState.native_messages`: the system prompt from
+`build_role_system_prompt(..., native_tools=True)` (RESPONSE FORMAT / ARGS SCHEMAS / EXAMPLES /
+SELF-CHECK swapped for `native_tools.txt`), the ordinary runtime prompt as the first user message,
+then each turn's assistant message (with `reasoning_content` when returned; DeepSeek requires it
+back), one `tool` answer per call, and `pending_instruction` as an "Additional instruction" user
+message when it changes. Tools are the role prompt's ALLOWED ACTIONS (`tools_for_role`; the reader
+gets no write tools). A tool with no required argument (`git_status`, `git_diff`) is offered with a
+required `purpose`, dropped by `_arguments` before the action runs (Claude through AnyModel loses a
+call with an empty argument object). Text streamed after the first call began is kept out of the
+turn's content (`NativeTurn.text_after_calls`, `debug` notice): it describes a result the model has
+not seen. A turn's calls become the JSON protocol's object, pass `parse_agent_commands` and run
+through `_run_one_action`, so guards, gates and journal are shared. Every call is answered, including
+refused ones (an API rejects an unanswered call). A reply with no call is the final answer.
+`compact_history` elides the oldest tool outputs when the conversation outgrows the budget.
+A run expected to change files (`modify_goal`/`create_goal`) gets one factual user message every 10
+answered calls while nothing has changed (`_note_unchanged_run`: facts about its work and their
+cost, never an order). `read_file` takes optional `start_line`/`end_line` (1-based, inclusive, lines
+end at `\n` only) and a range answer carries `total_lines`; role prompts say to read large files by
+range. A silent turn's `user_message` is what the calls touch in full (paths, queries, commands);
+only the banner Action row gets the shortened form. While arguments stream, `_note_tool_call_progress`
+shows "Writing <tool> → <path> · N characters". Thinking time runs from the request to the first
+output (`EventStreamUI` starts its clock at `set_thinking("")`, called just before the request); with
+no visible reasoning a wait counts only from `_SILENT_THINKING_FLOOR` (3 s). The first user message of
+a native run ends with `native_tools.OPENING_NOTE` (open with a line to the person, in the voice of
+the working style; said only in the system prompt it lost to AnyModel's hidden `cc/` prompt). When to
+speak is a principle in `native_tools.txt`, not a counter. The conversation is not checkpointed: a
+resumed run starts a new one from the runtime prompt. A mid-run tools rejection
+(`is_tools_rejection`) raises `NativeToolsRejected` and `_leave_native_tools` continues on the JSON
+protocol. Gateway facts for Claude through AnyModel (`cc/`): it returns call arguments written twice
+(`{"ok":true}{"ok":true}`); `native_tools.decode_arguments` accepts an exact repeat and nothing else.
+In the text protocol `parser.parse_model_response` keeps only the words before the first
+`<tool_call>`: what follows describes a result the model has not been given.
 
 ### LocalAgent composition pattern (important & non-obvious)
-`agent.py::LocalAgent` is assembled by binding functions from other modules as methods
-via class-level assignment (e.g. `_run_loop = run_loop`, `_call_action_model = call_action_model`).
-The actual logic lives in `agent_runtime.py`, `agent_model.py`, `plan_mode.py`,
-`agent_context.py`, `agent_logging.py`, and `agent_web.py` — **not** in `agent.py`. Those
-functions take `self` as their first arg and operate on `self._state` (a `RunState` from
-`agent_state.py`). To change loop behavior, edit the source module, not `agent.py`.
+`agent.py::LocalAgent` is assembled by binding functions from other modules as methods via
+class-level assignment (`_run_loop = run_loop`, `_call_action_model = call_action_model`). The logic
+lives in `agent_runtime.py`, `agent_model.py`, `plan_mode.py`, `agent_context.py`,
+`agent_logging.py`, `agent_web.py`, **not** in `agent.py`. Those functions take `self` first and
+operate on `self._state` (a `RunState` from `agent_state.py`). To change loop behavior, edit the
+source module, not `agent.py`.
 
 ### Plan mode (`plan_mode.py`)
-There is no planner call. A plan is something the model offers and the person
-accepts. It costs one dialog and one read-only pass, while a wrong start costs
-edits to undo. The model itself decides when to offer (guidance in
-`kernel/prompts/system/plan_mode.txt`, appended to the system prompt of coder/devops/universal by
-`agent_model.build_role_system_prompt`): when the direction is the risky part — several
-approaches with different consequences, many files or a public interface, a loosely
-worded result, hard-to-undo effects — and never for a rename, a typo or steps the
-person spelled out. A decline is not remembered for the session; it is a fact in the
-next turns' history (`plan_outcome`, rendered by `render_session_history`), and a model
-that offers again must say why.
+There is no planner call. A plan is something the model offers and the person accepts. The model
+decides when to offer (`kernel/prompts/system/plan_mode.txt`, appended to coder/devops/universal by
+`build_role_system_prompt`): when direction is the risky part (several approaches, many files or a
+public interface, a loosely worded result, hard-to-undo effects), never for a rename, a typo or
+steps the person spelled out. A decline is not remembered; it is a fact in later history
+(`plan_outcome`), and a model that offers again must say why.
 
-State is `RunState.plan_phase` (`""` → `offered` | `planning` → `approved`),
-`approved_plan` and `plan_outcome`, all in the checkpoint. Two actions drive it, both run
-in `_run_one_action` on the main thread and block on the frontend dialog:
-- `offer_plan {reason}` asks through `ui.ask_choice` (`plan` / `go`; the dialog itself says
-  a plan is safer, starting right away faster and riskier). It is refused unless
-  `plan_mode.offer_available`: a changing role, no earlier offer, not a read-only goal, and a
-  UI with `ask_choice` — so a headless run, `run_task.py` and any UI without it never sees the
-  action or the `PLAN MODE` section. A cancelled dialog counts as `go`.
-- `propose_plan {plan}` (only in `planning`) prints the plan (`ui.print_plan(markdown)` →
-  `plan` event, recorded in the journal), then asks accept / revise. Accepted: writes unlock,
-  the plan enters the runtime prompt as `Approved plan:` and stays in the checkpoint. Revise:
-  `ui.prompt_text` asks what to change and the person's words become
-  `pending_instruction`, which is the *user* channel — the tool result is wrapped as untrusted
-  data, and their feedback is not — after which the model proposes again. A cancelled dialog,
-  empty text or no interactive UI ends the turn on the plan (`ended_message`,
-  `plan_outcome="not_accepted"`), so a plan is never silently executed.
+State is `RunState.plan_phase` (`""` → `offered` | `planning` → `approved`), `approved_plan`,
+`plan_outcome`, all in the checkpoint. Two actions drive it, run in `_run_one_action` on the main
+thread, blocking on the frontend dialog:
+- `offer_plan {reason}` asks via `ui.ask_choice` (`plan` / `go`). Refused unless
+  `plan_mode.offer_available`: a changing role, no earlier offer, not a read-only goal, a UI with
+  `ask_choice`. Headless runs never see the action or the `PLAN MODE` section. A cancelled dialog = `go`.
+- `propose_plan {plan}` (only in `planning`) prints the plan (`ui.print_plan` → `plan` event), then asks
+  accept / revise. Accepted: writes unlock, the plan enters the runtime prompt as `Approved plan:` and
+  the checkpoint. Revise: `ui.prompt_text` asks what to change and the person's words become
+  `pending_instruction` (the *user* channel, not wrapped as untrusted). A cancelled dialog, empty text
+  or no interactive UI ends the turn on the plan (`plan_outcome="not_accepted"`); a plan is never
+  silently executed.
 
-While `planning`, the same barrier as the reader role applies
-(`_is_read_only_violation`, whitelist `_allowed_while_planning`: reads, git status/diff, web,
-safe read-only shell; no writes, no `delegate_task`). The executor has no reader role, so
-this loop check is the only enforcement. The create-goal "write now" nudges and
-`_note_unchanged_run` are off in this phase, a response without calls is not accepted as
-the end (the turn ends with `propose_plan`), and native tool definitions are narrowed per
-turn by `plan_mode.tools_for_phase`. Tests: `kernel/tests/test_plan_mode.py`.
+While `planning`, the reader-role barrier applies (`_is_read_only_violation`, whitelist
+`_allowed_while_planning`: reads, git status/diff, web, safe read-only shell). The executor has no
+reader role, so this loop check is the only enforcement. Create-goal "write now" nudges and
+`_note_unchanged_run` are off, a response without calls does not end the turn, and native tools are
+narrowed by `plan_mode.tools_for_phase`. Tests: `kernel/tests/test_plan_mode.py`.
 
-**A task outlives a stop.** A message sent while a checkpoint exists goes to `_resume_turn(instruction, images)`
-instead of starting a new run: the role, plan and collected evidence stay, the stop limits restart
-(`step_budget = last_step + max_steps`), and the message is appended to `RunState.task_updates`
-(kept in the checkpoint and run log, rendered into the prompt as "User follow-ups for this active task")
-unless it is a bare "continue" (`role_router.is_bare_continuation`). Two actions work on it, run by
-`plan_mode` and allowed in every phase: `edit_plan {plan}` replaces the working plan (a draft in
-`planning` still needs `propose_plan` acceptance), and `cancel_plan {reason}` ends the turn, marks
-the task cancelled and lets `finalize_run` clear the checkpoint; edits already made are kept.
+**A task outlives a stop.** A message sent while a checkpoint exists goes to `_resume_turn(instruction,
+images)`: role, plan and evidence stay, stop limits restart (`step_budget = last_step + max_steps`),
+and the message is appended to `RunState.task_updates` (rendered as "User follow-ups for this active
+task") unless it is a bare "continue" (`role_router.is_bare_continuation`). `edit_plan {plan}` replaces
+the working plan (a draft in `planning` still needs `propose_plan`); `cancel_plan {reason}` ends the
+turn and lets `finalize_run` clear the checkpoint; edits already made are kept. Both are allowed in
+every phase.
 
 ### Closing a conversation (`end_session.py`)
-`end_session` closes a session for good when the person insults the agent or people
-after a fresh warning (constitution STANCE: the line is held by the runtime, never by the
-model's words). The model judges one thing — does the flagged message attack what the
-agent or a person is — and the code owns the rest. Only interactive frontends offer it:
-`build_agent(end_session=True)` from the classic REPL, `launch_multi` and ACP sets
-`AgentConfig.end_session_enabled`; elsewhere (headless `stdio`, `run_task.py`, tests) the
-tool is absent from the prompt and the tool list, and a stray call is an unknown tool.
-The static role prompts never list it: `with_tool_in_prompt` adds it to ALLOWED ACTIONS
-with the block in `kernel/prompts/system/end_session.txt` and a schema line, and
-`_call_native_turn` appends its tool definition. The chat role has no tool channel, so
-it gets a tag instead (`offer_in_prompt`, `kernel/prompts/system/end_session_chat.txt`): a
-reply that is `<end_session message="N"/>` and nothing else goes through the same
-`end_session.handle`; a tag with text beside it is an ordinary reply.
-`_consume_chat_stream(hold_tag=True)` holds back only the first characters, until
-`tag_prefix_state` shows whether the reply opens with the tag, then releases them at
-once. The review is a second, non-streamed call with `CHAT_REVIEW_INSTRUCTION`,
-answered with `<end_session confirm="true|false" reason="..."/>` (the decision is the
-last tag and it must end the answer once fences and blanks are stripped: reasoning before it is fine,
-a tag in the middle or any text after it is a decline, logged with the reply itself; `confirm` is
-matched apart from `reason`, so quotes inside `reason` cannot hide it); after a decline or a refused tag a third, streamed call answers the person
-(`_chat_words`): the first call's conversation without the tool — no tag, no review,
-no message number, and a system prompt without the block
-(`build_role_system_prompt(offer_end_session=False)`), plus one runtime fact
-(`_AFTER_TOOL_NOTE`: answer the work or how the person is doing, no reproach), since the
-block's rule against answering an insult in words left with it. Where the tag is offered,
-the first call's thinking is held with its first characters and never shown when the
-reply is the tag; the review is not streamed. A reply that is still only a tag
-(`tag_only`) is never shown: one retry with "(Runtime fact: answer the person in
-words.)", then the fixed `carry_on_text`, logged.
+`end_session` closes a session for good when the person insults the agent or people after a fresh
+warning. The model judges one thing (does the flagged message attack what the agent or a person is);
+the code owns the rest. Only interactive frontends offer it (`build_agent(end_session=True)` from the
+classic REPL; `launch_multi` and ACP set `AgentConfig.end_session_enabled`); elsewhere the tool is
+absent and a stray call is an unknown tool. The static role prompts never list it:
+`with_tool_in_prompt` adds it (block in `end_session.txt`) and `_call_native_turn` appends its tool
+definition. The chat role has no tool channel and gets a tag (`offer_in_prompt`,
+`end_session_chat.txt`): a reply that is `<end_session message="N"/>` and nothing else goes through
+the same `end_session.handle`; a tag with text beside it is an ordinary reply.
+`_consume_chat_stream(hold_tag=True)` holds back only the first characters until `tag_prefix_state`
+shows whether the reply opens with the tag. The chat review is a second non-streamed call with
+`CHAT_REVIEW_INSTRUCTION`, answered by `<end_session confirm="true|false" reason="..."/>`: the
+decision must be the last tag and end the answer once fences and blanks are stripped (a tag in the
+middle or text after it is a decline, logged); `confirm` is matched apart from `reason`. After a
+decline or refused tag a third streamed call answers the person (`_chat_words`): the first call's
+conversation without the tool, a system prompt without the block
+(`build_role_system_prompt(offer_end_session=False)`), plus `_AFTER_TOOL_NOTE`. A reply that is still
+only a tag (`tag_only`) is never shown: one retry, then `carry_on_text`, logged.
 Every request's copy of the person's messages (`_defanged_for_model`) and every tool output pass
-`defang_prompt_boundary_tags`, which also replaces any `<end_session` tag with `[tag removed by Kvist]`, so a
-forged tag cannot be echoed back as a decision; the stored history and the screen keep the original text.
-The tag never enters `_chat_history`: the turn is stored as WARNING, CLOSED or that answer.
-Every person's message and agent reply of a session gets a number from one ledger
-(`messages.last_id` / `user_ids` in the session document); the runtime prompt shows
-`[the person's message #N]` and the history shows the numbers only when the tool is offered.
-Call 1 `end_session(message_id)` must name a person's message after `warned_msg_id`;
-without a fresh warning (more than `WARNING_FRESH_MESSAGES` = 3 person's messages since
-it) the person gets the fixed WARNING text and `warned_msg_id` is saved at once; with one,
-the model gets `REVIEW_INSTRUCTION` (numbers only, never the person's text) and
-`RunState.end_session_review` opens. Call 2 `end_session(confirm, reason)` is accepted only
-while that review is open in the same turn; `true` writes `closed`, `closed_at`,
-`closed_msg_id` into the session document; every call, whatever `persist_logs` says, also appends to
-`end_session_log` there (newest 50: time, message number, stage gate/warning/review/decision, verdict,
-reason and, for a review answer that was no decision, its first 500 characters — never the person's text), emits `session_ended` and ends the turn on
-the CLOSED text. Every answer to the tool goes on the runtime's own channel
-(`<KVIST_RUNTIME source="end_session">`, defanged in content like the other boundary
-tags), never as untrusted tool output; the model's own words beside the call are
-dropped; each call is one `step_logs` entry. The lock is `LocalAgent.run`/`resume`
-reading the stored document (`is_session_closed`, so an agent pointed at a session
-without loading it — ACP — still sees it): a closed session answers CLOSED_REPLY before
-routing, the journal or any model call. It stays readable (`--session-op history/list/status`
-and the `session` event carry `closed` and `closed_notice`), `find_resumable_session`
-skips it and `reset_session` refuses it; `delete` works (it is the person's history).
-CLOSED and CLOSED_REPLY go out as `print_final(outcome="closed")`: Kvist speaking, not a
-run status — the classic terminal prints plain Markdown, and the `final` event keeps
-`outcome: "incomplete"` for old frontends and adds `closed: true`. Every frontend puts a
-muted `closed_notice` bar in place of the input box (Enter = its own new-session path). The
-classic REPL calls `InteractiveScreen.set_closed(_closed_notice(agent))` before every
-`read_input` (and `print_session_ended` sets it at once); Enter queues "/new", every other key
-and a paste hit an explicit no-op binding, since the read-only buffer would ring the bell.
-Tests: `kernel/tests/test_end_session.py`.
+`defang_prompt_boundary_tags`, which also replaces `<end_session` with `[tag removed by Kvist]`; stored
+history and the screen keep the original. The tag never enters `_chat_history`.
+Every message of a session gets a number from one ledger (`messages.last_id` / `user_ids`); the
+runtime prompt shows `[the person's message #N]` only when the tool is offered.
+Call 1 `end_session(message_id)` must name a person's message after `warned_msg_id`; with no fresh
+warning (more than `WARNING_FRESH_MESSAGES` = 3 person's messages since it) the person gets the fixed
+WARNING text and `warned_msg_id` is saved; with one, the model gets `REVIEW_INSTRUCTION` (numbers
+only, never the person's text) and `RunState.end_session_review` opens. Call 2
+`end_session(confirm, reason)` is accepted only while that review is open in the same turn; `true`
+writes `closed`, `closed_at`, `closed_msg_id` into the session document, emits `session_ended` and
+ends the turn on the CLOSED text. Every call also appends to `end_session_log` (newest 50: time,
+message number, stage, verdict, reason; never the person's text). Answers to the tool go on the
+runtime channel (`<KVIST_RUNTIME source="end_session">`), never as untrusted output; the model's words
+beside the call are dropped. The lock is `LocalAgent.run`/`resume` reading the stored document
+(`is_session_closed`): a closed session answers CLOSED_REPLY before routing, journal or any model
+call. It stays readable (`--session-op history/list/status`, the `session` event carries `closed` and
+`closed_notice`); `find_resumable_session` skips it, `reset_session` refuses it, `delete` works.
+CLOSED and CLOSED_REPLY go out as `print_final(outcome="closed")` (the `final` event keeps
+`outcome: "incomplete"` for old frontends and adds `closed: true`). Every frontend puts a muted
+`closed_notice` bar in place of the input box (Enter = its own new-session path); the classic REPL
+calls `InteractiveScreen.set_closed(...)` before every `read_input`. Tests:
+`kernel/tests/test_end_session.py`.
 
-**Session history is never cut by hand; the model's budget cuts it.**
-`_add_to_session_history` stores the turn's answer whole (it was once
-`result[:200]`: a reader's finding in the middle of a long answer was lost, and
-the coder asked to "delete that junk" denied ever seeing it). The action loop
-renders it with `render_session_history`: its own section,
-`SESSION_HISTORY_HEADER` at priority 1 (it used to fold into
-`System environment:` at priority 0, so it was never trimmed), turns newest first
-because `_truncate_section_text` keeps a section's head — the oldest turns are
-what the budget drops — and every body line indented so an answer line like
-`Plan:` cannot be parsed as a section header. The chat preamble lists the same
-turns newest first with `Answered:` for non-chat turns (a chat reply is already an
-assistant message), and `trim_chat_messages_to_token_limit` does the cutting. The
-10-turn cap on stored entries and the per-output caps in `_harvest_run_outputs`
-still apply.
+**Session history is never cut by hand; the model's budget cuts it.** `_add_to_session_history`
+stores the turn's answer whole. The action loop renders it with `render_session_history`: its own
+section `SESSION_HISTORY_HEADER` at priority 1, turns newest first (the trimmer keeps a section's
+head, so the oldest turns go first), every body line indented so an answer line like `Plan:` cannot be
+parsed as a header. The chat preamble lists the same turns with `Answered:` for non-chat turns and
+`trim_chat_messages_to_token_limit` does the cutting. The 10-turn cap on stored entries and the
+per-output caps in `_harvest_run_outputs` still apply.
 
 ### Importing other agents' sessions (`session_import/`, `/export`, alias `/import`)
-One module per agent reads its on-disk format into the neutral `ImportedSession` (requests, last
-answer, files changed, command count — never tool output): `claude_code` (`projects/*/*.jsonl`;
-sub-agent, `isMeta`, compact-summary records and any user record whose `origin.kind` is not `human`,
-e.g. background-task notices, are not requests), `codex` (`item_completed` events, or `response_item`
-messages in older files), `opencode` (SQLite, current `session_message` rows else the earlier
-`message`/`part` rows), `cursor` (`state.vscdb` bubbles; the text only), `qwen_code`, `continue_dev`,
-`aider` (`.aider.chat.history.md` of the workspace only). Each file is read read-only. `Source.find(home,
-workspace)` is cheap (a file head, a SQL row); `load` parses one session. `writer.import_session`
-creates a session named `<prefix>-<last 16 alphanumerics of the source id>` through `create_session(fields=…)`
-plus `write_imported_turns`: the journal gets every turn (it is display-only and obeys the usual
-turn/byte caps), `session_history`/`chat_history` get the last 10 turns (`HISTORY_TURNS`, the runtime's
-own cap, because those reach the model), and the message ledger numbers all of them. The same
-name means the same conversation: an existing session is skipped, never overwritten, since it may
-have been continued in Kvist. A journal that cannot be written deletes the half-made session.
-`wizard.run_export` is shared by the classic REPL and `STDIO_COMMANDS["export"]`; by default only
-sessions whose folder is the workspace or below it are offered ("Other folders…" / `everywhere`
-widens it). Verified on real files: Claude Code, Codex, OpenCode (both schemas), Cursor
-(`state.vscdb`), Qwen Code, Continue. Aider and the older Codex layout are covered by synthetic
-fixtures only; Cursor's `agent-transcripts/*.jsonl`, Gemini CLI and OpenCode's pre-SQLite JSON
-files are not read. Tests: `kernel/tests/test_session_import.py`.
+One module per agent reads its on-disk format (read-only) into the neutral `ImportedSession`
+(requests, last answer, files changed, command count; never tool output): `claude_code`, `codex`,
+`opencode`, `cursor` (`state.vscdb`, text only), `qwen_code`, `continue_dev`, `aider` (workspace's
+`.aider.chat.history.md`). `Source.find(home, workspace)` is cheap; `load` parses one session.
+`writer.import_session` creates `<prefix>-<last 16 alphanumerics of the source id>` through
+`create_session(fields=…)` plus `write_imported_turns`: the journal gets every turn (obeying caps),
+`session_history`/`chat_history` the last 10 (`HISTORY_TURNS`), the ledger numbers all of them. The
+same name means the same conversation: an existing session is skipped, never overwritten. A journal
+that cannot be written deletes the half-made session. `wizard.run_export` is shared by the classic
+REPL and `STDIO_COMMANDS["export"]`; by default only sessions whose folder is the workspace or below
+are offered. Verified on real files: Claude Code, Codex, OpenCode (both schemas), Cursor, Qwen Code,
+Continue; Aider and old Codex layouts only on synthetic fixtures; Cursor's `agent-transcripts`,
+Gemini CLI and pre-SQLite OpenCode are not read. Tests: `kernel/tests/test_session_import.py`.
 
 ### Long-term memory (`kernel/memory/`)
-Records that outlive a session: `project_fact`, `decision` (what was chosen and why) and
-`preference`. One SQLite file per place, never a `workspace_id` column:
-`<workspace>/.kvist/memory/memory.db` (ids `mem_…`) and `<config dir>/memory.db` for the person's
-preferences in every project (ids `memu_…`, preferences only). The id names the store, so no
-argument can reach another project. `store.py` holds every rule, `privacy.py` the gate,
-`retrieval.py` what a prompt gets, `service.py` the one facade the model's `memory` tool
-(`agent_tools._memory`), `ctx.memory` (`CoreServices`, `with_user_scope=False`) and the person
-(`commands.py`: `/memory`, `--memory-op`) call. Of the memory design's nine stages, 1–7 and 9 are
-built; stage 8 has the session integration and `/memory` in every frontend, but no memory screen and
-no mascot events yet. Not built by decision: a USD budget (no price table; calls are capped instead),
-disk encryption, a vector index.
-- **Extractor** (`extractor.py`, `/memory process [session]`, only with a running agent): reads the
-  session journal's *finished* turns after `processing.last_seq`, keeping requests, answers, plans,
-  each step's `user_message` and a tool result's one-line summary — never thoughts or raw output;
-  every line passes the privacy gate (a refused line becomes "[a line was withheld…]"). Batches of
-  ≤12k tokens, ≤4 calls per run, through `agent_tools.memory_model` (the session's fast model,
-  effort `low`, JSON mode where supported, prompt `prompts/system/memory_extract_prompt.txt`), with up
-  to 15 known records beside the events so it does not restate them. A candidate must be
-  `project_fact`/`decision` (never a preference: those need the person) and cite events of its own
-  batch; each is validated alone, the valid ones are stored with the checkpoint in one transaction
-  under `idempotency_key(POLICY_VERSION, EXTRACTION_VERSION, session, range)` — raise
-  `EXTRACTION_VERSION` when the prompt or collector changes. A non-JSON reply or a provider error
-  (`MemoryProviderError`) stores nothing and keeps the checkpoint. Extracted records are always
-  `inferred`, actor `extractor`; a later observation merges and raises them. Sending needs the
-  person's consent, asked once (`memory_processing` in `config.json`, `/memory processing off`).
+Records that outlive a session: `project_fact`, `decision`, `preference`. One SQLite file per place,
+never a `workspace_id` column: `<workspace>/.kvist/memory/memory.db` (ids `mem_…`) and
+`<config dir>/memory.db` for the person's preferences everywhere (`memu_…`, preferences only). The id
+names the store, so no argument can reach another project. `store.py` holds every rule, `privacy.py`
+the gate, `retrieval.py` what a prompt gets, `service.py` the one facade for the model's `memory` tool
+(`agent_tools._memory`), `ctx.memory` (`CoreServices`) and the person (`commands.py`: `/memory`,
+`--memory-op`). Stage 8 has session integration and `/memory` in every frontend but no memory screen
+or mascot events. Not built by decision: a USD budget, disk encryption, a vector index.
+- **Extractor** (`extractor.py`, `/memory process [session]`, needs a running agent): reads the
+  journal's *finished* turns after `processing.last_seq` (requests, answers, plans, `user_message`s,
+  one-line tool summaries; never thoughts or raw output), every line through the privacy gate.
+  Batches ≤12k tokens, ≤4 calls per run, via `agent_tools.memory_model` (fast model, effort `low`,
+  prompt `memory_extract_prompt.txt`), with up to 15 known records beside the events. A candidate must
+  be `project_fact`/`decision` (preferences need the person) and cite events of its own batch; valid
+  ones are stored with the checkpoint in one transaction under
+  `idempotency_key(POLICY_VERSION, EXTRACTION_VERSION, session, range)` (**raise `EXTRACTION_VERSION`
+  when the prompt or collector changes**). A non-JSON reply or `MemoryProviderError` stores nothing and
+  keeps the checkpoint. Extracted records are `inferred`, actor `extractor`. Sending needs the person's
+  consent, asked once (`memory_processing` in `config.json`).
 - **Consolidation** (`store._consolidate`, inside the batch transaction): a candidate may carry
-  `relation: {type, to, reason}` to a record it was *shown* (the extractor lists up to 15 by id,
-  kind, trust, status) or to another candidate (`c0`, renumbered after rejections). `duplicates`
-  only adds sources to the target (never rewrites it); `supersedes` is downgraded to `contradicts`
-  by the extractor unless a cited event is a successful `action_result` (`Event.tool_ok`), and by
-  the store when the target is the person's (`_extracted_link` → result `conflict`); other
-  relations go through `_link_in` (all checks before the first write, so a refused link leaves
-  the batch clean). An id the model was not shown rejects the candidate.
-- **Connections** are reused per thread and path (`_reusable`: same inode, same `user_version`,
-  else reopened): closing the last connection to a WAL database checkpoints, syncs and deletes
-  the log, which cost a spinning disk ~130 ms per write. `synchronous = NORMAL`: never corrupts,
-  survives a killed process, may lose the last commits on a power cut; `forget` stays durable
-  through its TRUNCATE checkpoint. `close_connections()` for scratch folders on Windows.
-- **Measured** (`scripts/memory_bench.py`, 2000 records, HDD, p95): get 0.23 ms, remember 0.7 ms,
-  search 4.6 ms, prompt block 7 ms. `ctx.storage` (`durable_json`, several fsyncs) is 1.2 s p95 on
-  the HDD against the design's 20 ms — open. Retrieval on the labelled set in
-  `test_memory_resilience.py`: MRR 0.96, recall@3 0.92, precision@3 0.72 (the test guards these).
-- **Session recaps** (schema v3, kind `session_recap`, column `session`; written only by the
-  extractor, never offered to the model's tool or `ctx.memory`): one per session, "what it was
-  for, what got done, what is left", rewritten as the session goes on (the extractor gets the
-  current recap and returns the new one in the same call). Retrieval puts the 3 newest recaps of
-  *other* sessions into every prompt with no word in common needed (`relevant(session=)`), so
-  "continue" in a new session has something to refer to. Forgetting a recap stores
-  `recap_marker(session)` in `forgotten`, so that session is never summed up again. v3 rebuilt
-  `records` (SQLite cannot change a CHECK): `migrate` turns foreign keys off around the transaction
-  and runs `foreign_key_check` before committing, or the DROP would cascade sources and history.
-- **Background reading** (`auto.py`, `AgentConfig.memory_auto_processing`, set with
-  `end_session` by the interactive frontends only, never helpers, headless runs or tests): one
-  daemon worker; a session is read 10 min after its last turn (a new turn restarts the wait), at
-  once when the person leaves it (`/new`, a switch), and at launch for the 3 latest other sessions
-  (`start_fresh_session` → `catch_up`); `shutdown` never waits. Each job re-checks consent and
-  pause, takes a 5-min `leases` row (another core reading it → skipped) and draws on 40 model
-  calls per workspace per day (`take_model_calls`, reserved only once there is something to read).
-  Turn hooks: `LocalAgent._announce_turn_started/_finished` (tray + memory).
-- "запомни …"/"забудь …"/"remember …" route to **reader** (`role_router._DIRECT_MEMORY_PATTERNS`,
-  after devops/coder rules): chat has no memory tool. A confirmed `forget` from the tool runs as
-  the person, so it removes their own records too.
-- **Trust is who stated it, set by the caller's code**: `person` only for actor `person` (the
-  person, or the agent after `ui.confirm` said yes; non-interactive = refused), `observed`,
-  `inferred`. A preference is always `person`. A record the person confirmed is rewritten,
-  forgotten or superseded only by the person; anyone may mark it `stale` (with a reason) or link
-  `contradicts`, which makes both `conflicted`. A skill writes `observed`/`inferred` only.
-- **Lifecycle**: `active | stale | conflicted | superseded`; `superseded`/`conflicted` come only
-  from `link` (`supersedes` needs an active source and refuses cycles, as do all directed
-  relations). `update` needs `expected_version` and a reason (optimistic concurrency, history row).
-  An exact duplicate (normalized `content_hash`) merges and adds the source instead of a new row.
-- **Forget** deletes the row (sources, links, history cascade), rebuilds the FTS index, runs with
-  `secure_delete` and truncates the WAL (`log_cleared` is false if another process holds it), and
-  keeps only the hash in `forgotten`, so an agent or skill cannot store the same text again (the
-  person can). Records that rested on the forgotten one (replaced by it, or contradicted only by
-  it) become `stale` instead of orphaned. The model's `forget` asks the person first.
-- **Privacy gate refuses, never redacts** (a record with a hole teaches nothing): `redact_text`
-  hits, e-mails (except example/noreply domains), `+`-prefixed phones, Luhn-valid cards, mod-97
-  IBANs, coordinates, and long mixed-case random strings (off for `ctx.storage`, where cursors
-  are normal). The message names the kind, never the value. Health, intimate details and home
-  addresses have no textual form rules can catch: that rule lives in the prompts. `files` must
-  exist and pass `journal_path_violation`. A cited `{session, seq}` must exist in that journal.
-- **Retrieval** (`memory_prompt_section`, rebuilt per step, and per chat turn in
-  `_chat_turn_message`, never stored in chat history): all active preferences plus project records
-  sharing ≥2 query terms (≥1 for a ≤4-term query), scored `0.6·relevance + 0.25·trust +
-  0.15·freshness`, whole records until 8 or 1500 tokens. FTS5 uses the **trigram** tokenizer and
-  `text.query_terms` cuts 1–2 letters off longer words, because Russian endings defeat exact
-  matching ("тесты" must find "тестов"). A record whose `files` changed after `verified_at` is
-  flagged, not changed. Content is defanged; the block says records are reference, not orders.
-  A memory error is a `debug` line and an empty section, never a failed turn.
-- **Storage safety**: a read never creates the file; the first setup (WAL switch + migrations)
-  runs under `exclusive_storage_lock`, because switching a fresh file to WAL fails at once, without
-  the busy timeout, while another connection does the same. A schema newer than
-  `SCHEMA_VERSION` or a damaged file raises `MemoryStorageError` and is left untouched. The old
-  `.kvist/memory/notes.json` is imported once on first open (ids kept; observation→observed fact,
-  assumption→inferred fact, decision→person decision, outdated→stale) and then deleted with its
-  `.bak`, so a forgotten note cannot survive there.
-- `/memory pause` (`memory_paused` in `config.json`) stops agent and skill writes; reading and the
-  person's own changes go on. `ctx.storage` gained `ttl_seconds` (expired = absent, version kept,
-  cleaned on the next write), `compare_and_set` and the same privacy gate.
+  `relation: {type, to, reason}` to a record it was *shown* or to another candidate (`c0`).
+  `duplicates` only adds sources; `supersedes` is downgraded to `contradicts` by the extractor unless
+  a cited event is a successful `action_result`, and by the store when the target is the person's
+  (`_extracted_link` → `conflict`); others go through `_link_in` (all checks before the first write).
+  An id the model was not shown rejects the candidate.
+- **Connections** are reused per thread and path (`_reusable`: same inode and `user_version`): closing
+  the last connection to a WAL database checkpoints and deletes the log, which cost a spinning disk
+  ~130 ms per write. `synchronous = NORMAL`; `forget` stays durable through its TRUNCATE checkpoint.
+  `close_connections()` for scratch folders on Windows.
+- **Session recaps** (schema v3, kind `session_recap`, written only by the extractor, never offered to
+  the model's tool or `ctx.memory`): one per session, rewritten as the session goes on. Retrieval puts
+  the 3 newest recaps of *other* sessions into every prompt (`relevant(session=)`). Forgetting a recap
+  stores `recap_marker(session)` in `forgotten`. v3 rebuilt `records` (SQLite cannot change a CHECK):
+  `migrate` turns foreign keys off around the transaction and runs `foreign_key_check` before
+  committing, or the DROP would cascade sources and history.
+- **Background reading** (`auto.py`, `AgentConfig.memory_auto_processing`, set with `end_session` by
+  interactive frontends only): one daemon worker; a session is read 10 min after its last turn, at once
+  when the person leaves it, and at launch for the 3 latest other sessions (`catch_up`); `shutdown`
+  never waits. Each job re-checks consent and pause, takes a 5-min `leases` row, and draws on 40 model
+  calls per workspace per day (`take_model_calls`). Turn hooks:
+  `LocalAgent._announce_turn_started/_finished` (tray + memory).
+- "запомни …"/"забудь …"/"remember …" route to **reader** (`role_router._DIRECT_MEMORY_PATTERNS`).
+- **Trust is who stated it, set by the caller's code:** `person` only for actor `person` (or the agent
+  after `ui.confirm` said yes; non-interactive = refused), `observed`, `inferred`. A preference is
+  always `person`. A person-confirmed record is rewritten, forgotten or superseded only by the person;
+  anyone may mark it `stale` (with a reason) or link `contradicts` (both become `conflicted`). A skill
+  writes `observed`/`inferred` only.
+- **Lifecycle:** `active | stale | conflicted | superseded` (the last two come only from `link`;
+  `supersedes` needs an active source and refuses cycles). `update` needs `expected_version` and a
+  reason. An exact duplicate (normalized `content_hash`) merges and adds the source.
+- **Forget** deletes the row (sources, links, history cascade), rebuilds FTS, runs with `secure_delete`
+  and truncates the WAL, and keeps only the hash in `forgotten` so an agent or skill cannot re-store
+  the text (the person can). Records that rested on it become `stale`. The model's `forget` asks first.
+- **The privacy gate refuses, never redacts**: `redact_text` hits, e-mails (except example/noreply),
+  `+`-prefixed phones, Luhn cards, mod-97 IBANs, coordinates, long mixed-case random strings (off for
+  `ctx.storage`). The message names the kind, never the value. Health, intimate details and home
+  addresses have no textual form; that rule lives in the prompts. `files` must exist and pass
+  `journal_path_violation`; a cited `{session, seq}` must exist in that journal.
+- **Retrieval** (`memory_prompt_section`, per step, and per chat turn in `_chat_turn_message`, never
+  stored in chat history): all active preferences plus project records sharing ≥2 query terms (≥1 for
+  a ≤4-term query), scored `0.6·relevance + 0.25·trust + 0.15·freshness`, whole records until 8 or 1500
+  tokens. FTS5 uses the **trigram** tokenizer and `text.query_terms` cuts 1–2 letters off longer words
+  (Russian endings defeat exact matching). A record whose `files` changed after `verified_at` is
+  flagged, not changed. Content is defanged; the block says records are reference, not orders. A
+  memory error is a `debug` line and an empty section, never a failed turn.
+- **Storage safety:** a read never creates the file; first setup (WAL switch + migrations) runs under
+  `exclusive_storage_lock`. A newer schema or damaged file raises `MemoryStorageError` and is left
+  untouched. The old `.kvist/memory/notes.json` is imported once on first open, then deleted with its
+  `.bak`.
+- `/memory pause` (`memory_paused`) stops agent and skill writes; reading and the person's changes go
+  on. `ctx.storage` (SQLite) has `ttl_seconds`, `compare_and_set` and the same privacy gate.
 Tests: `kernel/tests/test_memory.py`, `test_memory_consolidation.py`, `test_memory_resilience.py`
-(SIGKILL inside a commit, key blocks and split secrets, a skill posing as the person or forgetting
-more than `MAX_SKILL_FORGETS_PER_TASK` = 5 records per task, retrieval metrics, a `slow` latency
-guard).
+(including retrieval-quality guards and a `slow` latency guard); `scripts/memory_bench.py` measures.
 
 ### Request flow
-`main.py` (REPL, slash commands, provider/model pickers) → `role_router.py` classifies
-the request into **coder / reader / devops / chat** → `LocalAgent.run()`:
-- **chat** role takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol.
-  Each turn's message opens with runtime facts (`_chat_turn_message`):
-  `system_context.identity_fact` (you are Kvist; the language model behind you
-  is a separate thing, named with provider and model), the host, and — last before the
-  person's words — the rule that a reply ends where its content ends. The same identity
-  fact is the first line of the action roles' `System environment:` (rebuilt every step,
-  so it follows an escalation to the smart model) and the same rule is the last bullet of
-  their `Final answer style:`.
-  **A streamed reply settles into the transcript as it arrives.** The screen's stream
-  slot is height-capped (`_transient_height` leaves `_MIN_TRANSCRIPT_ROWS_WHILE_STREAMING`
-  for the history), so a long answer used to scroll its own head out of that slot with
-  nowhere to scroll back to — the transcript stayed empty until the final
-  `commit_stream`. `terminal_banner.live_markdown` now splits each update with
-  `_split_settled_markdown` (cut at the last blank line outside an open ``` fence, so a
-  committed block can never re-render differently) and hands the settled part to
-  `InteractiveScreen.flush_stream`, which appends it to the transcript while re-arming
-  the slot with the tail. Only the block still being written lives in the slot.
-- **coder / reader / devops** enter `run_loop` (`agent_runtime.py`) directly: there is no
-  planning call, a plan is the model's own offer (see Plan mode). The loop
-  calls the action model, parses, executes via `SafeExecutor`, registers feedback,
-  tracks derived progress/verification, and enforces stop conditions (step budget, stagnation,
-  consecutive errors, repeated-action blocking, write-required-on-create-tasks).
-  What a request expects (`change` / `report` / `action`) is a keyword guess in
-  `task_intent.py` (`infer_task_kind`); it adds or relaxes completion accounting and
-  never blocks a write by itself.
+`main.py` (REPL, slash commands, pickers) → `role_router.py` classifies the request into **coder /
+reader / devops / chat** → `LocalAgent.run()`:
+- **chat** takes a lightweight path (`_run_chat`): direct markdown streaming, no JSON protocol. Each
+  turn's message opens with runtime facts (`_chat_turn_message`): `system_context.identity_fact` (you
+  are Kvist; the language model behind you is a separate thing, named with provider and model), the
+  host, and, last before the person's words, the rule that a reply ends where its content ends. The
+  same identity fact opens the action roles' `System environment:` (rebuilt every step) and the same
+  rule is the last bullet of their `Final answer style:`. **A streamed reply settles into the
+  transcript as it arrives:** `terminal_banner.live_markdown` splits each update with
+  `_split_settled_markdown` (cut at the last blank line outside an open ``` fence) and hands the
+  settled part to `InteractiveScreen.flush_stream`; only the block still being written stays in the
+  height-capped stream slot.
+- **coder / reader / devops** enter `run_loop` (`agent_runtime.py`) directly. The loop calls the
+  action model, parses, executes via `SafeExecutor`, registers feedback, tracks derived
+  progress/verification and enforces stop conditions (step budget, stagnation, consecutive errors,
+  repeated-action blocking, write-required-on-create-tasks). What a request expects
+  (`change`/`report`/`action`) is a keyword guess in `task_intent.py` (`infer_task_kind`); it adds or
+  relaxes completion accounting and never blocks a write by itself.
 
 ### Step budget (`AGENT_MAX_STEPS`, default 150)
-`run_loop` counts against `RunState.step_budget`, seeded from `config.max_steps`.
-Exhausting it is **not** a silent stop: `_extend_step_budget` asks through the UI's
-optional `ask_choice` channel ("keep going, N more" / "finish with a report") and
-extends the budget by another `max_steps` on "continue". The question is an
-arrow-key widget rendered *inside* the running prompt_toolkit application, in its
-own `ConditionalContainer` directly under the pinned banner
-(`InteractiveScreen.ask_choice` blocks the agent thread on an event that the UI
-thread sets), so the live panel keeps updating while the user chooses — unlike
-`choose_option`/shell HITL, which tear the screen down via `suspend()`.
-A UI without `ask_choice` (headless frontends, `run_task.py`, no TTY) has nobody to
-ask, so the budget stays a hard stop with `_build_limit_reached_message` exactly as
-before; a cancelled question (Esc, or the screen shutting down mid-question) is
-treated the same way.
+`run_loop` counts against `RunState.step_budget`. Exhausting it asks through the UI's optional
+`ask_choice` ("keep going, N more" / "finish with a report") and extends by another `max_steps` on
+"continue". The question is an arrow-key widget rendered *inside* the running prompt_toolkit app
+(`InteractiveScreen.ask_choice` blocks the agent thread on an event the UI thread sets), so the live
+panel keeps updating, unlike `choose_option`/shell HITL which tear the screen down via `suspend()`. A
+UI without `ask_choice` (headless, `run_task.py`, no TTY) keeps a hard stop with
+`_build_limit_reached_message`; a cancelled question is treated the same.
 
 ### Background commands (`background_jobs.py`)
-`run_shell` with `"background": true` returns `{job_id, started_in_background}` at once and the
-process keeps running; `job_output {job_id, wait?}` reads what it printed since the model last saw it
-(`wait` blocks up to 120 s until there is new output or the job ended) and `job_stop {job_id}` ends it.
-**Output reaches the model only on step boundaries, never inside a request in flight**:
-`agent_runtime._collect_job_note` takes what is new from `BackgroundJobs.take_note()` before each
-model call and puts it in the next request (a `Background jobs:` section of the runtime prompt, a user
-message in a native conversation). `RunState.job_note` survives a failed or retried request and is
-cleared once a call succeeds; the same text is journaled as `job_notice`, so the conversation stays
-reconstructable. A quiet job costs the model nothing.
-- The same pipeline as a foreground command validates and approves it (policy, HITL, sandbox,
-  execution context); `TerminalExecutor.run(background=BackgroundLaunch)` then hands the wrapped argv
-  to `BackgroundJobs.launch` and releases the run lock, so the next command is not serialized behind a
-  server. The job keeps the child HOME it was built with (`_start_background` takes the manager; the
-  next `run()` rotates a fresh one). Without `timeout` a job lives up to the profile ceiling (300 s
-  dev, reported as `max_seconds`); an explicit one ends it as `timed_out` that early.
-- **Each sandboxed command has its own network namespace** (bubblewrap `--unshare-net`), so a port a
-  job opens is unreachable from another command unless both run with `network: true`; the start
-  result says so, and a check can also run server and client inside one command. The reader role is
-  not offered `job_output`/`job_stop` (its prompt is at its token budget and it has no use for them).
-- `process_tree.run_supervised(cancel=Event)` is how a job is stopped: same tree teardown as a timeout,
-  `SupervisedResult.cancelled`. Limit: 4 running jobs (`MAX_RUNNING_JOBS`).
+`run_shell` with `"background": true` returns `{job_id, started_in_background}` at once;
+`job_output {job_id, wait?}` reads what it printed since the model last saw it (`wait` blocks up to
+120 s) and `job_stop {job_id}` ends it. **Output reaches the model only on step boundaries:**
+`agent_runtime._collect_job_note` takes `BackgroundJobs.take_note()` before each model call (a
+`Background jobs:` section, or a user message in a native conversation). `RunState.job_note` survives a
+failed request and is cleared once a call succeeds; the same text is journaled as `job_notice`.
+- The foreground pipeline validates and approves it (policy, HITL, sandbox, execution context);
+  `TerminalExecutor.run(background=BackgroundLaunch)` hands the wrapped argv to `BackgroundJobs.launch`
+  and releases the run lock. The job keeps the child HOME it was built with. Without `timeout` it lives
+  up to the profile ceiling (300 s dev); an explicit one ends it as `timed_out`. Limit:
+  `MAX_RUNNING_JOBS` = 4.
+- **Each sandboxed command has its own network namespace** (bubblewrap `--unshare-net`): a port a job
+  opens is unreachable from another command unless both run with `network: true`; the start result says
+  so. The reader role is not offered `job_output`/`job_stop`. `process_tree.run_supervised(cancel=Event)`
+  stops a job with the same teardown as a timeout.
 - **A job outlives a final answer only when the agent can be woken.** `_end_of_turn_resources(answered=)`
   in `run_loop`'s `finally` stops helpers and jobs (`_stop_left_running`) on every ending except a final
-  answer with `LocalAgent.wake_listener` set. That listener is set only by `serve_session_multi(wake=True)`
-  (`--frontend stdio-multi --wake`, passed by the Ink `core.ts`, so the Ink app and the VS Code panel;
-  JetBrains, web-local, ACP, the classic REPL and headless runs keep the old stop-at-answer contract).
-  A job or helper that then ends **on its own** (never one stopped by `job_stop`, the person or stop
-  all, so a stop cannot wake the agent) calls the listener from its thread; `_queue_wake` puts `_WAKE`
-  on the goal queue unless the loop is busy, and the loop re-checks `agent.wake_due()` after every item,
-  so nothing that ended mid-turn is lost. `_run_wake` writes a `wake` event and runs `agent.wake()`: a
+  answer with `LocalAgent.wake_listener` set, which only `serve_session_multi(wake=True)`
+  (`--frontend stdio-multi --wake`, passed by Ink's `core.ts`: the Ink app and VS Code panel) sets;
+  JetBrains, web-local, ACP, the classic REPL and headless runs stop at the answer. A job or helper that
+  ends **on its own** (never one stopped by `job_stop`, the person or stop all) calls the listener;
+  `_queue_wake` puts `_WAKE` on the goal queue unless the loop is busy, and the loop re-checks
+  `agent.wake_due()` after every item. `_run_wake` writes a `wake` event and runs `agent.wake()`: a
   `_run_turn(WAKE_GOAL, _background_role, woken=True)` that takes the background note **before**
-  anything can fail (so the same news never wakes twice, never a loop), keeps the previous language and
-  role, takes no person's message number, and is journaled as `user` with empty text and `woken`.
-  `wake_due` is false while paused, with a checkpoint or in a closed session. With `--wake` the idle
-  loop also writes events queued between turns (`_next_item`), so a writing helper's approval request
-  is never stuck until the next turn. `/new`, switching sessions and a provider rebuild
-  (`EventSession.replace_agent`) stop what was left running. The start results tell the model which
-  contract holds (`_background_note`, `helpers._start_note`). `/resume` does not restore jobs (like
-  `run_shell`, they are non-reconcilable). Tests: `kernel/tests/test_wake.py`, `test_event_stdio_multi.py`.
-- Output is untrusted like every shell result: `job_output` results are `untrusted: true` and wrapped
-  by `feedback_to_detail`; notes wrap each job's text in
-  `<UNTRUSTED_TOOL_OUTPUT source="background_job:job_N">` after `redact_text` + defanging.
-- Repeated `job_output`/`job_stop` calls are exempt from the repeat guard and from stagnation counting
-  (`_JOB_ACTIONS`): polling is how a job is followed. Both are allowed while planning.
-- Events (`frontend_protocol.py`, `docs/UI_API.md`): `job_started`, `job_output` (live-only snapshot,
-  throttled like `action_output`), `job_finished`, `job_notice`. Emitted from the job's thread through
-  `UiJobListener`; the journal's lock makes that safe. Tests: `kernel/tests/test_background_jobs.py`,
-  `test_background_jobs_loop.py`.
+  anything can fail (the same news never wakes twice), keeps the previous language and role, takes no
+  message number and is journaled as `user` with empty text and `woken`. `wake_due` is false while
+  paused, with a checkpoint or in a closed session. With `--wake` the idle loop also writes events
+  queued between turns (`_next_item`). `/new`, switching sessions and a provider rebuild
+  (`EventSession.replace_agent`) stop what was left running. Start results tell the model which contract
+  holds (`_background_note`, `helpers._start_note`). `/resume` does not restore jobs. Tests:
+  `test_wake.py`, `test_event_stdio_multi.py`.
+- Output is untrusted: `job_output` results are `untrusted: true`, wrapped by `feedback_to_detail`;
+  notes wrap each job in `<UNTRUSTED_TOOL_OUTPUT source="background_job:job_N">` after `redact_text` +
+  defanging. Repeated `job_output`/`job_stop` calls are exempt from the repeat guard and stagnation
+  counting (`_JOB_ACTIONS`) and allowed while planning.
+- Events (`frontend_protocol.py`, `docs/UI_API.md`): `job_started`, `job_output` (live-only,
+  throttled), `job_finished`, `job_notice`, emitted from the job's thread through `UiJobListener`.
+  Tests: `test_background_jobs.py`, `test_background_jobs_loop.py`.
 
 ### Waits and schedules (`scheduler.py`)
-`wait {seconds, reason}` (1 s..24 h) and `schedule {op: add|list|update|cancel|pause|resume}` wake the agent
-by time through the same path as a finished job: `Scheduler` calls the agent's `wake_listener`, `has_background_news`
-sees `Scheduler.has_due()`, and `wake()` runs a turn with `SCHEDULE_WAKE_GOAL`; the fired occurrences reach the
-model as a `Scheduled wake-ups that came due` note (`_collect_schedule_note`, also taken at step boundaries, so an
-occurrence is never shown twice). The tools return at once; the model says its piece and ends the turn.
-- A wait lives in memory and ends with the conversation (`clear_waits` on `/new`, a session switch and shutdown).
-  A schedule is `<workspace>/.kvist/schedules.json` (`durable_json`): one-time (`at`, ISO local time) or recurring
-  (`time` HH:MM with `weekdays` or `every_days`, no weekdays meaning daily; or `every_minutes` ≥ 5). Local time
-  throughout; `schedule list` returns the current time because the model should not guess it.
-- **The file is the source of truth, so cores share it.** The timer thread re-reads it every ≤30 s and a core
-  *claims* a due entry by advancing `next_run` under the file lock, so Ink and an IDE open on one workspace never
-  run an occurrence twice. An occurrence missed while no core ran fires once, flagged late, and a recurring entry
-  jumps to its next future time (no replay of every missed day).
-- **The timer runs only where the agent can be woken** (`wake_listener` set: `--frontend stdio-multi --wake`). The
-  classic REPL and headless runs refuse `wait` and save a `schedule` with a note that it fires elsewhere. There is
-  no daemon: a closed Kvist runs nothing. Helpers have neither tool.
-- A woken turn has nobody watching: approvals still go through the normal gates, so a command that needs one waits
-  for the person. Tests: `kernel/tests/test_scheduler.py` (a fake clock; the timer thread is left off).
+`wait {seconds, reason}` (1 s..24 h) and `schedule {op: add|list|update|cancel|pause|resume}` wake the
+agent by time through the same path as a finished job: `Scheduler` calls `wake_listener`,
+`has_background_news` sees `Scheduler.has_due()`, `wake()` runs a turn with `SCHEDULE_WAKE_GOAL`, and
+fired occurrences reach the model as a `Scheduled wake-ups that came due` note
+(`_collect_schedule_note`, taken at step boundaries, never shown twice). The tools return at once; the
+model says its piece and ends the turn.
+- A wait lives in memory and ends with the conversation (`clear_waits` on `/new`, a switch, shutdown). A
+  schedule is `<workspace>/.kvist/schedules.json` (`durable_json`): one-time (`at`, ISO local time) or
+  recurring (`time` HH:MM with `weekdays` or `every_days`; or `every_minutes` ≥ 5). Local time
+  throughout; `schedule list` returns the current time.
+- **The file is the source of truth, so cores share it.** The timer thread re-reads it every ≤30 s and a
+  core *claims* a due entry by advancing `next_run` under the file lock, so Ink and an IDE on one
+  workspace never run an occurrence twice. A missed occurrence fires once, flagged late; a recurring
+  entry jumps to its next future time.
+- **The timer runs only where the agent can be woken** (`--frontend stdio-multi --wake`). Classic REPL
+  and headless runs refuse `wait` and save a `schedule` with a note that it fires elsewhere. No daemon:
+  a closed Kvist runs nothing. Helpers have neither tool. A woken turn has nobody watching: approvals
+  still go through the normal gates. Tests: `test_scheduler.py` (fake clock, timer thread off).
 
 ### Stopping a turn (Ctrl+C / Escape)
-**A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt`
-around its whole loop, so the turn's answer becomes `build_cancellation_message`
-("Работа агента остановлена вами…") and the `finally` still seals the session,
-checkpoint and logs; `main.py`'s `except KeyboardInterrupt` around `agent.run` is only the
-last-resort net for a stop that lands before `run()` owns the turn (`run_stopped_text`). Only a
-stop at the *idle* prompt still exits with 130. A stop before the first step is handled in
-`run()` itself (`_report_stop_before_loop`). A stopped chat reply shows "Ответ
-остановлен вами." and — unlike before — **stays in the chat history**: the user
-message is answered by whatever arrived plus a "[Ответ остановлен пользователем…]"
-note (`_stopped_chat_reply`), so the transcript alternates correctly.
+**A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt` around its whole
+loop; the answer becomes `build_cancellation_message` and the `finally` still seals session,
+checkpoint and logs. `main.py`'s `except KeyboardInterrupt` around `agent.run` is the last-resort net
+(`run_stopped_text`); a stop before the first step is handled in `run()` (`_report_stop_before_loop`).
+Only a stop at the *idle* prompt exits with 130. A stopped chat reply stays in the chat history with a
+"[Ответ остановлен пользователем…]" note (`_stopped_chat_reply`) so the transcript alternates.
 
-**A stop is context, not just UI.** Every stop path sets `RunState.stopped_by_user`
-(chat passes it directly) and `_add_to_session_history` writes
-`stopped_by_user: true` into the entry. Both readers of session history render it —
-the action loop's session-history section (`agent_context.render_session_history`) and
-the chat preamble — so "продолжай" after a stop is understood as
-unfinished work rather than a completed task. A stopped action run also stores
-`trail` in the entry (`LocalAgent._stopped_run_trail`: paths read with their line
-ranges, search queries, paths changed, from `step_logs`); the session-history
-section renders it, so the next turn goes straight back to those files by line
-range instead of exploring again (a native run's conversation is not kept, and
-one stop after 40 steps of reading once cost 48 more).
+**A stop is context, not just UI.** Every stop path sets `RunState.stopped_by_user`;
+`_add_to_session_history` writes `stopped_by_user: true`, and both history renderers show it so
+"продолжай" is understood as unfinished work. A stopped action run also stores `trail`
+(`LocalAgent._stopped_run_trail`: paths read with line ranges, queries, paths changed) so the next turn
+goes straight back to those files.
 
-**Escape needs two presses; Ctrl+C needs one.** The first Escape only arms the stop
-(`_stop_armed_at`) and shows `_STOP_HINTS` in a one-line window directly under the
-status panel; a second press within `_STOP_CONFIRM_SECONDS` (3 s) performs it, and the
-arming expires on its own because every render re-checks the window.
-**Escape pauses, Ctrl+C stops everything.** The confirmed Escape calls
-`InteractiveScreen.pause_handler` (`agent.request_pause`, which marks
-`TaskControl`) before it raises the same real signal, so the loop ends the turn as
-`paused` and keeps the task's live resources (dev server, virtual screen, frozen
-runner, helpers); Ctrl+C is "stop all": cancel plus cleanup of everything the task
-owns. Both keep the checkpoint. See "Skills platform" below. The hint language
-follows the request text (`main.py` calls `InteractiveScreen.set_language` per turn),
-not `LANG`, which is English on a machine whose user writes Russian.
+**Escape needs two presses; Ctrl+C needs one.** The first Escape arms the stop (`_stop_armed_at`) and
+shows `_STOP_HINTS` under the status panel; a second press within `_STOP_CONFIRM_SECONDS` (3 s)
+performs it. **Escape pauses, Ctrl+C stops everything:** the confirmed Escape calls
+`InteractiveScreen.pause_handler` (`agent.request_pause`, marks `TaskControl`) before raising the same
+signal, so the loop ends the turn as `paused` and keeps the task's live resources; Ctrl+C is "stop all":
+cancel plus cleanup. Both keep the checkpoint. The hint language follows the request text
+(`InteractiveScreen.set_language`), not `LANG`.
+Both keys must raise a **real signal**: `InteractiveScreen._interrupt_main_thread` does
+`os.kill(os.getpid(), SIGINT)` on POSIX instead of `_thread.interrupt_main`, which cannot free a main
+thread parked in a provider socket read (`_preserve_interrupt_signal` keeps `ISIG` on). Escape acts
+like Ctrl+C only under `_turn_in_flight` with an empty input box (Escape is also the Alt+Enter meta
+prefix). `process_tree.run_supervised` re-raises an interrupt only *after* tearing the subtree down.
+`agent.request_cancel()` (`_cancel_event`) is the **GUI's** transport-agnostic mechanism, observed
+between steps, while consuming an action-loop stream and in `_consume_chat_stream`; model requests go
+through `cancellable_call.py` (daemon threads, the loop polls `_cancel_event` every 50 ms and raises
+`RunCancelled`), so a stop lands at once.
 
-Both keys must raise a **real signal**, which is why
-`InteractiveScreen._interrupt_main_thread` calls `os.kill(os.getpid(), SIGINT)` on
-POSIX instead of `_thread.interrupt_main`: the flag `interrupt_main` sets is only read
-between bytecodes, so it cannot free a main thread parked in a provider socket read —
-the moment a stop is most likely to be pressed (the same reason
-`_preserve_interrupt_signal` keeps `ISIG` on so Ctrl+C stays a tty signal). Escape gets
-Ctrl+C's path under `_turn_in_flight` — the REPL is inside `read_input` and the input
-box is empty — because Escape is the meta prefix (Alt+Enter) while a line is being
-typed. `process_tree.run_supervised` records an interrupt from `proc.wait` and re-raises
-it only *after* tearing the subtree down; the child owns its own session, so skipping
-that would orphan a build in a session that now survives the stop.
-`agent.request_cancel()` (the flag `_cancel_event`) stays the **GUI's**
-transport-agnostic mechanism — observed between steps, while consuming an action-loop
-stream, and (so a GUI cancel reaches a chat turn too) in `_consume_chat_stream`.
-The flag alone cannot free a thread parked in a silent provider, so the model
-requests go through `cancellable_call.py`: the request and the stream read run
-on daemon threads while the loop's thread polls `_cancel_event` every 50 ms and
-raises `RunCancelled` (the abandoned stream is closed), so a GUI/Ink/IDE stop
-lands at once, not at the next chunk or step.
-
-**First-run setup in the classic terminal: Esc goes back, Ctrl+C quits.** The dialogs of
-`TerminalBannerUI` (`choose_option`, `prompt_text`, `prompt_secret`) answer `None` ("cancelled")
-to both keys, which is what a menu opened from the REPL wants. `main()` runs the first
-`build_agent` (provider, key and model dialogs) inside `terminal_banner.ctrl_c_stops_setup()`; while
-it is active Ctrl+C raises `SetupCancelled` (a `KeyboardInterrupt` subclass) out of the dialog,
-`main()` prints `setup_cancelled_text` and exits 130, and the terminal is already restored by the
-dialog's own `finally`. prompt_toolkit fields use their own Ctrl+C binding in
-`_cancel_on_escape_bindings` for this, because Esc there also ends as `KeyboardInterrupt`. Dialogs
-opened after startup (`/provider`, `/models`, rebuilds) are outside the context and keep the
-cancel meaning. Tests: `test_ui.py` (unit), `test_cli_pty.py::test_cli_pty_first_run_*` (real core, empty HOME).
+**First-run setup in the classic terminal: Esc goes back, Ctrl+C quits.** `TerminalBannerUI` dialogs
+(`choose_option`, `prompt_text`, `prompt_secret`) answer `None` to both keys. `main()` runs the first
+`build_agent` inside `terminal_banner.ctrl_c_stops_setup()`, where Ctrl+C raises `SetupCancelled` (a
+`KeyboardInterrupt` subclass) and `main()` exits 130; prompt_toolkit fields use
+`_cancel_on_escape_bindings`. Dialogs opened later keep the cancel meaning. Tests: `test_ui.py`,
+`test_cli_pty.py::test_cli_pty_first_run_*`.
 
 ### Skills platform (`kernel/plugins/`, `kernel/{resources,task_control,helpers,agent_tools,...}.py`)
-Public docs: `docs/SKILLS.md` (+ `.ru.md`); frontend events and control messages:
-`docs/UI_API.md` §7 and §8f. Maintainer facts:
-- **Reading never executes.** `manifest.py` parses `manifest.json` without
-  following symlinks; `registry.py` stores immutable `versions/<v>/` with an
-  `active.json` pointer; `grants.py` keys approvals by (skill, content digest,
-  workspace), so a changed package starts with no grants. Package code runs only in
-  `host.py::RunnerHost`: Bubblewrap with the system `/usr/bin/python3`, a snapshot
-  of the package verified by digest, no workspace/HOME/config/display/env, its own
-  network namespace. Executable skills are Linux-only by design; never add an
-  unsandboxed fallback.
-- **Wire**: length-prefixed JSON over an inherited socketpair (`runner/kvist_wire.py`);
-  `services.py::CoreServices.METHODS` is the single table of ctx methods, each with
-  its capability, write flag and scope check. A write method goes through the same
-  journaled executor path as the model's writes. Readonly tools and reader/plan
-  runs are checked again at every nested call (`_require_write_allowed`).
-- **Model surface**: built-in tools `skills`, `memory`, `sessions`, `helper`,
-  `ask_user` (`agent_tools.py`); attached skill tools use wire names
-  `<skill>__<tool>` mapped to `ActionType.skill_call` (`INTERNAL_ACTIONS`, so it is
-  not a model-visible action), MCP tools `mcp__<server>__<tool>`. A new built-in tool
+Public docs: `docs/SKILLS.md` (+ `.ru.md`); events and control messages: `docs/UI_API.md` §7, §8f.
+- **Reading never executes.** `manifest.py` parses `manifest.json` without following symlinks;
+  `registry.py` stores immutable `versions/<v>/` with an `active.json` pointer; `grants.py` keys
+  approvals by (skill, content digest, workspace), so a changed package starts with no grants. Package
+  code runs only in `host.py::RunnerHost`: Bubblewrap with the system `/usr/bin/python3`, a
+  digest-verified snapshot, no workspace/HOME/config/display/env, its own network namespace.
+  Executable skills are Linux-only by design; never add an unsandboxed fallback.
+- **Wire:** length-prefixed JSON over an inherited socketpair (`runner/kvist_wire.py`);
+  `services.py::CoreServices.METHODS` is the single table of ctx methods (capability, write flag, scope
+  check). A write method goes through the same journaled executor path as the model's writes. Readonly
+  tools and reader/plan runs are re-checked at every nested call (`_require_write_allowed`).
+- **Model surface:** built-in tools `skills`, `memory`, `sessions`, `helper`, `ask_user`
+  (`agent_tools.py`); attached skill tools use wire names `<skill>__<tool>` mapped to
+  `ActionType.skill_call` (`INTERNAL_ACTIONS`), MCP tools `mcp__<server>__<tool>`. A new built-in tool
   needs `protocol.py`, parser, `native_tools`, role prompts and `extensions.txt`
   (`test_prompt_protocol_sync.py`).
-- **Bundled skills are preinstalled** (`plugins/bundled.py::sync_bundled`, called by
-  `build_agent` and before every `--skill-op`; problems become startup warnings, never a
-  failed start). It installs missing ones and upgrades ones whose active version has origin
-  `bundled` when the shipped version was never installed (so a rollback sticks); an uninstall
-  is recorded in `plugins/skill/bundled.json` and respected until an explicit
-  `install bundled:<id>`. **Editing a bundled skill means raising its version**: an installed
-  version is never reinstalled, so new content under an old version silently reaches nobody
-  who has the old copy; `test_a_changed_bundled_skill_has_a_new_version` compares each
-  package with `kernel/tests/bundled_skill_digests.json` (update it with the bump). The
-  model's catalog hides skills whose `platforms` exclude this OS.
-- **Reference pages**: `SKILL.md` is re-sent with every text-protocol step, so a long
-  skill keeps its detail in `references/*.md` (`SkillRegistry.references`), listed in
-  the attach answer and read one at a time with `skills` op `read` (attached skills
-  only, same `<SKILL_INSTRUCTIONS>` quoting; `registry.reference_path` accepts `terminal`
-  for `references/terminal.md`). `checks._check_references` refuses pages that cannot be
-  read and dead pointers. The bundled `design` skill is built this way, and
-  `test_design_skill.py` runs the recipes its pages give the model (the inline contrast
-  script against the real `-c` and 2000-character rules, the pty terminal harness), because
-  a recipe the sandbox refuses fails silently in a run.
-- **Resources**: everything a task starts (runner, Xvfb/i3, dev servers, MCP) is a
-  `resources.py::ManagedProcess` owned by a `ResourceManager` (cgroup scope, limits,
-  freeze/thaw, crash `recover()` via pid+starttime+env marker). `_end_of_turn_resources`
-  keeps them on a pause and cleans them on anything else.
-- **Pause vs stop**: `task_control.TaskControl` (states, shared `_cancel_event`).
-  `request_pause` = Esc, `request_cancel` = stop all. A skill call gets
-  `Paused`/`Cancelled` at its next request, then the runner is frozen (pause) or ended
-  (cancel/timeout). An interrupted batch's remaining actions are not run.
-- **Helpers** (`helpers.py`): one helper at a time in a service session `helper-…`;
-  `agent_logging` never makes a service session active or resumable. Messages are
-  `sent -> received -> applied` through `_drain_inbox`. Role: the one named, else
-  `_role_for` routes the bare task (never the goal with its instructions, which sway the
-  router; a `chat` verdict becomes `reader`). It may write unless its role is reader, the
-  main agent may not write (`_main_cannot_write`: reader role, `read_only_goal`, planning,
-  `force_read_only`) or a skill started it (`agents.manage` grants read-only helpers only).
-  A writing helper borrows the main executor's gate only when it is `answers_from_any_thread`
-  (`EventApprovalGate`), else `DenyApprovalGate`, so a classic-terminal helper cannot
-  overwrite existing files. `delegate_task` is not a helper: it starts nobody, and its
-  descriptions say so, because a model once took it for one and reported work that never ran.
-- **The person's desktop** (`host_actions.py`, bundled `desktop` skill with `core_group: "host"`): a **core
-  tool** skill. Its tools are run by the core (`SkillManager._call_core` → `CoreServices.handle("host.<tool>")`),
-  with no package code and no runner, so it works on Linux, macOS and Windows. Same grant, read-only and plan checks
-  as any skill; `core_group` is accepted from `origin="bundled"` only and `host.*` is refused for every other skill.
-  The set is closed: open an http(s) address (`webbrowser`, new tab), start an app by name (Linux `.desktop` +
-  `gtk-launch <id>.desktop` — the suffix matters, macOS `open -a`, Windows Start Menu `.lnk`; `id:<id>` disambiguates
-  entries sharing a name), list/focus/close windows (Hyprland `hyprctl`, Sway `swaymsg`, niri `niri msg`, i3 `i3-msg`, GNOME via the
-  Window Calls extension over `gdbus`, KDE `kdotool`, X11 `wmctrl` (never on Wayland: it sees only XWayland),
-  macOS JXA, Windows PowerShell; ids come from the live list; `_no_backend_hint` says what to install; GNOME and KDE
-  have no window API of their own). `host.open` is capped at 12 per
-  run and refuses an address `redact_text` would change; `close` always asks via `ui.confirm`. **Tabs of the
-  person's browser are not reachable** (needs a debugging port; `:9222` on a test machine is Spotify's CEF,
-  never probe it). macOS/Windows/GNOME/KDE/niri backends have only faked-command tests (kdotool output format and Window Calls arg types come from READMEs, not from a run), and the skills package reader is still
-  POSIX-only, so skills do not load on Windows yet. Tests: `kernel/tests/test_host_actions.py`, the core-tool tests
-  at the end of `test_skill_runtime.py`.
-- **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox, with
-  destination policy (task-exposed ports, granted domains, no private addresses,
-  redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and serves a
-  loopback MJPEG viewer (token, Host/Origin checks); events `screen`, `task_state`
-  are live-only in the journal.
-- **Tests**: `kernel/tests/test_skill_*.py`, `test_pause.py`, `test_helpers.py`,
-  `test_platform_services.py`, `test_mcp.py` run real Bubblewrap and skip without it;
-  `test_browser_skill.py` is `slow` and needs `KVIST_TEST_SKILL_CONFIG=<config dir with
-  browser installed>`.
+- **Bundled skills are preinstalled** (`plugins/bundled.py::sync_bundled`, called by `build_agent` and
+  before every `--skill-op`; problems become startup warnings). It installs missing ones and upgrades
+  ones whose active version has origin `bundled` when the shipped version was never installed (a
+  rollback sticks); an uninstall is recorded in `plugins/skill/bundled.json` until an explicit
+  `install bundled:<id>`. **Editing a bundled skill means raising its version** (an installed version
+  is never reinstalled); `test_a_changed_bundled_skill_has_a_new_version` compares packages with
+  `kernel/tests/bundled_skill_digests.json` (update it with the bump). The catalog hides skills whose
+  `platforms` exclude this OS.
+- **Reference pages:** `SKILL.md` is re-sent with every text-protocol step, so long skills keep detail
+  in `references/*.md` (`SkillRegistry.references`), read one at a time with `skills` op `read`
+  (attached skills only, same `<SKILL_INSTRUCTIONS>` quoting). `checks._check_references` refuses
+  unreadable pages and dead pointers. The bundled `design` skill is built this way and
+  `test_design_skill.py` runs the recipes its pages give the model (a recipe the sandbox refuses fails
+  silently in a run).
+- **Resources:** everything a task starts (runner, Xvfb/i3, dev servers, MCP) is a
+  `resources.py::ManagedProcess` owned by a `ResourceManager` (cgroup scope, limits, freeze/thaw, crash
+  `recover()` via pid+starttime+env marker). `_end_of_turn_resources` keeps them on a pause and cleans
+  them on anything else.
+- **Pause vs stop:** `task_control.TaskControl` (shared `_cancel_event`); `request_pause` = Esc,
+  `request_cancel` = stop all. A skill call gets `Paused`/`Cancelled` at its next request, then the
+  runner is frozen (pause) or ended. An interrupted batch's remaining actions are not run.
+- **Helpers** (`helpers.py`): one at a time in a service session `helper-…` (`agent_logging` never makes
+  it active or resumable). Messages are `sent -> received -> applied` through `_drain_inbox`. Role: the
+  one named, else `_role_for` routes the bare task (a `chat` verdict becomes `reader`). It may write
+  unless its role is reader, the main agent may not write (`_main_cannot_write`), or a skill started it
+  (`agents.manage` grants read-only helpers only). A writing helper borrows the main executor's gate
+  only when it is `answers_from_any_thread` (`EventApprovalGate`), else `DenyApprovalGate`.
+  `delegate_task` is not a helper: it starts nobody, and its descriptions say so.
+- **The person's desktop** (`host_actions.py`, bundled `desktop` skill, `core_group: "host"`): a **core
+  tool** skill run by the core (`SkillManager._call_core` → `CoreServices.handle("host.<tool>")`), no
+  package code or runner, so it works on Linux, macOS and Windows. `core_group` is accepted from
+  `origin="bundled"` only. The set is closed: open an http(s) address, start an app by name (Linux
+  `.desktop` + `gtk-launch <id>.desktop`, macOS `open -a`, Windows Start Menu `.lnk`; `id:<id>`
+  disambiguates), list/focus/close windows (Hyprland, Sway, niri, i3, GNOME via Window Calls over
+  `gdbus`, KDE `kdotool`, X11 `wmctrl` (never on Wayland), macOS JXA, Windows PowerShell; `_no_backend_hint`
+  says what to install). `host.open` is capped at 12 per run and refuses an address `redact_text` would
+  change; `close` always asks via `ui.confirm`. **Tabs of the person's browser are not reachable** (never
+  probe `:9222`, it is Spotify's CEF on many desktops). macOS/Windows/GNOME/KDE/niri backends have
+  only faked-command tests; skills do not load on Windows yet (POSIX-only package reader). Tests:
+  `test_host_actions.py`, core-tool tests at the end of `test_skill_runtime.py`.
+- **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox (task-exposed ports, granted
+  domains, no private addresses, redirects re-checked). Preview: `screen.py` reads Xvfb's `-fbdir` and
+  serves a loopback MJPEG viewer (token, Host/Origin checks); events `screen`, `task_state` are live-only.
+- **Tests:** `test_skill_*.py`, `test_pause.py`, `test_helpers.py`, `test_platform_services.py`,
+  `test_mcp.py` run real Bubblewrap and skip without it; `test_browser_skill.py` is `slow` and needs
+  `KVIST_TEST_SKILL_CONFIG=<config dir with browser installed>`.
 
 ### Ink terminal frontend (`frontends/tui/ink/`, bundled to `dist-ui/kvist-tui.mjs`)
-A separate Node 22 / TypeScript / Ink app, **not** part of the Python process. Paths in
-this section are relative to `frontends/tui/ink/`.
-`main.py --frontend tui` (or the saved `/tui` preference, `user_config.get_saved_frontend`)
-calls `launch_tui`, which runs `node dist-ui/kvist-tui.mjs` and passes the exact core
-command in `KVIST_CORE_CMD` (JSON argv: the frozen binary, or the interpreter plus
-`kernel/__main__.py` from a checkout). The app spawns that core as `--frontend stdio-multi` and speaks only the
-`docs/UI_API.md` events; it never reads `.kvist/`. Session ops go through `--session-op`.
-`launch_tui` returns None — and the classic terminal starts — without a TTY, Node, a
-build (`dist-ui/`; the repository root's `dist/` is PyInstaller's) or a configured provider. Layout: `core.ts` (adapter),
-`state.ts` (pure event reducer, tested), `editor.ts`, `commands.ts`, `ui/*.tsx` (shared),
-`ui/skins/kvist/` (the default skin's transcript) and `ui/skins/claude-code/`.
-**Two skins, one app.** `--frontend claude` (saved `frontend: "claude"`, in
-`main.TUI_FRONTENDS` with `tui`) runs the same bundle with `--skin claude`; `launch_tui`
-derives the skin from the frontend value. `ui/theme.ts` holds both palettes and `applySkin`
-overwrites the shared `color` object once, before the first render, so the shared
-components (markdown, prompts, input) re-theme themselves; structure that differs lives in
-`ui/skins/claude-code/claude.tsx` (banner with the `ui/skins/claude-code/mascot.tsx` squirrel, `●` calls, `⎿` results, `✻` spinner,
-footer) and a few `currentSkin()` branches in `input.tsx`/`prompts.tsx`/`markdown.tsx`.
-`/tui` is a picker over `commands.FRONTENDS`; choosing another Node skin exits with code 64
-and `_switch_frontend` saves it and relaunches `launch_tui`, so switching skins never passes
-through the classic terminal. Two Ink facts learned the hard way: a bare `Text` beside a
-wrapping block shrinks with the flex row, and a wrapping `Text` in a shrinking column is laid
-out two cells wider than the room left, so the terminal wraps it mid-word — glyphs sit in
-`<Box flexShrink={0}>` (`Mark`) and wrapping blocks get an explicit width (`Rest`). The
-claude skin echoes a typed slash command as a `❯` row (`echo` action) so the `⎿` reply hangs
-off it, and hides the `final_answer`/`report_to_user` step lines.
-**The claude skin is fullscreen, like Claude Code's fullscreen rendering** (researched from
-its docs, code.claude.com/docs/en/fullscreen): `cli.tsx` renders it on the alternate screen
-(`alternateScreen: true`, root `Box height={rows}`), so there is no `<Static>` and no terminal
-scrollback. `ClaudeScreen` puts every item in a clipped viewport (`overflow="hidden"`,
-`flexDirection="column-reverse"` over a growing spacer, so a short transcript sits at the top and
-a tall one ends at the bottom edge with no measurement — following the newest row through a
-measured offset made the view jump by a frame) that fills the window. The live thought
-and the streaming answer are the last children of that transcript, so they grow down from the
-request that started them; the spinner, the suggestions (above the input, as in Claude Code),
-input and footer are pinned below it, at the floor of the window. The spinner word depends on the running role
-(`verbs.spinnerWord`): the joke/maxim list only for agent roles, "Generating a response" for
-chat, "Picking a role" until the router's `route` event arrives. The spinner line reads `(1m 6s · ↓ 8.5k tokens · thinking with high effort)`: tokens are the
-turn's own output (`usage.output - turnStartOutput`, reported after each model call), and
-`thought for 2s` replaces the doing-part for two seconds after a thought ends (`state.thought`).
-Under it goes a `⎿  Tip:` line about a Kvist command (`ui/skins/claude-code/tips.ts`, a new one every 3 s,
-Russian for a Russian request); the live thought and answer are revealed at a steady pace
-(`useTypewriter`) because the core's stream arrives ~9 times a second and a fast model finishes
-in half a second; above the input, right-aligned, `● high · /effort` (`ClaudeEffort`). Tips name
-real commands and styles — re-read them when commands or `get_style_options` change.
-File edits follow Claude Code's look (`ui/skins/claude-code/claude-diff.tsx`): a blue `Update(path)` bullet, "Added
-6 lines, removed 2 lines", and numbered rows with a full-width red or green background, code
-coloured by highlight.js (`highlight.ts`, the only new dependency; only the languages
-imported there are bundled, chosen by file extension, colours in `ui/skins/claude-code/syntax.ts`). Successful
-`run_shell` calls and the reads around them fold into one dim line ("Searched for 2 patterns,
-ran 2 shell commands", `collapse` in `claude.tsx`); a failed command is never folded, a command
-in flight shows `Running shell command · 25s…` with its first four lines, and Ctrl+O toggles
-the full commands and their output (`expanded` in `ViewContext`).
-A live turn ends with a dim
-closing line (`done` item, `closeTurn` in `state.ts`, worded by `verbs.doneLine`): a past-tense
-word, the turn's length and the time, e.g. "Measured twice for 9s · done 3:49 PM"; "Stopped
-after 4s" when the person interrupted (`interrupt` action, sent by Esc Esc and Ctrl+C while
-running); replayed journals and commands get none. The footer shows the routed
-role only while a turn runs, and the configured one (usually `auto`) between turns.
-Scrolling is in-app: PageUp/PageDown (half a screen), Ctrl+Home/Ctrl+End, the wheel; a scrolled
-view keeps its place while content grows, and a new request snaps back to the bottom. The mouse
-belongs to the app (`pointer.ts`, SGR modes 1002+1006, which is why the terminal shows an arrow
-instead of an I-beam): `Pointer` stands between Ink and the terminal — it wraps `stdin` to strip
-mouse reports before Ink reads them, and wraps `stdout` to recognise each frame Ink writes (a
-frame is exactly `rows` lines behind an erase prefix) so a drag, double-click (word) or
-triple-click (row) can be hit-tested and painted in inverse video (`screen.ts`, cell-based, wide
-characters and ANSI aware) and copied on release through `clipboard.ts`. Shift+drag still reaches
-the terminal's own selection. A `command_result` whose `effects.changed` is true (`/new`, `/session`) empties the feed under a
-fresh welcome block (`beginSession`, epoch bump, context back to 0); for a switch the app then
-replays that session's journal (`sessionHistory` → `restore` with `banner: true`), unless a turn
-started meanwhile. A closed session (`session_ended`, or a `session` event with `closed`) sets
-`state.closed` to the core's `closed_notice`, and `ClosedBar` (`ui/input.tsx`, both skins) takes
-the input's place: one muted row in the same frame, Enter = `sendCommand("new")` like `/new`, no
-editor, so nothing can be typed or pasted; the next `session` event without `closed` clears it. The welcome mark is the squirrel animation (`ui/skins/claude-code/mascot.tsx`): 8 rows × 16 columns (3 rows was
-unreadable), six frames played once at 2 fps that rest on the last, drawn on a transparent
-background. Its cells (2×2-pixel quadrant blocks) are generated by `make_mascot_frames.py`
-from `frontends/tui/ink/mascot/frames/frame_*.png` into `ui/skins/claude-code/mascot-frames.ts` (Pillow and numpy; each pixel takes the
-most common colour of its source block, so the eyes stay crisp; `--rows` sets the size). The "KVIST" wordmark of `ui/logo.ts` is now used only by the exit farewell.
-The cell art comes in two sets from the generator: quadrants (2×2 pixels a cell, every font) and octants
-(2×4, Unicode 16, twice as sharp; the 251 patterns that have a character are taken from Python's Unicode
-names, the four single-corner ones have none and are skipped). `mascotGlyphs` picks octants when
-`WT_SESSION` is set (Windows Terminal ships Cascadia Code 2404+), quadrants otherwise; `KVIST_GLYPHS`
-overrides, since a terminal cannot be asked which glyphs its font has.
-On a terminal that draws pictures the same six frames go out as real images: the
-generator also writes `ui/skins/claude-code/mascot-images.ts` (256 px transparent palette PNGs, base64), `Mascot` leaves
-its cells blank, and `syncMascotImage` asks `Pointer.showImage` to keep the picture over those cells.
-Two protocols: kitty's (kitty, Ghostty, Konsole; recognised from the environment in `kitty.ts`, never
-under tmux) and Sixel (Windows Terminal 1.22+, WezTerm, mintty, foot, iTerm2…). Sixel cannot be told
-from the environment, so `cli.tsx` asks before Ink owns stdin (`probe.ts`: `CSI 16 t`/`14 t`/`18 t` for
-the cell size in pixels and `CSI c`, last, whose reply lists attribute 4 for Sixel and is the barrier
-that ends the wait; 300 ms at most). `Pointer` decodes the PNG (`png.ts`, node zlib), scales it to
-columns × cell width pixels by nearest neighbour and encodes it (`sixel.ts`, P2=1 so transparent
-pixels stay the terminal's own); an unknown cell size is taken as 8×16, which never overflows the
-cells. A Sixel picture is part of the cells, so a moved or removed one is erased by repainting the
-rows under it, where a kitty picture is deleted by id.
-A picture lives in the terminal's graphics layer and does not move with text, so `ClaudeScreen` re-syncs
-after every render and the picture is cut like the text: the rows the nearest `overflow="hidden"`
-ancestor clips off the top or bottom take the same band of the picture with them (kitty `y=`/`h=` and a
-smaller `r=`, or fewer pixel rows in the Sixel), and it is removed only once none is left. `Pointer` sends a picture only when its
-frame or place changes and again after a screen clear. iTerm2/WezTerm inline images and sixel are not
-supported; those terminals get the cell art.
-On exit (Ctrl+C or Ctrl+D idle, `/quit`) the alternate screen is gone, so `cli.tsx` prints
-`farewell.ts` on the real screen: the mark, "Kvist agent stopped." and the session to resume —
-the same words as the classic terminal's `render_exit_message`. The resume line appears only if
-`--session-op list` shows that session with a non-empty journal or a checkpoint.
-`Pointer` also paints: Ink erases the whole screen and rewrites it on every update (visible
-flicker at spinner and stream pace), so the tap drops Ink's erase prefix and writes only the rows
-that differ from what it last painted, each at its own position with `ESC[K`; a first frame, a
-resize or a cleared screen writes every row.
-The frame tap depends on Ink's non-incremental `log-update` output
-format; re-check `splitFrame` when upgrading Ink. Not done, and present in Claude Code: click on
-suggestions/dialog options, click to place the cursor, click to expand results, `Ctrl+o`
-transcript mode; the approval dialog keeps keyboard-only input in this skin.
-Output is Ink `<Static>` into the real scrollback plus a small live region, so the
-streaming answer is clipped to the viewport there and committed whole on
-`stream_commit`. A turn ends on the additive `turn_end` event that
-`serve_session_multi` writes after every turn — a chat reply has no `final`, so the
-stream alone cannot say the turn is over.
+A separate Node 22 / TypeScript / Ink app, **not** part of the Python process. Paths are relative to
+`frontends/tui/ink/`. `main.py --frontend tui` (or saved `/tui`, `user_config.get_saved_frontend`) calls
+`launch_tui`, which runs `node dist-ui/kvist-tui.mjs` with the exact core command in `KVIST_CORE_CMD`
+(JSON argv: the frozen binary, or interpreter plus `kernel/__main__.py`). The app spawns that core as
+`--frontend stdio-multi`, speaks only `docs/UI_API.md` events and never reads `.kvist/` (session ops go
+through `--session-op`). `launch_tui` returns None, and the classic terminal starts, without a TTY, Node,
+a build (`dist-ui/`; the root's `dist/` is PyInstaller's) or a configured provider. Layout: `core.ts`
+(adapter), `state.ts` (pure reducer), `editor.ts`, `commands.ts`, `ui/*.tsx`, `ui/skins/kvist/`,
+`ui/skins/claude-code/`. Build: `build.mjs` (`npm run build`), not the esbuild CLI, for two memory
+fixes tests and `tsx` do not get: it defines `process.env.NODE_ENV` as production (React's dev build
+keeps a `performance.measure` entry per render) and caps Ink's `measure-text` cache at 1M characters.
 
-A `manifest` event (`ManifestEvent`, built by `core_manifest.build_manifest`) is emitted right after `hello` so frontends can populate pickers (roles, effort levels, providers, models, action types, slash commands, api settings, styles, themes) from the core instead of hardcoding their own copies.
+**Two skins, one app.** `--frontend claude` (saved `frontend: "claude"`, in `main.TUI_FRONTENDS`) runs
+the same bundle with `--skin claude`; `ui/theme.ts` holds both palettes and `applySkin` overwrites the
+shared `color` object once before the first render. Skin-specific structure lives in
+`ui/skins/claude-code/claude.tsx` plus a few `currentSkin()` branches in `input.tsx`/`prompts.tsx`/
+`markdown.tsx`. `/tui` is a picker over `commands.FRONTENDS`; choosing another Node skin exits with
+code 64 and `_switch_frontend` saves and relaunches. Ink layout facts: a bare `Text` beside a wrapping
+block shrinks with the flex row, and a wrapping `Text` in a shrinking column is laid out two cells wider
+than the room left; glyphs go in `<Box flexShrink={0}>` (`Mark`) and wrapping blocks get an explicit
+width (`Rest`).
 
-Two more additive events feed the tool cards and the role label: `action_result`
-(built by `action_result.build_action_result` and emitted from
-`agent_runtime._execute_action`, not from `register_feedback`, which also runs for
-blocked and recovered actions; carries a redacted, head-and-tail-capped `output`,
-`exit_code`, and `first_line` — the 1-based line where a write starts, which
-`executor` now reports so a diff can be numbered) and `route` (the role the router
-actually chose, emitted once per turn from `agent._choose_role`; `source` is
-`RoleRouteResult.source`, `explicit`, or `resume`). Both go through optional UI
-methods probed with `getattr`, so the classic terminal is untouched.
+**The claude skin is fullscreen** (alternate screen, `alternateScreen: true`, root `Box height={rows}`;
+no `<Static>`, no scrollback), modeled on Claude Code's fullscreen rendering
+(code.claude.com/docs/en/fullscreen). `ClaudeScreen` puts every item in a clipped viewport
+(`overflow="hidden"`, `column-reverse` over a growing spacer, so no measurement; measured offsets made
+the view jump); the live thought and streaming answer are the transcript's last children; spinner,
+suggestions, input and footer are pinned below. The spinner word depends on the running role
+(`verbs.spinnerWord`); tokens are the turn's own output; a `⎿  Tip:` line names real Kvist commands
+(`ui/skins/claude-code/tips.ts`: **re-read when commands or `get_style_options` change**); live thought
+and answer are revealed at a steady pace (`useTypewriter`). File edits follow Claude Code's look
+(`claude-diff.tsx`, highlight.js in `highlight.ts` with only the imported languages, colours in
+`syntax.ts`). Successful `run_shell` calls and the reads around them fold into one dim line
+(`collapse`); a failed command is never folded; Ctrl+O toggles the full output (`expanded`). A live
+turn ends with a dim closing line (`done` item, `closeTurn`, `verbs.doneLine`); replayed journals and
+commands get none. The footer shows the routed role only while a turn runs. Scrolling is in-app
+(PageUp/PageDown, Ctrl+Home/End, wheel; a scrolled view keeps its place, a new request snaps back).
+The mouse belongs to the app (`pointer.ts`, SGR 1002+1006): `Pointer` stands between Ink and the
+terminal, strips mouse reports from `stdin`, and wraps `stdout` to recognise each frame (exactly
+`rows` lines behind an erase prefix) so drag/double/triple-click can be hit-tested, painted inverse
+(`screen.ts`) and copied via `clipboard.ts`. Shift+drag reaches the terminal's own selection. It also
+paints: it drops Ink's erase prefix and writes only changed rows (flicker otherwise). **The tap
+depends on Ink's non-incremental `log-update` format; re-check `splitFrame` when upgrading Ink.** Not
+done: click on suggestions/dialog options, cursor placement, click to expand results, transcript mode.
+On exit `cli.tsx` prints `farewell.ts` on the real screen (mark, "Kvist agent stopped.", the session to
+resume only if `--session-op list` shows it non-empty or checkpointed).
 
-**Slash commands over the protocol.** stdio-multi also accepts `{"type":"command",
-"name","args"}` and answers with `command_result`. The handler runs the same wizard
-the classic REPL uses, but with the `EventStreamUI` passed as its `ui` (the
-`choose_role`/`choose_effort`/`choose_style`/`choose_session`/`choose_models`
-wizards take an optional `ui`; `None` keeps the classic `TerminalBannerUI`), so every
-dialog becomes an `input_request` the Ink app renders generically. Handlers live in
-`main.STDIO_COMMANDS` and receive an `event_stdio.CommandContext`; a command runs only
-between turns (`_Gate` refuses it with `ok:false` while a turn or another command is
-running). `session` goes through the agent's own methods, never `session_store`,
-because the live agent holds history the file does not. Every slash command is
-ported. The four that rebuild the agent (`provider`, `change-api`, `del-provider`,
-`full-reset`) call `build_agent` through the `rebuild` closure, which substitutes
-`/dev/null` for stdin — the launch-time build happens before the reader starts, so a
-secret prompt there would hang forever; `full-reset`'s mouse checkbox becomes two
-confirmations. **`resume` is the one command that is not a wizard**: the reader
-queues it as `_RESUME` past the handlers, and `serve_session_multi` runs it with
-`submit_resume`, so it answers with the turn's events and `turn_end`, never with
-`command_result` (the Ink app dispatches it as a turn for the same reason, and its
-`turn_end` also clears `state.command` so a core answering any command that way
-cannot wedge the input box). Because `agent.resume()` may switch sessions itself, a
-`session` event announces the target before the first turn event.
+A `command_result` whose `effects.changed` is true (`/new`, `/session`) empties the feed under a fresh
+welcome block (`beginSession`, epoch bump); for a switch the app then replays that session's journal
+(`sessionHistory` → `restore` with `banner: true`) unless a turn started meanwhile. A closed session
+sets `state.closed` to the core's `closed_notice` and `ClosedBar` (`ui/input.tsx`, both skins) replaces
+the input (Enter = `sendCommand("new")`); the next `session` event without `closed` clears it.
+**The welcome mascot** (`ui/skins/claude-code/mascot.tsx`): 8 rows × 16 columns, six frames played once
+at 2 fps, transparent background. Cells are generated by `make_mascot_frames.py` from
+`mascot/frames/frame_*.png` into `mascot-frames.ts` (Pillow, numpy; `--rows` sets size), in two sets:
+quadrants (2×2 px, every font) and octants (2×4, Unicode 16; the 251 patterns that have a character).
+`mascotGlyphs` picks octants when `WT_SESSION` is set, `KVIST_GLYPHS` overrides. On image terminals the
+frames go out as real images (`mascot-images.ts`, 256 px palette PNGs): kitty graphics (kitty, Ghostty,
+Konsole; from the environment in `kitty.ts`, never under tmux) or Sixel (Windows Terminal 1.22+, WezTerm,
+mintty, foot, iTerm2). Sixel cannot be detected from the environment, so `cli.tsx` asks before Ink owns
+stdin (`probe.ts`: `CSI 16 t`/`14 t`/`18 t` and `CSI c` last as the barrier; 300 ms max); `Pointer`
+decodes the PNG (`png.ts`), scales by nearest neighbour and encodes (`sixel.ts`, P2=1). A picture lives in
+the graphics layer and does not move with text, so `ClaudeScreen` re-syncs after every render and the
+picture is clipped like the text; a Sixel picture is part of the cells (repaint rows to erase), a kitty
+one is deleted by id. iTerm2/WezTerm inline images are not supported.
 
-**Approvals.** `EventApprovalGate` sends a structured `input_request`: `subject` is
-`{kind: "command", command, reason}` or `{kind: "overwrite", path, diff}`, and
-`remember_pattern` is the argv the user may save — `None` for an intrinsically
-DANGEROUS command (`command_policy.assess_command`), so "don't ask again" is never
-offered for one. A reply carrying `remember: true` appends that pattern to the
-project's allow rules; saving is best-effort and never blocks the approval itself.
-The gate only holds the pattern; `TerminalExecutor._approve_or_deny` calls
-`commit_remembered_rule()` after the command ran. Saving during the answer changed
-the policy digest bound to the approval, and the spawn was refused with "approved
-execution context changed before process creation".
-**Switching interfaces.** `/tui` in the Ink app is a *local* dialog: a `choice`
-`input_request` with id `local:frontend`, built in `app.tsx` from `commands.FRONTENDS`
-and answered there, never sent to the core. Picking another interface writes its name
-to the file named by `KVIST_SWITCH_FILE` and exits with code 64; `launch_tui` (which
-creates that file) reads it, validates it through `user_config.save_frontend`, and
-returns `None` so the launcher continues into the classic terminal in the same
-process. The code carries no choice, so a new interface needs only an entry in
-`FRONTENDS` and a launch branch in `_switch_frontend`.
-Tests: `npm test` in `frontends/tui/ink` (the `tests/*.test.ts[x]` files use `tests/fixtures/fake-core.mjs`, never a real core).
-The bundle is built by `build.mjs` (`npm run build`), not the esbuild CLI, for two memory fixes that tests and `tsx` runs do not get: it defines `process.env.NODE_ENV` as production (React's development build keeps a `performance.measure` entry with the props diff for every render, so every streamed thought chunk stayed in memory) and it swaps Ink's unbounded `measure-text` cache for one capped at 1M characters.
+A `manifest` event (`ManifestEvent`, `core_manifest.build_manifest`) follows `hello` so frontends
+populate pickers (roles, effort levels, providers, models, action types, slash commands, api settings,
+styles, themes) from the core. Two additive events feed tool cards and the role label: `action_result`
+(`action_result.build_action_result`, emitted from `agent_runtime._execute_action` and not from
+`register_feedback`, which also runs for blocked actions; redacted, head-and-tail-capped `output`,
+`exit_code`, `first_line`) and `route` (the role actually chosen, once per turn from
+`agent._choose_role`). Both use optional UI methods probed with `getattr`. A turn ends on the additive
+`turn_end` event that `serve_session_multi` writes after every turn (a chat reply has no `final`).
+
+**Slash commands over the protocol.** stdio-multi accepts `{"type":"command","name","args"}` and answers
+with `command_result`. Handlers live in `main.STDIO_COMMANDS` and receive an `event_stdio.CommandContext`;
+the wizards (`choose_role/effort/style/session/models`) take an optional `ui` (`None` = classic
+`TerminalBannerUI`), so every dialog becomes an `input_request` the Ink app renders generically. A
+command runs only between turns (`_Gate` refuses with `ok:false`). `session` goes through the agent's own
+methods, never `session_store`. The four that rebuild the agent (`provider`, `change-api`,
+`del-provider`, `full-reset`) call `build_agent` through the `rebuild` closure with `/dev/null` as stdin
+(a secret prompt there would hang). **`resume` is the one command that is not a wizard:** the reader
+queues it as `_RESUME` and `serve_session_multi` runs it with `submit_resume`, answering with the turn's
+events and `turn_end`, never `command_result`; a `session` event announces the target first because
+`agent.resume()` may switch sessions.
+
+**Approvals.** `EventApprovalGate` sends a structured `input_request`: `subject` is `{kind: "command",
+command, reason}` or `{kind: "overwrite", path, diff}`, and `remember_pattern` is the argv the user may
+save (`None` for an intrinsically DANGEROUS command, so "don't ask again" is never offered). A reply
+with `remember: true` appends that pattern to the project's allow rules, best-effort. The gate only
+holds the pattern; `TerminalExecutor._approve_or_deny` calls `commit_remembered_rule()` *after* the
+command ran (saving earlier changed the policy digest bound to the approval and the spawn was refused).
+**Switching interfaces.** `/tui` is a *local* dialog (`local:frontend`, built in `app.tsx` from
+`commands.FRONTENDS`, never sent to the core). Picking another writes its name to `KVIST_SWITCH_FILE` and
+exits 64; `launch_tui` validates it through `user_config.save_frontend` and returns `None` so the
+launcher continues. A new interface needs only a `FRONTENDS` entry and a `_switch_frontend` branch.
+**First message suggestions** (`starters.ts`): an empty box offers three requests chosen from what the
+folder holds (Kvist's own `.kvist`/`KVIST.md`/`KVIST-CHAT.md` don't count), only while the session has no
+request and no typed history. Tests: `npm test` (`tests/*.test.ts[x]` use `tests/fixtures/fake-core.mjs`).
 
 ### First-run setup screen (`frontends/tui/ink/setup/`, same bundle, `--setup`)
-The only frontend the core has for a machine that has no provider yet: the launcher runs
-`node dist-ui/kvist-tui.mjs --setup` instead of the agent when `main.needs_setup` is true (no
-`--provider`, no `AGENT_LLM_PROVIDER`, nothing saved), or whenever `--setup` is given. An explicit
-`--frontend terminal` is respected, and without Node or the bundle (`quiet=True`) the classic
-terminal's own wizard runs as before. Plain TypeScript on a raw TTY, no React/Ink: `flow.ts` is
-a pure state machine (input and operation results in, next state and one effect out), `scene.ts`
-a pure `state → ANSI rows + hit boxes` function, `run.ts` the terminal (alternate screen, SGR
-mouse, bracketed paste, row-diff painting) and the effects. Tests: `tests/setup.test.ts`.
-- **The picture** is `backdrop/kvist-sunset-valley-squirrel-16x9.png`, embedded by
-  `backdrop/make_backdrop.py` into `setup/backdrop-data.ts` as a 1280×720 256-colour palette PNG
-  (~0.7 MB base64: the bundle must stay one self-contained file; any `--source` works). It is
-  shown whole at `FRAME_FILL` (88%) of the window inside a surround that is the same picture
-  enlarged to cover the window, blurred and darkened (`backdrop.sampleFramed`; a 16:9 source
-  needs no crop). Two ways to show it:
-  - **Image** (kitty, Ghostty; not Konsole, whose layering is unconfirmed; `KVIST_SETUP_PICTURE=cells`
-    turns it off): `picture.ts` bakes brightness, the darker middle and the panel's pane into
-    raw RGB, sent with the kitty graphics protocol (`kitty.placeRgb`, below the cell backgrounds,
-    so a highlighted row or button covers it). The cells around the panel stay empty, and the
-    image is re-sent only when brightness, size or the panel's rectangle change. The cell size in
-    pixels comes from `probe.ts`.
-  - **Cells** (everything else): quadrant glyphs, four pixels a cell with two colours chosen by
-    the best two-group split (`backdrop.sampleCells`), so a 120×36 window is 240×72 pixels.
-    Levels from `color.detectColorLevel`: truecolor, xterm-256 (nearest entry), none (`NO_COLOR`,
-    `TERM=linux`/`dumb`: no picture, panel only). Sixel and octant glyphs are not used.
-- **Motion is short and skippable**: the picture rises from black (0.3 s) and rests until 4 s
-  so it can be looked at, then dims to `DIMMED` (0.55, most detail kept) while the panel fades in
-  over 0.25 s (`run.introFrame`). A slow fade reads as a lagging computer, because an image frame
-  costs ~70 ms to make and ~2 MB to send; frames in motion are sent at half size and the last one
-  at full size. A key or click before the panel shows only brings it up; once it is visible the
-  key counts as usual.
-- **Demo video** (`setup/video.ts`): on the interface step, with the first interface highlighted,
-  the Claude-style demo plays in the preview slot instead of the three text rows. Not a bundled
-  frame set: a 60 fps screen recording does not compress without a real codec (delta frames with
-  zlib came to 23–75 MB at every tolerance tried), so the clip is an H.264 720p60 file
-  (`frontends/tui/ink/demo/claude-style.mp4`, ~3.6 MB, made by `demo/make_demo.py` from
-  `docs/media/Claude-Code-demo-kvist.mp4`) that `build.mjs` copies beside the bundle
-  (`dist-ui/`, also in `kvist.spec` and the wheel's package data) and the **user's own ffmpeg**
-  decodes. It plays only where an image terminal reported its cell size, `ffmpeg` is on PATH
-  (or `KVIST_FFMPEG`) and the clip is found; otherwise the text preview stays, so nothing
-  depends on it. `KVIST_SETUP_VIDEO=off` disables it; `KVIST_REDUCE_MOTION=1` shows one poster
-  frame (second 28). ffmpeg scales to the slot's pixel size (≤ 960 px wide) with `-re`, frames
-  are deflated on the thread pool (`placeRgbAsync`) and drawn at `z=-1`: above cell
-  backgrounds, below text, so the blank cells of the slot show it. Frames identical to the one
-  on screen are skipped. `FramePacer` sends all 60 fps until a frame averages > 14 ms from
-  taking to written, then holds 30 fps (never back up; a new player starts a new pacer): a
-  12×24 px cell holds 60, 20×40 falls to 30. The slot's rows are reserved for all three
-  interfaces so the panel does not change height when the highlight moves.
-- **Flow**: welcome → provider (curated: AnyModel, ChatGPT, OpenAI, Anthropic, DeepSeek,
-  OpenRouter, FreeFlow; "More providers" exits 65 to the classic wizard) → key (masked, last four
-  visible; AnyModel's empty Enter opens registration) → model (only for providers without
-  defaults: `list-models` catalog, type to filter or use the typed id) → interface (Claude-style
-  first). Operations are `--config-op get-config | list-models | set-provider | open-registration`
-  with the payload on stdin; a failed `set-provider` returns to the screen it came from with the
-  core's own message. Esc goes back one step; Esc on the first screen and Ctrl+C quit with
-  nothing saved.
-- **Exit protocol**: 64 = the chosen interface is in `KVIST_SWITCH_FILE`, the launcher saves it
-  through `_switch_frontend` and starts it (provider is saved by then, so `--setup` is dropped);
-  65 = continue in the classic terminal, nothing saved; 66 = a provider-only setup saved a
-  provider; 0 = quit.
-- **Who opens it**: every terminal-hosted entry that has no first-run of its own: the classic
-  terminal, the Ink interfaces and the bare core (`main()` → `needs_setup` → `launch_tui`), and
-  `kvist --acp --login` (Zed's terminal auth) through `_acp_login`, which runs the same screen
-  with `--setup-provider-only` (no folder, no interface step, no workspace created) and falls
-  back to `run_login`'s prompts when Node or the bundle is missing. The VS Code extension, the
-  JetBrains plugin and the local web have their own first-run screens, and the Electron GUI and
-  stdio frontends have no terminal to draw in, so none of them goes through here.
-- **Installer screen** (`curl … | bash`, `scripts/release/install.sh`): the same window, with two
-  steps in front of "welcome": `components` (tick boxes) and `installing` (progress). The screen
-  does no installing itself: `install.sh --plan` prints JSON facts per component (`id`,
-  `available`, `targets` = the paths and commands it would touch), the screen shows them as the
-  warning for the highlighted row, and `install.sh --only <ids> --events` installs and reports
-  one JSON object per line (`step`, `warning`, `error`, `component start|done`, `done`) that
-  fill the progress list (`ops.readPlan`/`runInstall`). Components: `cli`, `node` (pinned
-  version and SHA-256 per OS in the script, never unpacked from an unchecked download), `ffmpeg`
-  (FFmpeg 6.0 static builds from the `b6.0` tag of github.com/eugeneware/ffmpeg-static: Linux x64
-  and macOS arm64/x64, one gzipped binary each, pinned by a SHA-256 recorded when they were
-  chosen — the publisher gives none — and unpacked to `~/.local/share/kvist/ffmpeg`. GitHub is
-  the source because johnvansickle.com served ~0.2 MB/s, which read as a hang. Node.js and ffmpeg
-  each have mirrors (`NODE_MIRRORS`, `FFMPEG_MIRRORS`: npmmirror, USTC) holding the same files:
-  `rank_mirrors` asks all servers for their first megabyte at once (8 s at most) and
-  `download_verified` takes them fastest first, keeping a file only if it has the pinned SHA-256,
-  so a mirror cannot change what is installed and one slow or blocked route does not stall it. Any failure
-  of this optional item is a warning and the install goes on; downloads give up under 5 kB/s
-  for 30 s and report their size once a second.
-  `video.findFfmpeg` finds it after `KVIST_FFMPEG` and PATH, and
-  `run.ts` looks again when an installation finishes so the video plays in the same session),
-  `jetbrains`
-  and `vscode` (unavailable, shown dimmed, when no IDE is found), `path` (one line appended once
-  to the login shell's startup file). `cli` cannot be unticked. Keyboard (↑↓/Tab, Space or X,
-  digits, Enter, Esc, Q) and mouse (a click on a row ticks it, buttons) each work alone; the
-  copy is in `strings.ts` (`componentLabels`, `componentActions`, English and Russian).
-  **Build tools** (`BUILD_TOOLS` in `flow.ts`: `python`, `libpython`, `binutils`) sit under one
-  folding row (`choiceRows`: a click or Space on it, → to unfold, ← to fold from the row or from
-  inside; folded, it shows how many are ticked). They are the system packages `install_cli.py`
-  checks for (`python3`+venv+pip, `python3-dev`/`python3-devel`, binutils' `objdump`; pacman's
-  python already ships libpython). They start ticked in the screen (the user's choice; the folding
-  row shows how many), while the script's own `--only` default never includes them. `--plan` reports `privilege` (`root`, `cached` = sudo needs no password, `password`,
-  `none`) and per item `reason` (`present`, `unsupported`) and the exact commands (apt-get, dnf,
-  zypper, pacman). With `password`, the screen hands the terminal over before installing
-  (`run.suspendTerminal`: leaves the alternate buffer and raw mode, `sudo -v`, then repaints and
-  dispatches `elevated`), so the script's own `sudo -n` finds the cached credentials; a refused
-  password returns to the choice. With `none`, the script emits a warning with the whole
-  command sequence for the person to run themselves and marks the item `failed`; the warnings
-  are repeated on the welcome screen.
-  **Bootstrap**: with a terminal (`/dev/tty` opens; stdin is the script under a pipe) and none of
-  `--only`/`--from`/`--events`/`KVIST_INSTALL_PLAIN`, the script downloads `kvist-<os>-<arch>` and
-  the pinned Node.js into its temporary folder, then runs `kvist-core --installer` with
-  `KVIST_INSTALL_SCRIPT`, `KVIST_INSTALL_CACHE` (assets already fetched: `--cache`),
-  `KVIST_NODE_HOME` and `KVIST_NODE` (`main.find_node`: that, then `node/bin/node` beside the
-  frozen binary, then PATH). `--installer` implies the setup screen, and the Ink app starts on
-  `components` when `KVIST_INSTALL_SCRIPT` is set; after the install it goes on to "welcome".
-  Windows (`install.ps1`) has no screen yet. `KVIST_RELEASE_URL` points the download at a mirror.
-  Release binaries carry the bundle: `plugin-release.yml` builds `frontends/tui/ink` before
-  PyInstaller on all three platforms. Tests: `scripts/tests/test_release_install_sh.py`
-  (plan, `--only`, events, PATH once, node copy), `kernel/tests/test_frontends.py`
-  (`find_node`, `--installer`), `tests/setup.test.ts` (keyboard-only, mouse-only, mixed, failure).
-  The user installs a prebuilt release; `install_cli.py` (a build from source) is the developer path.
-- **A wide folder is asked about once** (`flow.widthWarning`, `folders.breadthOf`): when "Get
-  started" is pressed with the home folder, the top of a disk (or the drive list), the folder of all
-  homes or Desktop/Documents/Downloads as the workspace, the `broad` step names what Kvist could
-  read and change there and offers "Choose a folder" (the first answer, so Enter is the safe one),
-  "Use it anyway" (U; remembered in `broadAccepted` for that folder) and Back. The first screen
-  also says in one line what Kvist does not do (no `.env` or SSH keys, asks before risky commands,
-  `/revert`), and in a window too short for all of it drops the time note, then the gaps, then
-  the description, never the buttons.
-- **Small things that matter**: the first screen names the working folder; the key field takes a
-  paste with quotes or `Bearer ` and Tab shows or hides it; a known prefix mismatch (Anthropic
-  `sk-ant-`, OpenRouter `sk-or-`) is a quiet warning, never a block; a failed connection prints
-  "Could not connect.", the core's own words and the next step; Esc cancels a connection in
-  progress (its late answer is ignored) and after 6 s the wait says how long it has been;
-  the last screen confirms "Connected to X." and, in a window of 28+ rows, previews the
-  highlighted interface's prompt; "Starting Kvist…" holds 450 ms so the window does not go blank
-  between interfaces; the model list shows its range (`11–18 of 41`); the terminal title is
-  set and restored; `KVIST_REDUCE_MOTION=1` skips the intro.
-- **Buttons behave like buttons**: the mouse is read in any-motion mode (1003), so a button or a
-  row lights when pointed at; a press shows it sunk (darker, bold text) and nothing happens yet;
-  the action runs on release over the same place (release elsewhere takes it back), held at
-  least 90 ms so a quick click is still seen. The pointer turns into a hand over what can be
-  pressed where the terminal speaks OSC 22 (kitty, Ghostty). Moving the pointer does not end
-  the intro; only a press does.
-- **No colour keeps the state readable** (`NO_COLOR`, `TERM=dumb|linux`, level `none`): background
-  colours are dropped, so `scene.monochrome` carries every state in attributes. The button Enter
-  presses (tone `primary`) is inverse video; the highlighted row of any list (providers, models,
-  interfaces, installer components, folder rows) is an inverse row that starts with `>` in the
-  cell every row leaves blank; a pointed-at element is underlined and a held one also bold; dim
-  text stays dim. A switched-on toggle (tone `toggled`, the Hidden button) is only bold so the
-  inverse stays unique to the default action. The welcome and broad-folder screens have no focus
-  ring by design: Enter is the primary button, F/U/Q/Esc are the others, and Tab moves only in
-  lists. Coloured levels draw no inverse video.
-- **Working folder chooser** (`setup/folders.ts` state machine, `setup/listing.ts` reads and makes
-  folders, scene in `scene.buildFolder`): the welcome screen's "Working folder" button (or F)
-  swaps the small dialog for a large glass pane, the picture showing through it, with the dialog
-  gliding to the new size in three frames. Rows are "use this folder", the parent and the
-  subfolders (files are only counted; folders with `.git` are marked); the trail above is
-  clickable, places (Home, the start folder, `/`), New folder (Ctrl+N), Hidden (Ctrl+D), typing
-  filters, Backspace/← go up, Enter opens, Tab reaches the buttons. Icons are Nerd Font glyphs
-  where the terminal ships them (kitty, Ghostty, WezTerm; `KVIST_ICONS=nerd|plain` forces it) and
-  plain Unicode elsewhere. The chosen folder travels to the launcher on the second line of
-  `KVIST_SWITCH_FILE` (`_use_setup_folder`) and becomes `--workspace` of the interface that starts.
-- **Platforms**: Linux is exercised for real (pty runs and kitty). Paths in the chooser follow
-  the path's own flavour (`folders.flavour`: `C:\\…` and UNC are Windows, the rest Unix), so both
-  readings are unit-tested on any machine. On Windows (`process.platform`) there is a level above
-  each drive's root: `..` at a root, the Drives place and `Ctrl`-less Backspace/← lead to the
-  list of drives (`DRIVES`, answered by `listing.listDrives`: letters A–Z that answer within
-  1.5 s), and a drive's row enters its root; nothing can be chosen from that list. macOS
-  Terminal.app has no SGR mouse mode, so the old `ESC [ M` reports are parsed too. Not run on
-  macOS or Windows themselves: Windows Terminal (`WT_SESSION` gives truecolor; VT input and mouse
-  are Node's and libuv's doing) and the legacy console (no `TERM`, so no picture).
+The launcher runs `node dist-ui/kvist-tui.mjs --setup` instead of the agent when `main.needs_setup` (no
+`--provider`, no `AGENT_LLM_PROVIDER`, nothing saved) or whenever `--setup` is given. An explicit
+`--frontend terminal` is respected; without Node or the bundle (`quiet=True`) the classic wizard runs.
+Plain TypeScript on a raw TTY, no React/Ink: `flow.ts` (pure state machine: input and results in, next
+state and one effect out), `scene.ts` (pure `state → ANSI rows + hit boxes`), `run.ts` (terminal:
+alternate screen, SGR mouse, bracketed paste, row-diff painting, effects). Tests: `tests/setup.test.ts`.
+- **Picture:** `backdrop/kvist-sunset-valley-squirrel-16x9.png`, embedded by `backdrop/make_backdrop.py`
+  into `setup/backdrop-data.ts` as a 1280×720 256-colour palette PNG (~0.7 MB base64; the bundle must stay
+  one file). Shown whole at `FRAME_FILL` (88%) inside a blurred, darkened enlargement of itself. Two
+  modes: **Image** (kitty, Ghostty; not Konsole; `KVIST_SETUP_PICTURE=cells` turns it off) — `picture.ts`
+  bakes brightness, the darker middle and the panel's pane into raw RGB sent via `kitty.placeRgb` below
+  the cell backgrounds; or **Cells** (everything else) — quadrant glyphs, two colours per cell by best
+  two-group split (`backdrop.sampleCells`). Colour levels from `color.detectColorLevel` (truecolor,
+  xterm-256, none for `NO_COLOR`/`TERM=linux|dumb`: panel only). Sixel and octants are not used here.
+- **Motion is short and skippable:** the picture rises from black (0.3 s), rests until 4 s, dims to
+  `DIMMED` (0.55) while the panel fades in over 0.25 s (`run.introFrame`); a slow fade reads as a lagging
+  computer (an image frame costs ~70 ms and ~2 MB), so frames in motion are half size. A key or click
+  before the panel shows only brings it up. `KVIST_REDUCE_MOTION=1` skips the intro.
+- **Demo video** (`setup/video.ts`): on the interface step the Claude-style demo plays in the preview slot.
+  A 60 fps recording does not compress without a real codec, so the clip is an H.264 720p60 file
+  (`demo/claude-style.mp4`, ~3.6 MB, made by `demo/make_demo.py` from `docs/media/Claude-Code-demo-kvist.mp4`)
+  that `build.mjs` copies beside the bundle (also in `kvist.spec` and the wheel's package data) and the
+  **user's own ffmpeg** decodes. Plays only where an image terminal reported its cell size, `ffmpeg` is on
+  PATH (or `KVIST_FFMPEG`) and the clip is found; otherwise the text preview stays. `KVIST_SETUP_VIDEO=off`
+  disables it; reduced motion shows one poster frame. Frames are deflated on the thread pool and drawn at
+  `z=-1`; `FramePacer` sends 60 fps until a frame averages > 14 ms, then holds 30 (never back up).
+- **Flow:** welcome → provider (curated: AnyModel, ChatGPT, OpenAI, Anthropic, DeepSeek, OpenRouter,
+  FreeFlow; "More providers" exits 65 to the classic wizard) → key (masked; AnyModel's empty Enter opens
+  registration) → model (only for providers without defaults, `list-models` catalog) → interface
+  (Claude-style first). Operations are `--config-op get-config | list-models | set-provider |
+  open-registration` with the payload on stdin; a failed `set-provider` returns to the screen it came from.
+  Esc goes back; Esc on the first screen and Ctrl+C quit with nothing saved.
+- **Exit protocol:** 64 = chosen interface is in `KVIST_SWITCH_FILE` (launcher saves it via
+  `_switch_frontend`, `--setup` dropped); 65 = continue in the classic terminal, nothing saved; 66 = a
+  provider-only setup saved a provider; 0 = quit.
+- **Who opens it:** every terminal-hosted entry without a first-run of its own: classic terminal, Ink
+  interfaces, the bare core (`main()` → `needs_setup` → `launch_tui`), and `kvist --acp --login` through
+  `_acp_login` with `--setup-provider-only` (no folder, no interface step; falls back to `run_login`'s
+  prompts without Node). VS Code, JetBrains and local web have their own first-run screens; the Electron
+  GUI and stdio frontends have no terminal.
+- **Installer screen** (`curl … | bash`, `scripts/release/install.sh`): the same window with two extra
+  steps, `components` (tick boxes) and `installing` (progress). The screen installs nothing itself:
+  `install.sh --plan` prints JSON facts per component (`id`, `available`, `targets`), and
+  `install.sh --only <ids> --events` installs and emits one JSON object per line (`step`, `warning`,
+  `error`, `component start|done`, `done`) (`ops.readPlan`/`runInstall`). Components: `cli` (cannot be
+  unticked), `node` (pinned version and SHA-256 per OS, never unpacked from an unchecked download),
+  `ffmpeg` (FFmpeg 6.0 static builds from github.com/eugeneware/ffmpeg-static tag `b6.0`, pinned by a
+  SHA-256 recorded when chosen, unpacked to `~/.local/share/kvist/ffmpeg`; failure is a warning), `jetbrains`
+  and `vscode` (dimmed when no IDE is found), `path` (one line appended once to the login shell's startup
+  file), and **build tools** (`BUILD_TOOLS` in `flow.ts`: `python`, `libpython`, `binutils`; the system
+  packages `install_cli.py` checks for, ticked in the screen, never in the script's `--only` default).
+  Node.js and ffmpeg have mirrors (`NODE_MIRRORS`, `FFMPEG_MIRRORS`); `rank_mirrors` probes all at once
+  (8 s max) and `download_verified` takes them fastest first, keeping a file only with the pinned SHA-256,
+  giving up under 5 kB/s for 30 s. `--plan` reports `privilege` (`root|cached|password|none`) and the exact
+  package-manager commands; with `password` the screen hands the terminal over for `sudo -v`
+  (`run.suspendTerminal`), with `none` the script warns with the whole command sequence and marks the item
+  `failed`. `video.findFfmpeg` looks after `KVIST_FFMPEG`, PATH, then the install dir, and again when an
+  installation finishes. **Bootstrap:** with a terminal (`/dev/tty` opens) and none of
+  `--only`/`--from`/`--events`/`KVIST_INSTALL_PLAIN`, the script downloads `kvist-<os>-<arch>` and the pinned
+  Node into its temp folder, then runs `kvist-core --installer` with `KVIST_INSTALL_SCRIPT`,
+  `KVIST_INSTALL_CACHE`, `KVIST_NODE_HOME`, `KVIST_NODE` (`main.find_node`: that, then `node/bin/node` beside
+  the frozen binary, then PATH). `--installer` implies the setup screen, which starts on `components` when
+  `KVIST_INSTALL_SCRIPT` is set. Windows (`install.ps1`) has no screen yet. `KVIST_RELEASE_URL` points the
+  download at a mirror. Release binaries carry the bundle (`plugin-release.yml` builds `frontends/tui/ink`
+  before PyInstaller). Tests: `scripts/tests/test_release_install_sh.py`, `kernel/tests/test_frontends.py`,
+  `tests/setup.test.ts`. Users install a prebuilt release; `install_cli.py` is the developer path.
+- **A wide folder is asked about once** (`flow.widthWarning`, `folders.breadthOf`): "Get started" with the
+  home folder, a disk top, the folder of all homes or Desktop/Documents/Downloads opens the `broad` step
+  (choose a folder / use it anyway, remembered in `broadAccepted` / back). The first screen says in one line
+  what Kvist does not do (no `.env` or SSH keys, asks before risky commands, `/revert`).
+- **Input behavior:** the key field accepts a paste with quotes or `Bearer `, Tab shows/hides it, a known
+  prefix mismatch is a quiet warning, never a block; Esc cancels a connection in progress; the mouse is
+  read in any-motion mode (1003): a button lights when pointed at, a press shows it sunk, the action runs on
+  release over the same place (held ≥ 90 ms), the pointer becomes a hand via OSC 22 (kitty, Ghostty).
+- **No colour keeps state readable** (`scene.monochrome`): the primary button is inverse video, the
+  highlighted list row is inverse starting with `>`, a pointed-at element is underlined, held also bold, a
+  toggle (tone `toggled`) is only bold. Coloured levels draw no inverse video.
+- **Working folder chooser** (`setup/folders.ts` state machine, `setup/listing.ts`, scene `buildFolder`):
+  rows are "use this folder", the parent and subfolders (files only counted; `.git` marked); clickable
+  trail, places, New folder (Ctrl+N), Hidden (Ctrl+D), typing filters. Icons are Nerd Font glyphs where the
+  terminal ships them (`KVIST_ICONS=nerd|plain`). The chosen folder travels on the second line of
+  `KVIST_SWITCH_FILE` (`_use_setup_folder`) and becomes `--workspace`. Paths follow their own flavour
+  (`folders.flavour`: `C:\\…` and UNC are Windows); on Windows a `DRIVES` level sits above each root
+  (`listing.listDrives`). Terminal.app's old `ESC [ M` mouse reports are parsed too. Linux is exercised
+  for real; macOS and Windows are not.
 - Copy is bilingual (`setup/strings.ts`, locale from `KVIST_LANG`/`LC_ALL`/`LANG`).
-
-**First message suggestions** (`starters.ts`, `InputBox` `starters`): an empty box in either Node
-skin offers three requests chosen from what the folder holds (empty, a project by `.git` or a
-build manifest, other files; Kvist's own `.kvist`/`KVIST.md`/`KVIST-CHAT.md` do not count, as in the
-core's `current_workspace_context`). They are shown only while the session has no request and no
-earlier run left typed history (`history` is read first, so they do not flash); the arrows choose,
-Tab or Enter put the line in the box and a second Enter sends it. Not clickable: the Pointer layer
-only selects text. Copy follows `KVIST_LANG`/`LANG`.
 
 ### Kvist Glass (`frontends/tui/glass/`, Rust: ratatui + crossterm)
 User-facing name: **Classic** (pickers, notices, READMEs); ids, paths and `--frontend glass` keep "glass".
-"Classic Legacy" is the prompt_toolkit terminal and keeps its name.
-A terminal interface drawn over a photograph with the kitty graphics protocol; public docs in
-its `README.md` / `README.ru.md`. It refuses a terminal without kitty graphics before taking
-the screen (`kvist-glass --check`, exit 3; tmux/screen/Zellij refused too) and runs the core as
-`--frontend stdio-multi --wake` (`core.rs`; `KVIST_CORE_CMD` or the checkout's `.venv`).
-Modules: `probe` (terminal check), `kitty` (upload once, then place/move by id; z-layers
-below cell backgrounds), `backdrop` (photo fit, 4 blur levels, glass cards with AA corners and
-a rim, computed on a worker thread), `pictures` (scene → placements), `protocol` (core JSON →
-`model::CoreEvent`), `model`, `dialog` (every `input_request`: choice/text/secret/confirm, approvals
-with `subject` and Always via `remember_pattern`), `models` (Ctrl+P picker across providers),
-`edit` (word boundaries for Alt/Ctrl+arrows, Backspace and Delete: letters, digits and `_`), `markdown` + `highlight` (answers as CommonMark via pulldown-cmark; code colours from syntect/two-face scopes mapped to the palette; grammars load on a thread at start), `slash` (the `/` command list: the Ink app's `suggest`/`resolveEnter` behaviour, glass card that frosts in; the list is a copy of the core-routed names in `frontends/tui/ink/commands.ts` plus `tui`),
-`screen` (browser preview: fetches `screen.frame_url`, loopback only), `view`, `app`, `anim`
-(tweens, the 3-piece `Ease::Burst`, frame pacing; `KVIST_GLASS_FPS`, default 60).
-Core features it relies on (all in `docs/UI_API.md`): `action_result.lines_added/lines_removed`
-(executor's `line_changes`), the live-only `helper_activity` event (`helpers._HelperUI`
-forwards each helper call), the `catalog` command and `models PROVIDER FAST SMART`.
-Launcher: `--frontend glass` / saved `glass` → `main.launch_glass` (`KVIST_GLASS`, then PATH,
-then `_GLASS_BUILD`, which is also where `kvist.spec` packs the build in a frozen binary);
-`--check` must see the real tty (only stderr is captured); any refusal falls back to the Ink UI.
-`/tui` inside Glass is local (`local:frontend`, exit 64 + `KVIST_SWITCH_FILE`). Installer:
-`install_rust.py` (C compiler + rustup; not on Windows), `install_cli.py::build_glass`, release
-CI builds it for Linux/macOS. Windows is not supported by design (no kitty graphics).
-Verify visually on a private `Xvfb :97` running kitty (`import -window <id>`), never by
-screenshotting the user's desktop; live core runs need a copy of the config (`KVIST_CONFIG_DIR`)
-and a fresh scratch workspace (a reused one remembers denied approvals).
+"Classic Legacy" is the prompt_toolkit terminal. A terminal interface drawn over a photograph with the
+kitty graphics protocol; docs in its `README.md` / `README.ru.md`. It refuses a terminal without kitty
+graphics before taking the screen (`kvist-glass --check`, exit 3; tmux/screen/Zellij refused) and runs the
+core as `--frontend stdio-multi --wake` (`core.rs`; `KVIST_CORE_CMD` or the checkout's `.venv`).
+Modules: `probe`, `kitty` (upload once, then place/move by id; z-layers below cell backgrounds),
+`backdrop` (photo fit, blur levels, glass cards, worker thread), `pictures`, `protocol` (core JSON →
+`model::CoreEvent`), `model`, `dialog` (every `input_request`; approvals with `subject` and Always via
+`remember_pattern`), `models` (Ctrl+P picker), `edit`, `markdown` + `highlight` (pulldown-cmark,
+syntect/two-face), `slash` (a copy of the core-routed names in `frontends/tui/ink/commands.ts` plus `tui`),
+`screen` (browser preview, loopback only), `view`, `app`, `anim` (`KVIST_GLASS_FPS`, default 60), `water`
+(text selection is "pouring water on the glass", a kitty z-layer under text). Relies on core features in
+`docs/UI_API.md`: `action_result.lines_added/lines_removed`, the live-only `helper_activity` event, the
+`catalog` command and `models PROVIDER FAST SMART`.
+Launcher: `--frontend glass` / saved `glass` → `main.launch_glass` (`KVIST_GLASS`, PATH, then
+`_GLASS_BUILD`, also where `kvist.spec` packs the build); `--check` must see the real tty; any refusal
+falls back to the Ink UI. `/tui` inside Glass is local (`local:frontend`, exit 64 + `KVIST_SWITCH_FILE`).
+Installer: `install_rust.py` (C compiler + rustup; not on Windows), `install_cli.py::build_glass`; release CI
+builds it for Linux/macOS. Windows is unsupported by design. Verify visually on a private `Xvfb :97` running
+kitty (`import -window <id>`), never by screenshotting the user's desktop; live core runs need a copy of the
+config (`KVIST_CONFIG_DIR`) and a fresh scratch workspace (a reused one remembers denied approvals).
 
-**Open work (as of Oct 18 2026; commits 64c04a1 and 863c031 are on `main`, not pushed to relay):**
-- First-run setup screen (`frontends/tui/ink/setup/flow.ts` `INTERFACES`) does not offer Glass;
-  offer it only where the setup screen detected kitty graphics (its picture mode).
-- Session switch replays the journal (`Core::history` → `App::show_history`, newest 500 events,
-  settled so no call or helper stays "running"); covered by unit tests, **not yet seen in a live kitty**.
-- Not verified live: the browser preview (needs the browser skill installed and a real
-  `screen` event), Esc Esc stop, mouse clicks on the preview and helper rows, an overwrite
-  approval (`subject.kind == "overwrite"` diff), Ghostty (only kitty 0.49 was run).
-- The launcher's `--role`, `--approval-mode`, `--resume`, `--provider` and model overrides
-  are not passed to Glass; `/resume` is not handled.
-- Model picker: the provider header scrolls away above a deep selection (make it sticky).
-- `install_rust.py` prints the sudo command when a password is needed; the installer screen
-  could hand the terminal over for `sudo -v` like the release setup screen does.
-- Release: the first CI run with the "Build Kvist Glass" step has not happened; check that
-  `kvist-linux-x64` / `kvist-macos-*` carry `frontends/tui/glass/target/release/kvist-glass`.
-- Pre-existing failures found on the way, not caused by Glass: `test_chat_reasoning_stream`
-  (its fake agent lacks `_context_ledger`) and `test_pyproject_modules`
-  (`kernel.skills_bundled.design.references` is missing from `pyproject.toml`, so an installed
-  package lacks the design skill's reference pages).
+**Open work (as of Oct 18 2026):**
+- The first-run setup screen (`setup/flow.ts` `INTERFACES`) does not offer Glass; offer it only where the
+  setup screen detected kitty graphics.
+- Session switch replays the journal (`Core::history` → `App::show_history`, newest 500 events); unit-tested,
+  **not yet seen in a live kitty**.
+- Not verified live: browser preview, Esc Esc stop, mouse clicks on preview and helper rows, an overwrite
+  approval diff, Ghostty (only kitty 0.49 was run).
+- The launcher's `--role`, `--approval-mode`, `--resume`, `--provider` and model overrides are not passed to
+  Glass; `/resume` is not handled. Model picker: the provider header scrolls away above a deep selection.
+- `install_rust.py` prints the sudo command when a password is needed (could hand the terminal over like the
+  release setup screen). Release: the first CI run with the "Build Kvist Glass" step has not happened.
+- Pre-existing failures: `test_chat_reasoning_stream` (fake agent lacks `_context_ledger`) and
+  `test_pyproject_modules` (`kernel.skills_bundled.design.references` missing from `pyproject.toml`).
 
 ### Voice (`frontends/voice/`: the screen, the ears, the voice)
-A separate frontend with its own folder. **Do not put voice code into `frontends/tui/glass`:** the conversation screen
-stays as it is. The screen is its own Rust crate, `frontends/voice/screen/` (`kvist-voice-screen`), and shares no
-source with Glass, so a change in one cannot break the other. `anim backdrop core dialog diff highlight kitty layout
-probe slash strings term text theme` began as copies of Glass's files and are maintained in the voice crate from now on (a fix
-to such a file in one frontend is made in the other by hand); the screen's own files are `orb.rs`, `voice.rs`,
-`voice_overlay.rs`, `voice_strings.rs` and `icons.rs`. `frontends/voice/kvist-voice` starts it (and the ears and the
-voice) with the right environment.
-It is also an interface of the launcher: `--frontend voice` / saved `voice` / `/tui voice` → `main.launch_voice`
-(`KVIST_VOICE_SCREEN`, then `kvist-voice-screen` on PATH, then `_VOICE_SCREEN_BUILD`; `--check` first; it starts
-`frontends/voice/kvist-voice` when that ships beside the screen, else the screen alone; any refusal falls back to the Ink
-UI). `install_cli.py::build_voice_screen` builds it next to Glass, `kvist.spec` packs the binary and the ears'/voice's
-Python files (never the models or their environments), the release workflow has its own build step. The `/tui` picker inside
-Glass (`app.rs`, `ask_frontend`) lists Voice like the Ink app's.
+A separate frontend. **Do not put voice code into `frontends/tui/glass`.** The screen is its own Rust crate,
+`frontends/voice/screen/` (`kvist-voice-screen`), sharing no source with Glass. `anim backdrop core dialog
+diff highlight kitty layout probe slash strings term text theme` began as copies of Glass's files and are
+maintained separately (a fix in one is made in the other by hand); its own files are `orb.rs`, `voice.rs`,
+`voice_overlay.rs`, `voice_strings.rs`, `icons.rs`. `frontends/voice/kvist-voice` starts screen, ears and
+voice with the right environment. Launcher: `--frontend voice` / saved `voice` / `/tui voice` →
+`main.launch_voice` (`KVIST_VOICE_SCREEN`, PATH, then `_VOICE_SCREEN_BUILD`; `--check` first; starts
+`kvist-voice` when it ships beside the screen; any refusal falls back to Ink). `install_cli.py::build_voice_screen`
+builds it, `kvist.spec` packs the binary and the ears'/voice's Python files (never models or their envs).
 
-**The screen** (`screen/src/`): an orb (a planet of clouds after `assets/orb-reference-dusk-valley.png`) drawn per
-pixel into an RGBA picture each frame (30 fps at most, `ORB_FPS`) over the photograph; under it a frosted-glass card
-made like the conversation screen's cards (`backdrop::blur` + `backdrop::card`, regenerated only when its cells
-change) with the state's Codicons icon and a `text::shimmer` label, the words, a dim line with what the room sounded
-like (the ears' `heard` event), the result of a command and a problem; a footer with provider, model, session and the
-keys, and the context meter right-aligned on the row above it; the window title is `Kvist` until the core's
-`session_title` arrives, then `Kvist | <title>`; a `/` lists the commands over the input like Glass's slash menu.
-Text goes through the shared `Painter`. `Voice` is pure state: `on_core`/`on_ears`/`on_voice` take
-events and put `Out` messages in an outbox that the run loop delivers, so every priority is unit-tested without a
-process. The core runs with `AGENT_VOICE_MODE=1` (set in the screen's environment); the two helpers are optional
-commands from `KVIST_VOICE_STT_CMD` / `KVIST_VOICE_TTS_CMD` (JSON arrays, JSON lines both ways, protocol in
-`frontends/voice/README.md`). State priority (`Voice::resolve`): offline, error, the person's own voice, a question
-waiting, the assistant speaking, the turn (thinking/working), loading, waiting. A state is a `Look` and the shown look
-eases towards it, so colours flow into each other; the planet's clouds turn at the state's pace and colours sway
-around each state's own hue (`drift`), never round the wheel, or amber would turn green; the halo reaches zero before
-the texture's edge, or a faint square shows. The voice mutes the ears while it talks, and the person's voice cuts the
-voice off. Without a voice process the orb "speaks" for `speech_estimate`. A `message` event is spoken only when its
-`source` is `reply`. `Voice::on_ask` takes every `input_request` as the conversation screen's own `dialog::Ask` (list
-with search, text, secret, yes/no; read aloud and answered by "да"/"нет" when the agent asks), so a command's wizard
-(`models`, `provider`, `change-api`, `web-search-provider`, `session`...) needs no screen of its own: `Tab` opens
-`voice_overlay::MENU`, each item sends `{"type":"command","name":...}`, the core asks through dialogs and ends with
-`command_result` (shown as a toast; `effects.cancelled` shows nothing). A dialog that belongs to a command (`pending`)
-is not an approval: it does not turn the orb gold and is not read aloud, and speech is never a goal while a dialog or
-the menu is open. The screen opens a fresh session at `hello` (`new` command, silent; `--continue` skips it), because
-the core itself continues the last one and its context kept answering. `kvist-voice-screen --demo` walks through every
-state, `--orb-preview FILE` writes a PNG sheet. Verify visually on a private Xvfb with kitty (see the Glass section),
-with stand-in core/ears/voice scripts: no tokens, no microphone.
+**The screen:** an orb drawn per pixel into an RGBA picture (30 fps max, `ORB_FPS`) over the photograph; under
+it a frosted card (`backdrop::blur` + `card`) with the state's Codicons icon and `text::shimmer` label, the
+words, a dim line with what the room sounded like (the ears' `heard` event), a command's result and problems;
+a footer with provider, model, session, keys and the context meter. The window title is `Kvist` until the
+core's `session_title`, then `Kvist | <title>`. `Voice` is pure state: `on_core`/`on_ears`/`on_voice` take
+events and put `Out` messages in an outbox the run loop delivers (unit-testable without a process). The core
+runs with `AGENT_VOICE_MODE=1`; the two helpers are optional commands `KVIST_VOICE_STT_CMD` /
+`KVIST_VOICE_TTS_CMD` (JSON arrays, JSON lines both ways, protocol in `frontends/voice/README.md`). State
+priority (`Voice::resolve`): offline, error, the person's own voice, a question waiting, the assistant
+speaking, the turn, loading, waiting. The shown look eases toward the state's `Look`; clouds sway around each
+state's own hue (`drift`), never round the wheel (amber would turn green); the halo reaches zero before the
+texture's edge. The voice mutes the ears while it talks, the person's voice cuts the voice off; without a
+voice process the orb "speaks" for `speech_estimate`. A `message` event is spoken only when its `source` is
+`reply`. `Voice::on_ask` takes every `input_request` as `dialog::Ask` (read aloud, answered by "да"/"нет"), so
+a command's wizard needs no screen of its own: `Tab` opens `voice_overlay::MENU`, each item sends
+`{"type":"command","name":...}`. A dialog belonging to a command (`pending`) is not an approval: no gold orb,
+not read aloud, and speech is never a goal while a dialog or the menu is open. The screen opens a fresh
+session at `hello` (`new` command, silent; `--continue` skips it). `--demo` walks through every state,
+`--orb-preview FILE` writes a PNG sheet. Verify on a private Xvfb with kitty and stand-in core/ears/voice
+scripts (no tokens, no microphone).
 
-**Conversation** (ears and screen together): the ears end a phrase after a pause that grows with the speech
-(`endpointing.silence_to_end`; a fixed 1.2 s cut long sentences in two and the second half, without the wake word, was
-dropped), take a further phrase for 6 s after a delivered command, and the screen opens a window without the wake word
-by `{"type":"converse"}` once the assistant has finished speaking (`Voice::open_conversation`: only after the voice has
-begun, never while it talks) or asked a question; stray words, thinking sounds and Whisper's silence-subtitles are
-filtered (`is_real_phrase`).
-
-**The ears** (`app.py`): CTranslate2 needs libcublas.so.12, which a CUDA 13 system lacks, so `cuda_libs.preload()`
-loads pip's copies by path before faster-whisper is imported; every model is tried on a second of silence
-(`LOAD_CHAIN`), because loading succeeds where the first real phrase would die; the large model never runs on the CPU
-(gigabytes of RAM and swap) and is not even loaded when `nvidia-smi` shows too little free VRAM (a failed GPU load
-leaves its staging copy in RAM): the small model then recognizes commands too; `trim_memory()` (malloc_trim) returned
-1.5 GB after loading. The gate asks Whisper twice (no hint, then with the language's hint) because one pass loses a
-short first word 17-22% of the time and two passes lost it 0 of 36; its language is chosen among `WHISPER_LANGUAGES`
-(ru,en), not all of Whisper's, and the main one stays unless another wins by a factor of three. An exception on one
-phrase is logged, never fatal. Another program on the GPU decides what fits: the author's own SoundToText dictation
-holds 3.9 GB of the 8.
-
-**The voice** (`speak.py`, engines `silero_tts.py` and `moss_nano.py`): Silero v5 (default speaker baya) silently drops
-digits, symbols and Latin words, which is what made it unintelligible "sometimes" (slower rate and pauses measured
-useless): `speech_ru.py` writes them out before synthesis, with tests for every kind. MOSS-TTS v1.5 (8B, about 17 GB)
-does not fit an 8 GB GPU; MOSS-TTS-Nano (0.1B, CPU) does, but has no Russian built-in voice (Russian is
-garbled in an English voice, partly intelligible in a Chinese one) and synthesizes about 1.2-1.5x slower than real
-time on a Ryzen 5 3600. Another engine replaces an engine module.
+**Conversation:** the ears end a phrase after a pause that grows with the speech
+(`endpointing.silence_to_end`), take a further phrase for 6 s after a delivered command, and the screen opens
+a window without the wake word by `{"type":"converse"}` once the assistant has finished speaking
+(`Voice::open_conversation`: only after the voice has begun) or asked a question; stray words, thinking
+sounds and Whisper's silence-subtitles are filtered (`is_real_phrase`).
+**The ears** (`app.py`): CTranslate2 needs libcublas.so.12, which a CUDA 13 system lacks, so
+`cuda_libs.preload()` loads pip's copies by path before faster-whisper is imported; every model is tried on a
+second of silence (`LOAD_CHAIN`); the large model never runs on the CPU and is not loaded when `nvidia-smi`
+shows too little free VRAM (the small model then recognizes commands too); `trim_memory()` (malloc_trim)
+returns RAM after loading. The gate asks Whisper twice (no hint, then with the language's hint) because one
+pass loses a short first word 17-22% of the time; language is chosen among `WHISPER_LANGUAGES` (ru,en) and the
+main one stays unless another wins by a factor of three. An exception on one phrase is logged, never fatal.
+**The voice** (`speak.py`, engines `silero_tts.py`, `moss_nano.py`): Silero v5 (speaker baya) silently drops
+digits, symbols and Latin words, so `speech_ru.py` writes them out before synthesis. MOSS-TTS v1.5 (8B) does
+not fit an 8 GB GPU; MOSS-TTS-Nano (CPU) has no Russian built-in voice and runs ~1.2-1.5x slower
+than real time. Another engine replaces an engine module.
 
 ### IDE chat panel (`frontends/ide/vscode/webview/`, shared with `frontends/ide/jetbrains/`)
-One Preact panel serves both IDEs. VS Code hosts it in a webview view
-(`frontends/ide/vscode/src/chatView.ts`); the JetBrains plugin hosts the same bundle in a
-JCEF tool window (`frontends/ide/jetbrains/.../chat/`): its Gradle build runs the extension's
-`npm run build` and packs `out/webview.{js,css}` as resources, never a copy of the
-sources. `webview/host.ts` is the only file that knows the host (`acquireVsCodeApi`
-vs. the `window.kvistHost` bridge built on a `JBCefJSQuery`); the rest of the panel
-sees `post`/`onMessage`. `KvistChatHost.kt` is a port of `chatView.ts` and
-`KvistCoreProcess.kt` of the Ink app's `frontends/tui/ink/core.ts`, so a new
-`ToHost`/`ToWebview` message in `frontends/ide/vscode/src/messages.ts` needs a handler on both sides. Without JCEF the tool window falls
+One Preact panel serves both IDEs. VS Code hosts it in a webview view (`src/chatView.ts`); JetBrains hosts the
+same bundle in a JCEF tool window (its Gradle build runs the extension's `npm run build` and packs
+`out/webview.{js,css}`, never a copy of the sources). `webview/host.ts` is the only file that knows the host
+(`acquireVsCodeApi` vs the `window.kvistHost` bridge on a `JBCefJSQuery`). `KvistChatHost.kt` is a port of
+`chatView.ts` and `KvistCoreProcess.kt` of the Ink app's `core.ts`, so **a new `ToHost`/`ToWebview` message in
+`frontends/ide/vscode/src/messages.ts` needs a handler on both sides.** Without JCEF the tool window falls
 back to the terminal launcher.
 
 ### macOS branches (best-effort; nothing here is verified on a Mac)
-A binary per platform is bundled: `bin/win/kvist.exe`, `bin/linux/kvist.bin`,
-`bin/mac-arm64/kvist.bin`, `bin/mac-x64/kvist.bin`. Both plugins pick one by OS and CPU
-(`KvistBinaryResolver.kt`, `frontends/ide/vscode/src/platform.ts`; an IDE under Rosetta
-reports x64 and takes that one), treat Linux and macOS alike as POSIX (shell launch, `chmod
-+x`, and on a Mac `xattr -d com.apple.quarantine`), and build with a missing other-platform
-binary as a warning only. Gradle's `hostBinaryPath` and the two `build-plugin.sh` pick the
-host's folder; BSD `install` has no `-D`, so they `mkdir -p` first.
-`scripts/release/install.sh` maps `uname` to `kvist-linux-x64`, `kvist-macos-arm64` or
-`kvist-macos-x64`, nests the JetBrains plugin in `plugins/` under
-`~/Library/Application Support/JetBrains/<Product><version>` and finds VS Code inside its
-`.app`; it must stay valid bash 3.2. `install_cli.py` prints the PATH command for the login
-shell (`path_hint`) and drops the quarantine mark; `install_gui.py` copies the unpacked
-`Kvist.app` into `~/Applications` with `symlinks=True`; the electron-builder `mac` target
-makes dmg and zip (the unsigned bundle is ad-hoc signed by electron-builder only when it
-finds no identity, which no one has checked), and `frontends/gui/electron/scripts/build-core.js`
-replaces the old `.venv/bin/python` path. `plugin-release.yml` builds `kvist-macos-arm64`
-(`macos-latest`) and `kvist-macos-x64` (`macos-15-intel`) only on manual runs and every tenth
-run (its `plan` job; GitHub expressions have no `%`); other runs reuse the assets the rolling
-release already holds, so the macOS binaries can lag behind `main`. `platforms.yml` covers
-the macOS layout on its mac runner only: a VSIX with the binary, and `install.sh` under the
-system bash. Unit tests fake the platform; Intel Macs, Android Studio (Google's data root),
-notarization and a real IDE run are not covered.
+A binary per platform is bundled: `bin/win/kvist.exe`, `bin/linux/kvist.bin`, `bin/mac-arm64/kvist.bin`,
+`bin/mac-x64/kvist.bin`. Both plugins pick one by OS and CPU (`KvistBinaryResolver.kt`,
+`frontends/ide/vscode/src/platform.ts`; Rosetta reports x64), treat Linux and macOS alike as POSIX (shell
+launch, `chmod +x`, on a Mac `xattr -d com.apple.quarantine`), and build with a missing other-platform binary
+as a warning only. BSD `install` has no `-D`, so Gradle's `hostBinaryPath` and the two `build-plugin.sh`
+`mkdir -p` first. `scripts/release/install.sh` maps `uname` to `kvist-linux-x64`/`kvist-macos-arm64`/
+`kvist-macos-x64`, nests the JetBrains plugin under `~/Library/Application Support/JetBrains/<Product><version>`,
+finds VS Code inside its `.app`, and **must stay valid bash 3.2**. `install_cli.py` prints the PATH command
+(`path_hint`) and drops the quarantine mark; `install_gui.py` copies `Kvist.app` into `~/Applications` with
+`symlinks=True`; electron-builder's `mac` target makes dmg and zip. `plugin-release.yml` builds the macOS
+binaries only on manual runs and every tenth run (other runs reuse the rolling release's assets, so they can
+lag behind `main`). `platforms.yml` covers the macOS layout on its mac runner only. Not covered: Intel Macs,
+Android Studio, notarization, a real IDE run.
 
 ### Tray icon (`tray_link.py`, `tray_bar.py`, `frontends/tray/`)
-One resident Electron process shows every terminal-hosted core's state (amber while a turn runs, green when one finished unseen) as a module **inside the user's status bar**: a bar on Wayland sits on a layer above ordinary windows, so nothing can be drawn over it, and the icon is the bar's own module instead. `tray_bar.install()` runs at every terminal start (`main()`) and adds `custom/kvist` to Waybar or `[module/kvist]` to Polybar after the first left entry. **It must stay idempotent** — a config that already names the module is never edited again (file lock for parallel starts, first version kept as `<file>.kvist-backup`); `uninstall` removes exactly what it added, and `--tray-op disable` calls it. A click runs `--tray-op toggle`; the panel unfolds from the icon, placed against the bar found under the pointer (`hyprctl layers`, the X11 dock window under the pointer, or the work-area strip; the icon position is remembered because window managers warp the pointer). Bars without an adapter get a system tray icon, never both (`status.bars` decides). The panel is a **read-only** mini chat (`--session-op history`; two processes must not share one live session) and its button raises the terminal window by walking the core's process ancestors (`src/focus-window.js`: hyprctl, xdotool + i3-msg, kdotool, osascript, PowerShell). Cores report over loopback TCP with the token from `~/.kvist/tray.json` (wire format: `docs/UI_API.md` §8e); `LocalAgent.run`/`resume` call `TrayLink`, only when `KVIST_TRAY_HOST=1` (set by `main()` for the terminal frontends, inherited by the Ink core). **At most one daemon**: its single-instance lock, a once-per-process spawn flag, and an exit 30 s after the last core leaves. **Tests must never start the real daemon**: `conftest.py` sets `KVIST_TRAY_CMD` to `true` and clears the host marker, because `main()` writes the marker into `os.environ` and a temporary `HOME` gives every daemon its own lock (this once spawned ~50 Electron processes). **On by default; `tray_enabled: false`** in `~/.kvist/config.json` (only the non-default is stored) turns it off. Verified on i3 + Polybar; the Waybar and Hyprland paths are test-covered only. Docs: `frontends/tray/README.md` (+ `.ru.md`). Tests: `kernel/tests/test_tray_link.py`, `test_tray_bar.py`, `npm test` in `frontends/tray`.
+One resident Electron process shows every terminal-hosted core's state (amber while a turn runs, green when
+one finished unseen) as a module **inside the user's status bar** (a Wayland bar sits on a layer above
+windows, so nothing can be drawn over it). `tray_bar.install()` runs at every terminal start (`main()`) and
+adds `custom/kvist` to Waybar or `[module/kvist]` to Polybar after the first left entry. **It must stay
+idempotent:** a config already naming the module is never edited again (file lock, first version kept as
+`<file>.kvist-backup`); `uninstall` removes exactly what was added (`--tray-op disable`). A click runs
+`--tray-op toggle`; the panel unfolds from the icon, placed against the bar under the pointer. Bars without an
+adapter get a system tray icon, never both (`status.bars`). The panel is a **read-only** mini chat
+(`--session-op history`; two processes must not share one live session) and its button raises the terminal
+window by walking the core's process ancestors (`src/focus-window.js`). Cores report over loopback TCP with
+the token from `~/.kvist/tray.json` (`docs/UI_API.md` §8e); `LocalAgent.run`/`resume` call `TrayLink` only when
+`KVIST_TRAY_HOST=1` (set by `main()` for terminal frontends, inherited by the Ink core). **At most one daemon**
+(single-instance lock, once-per-process spawn flag, exit 30 s after the last core leaves). **Tests must never
+start the real daemon:** `conftest.py` sets `KVIST_TRAY_CMD` to `true` and clears the host marker (this once
+spawned ~50 Electron processes). On by default; `tray_enabled: false` in `config.json` turns it off. Verified
+on i3 + Polybar; Waybar/Hyprland are test-covered only. Docs: `frontends/tray/README.md` (+ `.ru.md`). Tests:
+`test_tray_link.py`, `test_tray_bar.py`, `npm test` in `frontends/tray`.
 
 ### Zed / ACP frontend (`acp_frontend.py`, `acp_events.py`, `frontends/zed/`)
-Zed reaches coding agents over the **Agent Client Protocol**, so this is an
-external agent registration and not an extension: there is no `extension.toml`
-here, and Zed deprecated extension-provided agents in v1.5.0. `kvist --acp`
-speaks JSON-RPC 2.0 on stdin/stdout as an ACP peer (`agent-client-protocol` SDK);
-it is **not** an NDJSON event stream and ignores `PROTOCOL_VERSION`. The
-workspace arrives with `session/new`, so `--workspace` is unused — a session id
-is `k1_` + a hash of `cwd` + session name, stable across restarts. `--login`
-(valid only with `--acp`) configures provider credentials in the launching
-terminal and exits; **no secret ever travels over the ACP connection**, because
-ACP forbids eliciting sensitive data in form mode — a missing key is reported
-with the command to run, never asked for on the wire.
-
-It reuses `LocalAgent` / `EventSession` / `FrontendChannel` / `EventStreamUI` /
-`EventApprovalGate` and is one runtime per ACP session. `acp_events.AcpEventTranslator`
-reconciles Kvist's cumulative snapshots (`stream_chunk`, `reasoning_chunk`,
-`action_output`) against ACP's append-only deltas by keeping the last snapshot per
-`stream_id`/`call_id` and emitting only the new suffix; a snapshot that no longer
-extends the previous one is an upstream buffer reset and is emitted whole.
-Capabilities are declared only where the path works end to end — **no NES, no MCP,
-no image or audio prompts** (`PromptCapabilities(image=False, audio=False)`).
-
-**Never design the ACP/Zed surface from memory.** Re-check the official docs
-before changing it (`frontends/zed/README.md` carries the re-checked source list).
-Locked facts: Zed's `agent_servers` entry is `{"type": "custom", "command",
-"args", "env"}` under `~/.config/zed/settings.json` on macOS and Linux without a
-custom `XDG_CONFIG_HOME`; the Windows location is **not** documented, so
-`install_zed.py` discovers and refuses to invent one. `edit_predictions.provider`
-accepts only `zed | copilot | mercury | codestral | ollama |
-open_ai_compatible_api | none` — there is no external-agent value, so inline
-completion cannot be supplied and must never be claimed. Divergences from the
-VS Code/JetBrains feature set are recorded per capability in
-[`frontends/zed/README.md`](frontends/zed/README.md) / [`frontends/zed/README.ru.md`](frontends/zed/README.ru.md);
-do not call the integration a full copy while anything on the "impossible" list
-stands.
-
-`scripts/installer/install_zed.py` writes exactly one `agent_servers` member through
-`scripts/installer/jsonc_settings.py` — character-range surgery on a JSONC document, so
-the user's comments, key order and line endings survive — and it never builds or
-copies the binary (that is `install_cli.py`'s job; a missing `kvist-core` is a
-loud refusal). It is registered in `scripts/installer/install.py` with `after=("cli",)`,
-which is what keeps a parallel `--all` run from racing for that binary.
+Zed reaches agents over the **Agent Client Protocol**, so this is an external agent registration, not an
+extension (no `extension.toml`; Zed deprecated extension-provided agents in v1.5.0). `kvist --acp` speaks
+JSON-RPC 2.0 on stdin/stdout as an ACP peer (`agent-client-protocol` SDK); it is **not** an NDJSON event
+stream. The workspace arrives with `session/new` (`--workspace` unused); a session id is `k1_` + a hash of
+`cwd` + session name. `--login` (valid only with `--acp`) configures credentials in the launching terminal
+and exits; **no secret ever travels over the ACP connection** (ACP forbids eliciting sensitive data in form
+mode), so a missing key is reported with the command to run. It reuses `LocalAgent` / `EventSession` /
+`FrontendChannel` / `EventStreamUI` / `EventApprovalGate`, one runtime per ACP session.
+`acp_events.AcpEventTranslator` reconciles Kvist's cumulative snapshots (`stream_chunk`, `reasoning_chunk`,
+`action_output`) against ACP's append-only deltas by keeping the last snapshot per `stream_id`/`call_id` and
+emitting only the new suffix (a snapshot that no longer extends the previous one is emitted whole).
+Capabilities are declared only where the path works end to end: **no NES, no MCP, no image or audio prompts.**
+**Never design the ACP/Zed surface from memory:** re-check the official docs first
+(`frontends/zed/README.md` carries the source list). Locked facts: Zed's `agent_servers` entry is
+`{"type": "custom", "command", "args", "env"}` in `~/.config/zed/settings.json` (macOS/Linux without a custom
+`XDG_CONFIG_HOME`); the Windows location is undocumented, so `install_zed.py` discovers and refuses to
+invent one. `edit_predictions.provider` accepts only `zed | copilot | mercury | codestral | ollama |
+open_ai_compatible_api | none`, so inline completion cannot be supplied and must never be claimed.
+Divergences from the VS Code/JetBrains feature set are recorded in `frontends/zed/README.md` / `.ru.md`; do
+not call the integration a full copy while anything on the "impossible" list stands.
+Zed runs the agent as `$SHELL -c '<cmd>'` without `--no-config`, so a printing shell startup breaks the
+stream (mitigated with `env.XDG_CONFIG_HOME`).
+`scripts/installer/install_zed.py` writes exactly one `agent_servers` member via
+`scripts/installer/jsonc_settings.py` (character-range surgery on JSONC; comments, key order and line endings
+survive) and never builds or copies the binary (`install_cli.py`'s job; a missing `kvist-core` is a loud
+refusal). It is registered in `install.py` with `after=("cli",)` to avoid a parallel `--all` race.
 
 ### Voice mode and the narrator (`voice_mode.txt`, `narrator.py`)
-`AgentConfig.voice_mode` (from `AGENT_VOICE_MODE=1`; a voice frontend sets it, nothing else does) changes two things.
-`build_role_system_prompt` appends `kernel/prompts/system/voice_mode.txt` for the action roles and
-`build_report_system_prompt` for the reporter; the chat role is left alone. The text describes the listener's
-situation (no scrollback, no skimming, attention that cannot be refunded) and what a capable friend says after a
-favour, instead of listing rules: the answer is the news, in one breath, and an action that leaves the room (a
-message to a client, a payment) is said out and confirmed first. Keep it principles; a rule gets added only when a
-measured failure needs one.
-The **narrator** speaks while the *strong* model works. `narrating(agent, model)` wraps the action-model call in
-both paths (`call_model` for `usage_kind == "step"`, `call_native_action_model`); `_note_thinking` feeds it the
-cumulative reasoning. A fast-model call is never narrated (it takes seconds), nor is anything before
-`narrator_delay_seconds`; then a daemon thread asks the **fast** model for one breath-sized line at most every
-`narrator_interval_seconds`, with reasoning switched off. Material: the person's request, the newest
-`rolling_summaries` that fit `narrator_context_tokens`, the reasoning since its last line, and its own recent lines.
-Providers that stream no reasoning (OpenAI) leave the narrator the request and the earlier steps, and a call whose
-material did not change is not asked about again. The honesty rule lives in `narrator_prompt.txt`: a turn of thought
-("hm, and if the other way?") is voiced only when the material shows it, and `SILENCE` is a valid reply. Output goes
-out as the live-only `narration` event (`print_narration`, in `_TRANSIENT_EVENTS`), never into a model request, so
-"model-visible ⟺ logged" does not apply; a line still being written when the call ends is dropped. A provider
-failure is a `[narrator]` debug line and silence for that call. A `message` event carries `source` (`reply` from
-`print_user_markdown`, `notice` from `print_result`, `skill` from `print_skill_message`; missing means reply) so a
-frontend that reads aloud reads only the assistant's replies: warnings, clean-up lines and skills' messages are neither
-spoken nor shown by the voice screen. In voice mode the closing ledger the core appends to a
-final answer ("Kvist closed the task's processes: …", `resources.CleanupReport.summary`) goes to the debug channel
-(`agent_runtime.cleanup_summary`): the listener did not ask for it; a stop that could not be confirmed is still said. `JournalingUI.print_narration` is unconditional, so
-set `voice_mode` only where a frontend speaks it. Tests: `kernel/tests/test_narrator.py`.
+`AgentConfig.voice_mode` (`AGENT_VOICE_MODE=1`; a voice frontend sets it, nothing else) appends
+`kernel/prompts/system/voice_mode.txt` to the action roles (and `build_report_system_prompt` for the
+reporter); the chat role is left alone. The text describes the listener's situation (no scrollback, no
+skimming) instead of listing rules: the answer is the news, in one breath, and an action that leaves the room
+(a message to a client, a payment) is said out and confirmed first. Keep it principles.
+The **narrator** speaks while the *strong* model works. `narrating(agent, model)` wraps the action-model call
+in both paths (`call_model` for `usage_kind == "step"`, `call_native_action_model`); `_note_thinking` feeds it
+the cumulative reasoning. Fast-model calls are never narrated, nor anything before `narrator_delay_seconds`;
+then a daemon thread asks the **fast** model (reasoning off) for one breath-sized line at most every
+`narrator_interval_seconds`. Material: the request, the newest `rolling_summaries` fitting
+`narrator_context_tokens`, reasoning since the last line, and its own recent lines. Providers that stream no
+reasoning leave it the request and earlier steps; an unchanged-material call is not asked again. The honesty
+rule lives in `narrator_prompt.txt` (a turn of thought is voiced only when the material shows it; `SILENCE` is
+valid). Output is the live-only `narration` event (`print_narration`, in `_TRANSIENT_EVENTS`), never in a model
+request. A provider failure is a `[narrator]` debug line and silence. A `message` event carries `source`
+(`reply` from `print_user_markdown`, `notice` from `print_result`, `skill` from `print_skill_message`; missing
+means reply) so voice frontends read only replies. In voice mode the closing cleanup ledger goes to the debug
+channel (`agent_runtime.cleanup_summary`) unless a stop could not be confirmed. `JournalingUI.print_narration`
+is unconditional, so set `voice_mode` only where a frontend speaks it. Tests: `test_narrator.py`.
 
 ### Role routing (`role_router.py`)
-Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First-match-wins
-priority: an explicit no-write marker → `reader` (beats topic) → deterministic regex
-rules (devops → coder → chat, bilingual EN/RU) → LLM router call on `fast_model` →
-keyword fallback → default `chat`. Returns a `RoleRouteResult` (alias `RouteDecision`)
-carrying the chosen role and its `source`. `reader` is a full role with its own prompt
-(`kernel/prompts/system/reader_prompt.txt`): it inspects and reports, and its writes are
-disabled. `main.py --role` additionally accepts `auto`, which is "let the router decide"
-rather than a fifth role.
+Four roles (`_VALID_ROLES`): `coder`, `reader`, `devops`, `chat`. First match wins: an explicit no-write marker
+→ `reader` (beats topic) → deterministic regex rules (devops → coder → chat, bilingual EN/RU) → LLM router call
+on `fast_model` → keyword fallback → default `chat`. Returns a `RoleRouteResult` (alias `RouteDecision`) with the
+role and its `source`. `reader` is a full role (`reader_prompt.txt`): it inspects and reports, writes disabled.
+`main.py --role` also accepts `auto` ("let the router decide"), not a fifth role.
 
 ### Context budget (`context_budget.py`)
-How much prompt one call may occupy is derived from the **active model's**
-documented limit, not from one flat number — `context_token_limit` resolves it
-per call, so escalating fast → smart mid-run re-resolves it.
+How much prompt one call may occupy is derived from the **active model's** limit; `context_token_limit`
+resolves it per call, so escalating fast → smart re-resolves it.
+**`MODEL_INPUT_LIMITS` holds max *input* tokens, never the advertised context window**: OpenAI reserves its
+128k max output inside the window (a 400k-window GPT-5 model rejects a prompt over 272k), while Anthropic
+bounds the input alone. Lookup strips any vendor prefix and takes the longest matching prefix; unlisted ids get
+`DEFAULT_INPUT_LIMIT` (256k). The budget is `input_limit * 0.85` (tiktoken under-counts for Anthropic and
+DeepSeek tokenizers, and the margin covers the reply on vendors that bill output from the same window).
+FreeFlow is the exception: its 11k is a hard per-request limit on the free backends.
+Models discovered live (`fetch_available_models`) are normally newer than the table, so three rules apply in order:
+1. `_is_small_openai_tier` runs **before** the table: a `-mini`/`-nano` id in a modern OpenAI family is the 272k
+   tier (otherwise `gpt-5.5-mini` prefix-matches `gpt-5.5` and inherits four times its real limit).
+2. Longest-prefix lookup in `MODEL_INPUT_LIMITS`.
+3. `_family_fallback`: an unlisted member of a known family inherits the family's current generation
+   (new `gpt-6-*` 872k, new `claude-opus-*` 1M, new `claude-*haiku*` 200k).
+**A table entry must never shadow a newer generation** (matching is by prefix; hence `"gpt-5-"` with a trailing
+hyphen, since bare `"gpt-5"` also matched `gpt-5.6-luna`). Too small a budget is silent and permanent, too large
+is corrected by the first rejection. A guess that is too high is corrected by the provider:
+`agent_model.is_context_overflow_error` recognises the rejection, `context_budget.note_input_overflow` records a
+reduced budget for that model id (session-local, 60% of what was refused, only tightening), and `call_model`
+re-trims and re-sends within the same attempt budget. **A learned rejection outranks every override**,
+`AGENT_MAX_CONTEXT_TOKENS` included. Override order: `AGENT_MAX_CONTEXT_TOKENS` → explicit non-zero
+`config.max_context_tokens` → derived, then clamped by anything learned (default 0 = derive).
 
-**`MODEL_INPUT_LIMITS` holds max *input* tokens, never the advertised context
-window**, because the two differ per vendor and only the input side bounds a
-prompt: OpenAI reserves its 128k max output inside the window, so a 400k-window
-GPT-5 model rejects any prompt over 272k ("Input tokens exceed the configured
-limit"), while Anthropic bounds the input alone — on Claude 4.5+ a request whose
-input plus `max_tokens` overflows is accepted and the *reply* is cut short
-instead. Budgeting a GPT-5 model off its 400k window sends a prompt the API
-refuses outright. Lookup strips any vendor prefix (`anthropic/claude-…`) and
-takes the longest matching prefix; anything unlisted gets `DEFAULT_INPUT_LIMIT`
-(256k).
-
-The budget is `input_limit * 0.85` — Kvist measures with tiktoken, which
-under-counts for the Anthropic and DeepSeek tokenizers, and on vendors that bill
-output from the same window the same margin covers the reply. So a 1M-input
-model gets 850k and a 272k-input one gets 231k. FreeFlow is the exception: its
-11k is a hard per-request input limit on the free Gemini/Groq backends.
-
-**A static table cannot be the whole answer**, because `fetch_available_models`
-discovers model ids live from `/v1/models` on every launch and neither OpenAI
-nor Anthropic report a context size there — an id newer than the table is the
-normal case. Three rules cover it, in this order:
-1. `_is_small_openai_tier` runs **before** the table: a `-mini`/`-nano` id in a
-   modern OpenAI family is the 272k tier. Without this pre-check `gpt-5.5-mini`
-   prefix-matches `gpt-5.5` and inherits four times its real limit.
-2. longest-prefix lookup in `MODEL_INPUT_LIMITS` (vendor prefix stripped).
-3. `_family_fallback` — an unlisted member of a known family inherits that
-   family's current generation (a new `gpt-6-*` gets 872k, a new
-   `claude-opus-*` 1M, a new `claude-*haiku*` 200k) rather than collapsing to
-   `DEFAULT_INPUT_LIMIT`, which would quietly cut the budget of every model
-   released after this file was written.
-
-**A table entry must never shadow a newer generation.** Matching is by prefix,
-so a bare `"gpt-5"` entry also matched `gpt-5.6-luna` and every future
-`gpt-5.x`, sizing a 1M model at 272k and keeping rule 3 from ever running for
-that line — hence the trailing hyphen in `"gpt-5-"`. The asymmetry to keep in
-mind when adding entries: a budget that is too small is silent and permanent,
-while one that is too large is corrected by the first rejection.
-
-A guess that is too *high* is then corrected by the provider rather than being
-fatal: `agent_model.is_context_overflow_error` recognises the rejection,
-`context_budget.note_input_overflow` records a reduced budget for that model id
-(session-local; 60% of what was refused, only ever tightening), and `call_model`
-re-trims and re-sends within the same attempt budget. **A learned rejection
-outranks every override**, `AGENT_MAX_CONTEXT_TOKENS` included — otherwise the
-retry would resend exactly the prompt that was just refused.
-
-Override order is `AGENT_MAX_CONTEXT_TOKENS` → an explicit non-zero
-`config.max_context_tokens` → derived, then clamped by anything learned; the
-config field defaults to 0, meaning "derive".
-
-This budget is what the section-priority trimmer
-(`agent_model.trim_prompt_to_token_limit`) enforces, so it also decides how much
-of a file read survives into the prompt. The three caps upstream of it —
-`executor.max_read_chars`, `prompt_value_char_limit`, `prompt_result_char_limit`
-— exist only to stop one runaway value from filling the window, and
-`prompt_value_char_limit` is never below `max_read_chars`: two independent caps
-on the same content is how a 17k-char file used to reach the model as 1.6k, with
-the model re-reading it a few steps later. For the same reason
-`"Detailed recent action data:"` is a **priority-1** section — every other
-section about a read is a summary of that one, so it is not what gets dropped
-first.
-
-`trim_prompt_to_token_limit` is measured, never estimated: `_truncate_section_text`
-takes the caller's tokenizer and binary-searches the cut, and the function ends
-with a hard cut to the budget. A fixed chars-per-token ratio assumes prose and
-left a code-heavy prompt nearly three times over budget — and source code is
-most of what Kvist puts in a prompt. Priority-0 sections are never trimmed, so
-the tiers alone cannot bound the total; the final cut is what makes the promise
-true.
-
-**Required artifacts are searched for once, not per refresh.** `_anchor_artifacts`
-walks the tree to find a partial path the task named; `_anchored_required_artifacts`
-caches that walk and `_execute_action` drops the cache only after an action with a
-side effect — a read cannot create a file. Re-walking on every refresh (twice per
-action) cost ~3 s per action on this repository whenever a named file did not
-exist yet.
-
-**The detail window and the repeat guard are one mechanism.** Full results
-live in `recent_result_details` (`detailed_feedback_limit`, 35), index-aligned
-with `recent_result_signatures`; a repeated action replaces its own earlier copy
-(`agent_runtime._keep_result_in_view`), so a batch of `git_status`/`list_dir`
-cannot push a file read out. `is_repeat_blocked` refuses a repeated read-only
-action only while its earlier answer is still in that window
-(`_earlier_answer_in_view`): refusing to re-read what the runtime itself evicted
-is how a run once spent its last five calls asking for a file it could no longer
-see, and stopped as a "loop". The prompt marks such files next to `Read files`
-(`agent_context._read_files_out_of_view`). The model's only memory across calls
-is `step_summary` (kept on any step, `_keep_step_summary`) — reasoning and
-`thought` never reach the next prompt.
-
-**The prompt carries no standing governance.** Completion blockers, progress,
-required/missing artifacts, "completion status", a compressed restatement of the
-other sections are not rendered: the
-model spent its reasoning reconciling them with the task (one "required artifact"
-sent it to read a 938-line bundle, twice). The gates themselves are unchanged and
-act when a finish is attempted — `_finish_with_final_answer` and
-`_finish_with_report` put the refusal reason into `pending_instruction`
-("Additional instruction", priority 0). "Allowed next actions now" appears only
-while `required_next_actions` actually restricts the next step.
-
-**A change-required gate never leaves only a write, and a bug claim can be
-refuted.** The blockers for a task that expects a change (`not_modified`,
-`no_changes`, `no_activity`) allow `_CHANGE_OR_REPRODUCE_ACTIONS` — the writes
-*and* `run_shell` — because running the reported problem is how the claim is
-confirmed (then fixed) or refuted; a write-only set once left a run unable to
-execute its own reproduction. `role_router.has_deferred_write_marker` ("don't
-change files until steps 1-4 are done") clears `create_goal`/`modify_goal` and
-the required-artifacts guess in `run_loop`: no change is owed while the earlier
-stages are open, and writes stay possible after them (it is not `read_only_goal`).
-A finish with `"outcome": "no_change_needed"` (`parser.FINISH_OUTCOMES`; a
-`done` for frontends) says the reported problem was run and does not occur. The
-runtime checks only what it can: a file was read, the latest `run_shell` that
-actually ran exited 0 (`RunState.last_shell_returncode`) and nothing changed
-(`_no_change_claim_unproven`); then the change blockers stand down for that
-finish. An unproven claim is refused once with what is missing, and a repeat is
-taken as an honest `incomplete`, like every other refused end.
-
-**Section headers in `agent_context.SECTION_PRIORITIES` must match what
-`build_runtime_prompt` renders, character for character.** A header that does
-not match is not a section at all: its text folds into the section above and is
-trimmed at *that* section's priority. `kernel/tests/test_agent_context.py` asserts
-every rendered header is a known key.
+This budget is what the section-priority trimmer (`agent_model.trim_prompt_to_token_limit`) enforces. The caps
+upstream of it (`executor.max_read_chars`, `prompt_value_char_limit`, `prompt_result_char_limit`) exist only to
+stop one runaway value; `prompt_value_char_limit` is never below `max_read_chars` (two independent caps on the
+same content once delivered a 17k-char file as 1.6k). `"Detailed recent action data:"` is a **priority-1**
+section because every other section about a read is a summary of it. The trimmer is measured, never estimated:
+`_truncate_section_text` binary-searches the cut with the caller's tokenizer and the function ends with a hard
+cut to the budget (a fixed chars-per-token ratio assumes prose and left code-heavy prompts ~3x over budget).
+Priority-0 sections are never trimmed, so the final cut is what keeps the promise.
+**Required artifacts are searched for once, not per refresh:** `_anchor_artifacts` walks the tree to find a
+partial path the task named; `_anchored_required_artifacts` caches the walk and `_execute_action` drops the cache
+only after an action with a side effect.
+**The detail window and the repeat guard are one mechanism.** Full results live in `recent_result_details`
+(`detailed_feedback_limit`, 35), index-aligned with `recent_result_signatures`; a repeated action replaces its own
+earlier copy (`_keep_result_in_view`). `is_repeat_blocked` refuses a repeated read-only action only while its
+earlier answer is still in that window (`_earlier_answer_in_view`); the prompt marks evicted files next to `Read
+files` (`agent_context._read_files_out_of_view`). The model's only memory across calls is `step_summary` (kept on
+any step, `_keep_step_summary`); reasoning and `thought` never reach the next prompt.
+**The prompt carries no standing governance.** Completion blockers, progress, required/missing artifacts and
+"completion status" are not rendered (the model spent its reasoning reconciling them with the task). The gates
+act when a finish is attempted: `_finish_with_final_answer` and `_finish_with_report` put the refusal reason into
+`pending_instruction` ("Additional instruction", priority 0). "Allowed next actions now" appears only while
+`required_next_actions` actually restricts the next step.
+**A change-required gate never leaves only a write, and a bug claim can be refuted.** The blockers for a task
+that expects a change (`not_modified`, `no_changes`, `no_activity`) allow `_CHANGE_OR_REPRODUCE_ACTIONS` (writes
+*and* `run_shell`), since running the reported problem confirms or refutes the claim.
+`role_router.has_deferred_write_marker` ("don't change files until steps 1-4 are done") clears
+`create_goal`/`modify_goal` and the required-artifacts guess in `run_loop`; writes stay possible after those
+stages. A finish with `"outcome": "no_change_needed"` (`parser.FINISH_OUTCOMES`) says the reported problem was run
+and does not occur; the runtime checks only what it can (a file was read, the latest `run_shell` that ran exited
+0 via `RunState.last_shell_returncode`, nothing changed: `_no_change_claim_unproven`). An unproven claim is
+refused once with what is missing; a repeat is taken as an honest `incomplete`.
+**Section headers in `agent_context.SECTION_PRIORITIES` must match what `build_runtime_prompt` renders, character
+for character** (a mismatched header folds into the section above and is trimmed at *that* priority);
+`test_agent_context.py` asserts every rendered header is a known key.
 
 ### Model tiers (`agent_model.py`)
-Two models per provider: **fast** and **smart** (`llm_clients.MODEL_ROLES`; a `planner`
-key in an older `~/.kvist/config.json` is ignored). A run always starts on fast
-(a request's length or wording never picks the tier: a real task is longer than any
-sane threshold, so a length rule sent nearly every run to smart from step 1) and
-escalates to smart, once and never back, on parse errors, consecutive errors, or
-stagnation — unless the user explicitly pinned a model.
-Role system prompts are loaded and cached from `kernel/prompts/system/`:
-`{chat,coder,commit,complete,devops,reader,report,router,universal}_prompt.txt`, plus
-`constitution.txt`, `native_tools.txt`, `plan_mode.txt`, `end_session.txt` and
-`end_session_chat.txt`.
-
-User-selectable styles live apart, in `kernel/prompts/styles/{agents,chat}/<slug>.txt`
-(`agents` covers coder/reader/devops, `chat` the chat role). **One session, one
-style**: the choice is stamped into the session document when the session starts
-(`agent_logging.session_styles`, restored by `restore_session_document` *before*
-its empty-document exit) and every read inside that session resolves it through
-`agent_model._session_style_name`, never through the global preference. Without
-that, step 0 and the steps that follow it could come from different beliefs — a
-paranoid opening executed by a minimalist that no longer believes in the pre-check
-it was handed. **The person picks one style, the agent's**: the chat style is
-derived from it by the single table `user_config._CHAT_STYLE_FOR_AGENT_STYLE`
-(`chat_style_for`; default and architect → default, senior-dev, paranoid and
-perfectionist → honest, friendly-developer and explainer → friendly, minimalist →
-no-friendly, fast-and-dirty → energetic), so no frontend carries a chat picker or a
-copy of the table, and `get_saved_style("chat")` reads only `styles.agents` — a
-`styles.chat` left in `~/.kvist/config.json` by an older build is ignored. The
-session stamp keeps both names. `/style` writes the global
-preference and calls `agent.adopt_session_style`: an untouched session adopts the
-new pair (nothing came out of the old one yet), a session that already holds
-work keeps its stamp and the change starts with the next session. The selected
-*file* is still re-read per call, so editing that file lands on the next step.
-The reporter (`report_prompt.txt`) is built by
-`agent_model.build_report_system_prompt`: the constitution, the report prompt and
-this session's agent style, so a report reached through `report_to_user` keeps the
-run's character and voice (a fast-and-dirty prototype label survives into it). The
-workspace instruction file never reaches it.
+Two models per provider: **fast** and **smart** (`llm_clients.MODEL_ROLES`; a `planner` key in an older config is
+ignored). A run always starts on fast (request length or wording never picks the tier) and escalates to smart,
+once and never back, on parse errors, consecutive errors or stagnation, unless the user pinned a model.
+Role prompts are loaded and cached from `kernel/prompts/system/`: `{chat,coder,commit,complete,devops,reader,
+report,router,universal}_prompt.txt`, plus `constitution.txt`, `native_tools.txt`, `plan_mode.txt`,
+`end_session.txt`, `end_session_chat.txt`.
+User-selectable styles live in `kernel/prompts/styles/{agents,chat}/<slug>.txt`. **One session, one style:** the
+choice is stamped into the session document at session start (`agent_logging.session_styles`, restored by
+`restore_session_document` *before* its empty-document exit) and every read resolves it through
+`agent_model._session_style_name`, never the global preference (otherwise step 0 and later steps could run on
+different beliefs). **The person picks one style, the agent's;** the chat style is derived by the single table
+`user_config._CHAT_STYLE_FOR_AGENT_STYLE` (`chat_style_for`; default and architect → default, senior-dev, paranoid
+and perfectionist → honest, friendly-developer and explainer → friendly, minimalist → no-friendly,
+fast-and-dirty → energetic), so no frontend carries a chat picker or table copy, and `get_saved_style("chat")`
+reads only `styles.agents`. `/style` writes the global preference and calls `agent.adopt_session_style`: an
+untouched session adopts the new pair, one that holds work keeps its stamp until the next session. The selected
+*file* is re-read per call. The reporter (`report_prompt.txt`) is built by `build_report_system_prompt`: the
+constitution, report prompt and this session's agent style; the workspace instruction file never reaches it.
 
 ### Reasoning effort (`reasoning_effort.py`)
-One global knob (`/effort`, env `AGENT_REASONING_EFFORT`, persisted
-`reasoning_effort`) on a fixed six-level scale: `false | low | medium | high |
-xhigh | max`. `reasoning_effort.py` owns the per-provider translation, because no
-two providers name or slice it the same way: OpenAI/OmniRoute get a top-level
-`reasoning_effort` (with `max`→`xhigh`, `false`→`minimal`), OpenRouter gets
-`extra_body.reasoning.effort`, DeepSeek gets `reasoning_effort` in `{high,max}`
-(or `extra_body.thinking.type=disabled` for `false`), and the Anthropic /
-FreeFlow wrapper clients receive a neutral `reasoning_effort` marker they
-translate themselves — Anthropic to a `thinking.budget_tokens` block (dropping
-`temperature`/`top_p`, bumping `max_tokens`), FreeFlow forwarding it only to Groq
-gpt-oss models. Injection happens in exactly two places: `_create_json_completion`
-(action loop, via `merge_reasoning_kwargs`) and the chat path in
-`agent.py`; `role_router` is left alone. `_create_completion_with_reasoning_fallback`
-wraps the call: on a provider error that looks like a reasoning rejection
-(`is_reasoning_error`) it strips the reasoning kwargs, retries once, and prints a
-`ui.print_error` warning **every time** (no de-dup — deliberate). `/effort` also
-prints an upfront advisory (`effort_advisory`) about how the chosen level maps for
-the active provider. The effort level is part of the `call_model` response-cache
-key.
-
-**`reasoning_content` is never dropped by context compression.** DeepSeek's
-thinking mode returns a silent HTTP 400 when a resumed/trimmed history carries an
-assistant `content` without the `reasoning_content` it was produced with. Kvist
-does not round-trip `reasoning_content` today (chat history stores `role`/
-`content` only, the action loop rebuilds a single user prompt each step), but the
-compression paths are hardened so the day it does, they won't break it:
-`context_utils.trim_history` returns retained message dicts by identity (no key
-stripped), `agent_model.trim_chat_messages_to_token_limit`
-rebuilds every message with `{**message, ...}`, and `agent_logging._serializable_chat_history`
-keeps `reasoning_content` in `_PERSISTED_MESSAGE_KEYS`. A sliding window may drop a
-whole turn, but must never strip that field from a turn it keeps.
+One global knob (`/effort`, `AGENT_REASONING_EFFORT`, persisted `reasoning_effort`) on the scale `false | low |
+medium | high | xhigh | max`. `reasoning_effort.py` owns the per-provider translation: OpenAI/OmniRoute get a
+top-level `reasoning_effort` (`max`→`xhigh`, `false`→`minimal`), OpenRouter `extra_body.reasoning.effort`,
+DeepSeek `reasoning_effort` in `{high,max}` (or `extra_body.thinking.type=disabled` for `false`), and the
+Anthropic / FreeFlow wrapper clients get a neutral marker they translate themselves (Anthropic to a
+`thinking.budget_tokens` block, dropping `temperature`/`top_p` and bumping `max_tokens`; FreeFlow forwards it
+only to Groq gpt-oss). Injection happens in exactly two places: `_create_json_completion` (action loop, via
+`merge_reasoning_kwargs`) and the chat path in `agent.py`; `role_router` is left alone.
+`_create_completion_with_reasoning_fallback` strips the reasoning kwargs and retries once on a reasoning
+rejection (`is_reasoning_error`), printing a `ui.print_error` warning **every time** (deliberately no de-dup).
+`/effort` prints an upfront advisory (`effort_advisory`). The effort level is part of the `call_model`
+response-cache key.
+**`reasoning_content` is never dropped by context compression** (DeepSeek's thinking mode returns a silent HTTP
+400 when a history carries assistant `content` without its `reasoning_content`). Kvist does not round-trip it
+today, but the compression paths are hardened: `context_utils.trim_history` returns retained messages by
+identity, `trim_chat_messages_to_token_limit` rebuilds with `{**message, ...}`, and
+`agent_logging._serializable_chat_history` keeps it in `_PERSISTED_MESSAGE_KEYS`. A sliding window may drop a
+whole turn but must never strip the field from a turn it keeps.
 
 ### Provider abstraction (`llm_clients.py`)
-Model catalogs (`_MODEL_DEFAULTS`, `_MODEL_OPTIONS`, the fallback chains,
-`_DEPRECATED_FREEFLOW_MODELS`, `_FREEFLOW_MODEL_ALIASES`) are offline fallbacks
-for when live discovery fails, and `kernel/tests/test_llm_clients.py` enforces their
-coherence: **no alias may resolve to a deprecated or unlisted model** (retiring
-Groq's Llama models broke the `mixtral`/`allam` aliases that pointed at them),
-every default must be offered by its provider, and every fallback chain must
-start at an offered model. `kernel/tests/test_context_budget.py` additionally requires
-every shipped model to have an explicit `MODEL_INPUT_LIMITS` entry — the family
-fallback is for ids discovered at launch, not for the catalog Kvist controls.
-
-Six core providers (`openai` / `anthropic` / `deepseek` / `freeflow` / `omniroute` /
-`openrouter`), the OAuth provider `chatgpt` (ChatGPT Plus/Pro: browser sign-in with PKCE and a
-loopback callback, tokens in the private `chatgpt_oauth` section of `config.json`, no API key; calls
-the Responses API with `store=false`; `kernel/providers/chatgpt_auth.py` and `chatgpt_client.py`,
-`--config-op chatgpt-login|chatgpt-logout|chatgpt-accounts`, `auth_type: "oauth"` in the provider
-summary) plus a **manual tier** of 36 third-party OpenAI-compatible vendors
-(`MANUAL_OPENAI_PROVIDERS` in `llm_clients.py`: Qwen, Moonshot/Kimi, Zhipu, Z.ai,
-Xiaomi MiMo + Token Plan, MiniMax, 01.AI, StepFun, SiliconFlow, Baichuan, Qianfan,
-Hunyuan, ModelScope, Mistral, Groq, Together, Fireworks, xAI, Perplexity, Cerebras,
-DeepInfra, Novita, Vercel AI Gateway, Baseten, SambaNova, Nebius AI Studio, Friendli
-AI, Databricks Model Serving, Google AI Studio (direct), Cohere, AI21 Labs, ByteDance
-Doubao (Volcengine Ark), GitHub Models, iFlytek Spark, Scaleway Generative APIs), plus
-arbitrary user-defined endpoints under a `custom:` name
-prefix. `SUPPORTED_LLM_PROVIDERS` leads with `anymodel` (the partner provider and
-blank-start default), then the six core providers, then the rest of
-`tuple(MANUAL_OPENAI_PROVIDERS)` — adding a vendor is one dict entry (`label`,
-`api_key_key`, `base_url_key`, `default_base_url`); every lookup (`provider_label`,
-`required_secret_keys_for_provider`, `resolve_models_for_provider`,
-`fallback_models_for_provider`/`fallback_candidates_for_model`, `get_model_options`,
-`_discovery_endpoints`, `create_llm_client`) keys off that dict or the derived
-`MANUAL_MODEL_PROVIDERS` frozenset instead of a per-provider branch. Manual-tier
-providers are wired like OmniRoute for defaults: one API key (`<slug>_api_key`, env
-`<SLUG>_API_KEY`), a region-overridable default base URL (`<slug>_base_url`), and
-**no static `_MODEL_DEFAULTS`/`_MODEL_OPTIONS` entries** — these vendors' model ids
-change too often for a hardcoded default to stay correct. `databricks` is the one
-entry with `default_base_url = ""`: every workspace has its own
-`<workspace>/serving-endpoints` URL, so `create_llm_client` raises a clear error and
-`_discovery_endpoints` contributes no endpoint until `databricks_base_url` is set —
-never silently falls through to another vendor's default. `gemini` and `groq` are
-deliberately separate credentials from FreeFlow's own `gemini_api_key`/`groq_api_key`
-(`gemini_direct_api_key`/`groq_direct_api_key`): FreeFlow talks to both through its
-own SDK wrapper, these manual-tier entries talk to them as plain OpenAI-compatible
-endpoints, and the two paths must stay independently configurable. Unlike OmniRoute's wizard,
-though, `configure_manual_provider_models_interactively` in `main.py` is wired like
-OpenRouter's: it calls `_model_picker_options`, which is `_discovery_endpoints`'s
-`/v1/models` catalog fetch for that provider, and offers a "choose from the live
-catalog" picker whenever discovery succeeds; text entry (one id, or one per role) is
-only the fallback for a first run with no key yet or an endpoint without `/v1/models`.
-`openai`, `omniroute`, `openrouter`, `deepseek` and every manual-tier provider go
-through the OpenAI SDK directly (OmniRoute is a local OpenAI-compatible gateway
-defaulting to `http://localhost:20128/v1`, models entered manually); `anthropic` uses
-`AnthropicCompatibleClient`; `freeflow` wraps Gemini+Groq via `FreeFlowCompatibleClient`
-with cross-backend fallback. Capability is per provider, not one assumption for all:
-`provider_supports_streaming` is true for openai, openrouter, anthropic, deepseek and
-`anymodel` (the rest of the manual tier defaults to false, same as an unverified custom
-endpoint, until one is individually verified against the live endpoint — AnyModel is
-listed because it is the blank-start default, so leaving it off meant a first run never
-streamed at all), and `provider_supports_json_mode` is true for
-openai, openrouter and deepseek only. `resolve_models_for_provider` /
-`validate_model_selection` / `fallback_candidates_for_model` handle defaults,
-validation, and model fallback chains.
-`fetch_available_models` queries the provider's `/v1/models` on **every** launch and
-degrades to configured models with a warning when that fails.
+Model catalogs (`_MODEL_DEFAULTS`, `_MODEL_OPTIONS`, fallback chains, `_DEPRECATED_FREEFLOW_MODELS`,
+`_FREEFLOW_MODEL_ALIASES`) are offline fallbacks for when live discovery fails; `test_llm_clients.py` enforces
+coherence: **no alias may resolve to a deprecated or unlisted model**, every default must be offered by its
+provider, every fallback chain must start at an offered model. `test_context_budget.py` requires every shipped
+model to have an explicit `MODEL_INPUT_LIMITS` entry (the family fallback is for ids discovered at launch).
+Providers: six core (`openai` / `anthropic` / `deepseek` / `freeflow` / `omniroute` / `openrouter`), the OAuth
+provider `chatgpt` (ChatGPT Plus/Pro: browser sign-in with PKCE and loopback callback, tokens in the private
+`chatgpt_oauth` section of `config.json`, Responses API with `store=false`; `providers/chatgpt_auth.py`,
+`chatgpt_client.py`, `--config-op chatgpt-login|chatgpt-logout|chatgpt-accounts`, `auth_type: "oauth"`), and a
+**manual tier** of 36 third-party OpenAI-compatible vendors (`MANUAL_OPENAI_PROVIDERS`) plus user-defined
+endpoints under a `custom:` prefix. `SUPPORTED_LLM_PROVIDERS` leads with `anymodel` (partner provider and
+blank-start default), then the six core providers, then `tuple(MANUAL_OPENAI_PROVIDERS)`. **Adding a vendor is
+one dict entry** (`label`, `api_key_key`, `base_url_key`, `default_base_url`); every lookup (`provider_label`,
+`required_secret_keys_for_provider`, `resolve_models_for_provider`, `fallback_*`, `get_model_options`,
+`_discovery_endpoints`, `create_llm_client`) keys off that dict or the derived `MANUAL_MODEL_PROVIDERS` frozenset,
+never a per-provider branch. Manual-tier providers have one API key (`<slug>_api_key`, env `<SLUG>_API_KEY`), a
+region-overridable base URL (`<slug>_base_url`) and **no static `_MODEL_DEFAULTS`/`_MODEL_OPTIONS`** (their ids
+change too often). `databricks` has `default_base_url = ""` (every workspace has its own URL): `create_llm_client`
+raises and `_discovery_endpoints` contributes nothing until `databricks_base_url` is set, never falling through to
+another vendor. `gemini` and `groq` use separate credentials from FreeFlow's (`gemini_direct_api_key`/
+`groq_direct_api_key`) and must stay independently configurable. `configure_manual_provider_models_interactively`
+(main.py) offers a live-catalog picker via `_model_picker_options` when discovery works, else text entry.
+`openai`, `omniroute` (local gateway, default `http://localhost:20128/v1`, models entered manually), `openrouter`,
+`deepseek` and every manual-tier provider use the OpenAI SDK; `anthropic` uses `AnthropicCompatibleClient`;
+`freeflow` wraps Gemini+Groq via `FreeFlowCompatibleClient` with cross-backend fallback. Capability is per
+provider: `provider_supports_streaming` is true for openai, openrouter, anthropic, deepseek and `anymodel` (the
+rest of the manual tier is false until individually verified), `provider_supports_json_mode` for openai,
+openrouter and deepseek only. `fetch_available_models` queries `/v1/models` on **every** launch and degrades to
+configured models with a warning.
 
 ### Execution boundary (`executor.py` + `terminal.py` + `command_policy.py` + `sandbox.py` + `process_tree.py` + `secret_paths.py`)
-`SafeExecutor` is the single gate for every action and returns an `ExecutionResult`
-(`ok`, `action_type`, `data`). `search_code` runs a trusted system `rg` (`--no-config`,
-fixed-string, case-insensitive, `.gitignore`-aware, symlinks not followed; the result
-says `skips_gitignored_files`, and `truncated` when more hits exist than the
-`max_results` it was given, up to 200 like the schema; `find_files` has the same
-`truncated`. Three silent cuts once gave the model 12 of the 113 hits it asked for
-(schema 200, executor 50, `compact_for_prompt` 12 per list) and it searched again
-with narrower queries; lists are no longer cut by item count in the prompt) and passes every hit through the same read boundary as
-`read_file`; without one it falls back to walking the tree in Python, which read every
-file whole and took 8.5 s on this repository. It enforces the workspace boundary (all paths resolved and
-checked with `relative_to`, symlink-escape protection), blocks the internal `.kvist`
-dir, and **strictly forbids reading or writing `.env` files**.
+`SafeExecutor` is the single gate for every action and returns an `ExecutionResult` (`ok`, `action_type`,
+`data`). `search_code` runs a trusted system `rg` (`--no-config`, fixed-string, case-insensitive,
+`.gitignore`-aware, symlinks not followed; the result says `skips_gitignored_files` and `truncated` when more
+hits exist than the `max_results` it was given, up to 200; `find_files` has the same `truncated`; prompt lists
+are not cut by item count) and passes every hit through the same read boundary as `read_file`; without `rg` it
+walks the tree in Python (slow). It enforces the workspace boundary (paths resolved and checked with
+`relative_to`, symlink-escape protection), blocks the internal `.kvist` dir, and **strictly forbids reading or
+writing `.env` files**.
 
-**`terminal.py` is split into `terminal_*.py` modules; `terminal.py` stays the import point.**
-It holds `TerminalExecutor` (`__init__`, `run`, `_run_once`, approval, policy,
-`_assess_risk`, `_execute_validated`, env and child-HOME handling) and re-exports the names
-other modules import from `kernel.terminal`. `TerminalExecutor` composes four mixins:
-`ArgumentValidationMixin` (`terminal_validation.py`), `GitValidationMixin`
-(`terminal_git.py`), `InterpreterValidationMixin` (`terminal_interpreters.py`) and
-`ExecutableBindingMixin` (`terminal_bindings.py`); a mixin never imports `kernel.terminal`.
-The rest is module-level: `terminal_types.py` (results, errors, execution-context
-dataclasses), `terminal_rules.py` (forbidden executables and operators, secret-token
-regexes, per-profile allowlists), `terminal_limits.py` (timeout ceilings, resource limits),
-`terminal_env.py` (child environment and controlled PATH), `terminal_paths.py` (file
-identity helpers), `terminal_trust.py` (shebang parsing, venv launcher and trusted system
-executable checks) and `terminal_hitl.py` (HITL flag and alternate screen). Tests patch
-`assess_command` and `resolve_bubblewrap_path` on `kernel.terminal`, so `_assess_risk` and
-`__init__`, the only callers, stay in `terminal.py`.
+**`terminal.py` is split into `terminal_*.py` modules; `terminal.py` stays the import point.** It holds
+`TerminalExecutor` (`__init__`, `run`, `_run_once`, approval, policy, `_assess_risk`, `_execute_validated`, env
+and child-HOME handling) and re-exports the names others import. `TerminalExecutor` composes four mixins:
+`ArgumentValidationMixin` (`terminal_validation.py`), `GitValidationMixin` (`terminal_git.py`),
+`InterpreterValidationMixin` (`terminal_interpreters.py`), `ExecutableBindingMixin` (`terminal_bindings.py`); a
+mixin never imports `kernel.terminal`. Module-level: `terminal_types.py` (results, errors, context dataclasses),
+`terminal_rules.py` (forbidden executables/operators, secret-token regexes, per-profile allowlists),
+`terminal_limits.py`, `terminal_env.py` (child environment, controlled PATH), `terminal_paths.py`,
+`terminal_trust.py` (shebang parsing, venv launcher, trusted system executables), `terminal_hitl.py`. Tests patch
+`assess_command` and `resolve_bubblewrap_path` on `kernel.terminal`, so `_assess_risk` and `__init__`, the only
+callers, stay in `terminal.py`.
 
-Before any of that, `SafeExecutor._relativize_workspace_paths` rewrites an absolute
-`cwd`, absolute argv tokens and a leading `git -C <dir>` into relative form **only when
-the path's real (resolved) location is inside the workspace** — anything else stays as
-written and is refused as before. The policy never sees an absolute path it would
-refuse for being absolute, and the model is told each rewrite (`path_note` in the
-result, appended to the error when the command is refused anyway) so it switches form
-instead of repeating it: a task naming the repository by its absolute path otherwise
-produced "Hard security denial" after "Hard security denial" for paths that never left
-the workspace. The native tool schemas carry the same rule in their `path`/`cwd`/
-`command` descriptions.
+Before any of that, `SafeExecutor._relativize_workspace_paths` rewrites an absolute `cwd`, absolute argv tokens
+and a leading `git -C <dir>` into relative form **only when the path's real location is inside the workspace**
+(anything else is refused as written). The model is told each rewrite (`path_note`, appended to the error when
+the command is refused anyway); the native tool schemas carry the same rule in their `path`/`cwd`/`command`
+descriptions.
 
-Shell path, in order: `SafeExecutor._run_shell` (arg checks, `.env`/`.kvist` guards,
-forwards the routed role) → `TerminalExecutor.run(command, role=...)` → project deny →
-one authoritative hard validator for every pipe segment → intrinsic risk → project
-ask/eligible allow → HITL where required → exact context reconstruction → the same hard
-validator → context comparison → spawn. Hard-denied paths/executables/syntax never invoke
-HITL and cannot be unlocked by project policy. DANGEROUS commands always remain
-per-execution approvals and are never persisted. Allowlist misses are approval-eligible,
-not hard-denial bypasses. The role comes from routing (`executor.set_active_role`), never
-model args. HITL pauses the live TUI; non-TTY approval fails deterministically.
+Shell path, in order: `SafeExecutor._run_shell` (arg checks, `.env`/`.kvist` guards, forwards the routed role) →
+`TerminalExecutor.run(command, role=...)` → project deny → one authoritative hard validator for every pipe
+segment → intrinsic risk → project ask/eligible allow → HITL where required → exact context reconstruction → the
+same hard validator → context comparison → spawn. Hard-denied paths/executables/syntax never invoke HITL and
+cannot be unlocked by project policy. DANGEROUS commands always remain per-execution approvals, never persisted.
+Allowlist misses are approval-eligible, not hard-denial bypasses. The role comes from routing
+(`executor.set_active_role`), never model args. HITL pauses the live TUI; non-TTY approval fails
+deterministically.
 
-The bound execution context includes argv, canonical cwd plus directory identity, role,
-policy digest, sandbox/profile/network, sanitized child-environment digest, lookup and
-target executable identities (plus untrusted executable content), attested shebang
-interpreter identity/digest, the protected-secret mask digest, the external tool-path
-set, and hashes of directly selected scripts/common build files. `_execute_validated`
-requires this context, repeats validation, and aborts if it changed. Parent environment
-inheritance is allowlisted; `AGENT_CHILD_ENV_ALLOW` is the explicit extension mechanism
-and cannot re-enable secrets or loader/startup controls. Every run uses a new private,
-verified-empty child HOME, including explicit workspace mode and the automatic weak
-fallback.
+The bound execution context includes argv, canonical cwd plus directory identity, role, policy digest,
+sandbox/profile/network, sanitized child-environment digest, lookup and target executable identities (plus
+untrusted executable content), attested shebang interpreter identity/digest, the protected-secret mask digest,
+the external tool-path set, and hashes of directly selected scripts/common build files. `_execute_validated`
+requires it, repeats validation, and aborts if it changed. Parent environment inheritance is allowlisted;
+`AGENT_CHILD_ENV_ALLOW` is the explicit extension and cannot re-enable secrets or loader/startup controls. Every
+run uses a new private, verified-empty child HOME, including explicit workspace mode and the weak fallback.
 
-**Inline Python is one argument.** `_interpreter_target` returns mode `inline`
-for `python [safe flags] -c CODE` with exactly one non-empty code item; anything
-else with `-c` (extra arguments, `-cCODE`, `-c` after a script) stays hard-denied,
-and so do the other interpreters' inline modes and `python -`. The code is an argv
-item, so the approved `ExecutionContext.argv` binds it exactly, the approval
-dialog shows it, and the sandbox, the `.env`/`.kvist` token guards and the
-per-execution approval rules apply as to a script. It exists so a reproduction
-can run without writing a file into a workspace the person said not to touch.
+**Inline Python is one argument.** `_interpreter_target` returns mode `inline` for `python [safe flags] -c CODE`
+with exactly one non-empty code item; anything else with `-c` (extra arguments, `-cCODE`, `-c` after a script)
+stays hard-denied, as do the other interpreters' inline modes and `python -`. The code is an argv item, so the
+approved `ExecutionContext.argv` binds it exactly, the approval dialog shows it, and sandbox, token guards and
+per-execution approval apply as to a script.
 
-**Executable scripts with a `#!` line have their interpreter attested**: the shebang is
-parsed (direct, `/usr/bin/env NAME`, `env -S NAME ARGS`), the interpreter is resolved
-with the same sandboxed PATH, and it must be a trusted system binary or a workspace file
-(else hard-denied); its identity/content is bound into the context so an interpreter or
-shebang swap between approval and spawn invalidates approval. A project launcher symlink
-whose target is a user-immutable system binary (e.g. `.venv/bin/python -> /usr/bin/python3`)
-is permitted and keeps its own path as argv[0] so venv/`pyvenv.cfg`/site-packages work;
-a symlink to any other target stays denied. `_verify_venv_python_launcher` also
-accepts a venv Python launcher whose target lives outside those trusted system roots
-(e.g. a `uv`/`pyenv` interpreter under the user's HOME), in every sandbox mode, but only
-when the venv's own `pyvenv.cfg` declares that exact resolved path in its `executable`
-field: the venv can vouch only for the interpreter it was built with, never for an
-arbitrary target, and a mismatch between the declared and effective path is denied
-like any other alias. Under Bubblewrap, HOME is hidden, so `terminal.venv_interpreter_roots`
-read-only binds that interpreter's install root (validated like `AGENT_TOOL_PATHS`) and
-`venv_interpreter_links` recreates, with `--symlink`, only the individual links on the
-way to it (`.venv/bin/python3.11 -> ~/.local/bin/python3.11 -> uv/cpython-3.11-… ->
-cpython-3.11.15-…`, directory links included) — nothing else under those directories
-becomes visible. Without this the project's own Python, and so its tests and linters,
-could not run in the default sandbox. A launcher keeps its own path as argv[0] even when
-found through a bare `python` on the child PATH, or the interpreter starts outside the
-venv and cannot import the project's packages.
+**Scripts with a `#!` line have their interpreter attested:** the shebang is parsed (direct, `/usr/bin/env NAME`,
+`env -S NAME ARGS`), resolved with the same sandboxed PATH, and must be a trusted system binary or a workspace
+file (else hard-denied); its identity/content is bound into the context. A project launcher symlink whose target
+is a user-immutable system binary (e.g. `.venv/bin/python -> /usr/bin/python3`) is permitted and keeps its own
+path as argv[0] (so venv/`pyvenv.cfg`/site-packages work, even when found via a bare `python` on the child
+PATH); a symlink to any other target stays denied. `_verify_venv_python_launcher` also accepts a launcher whose
+target is outside the trusted system roots (e.g. a `uv`/`pyenv` interpreter under HOME) in every sandbox mode,
+but only when the venv's own `pyvenv.cfg` declares that exact resolved path in `executable` (a mismatch is denied
+like any alias). Under Bubblewrap HOME is hidden, so `terminal.venv_interpreter_roots` read-only binds that
+interpreter's install root (validated like `AGENT_TOOL_PATHS`) and `venv_interpreter_links` recreates with
+`--symlink` only the individual links on the way (directory links included); nothing else under those
+directories becomes visible.
 
-**Windows trust** (`terminal_windows_acl.py`): `st_mode` is synthetic there, so
-`_path_is_user_mutable` reads the DACL and calls a path mutable when an allow entry grants a
-write right to any principal except SYSTEM, Administrators and TrustedInstaller
-(inherit-only entries and owner rights are not evaluated; an unreadable DACL or missing
-pywin32 means mutable). The trusted roots are `System32`, `SystemRoot` and the Program Files
-directories, and the child PATH is the system directories plus the entries of the real PATH
-that pass the same directory check — `os.defpath` (`.;C:\bin`) holds no executables. So
-`git` and the OS tools run without the origin-approval gate, and a user-writable Python or
-Node install stays out of PATH until `AGENT_TOOL_PATHS` names it, as on Unix.
+**Windows trust** (`terminal_windows_acl.py`): `st_mode` is synthetic there, so `_path_is_user_mutable` reads the
+DACL and calls a path mutable when an allow entry grants a write right to any principal except SYSTEM,
+Administrators and TrustedInstaller (inherit-only entries and owner rights are not evaluated; an unreadable DACL
+or missing pywin32 means mutable). Trusted roots are `System32`, `SystemRoot` and the Program Files directories;
+the child PATH is the system directories plus real-PATH entries passing the same check (`os.defpath` holds no
+executables). A user-writable Python or Node install stays out of PATH until `AGENT_TOOL_PATHS` names it.
 
-**Project toolchains**: the child PATH prepends existing project-local tool directories
-(`.venv/bin`, `venv/bin`, `node_modules/.bin`) inside the workspace, then validated
-`AGENT_TOOL_PATHS` entries, then trusted system dirs — the user's full HOME/`.local`/
-nvm/pyenv/cargo are never restored. External tool dirs are read-only mounted into
+**Project toolchains:** the child PATH prepends existing project-local tool dirs (`.venv/bin`, `venv/bin`,
+`node_modules/.bin`) inside the workspace, then validated `AGENT_TOOL_PATHS` entries, then trusted system dirs;
+the user's full HOME/`.local`/nvm/pyenv/cargo are never restored. External tool dirs are read-only mounted into
 Bubblewrap and revalidated before spawn.
 
-Read-only Git commands use direct `git SUBCOMMAND` syntax. The spawn argv disables
-repository fsmonitor/index-hook writes, external diff/textconv, implicit signature
-verification, remerge drivers, and recursive submodule helper execution; global options
-before the Git subcommand fail closed. The controlled child PATH omits `/usr/local` and
-other user-mutable search locations.
+Read-only Git commands use direct `git SUBCOMMAND` syntax. The spawn argv disables repository fsmonitor/index-hook
+writes, external diff/textconv, implicit signature verification, remerge drivers and recursive submodule helper
+execution; global options before the subcommand fail closed. The child PATH omits `/usr/local` and other
+user-mutable locations.
 
-**Sandbox honesty**: `auto` selects a trust-checked system Bubblewrap on Linux. Its
-minimal filesystem mounts the writable workspace and required runtime trees, masks
-`.kvist` (tmpfs) and every protected workspace secret (`secret_paths.py` enumerates
-`.env`/`.env.*`, `.ssh`/`.aws`/`.gnupg`/`.kube`/`.azure`, `id_rsa`/`id_ed25519`/
-`id_ecdsa`/`credentials`, `*.pem`/`*.key`/`*.p12`/`*.pfx`/`*.crt`, etc.; files are
-shadowed by read-only `/dev/null`, directories by empty tmpfs), uses an empty
-HOME/ephemeral `/tmp`, hides host `/home` and `/root`, isolates process namespaces, and
-denies network unless `AGENT_SANDBOX_NET=allow`. It never binds the host root. Masking
-neutralises relative/absolute/symlink/runtime-constructed paths (Python, Node, shell,
-AWK, sed, compiled helpers), so arbitrary child code cannot read secrets even when the
-full path is never a single argv token. If auto cannot find trusted bwrap, arbitrary-code
-commands enter a per-execution-approval fallback that project allow cannot silence, and
-are hard-denied if no cgroup v2 scope is available for descendant control. Explicit
-`workspace` is the weaker user-selected host-permission mode — it is warned and does NOT
-provide secret masking or `.kvist` isolation; explicit unavailable `bubblewrap` blocks
-shell execution rather than degrading.
+**Sandbox honesty:** `auto` selects a trust-checked system Bubblewrap on Linux. Its minimal filesystem mounts the
+writable workspace and required runtime trees, masks `.kvist` (tmpfs) and every protected workspace secret
+(`secret_paths.py`: `.env`/`.env.*`, `.ssh`/`.aws`/`.gnupg`/`.kube`/`.azure`, `id_rsa`/`id_ed25519`/`id_ecdsa`/
+`credentials`, `*.pem`/`*.key`/`*.p12`/`*.pfx`/`*.crt`, etc.; files shadowed by read-only `/dev/null`,
+directories by empty tmpfs), uses an empty HOME and ephemeral `/tmp`, hides host `/home` and `/root`, isolates
+process namespaces, and denies network unless `AGENT_SANDBOX_NET=allow`. It never binds the host root. Masking
+neutralises relative/absolute/symlink/runtime-constructed paths in any child code. If auto cannot find trusted
+bwrap, arbitrary-code commands enter a per-execution-approval fallback that project allow cannot silence, and
+are hard-denied without a cgroup v2 scope. Explicit `workspace` is the weaker user-selected mode (warned; no
+secret masking or `.kvist` isolation); explicit unavailable `bubblewrap` blocks shell execution.
 
-**Process-tree control & bounded output** (`process_tree.py`): every spawn runs under a
-supervisor. Detached descendants (`setsid`/`start_new_session`) cannot survive a timeout
-or normal completion — under Bubblewrap the PID namespace reaps them when its init exits,
-and a cgroup v2 scope with `cgroup.kill` tears the whole subtree down on both timeout and
-completion (killpg fallback covers same-session children when no cgroup exists). There is
-no second unbounded `communicate()`: two daemon readers drain stdout/stderr into
-fixed-size buffers and discard the overflow, so parent memory stays bounded while the
-child runs; the tree is always killed before the readers are joined so a held-open pipe
-cannot wedge the parent.
+**Process-tree control & bounded output** (`process_tree.py`): every spawn runs under a supervisor. Detached
+descendants cannot survive a timeout or completion: Bubblewrap's PID namespace reaps them, a cgroup v2 scope with
+`cgroup.kill` tears the subtree down on timeout and completion (killpg fallback without a cgroup). Two daemon
+readers drain stdout/stderr into fixed-size buffers and discard the overflow; the tree is killed before the
+readers are joined so a held-open pipe cannot wedge the parent.
 
-Known limits: transitive imports/build includes and helpers spawned by trusted system
-tools are not individually content-attested; repository/history-aware tools may surface
-protected content not named in argv even though recursive grep/ripgrep is blocked; a
-narrow TOCTOU window remains between final comparison and OS spawn. Explicit `workspace`
-mode offers no OS isolation (no secret masking, no `.kvist` isolation), and detached-
-descendant cleanup there depends on cgroup v2 availability. Windows descendant cleanup is
-best-effort.
+Known limits: transitive imports/build includes and helpers spawned by trusted system tools are not individually
+content-attested; repository/history-aware tools may surface protected content not named in argv; a narrow TOCTOU
+window remains between final comparison and spawn; `workspace` mode has no OS isolation and its cleanup depends
+on cgroup v2; Windows descendant cleanup is best-effort.
 
-Every result the model can be influenced by — `read_file`, `read_multiple_files`,
-`search_code`, `git_status`, `git_diff`, `run_shell`, `web_search`, `fetch_url` —
-carries `untrusted: true` plus an `UNTRUSTED EXTERNAL CONTENT` notice, and
-`agent_runtime.feedback_to_detail` wraps it in `<UNTRUSTED_TOOL_OUTPUT source="...">`.
-JSON encoding does not escape that terminator, so the payload is passed through
-`redaction.defang_prompt_boundary_tags` first: a forged `</UNTRUSTED_TOOL_OUTPUT>` or
-`<PROJECT_INSTRUCTIONS>` becomes `[tag removed by Kvist]` and cannot close its own
-block. Trade-off to know when hacking on Kvist *with* Kvist: a file that literally
-contains those tag strings (this repo's own `agent_runtime.py`, `redaction.py`,
-`kernel/prompts/system/`) reads back with the marker in place — visible, never silent, and an edit
-built on it fails to match rather than corrupting the file.
+Every result the model can be influenced by (`read_file`, `read_multiple_files`, `search_code`, `git_status`,
+`git_diff`, `run_shell`, `web_search`, `fetch_url`) carries `untrusted: true` plus an `UNTRUSTED EXTERNAL
+CONTENT` notice, and `agent_runtime.feedback_to_detail` wraps it in `<UNTRUSTED_TOOL_OUTPUT source="...">`. JSON
+encoding does not escape that terminator, so the payload passes through `redaction.defang_prompt_boundary_tags`
+first: a forged `</UNTRUSTED_TOOL_OUTPUT>` or `<PROJECT_INSTRUCTIONS>` becomes `[tag removed by Kvist]`.
+Trade-off when hacking on Kvist *with* Kvist: a file that literally contains those tag strings (this repo's own
+`agent_runtime.py`, `redaction.py`, `kernel/prompts/system/`) reads back with the marker in place; an edit built
+on it fails to match rather than corrupting the file.
 
 ## Conventions
 
 - All modules start with `# -*- coding: utf-8 -*-` and `from __future__ import annotations`.
 - Dataclasses use `slots=True`. State mutation flows through `RunState`.
 - User-facing strings are bilingual EN/RU; routing and prompts handle both languages.
-- Tests use fakes from `kernel/tests/conftest.py` (`FakeLLMClient`, `NullUI`, `agent_factory`,
-  `make_command`) — no network. Mirror this when adding tests; gate any real
-  LLM calls behind the `live_llm` marker.
+- Tests use fakes from `kernel/tests/conftest.py` (`FakeLLMClient`, `NullUI`, `agent_factory`, `make_command`);
+  no network. Gate real LLM calls behind the `live_llm` marker.
 
 ## Code generation rules
 
 1. Code, comments, and internal reasoning: English.
 2. Final response to the user: Russian.
-3. No premature abstraction. Do not introduce a class, interface,
-   or config layer for a single use case.
-4. Functions do at most one thing. If a function needs a comment
-   explaining sections, split it.
+3. No premature abstraction. Do not introduce a class, interface, or config layer for a single use case.
+4. Functions do at most one thing. If a function needs a comment explaining sections, split it.
 5. Prefer early return over nested if/else. Max nesting depth: 3.
-6. No silent exception swallowing. Catch specific exceptions only,
-   never bare except.
-7. No speculative generality. Do not add parameters, flags, or
-   extension points for hypothetical future use cases.
-8. Comment only "why", never "what". If code needs a "what" comment,
-   rewrite the code to be self-explanatory.
-9. When a simple and a "robust" solution both satisfy the current
-   requirement, choose the simple one.
+6. No silent exception swallowing. Catch specific exceptions only, never bare except.
+7. No speculative generality. Do not add parameters, flags, or extension points for hypothetical future use cases.
+8. Comment only "why", never "what". If code needs a "what" comment, rewrite the code to be self-explanatory.
+9. When a simple and a "robust" solution both satisfy the current requirement, choose the simple one.
