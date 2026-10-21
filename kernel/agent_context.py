@@ -34,6 +34,7 @@ SECTION_PRIORITIES: dict[str, int] = {
     "Allowed next actions now:": 0,
     "Known dependency versions:": 3,
     "USER-FACING LANGUAGE:": 0,
+    "Local time:": 0,
     "Short external facts:": 3,
     "Read files:": 2,
     "Changed files:": 2,
@@ -295,7 +296,6 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             "System environment:",
             f"- OS: {self._state.system_os}",
             f"- Shell: {self._state.system_shell}",
-            f"- Current datetime: {current_time}",
             f"- Sandbox: {self._state.system_sandbox}",
         ]
         # Optional facts only appear when actually detected, so an unrelated
@@ -342,7 +342,10 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             f"{language_block}\n"
             f"{text['error_instruction']}\n\n"
             f"{text['completion_instruction']}\n\n"
-            f"{text['truth_instruction']}"
+            f"{text['truth_instruction']}\n\n"
+            # Last on purpose: a clock in the opening lines would change the
+            # prompt cache prefix on every run.
+            f"Local time: {current_time}\n"
         )
         self._state.cached_static_prompt = cached_prefix
         self._state.cached_static_suffix = cached_suffix

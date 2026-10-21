@@ -39,10 +39,24 @@ _PROJECT_MARKERS = (
 ### SYSTEM CONTEXT
 
 
+def _timezone_name(local: datetime) -> str:
+    """The IANA name (Europe/Berlin) where the system states it, else the bare abbreviation."""
+    try:
+        target = os.readlink("/etc/localtime")
+    except OSError:
+        return local.strftime("%Z")
+    _, marker, name = target.partition("zoneinfo/")
+    return name if marker else local.strftime("%Z")
+
+
 def current_time_context():
-    """Returns the current time in the format 'YYYY-MM-DD HH:MM:SS Timezone'."""
+    """Returns the current time as 'YYYY-MM-DD Weekday HH:MM:SS Zone (UTC+hh:mm)'."""
+    local = datetime.now().astimezone()
+    offset = local.strftime("%z")
     return {
-        "current_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "current_time": (
+            f"{local:%Y-%m-%d %A %H:%M:%S} {_timezone_name(local)} (UTC{offset[:3]}:{offset[3:]})"
+        ),
     }
 
 
