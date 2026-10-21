@@ -452,6 +452,9 @@ const REVEAL_MS = 33
 const CATCH_UP = 5
 // A long report would otherwise open with a fifth of itself in one tick.
 const MAX_STEP = 24
+// A model at 1000 tokens/s outruns MAX_STEP, so the reveal may trail the text by this much at most;
+// otherwise the answer keeps typing for seconds after the turn is marked done.
+const MAX_LAG = 160
 
 // What the live answer had shown when it was committed: the settled answer continues from there
 // instead of retyping from the first character.
@@ -465,7 +468,9 @@ function useTypewriter(text: string, start = 0): string {
     const timer = setInterval(() => {
       // Each tick closes a fifth of the gap, so a burst is spread over about half a second.
       setRevealed((n) =>
-        n > goal.current ? goal.current : n + Math.min(MAX_STEP, Math.ceil((goal.current - n) / CATCH_UP)),
+        n > goal.current
+          ? goal.current
+          : Math.max(n + Math.min(MAX_STEP, Math.ceil((goal.current - n) / CATCH_UP)), goal.current - MAX_LAG),
       )
     }, REVEAL_MS)
     return () => clearInterval(timer)

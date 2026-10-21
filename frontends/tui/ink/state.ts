@@ -281,7 +281,16 @@ function push(state: State, item: (id: number) => Item): State {
 }
 
 function append(state: State, item: (id: number) => Item): State {
-  return { ...state, items: [...state.items, item(state.nextId)], nextId: state.nextId + 1 }
+  const added = item(state.nextId)
+  return { ...state, items: [...settleReveal(state.items, added), added], nextId: state.nextId + 1 }
+}
+
+// A fast model moves on while the last words are still being revealed; once something follows them
+// they are shown whole, so the screen never trails the work it describes.
+function settleReveal(items: Item[], next: Item): Item[] {
+  const last = items.at(-1)
+  if (next.kind === "note" || !last || !("fresh" in last) || !last.fresh) return items
+  return [...items.slice(0, -1), { ...last, fresh: false }]
 }
 
 // A result names its call; a core older than call ids only names its step.

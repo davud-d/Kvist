@@ -191,7 +191,7 @@ pub struct App {
 }
 
 impl App {
-    fn new(grid: Grid, now: Instant, workspace: &Path) -> Self {
+    pub(crate) fn new(grid: Grid, now: Instant, workspace: &Path) -> Self {
         App {
             grid,
             started: now,
