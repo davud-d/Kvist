@@ -250,6 +250,8 @@ def _build_cli_parser() -> argparse.ArgumentParser:
             "set-provider",
             "list-models",
             "open-registration",
+            "list-imports",
+            "import-sessions",
             "chatgpt-login",
             "chatgpt-logout",
             "chatgpt-accounts",
@@ -528,6 +530,31 @@ def _run_open_registration_op(raw: object) -> dict:
     if normalized != DEFAULT_BLANK_START_PROVIDER:
         return {"ok": True, "opened": False, "url": None}
     return {"ok": True, "opened": open_registration_page(), "url": ANYMODEL_REGISTER_URL}
+
+
+def _setup_workspace(raw: object) -> Path:
+    if not isinstance(raw, dict) or not str(raw.get("workspace", "")).strip():
+        raise ValueError("Expected a JSON object with a workspace.")
+    return Path(str(raw["workspace"])).expanduser().resolve(strict=True)
+
+
+def _run_list_imports_op(raw: object) -> dict:
+    """Other agents' sessions in the folder the first-run screen is about to open."""
+    from kernel.session_import.wizard import setup_listing
+
+    return {"ok": True, "agents": setup_listing(_setup_workspace(raw))}
+
+
+def _run_import_sessions_op(raw: object) -> dict:
+    from kernel.session_import.wizard import setup_import
+
+    keys = raw.get("agents") if isinstance(raw, dict) else None
+    if not isinstance(keys, list):
+        raise ValueError("Expected a list of agents.")
+    outcome = setup_import(_setup_workspace(raw), [str(key) for key in keys])
+    if not outcome.ok:
+        return {"ok": False, "error": outcome.message}
+    return {"ok": True, "imported": len(outcome.effects.get("imported", [])), "message": outcome.message}
 
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.commit_message:
@@ -4465,6 +4492,10 @@ def main() -> None:
                 payload = {"ok": True, **account_status()}
             elif args.config_op == "open-registration":
                 payload = _run_open_registration_op(raw)
+            elif args.config_op == "list-imports":
+                payload = _run_list_imports_op(raw)
+            elif args.config_op == "import-sessions":
+                payload = _run_import_sessions_op(raw)
             elif args.config_op == "get-api-settings":
                 values = load_api_settings()
                 settings_list = []

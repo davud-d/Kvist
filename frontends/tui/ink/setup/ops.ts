@@ -23,6 +23,8 @@ export type OpReply<T> = (T & { ok: true }) | { ok: false; error: string }
 export interface SetProviderReply { provider: string; models: Record<string, string> }
 export interface ListModelsReply { provider: string; models: string[]; error?: string | null }
 export interface RegistrationReply { opened: boolean; url: string | null }
+export interface ImportsReply { agents: { key: string; label: string; here: number }[] }
+export interface ImportReply { imported: number; message: string }
 
 // A ChatGPT sign-in waits for the person in the browser.
 export const LOGIN_TIMEOUT_MS = 190_000

@@ -161,6 +161,34 @@ test("Classic is offered after Claude-style only where the terminal shows pictur
   assert.deepEqual(send(atInterface(false), key("char", "3")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
 })
 
+test("sessions of other agents are offered after the interface and before Kvist starts", () => {
+  const connecting: SetupState = { ...ready(), workspace: "/work/app", step: "working", provider: providers[2]! }
+  const connected = send(connecting, { type: "connected", reply: { ok: true, provider: "openai", models: {} } })
+  assert.deepEqual(connected.effect, { type: "scanImports", workspace: "/work/app" })
+  // Nothing found: the interface choice starts Kvist at once.
+  assert.deepEqual(send(connected.state, key("enter")).effect, { type: "finish", outcome: { kind: "frontend", value: "claude" } })
+
+  const found = send(connected.state, { type: "imports", reply: { ok: true, agents: [{ key: "claude-code", label: "Claude Code", here: 3 }, { key: "codex", label: "Codex", here: 1 }] } }).state
+  const atImport = send(found, key("char", "2")).state
+  assert.equal(atImport.step, "import")
+  assert.equal(atImport.chosen, "tui")
+  const shown = renderScene({ state: atImport, strings, cols: 100, rows: 30, level: "truecolor", brightness: 0.55, panel: 1, tick: 0, workspace: "", hover: null, pressed: null, icons: "plain", ghost: null, picture: "cells" }).rows.map(plain).join("\n")
+  assert.match(shown, /\[x\] +CC +Claude Code +3 sessions/)
+  assert.match(shown, /\[x\] +CX +Codex +1 session\b/)
+
+  // Untick Codex, import the rest, then start the chosen interface.
+  const unticked = send(atImport, key("char", "2")).state
+  const importing = send(unticked, key("enter"))
+  assert.equal(importing.state.step, "importing")
+  assert.deepEqual(importing.effect, { type: "importSessions", workspace: "/work/app", agents: ["claude-code"] })
+  assert.deepEqual(send(importing.state, { type: "imported", reply: { ok: true, imported: 3, message: "" } }).effect, { type: "finish", outcome: { kind: "frontend", value: "tui" } })
+  // A failure returns to the step with the reason; skipping starts Kvist without importing.
+  const failed = send(importing.state, { type: "imported", reply: { ok: false, error: "locked" } }).state
+  assert.deepEqual([failed.step, failed.error], ["import", "locked"])
+  assert.deepEqual(send(atImport, key("char", "s")).effect, { type: "finish", outcome: { kind: "frontend", value: "tui" } })
+  assert.equal(send(atImport, key("escape")).state.step, "interface")
+})
+
 test("an empty key on AnyModel opens registration instead of complaining", () => {
   const state = send(send(ready(), key("enter")).state, key("enter")).state
   assert.equal(state.provider?.id, "anymodel")

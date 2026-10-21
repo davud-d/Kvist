@@ -90,7 +90,9 @@ def head_jsonl(path: Path, max_bytes: int = 65536) -> list[dict[str, Any]]:
     with path.open("rb") as handle:
         chunk = handle.read(max_bytes)
     records: list[dict[str, Any]] = []
-    for line in chunk.decode("utf-8", errors="replace").splitlines()[:-1]:
+    lines = chunk.decode("utf-8", errors="replace").splitlines()
+    # Only a chunk cut short can end in a torn line; a whole small file ends in a real record.
+    for line in lines[:-1] if len(chunk) == max_bytes else lines:
         try:
             record = json.loads(line)
         except ValueError:

@@ -18,6 +18,8 @@ import {
   readPlan,
   runInstall,
   type ConfigInfo,
+  type ImportReply,
+  type ImportsReply,
   type InstallScript,
   type ListModelsReply,
   type RegistrationReply,
@@ -28,6 +30,9 @@ import { listDirectory, listDrives, makeDirectory } from "./listing.js"
 import { DIMMED, renderScene, sameTarget, type Hit, type Rect } from "./scene.js"
 import { detectLocale, stringsFor } from "./strings.js"
 import { FramePacer, findClip, findFfmpeg, frameSize, startClip, type Clip } from "./video.js"
+
+// A hundred sessions of a long-used agent take a few seconds to read.
+const IMPORT_TIMEOUT_MS = 120_000
 
 // How long a lone ESC waits for the rest of a sequence before it counts as the Escape key.
 const ESCAPE_WAIT_MS = 40
@@ -357,6 +362,10 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
             dispatch({ type: "connected", reply }),
           )
         }
+        case "scanImports":
+          return void configOp<ImportsReply>(command, "list-imports", { workspace: effect.workspace }).then((reply) => dispatch({ type: "imports", reply }))
+        case "importSessions":
+          return void configOp<ImportReply>(command, "import-sessions", { workspace: effect.workspace, agents: effect.agents }, IMPORT_TIMEOUT_MS).then((reply) => dispatch({ type: "imported", reply }))
         case "register":
           return void configOp<RegistrationReply>(command, "open-registration", { provider: effect.provider }).then((reply) => dispatch({ type: "registered", reply }))
       }

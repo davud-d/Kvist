@@ -2,18 +2,21 @@
 // at most one thing to do come out. Drawing is scene.ts, running the operations is run.ts.
 import { breadthOf, initialFolder, updateFolder, type Breadth, type FolderState, type FolderTarget, type Listing } from "./folders.js"
 import type { InputEvent } from "./keys.js"
-import type { ConfigInfo, InstallEvent, InstallReply, ListModelsReply, OpReply, PlanReply, ProviderInfo, RegistrationReply, SetProviderReply } from "./ops.js"
+import type { ConfigInfo, ImportReply, ImportsReply, InstallEvent, InstallReply, ListModelsReply, OpReply, PlanReply, ProviderInfo, RegistrationReply, SetProviderReply } from "./ops.js"
 
 // "components" and "installing" come before "welcome" when the installer started this screen.
-export type Step = "components" | "installing" | "welcome" | "broad" | "folder" | "provider" | "key" | "models" | "working" | "interface" | "starting"
+export type Step = "components" | "installing" | "welcome" | "broad" | "folder" | "provider" | "key" | "models" | "working" | "interface" | "import" | "importing" | "starting"
 
 // What the release installer can put on a machine, in the order it is offered. The first one is
 // the program itself and cannot be unticked.
-export const COMPONENT_IDS = ["cli", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils"] as const
+export const COMPONENT_IDS = ["cli", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils", "rust"] as const
 export const REQUIRED_COMPONENT = "cli"
 // System packages for building Kvist from source: they sit under one folding row and are the only
 // items that need administrator rights.
-export const BUILD_TOOLS: readonly string[] = ["python", "libpython", "binutils"]
+export const BUILD_TOOLS: readonly string[] = ["python", "libpython", "binutils", "rust"]
+// Offered, never ticked for the person: a toolchain of hundreds of megabytes that a release binary
+// does not need (it already carries Classic and the voice screen).
+const UNTICKED = ["rust"]
 
 export type ComponentStatus = "waiting" | "running" | "done" | "failed"
 
@@ -74,8 +77,18 @@ export function interfaces(glass: boolean): readonly InterfaceId[] {
 // "done" ends a provider-only setup: the provider is saved and there is no interface to choose.
 export type Outcome = { kind: "frontend"; value: InterfaceId } | { kind: "classic" } | { kind: "quit" } | { kind: "done" }
 
+// Another agent whose sessions ran in the working folder, and whether the person wants them brought over.
+export interface ImportAgent {
+  id: string
+  label: string
+  count: number
+  checked: boolean
+}
+
 export type Effect =
   | { type: "plan" }
+  | { type: "scanImports"; workspace: string }
+  | { type: "importSessions"; workspace: string; agents: string[] }
   | { type: "elevate" }
   | { type: "install"; only: string[] }
   | { type: "listModels"; provider: string; key: string }
@@ -88,7 +101,7 @@ export type Effect =
 
 export type Target =
   | { kind: "option"; index: number }
-  | { kind: "button"; id: "primary" | "back" | "quit" | "register" | "folder" | "anyway" }
+  | { kind: "button"; id: "primary" | "back" | "quit" | "register" | "folder" | "anyway" | "skip" }
   | { kind: "folder"; target: FolderTarget }
 
 export type Action =
@@ -99,6 +112,8 @@ export type Action =
   | { type: "models"; reply: OpReply<ListModelsReply> }
   | { type: "connected"; reply: OpReply<SetProviderReply> }
   | { type: "registered"; reply: OpReply<RegistrationReply> }
+  | { type: "imports"; reply: OpReply<ImportsReply> }
+  | { type: "imported"; reply: OpReply<ImportReply> }
   | { type: "listing"; listing: Listing }
   | { type: "made"; path: string; error?: string }
   | { type: "plan"; reply: OpReply<PlanReply> }
@@ -143,6 +158,12 @@ export interface SetupState {
   // The provider that has just connected, for the confirmation on the last screen.
   connected: string
   interfaceIndex: number
+  // Other agents' sessions found in the working folder; empty until the scan answers, and the step is
+  // skipped while it is empty.
+  imports: ImportAgent[]
+  importIndex: number
+  // The interface chosen before the import step; the screen starts it once the step is done.
+  chosen: InterfaceId | null
   // The terminal shows pictures, so the interface list includes Classic.
   glass: boolean
 }
@@ -174,6 +195,9 @@ export function initialState(workspace = "", home = "", drives = false, scope: "
     reveal: false,
     connected: "",
     interfaceIndex: 0,
+    imports: [],
+    importIndex: 0,
+    chosen: null,
     glass: false,
   }
 }
@@ -383,9 +407,37 @@ function back(state: SetupState): Update {
       return { state: { ...state, step: "key", error: "" } }
     case "welcome":
       return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
+    case "import":
+      return { state: { ...state, step: "interface", error: "" } }
     default:
       return { state }
   }
+}
+
+function startChosen(state: SetupState): Update {
+  return { state, effect: { type: "finish", outcome: { kind: "frontend", value: state.chosen ?? "claude" } } }
+}
+
+// The interface is the last choice; sessions of other agents, when the scan found any in this folder,
+// are offered before Kvist starts.
+function chooseInterface(state: SetupState, value: InterfaceId): Update {
+  const next = { ...state, chosen: value }
+  if (next.imports.length === 0) return startChosen(next)
+  return { state: { ...next, step: "import", importIndex: 0, error: "" } }
+}
+
+function toggleImport(state: SetupState, index: number): SetupState {
+  return { ...state, imports: state.imports.map((agent, at) => (at === index ? { ...agent, checked: !agent.checked } : agent)) }
+}
+
+function skipImport(state: SetupState): Update {
+  return startChosen(state)
+}
+
+function importChecked(state: SetupState): Update {
+  const agents = state.imports.filter((agent) => agent.checked).map((agent) => agent.id)
+  if (agents.length === 0) return startChosen(state)
+  return { state: { ...state, step: "importing", error: "" }, effect: { type: "importSessions", workspace: state.workspace, agents } }
 }
 
 function openFolder(state: SetupState): Update {
@@ -422,7 +474,10 @@ function press(state: SetupState, strings: { keyEmpty: string }): Update {
     case "models":
       return state.models.status === "loading" ? { state } : submitModel(state)
     case "interface":
-      return { state, effect: { type: "finish", outcome: { kind: "frontend", value: interfaces(state.glass)[state.interfaceIndex] ?? "claude" } } }
+      return chooseInterface(state, interfaces(state.glass)[state.interfaceIndex] ?? "claude")
+    case "import":
+      return importChecked(state)
+    case "importing":
     case "installing":
     case "working":
     case "starting":
@@ -441,6 +496,8 @@ function move(state: SetupState, delta: number): SetupState {
       return { ...state, modelIndex: wrap(state.modelIndex, delta, filteredModels(state).length) }
     case "interface":
       return { ...state, interfaceIndex: wrap(state.interfaceIndex, delta, interfaces(state.glass).length) }
+    case "import":
+      return { ...state, importIndex: wrap(state.importIndex, delta, state.imports.length) }
     default:
       return state
   }
@@ -448,7 +505,7 @@ function move(state: SetupState, delta: number): SetupState {
 
 function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string }): Update {
   if (event.type === "key" && event.ctrl && event.text === "c") return { state, effect: { type: "finish", outcome: { kind: "quit" } } }
-  if (state.step === "starting" || state.step === "installing") return { state }
+  if (state.step === "starting" || state.step === "installing" || state.step === "importing") return { state }
   if (state.step === "working") {
     // The connection is abandoned, not waited for: its answer is ignored when it arrives.
     if (event.type === "key" && event.key === "escape") return { state: { ...state, step: state.returnStep, error: "" }, effect: { type: "cancel" } }
@@ -484,14 +541,20 @@ function onKey(state: SetupState, event: InputEvent, strings: { keyEmpty: string
     const digit = Number(event.text)
     if (state.step === "provider" && digit >= 1 && digit <= providerOptionCount(state)) return chooseProvider(state, digit - 1)
     if (state.step === "interface" && digit >= 1 && digit <= interfaces(state.glass).length) {
-      return { state: { ...state, interfaceIndex: digit - 1 }, effect: { type: "finish", outcome: { kind: "frontend", value: interfaces(state.glass)[digit - 1]! } } }
+      return chooseInterface({ ...state, interfaceIndex: digit - 1 }, interfaces(state.glass)[digit - 1]!)
+    }
+    if (state.step === "import") {
+      if (event.text === " " || event.text === "x" || event.text === "X") return { state: toggleImport(state, state.importIndex) }
+      if (digit >= 1 && digit <= state.imports.length) return { state: toggleImport(state, digit - 1) }
+      if (event.text === "s" || event.text === "S") return skipImport(state)
     }
   }
   return { state }
 }
 
 function onClick(state: SetupState, target: Target, strings: { keyEmpty: string }): Update {
-  if (state.step === "working" || state.step === "starting" || state.step === "installing" || target.kind === "folder") return { state }
+  if (state.step === "working" || state.step === "starting" || state.step === "installing" || state.step === "importing" || target.kind === "folder") return { state }
+  if (state.step === "import" && target.kind === "option") return { state: toggleImport({ ...state, importIndex: target.index }, target.index) }
   if (state.step === "components" && target.kind === "option") return toggleComponent(state, target.index)
   if (target.kind === "button") {
     switch (target.id) {
@@ -507,15 +570,15 @@ function onClick(state: SetupState, target: Target, strings: { keyEmpty: string 
         return state.step === "welcome" || state.step === "broad" ? openFolder(state) : { state }
       case "anyway":
         return state.step === "broad" ? keepWide(state) : { state }
+      case "skip":
+        return state.step === "import" ? skipImport(state) : { state }
     }
   }
   if (state.step === "provider") return chooseProvider(state, target.index)
   if (state.step === "models") return submitModel({ ...state, modelIndex: target.index })
   if (state.step === "interface") {
     const value = interfaces(state.glass)[target.index]
-    return value
-      ? { state: { ...state, interfaceIndex: target.index }, effect: { type: "finish", outcome: { kind: "frontend", value } } }
-      : { state }
+    return value ? chooseInterface({ ...state, interfaceIndex: target.index }, value) : { state }
   }
   return { state }
 }
@@ -570,7 +633,15 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
       if (state.step !== "working") return { state }
       if (!action.reply.ok) return { state: failure(state, action.reply.error) }
       if (state.scope === "provider") return { state: { ...state, error: "", connected: state.provider?.label ?? "" }, effect: { type: "finish", outcome: { kind: "done" } } }
-      return { state: { ...state, step: "interface", error: "", connected: state.provider?.label ?? "" } }
+      return { state: { ...state, step: "interface", error: "", connected: state.provider?.label ?? "" }, effect: { type: "scanImports", workspace: state.workspace } }
+    case "imports":
+      if (!action.reply.ok) return { state }
+      return { state: { ...state, imports: action.reply.agents.map((agent) => ({ id: agent.key, label: agent.label, count: agent.here, checked: true })) } }
+    case "imported":
+      if (state.step !== "importing") return { state }
+      // A failed import is not worth keeping Kvist from starting: the person is told and can use /export.
+      if (!action.reply.ok) return { state: { ...state, step: "import", error: action.reply.error } }
+      return startChosen(state)
     case "registered":
       return action.reply.ok ? { state: { ...state, registration: { opened: action.reply.opened, url: action.reply.url } } } : { state: { ...state, error: action.reply.error } }
     case "plan": {
@@ -579,9 +650,9 @@ export function update(state: SetupState, action: Action, strings: { keyEmpty: s
       const reply = action.reply
       const components = COMPONENT_IDS.flatMap((id) => {
         const found = reply.components.find((item) => item.id === id)
-        // Everything that can be installed here starts ticked, the build tools included; the
-        // folding row shows how many of them are.
-        return found ? [{ id, available: found.available, reason: found.reason ?? "", targets: found.targets, checked: found.available }] : []
+        // Everything that can be installed here starts ticked, the build tools included (Rust
+        // excepted); the folding row shows how many of them are.
+        return found ? [{ id, available: found.available, reason: found.reason ?? "", targets: found.targets, checked: found.available && !UNTICKED.includes(id) }] : []
       })
       return { state: withInstall(state, { plan: "ready", components, privilege: reply.privilege, cursor: 0, error: "" }) }
     }

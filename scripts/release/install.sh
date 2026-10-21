@@ -638,11 +638,47 @@ privileged() {
 	esac
 }
 
+# Rust is what Kvist Classic and the voice screen are built with (a release binary already carries
+# them). The toolchain comes from rustup, which needs a C compiler to link and no administrator
+# rights of its own.
+cargo_path() {
+	command -v cargo 2>/dev/null && return 0
+	local candidate="${CARGO_HOME:-$HOME/.cargo}/bin/cargo"
+	[[ -x "$candidate" ]] && printf '%s\n' "$candidate"
+}
+
+has_c_compiler() {
+	command -v cc >/dev/null 2>&1 || command -v gcc >/dev/null 2>&1 || command -v clang >/dev/null 2>&1
+}
+
+# Like build_item, for Rust: the C compiler is a system package where there is a package manager;
+# a Mac gets one from the Xcode command line tools, which only the person can install.
+rust_item() {
+	local pm
+	pm="$(package_manager)"
+	if [[ -n "$(cargo_path)" ]]; then
+		BUILD_STATE="present"
+		return 0
+	fi
+	if ! has_c_compiler; then
+		[[ -n "$pm" ]] || return 0
+		case "$pm" in
+			apt-get) BUILD_PACKAGES=(build-essential) ;;
+			*) BUILD_PACKAGES=(gcc) ;;
+		esac
+	fi
+	BUILD_STATE="ready"
+}
+
 # Sets BUILD_STATE (ready, present or unsupported) and BUILD_PACKAGES for one build tool.
 build_item() {
 	local id="$1" pm
 	BUILD_STATE="unsupported"
 	BUILD_PACKAGES=()
+	if [[ "$id" == "rust" ]]; then
+		rust_item
+		return 0
+	fi
 	pm="$(package_manager)"
 	[[ -n "$pm" ]] || return 0
 	case "$id" in
@@ -685,12 +721,28 @@ build_item() {
 
 # The commands that install BUILD_PACKAGES, one per line, without a sudo prefix.
 build_commands() {
+	[[ ${#BUILD_PACKAGES[@]} -gt 0 ]] || return 0
 	case "$(package_manager)" in
 		apt-get) printf 'apt-get update\napt-get install -y %s\n' "${BUILD_PACKAGES[*]}" ;;
 		dnf) printf 'dnf install -y %s\n' "${BUILD_PACKAGES[*]}" ;;
 		zypper) printf 'zypper --non-interactive install %s\n' "${BUILD_PACKAGES[*]}" ;;
 		pacman) printf 'pacman -S --needed --noconfirm %s\n' "${BUILD_PACKAGES[*]}" ;;
 	esac
+}
+
+RUSTUP_COMMAND="curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
+
+# rustup's own installer (minimal profile); it adds ~/.cargo/bin to the shell's startup file.
+install_rustup() {
+	command -v curl >/dev/null 2>&1 || {
+		warn "curl is required to install Rust"
+		return 1
+	}
+	step "Running: $RUSTUP_COMMAND"
+	if ! curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal >/dev/null 2>&1; then
+		warn "rustup did not finish; run it yourself: $RUSTUP_COMMAND"
+		return 1
+	fi
 }
 
 # "sudo " in front of what a person would type, unless they are root already.
@@ -720,6 +772,13 @@ install_build_item() {
 			return 1
 		fi
 	done < <(build_commands)
+	if [[ "$1" == "rust" ]]; then
+		if ! has_c_compiler; then
+			warn "no C compiler found; on a Mac run: xcode-select --install"
+			return 1
+		fi
+		install_rustup
+	fi
 }
 
 # A failed build tool is reported and the others still run.
@@ -786,7 +845,7 @@ print_plan() {
 		"$(on_path && echo false || echo true)" "$(json_array "$(path_rc_file): $(path_rc_line)")"
 	local id line reason available
 	local -a commands
-	for id in python libpython binutils; do
+	for id in python libpython binutils rust; do
 		build_item "$id"
 		available=false
 		reason=""
@@ -801,6 +860,7 @@ print_plan() {
 			present) reason="present" ;;
 			*) reason="unsupported" ;;
 		esac
+		[[ "$id" == "rust" && "$BUILD_STATE" == "ready" ]] && commands+=("$RUSTUP_COMMAND")
 		printf ',{"id":%s,"available":%s,"reason":%s,"targets":%s}' \
 			"$(json_string "$id")" "$available" "$(json_string "$reason")" "$(json_array ${commands[@]+"${commands[@]}"})"
 	done
@@ -895,7 +955,7 @@ if wanted ffmpeg && [[ "$ffmpeg_ok" == 1 ]]; then run_component ffmpeg install_f
 if wanted jetbrains; then run_component jetbrains install_jetbrains "$jetbrains_zip"; fi
 if wanted vscode; then run_component vscode install_vscode "$vsix"; fi
 if wanted path; then run_component path install_path; fi
-for build_tool in python libpython binutils; do
+for build_tool in python libpython binutils rust; do
 	if wanted "$build_tool"; then run_build_item "$build_tool"; fi
 done
 

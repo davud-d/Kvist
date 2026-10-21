@@ -374,3 +374,26 @@ def test_the_fastest_server_is_tried_first_and_a_file_that_does_not_match_goes_t
     assert any("Downloading ffmpeg 6.0 from cdn.npmmirror.com (9.0 MB/s)" in m for m in messages)
     assert any("did not arrive intact; trying the next server" in m for m in messages)
     assert {"event": "component", "id": "ffmpeg", "status": "failed"} in events
+
+
+def test_plan_offers_rust_with_a_compiler_package_and_rustup(tmp_path):
+    result, _home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",), stub_tools=("apt-get",))
+
+    rust = next(item for item in json.loads(result.stdout)["components"] if item["id"] == "rust")
+    if rust["reason"] == "present":
+        pytest.skip("this machine already has cargo")
+    assert rust["available"] is True
+    assert rust["targets"][-1] == "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal"
+
+
+def test_rust_is_present_when_cargo_is_in_the_cargo_home(tmp_path):
+    cargo_home = tmp_path / "cargo"
+    (cargo_home / "bin").mkdir(parents=True)
+    cargo = cargo_home / "bin" / "cargo"
+    cargo.write_text("#!/bin/sh\n")
+    cargo.chmod(0o755)
+
+    result, _home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",), extra_env={"CARGO_HOME": str(cargo_home)})
+
+    rust = next(item for item in json.loads(result.stdout)["components"] if item["id"] == "rust")
+    assert (rust["available"], rust["reason"]) == (False, "present")

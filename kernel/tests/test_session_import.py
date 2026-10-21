@@ -24,7 +24,7 @@ from kernel.session_import import (
     qwen_code,
 )
 from kernel.session_import.model import ImportedSession, ImportedTurn, SessionSummary
-from kernel.session_import.wizard import run_export
+from kernel.session_import.wizard import run_export, setup_import, setup_listing
 from kernel.session_import.writer import HISTORY_TURNS, import_session, session_name
 from kernel.session_store import run_session_op
 
@@ -85,7 +85,7 @@ def _claude_session(home: Path, cwd: str) -> Path:
 def test_claude_code_reads_requests_answers_and_tool_facts(home, workspace):
     _claude_session(home, str(workspace))
     (summary,) = claude_code.find(home, workspace)
-    assert (summary.title, summary.cwd, summary.id) == ("fix the parser", str(workspace), "abc-123")
+    assert (summary.title, summary.cwd, summary.id) == ("Parser work", str(workspace), "abc-123")
 
     imported = claude_code.load(summary)
     assert imported.summary.title == "Parser work"
@@ -128,6 +128,29 @@ def test_codex_items_format(home, workspace):
     first, second = codex.load(summary).turns
     assert (first.answer, first.commands, first.files_changed) == ("Added.", 1, ["/p/cli.py"])
     assert (second.user, second.stopped) == ("and a test", True)
+
+
+def test_codex_uses_the_name_it_gave_the_thread_not_the_first_request(home, workspace):
+    _jsonl(_codex_path(home), [
+        {"type": "session_meta", "payload": {"id": "0abc", "cwd": str(workspace)}},
+        {"type": "event_msg", "payload": {"type": "item_completed", "item": {"type": "UserMessage", "content": [{"type": "text", "text": "add a flag"}]}}},
+    ])
+    _jsonl(home / ".codex" / "session_index.jsonl", [
+        {"id": "0abc", "thread_name": "Old name"},
+        {"id": "other", "thread_name": "Not this one"},
+        {"id": "0abc", "thread_name": "Add the --flag option"},
+    ])
+    (summary,) = codex.find(home, workspace)
+    assert summary.title == "Add the --flag option"
+    assert codex.load(summary).summary.title == "Add the --flag option"
+
+
+def test_claude_code_title_without_ai_title_is_the_first_request(home, workspace):
+    _jsonl(home / ".claude" / "projects" / "-p" / "plain.jsonl", [
+        {"type": "user", "cwd": str(workspace), "message": {"role": "user", "content": "just a question"}},
+    ])
+    (summary,) = claude_code.find(home, workspace)
+    assert summary.title == "just a question"
 
 
 def test_codex_older_response_item_format(home, workspace):
@@ -417,3 +440,21 @@ def test_export_reports_an_unknown_agent_and_an_empty_machine(home, workspace):
     _claude_session(home, str(workspace))
     unknown = run_export(_agent(workspace), None, ["nothing"])
     assert unknown.ok is False and "claude-code" in unknown.message
+
+
+def test_first_run_lists_only_agents_with_sessions_in_the_folder(home, workspace, tmp_path):
+    assert setup_listing(workspace) == []
+    _claude_session(home, str(tmp_path / "elsewhere"))
+    assert setup_listing(workspace) == []
+    _claude_session(home, str(workspace))
+    assert setup_listing(workspace) == [{"key": "claude-code", "label": "Claude Code", "here": 1}]
+
+
+def test_first_run_imports_without_an_agent_and_only_the_named_ones(home, workspace):
+    _claude_session(home, str(workspace))
+    assert setup_import(workspace, ["codex"]).effects["imported"] == []
+    outcome = setup_import(workspace, ["claude-code"])
+    assert outcome.ok
+    assert [item["session"] for item in outcome.effects["imported"]] == ["cc-abc123"]
+    assert setup_import(workspace, ["claude-code"]).effects["already_imported"] == 1
+

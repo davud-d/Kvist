@@ -17,6 +17,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from kernel.durable_json import JsonStorageError
@@ -208,3 +209,19 @@ def run_export(agent: Any, ui: Any, args: list[str]) -> ExportOutcome | None:
     if sessions is None:
         return None
     return _import_all(agent, [(item.source, summary) for summary in sessions])
+
+
+def setup_listing(workspace: Path) -> list[dict[str, Any]]:
+    """Agents with sessions that ran in ``workspace``: what the first-run screen offers."""
+    return [
+        {"key": item.source.key, "label": item.source.label, "here": len(here_sessions)}
+        for item in _discover(Path.home(), workspace)
+        if (here_sessions := here(item.sessions, workspace))
+    ]
+
+
+def setup_import(workspace: Path, keys: list[str]) -> ExportOutcome:
+    """Import every session of the named agents from ``workspace``; no agent exists yet at first run."""
+    host = SimpleNamespace(executor=SimpleNamespace(workspace=workspace))
+    wanted = [item for item in _discover(Path.home(), workspace) if item.source.key in keys]
+    return _import_all(host, [(item.source, summary) for item in wanted for summary in here(item.sessions, workspace)])

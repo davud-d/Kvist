@@ -31,9 +31,26 @@ _SHELL_CALLS = frozenset({"shell", "exec_command", "container.exec", "local_shel
 _INJECTED_PREFIXES = ("<", "# AGENTS.md instructions", "# Context from my IDE")
 
 
-def _root(home: Path) -> Path:
+def _codex_home(home: Path) -> Path:
     configured = os.environ.get("CODEX_HOME")
-    return (Path(configured) if configured else home / ".codex") / "sessions"
+    return Path(configured) if configured else home / ".codex"
+
+
+def _root(home: Path) -> Path:
+    return _codex_home(home) / "sessions"
+
+
+def _thread_names(home: Path) -> dict[str, str]:
+    """The names Codex gives its threads, by session id; the newest entry of an id wins."""
+    index = _codex_home(home) / "session_index.jsonl"
+    if not index.is_file():
+        return {}
+    names: dict[str, str] = {}
+    for record in read_jsonl(index):
+        name = record.get("thread_name")
+        if isinstance(record.get("id"), str) and isinstance(name, str) and name.strip():
+            names[record["id"]] = name
+    return names
 
 
 def _text_of(parts: object) -> str:
@@ -84,16 +101,22 @@ def _first_request(records: list[dict[str, Any]]) -> str:
 
 def find(home: Path, _workspace: Path) -> list[SessionSummary]:
     found: list[SessionSummary] = []
+    names = _thread_names(home)
     for path in _root(home).glob("*/*/*/rollout-*.jsonl"):
         head = head_jsonl(path, max_bytes=262144)
         meta = _meta(head)
-        title = _first_request(head)
-        if not title:
+        request = _first_request(head)
+        if not request:
             continue
         identifier = str(meta.get("id") or path.stem)
         found.append(
             SessionSummary(
-                "codex", identifier, short_title(title), str(meta.get("cwd") or ""), path.stat().st_mtime, str(path)
+                "codex",
+                identifier,
+                short_title(names.get(identifier) or request),
+                str(meta.get("cwd") or ""),
+                path.stat().st_mtime,
+                str(path),
             )
         )
     return found

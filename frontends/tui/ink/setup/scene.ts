@@ -2,6 +2,7 @@
 // the middle. Returns the ANSI rows and the places that react to a click.
 import { sampleCells } from "./backdrop.js"
 import { BOLD, Canvas, DIM, INVERSE, UNDERLINE, type Style } from "./canvas.js"
+import { markOf } from "./agents.js"
 import { mix, pack, scale, unpack, type ColorLevel, type RGB } from "./color.js"
 import { DRIVES, breadthOf, crumbsOf, isRoot, rootOf, rowsOf, tildePath, visibleDirs, type FolderTarget } from "./folders.js"
 import {
@@ -46,6 +47,8 @@ interface Segment {
   text: string
   tone: Tone
   hit?: Target
+  // A filled tag with its own colour (an agent's monogram).
+  badge?: RGB
 }
 
 interface PanelLine {
@@ -202,7 +205,7 @@ const text = (value: string, tone: Tone = "text"): PanelLine => ({ segments: [{ 
 const blank = (): PanelLine => text("")
 const paragraph = (value: string, width: number, tone: Tone = "text"): PanelLine[] => wrapText(value, width).map((line) => text(line, tone))
 
-function button(label: string, id: "primary" | "back" | "quit" | "register" | "folder" | "anyway", tone: Tone): Segment {
+function button(label: string, id: "primary" | "back" | "quit" | "register" | "folder" | "anyway" | "skip", tone: Tone): Segment {
   return { text: ` ${label} `, tone, hit: { kind: "button", id } }
 }
 
@@ -224,6 +227,24 @@ function optionRow(index: number, selected: boolean, label: string, blurb: strin
     segments: [
       { text: head, tone: selected ? "primary" : "text" },
       { text: body, tone: selected ? "primary" : "dim" },
+    ],
+    selected,
+    hit: { kind: "option", index },
+  }
+}
+
+// One agent of the import step: tick box, the agent's monogram, its name and how many sessions it has here.
+function importRow(index: number, selected: boolean, checked: boolean, id: string, label: string, count: string, width: number, labelWidth: number): PanelLine {
+  const { mark, color } = markOf(id)
+  const tone: Tone = selected ? "primary" : "text"
+  const head = ` [${checked ? "x" : " "}] `
+  const name = ` ${label.padEnd(labelWidth)}`
+  return {
+    segments: [
+      { text: head, tone },
+      { text: ` ${mark} `, tone, badge: color },
+      { text: name, tone },
+      { text: truncate(count, Math.max(0, width - head.length - 4 - name.length)), tone: selected ? "primary" : "dim" },
     ],
     selected,
     hit: { kind: "option", index },
@@ -686,6 +707,19 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       lines.push(blank(), buttons(button(strings.ready, "primary", "primary")))
       return { lines, video, hint: `${strings.hintMove} · ${strings.hintEnter} · ${hintMouse}`, step: steps, steps }
     }
+    case "import": {
+      const labelWidth = Math.max(...state.imports.map((agent) => agent.label.length)) + 2
+      const lines: PanelLine[] = [text(strings.importTitle, "title"), ...paragraph(strings.importBody, width, "dim"), blank()]
+      state.imports.forEach((agent, index) => {
+        lines.push(importRow(index, state.importIndex === index, agent.checked, agent.id, agent.label, strings.importCount(agent.count), width, labelWidth))
+      })
+      if (state.error) lines.push(blank(), text(strings.importFailed, "err"), ...paragraph(state.error, width, "dim"))
+      lines.push(blank(), ...paragraph(strings.importLater, width, "dim"))
+      lines.push(blank(), buttons(button(strings.importAction, "primary", "primary"), button(strings.importSkip, "skip", "secondary")))
+      return { lines, hint: `${strings.hintMove} · ${strings.hintToggle} · ${strings.hintEnter} · ${strings.hintSkip} · ${hintMouse}`, step: steps, steps }
+    }
+    case "importing":
+      return { lines: [text(`${SPINNER[input.tick % SPINNER.length]} ${strings.importing}`, "title")], hint: strings.hintWait, step: steps, steps }
     case "starting":
       return { lines: [text(`${SPINNER[input.tick % SPINNER.length]} ${strings.starting}`, "title")], hint: "", step: steps, steps }
   }
@@ -874,7 +908,7 @@ export function renderScene(input: SceneInput): Scene {
       const background = canvas.backgroundAt(x, y)
       // On a selected row the segments follow the row's own state, so text and fill agree.
       const interaction = segment.hit ? interactionOf(segment.hit) : line.selected ? row : "none"
-      const colored = style(segment.tone, background, interaction)
+      const colored = segment.badge ? { fg: PALETTE.text, bg: segment.badge, attrs: BOLD } : style(segment.tone, background, interaction)
       const painted = level === "none" ? monochrome(colored, segment.tone, interaction) : colored
       const used = canvas.text(x, y, segment.text, painted)
       if (segment.hit) hits.push({ col: x, row: y, width: used, height: 1, target: segment.hit })

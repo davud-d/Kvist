@@ -782,8 +782,14 @@ alternate screen, SGR mouse, bracketed paste, row-diff painting, effects). Tests
 - **Flow:** welcome → provider (curated: AnyModel, ChatGPT, OpenAI, Anthropic, DeepSeek, OpenRouter,
   FreeFlow; "More providers" exits 65 to the classic wizard) → key (masked; AnyModel's empty Enter opens
   registration) → model (only for providers without defaults, `list-models` catalog) → interface
-  (Claude-style first). Operations are `--config-op get-config | list-models | set-provider |
-  open-registration` with the payload on stdin; a failed `set-provider` returns to the screen it came from.
+  (Claude-style first) → import (only when the scan found sessions). Operations are `--config-op get-config | list-models | set-provider |
+  open-registration | list-imports | import-sessions` with the payload on stdin; a failed `set-provider` returns to the screen it came from.
+  **Import step:** a successful `connected` fires `scanImports` (`wizard.setup_listing`: agents with sessions that ran
+  in the chosen folder, none means no step); choosing an interface then opens `import` (tick boxes, all ticked,
+  Skip / `S`, Esc back) instead of finishing, and `import-sessions` (`wizard.setup_import`, no `LocalAgent`: a stand-in host
+  with `executor.workspace`) copies the ticked agents' sessions before the chosen interface starts. A failed import
+  stays on the step with the reason. Each agent has a two-letter monogram in its own colour (`setup/agents.ts`; the same
+  letters are drawn in `branding/agents/*.svg`): Kvist's own marks, never the agents' logos (trademarks).
   Esc goes back; Esc on the first screen and Ctrl+C quit with nothing saved.
 - **Exit protocol:** 64 = chosen interface is in `KVIST_SWITCH_FILE` (launcher saves it via
   `_switch_frontend`, `--setup` dropped); 65 = continue in the classic terminal, nothing saved; 66 = a

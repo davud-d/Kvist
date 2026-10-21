@@ -92,16 +92,22 @@ def _first_request(records: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _ai_title(records: list[dict[str, Any]]) -> str:
+    """The title Claude Code gave the session; it rewrites it as the session goes on, so the last one counts."""
+    titles = [r["aiTitle"].strip() for r in records if r.get("type") == "ai-title" and isinstance(r.get("aiTitle"), str)]
+    return next((title for title in reversed(titles) if title), "")
+
+
 def find(home: Path, _workspace: Path) -> list[SessionSummary]:
     found: list[SessionSummary] = []
     for path in _root(home).glob("*/*.jsonl"):
         head = head_jsonl(path)
-        title = _first_request(head)
+        request = _first_request(head)
         cwd = next((r["cwd"] for r in head if isinstance(r.get("cwd"), str)), "")
-        if not title:
+        if not request:
             continue
         found.append(
-            SessionSummary("claude-code", path.stem, short_title(title), cwd, path.stat().st_mtime, str(path))
+            SessionSummary("claude-code", path.stem, short_title(_ai_title(head) or request), cwd, path.stat().st_mtime, str(path))
         )
     return found
 
@@ -132,10 +138,8 @@ def _absorb_tool_call(turn: ImportedTurn, block: dict[str, Any]) -> None:
 def load(summary: SessionSummary) -> ImportedSession:
     path = Path(summary.location)
     turns: list[ImportedTurn] = []
-    title = ""
-    for record in read_jsonl(path):
-        if record.get("type") == "ai-title" and isinstance(record.get("aiTitle"), str):
-            title = record["aiTitle"]
+    records = read_jsonl(path)
+    for record in records:
         if not _is_conversation(record):
             continue
         message = record["message"]
@@ -152,7 +156,7 @@ def load(summary: SessionSummary) -> ImportedSession:
             continue
         if _is_request(text):
             turns.append(ImportedTurn(text, ts=iso_to_epoch(record.get("timestamp"))))
-    return ImportedSession(replace(summary, title=title.strip() or summary.title), turns)
+    return ImportedSession(replace(summary, title=_ai_title(records) or summary.title), turns)
 
 
 SOURCE = Source("claude-code", "Claude Code", "cc", find, load)
