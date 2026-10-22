@@ -987,7 +987,9 @@ def test_the_chat_review_call_is_counted_in_usage_like_every_other_call(tmp_path
     assert usage[1]["input_tokens"] == review_input
 
 
-def test_chat_review_declined_answers_the_person_and_keeps_no_tag(tmp_path):
+def test_chat_review_declined_answers_the_person_and_keeps_no_tag(tmp_path, monkeypatch):
+    # The message carries the time to the second; two calls straddling a second would differ.
+    monkeypatch.setattr("kernel.agent.current_time_context", lambda: {"current_time": "2026-10-22 Thursday 12:00:00 UTC"})
     agent, ui, client = _chat(
         tmp_path,
         [
@@ -1031,7 +1033,8 @@ _AFTER_TOOL_NOTE = (
 )
 
 
-def test_only_the_answer_after_the_tool_is_told_not_to_reproach(tmp_path):
+def test_only_the_answer_after_the_tool_is_told_not_to_reproach(tmp_path, monkeypatch):
+    monkeypatch.setattr("kernel.agent.current_time_context", lambda: {"current_time": "2026-10-22 Thursday 12:00:00 UTC"})
     agent, _ui, client = _chat(
         tmp_path,
         [
