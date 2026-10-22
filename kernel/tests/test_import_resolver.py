@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kernel import import_resolver as ir
-
-
+from kernel.context import import_resolver as ir
 def _write(path: Path, content: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")

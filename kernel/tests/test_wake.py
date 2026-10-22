@@ -105,7 +105,7 @@ def test_a_new_session_stops_what_the_old_one_left_running(agent_factory):
 
 
 def test_the_start_note_says_what_the_answer_does_to_the_job(agent_factory):
-    from kernel.executor import _background_note
+    from kernel.sandbox.executor import _background_note
 
     assert "keeps running" in _background_note(60, True, True)
     assert "ended when you give your final answer" in _background_note(60, True, False)

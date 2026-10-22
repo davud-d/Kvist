@@ -5,13 +5,13 @@ import json
 
 import pytest
 
-from kernel.agent_logging import get_journal_path
-from kernel.bug_report import (
+from kernel.session.agent_logging import get_journal_path
+from kernel.config.bug_report import (
     MAX_EVENT_FIELD_CHARS,
     build_bug_report,
     save_bug_report,
 )
-from kernel.durable_json import append_private_bytes
+from kernel.session.durable_json import append_private_bytes
 
 
 def _write_journal_events(agent, events: list[dict]) -> None:

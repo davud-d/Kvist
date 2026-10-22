@@ -35,12 +35,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import JsonStorageError, read_json_object, update_json_object
+from kernel.session.durable_json import JsonStorageError, read_json_object, update_json_object
 from kernel.plugins.paths import plugins_root
-from kernel.redaction import redact_text
-from kernel.resources import ManagedProcess, Owner, Resource, ResourceManager
-from kernel.sandbox import RUNTIME_MOUNT_ROOTS, resolve_bubblewrap_path
-from kernel.task_control import TaskControl
+from kernel.sandbox.redaction import redact_text
+from kernel.plugins.resources import ManagedProcess, Owner, Resource, ResourceManager
+from kernel.sandbox.sandbox import RUNTIME_MOUNT_ROOTS, resolve_bubblewrap_path
+from kernel.agent.task_control import TaskControl
 
 PROTOCOL_VERSION = "2025-06-18"
 SERVER_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,30}[a-z0-9]$")

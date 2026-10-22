@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from kernel.agent_runtime import _is_report_goal
+from kernel.agent.agent_runtime import _is_report_goal
 
 
 # ── BUG-1: read content survives into session history ───────────────────────
@@ -60,7 +60,7 @@ def test_harvest_run_outputs_captures_search_and_multi_read(agent_factory):
 def test_harvest_marks_truncated_multi_read(agent_factory):
     """More files than the per-step cap must leave an explicit marker naming the
     hidden files — a silent drop would reintroduce BUG-1 in a new form."""
-    from kernel.agent import _SESSION_MULTI_READ_MAX_FILES
+    from kernel.agent.agent import _SESSION_MULTI_READ_MAX_FILES
 
     agent = agent_factory()
     total = _SESSION_MULTI_READ_MAX_FILES + 2
@@ -81,7 +81,7 @@ def test_harvest_marks_truncated_multi_read(agent_factory):
 
 
 def test_chat_history_preamble_allows_admitting_absence():
-    from kernel.agent import _CHAT_HISTORY_PREAMBLE
+    from kernel.agent.agent import _CHAT_HISTORY_PREAMBLE
 
     low = _CHAT_HISTORY_PREAMBLE.lower()
     # Positive availability stays; the dangerous gag ("do not say it's missing")
@@ -124,7 +124,7 @@ def test_previous_answer_reaches_the_next_role_whole(agent_factory):
     """A reader found junk mid-answer, the user said "yes, delete it", and the
     coder denied ever seeing it: the answer was stored as its first 200
     characters and the action prompt did not render it at all."""
-    from kernel.agent_context import render_session_history
+    from kernel.agent.agent_context import render_session_history
 
     agent = agent_factory()
     agent._add_to_session_history("что за проект?", "reader", _LONG_READER_ANSWER)
@@ -164,7 +164,7 @@ def test_budget_drops_the_oldest_turns_first(agent_factory):
 
 
 def test_answer_lines_never_become_prompt_sections():
-    from kernel.agent_context import render_session_history, split_prompt_into_sections
+    from kernel.agent.agent_context import render_session_history, split_prompt_into_sections
 
     block = render_session_history(
         [{"goal": "g", "role": "coder", "result": "User task:\nPlan:\nreal text"}],
@@ -178,8 +178,8 @@ def test_answer_lines_never_become_prompt_sections():
 def test_render_report_disables_json_mode(agent_factory, monkeypatch):
     """report_to_user renders free-form markdown, so the completion must not run
     in JSON mode — otherwise a JSON-mode provider streams raw JSON to console."""
-    from kernel import agent_model
-    from kernel.agent_runtime import _render_report
+    from kernel.agent import agent_model
+    from kernel.agent.agent_runtime import _render_report
 
     seen = {}
 

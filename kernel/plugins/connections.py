@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 
-from kernel.durable_json import JsonStorageError, read_json_object, update_json_object
+from kernel.session.durable_json import JsonStorageError, read_json_object, update_json_object
 from kernel.plugins.paths import plugins_root
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")

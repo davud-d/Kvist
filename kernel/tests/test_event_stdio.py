@@ -6,9 +6,9 @@ import json
 
 import pytest
 
-from kernel import event_stdio
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
+from kernel.protocol import event_stdio
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
 from kernel.tests.conftest import FakeLLMClient
 
 
@@ -86,7 +86,7 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
     events = [json.loads(line) for line in output.getvalue().splitlines()]
     # effort mirrors the saved user preference, so only its shape is stable
     # across machines.
-    from kernel.version import kvist_version
+    from kernel.config.version import kvist_version
 
     assert events[0].pop("effort") in {"false", "low", "medium", "high", "xhigh", "max"}
     assert events[0].pop("kvist_version") == kvist_version()
@@ -113,7 +113,7 @@ def test_launch_runs_real_local_agent_over_ndjson(monkeypatch, tmp_path):
 
 def test_launch_hello_reports_resumable_checkpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_LLM_PROVIDER", "openai")
-    from kernel.executor import SafeExecutor
+    from kernel.sandbox.executor import SafeExecutor
     from kernel.tests.conftest import NullUI
 
     seed = LocalAgent(
@@ -148,6 +148,6 @@ def test_launch_hello_reports_resumable_checkpoint(monkeypatch, tmp_path):
     assert hello["session"] == "feature"
     assert hello["has_checkpoint"] is True
 
-    from kernel.version import kvist_version
+    from kernel.config.version import kvist_version
 
     assert hello["kvist_version"] == kvist_version()

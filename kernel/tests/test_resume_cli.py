@@ -6,10 +6,12 @@ import json
 
 import pytest
 
-from kernel import event_stdio, main
-from kernel.event_session import EventSession
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import FrontendChannel
+from kernel.protocol import event_stdio
+
+from kernel import main
+from kernel.protocol.event_session import EventSession
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import FrontendChannel
 
 
 def _interrupted(agent):

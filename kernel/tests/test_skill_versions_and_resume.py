@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.agent_runtime import _build_pending_action
+from kernel.agent.agent_runtime import _build_pending_action
 from kernel.plugins.checks import similar_skills
 from kernel.plugins.manifest import load_manifest
 from kernel.plugins.registry import SkillRegistry

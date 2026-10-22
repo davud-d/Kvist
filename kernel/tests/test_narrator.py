@@ -5,12 +5,12 @@ import threading
 import time
 from types import SimpleNamespace
 
-from kernel import session_events
-from kernel.agent_model import build_report_system_prompt, build_role_system_prompt
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import FrontendChannel
-from kernel.narrator import narrating, narration_material, spoken_line
-from kernel.session_events import SessionJournal
+from kernel.session import session_events
+from kernel.agent.agent_model import build_report_system_prompt, build_role_system_prompt
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import FrontendChannel
+from kernel.agent.narrator import narrating, narration_material, spoken_line
+from kernel.session.session_events import SessionJournal
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 
@@ -238,19 +238,19 @@ class _Debug(NullUI):
 
 
 def _report(*outcomes):
-    from kernel.resources import CleanupReport
+    from kernel.plugins.resources import CleanupReport
 
     return CleanupReport(reason="done", outcomes=list(outcomes))
 
 
 def _stopped(label="browser"):
-    from kernel.resources import StopOutcome
+    from kernel.plugins.resources import StopOutcome
 
     return StopOutcome(resource_id=label, label=label, stopped=True)
 
 
 def test_the_closing_ledger_is_kept_off_a_spoken_answer(agent_factory):
-    from kernel.agent_runtime import cleanup_summary
+    from kernel.agent.agent_runtime import cleanup_summary
 
     voice = agent_factory(voice_mode=True)
     voice._ui = _Debug()
@@ -264,8 +264,8 @@ def test_the_closing_ledger_is_kept_off_a_spoken_answer(agent_factory):
 
 
 def test_a_process_that_would_not_stop_is_still_said_aloud(agent_factory):
-    from kernel.agent_runtime import cleanup_summary
-    from kernel.resources import StopOutcome
+    from kernel.agent.agent_runtime import cleanup_summary
+    from kernel.plugins.resources import StopOutcome
 
     voice = agent_factory(voice_mode=True)
     voice._ui = _Debug()
@@ -275,7 +275,7 @@ def test_a_process_that_would_not_stop_is_still_said_aloud(agent_factory):
 
 
 def test_there_is_no_ledger_when_the_task_owned_nothing(agent_factory):
-    from kernel.agent_runtime import cleanup_summary
+    from kernel.agent.agent_runtime import cleanup_summary
 
     voice = agent_factory(voice_mode=True)
     assert cleanup_summary(voice, None) == ""

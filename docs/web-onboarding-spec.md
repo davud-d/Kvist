@@ -7,7 +7,7 @@
 - одно решение за владельцем, в ядре: модель AnyModel по умолчанию (раздел «открытые вопросы», пункт 1). Без него первый запуск занимает 6 действий, а не 4.
 - csp style-src 'self' и script-src 'self' без изменений: прототип снят под тем же заголовком CSP, что отдаёт http_api.py:413-415, нарушений нет (`prototype/shoot.mjs` падает на нарушении).
 - стили: только токены :root из styles.css; нет text-transform, box-shadow, gradient, blur, цветовых литералов вне :root и внешних адресов. Новых цветовых токенов нет (их 12 из 14).
-- тексты интерфейса на английском, предложения с заглавной буквы, без жаргона («provider» только там, где без него нельзя). Описания уровней рассуждений и ролей берутся из ядра как есть (kernel/reasoning_effort.py:53-60, kernel/role_router.py:40-46 через kernel/core_manifest.py:36-47), своих копий клиент не держит.
+- тексты интерфейса на английском, предложения с заглавной буквы, без жаргона («provider» только там, где без него нельзя). Описания уровней рассуждений и ролей берутся из ядра как есть (kernel/llm/reasoning_effort.py:53-60, kernel/agent/role_router.py:40-46 через kernel/protocol/core_manifest.py:36-47), своих копий клиент не держит.
 
 ## число действий
 
@@ -38,12 +38,12 @@
 - «Model» (список появляется после проверки ключа), кнопка «Start», текстовая кнопка «I have another provider».
 
 Основной путь AnyModel:
-1. кнопка регистрации: `window.open(registration_url, '_blank', 'noopener')`. Адрес только из поля `registration_url` ответа конфигурации, то есть из `ANYMODEL_REGISTER_URL` ядра (kernel/anymodel_onboarding.py:32, frontends/web-local/kvist_web/configuration.py:40); клиент принимает только https (как сейчас, configuration.js:65-66). Фокус после нажатия переходит в поле ключа.
-2. ключ проверяется сам: по событию paste (после вставки), по change и по Enter в поле. Проверка это существующий `POST /api/v1/configuration/models` (configuration.py:85-95, тот же `fetch_available_models`, что у TUI, kernel/main.py:2158-2177) для каталога и `fetch_model_coefficients` при сохранении (configuration.py:120-126, kernel/anymodel_onboarding.py:171-178). Новой проверки не появляется.
+1. кнопка регистрации: `window.open(registration_url, '_blank', 'noopener')`. Адрес только из поля `registration_url` ответа конфигурации, то есть из `ANYMODEL_REGISTER_URL` ядра (kernel/llm/anymodel_onboarding.py:32, frontends/web-local/kvist_web/configuration.py:40); клиент принимает только https (как сейчас, configuration.js:65-66). Фокус после нажатия переходит в поле ключа.
+2. ключ проверяется сам: по событию paste (после вставки), по change и по Enter в поле. Проверка это существующий `POST /api/v1/configuration/models` (configuration.py:85-95, тот же `fetch_available_models`, что у TUI, kernel/main.py:2158-2177) для каталога и `fetch_model_coefficients` при сохранении (configuration.py:120-126, kernel/llm/anymodel_onboarding.py:171-178). Новой проверки не появляется.
 3. при успехе: строка «The key works. N models available.», список Model с выбранной моделью, фокус на Start. Выбор модели по порядку: сохранённая модель провайдера, `defaults.fast` из конфигурации, иначе пустой пункт «Choose a model» и Start выключен до выбора.
 4. Start сохраняет ключ, модель (обе роли fast и smart одной моделью, как первый запуск VS Code, webview/firstRun.tsx:53-55) и текущий уровень рассуждений через существующий `POST /api/v1/configuration`, затем экран уходит, открывается пустая сессия (экран 2) с фокусом в поле ввода.
 
-Второй путь «I have another provider»: форма на месте первой (снимок `first-run-other*.png`): Provider (нативный select; первыми шесть основных провайдеров в порядке `_BUILTIN_PROVIDERS` ядра, kernel/config_info.py:46-56, затем `<optgroup label="More providers">` с остальными), «<Provider> API key», Model (список встроенных вариантов сразу, живой каталог после ввода ключа, «Other model ID…» открывает поле ввода; это поведение уже в 1c400e8), Provider address для провайдеров с `can_edit_base_url`, если адрес обязателен, Start, текстовая кнопка «Use AnyModel instead». Проверка ключа при Start тем же `save_configuration`, который сам вызывает каталог (configuration.py:127-128).
+Второй путь «I have another provider»: форма на месте первой (снимок `first-run-other*.png`): Provider (нативный select; первыми шесть основных провайдеров в порядке `_BUILTIN_PROVIDERS` ядра, kernel/config/config_info.py:46-56, затем `<optgroup label="More providers">` с остальными), «<Provider> API key», Model (список встроенных вариантов сразу, живой каталог после ввода ключа, «Other model ID…» открывает поле ввода; это поведение уже в 1c400e8), Provider address для провайдеров с `can_edit_base_url`, если адрес обязателен, Start, текстовая кнопка «Use AnyModel instead». Проверка ключа при Start тем же `save_configuration`, который сам вызывает каталог (configuration.py:127-128).
 
 Состояния:
 - загрузка конфигурации: заставка «Restoring your workspaces…» как сейчас (index.html:9).
@@ -77,7 +77,7 @@
 
 | меню | заголовок | пункты и подписи | действие |
 |---|---|---|---|
-| модель | «<Provider> models. Applies to this session and new ones.» | модели каталога; подпись: описание модели из `options` ядра, если есть (kernel/llm_clients.py:459-620), иначе «From your <Provider> catalog», у текущей «Current model»; разделитель; «Enter a model ID…» / «Use a model that is not in this list»; «Add a provider…» / «Connect another service with its own key» | `models [X, smart]` |
+| модель | «<Provider> models. Applies to this session and new ones.» | модели каталога; подпись: описание модели из `options` ядра, если есть (kernel/llm/llm_clients.py:459-620), иначе «From your <Provider> catalog», у текущей «Current model»; разделитель; «Enter a model ID…» / «Use a model that is not in this list»; «Add a provider…» / «Connect another service with its own key» | `models [X, smart]` |
 | рассуждения | «How much the model thinks before it acts. Applies now and to new sessions.» | шесть уровней с описаниями `EFFORT_DESCRIPTIONS` | `effort [L]` |
 | роль | «What Kvist may do in your workspace. Applies now and to new sessions.» | шесть ролей с описаниями `ROLE_DESCRIPTIONS` и `auto` (core_manifest.py:49-66) | `role [R]` |
 
@@ -195,7 +195,7 @@ Firefox для Playwright здесь не установлен; эти пунк�
 10. Шторка сайдбара на 390 закрывается после выбора команды палитры (аудит, задача 5) и по тапу в затемнение.
 
 ## открытые вопросы
-1. Модель AnyModel по умолчанию. У ядра её нет (`_MODEL_DEFAULTS` без AnyModel, kernel/llm_clients.py:427; TUI спрашивает модель отдельным шагом, kernel/main.py:2952-2990). Предложение: один id в `_MODEL_DEFAULTS[anymodel]`, выбор id за владельцем; тогда экран 1 даёт 2 действия, без него 4, а весь путь 6. Прототип ставит первую модель каталога на место этой модели по умолчанию. Решение владельца: упорядоченный список в ядре, берётся первая модель из живого каталога; реализовано как `ANYMODEL_DEFAULT_MODELS` в kernel/anymodel_onboarding.py. Сами id владелец ещё не вписал, список пуст, поэтому сейчас первый запуск идёт по длинному пути с выбором модели.
+1. Модель AnyModel по умолчанию. У ядра её нет (`_MODEL_DEFAULTS` без AnyModel, kernel/llm/llm_clients.py:427; TUI спрашивает модель отдельным шагом, kernel/main.py:2952-2990). Предложение: один id в `_MODEL_DEFAULTS[anymodel]`, выбор id за владельцем; тогда экран 1 даёт 2 действия, без него 4, а весь путь 6. Прототип ставит первую модель каталога на место этой модели по умолчанию. Решение владельца: упорядоченный список в ядре, берётся первая модель из живого каталога; реализовано как `ANYMODEL_DEFAULT_MODELS` в kernel/llm/anymodel_onboarding.py. Сами id владелец ещё не вписал, список пуст, поэтому сейчас первый запуск идёт по длинному пути с выбором модели.
 2. Подписи моделей из живого каталога: у ядра нет описаний для id, которых нет в `_MODEL_OPTIONS`; подпись «From your <Provider> catalog» говорит, откуда модель, а не что она меняет. Что она меняет, говорит заголовок меню.
 3. Удалённый режим: правка Settings (экран 4) и скрытие Switch server в палитре следуют за `SHOW_SERVERS`; при его включении оба пункта возвращаются.
 4. Запуск: в корневые README.md и README.ru.md раздел о `kvist-web`, в эпилог `kvist --help` одна строка о нём; предупреждение на экране 1, когда воркспейс это домашний каталог («Kvist will work in your home folder. Add a project folder instead?»). Это вне клиента и вне этой фазы.

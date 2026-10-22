@@ -7,8 +7,10 @@ import threading
 
 import pytest
 
-from kernel import tray_link, user_config
-from kernel.tray_link import TrayLink
+from kernel.tray import tray_link
+
+from kernel.config import user_config
+from kernel.tray.tray_link import TrayLink
 
 
 class FakeDaemon:

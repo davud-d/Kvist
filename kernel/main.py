@@ -10,7 +10,7 @@ import urllib.parse
 from contextlib import contextmanager
 from pathlib import Path
 
-from kernel.version import kvist_version
+from kernel.config.version import kvist_version
 
 
 def _build_cli_parser() -> argparse.ArgumentParser:
@@ -234,7 +234,7 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         "--complete-server",
         action="store_true",
         help="Serve inline code completions over stdin/stdout JSON lines until "
-        "stdin closes (requires --workspace); see kernel/completion_server.py.",
+        "stdin closes (requires --workspace); see kernel/ide/completion_server.py.",
     )
     parser.add_argument(
         "--selection-task",
@@ -297,9 +297,9 @@ _DIRECT_CLI_ARGS = (
 def _run_session_op(args: argparse.Namespace) -> None:
     import json
 
-    from kernel.durable_json import JsonStorageError
-    from kernel.redaction import sanitize_display_text
-    from kernel.session_store import run_session_op
+    from kernel.session.durable_json import JsonStorageError
+    from kernel.sandbox.redaction import sanitize_display_text
+    from kernel.session.session_store import run_session_op
 
     text = (
         sys.stdin.buffer.read().decode("utf-8", errors="replace")
@@ -329,16 +329,16 @@ def _run_session_op(args: argparse.Namespace) -> None:
 def _run_tray_op(args: argparse.Namespace) -> None:
     import json
 
-    from kernel import tray_bar
-    from kernel.user_config import get_tray_enabled, save_tray_enabled
+    from kernel.tray import tray_bar
+    from kernel.config.user_config import get_tray_enabled, save_tray_enabled
 
     if args.tray_op == "bar-stream":
-        from kernel.tray_bar_client import run_stream
+        from kernel.tray.tray_bar_client import run_stream
 
         run_stream(args.bar)
         return
     if args.tray_op == "toggle":
-        from kernel.tray_bar_client import send_toggle
+        from kernel.tray.tray_bar_client import send_toggle
 
         raise SystemExit(0 if send_toggle() else 1)
     try:
@@ -360,8 +360,8 @@ def _run_commit_message_op() -> None:
     import json
     from contextlib import redirect_stdout
 
-    from kernel.commit_message import CommitMessageError, generate_commit_message
-    from kernel.redaction import sanitize_display_text
+    from kernel.ide.commit_message import CommitMessageError, generate_commit_message
+    from kernel.sandbox.redaction import sanitize_display_text
 
     # The IDE writes UTF-8 whatever the console code page is (a Windows build
     # would otherwise decode stdin as cp1252), and the ASCII-escaped reply is
@@ -386,8 +386,8 @@ def _run_complete_op(args: argparse.Namespace) -> None:
     import json
     from contextlib import redirect_stdout
 
-    from kernel.completion import CompletionError, generate_completion, resolve_workspace_for_completion
-    from kernel.redaction import sanitize_display_text
+    from kernel.ide.completion import CompletionError, generate_completion, resolve_workspace_for_completion
+    from kernel.sandbox.redaction import sanitize_display_text
 
     payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
@@ -407,9 +407,9 @@ def _run_complete_op(args: argparse.Namespace) -> None:
 def _run_complete_server_op(args: argparse.Namespace) -> None:
     import json
 
-    from kernel.completion import CompletionError, resolve_workspace_for_completion
-    from kernel.completion_server import serve
-    from kernel.redaction import sanitize_display_text
+    from kernel.ide.completion import CompletionError, resolve_workspace_for_completion
+    from kernel.ide.completion_server import serve
+    from kernel.sandbox.redaction import sanitize_display_text
 
     try:
         workspace = resolve_workspace_for_completion(args.workspace)
@@ -423,9 +423,9 @@ def _run_selection_task_op() -> None:
     import json
     from contextlib import redirect_stdout
 
-    from kernel.completion import CompletionError
-    from kernel.redaction import sanitize_display_text
-    from kernel.selection_task import generate_selection_reply
+    from kernel.ide.completion import CompletionError
+    from kernel.sandbox.redaction import sanitize_display_text
+    from kernel.agent.selection_task import generate_selection_reply
 
     payload_text = sys.stdin.buffer.read().decode("utf-8", errors="replace")
     try:
@@ -449,7 +449,7 @@ def _run_set_provider_op(raw: object) -> dict:
     up front instead of prompted, so an event-driven frontend can offer its own
     setup screen without the core ever needing a TTY or an extra dialog round trip.
     """
-    from kernel.config_info import build_config_info
+    from kernel.config.config_info import build_config_info
 
     provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
     api_key = str(raw.get("api_key", "")).strip() if isinstance(raw, dict) else ""
@@ -524,7 +524,7 @@ def _run_open_registration_op(raw: object) -> dict:
     Only AnyModel has one today (``anymodel_onboarding.py``); any other
     provider id is a no-op the caller falls back to plain key entry for.
     """
-    from kernel.anymodel_onboarding import ANYMODEL_REGISTER_URL, open_registration_page
+    from kernel.llm.anymodel_onboarding import ANYMODEL_REGISTER_URL, open_registration_page
 
     provider = str(raw.get("provider", "")).strip() if isinstance(raw, dict) else ""
     normalized = normalize_provider(provider)
@@ -585,25 +585,25 @@ if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.session_op:
     raise SystemExit(0)
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.skill_op:
-    from kernel.skill_ops import main_skill_op
+    from kernel.plugins.skill_ops import main_skill_op
 
     main_skill_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.connection_op:
-    from kernel.skill_ops import main_connection_op
+    from kernel.plugins.skill_ops import main_connection_op
 
     main_connection_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.mcp_op:
-    from kernel.skill_ops import main_mcp_op
+    from kernel.plugins.skill_ops import main_mcp_op
 
     main_mcp_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
 
 if _DIRECT_CLI_ARGS is not None and _DIRECT_CLI_ARGS.memory_op:
-    from kernel.skill_ops import main_memory_op
+    from kernel.plugins.skill_ops import main_memory_op
 
     main_memory_op(_DIRECT_CLI_ARGS)
     raise SystemExit(0)
@@ -622,12 +622,12 @@ from rich.panel import Panel
 from rich.text import Text
 
 import banner
-from kernel.agent import AgentConfig, LocalAgent
-from kernel.event_stdio import CommandContext, CommandHandler, CommandResult
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import AgentConfig, LocalAgent
+from kernel.protocol.event_stdio import CommandContext, CommandHandler, CommandResult
+from kernel.sandbox.executor import SafeExecutor
 from interactive_screen import InteractiveScreen
-from kernel.language_utils import choose_localized_text, detect_request_language
-from kernel.llm_clients import (
+from kernel.context.language_utils import choose_localized_text, detect_request_language
+from kernel.llm.llm_clients import (
     create_llm_client,
     configured_freeflow_backends,
     ANTHROPIC_PROVIDER,
@@ -658,31 +658,31 @@ from kernel.llm_clients import (
     validate_model_selection,
     validate_omniroute_model_id,
 )
-from kernel.redaction import sanitize_display_text
-from kernel.custom_provider import (
+from kernel.sandbox.redaction import sanitize_display_text
+from kernel.llm.custom_provider import (
     CustomProviderError,
     normalize_custom_provider_payload,
     validate_provider_name,
 )
 from prompt_history import WorkspaceInputHistory
-from kernel.system_context import ensure_workspace_instructions
+from kernel.context.system_context import ensure_workspace_instructions
 from kernel.plugins.bundled import sync_bundled
 from kernel.plugins.registry import SkillRegistry
-from kernel.ui import AgentUI
+from kernel.protocol.ui import AgentUI
 from terminal_banner import SetupCancelled, TerminalBannerUI, ctrl_c_stops_setup
 from window_title import pop_window_title, push_window_title, set_window_title
 from terminal_image import print_exit_logo
-from kernel.anymodel_onboarding import offer_anymodel_registration
-from kernel.performance_logger import PerfLogger
-from kernel.agent_logging import (
+from kernel.llm.anymodel_onboarding import offer_anymodel_registration
+from kernel.config.performance_logger import PerfLogger
+from kernel.session.agent_logging import (
     delete_session as delete_agent_session,
     is_valid_session_name,
     list_sessions,
 )
-from kernel.session_titler import session_display_title
-from kernel import tray_bar
-from kernel.tray_link import mark_terminal_host
-from kernel.user_config import (
+from kernel.session.session_titler import session_display_title
+from kernel.tray import tray_bar
+from kernel.tray.tray_link import mark_terminal_host
+from kernel.config.user_config import (
     ensure_provider_credentials,
     get_custom_providers,
     get_custom_provider_by_name,
@@ -721,7 +721,7 @@ from kernel.user_config import (
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.shortcuts import CompleteStyle
 
-from kernel.api_settings import (
+from kernel.llm.api_settings import (
     API_SETTINGS,
     ApiSetting,
     active_env_override,
@@ -736,15 +736,15 @@ from kernel.api_settings import (
     setting_for,
     store_api_settings,
 )
-from kernel.context_budget import derived_prompt_budget
-from kernel.reasoning_effort import (
+from kernel.context.context_budget import derived_prompt_budget
+from kernel.llm.reasoning_effort import (
     DEFAULT_EFFORT,
     EFFORT_DESCRIPTIONS,
     EFFORT_LEVELS,
     effort_advisory,
     normalize_effort,
 )
-from kernel.slash_commands import (
+from kernel.protocol.slash_commands import (
     SLASH_COMMAND_KEY_BINDINGS,
     SLASH_COMMAND_LEXER,
     SLASH_COMMAND_MENU_HEIGHT,
@@ -3849,7 +3849,7 @@ def _stdio_session_op(agent, args: list[str]) -> str:
 
 
 def _stdio_session(ctx: CommandContext) -> CommandResult:
-    from kernel.durable_json import JsonStorageError
+    from kernel.session.durable_json import JsonStorageError
 
     agent = ctx.session.agent
     before = agent.current_session
@@ -3871,7 +3871,7 @@ def _stdio_session(ctx: CommandContext) -> CommandResult:
 
 def _session_event(agent):
     """The session a switch moved to, with the closed notice when end_session closed it."""
-    from kernel.frontend_protocol import SessionEvent
+    from kernel.protocol.frontend_protocol import SessionEvent
 
     return SessionEvent(
         agent.current_session,
@@ -3883,7 +3883,7 @@ def _session_event(agent):
 
 def _closed_notice(agent) -> str | None:
     """The core's notice for the input's place when end_session closed the active session."""
-    from kernel.end_session import closed_notice, closure_language
+    from kernel.plan.end_session import closed_notice, closure_language
 
     return closed_notice(closure_language(agent)) if agent.is_session_closed() else None
 
@@ -4002,7 +4002,7 @@ def _stdio_catalog(ctx: CommandContext) -> CommandResult:
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    from kernel.config_info import build_config_info
+    from kernel.config.config_info import build_config_info
 
     config = ctx.session.agent.config
     info = build_config_info()
@@ -4031,7 +4031,7 @@ def _catalog_options(entry: dict) -> list[str]:
 
 
 def _stdio_changes(ctx: CommandContext) -> CommandResult:
-    from kernel.change_journal import JournalUnavailableError, build_diff_report
+    from kernel.session.change_journal import JournalUnavailableError, build_diff_report
 
     try:
         report = build_diff_report(ctx.session.agent.executor.workspace)
@@ -4041,7 +4041,7 @@ def _stdio_changes(ctx: CommandContext) -> CommandResult:
 
 
 def _stdio_memory(ctx: CommandContext) -> CommandResult:
-    from kernel.agent_tools import memory_model
+    from kernel.agent.agent_tools import memory_model
     from kernel.memory import MemoryStoreError
     from kernel.memory.commands import run_slash
 
@@ -4063,7 +4063,7 @@ def _speaks_russian(agent) -> bool:
 
 
 def _stdio_context(ctx: CommandContext) -> CommandResult:
-    from kernel.context_meter import context_usage, describe
+    from kernel.context.context_meter import context_usage, describe
 
     usage = context_usage(ctx.session.agent)
     return CommandResult(
@@ -4074,8 +4074,8 @@ def _stdio_context(ctx: CommandContext) -> CommandResult:
 
 
 def _stdio_bug(ctx: CommandContext) -> CommandResult:
-    from kernel.bug_report import save_bug_report
-    from kernel.durable_json import JsonStorageError
+    from kernel.config.bug_report import save_bug_report
+    from kernel.session.durable_json import JsonStorageError
 
     user_text = " ".join(ctx.args)
     try:
@@ -4374,7 +4374,7 @@ def _revert_confirmation_body(baseline: dict) -> str:
 
 
 def _stdio_revert(ctx: CommandContext) -> CommandResult:
-    from kernel.change_journal import JournalUnavailableError, load_baseline, revert_workspace
+    from kernel.session.change_journal import JournalUnavailableError, load_baseline, revert_workspace
 
     workspace = ctx.session.agent.executor.workspace
     try:
@@ -4434,13 +4434,13 @@ def _stdio_commit_message(ctx: CommandContext) -> CommandResult:
     """
     import json as _json
 
-    from kernel.commit_message import (
+    from kernel.ide.commit_message import (
         CommitMessageError,
         drop_protected_files,
         generate_commit_message,
         split_unified_diff,
     )
-    from kernel.protocol import Action, AgentCommand
+    from kernel.protocol.protocol import Action, AgentCommand
 
     executor = ctx.session.agent.executor
     result = executor.execute(
@@ -4537,7 +4537,7 @@ def main() -> None:
     if args.config_info:
         import json as _json
 
-        from kernel.config_info import build_config_info
+        from kernel.config.config_info import build_config_info
 
         try:
             payload = build_config_info()
@@ -4570,7 +4570,7 @@ def main() -> None:
     if args.config_op:
         import json as _json
 
-        from kernel.config_info import build_config_info
+        from kernel.config.config_info import build_config_info
 
         try:
             # The payload can carry an API key, so the frontend pipes it on
@@ -4641,7 +4641,7 @@ def main() -> None:
                 store_api_settings(values)
                 payload = {"ok": True}
             elif args.config_op == "full-reset":
-                from kernel.user_config import reset_user_config
+                from kernel.config.user_config import reset_user_config
                 reset_user_config()
                 payload = {"ok": True}
             else:
@@ -4677,7 +4677,7 @@ def main() -> None:
     if args.journal_op:
         import json as _json
 
-        from kernel.change_journal import (
+        from kernel.session.change_journal import (
             JournalUnavailableError,
             build_diff_report,
             revert_workspace,
@@ -4711,31 +4711,31 @@ def main() -> None:
         return
 
     if args.skill_op:
-        from kernel.skill_ops import main_skill_op
+        from kernel.plugins.skill_ops import main_skill_op
 
         main_skill_op(args)
         return
 
     if args.memory_op:
-        from kernel.skill_ops import main_memory_op
+        from kernel.plugins.skill_ops import main_memory_op
 
         main_memory_op(args)
         return
 
     if args.mcp_op:
-        from kernel.skill_ops import main_mcp_op
+        from kernel.plugins.skill_ops import main_mcp_op
 
         main_mcp_op(args)
         return
 
     if args.connection_op:
-        from kernel.skill_ops import main_connection_op
+        from kernel.plugins.skill_ops import main_connection_op
 
         main_connection_op(args)
         return
 
     if args.frontend == "stdio-multi":
-        from kernel.event_stdio import launch_multi
+        from kernel.protocol.event_stdio import launch_multi
 
         model_values = (args.fast_model, args.smart_model)
         if any(model_values) and not all(model_values):
@@ -4770,7 +4770,7 @@ def main() -> None:
         return
 
     if args.frontend == "stdio":
-        from kernel.event_stdio import launch
+        from kernel.protocol.event_stdio import launch
 
         goal = "" if args.resume else sys.stdin.readline().strip()
         model_values = (args.fast_model, args.smart_model)
@@ -4874,7 +4874,7 @@ def main() -> None:
     sync_strime_suggestion(config.provider, config.stream)
 
     # Only an explicit resume continues a previous launch's conversation.
-    from kernel.durable_json import JsonStorageError
+    from kernel.session.durable_json import JsonStorageError
 
     try:
         if isinstance(args.resume, str):
@@ -5427,8 +5427,8 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/bug" or user_goal.lower().startswith("/bug "):
-                from kernel.bug_report import save_bug_report
-                from kernel.durable_json import JsonStorageError
+                from kernel.config.bug_report import save_bug_report
+                from kernel.session.durable_json import JsonStorageError
 
                 user_text = user_goal[len("/bug"):].strip()
                 try:
@@ -5447,7 +5447,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/changes":
-                from kernel.change_journal import build_diff_report
+                from kernel.session.change_journal import build_diff_report
 
                 report = build_diff_report(agent.executor.workspace)
                 console.print(Panel(
@@ -5458,7 +5458,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/memory" or user_goal.lower().startswith("/memory "):
-                from kernel.agent_tools import memory_model
+                from kernel.agent.agent_tools import memory_model
                 from kernel.memory import MemoryStoreError
                 from kernel.memory.commands import run_slash
 
@@ -5477,7 +5477,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/context":
-                from kernel.context_meter import context_usage, describe
+                from kernel.context.context_meter import context_usage, describe
 
                 console.print(Panel(
                     Text(describe(context_usage(agent))),
@@ -5487,7 +5487,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/diff":
-                from kernel.change_journal import build_session_diff_report
+                from kernel.session.change_journal import build_session_diff_report
 
                 session_name = getattr(agent, "current_session", "default")
                 report = build_session_diff_report(agent.executor.workspace, session_name)
@@ -5499,7 +5499,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/status":
-                from kernel.sandbox import sandbox_network_allowed
+                from kernel.sandbox.sandbox import sandbox_network_allowed
 
                 session_name = getattr(agent, "current_session", "default")
                 saved_role = get_saved_role() or "auto"
@@ -5540,7 +5540,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/permissions" or user_goal.lower().startswith("/permissions "):
-                from kernel.permission_policy import load_policy
+                from kernel.sandbox.permission_policy import load_policy
 
                 workspace = agent.executor.workspace
                 policy, note = load_policy(workspace)
@@ -5615,7 +5615,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/revert":
-                from kernel.change_journal import (
+                from kernel.session.change_journal import (
                     JournalUnavailableError,
                     load_baseline,
                     revert_workspace,
@@ -5943,7 +5943,7 @@ def main() -> None:
                 continue
 
             if user_goal.lower() == "/commands":
-                from kernel.slash_commands import SLASH_COMMANDS
+                from kernel.protocol.slash_commands import SLASH_COMMANDS
 
                 console.print("[bold]Available commands:[/bold]")
                 for command in SLASH_COMMANDS:
@@ -5979,7 +5979,7 @@ Support:
                 agent.run(user_goal)
                 continue
 
-            from kernel.role_router import route_role_decision_with_llm, route_role
+            from kernel.agent.role_router import route_role_decision_with_llm, route_role
             saved_role = get_saved_role()
             # If user selected a specific role, skip role detection and use it directly
             if saved_role and saved_role != "auto":

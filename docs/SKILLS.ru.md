@@ -295,7 +295,7 @@ def execute(tool_name: str, arguments: dict, ctx) -> dict:
 
 Одна задача — один жизненный цикл: `running`, `pause_requested`, `paused`, `resuming`,
 `cancelling`, `cancelled`, `completed`, `failed`, `awaiting_input`, `idle`
-(`kernel/task_control.py`; фронтенды получают `task_state`).
+(`kernel/agent/task_control.py`; фронтенды получают `task_state`).
 
 * **Escape (или кнопка «Пауза») ставит на паузу** Kvist и всех её помощниц в
   ближайшей безопасной точке; пока они её не достигли, интерфейс показывает «пауза

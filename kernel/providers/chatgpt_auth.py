@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 import httpx
 import jwt
 
-from kernel.user_config import _update_user_config, load_user_config
+from kernel.config.user_config import _update_user_config, load_user_config
 
 ISSUER = "https://auth.openai.com"
 RESOURCE = "https://api.openai.com/v1"

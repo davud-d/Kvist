@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.call_labels import call_label, trim_purpose
+from kernel.agent.call_labels import call_label, trim_purpose
 
 
 def test_labels_name_what_the_call_touches_in_the_response_language():

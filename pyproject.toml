@@ -46,6 +46,17 @@ kvist-web-bridge = "kvist_web.bridge_cli:main"
 # subdirectories stay out. kernel/tests/test_pyproject_modules.py checks this list.
 packages = [
     "kernel",
+    "kernel.agent",
+    "kernel.plan",
+    "kernel.protocol",
+    "kernel.sandbox",
+    "kernel.session",
+    "kernel.context",
+    "kernel.vision",
+    "kernel.llm",
+    "kernel.tray",
+    "kernel.config",
+    "kernel.ide",
     "kernel.providers",
     "kernel.session_import",
     "kernel.memory",

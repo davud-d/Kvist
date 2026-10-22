@@ -694,13 +694,13 @@ recorded per capability in [`frontends/zed/README.md`](../frontends/zed/README.m
 
 ## 8e. The tray link
 
-`frontends/tray` is a resident icon for every core that lives in a terminal. A core connects to it with `kernel/tray_link.py`; nothing travels back to the core. This is not the §8 event stream.
+`frontends/tray` is a resident icon for every core that lives in a terminal. A core connects to it with `kernel/tray/tray_link.py`; nothing travels back to the core. This is not the §8 event stream.
 
 - **Discovery.** The daemon writes `~/.kvist/tray.json` (`{"port", "token", "pid"}`, mode 0600) and listens on `127.0.0.1:<port>`. A core with no reachable daemon starts it once per process (`KVIST_TRAY_CMD`, a JSON argv, or the source checkout's `frontends/tray/node_modules/electron`) with `KVIST_CORE_CMD` set to its own command line.
 - **Wire.** NDJSON. The first line is `{"type": "hello", "token": "..."}`; a wrong token closes the connection. Then one `{"type": "state", "pid", "workspace", "session", "state"}` per change, where `state` is `running` (a turn began) or `done` (it ended). Each message is a complete snapshot, so a sender may drop all but the newest.
 - **Who sends.** Only terminal hosts: `main()` sets `KVIST_TRAY_HOST=1` before the terminal frontends start, and the Ink app's core inherits it. Cores started by a GUI, ACP or `run_task.py` never send.
 - **Switch.** `tray_enabled` in `~/.kvist/config.json` (absent means on) is read before every send; `kvist --tray-op enable|disable|status` prints `{"ok", "enabled"}` and exits.
-- **Bar clients.** A hello with `"role": "bar"` subscribes to `{"type": "summary", "state": "idle|running|done", "count", "tooltip"}` lines (sent at once and on every change) and may send `{"type": "toggle"}` to open or close the panel. `kernel/tray_bar.py` adds a module to the user's Waybar or Polybar config that runs `--tray-op bar-stream` and `--tray-op toggle`; the edit is idempotent and keeps `<file>.kvist-backup`.
+- **Bar clients.** A hello with `"role": "bar"` subscribes to `{"type": "summary", "state": "idle|running|done", "count", "tooltip"}` lines (sent at once and on every change) and may send `{"type": "toggle"}` to open or close the panel. `kernel/tray/tray_bar.py` adds a module to the user's Waybar or Polybar config that runs `--tray-op bar-stream` and `--tray-op toggle`; the edit is idempotent and keeps `<file>.kvist-backup`.
 - **Reading.** The daemon never reads session files; the mini chat calls `--session-op history`.
 
 ## 8f. Skills, the agent's screen, pause and helpers

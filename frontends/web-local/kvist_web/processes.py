@@ -20,7 +20,7 @@ _LOG = logging.getLogger("kvist.web.process")
 
 # These are the core events the session journal never holds: the ones
 # SessionJournal deliberately omits, and command_result, which stdio-multi
-# writes straight to stdout after a command (kernel/event_stdio.py). Every
+# writes straight to stdout after a command (kernel/protocol/event_stdio.py). Every
 # other raw core event is meaningful for a reconnecting frontend and is marked
 # durable on the live envelope; the durable sequence itself remains owned by
 # the core journal. A client applies a durable event from the journal, so an
@@ -132,8 +132,8 @@ class SessionProcess:
             self._set_state(ExecutionState.RUNNING)
 
     def command(self, name: str, args: list[str]) -> None:
-        from kernel.llm_clients import MODEL_ROLES
-        from kernel.reasoning_effort import EFFORT_LEVELS
+        from kernel.llm.llm_clients import MODEL_ROLES
+        from kernel.llm.reasoning_effort import EFFORT_LEVELS
         from kvist_web.configuration import ROLE_CHOICES
 
         if not isinstance(args, list) or not all(isinstance(v, str) and v.strip() for v in args):
@@ -402,7 +402,7 @@ class ProcessSupervisor:
                 existing = self._processes.get(key)
                 if existing is not None and existing.snapshot().pid is not None:
                     return existing
-            from kernel.session_store import SessionStore
+            from kernel.session.session_store import SessionStore
 
             SessionStore(workspace).switch(session)
             process = SessionProcess(

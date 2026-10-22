@@ -36,11 +36,11 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from kernel import end_session  # noqa: E402
-from kernel.agent import LocalAgent  # noqa: E402
-from kernel.agent_state import AgentConfig  # noqa: E402
-from kernel.executor import SafeExecutor  # noqa: E402
+from kernel.agent.agent import LocalAgent  # noqa: E402
+from kernel.agent.agent_state import AgentConfig  # noqa: E402
+from kernel.sandbox.executor import SafeExecutor  # noqa: E402
 from kernel.main import build_agent  # noqa: E402
-from kernel.system_context import ensure_workspace_instructions  # noqa: E402
+from kernel.context.system_context import ensure_workspace_instructions  # noqa: E402
 from kernel.tests.conftest import NullUI  # noqa: E402
 
 CASES_PATH = ROOT / "kernel" / "tests" / "data" / "end_session_cases.jsonl"

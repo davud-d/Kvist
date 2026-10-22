@@ -28,10 +28,10 @@ import pytest
 
 from kernel.tests.conftest import SYSTEM_BASH, SYSTEM_SH, requires_posix
 
-from kernel import terminal as terminal_module
-from kernel.sandbox import resolve_bubblewrap_path, SandboxMode
-from kernel.secret_paths import UnsafeSecretPathError, enumerate_secret_targets
-from kernel.terminal import ApprovalRequiredError, HardDenyError, TerminalExecutor
+from kernel.sandbox import terminal as terminal_module
+from kernel.sandbox.sandbox import resolve_bubblewrap_path, SandboxMode
+from kernel.sandbox.secret_paths import UnsafeSecretPathError, enumerate_secret_targets
+from kernel.sandbox.terminal import ApprovalRequiredError, HardDenyError, TerminalExecutor
 
 pytestmark = pytest.mark.slow
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from kernel.session_store import SessionStore
+from kernel.session.session_store import SessionStore
 
 from kvist_web.events import EventBroker
 from kvist_web.processes import SessionProcess
@@ -140,7 +140,7 @@ def test_agent_start_is_lazy_and_sessions_are_independent(tmp_path, monkeypatch)
 def test_history_recovers_only_events_after_durable_cursor(tmp_path):
     store = SessionStore(tmp_path)
     store.create("one")
-    from kernel.session_events import SessionJournal
+    from kernel.session.session_events import SessionJournal
 
     class Event:
         def __init__(self, text):

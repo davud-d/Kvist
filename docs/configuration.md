@@ -17,7 +17,7 @@ file in another folder. Per-project state is under `<workspace>/.kvist/`
 - ChatGPT Plus/Pro through browser sign-in, with no API key;
 - 36 other OpenAI-compatible services (Qwen, Moonshot, Mistral, Groq, xAI,
   Together, Cohere and others; the full list is `MANUAL_OPENAI_PROVIDERS` in
-  `kernel/llm_clients.py`);
+  `kernel/llm/llm_clients.py`);
 - any endpoint of your own, OpenAI-compatible or Anthropic-compatible.
 
 Every provider has a **fast** model for routine steps and a **smart** model for
@@ -79,7 +79,7 @@ to disconnect the app in ChatGPT Settings.
 ## Models, context and reasoning
 
 **Context budget.** The prompt budget comes from the active model's documented
-maximum *input* size (`kernel/context_budget.py`), not from its context window.
+maximum *input* size (`kernel/context/context_budget.py`), not from its context window.
 OpenAI reserves 128k of the window for output, so a 400k-window GPT-5 model
 rejects prompts over 272k; Anthropic limits only the input. The budget is 85% of
 the input limit, because tiktoken under-counts for the Anthropic and DeepSeek

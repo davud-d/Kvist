@@ -5,8 +5,8 @@ from pathlib import Path
 # Run as `python scripts/run_task.py`, the repository root is not on the path.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from kernel.agent import AgentConfig, LocalAgent
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import AgentConfig, LocalAgent
+from kernel.sandbox.executor import SafeExecutor
 from kernel.main import build_agent
 import asyncio
 

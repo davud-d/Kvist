@@ -24,8 +24,8 @@ from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 
-from kernel.redaction import redact_value, sanitize_display_text
-from kernel.terminal import is_hitl_active
+from kernel.sandbox.redaction import redact_value, sanitize_display_text
+from kernel.sandbox.terminal import is_hitl_active
 from math_text import replace_math
 from window_title import set_window_title
 

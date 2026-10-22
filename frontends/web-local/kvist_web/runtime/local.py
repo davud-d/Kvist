@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from kernel.change_journal import build_diff_report, build_session_diff_report
-from kernel.session_store import SessionStore
+from kernel.session.change_journal import build_diff_report, build_session_diff_report
+from kernel.session.session_store import SessionStore
 
 from ..events import EventBroker
 from ..processes import ProcessSupervisor

@@ -4,8 +4,6 @@ from __future__ import annotations
 import pytest
 
 from kernel import main
-
-
 @pytest.fixture(autouse=True)
 def _clean_provider_env(monkeypatch):
     monkeypatch.delenv("AGENT_LLM_PROVIDER", raising=False)

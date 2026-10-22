@@ -4,7 +4,7 @@
 - меняем только frontends/web-local/kvist_web/client/ и tests/browser/. ядро, ssh/, bridge/, runtime/, electron, image-attachments.js не трогаем.
 - единственные правки вне client/ и tests/browser/: исключение для сервера и строки package-data для новых файлов клиента в pyproject.toml (fonts/*.woff2, fonts/OFL.txt, features/feed.js и далее).
 - исключение для сервера: .woff2 в белом списке /assets/* (http_api.py:256) и одна строка mimetypes.add_type("font/woff2", ".woff2") (http_api.py:24), потому что python до 3.14 знает .woff2 только через системный mime.types, которого может не быть. csp не расширяется.
-- единственная правка ядра: журнал сессии берёт тот же stream_id, что живой поток (kernel/session_events.py, kernel/event_stream_ui.py, коммит 823ddda), иначе ответ из стрима и из истории не склеиваются по stream_id. поля событий и версия протокола не менялись.
+- единственная правка ядра: журнал сессии берёт тот же stream_id, что живой поток (kernel/session/session_events.py, kernel/protocol/event_stream_ui.py, коммит 823ddda), иначе ответ из стрима и из истории не склеиваются по stream_id. поля событий и версия протокола не менялись.
 - без фреймворков и сборки: чистые es-модули, csp script-src 'self' остаётся. внешних шрифтов и cdn нет, инструмент работает офлайн.
 - только тёмная тема. цвета заводим токенами, чтобы светлую тему потом добавить заменой набора.
 - /assets/* отдаёт только .js .css .svg .png и .woff2 (font/woff2). webp и другие форматы не использовать.

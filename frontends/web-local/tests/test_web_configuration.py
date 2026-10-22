@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from kernel import user_config
+from kernel.config import user_config
 from kernel.providers import anymodel_pricing
 from kvist_web import configuration as service
 from kvist_web.ssh.config import ssh_aliases

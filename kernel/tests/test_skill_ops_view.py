@@ -9,8 +9,8 @@ from argparse import Namespace
 import pytest
 from rich.console import Console
 
-from kernel.skill_ops import main_skill_op
-from kernel.skill_ops_view import render
+from kernel.plugins.skill_ops import main_skill_op
+from kernel.plugins.skill_ops_view import render
 from kernel.tests.skill_fixtures import write_skill
 
 READY = {"id": "browser", "name": "Browser", "summary": "Its own Chromium.", "version": "0.1.1", "kind": "tools",

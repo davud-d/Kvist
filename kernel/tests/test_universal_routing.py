@@ -21,8 +21,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel import role_router
-from kernel.role_router import _match_direct_rule, _parse_llm_role, _response_names_role
+from kernel.agent import role_router
+from kernel.agent.role_router import _match_direct_rule, _parse_llm_role, _response_names_role
 
 
 # ── Snapshot: requests that must keep routing exactly as before ──────────

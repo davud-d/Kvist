@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel import agent_model
-from kernel import agent_runtime
-from kernel.agent import LocalAgent
-from kernel.executor import SafeExecutor
+from kernel.agent import agent_model
+from kernel.agent import agent_runtime
+from kernel.agent.agent import LocalAgent
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 
@@ -394,7 +394,7 @@ def test_overflow_shrinks_the_budget_and_retries_instead_of_failing(
     The provider's rejection is the only authority on the real limit: it must
     lower the budget for that model and re-send, not break the step.
     """
-    from kernel.context_budget import learned_budget_for, reset_learned_budgets
+    from kernel.context.context_budget import learned_budget_for, reset_learned_budgets
 
     reset_learned_budgets()
     monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
@@ -433,7 +433,7 @@ def test_overflow_shrinks_the_budget_and_retries_instead_of_failing(
 
 def test_a_learned_rejection_outranks_an_explicit_override(agent_factory, monkeypatch):
     """Otherwise the retry resends exactly the prompt that was just refused."""
-    from kernel.context_budget import note_input_overflow, reset_learned_budgets
+    from kernel.context.context_budget import note_input_overflow, reset_learned_budgets
 
     reset_learned_budgets()
     monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
@@ -573,7 +573,7 @@ def test_overflow_does_not_resend_an_identical_prompt(agent_factory, monkeypatch
     learned cap is keyed to the model that was refused, which is not
     necessarily the one whose budget the trimmer consults.
     """
-    from kernel.context_budget import reset_learned_budgets
+    from kernel.context.context_budget import reset_learned_budgets
 
     reset_learned_budgets()
     monkeypatch.delenv("AGENT_MAX_CONTEXT_TOKENS", raising=False)
@@ -604,7 +604,7 @@ def test_json_mode_rejection_keeps_the_rest_of_the_request_and_warns():
     narrowed retry first so a provider that refuses only that parameter keeps
     everything else.
     """
-    from kernel import agent_model
+    from kernel.agent import agent_model
     from types import SimpleNamespace
 
     attempts: list[dict] = []
@@ -656,8 +656,7 @@ def test_cached_json_mode_rejection_still_falls_through_to_a_temperature_error()
     that failed both checks crashed every step after the first instead of
     recovering on the bare fallback like a fresh rejection does.
     """
-    from kernel import agent_model
-
+    from kernel.agent import agent_model
     provider = "openai"
     model = "gpt-6-astra-regression"
     agent_model._JSON_MODE_UNSUPPORTED.add((provider, model))
@@ -703,8 +702,8 @@ def test_json_mode_warning_prints_once_per_run_not_once_per_step():
     repeat on every step of the same run once the run has already seen it —
     only a fresh run (a fresh RunState) earns a fresh warning.
     """
-    from kernel import agent_model
-    from kernel.agent_state import RunState
+    from kernel.agent import agent_model
+    from kernel.agent.agent_state import RunState
 
     provider = "openai"
     model = "gpt-6-astra-dedup"
@@ -742,8 +741,7 @@ def test_json_mode_warning_prints_once_per_run_not_once_per_step():
 
 def test_manual_provider_reasoning_rejection_is_debug_only():
     """Optional effort controls must not surface as a red run error on gateways."""
-    from kernel import agent_model
-
+    from kernel.agent import agent_model
     warnings: list[str] = []
     debug: list[str] = []
     agent = SimpleNamespace(

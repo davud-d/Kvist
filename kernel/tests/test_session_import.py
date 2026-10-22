@@ -26,7 +26,7 @@ from kernel.session_import import (
 from kernel.session_import.model import ImportedSession, ImportedTurn, SessionSummary
 from kernel.session_import.wizard import run_export, setup_import, setup_listing
 from kernel.session_import.writer import HISTORY_TURNS, import_session, session_name
-from kernel.session_store import run_session_op
+from kernel.session.session_store import run_session_op
 
 
 def _jsonl(path: Path, records: list[dict]) -> None:

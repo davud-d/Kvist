@@ -5,7 +5,7 @@ from io import StringIO
 
 from rich.console import Console
 
-from kernel.unified_diff import confirmation_renderable, old_and_new_text, pair_rows, parse_unified_diff
+from kernel.protocol.unified_diff import confirmation_renderable, old_and_new_text, pair_rows, parse_unified_diff
 
 DIFF = "--- a/x.py\n+++ b/x.py\n@@ -2,3 +2,3 @@\n import os\n-DEBUG = False\n+DEBUG = True\n PORT = 1"
 

@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.agent_logging import session_styles
+from kernel.session.agent_logging import session_styles
 
 
 @pytest.fixture(autouse=True)
 def global_pick(monkeypatch):
-    monkeypatch.setattr("kernel.user_config.get_saved_style", lambda style_type: "Default")
+    monkeypatch.setattr("kernel.config.user_config.get_saved_style", lambda style_type: "Default")
 
 
 def test_a_session_without_a_stamp_adopts_the_current_pick():

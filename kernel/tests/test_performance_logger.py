@@ -5,8 +5,8 @@ import stat
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import performance_logger
-from kernel.performance_logger import PerfLogger
+from kernel.config import performance_logger
+from kernel.config.performance_logger import PerfLogger
 
 
 def test_perf_logger_is_noop_when_disabled(tmp_path):

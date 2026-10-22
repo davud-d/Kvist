@@ -3,8 +3,8 @@ from __future__ import annotations
 
 
 def test_a_rejected_call_logs_the_arguments_the_model_sent(agent_factory):
-    from kernel.agent_runtime import _plan_calls
-    from kernel.protocol import ModelResponse, ToolCallRequest
+    from kernel.agent.agent_runtime import _plan_calls
+    from kernel.protocol.protocol import ModelResponse, ToolCallRequest
 
     agent = agent_factory()
     seen: list[str] = []

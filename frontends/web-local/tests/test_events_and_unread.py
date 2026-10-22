@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from kernel.session_events import SessionJournal
-from kernel.session_store import SessionStore
+from kernel.session.session_events import SessionJournal
+from kernel.session.session_store import SessionStore
 
 from kvist_web.controller import WebController
 from kvist_web.events import EventBroker

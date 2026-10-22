@@ -17,7 +17,7 @@ Kvist и как её установить, написано в [README](../READM
 - ChatGPT Plus/Pro через вход в браузере, без API-ключа;
 - 36 других OpenAI-совместимых сервисов (Qwen, Moonshot, Mistral, Groq, xAI,
   Together, Cohere и другие; полный список — `MANUAL_OPENAI_PROVIDERS` в
-  `kernel/llm_clients.py`);
+  `kernel/llm/llm_clients.py`);
 - любой свой endpoint, совместимый с OpenAI или Anthropic.
 
 У каждого провайдера есть **fast**-модель для обычных шагов и **smart**-модель
@@ -83,7 +83,7 @@ python -m kernel --config-op chatgpt-logout --config-payload '{}'    # отоз�
 ## Модели, контекст и рассуждения
 
 **Бюджет контекста.** Размер промпта берётся из документированного максимума
-*входа* активной модели (`kernel/context_budget.py`), а не из её окна контекста.
+*входа* активной модели (`kernel/context/context_budget.py`), а не из её окна контекста.
 OpenAI резервирует 128k окна под вывод, поэтому модель GPT-5 с окном 400k
 отклоняет промпты длиннее 272k; Anthropic ограничивает только вход. Бюджет равен
 85% лимита входа, потому что tiktoken занижает счёт для токенизаторов Anthropic

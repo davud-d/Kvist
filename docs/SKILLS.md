@@ -296,7 +296,7 @@ runner (it cannot nest); the outer Bubblewrap boundary applies instead.
 
 One task, one life cycle: `running`, `pause_requested`, `paused`, `resuming`,
 `cancelling`, `cancelled`, `completed`, `failed`, `awaiting_input`, `idle`
-(`kernel/task_control.py`; frontends receive `task_state`).
+(`kernel/agent/task_control.py`; frontends receive `task_state`).
 
 * **Escape (or the Pause button) pauses** the main agent and every helper at their next
   safe point; the interface shows "pause requested" until they reach it. A skill call in

@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from kernel import completion
-from kernel.agent_state import AgentConfig
-from kernel.completion import (
+from kernel.ide import completion
+from kernel.agent.agent_state import AgentConfig
+from kernel.ide.completion import (
     MAX_COMPLETION_CHARS,
     CompletionError,
     CompletionRequest,
@@ -20,8 +20,8 @@ from kernel.completion import (
     parse_payload,
     resolve_workspace_for_completion,
 )
-from kernel.import_resolver import ResolvedImport
-from kernel.redaction import DEFANGED_TAG
+from kernel.context.import_resolver import ResolvedImport
+from kernel.sandbox.redaction import DEFANGED_TAG
 from kernel.tests.conftest import FakeLLMClient
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "system" / "complete_prompt.txt"
@@ -229,7 +229,6 @@ def test_cli_prints_json_reply(monkeypatch, capsys, tmp_path):
     import argparse
 
     from kernel import main
-
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
     monkeypatch.setattr(completion, "generate_completion", lambda text, workspace: "суффикс")
     main._run_complete_op(argparse.Namespace(workspace=str(tmp_path)))
@@ -242,7 +241,6 @@ def test_cli_reports_failure_as_json(monkeypatch, capsys, tmp_path):
     import argparse
 
     from kernel import main
-
     def fail(_text, _workspace):
         raise CompletionError("No fast model is configured")
 
@@ -261,7 +259,6 @@ def test_cli_rejects_missing_workspace(monkeypatch, capsys):
     import argparse
 
     from kernel import main
-
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
     with pytest.raises(SystemExit) as exit_info:
         main._run_complete_op(argparse.Namespace(workspace=""))
@@ -513,7 +510,7 @@ def test_iter_completion_yields_the_replacement_last(fake_caller, tmp_path):
 def test_the_server_sends_a_replacement_as_one_message(fake_caller, tmp_path):
     import threading
 
-    from kernel.completion_server import CompletionServer
+    from kernel.ide.completion_server import CompletionServer
 
     fake_caller.stream_chunks = [_reply("saz", "cache")]
     fake_caller.content = fake_caller.stream_chunks[0]

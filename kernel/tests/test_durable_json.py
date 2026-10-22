@@ -13,8 +13,8 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import durable_json
-from kernel.durable_json import (
+from kernel.session import durable_json
+from kernel.session.durable_json import (
     JsonStorageCorruptError,
     JsonStorageError,
     JsonStorageSecurityError,

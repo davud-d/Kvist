@@ -11,8 +11,8 @@ import json
 
 import pytest
 
-from kernel.executor import ExecutorError, SafeExecutor
-from kernel.protocol import Action, AgentCommand
+from kernel.sandbox.executor import ExecutorError, SafeExecutor
+from kernel.protocol.protocol import Action, AgentCommand
 
 # The stub the agent invented in run_001, trimmed to the shape that matters.
 HALLUCINATED_STUB = (
@@ -47,7 +47,7 @@ def _command(action_type: str, args: dict, plan_step: str = "edit") -> AgentComm
 
 @pytest.mark.parametrize("approved", [False, True])
 def test_large_rewrite_uses_normal_approval_and_keeps_recovery(tmp_path, approved):
-    from kernel.change_journal import load_baseline, revert_workspace
+    from kernel.session.change_journal import load_baseline, revert_workspace
 
     executor = SafeExecutor(tmp_path)
     original = _write_source(tmp_path)
@@ -98,7 +98,7 @@ def test_write_file_allows_partial_shrink(tmp_path):
 
 
 def test_large_targeted_deletion_is_allowed_with_recovery(tmp_path):
-    from kernel.change_journal import revert_workspace
+    from kernel.session.change_journal import revert_workspace
 
     executor = SafeExecutor(tmp_path)
     block = "def unused():\n    pass\n\n"

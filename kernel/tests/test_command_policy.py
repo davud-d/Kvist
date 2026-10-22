@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.command_policy import RiskLevel, assess_command
+from kernel.sandbox.command_policy import RiskLevel, assess_command
 
 
 def test_assess_command_classifies_safe_read_only_command():

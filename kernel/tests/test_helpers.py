@@ -8,8 +8,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel.agent_logging import load_active_session, read_session_document
-from kernel.agent_tools import HelperError
+from kernel.session.agent_logging import load_active_session, read_session_document
+from kernel.agent.agent_tools import HelperError
 from kernel.tests.conftest import NullUI
 
 
@@ -79,8 +79,8 @@ def test_a_helper_works_in_its_own_service_session_and_reports_back(agent_factor
 def test_without_a_role_the_router_picks_one_from_the_task_alone(agent_factory, monkeypatch, verdict, expected):
     main = _main(agent_factory, ScriptedClient(["done"]))
     routed: list[str] = []
-    from kernel.agent import LocalAgent
-    from kernel.role_router import RoleRouteResult
+    from kernel.agent.agent import LocalAgent
+    from kernel.agent.role_router import RoleRouteResult
 
     def route(self, user_goal):
         routed.append(user_goal)

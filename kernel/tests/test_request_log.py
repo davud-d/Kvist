@@ -7,7 +7,7 @@ import stat
 import httpx
 import pytest
 
-from kernel.request_log import REQUEST_LOG_ENV, wrap_transport
+from kernel.llm.request_log import REQUEST_LOG_ENV, wrap_transport
 
 
 def _client(monkeypatch, tmp_path, handler) -> tuple[httpx.Client, object]:

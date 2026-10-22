@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.deps import detect_dependency_versions
+from kernel.config.deps import detect_dependency_versions
 
 
 def test_detect_dependency_versions_from_requirements(tmp_path):

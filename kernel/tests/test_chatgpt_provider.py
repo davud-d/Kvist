@@ -15,10 +15,12 @@ import jwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from kernel import llm_clients as llm, user_config
-from kernel.config_info import build_config_info
+from kernel.llm import llm_clients as llm
+
+from kernel.config import user_config
+from kernel.config.config_info import build_config_info
 from kernel.providers import chatgpt_auth as auth, chatgpt_client as transport
-from kernel.reasoning_effort import reasoning_request_kwargs
+from kernel.llm.reasoning_effort import reasoning_request_kwargs
 
 _verify_identity = auth._validate_identity
 

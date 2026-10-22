@@ -17,12 +17,12 @@ import urllib.request
 import pytest
 from PIL import Image
 
-from kernel.attachments import AttachmentGone, AttachmentStore
+from kernel.context.attachments import AttachmentGone, AttachmentStore
 from kernel.plugins.http_client import HttpPolicyError, request
 from kernel.plugins.net_broker import Denied, NetPolicy, TaskService, TaskServices, decide
 from kernel.plugins.screen import ScreenViewer
 from kernel.plugins.storage import SkillStorage, StorageError
-from kernel.resources import ManagedProcess, Owner, ResourceManager
+from kernel.plugins.resources import ManagedProcess, Owner, ResourceManager
 from kernel.tests.conftest import NullUI
 
 
@@ -214,8 +214,8 @@ class QuestionUI(NullUI):
     ],
 )
 def test_ask_user_tells_an_answer_a_skip_a_cancel_and_nobody_apart(agent_factory, interactive, choice, text, status):
-    from kernel.agent_tools import run_agent_tool
-    from kernel.protocol import Action, AgentCommand
+    from kernel.agent.agent_tools import run_agent_tool
+    from kernel.protocol.protocol import Action, AgentCommand
 
     agent = agent_factory(interactive=interactive)
     object.__setattr__(agent._ui, "_ui", QuestionUI(choice, text))
@@ -249,7 +249,7 @@ def test_cleanup_stops_a_tree_and_reports_it(tmp_path, trusted_python_path):
 
 
 def test_recovery_never_kills_a_process_whose_pid_was_reused(tmp_path):
-    from kernel.durable_json import write_json_object
+    from kernel.session.durable_json import write_json_object
 
     registry = tmp_path / ".kvist" / "resources.json"
     registry.parent.mkdir()
@@ -397,7 +397,7 @@ def test_a_skill_reaches_only_connections_granted_by_name_and_never_sees_their_s
 def test_runtime_directory_is_private_unique_and_thread_safe(tmp_path, monkeypatch):
     import stat
     from concurrent.futures import ThreadPoolExecutor
-    import kernel.resources as resources
+    import kernel.plugins.resources as resources
 
     monkeypatch.setattr(resources.tempfile, "tempdir", str(tmp_path))
     manager = ResourceManager(tmp_path)
@@ -410,7 +410,7 @@ def test_runtime_directory_is_private_unique_and_thread_safe(tmp_path, monkeypat
 
 
 def test_runtime_directory_ignores_precreated_xdg_symlink(tmp_path, monkeypatch):
-    import kernel.resources as resources
+    import kernel.plugins.resources as resources
 
     victim = tmp_path / "victim"
     victim.mkdir(mode=0o755)

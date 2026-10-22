@@ -5,14 +5,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel.agent_model import (
+from kernel.agent.agent_model import (
     build_report_system_prompt,
     build_role_system_prompt,
     call_action_model,
     _load_constitution,
     _load_role_prompt,
 )
-from kernel.user_config import get_style_options, style_slug
+from kernel.config.user_config import get_style_options, style_slug
 
 
 def test_action_model_uses_current_agent_role_prompt(tmp_path):
@@ -80,7 +80,7 @@ def test_constitution_precedes_every_acting_role(tmp_path):
 
 @pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "report", "universal"])
 def test_roles_receive_current_command_reference(tmp_path, role):
-    from kernel.slash_commands import SLASH_COMMANDS
+    from kernel.protocol.slash_commands import SLASH_COMMANDS
 
     agent = SimpleNamespace(
         executor=SimpleNamespace(workspace=tmp_path),
@@ -134,8 +134,8 @@ def test_the_prototype_label_reaches_the_reporter(tmp_path):
 @pytest.mark.parametrize("style", sorted(get_style_options()))
 @pytest.mark.parametrize("role", ["coder", "reader", "devops", "chat", "report"])
 def test_every_style_and_role_gets_the_shared_voice(agent_factory, style, role):
-    from kernel.agent_model import _STYLES_DIR
-    from kernel.user_config import chat_style_for
+    from kernel.agent.agent_model import _STYLES_DIR
+    from kernel.config.user_config import chat_style_for
 
     agent = agent_factory()
     agent._session_styles = {"agents": style, "chat": chat_style_for(style)}
@@ -154,12 +154,12 @@ def test_every_style_and_role_gets_the_shared_voice(agent_factory, style, role):
 
 
 def test_chat_inherits_only_the_stamped_working_styles_voice(agent_factory, monkeypatch):
-    from kernel.user_config import chat_style_for
+    from kernel.config.user_config import chat_style_for
 
     agent = agent_factory()
     # Both choices have the same chat palette, but retain their own accent.
     assert chat_style_for("Explainer") == chat_style_for("Friendly Developer")
-    monkeypatch.setattr("kernel.user_config.get_saved_style", lambda family: "Minimalist")
+    monkeypatch.setattr("kernel.config.user_config.get_saved_style", lambda family: "Minimalist")
     agent._session_styles = {"agents": "Explainer", "chat": "Friendly"}
     explaining = build_role_system_prompt(agent, "chat")
     agent._session_styles = {"agents": "Friendly Developer", "chat": "Friendly"}
@@ -176,8 +176,7 @@ def test_chat_inherits_only_the_stamped_working_styles_voice(agent_factory, monk
 
 
 def test_shared_voice_and_chat_accent_are_reread_per_call(agent_factory, monkeypatch, tmp_path):
-    from kernel import agent_model
-
+    from kernel.agent import agent_model
     styles = tmp_path / "styles"
     (styles / "agents").mkdir(parents=True)
     (styles / "chat").mkdir()
@@ -232,8 +231,8 @@ def test_the_reporter_never_gets_the_workspace_instructions(tmp_path):
 
 
 def test_render_report_sends_the_reporter_system_prompt(agent_factory, monkeypatch):
-    from kernel import agent_model
-    from kernel.agent_runtime import _render_report
+    from kernel.agent import agent_model
+    from kernel.agent.agent_runtime import _render_report
 
     sent = {}
 
@@ -253,7 +252,7 @@ def test_render_report_sends_the_reporter_system_prompt(agent_factory, monkeypat
 def test_prompt_dir_resolves_to_correct_directory():
     """_PROMPT_DIR must point to prompts/system/, NOT a stale prompts/prompts/ copy."""
     from pathlib import Path
-    from kernel.agent_model import _PROMPT_DIR
+    from kernel.agent.agent_model import _PROMPT_DIR
 
     resolved = _PROMPT_DIR.resolve()
     assert resolved.name == "system", f"_PROMPT_DIR resolves to {resolved}, expected .../prompts/system"
@@ -267,7 +266,7 @@ def test_prompt_dir_resolves_to_correct_directory():
 def test_prompt_duplicate_directory_not_loaded():
     """Verify that prompts/prompts/ (if it exists) is NOT the active prompt source."""
     from pathlib import Path
-    from kernel.agent_model import _PROMPTS_ROOT as _PROMPT_DIR
+    from kernel.agent.agent_model import _PROMPTS_ROOT as _PROMPT_DIR
 
     stale_dir = _PROMPT_DIR / "prompts"
     if stale_dir.exists():

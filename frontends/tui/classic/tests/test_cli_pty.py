@@ -479,12 +479,12 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from kernel import llm_clients
+from kernel.llm import llm_clients
 from kernel import main
 from rich.console import Console
 
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
 from terminal_banner import TerminalBannerUI
 
 SECRET = "{secret}"
@@ -626,12 +626,12 @@ import threading
 import time
 from types import SimpleNamespace
 
-from kernel import llm_clients
+from kernel.llm import llm_clients
 from kernel import main
 from rich.console import Console
 
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
 from terminal_banner import TerminalBannerUI
 
 _started = threading.Event()

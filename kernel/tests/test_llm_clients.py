@@ -6,9 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel import llm_clients
-
-
+from kernel.llm import llm_clients
 def _fake_openai_models_client(ids_by_url: dict[str | None, list[str]], calls: list[str | None] | None = None):
     def factory(api_key, base_url=None, **kwargs):
         if calls is not None:
@@ -351,13 +349,13 @@ def test_custom_provider_label():
 
 def test_custom_provider_streaming_is_opt_in(monkeypatch):
     monkeypatch.setattr(
-        "kernel.user_config.get_custom_provider_by_name",
+        "kernel.config.user_config.get_custom_provider_by_name",
         lambda name: {"streaming": False},
     )
     assert llm_clients.provider_supports_streaming("custom:my-llama") is False
 
     monkeypatch.setattr(
-        "kernel.user_config.get_custom_provider_by_name",
+        "kernel.config.user_config.get_custom_provider_by_name",
         lambda name: {"streaming": True},
     )
     assert llm_clients.provider_supports_streaming("custom:my-llama") is True
@@ -408,7 +406,7 @@ def test_custom_provider_create_client_without_api_key(monkeypatch):
 
     monkeypatch.setattr(llm_clients, "OpenAI", mock_openai)
     monkeypatch.setattr(
-        "kernel.user_config.get_custom_provider_by_name",
+        "kernel.config.user_config.get_custom_provider_by_name",
         lambda name: {"api_key": "", "base_url": "http://localhost:8000/v1"},
     )
 
@@ -664,7 +662,7 @@ def test_fetch_available_models_custom_anthropic_uses_sdk(monkeypatch):
     fake_module = types.SimpleNamespace(Anthropic=FakeAnthropic)
     monkeypatch.setitem(sys.modules, "anthropic", fake_module)
     monkeypatch.setattr(
-        "kernel.user_config.get_custom_provider_by_name",
+        "kernel.config.user_config.get_custom_provider_by_name",
         lambda name: {
             "protocol": "anthropic",
             "base_url": "https://gw.example.com",

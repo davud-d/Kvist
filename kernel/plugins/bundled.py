@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kernel.durable_json import JsonStorageError, read_json_object, update_json_object
+from kernel.session.durable_json import JsonStorageError, read_json_object, update_json_object
 from kernel.plugins.manifest import ManifestError, load_manifest
 from kernel.plugins.registry import RegistryError, SkillRegistry
 

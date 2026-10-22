@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-from kernel.agent import LocalAgent
+from kernel.agent.agent import LocalAgent
 from kernel.tests.conftest import last_json_line, requires_posix
 
 pytestmark = pytest.mark.slow
@@ -17,7 +17,7 @@ pytestmark = pytest.mark.slow
 # --- F4: current==intended is desired-state, NOT agent authorship -------------
 
 def test_user_authored_content_matching_intent_is_not_owned_by_revert(agent_factory):
-    from kernel.change_journal import content_digest, record_baseline, revert_workspace
+    from kernel.session.change_journal import content_digest, record_baseline, revert_workspace
 
     agent = agent_factory()
     ws = agent.executor.workspace
@@ -48,7 +48,7 @@ def test_user_authored_content_matching_intent_is_not_owned_by_revert(agent_fact
 
 @requires_posix
 def test_changes_and_revert_reject_hardlink_to_outside_inode(tmp_path):
-    from kernel.change_journal import build_diff_report, journal_path, revert_workspace
+    from kernel.session.change_journal import build_diff_report, journal_path, revert_workspace
 
     workspace = tmp_path / "ws"
     workspace.mkdir()
@@ -78,7 +78,7 @@ def test_changes_and_revert_reject_hardlink_to_outside_inode(tmp_path):
 # --- F7: .kvist rejection must be case-insensitive -----------------------------
 
 def test_journal_path_violation_rejects_kvist_case_insensitively(tmp_path):
-    from kernel.change_journal import journal_path_violation
+    from kernel.session.change_journal import journal_path_violation
 
     for variant in (".kvist", ".KVIST", ".Kvist", ".kViSt"):
         reason = journal_path_violation(tmp_path, f"{variant}/sessions/default.json")
@@ -88,7 +88,7 @@ def test_journal_path_violation_rejects_kvist_case_insensitively(tmp_path):
 # --- F8: promotion must be bound to the transaction digest --------------------
 
 def test_reconcile_never_promotes_a_mismatched_journal_digest(agent_factory):
-    from kernel.change_journal import content_digest, load_baseline, record_baseline
+    from kernel.session.change_journal import content_digest, load_baseline, record_baseline
 
     agent = agent_factory()
     ws = agent.executor.workspace
@@ -114,9 +114,9 @@ def test_reconcile_never_promotes_a_mismatched_journal_digest(agent_factory):
 _SIDE_EFFECT_CRASH = r'''
 import json, os, sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
@@ -158,9 +158,9 @@ print("NO_CRASH")
 _SIDE_EFFECT_RESUME = r'''
 import json, sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
@@ -204,9 +204,9 @@ def test_crashed_run_shell_is_not_replayed_on_resume(tmp_path):
 _CRASH_IN_SETUP = r'''
 import json, os, sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
@@ -277,9 +277,9 @@ def _resume_in_fresh_process(tmp_path):
     resume_script = (
         "import json,sys\n"
         "from pathlib import Path\n"
-        "from kernel.agent import LocalAgent\n"
-        "from kernel.agent_state import AgentConfig\n"
-        "from kernel.executor import SafeExecutor\n"
+        "from kernel.agent.agent import LocalAgent\n"
+        "from kernel.agent.agent_state import AgentConfig\n"
+        "from kernel.sandbox.executor import SafeExecutor\n"
         "from kernel.tests.conftest import FakeLLMClient, NullUI\n"
         "a=LocalAgent(FakeLLMClient(), SafeExecutor(Path(sys.argv[1])),"
         "AgentConfig(persist_logs=False, api_request_interval=0, max_steps=2), ui=NullUI())\n"
@@ -300,7 +300,7 @@ def _resume_in_fresh_process(tmp_path):
 # --- F3: recovered write must require fresh verification ----------------------
 
 def test_recovered_write_requires_reverification_before_completion(agent_factory):
-    from kernel.change_journal import content_digest, record_baseline
+    from kernel.session.change_journal import content_digest, record_baseline
     agent = agent_factory()
     ws = agent.executor.workspace
 
@@ -328,7 +328,7 @@ def test_recovered_write_requires_reverification_before_completion(agent_factory
 # --- F5: crash after replace before promote, direct /revert -------------------
 
 def test_direct_revert_after_crash_before_promote_is_conservative(agent_factory):
-    from kernel.change_journal import content_digest, record_baseline, revert_workspace
+    from kernel.session.change_journal import content_digest, record_baseline, revert_workspace
     agent = agent_factory()
     ws = agent.executor.workspace
     (ws / "v.txt").write_text("V1\n", encoding="utf-8", newline="")

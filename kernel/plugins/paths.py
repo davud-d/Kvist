@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from kernel.user_config import get_user_config_path
+from kernel.config.user_config import get_user_config_path
 
 SKILLS_SUBDIR = ("plugins", "skill")
 WORKSPACE_STATE_DIR = ".kvist"

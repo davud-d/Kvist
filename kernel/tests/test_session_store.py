@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-from kernel.session_store import SessionStore, run_session_op
+from kernel.session.session_store import SessionStore, run_session_op
 
 pytestmark = pytest.mark.slow
 

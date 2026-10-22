@@ -11,9 +11,9 @@ import urllib.error
 
 import pytest
 
-from kernel import anymodel_onboarding
+from kernel.llm import anymodel_onboarding
 from kernel.providers import anymodel_pricing
-from kernel.redaction import redact_text, redact_value
+from kernel.sandbox.redaction import redact_text, redact_value
 
 SYNTHETIC_KEY = "am-synthetic-not-a-real-secret-0123456789"
 

@@ -7,8 +7,8 @@ const path = require("node:path")
 const readline = require("node:readline")
 
 /**
- * Loopback TCP endpoint the cores and the status bar talk to (kernel/tray_link.py,
- * kernel/tray_bar_client.py). Discovery is `<home>/.kvist/tray.json` with
+ * Loopback TCP endpoint the cores and the status bar talk to (kernel/tray/tray_link.py,
+ * kernel/tray/tray_bar_client.py). Discovery is `<home>/.kvist/tray.json` with
  * `{port, token, pid}`, mode 0600. A connection must open with a hello carrying
  * the token; anything else is closed. A hello with `role: "bar"` subscribes to
  * `summary()` pushes (sent now and on every registry change) and may send `toggle`.

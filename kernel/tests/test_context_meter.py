@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from kernel import context_meter
-from kernel.agent_model import _emit_usage
-from kernel.context_meter import (
+from kernel.context import context_meter
+from kernel.agent.agent_model import _emit_usage
+from kernel.context.context_meter import (
     ContextUsage,
     begin_call,
     context_usage,

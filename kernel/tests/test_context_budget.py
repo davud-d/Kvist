@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from kernel import llm_clients
-from kernel.context_budget import (
+from kernel.llm import llm_clients
+from kernel.context.context_budget import (
     DEFAULT_INPUT_LIMIT,
     FREEFLOW_PROMPT_BUDGET,
     MODEL_INPUT_LIMITS,
@@ -163,8 +163,7 @@ def test_a_rejection_outranks_every_override():
     """Otherwise the retry resends exactly the prompt that was refused."""
     from types import SimpleNamespace
 
-    from kernel import agent_model
-
+    from kernel.agent import agent_model
     agent = SimpleNamespace(
         config=SimpleNamespace(
             provider="openai", fast_model="gpt-5.6-luna", max_context_tokens=900_000

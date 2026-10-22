@@ -12,9 +12,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel import event_stdio
-from kernel.agent_state import RunCancelled
-from kernel.frontend_protocol import is_cancel_message
+from kernel.protocol import event_stdio
+from kernel.agent.agent_state import RunCancelled
+from kernel.protocol.frontend_protocol import is_cancel_message
 
 
 def _prepare_loop_agent(agent_factory, **overrides):
@@ -372,7 +372,7 @@ def test_a_stopped_run_keeps_what_it_read_searched_and_changed(agent_factory):
     agent._state.step_logs = [
         _logged("read_file", path="kernel/main.py"),
         _logged("read_file", path="kernel/main.py"),
-        _logged("read_file", path="kernel/agent.py", start_line=100, end_line=180),
+        _logged("read_file", path="kernel/agent/agent.py", start_line=100, end_line=180),
         _logged("read_multiple_files", paths=["a.py", "b.py"]),
         _logged("read_file", status="blocked", path="never.py"),
         _logged("search_code", query="files_changed"),
@@ -383,7 +383,7 @@ def test_a_stopped_run_keeps_what_it_read_searched_and_changed(agent_factory):
     agent._add_to_session_history("do it", "coder", "stopped", stopped_by_user=True)
 
     assert agent._session_history[-1]["trail"] == {
-        "read": ["kernel/main.py", "kernel/agent.py:100-180", "a.py", "b.py"],
+        "read": ["kernel/main.py", "kernel/agent/agent.py:100-180", "a.py", "b.py"],
         "searched": ["files_changed"],
         "changed": ["kernel/main.py"],
     }
@@ -404,7 +404,7 @@ def test_the_trail_is_kept_for_a_stopped_turn_only(agent_factory):
 
 
 def test_the_next_turn_is_told_what_the_stopped_run_had_read(agent_factory):
-    from kernel.agent_context import render_session_history
+    from kernel.agent.agent_context import render_session_history
 
     history = [
         {"goal": "add commands", "role": "coder", "result": "x", "stopped_by_user": True,
@@ -420,7 +420,7 @@ def test_the_next_turn_is_told_what_the_stopped_run_had_read(agent_factory):
 
 
 def test_every_history_reader_tells_the_model_about_the_stop(agent_factory):
-    from kernel.agent_context import render_session_history
+    from kernel.agent.agent_context import render_session_history
 
     agent = agent_factory()
     agent._session_history = [
@@ -439,7 +439,7 @@ def test_stop_frees_a_loop_blocked_on_a_silent_stream():
     import threading
     import time
 
-    from kernel.cancellable_call import iterate_cancellable
+    from kernel.agent.cancellable_call import iterate_cancellable
 
     cancel = threading.Event()
     release = threading.Event()
@@ -470,7 +470,7 @@ def test_stop_frees_a_loop_blocked_on_a_request_that_never_answers():
     import threading
     import time
 
-    from kernel.cancellable_call import call_cancellable
+    from kernel.agent.cancellable_call import call_cancellable
 
     cancel = threading.Event()
     release = threading.Event()

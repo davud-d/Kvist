@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from kernel import agent_model
-from kernel import api_settings
-from kernel.agent_state import AgentConfig
+from kernel.agent import agent_model
+from kernel.llm import api_settings
+from kernel.agent.agent_state import AgentConfig
 
 
 def _config(**overrides) -> AgentConfig:

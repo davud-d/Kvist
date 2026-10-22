@@ -36,7 +36,7 @@ Durable history records are:
 `seq` is scoped to one session journal. A reconnecting client requests
 `history?after=1842`; live SSE has its own controller-scoped `LiveEnvelope.id`
 cursor. `bootstrap.event_stream` contains that cursor plus an opaque `epoch`.
-The UI reducer consumes the existing `kernel.frontend_protocol` event objects
+The UI reducer consumes the existing `kernel.protocol.frontend_protocol` event objects
 without learning how they were produced.
 
 Live envelopes have this stable shape:

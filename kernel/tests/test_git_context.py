@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 
-from kernel.executor import SafeExecutor
+from kernel.sandbox.executor import SafeExecutor
 
 
 def _git(root, *args):

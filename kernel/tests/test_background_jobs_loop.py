@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from kernel import agent_model
-from kernel.frontend_protocol import FrontendChannel, JobFinishedEvent, JobNoticeEvent
-from kernel.event_stream_ui import EventStreamUI
-from kernel.session_events import JournalingUI
+from kernel.agent import agent_model
+from kernel.protocol.frontend_protocol import FrontendChannel, JobFinishedEvent, JobNoticeEvent
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.session.session_events import JournalingUI
 from kernel.tests.test_background_jobs import _spawn_script, _spawn_until_cancelled, _wait_finished
 from kernel.tests.test_native_tools import ScriptedClient, _call, _response
 
@@ -78,7 +78,7 @@ def test_a_job_still_running_is_stopped_when_the_turn_ends(agent_factory):
 
 
 def test_job_events_are_journaled_but_live_output_is_not(agent_factory, tmp_path):
-    from kernel.session_events import SessionJournal
+    from kernel.session.session_events import SessionJournal
 
     channel = FrontendChannel()
     live = EventStreamUI(channel)

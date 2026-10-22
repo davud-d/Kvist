@@ -35,8 +35,8 @@ from kernel.plugins.registry import CatalogEntry, RegistryError, SkillRegistry, 
 from kernel.plugins.schema import validate
 from kernel.plugins.screen import ScreenViewer
 from kernel.plugins.services import AttachedSkill, CoreServices, SkillCall
-from kernel.redaction import defang_prompt_boundary_tags, redact_text
-from kernel.resources import CleanupReport, Owner
+from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text
+from kernel.plugins.resources import CleanupReport, Owner
 
 WIRE_SEPARATOR = "__"
 CATALOG_PROMPT_LIMIT = 12

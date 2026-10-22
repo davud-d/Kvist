@@ -8,7 +8,7 @@ sys.path[:0] = [str(repo), str(repo / 'frontends/web-local')]
 
 
 def serve(root):
-    from kernel import llm_clients
+    from kernel.llm import llm_clients
     from kernel.providers import anymodel_pricing
     from kvist_web.controller import WebController
     from kvist_web.storage import WebStateStore

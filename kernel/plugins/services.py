@@ -32,9 +32,9 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Callable, Iterator
 
-from kernel.agent_state import PLAN_PLANNING
-from kernel.artifacts import ArtifactError, ArtifactStore
-from kernel.attachments import AttachmentError, AttachmentGone, AttachmentStore
+from kernel.agent.agent_state import PLAN_PLANNING
+from kernel.plugins.artifacts import ArtifactError, ArtifactStore
+from kernel.context.attachments import AttachmentError, AttachmentGone, AttachmentStore
 from kernel.plugins import capabilities as caps
 from kernel.plugins import host_actions
 from kernel.plugins.grants import Grant
@@ -43,10 +43,10 @@ from kernel.plugins.manifest import ToolDef
 from kernel.plugins.registry import CatalogEntry
 from kernel.plugins.schema import SchemaError, check_schema, validate
 from kernel.plugins.storage import MAX_TTL_SECONDS, SkillStorage, StorageError
-from kernel.protocol import Action, AgentCommand
-from kernel.redaction import redact_text, redact_value
-from kernel.resources import Owner
-from kernel.session_search import SessionSearchError, list_sessions, read_session, search_sessions
+from kernel.protocol.protocol import Action, AgentCommand
+from kernel.sandbox.redaction import redact_text, redact_value
+from kernel.plugins.resources import Owner
+from kernel.session.session_search import SessionSearchError, list_sessions, read_session, search_sessions
 from kernel.memory import MemoryService, MemoryStoreError, Source
 from kernel.memory.schema import KINDS as MEMORY_KINDS
 
@@ -353,7 +353,7 @@ class CoreServices:
         return attachment
 
     def _images_analyze(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
-        from kernel.vision import describe_images, model_supports_vision, vision_model
+        from kernel.vision.vision import describe_images, model_supports_vision, vision_model
 
         ids = _str_list(params, "ids", limit=8)
         if not ids:
@@ -667,7 +667,7 @@ class CoreServices:
                             call_id=f"nested_{uuid.uuid4().hex[:10]}")
 
     def _run_read(self, call: SkillCall, action_type: str, args: dict[str, Any]) -> Any:
-        from kernel.parser import CommandValidationError, validate_action_args
+        from kernel.protocol.parser import CommandValidationError, validate_action_args
 
         try:
             validate_action_args(action_type, args)
@@ -679,7 +679,7 @@ class CoreServices:
         return feedback.get("data")
 
     def _run_write(self, call: SkillCall, action_type: str, args: dict[str, Any]) -> Any:
-        from kernel.parser import CommandValidationError, validate_action_args
+        from kernel.protocol.parser import CommandValidationError, validate_action_args
 
         try:
             validate_action_args(action_type, args)
@@ -725,7 +725,7 @@ class CoreServices:
                 "by_skills": [{"origin": log["origin"], "action": log["command"]["action"]} for log in nested[-50:]]}
 
     def _changes_diff(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
-        from kernel.change_journal import build_diff_report, JournalUnavailableError
+        from kernel.session.change_journal import build_diff_report, JournalUnavailableError
 
         try:
             report = build_diff_report(Path(self._agent.executor.workspace))
@@ -782,7 +782,7 @@ class CoreServices:
         return data
 
     def _run_process(self, call: SkillCall, args: dict[str, Any]) -> Any:
-        from kernel.parser import CommandValidationError, validate_action_args
+        from kernel.protocol.parser import CommandValidationError, validate_action_args
 
         try:
             validate_action_args("run_shell", args)
@@ -813,7 +813,7 @@ class CoreServices:
         return self._run_read(call, "job_stop", {"job_id": self._own_job(call, params)})
 
     def _processes_list(self, call: SkillCall, params: dict[str, Any]) -> list[dict[str, Any]]:
-        from kernel.background_jobs import snapshot
+        from kernel.agent.background_jobs import snapshot
 
         jobs = self._agent.executor.jobs
         own = self._manager.jobs_of(call.skill.id)
@@ -1539,7 +1539,7 @@ def _limit_kwargs(model: str, max_tokens: int) -> dict[str, int]:
 
 
 def _request_kwargs(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens: int, stream: bool) -> dict[str, Any]:
-    from kernel.reasoning_effort import merge_reasoning_kwargs
+    from kernel.llm.reasoning_effort import merge_reasoning_kwargs
 
     kwargs: dict[str, Any] = {"model": model, "messages": messages, "timeout": agent.config.api_timeout,
                               **_limit_kwargs(model, max_tokens)}
@@ -1550,7 +1550,7 @@ def _request_kwargs(agent: Any, model: str, messages: list[dict[str, Any]], max_
 
 
 def _complete(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens: int, *, owner: str) -> tuple[str, dict[str, int]]:
-    from kernel.agent_model import (
+    from kernel.agent.agent_model import (
         _create_completion_with_reasoning_fallback,
         _emit_usage,
         _should_retry_model_error,
@@ -1581,7 +1581,7 @@ def _complete(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens
 
 
 def _stream(agent: Any, model: str, messages: list[dict[str, Any]], max_tokens: int, *, owner: str):
-    from kernel.agent_model import (
+    from kernel.agent.agent_model import (
         _create_completion_with_reasoning_fallback,
         _emit_usage,
         _throttle_request_rate,

@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from kernel import anymodel_onboarding
-
-
+from kernel.llm import anymodel_onboarding
 @pytest.fixture(autouse=True)
 def _clean_oauth_flag(monkeypatch):
     monkeypatch.delenv("AGENT_ANYMODEL_OAUTH", raising=False)

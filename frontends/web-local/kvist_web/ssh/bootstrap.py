@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from kernel.version import kvist_version
+from kernel.config.version import kvist_version
 
 from ..protocol import BRIDGE_PROTOCOL_VERSION, AuthMethod
 from .transport import SSHTransport
@@ -226,7 +226,7 @@ class RemoteBootstrap:
     def _installed_version(self, facts: dict[str, str]) -> tuple[bool, str]:
         script = (
             "import json;"
-            "from kernel.version import kvist_version;"
+            "from kernel.config.version import kvist_version;"
             "import kvist_web;"
             "print(json.dumps({'version':kvist_version()}))"
         )

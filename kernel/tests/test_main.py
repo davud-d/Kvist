@@ -10,7 +10,7 @@ import pytest
 from rich.console import Console
 
 from kernel import main
-from kernel.executor import SafeExecutor
+from kernel.sandbox.executor import SafeExecutor
 
 
 def test_cli_help_exits_before_terminal_and_provider_initialization(tmp_path):
@@ -37,7 +37,7 @@ def test_cli_help_exits_before_terminal_and_provider_initialization(tmp_path):
 
 
 def test_cli_version_exits_before_terminal_and_provider_initialization(tmp_path):
-    from kernel.version import kvist_version
+    from kernel.config.version import kvist_version
 
     root = Path(__file__).resolve().parents[2]
     environment = os.environ.copy()
@@ -798,7 +798,7 @@ def test_status_reports_effective_network_isolation(tmp_path, monkeypatch, mode,
 
 
 def test_permissions_uses_active_role_and_renders_literal_policy_values(tmp_path, monkeypatch):
-    from kernel.permission_policy import PermissionPolicy
+    from kernel.sandbox.permission_policy import PermissionPolicy
 
     calls = []
     agent = SimpleNamespace(
@@ -812,7 +812,7 @@ def test_permissions_uses_active_role_and_renders_literal_policy_values(tmp_path
         ),
     )
     monkeypatch.setattr(
-        "kernel.permission_policy.load_policy",
+        "kernel.sandbox.permission_policy.load_policy",
         lambda workspace: (PermissionPolicy(allow=("echo [red]literal[/red]",)), ""),
     )
     recorded = _run_main_with_agent(

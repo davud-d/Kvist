@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { initialState, reduce, reducesLive, TOOL_NAMES } from '../../kvist_web/client/features/blocks.js';
 
-// Fixtures follow the to_dict() output of kernel/frontend_protocol.py (class line in each comment).
+// Fixtures follow the to_dict() output of kernel/protocol/frontend_protocol.py (class line in each comment).
 const env = (event, seq, ts) => ({ ...(seq != null && { seq }), ...(ts != null && { ts }), event });
 const fold = (envelopes, state = initialState()) => envelopes.reduce(reduce, state);
 const seqd = events => events.map((event, i) => env(event, i + 1, 1000 + i));

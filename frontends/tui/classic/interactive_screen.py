@@ -61,8 +61,8 @@ from paste_labels import (
     label_length_before,
     normalize_newlines,
 )
-from kernel.redaction import escape_terminal_controls
-from kernel.slash_commands import (
+from kernel.sandbox.redaction import escape_terminal_controls
+from kernel.protocol.slash_commands import (
     SLASH_COMMAND_MENU_HEIGHT,
     SLASH_COMMAND_PROMPT,
     SLASH_COMMAND_PROMPT_CONTINUATION,
@@ -440,7 +440,7 @@ class InteractiveScreen:
         self._saved_accept_handler: Any = None
         self._handler_is_installed = False
         self._pastes = PasteStore()
-        from kernel.image_input import ImageLabels
+        from kernel.vision.image_input import ImageLabels
         self._images = ImageLabels()
         self._original_app = session.app
         self._original_layout = session.layout
@@ -773,7 +773,7 @@ class InteractiveScreen:
     def _accept_input(self, buffer: Any) -> bool:
         value = buffer.document.text.strip()
         if value.startswith("/image "):
-            from kernel.image_input import path_image
+            from kernel.vision.image_input import path_image
             try:
                 image = path_image(value[7:])
                 if image is None:
@@ -1581,7 +1581,7 @@ class InteractiveScreen:
 
         @bindings.add("c-v", filter=buffer_focused & ~choosing)
         def paste_image(event: Any) -> None:
-            from kernel.image_input import clipboard_image
+            from kernel.vision.image_input import clipboard_image
             try:
                 current = event.current_buffer
                 current.insert_text(self._images.add(clipboard_image(), current.text))
@@ -1607,7 +1607,7 @@ class InteractiveScreen:
             # paste becomes a label that _accept_input expands on submit, and
             # pasting the same text again replaces that label with the text.
             current = event.current_buffer
-            from kernel.image_input import path_image
+            from kernel.vision.image_input import path_image
             try:
                 image = path_image(event.data)
                 if image is not None:

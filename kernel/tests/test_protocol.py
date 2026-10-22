@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.protocol import Action, AgentCommand
+from kernel.protocol.protocol import Action, AgentCommand
 
 
 def test_protocol_dataclasses_store_action_payload():

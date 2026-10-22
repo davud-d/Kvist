@@ -26,8 +26,8 @@ from pathlib import Path
 
 import pytest
 
-from kernel import role_router
-from kernel.llm_clients import (
+from kernel.agent import role_router
+from kernel.llm.llm_clients import (
     FREEFLOW_PROVIDER,
     configured_freeflow_backends,
     create_llm_client,
@@ -35,8 +35,8 @@ from kernel.llm_clients import (
     required_secret_keys_for_provider,
     resolve_models_for_provider,
 )
-from kernel.role_router import RouteDecision, route_role_decision_with_llm, _match_direct_rule
-from kernel.user_config import get_saved_models, load_available_credentials
+from kernel.agent.role_router import RouteDecision, route_role_decision_with_llm, _match_direct_rule
+from kernel.config.user_config import get_saved_models, load_available_credentials
 
 
 # ── Test result tracking ─────────────────────────────────────────────

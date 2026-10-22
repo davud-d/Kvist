@@ -25,8 +25,8 @@ from kernel.plugins.manifest import Manifest
 from kernel.plugins.net_broker import NetBroker, NetPolicy, TaskServices
 from kernel.plugins.registry import SkillRegistry
 from kernel.plugins.sandbox import RUNNER_DIR, runner_python, runner_unavailable_reason
-from kernel.resources import ManagedProcess
-from kernel.sandbox import RUNTIME_MOUNT_ROOTS, resolve_bubblewrap_path
+from kernel.plugins.resources import ManagedProcess
+from kernel.sandbox.sandbox import RUNTIME_MOUNT_ROOTS, resolve_bubblewrap_path
 
 PACKAGE_INDEX = ["pypi.org", "files.pythonhosted.org"]
 INSTALL_TIMEOUT = 900.0

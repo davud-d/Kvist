@@ -11,8 +11,8 @@ import time
 from rich.console import Console
 
 from kernel import main
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
 from terminal_banner import TerminalBannerUI
 
 

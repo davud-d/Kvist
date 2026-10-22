@@ -11,9 +11,9 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import terminal as terminal_module
-from kernel.sandbox import SandboxMode
-from kernel.terminal import HardDenyError, TerminalExecutor
+from kernel.sandbox import terminal as terminal_module
+from kernel.sandbox.sandbox import SandboxMode
+from kernel.sandbox.terminal import HardDenyError, TerminalExecutor
 
 
 def _executor_with_approval(workspace: Path) -> TerminalExecutor:

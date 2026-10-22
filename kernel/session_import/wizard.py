@@ -20,7 +20,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from kernel.durable_json import JsonStorageError
+from kernel.session.durable_json import JsonStorageError
 from kernel.session_import import SOURCES, SourceUnreadable, find_sessions, here, source_by_key
 from kernel.session_import.model import SessionSummary, Source
 from kernel.session_import.writer import import_session

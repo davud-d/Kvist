@@ -29,7 +29,7 @@ def test_universal_plain_conversation_ends_the_turn_without_any_tool_call(agent_
 
 
 def test_universal_can_finish_a_build_without_source_edits(agent_factory):
-    from kernel.agent_runtime import _run_final_answer
+    from kernel.agent.agent_runtime import _run_final_answer
     from kernel.tests.conftest import make_command
 
     agent = agent_factory()

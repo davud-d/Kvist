@@ -7,8 +7,8 @@ from typing import get_args
 
 import pytest
 
-from kernel import agent_model
-from kernel.native_tools import (
+from kernel.agent import agent_model
+from kernel.agent.native_tools import (
     decode_arguments,
     ACTION_TOOLS,
     ELIDED_OUTPUT,
@@ -21,8 +21,8 @@ from kernel.native_tools import (
     native_role_prompt,
     tools_for_role,
 )
-from kernel.parser import CommandValidationError, build_command
-from kernel.protocol import ActionType
+from kernel.protocol.parser import CommandValidationError, build_command
+from kernel.protocol.protocol import ActionType
 
 
 def _call(call_id: str, name: str, **args) -> SimpleNamespace:
@@ -94,7 +94,7 @@ def test_silent_thinking_counts_only_when_it_is_long_enough():
 
 
 def test_every_action_has_a_tool_definition():
-    from kernel.native_tools import INTERNAL_ACTIONS
+    from kernel.agent.native_tools import INTERNAL_ACTIONS
 
     assert set(ACTION_TOOLS) == set(get_args(ActionType)) - INTERNAL_ACTIONS
 

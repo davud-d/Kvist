@@ -203,7 +203,7 @@ def configure(home: Path, base_url: str) -> None:
     """Write the fake provider into the isolated user config through Kvist's own API."""
     os.environ["HOME"] = os.environ["USERPROFILE"] = str(home)
     sys.path.insert(0, str(ROOT))
-    from kernel.user_config import save_custom_provider
+    from kernel.config.user_config import save_custom_provider
     save_custom_provider("fake", {
         "label": "Fake", "base_url": base_url, "api_key": "smoke-test-key",
         "models": {"fast": "fake-fast", "smart": "fake-smart"}, "streaming": False})

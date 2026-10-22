@@ -65,7 +65,7 @@ class FakeAgent:
         self.cancelled = 0
 
     def new_session(self):
-        from kernel.session_store import SessionStore
+        from kernel.session.session_store import SessionStore
 
         self.current_session = SessionStore(self.workspace).new()["active_session"]
         return self.current_session
@@ -228,9 +228,9 @@ def seed_history(workspace, name, turns):
     ``turns`` is a list of ``(prompt, answer)`` pairs, written through
     ``SessionJournal`` — the same code path a live turn uses.
     """
-    from kernel.frontend_protocol import MessageEvent
-    from kernel.session_events import SessionJournal
-    from kernel.session_store import SessionStore, get_journal_path
+    from kernel.protocol.frontend_protocol import MessageEvent
+    from kernel.session.session_events import SessionJournal
+    from kernel.session.session_store import SessionStore, get_journal_path
 
     store = SessionStore(workspace)
     store.create(name)
@@ -345,7 +345,7 @@ def test_session_ids_are_opaque_and_unique_per_workspace(tmp_path):
 
 
 def test_a_session_id_from_another_workspace_does_not_resolve(tmp_path):
-    from kernel.session_store import SessionStore
+    from kernel.session.session_store import SessionStore
 
     SessionStore(tmp_path).create("chat-1")
     foreign = tmp_path / "foreign"
@@ -566,7 +566,7 @@ def test_delete_works_on_the_workspace_active_session(tmp_path):
     point at a deleted one; the transport moves the marker aside first rather
     than refusing the client's request.
     """
-    from kernel.session_store import SessionStore
+    from kernel.session.session_store import SessionStore
 
     async def scenario():
         async with Wire() as wire:
@@ -863,7 +863,7 @@ def test_advanced_menu_offers_terminal_dialogs():
 
 
 def _request(**fields):
-    from kernel.frontend_protocol import InputRequestEvent
+    from kernel.protocol.frontend_protocol import InputRequestEvent
 
     defaults = {
         "request_id": "r1",
@@ -1259,7 +1259,6 @@ def test_a_terminal_the_client_refuses_to_open_is_reported_not_hidden(tmp_path):
 def test_every_advertised_command_is_executable():
     """The picker must never offer a command that would fail when chosen."""
     from kernel import main
-
     advertised = dict(available_commands())
     handlers = set(main.STDIO_COMMANDS)
 
@@ -1271,11 +1270,11 @@ def test_every_advertised_command_is_executable():
 
 def test_a_closed_session_refuses_a_prompt_without_a_model_call(tmp_path):
     """The core's lock holds over ACP too, even for an agent built on another session."""
-    from kernel import end_session
-    from kernel.agent import LocalAgent
-    from kernel.agent_state import AgentConfig
-    from kernel.executor import SafeExecutor
-    from kernel.session_store import SessionStore
+    from kernel.plan import end_session
+    from kernel.agent.agent import LocalAgent
+    from kernel.agent.agent_state import AgentConfig
+    from kernel.sandbox.executor import SafeExecutor
+    from kernel.session.session_store import SessionStore
     from kernel.tests.conftest import FakeLLMClient, NullPerfLogger, NullUI
 
     seed_history(tmp_path, "chat-1", [("you useless piece of junk", "closed")])
@@ -1322,8 +1321,8 @@ def test_a_closed_session_refuses_a_prompt_without_a_model_call(tmp_path):
 
 def _real_agent_builder(client):
     """``build_agent`` stand-in that returns a real LocalAgent on a shared fake client."""
-    from kernel.agent import LocalAgent
-    from kernel.agent_state import AgentConfig
+    from kernel.agent.agent import LocalAgent
+    from kernel.agent.agent_state import AgentConfig
     from kernel.tests.conftest import NullPerfLogger, NullUI
 
     def build(executor, **kwargs):
@@ -1342,9 +1341,9 @@ def _real_agent_builder(client):
 
 def _seed_chat_session(workspace, name, marker):
     """Persist a session document whose chat history carries ``marker``."""
-    from kernel.agent import LocalAgent
-    from kernel.agent_state import AgentConfig
-    from kernel.executor import SafeExecutor
+    from kernel.agent.agent import LocalAgent
+    from kernel.agent.agent_state import AgentConfig
+    from kernel.sandbox.executor import SafeExecutor
     from kernel.tests.conftest import FakeLLMClient, NullPerfLogger, NullUI
 
     agent = LocalAgent(
@@ -1371,7 +1370,7 @@ def test_load_of_another_session_keeps_the_active_sessions_history_out_of_the_mo
     _seed_chat_session(tmp_path, "alpha", "ALPHA-MARKER")
     _seed_chat_session(tmp_path, "beta", "BETA-MARKER")
     # The workspace's active session is the one saved last; make it alpha.
-    from kernel.session_store import SessionStore
+    from kernel.session.session_store import SessionStore
 
     SessionStore(tmp_path).switch("alpha")
     client = FakeLLMClient(content="chat", stream_chunks=["ok"])
@@ -1406,7 +1405,7 @@ def test_load_of_another_session_keeps_the_active_sessions_history_out_of_the_mo
 
 
 def test_new_session_keeps_the_active_sessions_history_out_of_the_model(tmp_path):
-    from kernel.session_store import SessionStore
+    from kernel.session.session_store import SessionStore
     from kernel.tests.conftest import FakeLLMClient
 
     _seed_chat_session(tmp_path, "alpha", "ALPHA-MARKER")

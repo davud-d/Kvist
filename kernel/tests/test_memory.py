@@ -264,7 +264,7 @@ def test_forgetting_removes_the_text_everywhere_and_blocks_relearning(store):
 
 
 def test_pause_stops_agents_and_skills_but_not_the_person(tmp_path):
-    from kernel.user_config import save_memory_paused
+    from kernel.config.user_config import save_memory_paused
 
     memory = MemoryService(tmp_path, with_user_scope=True)
     save_memory_paused(True)
@@ -434,7 +434,7 @@ class ConfirmUI(NullUI):
 
 
 def _tool(agent, **args):
-    from kernel.agent_tools import run_agent_tool
+    from kernel.agent.agent_tools import run_agent_tool
 
     return run_agent_tool(agent, make_command("memory", args))
 
@@ -503,7 +503,7 @@ def test_a_refused_secret_reaches_the_model_as_an_error_without_the_value(agent_
 
 
 def test_the_parser_rejects_malformed_memory_calls():
-    from kernel.parser import CommandValidationError, validate_action_args
+    from kernel.protocol.parser import CommandValidationError, validate_action_args
 
     for bad in (
         {"op": "remember"},
@@ -523,7 +523,7 @@ def test_relevant_records_reach_the_action_prompt_and_the_chat_turn(agent_factor
         "The billing module retries through a dead-letter queue", kind="project_fact", trust="observed", actor="agent")
     agent._state.user_goal = "fix the billing retries"
 
-    from kernel.agent_context import _extensions_block
+    from kernel.agent.agent_context import _extensions_block
 
     assert "dead-letter queue" in _extensions_block(agent, "en")
     assert "dead-letter queue" in agent._chat_turn_message("why do billing retries fail?", offer_tag=False)
@@ -574,9 +574,9 @@ _SESSION = "chat-20261020-100000"
 
 def _journal(workspace, events):
     """Write a session journal: ``events`` is a list of turns, each a list of event dicts."""
-    from kernel.agent_logging import get_journal_path
-    from kernel.session_events import _encode
-    from kernel.session_store import SessionStore
+    from kernel.session.agent_logging import get_journal_path
+    from kernel.session.session_events import _encode
+    from kernel.session.session_store import SessionStore
 
     path = get_journal_path(SessionStore(workspace), _SESSION)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -749,7 +749,7 @@ def test_the_model_sees_events_as_quoted_data_and_known_records(tmp_path):
 
 def test_processing_asks_for_consent_once_and_respects_pause(tmp_path):
     from kernel.memory.commands import run_slash
-    from kernel.user_config import get_memory_processing_allowed, save_memory_paused
+    from kernel.config.user_config import get_memory_processing_allowed, save_memory_paused
 
     _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
     model = FakeModel(_candidates())
@@ -883,7 +883,7 @@ def _auto(tmp_path, model):
 
 
 def test_background_reading_needs_consent_and_stops_on_pause(tmp_path):
-    from kernel.user_config import save_memory_paused, save_memory_processing_allowed
+    from kernel.config.user_config import save_memory_paused, save_memory_processing_allowed
 
     _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
     model = FakeModel(_candidates(), _candidates())
@@ -898,7 +898,7 @@ def test_background_reading_needs_consent_and_stops_on_pause(tmp_path):
 
 
 def test_another_core_holding_the_lease_is_left_alone(tmp_path):
-    from kernel.user_config import save_memory_processing_allowed
+    from kernel.config.user_config import save_memory_processing_allowed
 
     save_memory_processing_allowed(True)
     _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])
@@ -911,7 +911,7 @@ def test_another_core_holding_the_lease_is_left_alone(tmp_path):
 
 
 def test_the_daily_cap_bounds_background_calls(tmp_path, monkeypatch):
-    from kernel.user_config import save_memory_processing_allowed
+    from kernel.config.user_config import save_memory_processing_allowed
 
     save_memory_processing_allowed(True)
     monkeypatch.setattr("kernel.memory.auto.DAILY_CALLS", 1)
@@ -928,7 +928,7 @@ def test_the_daily_cap_bounds_background_calls(tmp_path, monkeypatch):
 
 
 def test_a_quiet_session_is_read_after_the_pause_and_a_new_turn_postpones_it(tmp_path, monkeypatch):
-    from kernel.user_config import save_memory_processing_allowed
+    from kernel.config.user_config import save_memory_processing_allowed
 
     save_memory_processing_allowed(True)
     monkeypatch.setattr("kernel.memory.auto.IDLE_SECONDS", 0.2)

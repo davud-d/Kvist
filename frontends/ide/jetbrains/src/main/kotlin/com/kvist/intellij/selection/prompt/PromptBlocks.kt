@@ -4,7 +4,7 @@ import com.kvist.intellij.selection.SelectionContext
 
 /**
  * Shared pieces of the selection prompts. Mirrors the core's untrusted-content contract
- * (`kernel/redaction.py`, `kernel/completion.py`): the user's code is quoted inside a tagged
+ * (`kernel/sandbox/redaction.py`, `kernel/ide/completion.py`): the user's code is quoted inside a tagged
  * block, and a forged tag in it is replaced so the content cannot close its own block.
  */
 internal object PromptBlocks {

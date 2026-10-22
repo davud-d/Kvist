@@ -7,7 +7,7 @@ def test_build_runtime_prompt_includes_state_sections(agent_factory, monkeypatch
     agent._state.system_shell = "bash"
     agent._state.files_read = ["ui.py"]
     agent._state.dependency_versions = {"pytest": "==8"}
-    monkeypatch.setattr("kernel.agent_context.current_time_context", lambda: {"current_time": "2026-01-01 00:00:00 UTC"})
+    monkeypatch.setattr("kernel.agent.agent_context.current_time_context", lambda: {"current_time": "2026-01-01 00:00:00 UTC"})
 
     prompt = agent._build_runtime_prompt("test goal", 2)
 
@@ -42,12 +42,12 @@ def test_every_rendered_section_header_is_known_to_the_trimmer(agent_factory, mo
     action results:") drifted from their SECTION_PRIORITIES keys exactly this
     way, so the guard is the spelling itself.
     """
-    from kernel.agent_context import SECTION_PRIORITIES, split_prompt_into_sections
+    from kernel.agent.agent_context import SECTION_PRIORITIES, split_prompt_into_sections
 
     agent = agent_factory()
     agent._state.completion_ready = True  # also renders "Final answer style:"
     monkeypatch.setattr(
-        "kernel.agent_context.current_time_context",
+        "kernel.agent.agent_context.current_time_context",
         lambda: {"current_time": "2026-01-01 00:00:00 UTC"},
     )
 

@@ -47,7 +47,7 @@ await page.route('**/api/v1/**', async route => {
     return json({ ok: true });
 });
 
-// --- event builders (to_dict() of kernel/frontend_protocol.py) -------------------------------------
+// --- event builders (to_dict() of kernel/protocol/frontend_protocol.py) -------------------------------------
 const T0 = 1780000000;
 let seq = 0;
 const rec = (event, ts = T0) => ({ seq: ++seq, ts, event });

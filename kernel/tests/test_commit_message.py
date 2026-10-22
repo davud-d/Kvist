@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from kernel import commit_message
-from kernel.agent_model import init_tiktoken_encoding
-from kernel.agent_state import AgentConfig
-from kernel.commit_message import (
+from kernel.ide import commit_message
+from kernel.agent.agent_model import init_tiktoken_encoding
+from kernel.agent.agent_state import AgentConfig
+from kernel.ide.commit_message import (
     MAX_SUBJECT_CHARS,
     CommitMessageError,
     FilePatch,
@@ -22,7 +22,7 @@ from kernel.commit_message import (
     generate_commit_message,
     parse_payload,
 )
-from kernel.redaction import DEFANGED_TAG
+from kernel.sandbox.redaction import DEFANGED_TAG
 from kernel.tests.conftest import FakeLLMClient
 
 _PROMPT_PATH = Path(__file__).resolve().parent.parent / "prompts" / "system" / "commit_prompt.txt"
@@ -262,7 +262,6 @@ def _utf8_stdin(text: str) -> io.TextIOWrapper:
 
 def test_cli_prints_json_reply(monkeypatch, capsys):
     from kernel import main
-
     received: list[str] = []
 
     def generate(text):
@@ -280,7 +279,6 @@ def test_cli_prints_json_reply(monkeypatch, capsys):
 
 def test_cli_reports_failure_as_json(monkeypatch, capsys):
     from kernel import main
-
     def fail(_text):
         raise CommitMessageError("Nothing to describe")
 

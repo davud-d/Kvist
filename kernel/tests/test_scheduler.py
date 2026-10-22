@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Waits, one-time and recurring schedules (``kernel.scheduler``) and the turns their time starts."""
+"""Waits, one-time and recurring schedules (``kernel.agent.scheduler``) and the turns their time starts."""
 from __future__ import annotations
 
 from datetime import datetime
 
 import pytest
 
-from kernel.parser import CommandValidationError, validate_action_args
-from kernel.scheduler import ScheduleError, Scheduler, build_repeat, next_after, parse_at
+from kernel.protocol.parser import CommandValidationError, validate_action_args
+from kernel.agent.scheduler import ScheduleError, Scheduler, build_repeat, next_after, parse_at
 
 
 class _Clock:

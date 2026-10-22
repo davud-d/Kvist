@@ -48,8 +48,8 @@ from kernel.plugins.manifest import (
 from kernel.plugins.net_broker import TaskServices
 from kernel.plugins.registry import CatalogEntry, SkillRegistry
 from kernel.plugins.sandbox import runner_unavailable_reason
-from kernel.resources import Owner, ResourceManager
-from kernel.task_control import TaskControl
+from kernel.plugins.resources import Owner, ResourceManager
+from kernel.agent.task_control import TaskControl
 
 CONTRACT_SAMPLES = "tests/contract.json"
 AUTHOR_TEST_TIMEOUT = 120.0
@@ -407,8 +407,8 @@ def _author_tests(path: Path, manifest: Manifest, report: CheckReport, registry:
         report.add("author_tests_present", False, "no tests/test_*.py in the package", severity="warning")
         return
     from kernel.plugins.sandbox import RUNNER_DIR, runner_python
-    from kernel.resources import ManagedProcess
-    from kernel.sandbox import RUNTIME_MOUNT_ROOTS, resolve_bubblewrap_path
+    from kernel.plugins.resources import ManagedProcess
+    from kernel.sandbox.sandbox import RUNTIME_MOUNT_ROOTS, resolve_bubblewrap_path
 
     with tempfile.TemporaryDirectory(prefix="kvist-tests-") as raw:
         snapshot = Path(raw) / "skill"

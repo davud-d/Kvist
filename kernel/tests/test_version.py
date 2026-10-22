@@ -3,9 +3,7 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError
 
-from kernel import version
-
-
+from kernel.config import version
 def test_kvist_version_reads_installed_distribution_metadata(monkeypatch):
     monkeypatch.setattr(version, "_installed_version", lambda name: "9.9.9")
 

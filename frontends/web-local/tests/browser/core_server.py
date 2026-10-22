@@ -99,7 +99,7 @@ def serve(root: Path) -> None:
     threading.Thread(target=fake.serve_forever, daemon=True).start()
     fake_url = f'http://127.0.0.1:{fake.server_address[1]}/v1'
     sys.path[:0] = [str(REPO), str(REPO / 'frontends/web-local')]
-    from kernel import user_config
+    from kernel.config import user_config
     from kernel.providers import anymodel_pricing
 
     user_config.set_provider_secret('anymodel_base_url', fake_url)
@@ -119,7 +119,7 @@ def serve(root: Path) -> None:
 
     anymodel_pricing.fetch_model_coefficients = verify
     from kvist_web import configuration
-    # Stands in for the owner's list in kernel/anymodel_onboarding.py, which is empty until chosen.
+    # Stands in for the owner's list in kernel/llm/anymodel_onboarding.py, which is empty until chosen.
     if os.environ.get('KVIST_FIXTURE_DEFAULT_MODELS'):
         configuration.ANYMODEL_DEFAULT_MODELS = tuple(os.environ['KVIST_FIXTURE_DEFAULT_MODELS'].split(','))
     from kvist_web.controller import WebController

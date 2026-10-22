@@ -42,7 +42,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.processors import AfterInput, ConditionalProcessor
 from prompt_toolkit.styles import Style
 
-from kernel.theme import Mode, Theme, ThemeError, load_theme
+from kernel.config.theme import Mode, Theme, ThemeError, load_theme
 
 LOGO_TEXT = "Kvist"
 

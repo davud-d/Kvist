@@ -10,12 +10,12 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import sandbox
-from kernel import terminal as terminal_module
-from kernel import terminal_trust
-from kernel.permission_policy import policy_file_path
-from kernel.sandbox import SandboxMode, detect_sandbox_mode, resolve_bubblewrap_path, wrap_command_for_sandbox
-from kernel.terminal import HardDenyError, TerminalExecutor
+from kernel.sandbox import sandbox
+from kernel.sandbox import terminal as terminal_module
+from kernel.sandbox import terminal_trust
+from kernel.sandbox.permission_policy import policy_file_path
+from kernel.sandbox.sandbox import SandboxMode, detect_sandbox_mode, resolve_bubblewrap_path, wrap_command_for_sandbox
+from kernel.sandbox.terminal import HardDenyError, TerminalExecutor
 
 
 def fake_which(value):

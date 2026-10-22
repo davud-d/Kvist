@@ -1905,7 +1905,7 @@ mod tests {
         app
     }
 
-    const PATCH: &str = "--- a/kernel/helpers.py\n+++ b/kernel/helpers.py\n@@ -10,3 +10,3 @@\n keep\n-total = price * 2\n+total = price * 3\n keep too";
+    const PATCH: &str = "--- a/kernel/agent/helpers.py\n+++ b/kernel/agent/helpers.py\n@@ -10,3 +10,3 @@\n keep\n-total = price * 2\n+total = price * 3\n keep too";
 
     /// A wide window with one file the agent changed, drawn once so its rows are clickable.
     fn changed_app() -> (App, Instant) {
@@ -1913,7 +1913,7 @@ mod tests {
         app.grid = Grid { cols: 180, rows: 50, cw: 10, ch: 20 };
         let now = Instant::now();
         app.session.apply(
-            CoreEvent::FileChanged { path: "kernel/helpers.py".into(), added: 1, removed: 1, patch: Some(PATCH.into()) },
+            CoreEvent::FileChanged { path: "kernel/agent/helpers.py".into(), added: 1, removed: 1, patch: Some(PATCH.into()) },
             now,
         );
         app.left_in = Tween::settled(1.0);
@@ -1938,7 +1938,7 @@ mod tests {
     fn clicking_a_changed_file_opens_its_diff_on_the_right_and_a_second_click_closes_it() {
         let (mut app, now) = changed_app();
         click_on(&mut app, |h| matches!(h, Hit::File(0)), now);
-        assert_eq!(app.diff.as_ref().map(|view| view.path.as_str()), Some("kernel/helpers.py"));
+        assert_eq!(app.diff.as_ref().map(|view| view.path.as_str()), Some("kernel/agent/helpers.py"));
         draw_once(&mut app, now + Duration::from_secs(1));
         let panel = app.layout.diff.expect("the panel");
         assert!(panel.x > app.layout.input.right());
@@ -1966,7 +1966,7 @@ mod tests {
         let (mut app, now) = changed_app();
         let long: String = (1..=80).map(|n| format!("+line {n}\n")).collect();
         app.session.apply(
-            CoreEvent::FileChanged { path: "kernel/helpers.py".into(), added: 80, removed: 0, patch: Some(format!("@@ -0,0 +1,80 @@\n{long}")) },
+            CoreEvent::FileChanged { path: "kernel/agent/helpers.py".into(), added: 80, removed: 0, patch: Some(format!("@@ -0,0 +1,80 @@\n{long}")) },
             now,
         );
         app.open_diff(0, now);
@@ -1997,7 +1997,7 @@ mod tests {
         let now = Instant::now();
         app.on_core(
             &json!({"type": "input_request", "request_id": "w", "kind": "confirm", "title": "File overwrite",
-                "subject": {"kind": "overwrite", "path": "kernel/helpers.py", "diff": PATCH}}),
+                "subject": {"kind": "overwrite", "path": "kernel/agent/helpers.py", "diff": PATCH}}),
             now,
         );
         app.modal_p = Tween::settled(1.0);

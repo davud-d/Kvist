@@ -28,7 +28,7 @@ class WebStateStore:
     def load(self) -> dict[str, Any]:
         with self._lock:
             if self._path is None:
-                from kernel.user_config import get_web_local_config
+                from kernel.config.user_config import get_web_local_config
 
                 value = get_web_local_config()
             else:
@@ -50,7 +50,7 @@ class WebStateStore:
             state = self.load()
             change(state)
             if self._path is None:
-                from kernel.user_config import save_web_local_config
+                from kernel.config.user_config import save_web_local_config
 
                 save_web_local_config(state)
             else:

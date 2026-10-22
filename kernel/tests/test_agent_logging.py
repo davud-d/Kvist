@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from kernel import agent_logging
-from kernel.agent_logging import get_state_path
+from kernel.session import agent_logging
+from kernel.session.agent_logging import get_state_path
 
 
 def test_sanitize_for_log_redacts_secrets_and_truncates(agent_factory):

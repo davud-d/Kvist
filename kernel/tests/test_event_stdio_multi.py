@@ -14,10 +14,10 @@ import time
 
 import pytest
 
-from kernel import event_stdio
-from kernel.event_session import EventSession
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import FrontendChannel
+from kernel.protocol import event_stdio
+from kernel.protocol.event_session import EventSession
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import FrontendChannel
 
 
 class _FakeConfig:

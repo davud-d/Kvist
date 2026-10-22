@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn the_language_is_the_extension() {
-        assert_eq!(language("kernel/helpers.py"), "py");
+        assert_eq!(language("kernel/agent/helpers.py"), "py");
         assert_eq!(language("Makefile"), "");
         assert_eq!(language("a.d/Makefile"), "");
     }

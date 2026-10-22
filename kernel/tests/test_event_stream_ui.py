@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import threading
 
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import (
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import (
     DebugEvent,
     ErrorEvent,
     FinalEvent,
@@ -400,7 +400,7 @@ def test_loop_reasoning_is_streamed_and_sealed_once():
 
 def test_reasoning_that_arrives_in_one_piece_is_timed_from_the_call(monkeypatch):
     clock = iter([100.0, 145.0])
-    monkeypatch.setattr("kernel.event_stream_ui.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("kernel.protocol.event_stream_ui.time.monotonic", lambda: next(clock))
     ch = FrontendChannel()
     ui = EventStreamUI(ch)
 

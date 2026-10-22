@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.agent_state import AgentConfig, RunState
+from kernel.agent.agent_state import AgentConfig, RunState
 
 
 def test_agent_config_and_run_state_defaults_are_isolated():

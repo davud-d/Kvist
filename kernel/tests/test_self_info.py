@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from kernel import self_info
-from kernel.self_info import (
+from kernel.sandbox import self_info
+from kernel.sandbox.self_info import (
     HOST_JETBRAINS,
     HOST_VSCODE,
     HOST_ZED,
@@ -14,7 +14,7 @@ from kernel.self_info import (
     detect_host,
     self_termination_denial,
 )
-from kernel.terminal import HardDenyError, TerminalExecutor
+from kernel.sandbox.terminal import HardDenyError, TerminalExecutor
 
 # Kvist in the VS Code panel on Hyprland: core <- extension host <- code <- Hyprland.
 VSCODE_CHAIN = (
@@ -261,7 +261,7 @@ def test_runtime_prompt_names_the_host(agent_factory, monkeypatch):
     agent = agent_factory()
     agent._state.system_host = describe_host(VSCODE_CHAIN, HOST_VSCODE)
     monkeypatch.setattr(
-        "kernel.agent_context.current_time_context",
+        "kernel.agent.agent_context.current_time_context",
         lambda: {"current_time": "2026-01-01 00:00:00 UTC"},
     )
 
@@ -271,7 +271,7 @@ def test_runtime_prompt_names_the_host(agent_factory, monkeypatch):
 
 
 def test_environment_facts_fill_the_host_line(agent_factory, monkeypatch):
-    monkeypatch.setattr("kernel.agent.ancestor_chain", lambda: VSCODE_CHAIN)
+    monkeypatch.setattr("kernel.agent.agent.ancestor_chain", lambda: VSCODE_CHAIN)
     agent = agent_factory()
 
     agent._set_environment_facts()
@@ -291,9 +291,9 @@ def test_chat_turn_carries_the_host_fact(agent_factory, monkeypatch):
     from kernel.tests.conftest import FakeLLMClient
 
     agent = agent_factory(stream=False)
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
     monkeypatch.setattr(
-        "kernel.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: []
+        "kernel.llm.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: []
     )
     agent.client = FakeLLMClient(content="ok")
     agent._state.system_host = describe_host(VSCODE_CHAIN, HOST_VSCODE)

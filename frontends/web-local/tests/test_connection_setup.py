@@ -57,7 +57,7 @@ def test_user_script_is_uploaded_and_run_before_install_check(tmp_path):
     assert transport.uploads[0] == (script, '.kvist/web-bridge/setup')
     assert transport.uploads[1][1] == '.kvist/web-bridge/setup'
     assert transport.commands[1] == "/usr/bin/python3 -u '/remote/setup script;name.py' --mode ssh-config --connection-json '/remote/connection payload.json'"
-    assert 'from kernel.version' in transport.commands[2]
+    assert 'from kernel.config.version' in transport.commands[2]
     assert transport.payloads == [{
         'auth_method': 'ssh_config',
         'host': '',

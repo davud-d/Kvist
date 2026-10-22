@@ -6,7 +6,7 @@ import zipfile
 
 import pytest
 
-from kernel.session_store import SessionStore
+from kernel.session.session_store import SessionStore
 
 from kvist_web.bridge.service import BridgeApplication
 from kvist_web import bridge_cli
@@ -103,7 +103,7 @@ class _BootstrapTransport:
                     "version": list(self.python_version),
                 }
             )
-        if "from kernel.version" in command:
+        if "from kernel.config.version" in command:
             if self.version is None:
                 raise RuntimeError("missing")
             return json.dumps({"version": self.version})

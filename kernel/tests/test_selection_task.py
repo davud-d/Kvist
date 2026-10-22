@@ -6,10 +6,12 @@ import json
 
 import pytest
 
-from kernel import completion, selection_task
-from kernel.agent_state import AgentConfig
-from kernel.completion import CompletionError
-from kernel.selection_task import generate_selection_reply, parse_payload
+from kernel.ide import completion
+
+from kernel.agent import selection_task
+from kernel.agent.agent_state import AgentConfig
+from kernel.ide.completion import CompletionError
+from kernel.agent.selection_task import generate_selection_reply, parse_payload
 from kernel.tests.conftest import FakeLLMClient
 
 
@@ -84,7 +86,6 @@ def _utf8_stdin(text: str) -> io.TextIOWrapper:
 
 def test_cli_prints_json_reply(monkeypatch, capsys):
     from kernel import main
-
     monkeypatch.setattr("sys.stdin", _utf8_stdin(_payload()))
     monkeypatch.setattr(selection_task, "generate_selection_reply", lambda text: "перевод")
     main._run_selection_task_op()
@@ -95,7 +96,6 @@ def test_cli_prints_json_reply(monkeypatch, capsys):
 
 def test_cli_reports_failure_as_json(monkeypatch, capsys):
     from kernel import main
-
     def fail(_text):
         raise CompletionError("No fast model is configured")
 

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from prompt_toolkit.history import History
 
-from kernel.input_history import InputHistoryStore
+from kernel.session.input_history import InputHistoryStore
 
 class WorkspaceInputHistory(History):
     """prompt_toolkit history backed by :class:`~input_history.InputHistoryStore`."""

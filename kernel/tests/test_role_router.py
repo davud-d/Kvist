@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from kernel import role_router
-from kernel.role_router import (
+from kernel.agent import role_router
+from kernel.agent.role_router import (
     RouteDecision,
     route_role,
     route_role_with_llm,
@@ -688,30 +688,30 @@ class TestParseRobustness:
     """Test _parse_llm_role handles noisy LLM responses."""
 
     def test_parse_clean_role(self):
-        from kernel.role_router import _parse_llm_role
+        from kernel.agent.role_router import _parse_llm_role
         assert _parse_llm_role("coder") == "coder"
         assert _parse_llm_role("devops") == "devops"
         assert _parse_llm_role("chat") == "chat"
 
     def test_parse_uppercase(self):
-        from kernel.role_router import _parse_llm_role
+        from kernel.agent.role_router import _parse_llm_role
         assert _parse_llm_role("CODER") == "coder"
         assert _parse_llm_role("DevOps") == "devops"
         assert _parse_llm_role("CHAT") == "chat"
 
     def test_parse_with_whitespace(self):
-        from kernel.role_router import _parse_llm_role
+        from kernel.agent.role_router import _parse_llm_role
         assert _parse_llm_role("  coder  ") == "coder"
         assert _parse_llm_role("\ndevops\n") == "devops"
 
     def test_parse_noisy_response(self):
-        from kernel.role_router import _parse_llm_role
+        from kernel.agent.role_router import _parse_llm_role
         assert _parse_llm_role("I think coder is best") == "coder"
         assert _parse_llm_role("The role should be devops") == "devops"
         assert _parse_llm_role("chat role") == "chat"
 
     def test_parse_garbage_returns_default(self):
-        from kernel.role_router import _parse_llm_role
+        from kernel.agent.role_router import _parse_llm_role
         assert _parse_llm_role("xyz123") == _DEFAULT_ROLE
         assert _parse_llm_role("") == _DEFAULT_ROLE
         assert _parse_llm_role("unknown") == _DEFAULT_ROLE
@@ -861,7 +861,7 @@ class TestMatchDirectRule:
     """Test _match_direct_rule function directly."""
 
     def test_match_direct_rule_devops(self):
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         result = _match_direct_rule("Разверни проект на VPS")
         assert result is not None
         role, label, pattern = result
@@ -869,7 +869,7 @@ class TestMatchDirectRule:
         assert label == "deploy action"
 
     def test_match_direct_rule_coder(self):
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         result = _match_direct_rule("Создай Python скрипт")
         assert result is not None
         role, label, pattern = result
@@ -881,7 +881,7 @@ class TestMatchDirectRule:
         # (see _DIRECT_CHAT_MIN_MATCHES) — a lone "definition question"
         # hit like "Что такое Docker?" is covered by
         # test_match_direct_rule_single_chat_hit_defers below.
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         result = _match_direct_rule("Объясни, как работает Docker")
         assert result is not None
         role, label, pattern = result
@@ -893,12 +893,12 @@ class TestMatchDirectRule:
         # A single chat-pattern hit is weak evidence on its own (it could
         # just as well appear inside a diagnostic/investigation request),
         # so it must defer to the LLM router rather than deciding alone.
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         assert _match_direct_rule("Что такое Docker?") is None
         assert _match_direct_rule("Explain Docker") is None
 
     def test_match_direct_rule_none(self):
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         result = _match_direct_rule("абракадабра xyz")
         assert result is None
 
@@ -906,7 +906,7 @@ class TestMatchDirectRule:
         # "explain/summarize <workspace artifact>" needs a file read, which
         # chat cannot do at all — must not fall into the chat patterns just
         # because it starts with "объясни"/"explain".
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         for goal in (
             "Объясни, что в этом логе",
             "Перескажи содержимое усечённого лога инцидента",
@@ -922,7 +922,7 @@ class TestMatchDirectRule:
     def test_match_direct_rule_reader_artifact_beats_chat_min_matches(self):
         # Without the reader rule, two chat-pattern hits ("explain" +
         # "how does") would short-circuit this straight to chat.
-        from kernel.role_router import _match_direct_rule
+        from kernel.agent.role_router import _match_direct_rule
         role, _label, _pattern = _match_direct_rule(
             "Explain how does this log file end up truncated"
         )

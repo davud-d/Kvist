@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import read_json_object, update_json_object
+from kernel.session.durable_json import read_json_object, update_json_object
 from kernel.plugins.paths import config_dir, grants_path
 
 GRANTS_FORMAT = 1

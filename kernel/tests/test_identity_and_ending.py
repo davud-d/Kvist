@@ -13,8 +13,8 @@ _IDENTITY = (
 
 def _chat_message_sent(agent_factory, monkeypatch, goal: str = "что ты такое?") -> str:
     agent = agent_factory(stream=False, provider="anymodel", fast_model="ds/some-model")
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
-    monkeypatch.setattr("kernel.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.llm.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
     agent.client = FakeLLMClient(content="ok")
 
     agent._run_chat(goal)
@@ -65,8 +65,8 @@ def test_a_chat_turn_puts_the_ending_rule_last_before_the_persons_message(agent_
 
 def test_the_ending_rule_follows_the_session_history_too(agent_factory, monkeypatch):
     agent = agent_factory(stream=False)
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
-    monkeypatch.setattr("kernel.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.llm.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
     agent.client = FakeLLMClient(content="ok")
     agent._session_history = [{"role": "reader", "goal": "прочитай a.py", "result": "готово"}]
 
@@ -79,8 +79,8 @@ def test_the_ending_rule_follows_the_session_history_too(agent_factory, monkeypa
 
 def test_the_stored_chat_turn_does_not_carry_the_ending_rule(agent_factory, monkeypatch):
     agent = agent_factory(stream=False)
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
-    monkeypatch.setattr("kernel.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.llm.llm_clients.fallback_candidates_for_model", lambda *args, **kwargs: [])
     agent.client = FakeLLMClient(content="ok")
 
     agent._run_chat("спасибо")

@@ -5,10 +5,8 @@ import io
 
 import pytest
 
-from kernel import event_stdio
+from kernel.protocol import event_stdio
 from kernel import main
-
-
 def test_main_dispatches_stdio_frontend_without_starting_terminal(monkeypatch, tmp_path):
     captured = {}
 

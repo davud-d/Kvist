@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from kernel.parser import CommandValidationError, validate_action_args
+from kernel.protocol.parser import CommandValidationError, validate_action_args
 from kernel.tests.conftest import make_command
 
 _SYNTHETIC_SUCCESS = (
@@ -79,8 +79,7 @@ def test_modify_task_with_missing_target_ends_honestly_on_first_final_answer(age
 
 
 def test_incomplete_report_skips_gates_and_tells_the_reporter(agent_factory, monkeypatch):
-    from kernel import agent_runtime
-
+    from kernel.agent import agent_runtime
     agent = _fix_agent(agent_factory, max_steps=4)
     contexts: list[dict] = []
     monkeypatch.setattr(
@@ -207,7 +206,7 @@ def test_read_only_guard_feedback_reaches_the_model_as_its_text(agent_factory):
     agent._state.current_agent_role = "reader"
     command = make_command("write_file", {"path": "out.txt", "content": "x"}, "edit")
 
-    from kernel.agent_runtime import _reject_read_only_violation
+    from kernel.agent.agent_runtime import _reject_read_only_violation
 
     assert _reject_read_only_violation(agent, 1, command)
     error = agent._feedback_error_for_model(_last_feedback(agent))

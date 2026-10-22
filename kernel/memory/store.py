@@ -35,7 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import JsonStorageError, exclusive_storage_lock, validate_storage_path
+from kernel.session.durable_json import JsonStorageError, exclusive_storage_lock, validate_storage_path
 from kernel.memory import privacy
 from kernel.memory.errors import (
     MemoryBusyError,
@@ -130,7 +130,7 @@ class MemoryStore:
 
     @classmethod
     def for_user(cls) -> "MemoryStore":
-        from kernel.user_config import get_user_config_path
+        from kernel.config.user_config import get_user_config_path
 
         folder = get_user_config_path().parent
         return cls(folder / "memory.db", scope="user", boundary=folder.parent)
@@ -627,9 +627,9 @@ class MemoryStore:
         session, seq = source.get("session"), source.get("event_seq")
         if not session or seq is None or self.workspace is None:
             return None
-        from kernel.agent_logging import get_journal_path, is_valid_session_name
-        from kernel.session_events import read_history
-        from kernel.session_store import SessionStore
+        from kernel.session.agent_logging import get_journal_path, is_valid_session_name
+        from kernel.session.session_events import read_history
+        from kernel.session.session_store import SessionStore
 
         if not is_valid_session_name(session):
             return False

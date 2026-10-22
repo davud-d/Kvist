@@ -33,12 +33,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import JsonStorageError
+from kernel.session.durable_json import JsonStorageError
 from kernel.memory import privacy
 from kernel.memory.errors import MemoryPrivacyError, MemoryProviderError, MemoryStoreError, MemoryValidationError
 from kernel.memory.schema import RELATIONS
 from kernel.memory.store import DUPLICATE, MAX_REASON, MemoryStore, NewRecord, Source
-from kernel.redaction import defang_prompt_boundary_tags
+from kernel.sandbox.redaction import defang_prompt_boundary_tags
 
 ACTOR = "extractor"
 # Raise when the prompt, the collector or the gate changes what a batch yields:
@@ -126,9 +126,9 @@ def _skip_to(store: MemoryStore, session: str, boundary: int) -> None:
 
 def collect(store: MemoryStore, session: str, after_seq: int) -> tuple[list[Event], int | None]:
     """Finished turns after ``after_seq``, filtered; the boundary is the last finished turn's end."""
-    from kernel.agent_logging import get_journal_path, is_valid_session_name
-    from kernel.session_events import MAX_HISTORY_LIMIT, read_history
-    from kernel.session_store import SessionStore
+    from kernel.session.agent_logging import get_journal_path, is_valid_session_name
+    from kernel.session.session_events import MAX_HISTORY_LIMIT, read_history
+    from kernel.session.session_store import SessionStore
 
     if store.workspace is None or not is_valid_session_name(session):
         raise MemoryValidationError(f"no session {session!r} in this workspace")
@@ -157,7 +157,7 @@ def collect(store: MemoryStore, session: str, after_seq: int) -> tuple[list[Even
 def batches(events: list[Event], count_tokens: Callable[[str], int],
             budget: int = MAX_BATCH_TOKENS) -> list[list[Event]]:
     """Consecutive events whose lines fit the budget; an event too big alone is cut to it, keeping both ends."""
-    from kernel.session_events import truncate_middle
+    from kernel.session.session_events import truncate_middle
 
     groups: list[list[Event]] = []
     current: list[Event] = []

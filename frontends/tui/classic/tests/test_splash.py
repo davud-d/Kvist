@@ -18,8 +18,7 @@ from prompt_toolkit.layout.screen import Screen, WritePosition
 from prompt_toolkit.output import DummyOutput
 
 import splash
-from kernel import theme
-
+from kernel.config import theme
 _ROOT = Path(splash.__file__).resolve().parent
 _BLOCK = set("█▀▄ ")
 

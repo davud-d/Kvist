@@ -4,10 +4,10 @@ from __future__ import annotations
 import threading
 from types import SimpleNamespace
 
-from kernel.agent import LocalAgent
-from kernel.context_meter import ContextLedger
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import (
+from kernel.agent.agent import LocalAgent
+from kernel.context.context_meter import ContextLedger
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import (
     FrontendChannel,
     ReasoningChunkEvent,
     ReasoningCommitEvent,

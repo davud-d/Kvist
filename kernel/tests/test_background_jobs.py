@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from kernel.background_jobs import (
+from kernel.agent.background_jobs import (
     BackgroundJob,
     BackgroundJobs,
     JobLimitError,
@@ -16,17 +16,17 @@ from kernel.background_jobs import (
     describe,
     wrap_output,
 )
-from kernel.event_stream_ui import EventStreamUI
-from kernel.executor import ExecutorError, SafeExecutor
-from kernel.frontend_protocol import (
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.sandbox.executor import ExecutorError, SafeExecutor
+from kernel.protocol.frontend_protocol import (
     FrontendChannel,
     JobFinishedEvent,
     JobNoticeEvent,
     JobOutputEvent,
     JobStartedEvent,
 )
-from kernel.parser import CommandValidationError, validate_action_args
-from kernel.process_tree import run_supervised
+from kernel.protocol.parser import CommandValidationError, validate_action_args
+from kernel.sandbox.process_tree import run_supervised
 from kernel.tests.conftest import AllowAllApprovals, requires_posix
 
 
@@ -96,7 +96,7 @@ def test_output_read_through_job_output_is_not_repeated_in_the_next_note():
 
 
 def test_output_beyond_the_tail_is_counted_as_lost(monkeypatch):
-    monkeypatch.setattr("kernel.background_jobs.TAIL_CHARS", 10)
+    monkeypatch.setattr("kernel.agent.background_jobs.TAIL_CHARS", 10)
     jobs = BackgroundJobs()
     job = jobs.launch(["srv"], "", "", _spawn_script(["0123456789", "abcdefghij", "KLMNO"]))
     _wait_finished(job)

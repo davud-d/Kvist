@@ -9,9 +9,7 @@ import pytest
 from prompt_toolkit.styles import ANSI_COLOR_NAMES, Style
 from rich.color import Color
 
-from kernel import theme
-
-
+from kernel.config import theme
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
@@ -280,7 +278,7 @@ def test_theme_directories_order(tmp_path, monkeypatch):
     cwd = tmp_path / "cwd"
     dirs = theme.theme_directories(workspace=workspace, cwd=cwd)
     assert dirs == [
-        (Path(theme.__file__).resolve().parent / "themes"),
+        (Path(theme.__file__).resolve().parent.parent / "themes"),
         (home / ".config" / "opencode" / "themes").resolve(),
         (home / ".kvist" / "themes").resolve(),
         (workspace / ".kvist" / "themes").resolve(),

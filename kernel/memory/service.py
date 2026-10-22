@@ -17,7 +17,7 @@ from kernel.memory.errors import MemoryNotFound, MemoryPermissionError, MemoryVa
 from kernel.memory.retrieval import relevant, render_block
 from kernel.memory.schema import KINDS, STATUSES
 from kernel.memory.store import PERSON, USER_PREFIX, WORKSPACE_PREFIX, MemoryStore, Source
-from kernel.user_config import get_memory_paused, get_memory_processing_allowed
+from kernel.config.user_config import get_memory_paused, get_memory_processing_allowed
 
 SCOPES = ("workspace", "user")
 

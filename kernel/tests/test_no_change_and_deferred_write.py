@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.role_router import has_deferred_write_marker
+from kernel.agent.role_router import has_deferred_write_marker
 from kernel.tests.conftest import make_command
 
 DEFERRED_GOAL = (

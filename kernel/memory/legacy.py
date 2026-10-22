@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import JsonStorageError, read_json_object
+from kernel.session.durable_json import JsonStorageError, read_json_object
 from kernel.memory.errors import MemoryStorageError
 from kernel.memory.text import content_hash
 

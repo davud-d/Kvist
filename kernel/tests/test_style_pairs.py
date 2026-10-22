@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 import kernel
-from kernel.agent_logging import session_styles
-from kernel.user_config import (
+from kernel.session.agent_logging import session_styles
+from kernel.config.user_config import (
     chat_style_for,
     get_saved_style,
     get_style_options,

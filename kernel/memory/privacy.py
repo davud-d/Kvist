@@ -15,9 +15,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from kernel.change_journal import journal_path_violation
+from kernel.session.change_journal import journal_path_violation
 from kernel.memory.errors import MemoryPrivacyError, MemoryValidationError
-from kernel.redaction import redact_text
+from kernel.sandbox.redaction import redact_text
 
 _EMAIL_RE = re.compile(r"[\w.+-]+@([\w-]+(?:\.[\w-]+)+)", re.UNICODE)
 _HARMLESS_EMAIL_DOMAINS = ("example.com", "example.org", "example.net", "users.noreply.github.com", "anthropic.com")

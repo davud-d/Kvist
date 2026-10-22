@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.context_utils import trim_history
+from kernel.context.context_utils import trim_history
 
 
 def test_trim_history_keeps_first_system_and_recent_messages():

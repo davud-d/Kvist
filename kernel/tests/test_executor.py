@@ -13,9 +13,9 @@ import pytest
 
 from kernel.tests.conftest import AllowAllApprovals, requires_posix
 
-from kernel import executor as executor_module
-from kernel.executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError, SafeExecutor
-from kernel.terminal import TerminalError, TerminalResult
+from kernel.sandbox import executor as executor_module
+from kernel.sandbox.executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError, SafeExecutor
+from kernel.sandbox.terminal import TerminalError, TerminalResult
 
 
 def _append_source_in_process(workspace: str, prefix: str, count: int) -> None:
@@ -678,8 +678,7 @@ def test_a_refused_command_still_tells_the_model_about_the_rewrite(tmp_path):
 @pytest.fixture(params=["ripgrep", "walk"])
 def search_engine(request, monkeypatch):
     """Run a search test against both engines; skip ripgrep where it is absent."""
-    from kernel import executor as executor_module
-
+    from kernel.sandbox import executor as executor_module
     if request.param == "walk":
         monkeypatch.setattr(executor_module, "_trusted_ripgrep", lambda: None)
     elif executor_module._trusted_ripgrep() is None:
@@ -1195,8 +1194,7 @@ def test_fetch_never_asks_for_local_addresses(tmp_path, url):
 
 
 def test_web_search_uses_the_key_saved_by_the_command(tmp_path, monkeypatch):
-    from kernel import user_config
-
+    from kernel.config import user_config
     for name in ("TAVILY_API_KEY", "SEARXNG_BASE_URL", "BRAVE_SEARCH_API_KEY", "SEARCH_PROVIDER"):
         monkeypatch.delenv(name, raising=False)
     executor = SafeExecutor(tmp_path)

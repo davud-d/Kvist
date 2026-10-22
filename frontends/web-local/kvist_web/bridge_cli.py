@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from kernel.version import kvist_version
+from kernel.config.version import kvist_version
 
 from .bridge.client import (
     bridge_status,

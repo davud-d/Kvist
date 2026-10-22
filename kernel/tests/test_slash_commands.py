@@ -10,7 +10,7 @@ from prompt_toolkit.formatted_text import to_formatted_text
 from prompt_toolkit.shortcuts import CompleteStyle
 
 from kernel import main
-from kernel.slash_commands import (
+from kernel.protocol.slash_commands import (
     SLASH_COMMANDS,
     SLASH_COMMAND_LEXER,
     SLASH_COMMAND_MENU_HEIGHT,
@@ -273,7 +273,7 @@ def test_apply_strime_mode_rejects_builtin_provider():
 def test_ink_model_reference_matches_frontend_commands(monkeypatch):
     import re
     from pathlib import Path
-    from kernel.slash_commands import slash_commands_context
+    from kernel.protocol.slash_commands import slash_commands_context
 
     monkeypatch.setenv("KVIST_COMMAND_FRONTEND", "ink")
     context = slash_commands_context()

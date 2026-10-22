@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.agent_model import _load_role_prompt
+from kernel.agent.agent_model import _load_role_prompt
 from kernel.tests.conftest import make_command
 
 

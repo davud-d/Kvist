@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 
-from kernel.agent import LocalAgent
+from kernel.agent.agent import LocalAgent
 from kernel.tests.conftest import make_command, requires_posix
 
 pytestmark = pytest.mark.slow
@@ -18,8 +18,7 @@ pytestmark = pytest.mark.slow
 
 @pytest.mark.offline_smoke
 def test_write_with_failed_promotion_is_not_reported_as_success(agent_factory, monkeypatch):
-    from kernel import executor as executor_module
-
+    from kernel.sandbox import executor as executor_module
     agent = agent_factory()
     ws = agent.executor.workspace
     (ws / "f.txt").write_text("A\n", encoding="utf-8", newline="")
@@ -37,16 +36,16 @@ def test_write_with_failed_promotion_is_not_reported_as_success(agent_factory, m
     # ...but the action must NOT be reported as an ordinary success.
     assert feedback["ok"] is False
     # And /revert must not have been granted ownership of B.
-    from kernel.change_journal import load_baseline
+    from kernel.session.change_journal import load_baseline
     entry = load_baseline(ws)["f.txt"]
-    from kernel.change_journal import content_digest
+    from kernel.session.change_journal import content_digest
     assert entry.get("last_digest") != content_digest("B\n")
 
 
 # --- F6: a different action cannot finalize another action's pending txn -------
 
 def test_promotion_is_bound_to_action_identity(tmp_path):
-    from kernel.change_journal import content_digest, load_baseline, promote_baseline, record_baseline
+    from kernel.session.change_journal import content_digest, load_baseline, promote_baseline, record_baseline
 
     digest_b = content_digest("B\n")
     # Action A records a pending write of B.
@@ -79,7 +78,7 @@ def test_promotion_is_bound_to_action_identity(tmp_path):
     ("replace_in_file", {"path": "f.txt", "old_text": "ORIG", "new_text": "X"}),
 ])
 def test_corrupt_journal_blocks_mutation(agent_factory, action, args):
-    from kernel.change_journal import journal_path
+    from kernel.session.change_journal import journal_path
 
     agent = agent_factory()
     ws = agent.executor.workspace
@@ -98,7 +97,7 @@ def test_corrupt_journal_blocks_mutation(agent_factory, action, args):
 
 
 def test_corrupt_journal_is_reported_not_treated_as_empty(tmp_path):
-    from kernel.change_journal import build_diff_report, journal_path
+    from kernel.session.change_journal import build_diff_report, journal_path
 
     j = journal_path(tmp_path)
     j.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +136,7 @@ def test_committed_reconciliation_matches_normal_success_state(agent_factory):
     normal_state = _semantic_state(normal)
 
     # --- Same write, but crash before post-action checkpoint, then reconcile ---
-    from kernel.change_journal import content_digest, record_baseline, promote_baseline
+    from kernel.session.change_journal import content_digest, record_baseline, promote_baseline
     recov = agent_factory()
     recov._state.create_goal = True
     ws = recov.executor.workspace
@@ -185,8 +184,8 @@ def test_begin_run_persists_new_run_and_supersedes_old(agent_factory):
 
 @requires_posix
 def test_changes_does_not_follow_parent_swapped_to_symlink(tmp_path):
-    from kernel import change_journal
-    from kernel.change_journal import build_diff_report, journal_path
+    from kernel.session import change_journal
+    from kernel.session.change_journal import build_diff_report, journal_path
 
     ws = tmp_path / "ws"
     (ws / "safe").mkdir(parents=True)
@@ -230,7 +229,7 @@ def test_changes_does_not_follow_parent_swapped_to_symlink(tmp_path):
 
 @requires_posix
 def test_internal_hardlinks_allowed_external_rejected(tmp_path):
-    from kernel.change_journal import _SafeChild, JournalPathBindingError
+    from kernel.session.change_journal import _SafeChild, JournalPathBindingError
 
     ws = tmp_path / "ws"
     ws.mkdir()

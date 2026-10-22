@@ -71,7 +71,7 @@
 ### задача 4. смена режима рассуждений
 Шаги: кнопка модели, раскрыть Advanced · models, reasoning & endpoint, выбрать уровень, Save defaults.
 - неочевидно: режим рассуждений спрятан в раскрывающемся блоке окна модели (configuration.js@2707b56:53), рядом с адресом провайдера (`04-t4-3-open-advanced.png`). На главном экране уровень не виден ни до, ни после смены (проверено по тексту `main`).
-- уровни подписаны только именами `false|low|…|max` (`Off` вместо `false`); описаний уровней нет, хотя ядро их отдаёт (kernel/reasoning_effort.py:53-60, событие manifest kernel/core_manifest.py:36-47).
+- уровни подписаны только именами `false|low|…|max` (`Off` вместо `false`); описаний уровней нет, хотя ядро их отдаёт (kernel/llm/reasoning_effort.py:53-60, событие manifest kernel/protocol/core_manifest.py:36-47).
 
 ### задача 5. поиск списка команд
 Шаги на 1440: ввести «/» (ничего), кнопка Commands в подвале сайдбара. На 390 ещё открыть шторку и закрыть её после палитры.
@@ -108,7 +108,7 @@
 
 | функция | TUI (Ink и классический терминал) | VS Code | веб (2707b56) |
 |---|---|---|---|
-| первый запуск | Ink без провайдера не стартует и отсылает в классический терминал (kernel/main.py:813-819); там экран AnyModel: Enter открывает регистрацию, Esc другой провайдер, вставка ключа и проверка через `/v1/models` (kernel/anymodel_onboarding.py:131-180, main.py:1094-1105) | отдельный экран до запуска ядра: `--config-info`, карточки провайдеров с подписью, AnyModel первым (src/chatView.ts:143-164, 19; webview/firstRun.tsx:47-156) | окно поверх приложения после загрузки (app.js:185), тот же контент, что окно настроек (configuration.js) |
+| первый запуск | Ink без провайдера не стартует и отсылает в классический терминал (kernel/main.py:813-819); там экран AnyModel: Enter открывает регистрацию, Esc другой провайдер, вставка ключа и проверка через `/v1/models` (kernel/llm/anymodel_onboarding.py:131-180, main.py:1094-1105) | отдельный экран до запуска ядра: `--config-info`, карточки провайдеров с подписью, AnyModel первым (src/chatView.ts:143-164, 19; webview/firstRun.tsx:47-156) | окно поверх приложения после загрузки (app.js:185), тот же контент, что окно настроек (configuration.js) |
 | регистрация AnyModel | `ANYMODEL_REGISTER_URL` (anymodel_onboarding.py:32), открывает браузер или печатает адрес | `--config-op open-registration` открывает автоматически один раз, без браузера показывает адрес (chatView.ts:183-186, firstRun.tsx:63-67, 98-106) | ссылка `target=_blank` с адресом из `registration_url` ядра (configuration.py:40, configuration.js@2707b56:62-64); при заблокированной вкладке ничего не сообщает |
 | проверка ключа | `fetch_model_coefficients` до сохранения (anymodel_onboarding.py:171-178) | `--config-op set-provider` | та же проверка при сохранении (frontends/web-local/kvist_web/configuration.py:120-126) |
 | выбор провайдера | `choose_provider` список с фильтром по вводу | 7 карточек, остальные в Settings | `<select>` из 43 провайдеров |

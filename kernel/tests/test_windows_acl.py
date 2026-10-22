@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from kernel.terminal_env import _controlled_child_path
-from kernel.terminal_trust import _is_trusted_system_directory, _is_trusted_system_executable
-from kernel.terminal_windows_acl import dacl_lets_users_write, windows_path_is_user_mutable
+from kernel.sandbox.terminal_env import _controlled_child_path
+from kernel.sandbox.terminal_trust import _is_trusted_system_directory, _is_trusted_system_executable
+from kernel.sandbox.terminal_windows_acl import dacl_lets_users_write, windows_path_is_user_mutable
 
 SYSTEM = "S-1-5-18"
 ADMINISTRATORS = "S-1-5-32-544"
@@ -78,8 +78,7 @@ def test_the_child_path_holds_the_system_directories_and_the_installed_git(tmp_p
 
 
 def test_windows_exec_dirs_keep_only_absolute_trusted_unique_entries(monkeypatch, tmp_path):
-    from kernel import terminal_env
-
+    from kernel.sandbox import terminal_env
     system_root = tmp_path / "Windows"
     trusted_git = tmp_path / "Git" / "cmd"
     user_tools = tmp_path / "Users" / "tools"

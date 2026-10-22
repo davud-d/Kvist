@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from kernel.redaction import (
+from kernel.sandbox.redaction import (
     REDACTED,
     escape_terminal_controls,
     redact_text,

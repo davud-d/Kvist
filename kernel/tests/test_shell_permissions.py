@@ -10,14 +10,16 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel import sandbox, terminal
-from kernel.event_session import EventApprovalGate
-from kernel.executor import ExecutorError, SafeExecutor
-from kernel.frontend_protocol import FrontendChannel, InputRequestEvent
-from kernel.parser import CommandValidationError, validate_action_args
-from kernel.permission_policy import append_allow_rule, load_policy
-from kernel.sandbox import SandboxMode, wrap_command_for_sandbox
-from kernel.terminal import HardDenyError, TerminalExecutor
+from kernel.sandbox import sandbox
+
+from kernel.sandbox import terminal
+from kernel.protocol.event_session import EventApprovalGate
+from kernel.sandbox.executor import ExecutorError, SafeExecutor
+from kernel.protocol.frontend_protocol import FrontendChannel, InputRequestEvent
+from kernel.protocol.parser import CommandValidationError, validate_action_args
+from kernel.sandbox.permission_policy import append_allow_rule, load_policy
+from kernel.sandbox.sandbox import SandboxMode, wrap_command_for_sandbox
+from kernel.sandbox.terminal import HardDenyError, TerminalExecutor
 from kernel.tests.conftest import AllowAllApprovals
 
 

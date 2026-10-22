@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from kernel import config_info
-from kernel import user_config
-from kernel.llm_clients import MANUAL_OPENAI_PROVIDERS
+from kernel.config import config_info
+from kernel.config import user_config
+from kernel.llm.llm_clients import MANUAL_OPENAI_PROVIDERS
 
 _CREDENTIAL_ENVS = (
     "OPENAI_API_KEY",

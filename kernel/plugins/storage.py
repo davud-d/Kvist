@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import (
+from kernel.session.durable_json import (
     JsonStorageError,
     exclusive_storage_lock,
     read_json_object,

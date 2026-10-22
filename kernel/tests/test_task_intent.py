@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
+from kernel.agent.task_intent import asks_for_explanation, infer_task_kind, is_create_goal
 
 
 def test_infer_task_kind_catches_verbless_report_phrases():

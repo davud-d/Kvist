@@ -10,10 +10,8 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import durable_json
-from kernel import user_config
-
-
+from kernel.session import durable_json
+from kernel.config import user_config
 def test_load_and_save_user_config(tmp_path):
     path = tmp_path / "config.json"
     user_config.save_user_config({"x": "y"}, path)
@@ -512,7 +510,7 @@ def test_custom_provider_invalid_entries_filtered(tmp_path):
     path = tmp_path / "config.json"
 
     # Write raw config with invalid entries
-    from kernel.user_config import save_user_config
+    from kernel.config.user_config import save_user_config
     save_user_config({
         "custom_providers": {
             "valid": {

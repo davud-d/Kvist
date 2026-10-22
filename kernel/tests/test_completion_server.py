@@ -7,9 +7,11 @@ import threading
 
 import pytest
 
-from kernel import completion, completion_server
-from kernel.agent_state import AgentConfig
-from kernel.completion_server import CompletionServer
+from kernel.ide import completion
+
+from kernel.ide import completion_server
+from kernel.agent.agent_state import AgentConfig
+from kernel.ide.completion_server import CompletionServer
 from kernel.tests.conftest import FakeLLMClient
 
 

@@ -42,7 +42,7 @@ data class CompletionPayload(
 
 /**
  * One long-lived `kvist --complete-server` per binary and workspace (protocol in
- * `kernel/completion_server.py`). A process per keystroke paid interpreter start-up
+ * `kernel/ide/completion_server.py`). A process per keystroke paid interpreter start-up
  * and a new TLS connection every time. The reply arrives in pieces that
  * [stream] passes on, so the editor shows text while the model is still writing.
  */

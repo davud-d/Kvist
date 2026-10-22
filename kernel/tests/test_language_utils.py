@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from kernel.language_utils import choose_localized_text, detect_request_language, resolve_language
+from kernel.context.language_utils import choose_localized_text, detect_request_language, resolve_language
 
 
 def test_detect_request_language_counts_cyrillic_and_latin():

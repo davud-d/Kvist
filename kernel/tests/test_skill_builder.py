@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.agent_tools import run_agent_tool
+from kernel.agent.agent_tools import run_agent_tool
 from kernel.plugins.builder import MAX_CHECKS_PER_TASK, BuildError, BuildLedger, check_draft, install_draft
 from kernel.plugins.grants import GrantStore
 from kernel.plugins.registry import SkillRegistry
-from kernel.protocol import Action, AgentCommand
+from kernel.protocol.protocol import Action, AgentCommand
 from kernel.tests.conftest import NullUI
 from kernel.tests.skill_fixtures import requires_runner
 
@@ -136,7 +136,7 @@ def test_the_builder_cannot_write_into_installed_skills_or_grants(builder_agent)
 
 
 def test_a_shell_command_cannot_read_a_config_directory_inside_the_project(tmp_path, monkeypatch):
-    from kernel.sandbox import SandboxMode, bubblewrap_available, wrap_command_for_sandbox
+    from kernel.sandbox.sandbox import SandboxMode, bubblewrap_available, wrap_command_for_sandbox
 
     if not bubblewrap_available():
         pytest.skip("needs Bubblewrap")

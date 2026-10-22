@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from kernel.parser import (
+from kernel.protocol.parser import (
     CommandValidationError,
     build_command,
     load_single_json_object,
@@ -12,7 +12,7 @@ from kernel.parser import (
     plan_step_for_calls,
     validate_action_args,
 )
-from kernel.protocol import ToolCallRequest
+from kernel.protocol.protocol import ToolCallRequest
 
 
 def command_for(name: str, arguments: dict | None, *, text: str = "", language: str = "en"):
@@ -408,6 +408,6 @@ def test_model_response_reads_a_bare_call_object_without_tags():
     ],
 )
 def test_speakable_prefix_keeps_the_words_and_drops_calls_and_json(text, words):
-    from kernel.parser import speakable_prefix
+    from kernel.protocol.parser import speakable_prefix
 
     assert speakable_prefix(text) == words

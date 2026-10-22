@@ -9,10 +9,10 @@ from rich.text import Text
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import terminal as terminal_module
-from kernel.approvals import TerminalApprovalGate
-from kernel.command_policy import CommandAssessment, RiskLevel
-from kernel.terminal import ApprovalRequiredError, HardDenyError, TerminalError, TerminalExecutor
+from kernel.sandbox import terminal as terminal_module
+from kernel.sandbox.approvals import TerminalApprovalGate
+from kernel.sandbox.command_policy import CommandAssessment, RiskLevel
+from kernel.sandbox.terminal import ApprovalRequiredError, HardDenyError, TerminalError, TerminalExecutor
 
 
 def test_terminal_allows_common_read_only_command(

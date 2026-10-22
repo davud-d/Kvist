@@ -7,8 +7,8 @@ import pytest
 
 from kernel.plugins.grants import GrantStore
 from kernel.plugins.registry import SkillRegistry
-from kernel.redaction import DEFANGED_TAG
-from kernel.resources import Owner
+from kernel.sandbox.redaction import DEFANGED_TAG
+from kernel.plugins.resources import Owner
 from kernel.tests.conftest import NullUI
 from kernel.tests.skill_fixtures import ECHO_TOOL, grant_all, install, requires_runner, write_skill
 
@@ -189,8 +189,8 @@ def test_a_skill_tool_is_unknown_before_attach_and_after_detach(agent_factory, r
 
 
 def test_skill_call_cannot_be_named_directly_by_the_model(agent_factory):
-    from kernel.parser import CommandValidationError, build_command
-    from kernel.protocol import ToolCallRequest
+    from kernel.protocol.parser import CommandValidationError, build_command
+    from kernel.protocol.protocol import ToolCallRequest
 
     agent, _ui = _agent(agent_factory)
     request = ToolCallRequest("c1", "skill_call", {"skill": "echo", "tool": "say", "arguments": {}})
@@ -201,8 +201,8 @@ def test_skill_call_cannot_be_named_directly_by_the_model(agent_factory):
 
 
 def test_arguments_are_checked_against_the_tool_schema(agent_factory, registry, tmp_path):
-    from kernel.parser import CommandValidationError, build_command
-    from kernel.protocol import ToolCallRequest
+    from kernel.protocol.parser import CommandValidationError, build_command
+    from kernel.protocol.protocol import ToolCallRequest
 
     install(registry, write_skill(tmp_path / "src"))
     agent, _ui = _agent(agent_factory)
@@ -216,7 +216,7 @@ def test_arguments_are_checked_against_the_tool_schema(agent_factory, registry, 
 
 
 def test_native_tool_list_carries_attached_skill_tools(agent_factory, registry, tmp_path, monkeypatch):
-    from kernel.agent_runtime import _call_native_turn
+    from kernel.agent.agent_runtime import _call_native_turn
 
     install(registry, write_skill(tmp_path / "src"))
     agent, _ui = _agent(agent_factory)
@@ -224,7 +224,7 @@ def test_native_tool_list_carries_attached_skill_tools(agent_factory, registry, 
     agent._state.current_agent_role = "coder"
     agent._state.native_tools = True
     seen: list[list[str]] = []
-    monkeypatch.setattr("kernel.agent_model.call_native_action_model",
+    monkeypatch.setattr("kernel.agent.agent_model.call_native_action_model",
                         lambda agent_, messages, tools: seen.append([t["function"]["name"] for t in tools]))
 
     _call_native_turn(agent, "task", 1)
@@ -290,8 +290,8 @@ def execute(tool_name, arguments, context):
 
 @requires_runner
 def test_reader_role_refuses_a_writing_tool_and_its_writes(agent_factory, registry, tmp_path):
-    from kernel.agent_runtime import _is_read_only_violation
-    from kernel.protocol import Action, AgentCommand
+    from kernel.agent.agent_runtime import _is_read_only_violation
+    from kernel.protocol.protocol import Action, AgentCommand
 
     writer = {**ECHO_TOOL, "name": "save", "readonly": False}
     plugin = """
@@ -425,8 +425,8 @@ def test_a_skill_that_lacks_execute_fails_to_start_with_a_clear_reason(agent_fac
 
 @requires_runner
 def test_an_injected_result_cannot_close_its_untrusted_block(agent_factory, registry, tmp_path):
-    from kernel.agent_runtime import feedback_to_detail
-    from kernel.protocol import Action, AgentCommand
+    from kernel.agent.agent_runtime import feedback_to_detail
+    from kernel.protocol.protocol import Action, AgentCommand
 
     plugin = """
 def describe():
@@ -516,9 +516,9 @@ def test_a_core_tool_is_attached_with_approval_and_runs_without_a_runner(agent_f
 
 
 def test_a_core_tool_that_changes_things_is_refused_for_a_read_only_task(agent_factory, registry, monkeypatch):
-    from kernel.agent_runtime import _is_read_only_violation
+    from kernel.agent.agent_runtime import _is_read_only_violation
     from kernel.plugins import host_actions
-    from kernel.protocol import Action, AgentCommand
+    from kernel.protocol.protocol import Action, AgentCommand
 
     opened = []
     monkeypatch.setattr(host_actions, "open_url", opened.append)

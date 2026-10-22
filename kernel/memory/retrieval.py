@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 
 from kernel.memory.store import MemoryStore, Record
 from kernel.memory.text import query_terms
-from kernel.redaction import defang_prompt_boundary_tags
+from kernel.sandbox.redaction import defang_prompt_boundary_tags
 
 MAX_RESULTS = 8
 MAX_CONTEXT_TOKENS = 1500

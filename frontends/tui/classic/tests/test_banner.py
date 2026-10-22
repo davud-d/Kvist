@@ -6,7 +6,7 @@ import pytest
 from prompt_toolkit.formatted_text import FormattedText
 
 import banner
-from kernel.agent_state import AgentConfig
+from kernel.agent.agent_state import AgentConfig
 from banner_frames import BOOT_MS, frame_at
 
 

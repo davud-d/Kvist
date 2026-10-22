@@ -23,27 +23,27 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import terminal as terminal_module
-from kernel.process_tree import (
+from kernel.sandbox import terminal as terminal_module
+from kernel.sandbox.process_tree import (
 
     ProcessSupervisionError,
     _BoundedReader,
     cgroup_supervision_available,
     run_supervised,
 )
-from kernel.sandbox import (
+from kernel.sandbox.sandbox import (
     resolve_bubblewrap_path,
     validated_external_tool_path,
     wrap_command_for_sandbox,
     SandboxMode,
 )
-from kernel.secret_paths import (
+from kernel.sandbox.secret_paths import (
     UnsafeSecretPathError,
     enumerate_secret_targets,
     is_secret_basename,
     secret_mask_digest,
 )
-from kernel.terminal import (
+from kernel.sandbox.terminal import (
     ApprovalRequiredError,
     HardDenyError,
     TerminalExecutor,
@@ -332,7 +332,7 @@ def test_auto_fallback_hard_denies_arbitrary_code_without_tree_control(
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     monkeypatch.setattr(terminal_module.shutil, "which", lambda name, path=None: None)
     monkeypatch.setattr(
-        "kernel.sandbox.shutil.which", lambda name, path=None: None
+        "kernel.sandbox.sandbox.shutil.which", lambda name, path=None: None
     )
     _write_policy(tmp_path, ["python *"])
     (tmp_path / "s.py").write_text("print('x')", encoding="utf-8")
@@ -363,7 +363,7 @@ def test_auto_fallback_treats_path_programming_tools_as_arbitrary_code(
     command,
 ):
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
-    monkeypatch.setattr("kernel.sandbox.resolve_bubblewrap_path", lambda: None)
+    monkeypatch.setattr("kernel.sandbox.sandbox.resolve_bubblewrap_path", lambda: None)
     monkeypatch.setattr(terminal_module, "resolve_bubblewrap_path", lambda: None)
     (tmp_path / "input.txt").write_text("fixture\n", encoding="utf-8")
     executor = TerminalExecutor(tmp_path)
@@ -374,7 +374,7 @@ def test_auto_fallback_treats_path_programming_tools_as_arbitrary_code(
 
 
 def test_explicit_workspace_mode_is_named_and_warned(monkeypatch):
-    from kernel.sandbox import detect_sandbox_mode
+    from kernel.sandbox.sandbox import detect_sandbox_mode
 
     mode, note = detect_sandbox_mode("workspace")
     assert mode is SandboxMode.WORKSPACE_ONLY
@@ -472,12 +472,12 @@ def test_same_session_descendant_killed_on_timeout_without_cgroup(tmp_path):
 
 def test_required_cgroup_disappearance_fails_before_spawn(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "kernel.process_tree._CgroupScope.create",
+        "kernel.sandbox.process_tree._CgroupScope.create",
         classmethod(lambda cls: None),
     )
     spawned = []
     monkeypatch.setattr(
-        "kernel.process_tree.subprocess.Popen",
+        "kernel.sandbox.process_tree.subprocess.Popen",
         lambda *args, **kwargs: spawned.append((args, kwargs)),
     )
 
@@ -515,7 +515,7 @@ def test_required_cgroup_cleanup_failure_is_reported_after_reader_cleanup(
             return None
 
     monkeypatch.setattr(
-        "kernel.process_tree._CgroupScope.create",
+        "kernel.sandbox.process_tree._CgroupScope.create",
         classmethod(lambda cls: BrokenScope()),
     )
 
@@ -853,7 +853,7 @@ def test_external_tool_paths_validated(tmp_path, monkeypatch):
     monkeypatch.setenv(
         "AGENT_TOOL_PATHS", os.pathsep.join([str(good), "relative/no", "/nonexistent-xyz"])
     )
-    from kernel.terminal import _external_tool_paths
+    from kernel.sandbox.terminal import _external_tool_paths
 
     resolved = _external_tool_paths()
     assert good.resolve() in resolved
@@ -887,7 +887,7 @@ def test_external_tool_paths_reject_group_writable_and_broad_mounts(
             ]
         ),
     )
-    from kernel.terminal import _external_tool_paths
+    from kernel.sandbox.terminal import _external_tool_paths
 
     resolved = _external_tool_paths(workspace)
 

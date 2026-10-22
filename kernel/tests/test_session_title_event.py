@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from kernel import agent as agent_module
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import FrontendChannel, SessionTitleEvent
-from kernel.session_events import JournalingUI, SessionJournal
+from kernel.agent import agent as agent_module
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import FrontendChannel, SessionTitleEvent
+from kernel.session.session_events import JournalingUI, SessionJournal
 from terminal_banner import TerminalBannerUI
 from kernel.tests.conftest import NullUI
 

@@ -1,6 +1,6 @@
 # tests/test_role_router_rules.py
 
-from kernel.role_router import _match_direct_rule
+from kernel.agent.role_router import _match_direct_rule
 
 
 def test_systemd_status_routes_to_devops():

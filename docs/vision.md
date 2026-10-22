@@ -18,7 +18,7 @@ and both terminal interfaces. Zed/ACP is unchanged.
   image; click one to open it at full size, click again or press Esc to close.
   Deleting its `[Image #N]` marker (one Backspace) detaches it.
 
-The independent `kernel/vision.py` service validates and describes images before
+The independent `kernel/vision/vision.py` service validates and describes images before
 passing their descriptions to the text agent. `read_file` and
 `read_multiple_files` use the same service for image files, with the executor's
 normal workspace and secret-path checks. Descriptions are untrusted tool content.

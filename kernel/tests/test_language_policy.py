@@ -6,7 +6,7 @@ import pytest
 import json
 
 
-from kernel.language_policy import (
+from kernel.context.language_policy import (
     detect_response_language,
     resolve_response_language,
     response_language_name,
@@ -123,7 +123,7 @@ def test_chat_prompt_does_not_script_the_refusal():
 
 
 def test_report_context_leaves_the_language_to_the_reporter(agent_factory):
-    from kernel.agent_runtime import _build_report_context
+    from kernel.agent.agent_runtime import _build_report_context
 
     agent = agent_factory()
     agent._state.response_language = "ru"

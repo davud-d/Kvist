@@ -4,9 +4,9 @@ from __future__ import annotations
 import sys
 import time
 
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import ActionOutputEvent, ActionResultEvent, FrontendChannel
-from kernel.process_tree import run_supervised
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import ActionOutputEvent, ActionResultEvent, FrontendChannel
+from kernel.sandbox.process_tree import run_supervised
 
 def _run(script: str, sink, tmp_path):
     return run_supervised(

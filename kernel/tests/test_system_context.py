@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from kernel import system_context
-
-
+from kernel.context import system_context
 def test_current_os_context_for_linux(monkeypatch):
     monkeypatch.setattr(system_context.platform, "system", lambda: "Linux")
     monkeypatch.setattr(system_context.distro, "name", lambda: "TestLinux")
@@ -21,7 +19,7 @@ def test_current_time_context_returns_key():
 
 
 def test_workspace_fact_ignores_kvists_own_files(tmp_path):
-    from kernel.system_context import current_workspace_context
+    from kernel.context.system_context import current_workspace_context
 
     (tmp_path / ".kvist").mkdir()
     (tmp_path / "KVIST.md").write_text("x", encoding="utf-8")

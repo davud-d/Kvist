@@ -120,7 +120,7 @@ def resolve_session_name(workspace: Path | str, session_id: str) -> str | None:
     :param session_id: the opaque ACP session id.
     :returns: the Kvist session name, or None when the id names nothing here.
     """
-    from kernel.session_store import SessionStore
+    from kernel.session.session_store import SessionStore
 
     try:
         names = SessionStore(workspace).listing().get("sessions") or []
@@ -358,7 +358,7 @@ class AcpInputBridge:
         return options
 
     def _tool_call_for(self, pending: _PendingInput) -> schema.ToolCallUpdate:
-        from kernel.unified_diff import old_and_new_text, parse_unified_diff
+        from kernel.protocol.unified_diff import old_and_new_text, parse_unified_diff
 
         subject = pending.subject or {}
         title = pending.title
@@ -668,7 +668,7 @@ class KvistAcpAgent:
             return schema.ListSessionsResponse(sessions=[])
         workspace = normalize_cwd(cwd)
         self._remember_workspace(workspace)
-        from kernel.session_store import SessionStore
+        from kernel.session.session_store import SessionStore
 
         items = SessionStore(workspace).listing().get("session_items") or []
         sessions: list[schema.SessionInfo] = []
@@ -698,7 +698,7 @@ class KvistAcpAgent:
         name = resolve_session_name(workspace, session_id)
         if name is None:
             raise RequestError.resource_not_found(session_id)
-        from kernel.session_store import SessionStore
+        from kernel.session.session_store import SessionStore
 
         # Stop using it before removing it, so no turn is mid-run on a session
         # that is about to disappear.
@@ -833,7 +833,7 @@ class KvistAcpAgent:
             await self._send(session, _error_event(f"Unknown command: {name}"))
             session.translator.end_turn()
             return
-        from kernel.event_stdio import CommandContext, CommandResult, run_command_handler
+        from kernel.protocol.event_stdio import CommandContext, CommandResult, run_command_handler
 
         context = CommandContext(
             session=session.session,
@@ -897,7 +897,7 @@ class KvistAcpAgent:
         client = self._client
         if client is None:
             return
-        from kernel.session_store import SessionStore
+        from kernel.session.session_store import SessionStore
 
         try:
             page = SessionStore(session.workspace).history(session.name, limit=500)
@@ -988,7 +988,7 @@ class KvistAcpAgent:
         to open a dialog, and that dialog has to reach the client through the
         same event pump rather than blocking the asyncio loop.
         """
-        from kernel.event_stdio import CommandContext, CommandResult, run_command_handler
+        from kernel.protocol.event_stdio import CommandContext, CommandResult, run_command_handler
 
         handler = _stdio_commands().get(name)
         if handler is None:
@@ -1098,7 +1098,7 @@ class KvistAcpAgent:
         # is only a build-time seed, so reading it would report a role the run
         # no longer uses after `/role`.
         _ = session
-        from kernel.user_config import get_saved_role
+        from kernel.config.user_config import get_saved_role
 
         return str(get_saved_role() or "auto").casefold()
 
@@ -1110,7 +1110,7 @@ class KvistAcpAgent:
         return bool(getattr(session.agent.config, "verbose", False))
 
     def _current_style(self) -> str:
-        from kernel.user_config import get_saved_style
+        from kernel.config.user_config import get_saved_style
 
         return get_saved_style("agents")
 
@@ -1218,10 +1218,10 @@ class KvistAcpAgent:
         same ``EventApprovalGate``, same ``build_agent`` call — so an ACP turn
         behaves like a stdio turn. Nothing here reimplements agent behavior.
         """
-        from kernel.event_session import EventApprovalGate, EventSession
-        from kernel.event_stream_ui import EventStreamUI
-        from kernel.executor import SafeExecutor
-        from kernel.frontend_protocol import FrontendChannel
+        from kernel.protocol.event_session import EventApprovalGate, EventSession
+        from kernel.protocol.event_stream_ui import EventStreamUI
+        from kernel.sandbox.executor import SafeExecutor
+        from kernel.protocol.frontend_protocol import FrontendChannel
 
         build_agent_fn = self._build_agent_fn or _default_build_agent()
         channel = FrontendChannel()
@@ -1451,7 +1451,7 @@ def build_config_options(
     :param allow_boolean: whether the client accepts boolean config options.
     :returns: the complete option list in priority order.
     """
-    from kernel.user_config import get_style_options
+    from kernel.config.user_config import get_style_options
 
     role = role if role in ROLE_CHOICES else "auto"
     effort = effort if effort in EFFORT_CHOICES else "medium"
@@ -1553,7 +1553,7 @@ def build_config_options(
 
 
 def _kvist_version() -> str:
-    from kernel.version import kvist_version
+    from kernel.config.version import kvist_version
 
     return kvist_version()
 
@@ -1571,7 +1571,7 @@ def has_provider() -> bool:
     """
     if os.getenv("AGENT_LLM_PROVIDER"):
         return True
-    from kernel.user_config import get_saved_provider_or_none
+    from kernel.config.user_config import get_saved_provider_or_none
 
     return get_saved_provider_or_none() is not None
 
@@ -1588,9 +1588,9 @@ def run_login() -> int:
     """
     import getpass
 
-    from kernel.llm_clients import normalize_provider, required_secret_keys_for_provider
+    from kernel.llm.llm_clients import normalize_provider, required_secret_keys_for_provider
     from kernel.main import choose_provider
-    from kernel.user_config import ensure_provider_credentials, get_saved_provider_or_none
+    from kernel.config.user_config import ensure_provider_credentials, get_saved_provider_or_none
 
     current = get_saved_provider_or_none()
     print("Kvist setup — provider credentials", file=sys.stderr)

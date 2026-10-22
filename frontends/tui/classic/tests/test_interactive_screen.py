@@ -15,9 +15,9 @@ from prompt_toolkit.shortcuts import CompleteStyle
 
 import banner
 import interactive_screen as interactive_screen_module
-from kernel.agent_state import AgentConfig
+from kernel.agent.agent_state import AgentConfig
 from interactive_screen import InteractiveScreen
-from kernel.slash_commands import (
+from kernel.protocol.slash_commands import (
     SLASH_COMMAND_KEY_BINDINGS,
     SLASH_COMMAND_LEXER,
     SLASH_COMMAND_MENU_HEIGHT,

@@ -9,9 +9,9 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from kernel.executor import ExecutorError
-from kernel.image_input import ImageLabels, path_image
-from kernel.vision import (MAX_IMAGE_BYTES, anthropic_content, describe_images, image_from_bytes,
+from kernel.sandbox.executor import ExecutorError
+from kernel.vision.image_input import ImageLabels, path_image
+from kernel.vision.vision import (MAX_IMAGE_BYTES, anthropic_content, describe_images, image_from_bytes,
                            model_supports_vision, prepare_goal, unpack_goal, validate_images)
 
 

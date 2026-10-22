@@ -5,11 +5,11 @@ import json
 
 import pytest
 
-from kernel.action_result import MAX_OUTPUT_CHARS, build_action_result
-from kernel.event_stream_ui import EventStreamUI
-from kernel.executor import ExecutionResult
-from kernel.frontend_protocol import ActionResultEvent, FrontendChannel, RouteEvent
-from kernel.role_router import RoleRouteResult
+from kernel.protocol.action_result import MAX_OUTPUT_CHARS, build_action_result
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.sandbox.executor import ExecutionResult
+from kernel.protocol.frontend_protocol import ActionResultEvent, FrontendChannel, RouteEvent
+from kernel.agent.role_router import RoleRouteResult
 from terminal_banner import TerminalBannerUI
 from kernel.tests.conftest import FakeLLMClient, NullUI, make_command
 
@@ -78,7 +78,7 @@ def test_a_write_patch_reaches_the_frontend_but_not_the_models_result():
                 ok=True, action_type="write_file", data={"path": "a.py", "first_line": 1}, patch="@@ -1 +1 @@\n-x\n+y"
             )
 
-    from kernel.agent_runtime import execute_command
+    from kernel.agent.agent_runtime import execute_command
 
     agent = type("Agent", (), {"executor": Executor()})()
     feedback = execute_command(agent, make_command("write_file", {"path": "a.py", "content": "y"}))
@@ -91,7 +91,7 @@ def test_a_secret_in_a_patch_is_redacted():
         def execute(self, command):
             return ExecutionResult(ok=True, action_type="write_file", data={}, patch=f"+token={SYNTHETIC_KEY}")
 
-    from kernel.agent_runtime import execute_command
+    from kernel.agent.agent_runtime import execute_command
 
     agent = type("Agent", (), {"executor": Executor()})()
     feedback = execute_command(agent, make_command("write_file", {"path": "a.py", "content": "y"}))
@@ -111,7 +111,7 @@ def test_a_write_passes_on_the_executors_line_counts():
 
 
 def test_result_names_its_call_and_batch():
-    from kernel.action_result import build_action_result
+    from kernel.protocol.action_result import build_action_result
 
     result = build_action_result(
         2, "read_file", {"path": "a.py"}, _ok("read_file", {"content": "x"}), call_id="call_1", batch_id="b1"
@@ -121,7 +121,7 @@ def test_result_names_its_call_and_batch():
 
 
 def test_a_skipped_write_says_so_instead_of_failed():
-    from kernel.action_result import SKIPPED_ERROR, build_action_result
+    from kernel.protocol.action_result import SKIPPED_ERROR, build_action_result
 
     result = build_action_result(
         4, "write_file", {"path": "b.py", "content": "x"}, {"ok": False, "error": SKIPPED_ERROR}
@@ -443,7 +443,7 @@ def test_run_emits_a_single_explicit_route_event(agent_factory, monkeypatch):
     agent = agent_factory(stream=False)
     agent._ui = ui = RecordingUI()
     agent.client = FakeLLMClient(content="hi")
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
 
     agent.run("hello", routed_role="chat")
 
@@ -454,9 +454,9 @@ def test_run_reports_the_routers_own_source(agent_factory, monkeypatch):
     agent = agent_factory(stream=False)
     agent._ui = ui = RecordingUI()
     agent.client = FakeLLMClient(content="hi")
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
     monkeypatch.setattr(
-        "kernel.agent.route_role_decision_with_llm",
+        "kernel.agent.agent.route_role_decision_with_llm",
         lambda **kwargs: RoleRouteResult(role="chat", source="llm"),
     )
 
@@ -471,7 +471,7 @@ def test_router_failure_falls_back_to_keyword_source(agent_factory, monkeypatch)
     def boom(**kwargs):
         raise RuntimeError("router down")
 
-    monkeypatch.setattr("kernel.agent.route_role_decision_with_llm", boom)
+    monkeypatch.setattr("kernel.agent.agent.route_role_decision_with_llm", boom)
     decision = agent._route_decision("fix the bug in main.py")
     assert decision.source == "keyword_fallback"
 

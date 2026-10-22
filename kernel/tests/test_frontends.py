@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from kernel import frontends
+from kernel.protocol import frontends
 from kernel import main
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.event_session import EventSession
-from kernel.event_stream_ui import EventStreamUI
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.protocol.event_session import EventSession
+from kernel.protocol.event_stream_ui import EventStreamUI
 from kernel.tests.conftest import FakeLLMClient
 
 
@@ -178,8 +178,8 @@ def test_session_op_skips_provider_and_terminal_imports(tmp_path):
 
 
 def test_stdio_launcher_import_is_valid():
-    from kernel.event_stdio import serve_stdio
-    from kernel.frontends import load_launcher
+    from kernel.protocol.event_stdio import serve_stdio
+    from kernel.protocol.frontends import load_launcher
 
     launcher = load_launcher("stdio")
     assert callable(launcher)

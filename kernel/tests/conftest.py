@@ -11,11 +11,11 @@ from types import SimpleNamespace
 import pytest
 from rich.text import Text
 
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
-from kernel.protocol import Action, AgentCommand
-from kernel.terminal import (
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
+from kernel.protocol.protocol import Action, AgentCommand
+from kernel.sandbox.terminal import (
     _controlled_child_path,
     _is_trusted_system_executable,
 )
@@ -305,7 +305,7 @@ def agent_factory(tmp_path):
 
 def commands_from_response(text: str, language: str = "en") -> list[AgentCommand]:
     """A response read the way the runtime reads it; raises on the first call it would refuse."""
-    from kernel.parser import build_command, parse_model_response, plan_step_for_calls
+    from kernel.protocol.parser import build_command, parse_model_response, plan_step_for_calls
 
     response = parse_model_response(text)
     plan_step = plan_step_for_calls([call.name for call in response.calls], False)

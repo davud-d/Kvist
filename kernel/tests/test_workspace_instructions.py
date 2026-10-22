@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from kernel.system_context import (
+from kernel.context.system_context import (
     AGENT_INSTRUCTIONS_FILE,
     CHAT_INSTRUCTIONS_FILE,
     ensure_workspace_instructions,
@@ -155,7 +155,7 @@ def test_oversized_file_is_truncated(tmp_path):
 def test_action_model_system_prompt_carries_the_workspace_file(tmp_path):
     from types import SimpleNamespace
 
-    from kernel.agent_model import _load_role_prompt, call_action_model
+    from kernel.agent.agent_model import _load_role_prompt, call_action_model
 
     (tmp_path / AGENT_INSTRUCTIONS_FILE).write_text("Never touch vendor/.\n", encoding="utf-8")
     captured = {}
@@ -192,7 +192,7 @@ def test_action_model_system_prompt_carries_the_workspace_file(tmp_path):
 
 
 def test_writer_roles_are_taught_to_maintain_the_file():
-    from kernel.agent_model import _load_role_prompt
+    from kernel.agent.agent_model import _load_role_prompt
 
     for role in ("coder", "devops"):
         prompt = _load_role_prompt(role)
@@ -201,7 +201,7 @@ def test_writer_roles_are_taught_to_maintain_the_file():
 
 
 def test_read_only_and_chat_roles_are_told_they_cannot_write_it():
-    from kernel.agent_model import _load_role_prompt
+    from kernel.agent.agent_model import _load_role_prompt
 
     reader = _load_role_prompt("reader")
     assert "<PROJECT_INSTRUCTIONS>" in reader
@@ -275,7 +275,7 @@ def test_symlinked_instructions_are_not_read(tmp_path):
 
 
 def test_roles_are_told_the_block_is_untrusted():
-    from kernel.agent_model import _load_role_prompt
+    from kernel.agent.agent_model import _load_role_prompt
 
     for role in ("coder", "devops", "reader", "chat"):
         prompt = _load_role_prompt(role)
@@ -291,7 +291,7 @@ def test_roles_are_told_the_block_is_untrusted():
 def test_tool_output_cannot_forge_its_own_terminator():
     from types import SimpleNamespace
 
-    from kernel.agent_runtime import feedback_to_detail
+    from kernel.agent.agent_runtime import feedback_to_detail
 
     class Agent:
         config = SimpleNamespace(prompt_result_char_limit=100_000)

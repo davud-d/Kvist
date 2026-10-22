@@ -10,7 +10,7 @@ The icon is on by default. A machine without this frontend installed simply has 
 
 ## The module in the bar
 
-A program cannot draw over a Wayland bar (the bar is on a layer above ordinary windows), so the icon is a module of the bar itself. At every start a terminal core runs `kernel/tray_bar.py`, which adds the module to the configs it finds:
+A program cannot draw over a Wayland bar (the bar is on a layer above ordinary windows), so the icon is a module of the bar itself. At every start a terminal core runs `kernel/tray/tray_bar.py`, which adds the module to the configs it finds:
 
 | Bar | Config | Placement |
 |---|---|---|
@@ -23,7 +23,7 @@ The module runs `kvist --tray-op bar-stream` (prints the state) and `kvist --tra
 
 ## How it works
 
-`kernel/tray_link.py` runs in every core that lives in a terminal (the classic REPL and the Ink app's core; cores started by the Electron GUI, ACP or `run_task.py` are not terminal hosts). At the start and end of each turn it sends a state snapshot to the daemon over loopback TCP. The daemon publishes its port and a random token in `~/.kvist/tray.json` (mode 0600); a connection without the token is closed. The wire format is in [UI_API.md](../../docs/UI_API.md#8e-the-tray-link).
+`kernel/tray/tray_link.py` runs in every core that lives in a terminal (the classic REPL and the Ink app's core; cores started by the Electron GUI, ACP or `run_task.py` are not terminal hosts). At the start and end of each turn it sends a state snapshot to the daemon over loopback TCP. The daemon publishes its port and a random token in `~/.kvist/tray.json` (mode 0600); a connection without the token is closed. The wire format is in [UI_API.md](../../docs/UI_API.md#8e-the-tray-link).
 
 If no daemon answers, the first core to notice starts it, once per process. The daemon's single-instance lock makes simultaneous starts from several terminals produce one daemon. The daemon exits 30 seconds after the last core disconnects.
 

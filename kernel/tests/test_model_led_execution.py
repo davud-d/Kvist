@@ -163,8 +163,7 @@ def test_no_change_can_be_reported_from_inspection_without_a_token_command(agent
 
 @pytest.mark.parametrize("outcome", ["done", "incomplete", "no_change_needed"])
 def test_reporter_preserves_the_models_declared_outcome(agent_factory, monkeypatch, outcome):
-    from kernel import agent_runtime
-
+    from kernel.agent import agent_runtime
     agent = agent_factory(max_steps=4)
     contexts = []
     monkeypatch.setattr(agent_runtime, "_render_report", lambda self, context: contexts.append(json.loads(context)) or "Reported.")

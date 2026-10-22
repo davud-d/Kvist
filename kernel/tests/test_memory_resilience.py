@@ -132,7 +132,7 @@ def test_a_forgotten_record_leaves_neither_the_file_nor_its_log(tmp_path):
 
 def test_background_diagnostics_carry_counts_never_content(tmp_path):
     from kernel.memory.auto import AutoProcessor
-    from kernel.user_config import save_memory_processing_allowed
+    from kernel.config.user_config import save_memory_processing_allowed
 
     save_memory_processing_allowed(True)
     _journal(tmp_path, [_turn("how is the CLI built?", "With PyInstaller.")])

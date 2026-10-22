@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from kernel.version import kvist_version
+from kernel.config.version import kvist_version
 
 from ..events import EventBroker
 from ..protocol import BRIDGE_PROTOCOL_VERSION, BridgeRequest, BridgeResponse

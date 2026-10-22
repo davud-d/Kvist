@@ -15,13 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from kernel import event_stdio
+from kernel.protocol import event_stdio
 from kernel import main
-from kernel.agent_state import AgentConfig
-from kernel.event_session import EventSession
-from kernel.event_stdio import CommandContext, CommandResult
-from kernel.event_stream_ui import EventStreamUI
-from kernel.frontend_protocol import FrontendChannel, InputRequestEvent
+from kernel.agent.agent_state import AgentConfig
+from kernel.protocol.event_session import EventSession
+from kernel.protocol.event_stdio import CommandContext, CommandResult
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.protocol.frontend_protocol import FrontendChannel, InputRequestEvent
 from kernel.tests.test_event_stdio_multi import _Collector, _ScriptedReader
 
 
@@ -311,7 +311,7 @@ def _run_handler(name, agent, args=(), answers=(), rebuild=None):
 
 
 def _saved(key):
-    from kernel.user_config import load_user_config
+    from kernel.config.user_config import load_user_config
 
     return load_user_config().get(key)
 
@@ -407,7 +407,7 @@ def test_verbose_toggles_the_runtime_flag_only(home, agent_factory):
 
 
 def test_style_wizard_asks_one_question_and_sets_both_styles(home, agent_factory):
-    from kernel.user_config import chat_style_for, get_style_options
+    from kernel.config.user_config import chat_style_for, get_style_options
 
     agent = agent_factory()
     name = list(get_style_options())[1]
@@ -560,8 +560,7 @@ def test_models_refuses_an_unknown_provider(home, agent_factory):
 
 
 def test_catalog_lists_connected_providers_with_the_current_one_first(home, agent_factory, monkeypatch):
-    from kernel import config_info
-
+    from kernel.config import config_info
     def summary(provider, connected, saved=None):
         return {"id": provider, "label": provider.title(), "custom": False, "has_credentials": connected,
                 "defaults": {"fast": f"{provider}-fast", "smart": f"{provider}-smart"},
@@ -625,8 +624,7 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
 
 
 def test_context_command_answers_with_the_meter_numbers(monkeypatch):
-    from kernel import context_meter
-
+    from kernel.context import context_meter
     monkeypatch.setattr(
         context_meter, "context_usage", lambda _agent: context_meter.ContextUsage(1000, 250)
     )
@@ -661,7 +659,7 @@ def test_real_handlers_over_the_wire_change_the_role_of_the_next_goal(home):
 def test_home_is_isolated_for_every_config_writing_test(home):
     from pathlib import Path
 
-    from kernel.user_config import get_user_config_path
+    from kernel.config.user_config import get_user_config_path
 
     assert Path.home() == home
     assert home in get_user_config_path().parents
@@ -776,7 +774,7 @@ def test_change_api_reports_a_failed_apply_but_keeps_the_saved_key(home, agent_f
 
 
 def _custom_agent(agent_factory, **overrides):
-    from kernel.user_config import save_custom_provider
+    from kernel.config.user_config import save_custom_provider
 
     save_custom_provider(
         "gw",
@@ -791,7 +789,7 @@ def test_del_provider_needs_a_custom_provider(home, agent_factory):
 
 
 def test_del_provider_confirms_deletes_and_picks_a_replacement(home, agent_factory):
-    from kernel.user_config import save_role_selection
+    from kernel.config.user_config import save_role_selection
 
     save_role_selection("coder")
     agent = _custom_agent(agent_factory)
@@ -833,7 +831,7 @@ def test_del_provider_without_a_replacement_asks_for_a_restart(home, agent_facto
 
 
 def test_full_reset_needs_two_explicit_yeses_then_wipes_the_config(home, agent_factory):
-    from kernel.user_config import save_role_selection
+    from kernel.config.user_config import save_role_selection
 
     save_role_selection("coder")
     replacement = agent_factory()
@@ -851,7 +849,7 @@ def test_full_reset_needs_two_explicit_yeses_then_wipes_the_config(home, agent_f
 
 @pytest.mark.parametrize("answers", [[False], [None], [True, False], [True, None]])
 def test_full_reset_is_fail_closed_on_any_non_yes(home, agent_factory, answers):
-    from kernel.user_config import save_role_selection
+    from kernel.config.user_config import save_role_selection
 
     save_role_selection("coder")
 
@@ -936,8 +934,7 @@ def test_strime_toggles_and_persists_for_a_custom_provider(home, agent_factory):
 
 
 def _fake_baseline(monkeypatch, paths):
-    from kernel import change_journal
-
+    from kernel.session import change_journal
     monkeypatch.setattr(change_journal, "load_baseline", lambda workspace: {p: {} for p in paths})
     return change_journal
 
@@ -980,8 +977,7 @@ def test_revert_with_nothing_tracked_or_a_corrupt_journal(home, agent_factory, m
     result, requests, _ = _run_handler("revert", agent_factory())
     assert result.ok and result.effects == {"reverted": []} and requests == []
 
-    from kernel import change_journal
-
+    from kernel.session import change_journal
     def corrupt(workspace):
         raise change_journal.JournalUnavailableError("bad")
 
@@ -1087,7 +1083,7 @@ def test_startup_provider_is_asked_through_the_interactive_ui_without_a_tty(home
 
 
 def test_build_agent_collects_a_missing_secret_through_the_interactive_ui(home, tmp_path, monkeypatch):
-    from kernel.executor import SafeExecutor
+    from kernel.sandbox.executor import SafeExecutor
 
     for name in ("DEEPSEEK_API_KEY", "AGENT_LLM_PROVIDER"):
         monkeypatch.delenv(name, raising=False)

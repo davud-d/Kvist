@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from kernel.frontend_protocol import (
+from kernel.protocol.frontend_protocol import (
     DebugEvent,
     ErrorEvent,
     FinalEvent,
@@ -339,7 +339,7 @@ def test_usage_event_defaults_context_to_zero():
 
 
 def test_v2_call_fields_are_additive():
-    from kernel.frontend_protocol import ActionOutputEvent, ActionResultEvent, FinalEvent, StepEvent
+    from kernel.protocol.frontend_protocol import ActionOutputEvent, ActionResultEvent, FinalEvent, StepEvent
 
     step = StepEvent(1, "inspect", "", "Читаю", "read_file", {"path": "a"}, 0.0, "читает a", "call_1", "b1").to_dict()
     assert step["thought"] == "" and step["user_message"] == "Читаю"

@@ -3,7 +3,7 @@
 
 Run as a file, Python puts ``kernel/`` itself first on the import path, which
 would make every core module importable a second time under its bare name and
-let ``kernel/parser.py`` or ``kernel/ui.py`` shadow unrelated modules, so the
+let ``kernel/protocol/parser.py`` or ``kernel/protocol/ui.py`` shadow unrelated modules, so the
 repository root takes its place. ``kernel.main`` runs as ``__main__`` because it
 rejects bad arguments and serves ``--help`` before importing provider SDKs.
 """
@@ -22,7 +22,7 @@ if _web_modules.is_dir() and str(_web_modules) not in sys.path:
 
 # The status bar keeps these running for as long as it lives; they must not import the core.
 if "--tray-op" in sys.argv and sys.argv[sys.argv.index("--tray-op") + 1 :][:1] in (["bar-stream"], ["toggle"]):
-    from kernel.tray_bar_client import main as _tray_bar_main
+    from kernel.tray.tray_bar_client import main as _tray_bar_main
 
     raise SystemExit(_tray_bar_main(sys.argv))
 

@@ -4,9 +4,9 @@ import re
 
 import pytest
 
-from kernel.agent_model import _load_role_prompt
-from kernel.parser import ALLOWED_ACTIONS
-from kernel.native_tools import native_role_prompt
+from kernel.agent.agent_model import _load_role_prompt
+from kernel.protocol.parser import ALLOWED_ACTIONS
+from kernel.agent.native_tools import native_role_prompt
 from kernel.tests.conftest import commands_from_response
 
 _TOOL_CALL_RE = re.compile(r"<tool_call>.*?</tool_call>", re.DOTALL)
@@ -100,7 +100,7 @@ def test_every_shell_example_names_its_purpose(role):
 
 @pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])
 def test_end_session_is_offered_with_its_block_and_schema(role):
-    from kernel.end_session import _PROMPT_FILE, with_tool_in_prompt
+    from kernel.plan.end_session import _PROMPT_FILE, with_tool_in_prompt
 
     prompt_text = with_tool_in_prompt(_load_role_prompt(role))
     listed = _extract_allowed_actions_block(prompt_text)
@@ -111,7 +111,7 @@ def test_end_session_is_offered_with_its_block_and_schema(role):
 
 
 def test_end_session_block_is_the_agreed_text():
-    from kernel.end_session import _PROMPT_FILE
+    from kernel.plan.end_session import _PROMPT_FILE
 
     text = _PROMPT_FILE.read_text(encoding="utf-8")
     assert text.startswith("end_session: closes this conversation for good, in two cases:")
@@ -124,7 +124,7 @@ def test_end_session_block_is_the_agreed_text():
 
 @pytest.mark.parametrize("role", ["coder", "reader", "devops", "universal"])
 def test_both_transports_describe_model_owned_completion(role):
-    from kernel.agent_model import _load_native_channel_section
+    from kernel.agent.agent_model import _load_native_channel_section
 
     original = _load_role_prompt(role)
     native = native_role_prompt(original, _load_native_channel_section())

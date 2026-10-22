@@ -7,14 +7,14 @@ import threading
 
 import pytest
 
-from kernel import event_stdio
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.event_session import EventApprovalGate, EventSession
-from kernel.event_stream_ui import EventStreamUI
-from kernel.executor import SafeExecutor
-from kernel.permission_policy import load_policy
-from kernel.frontend_protocol import (
+from kernel.protocol import event_stdio
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.protocol.event_session import EventApprovalGate, EventSession
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.sandbox.executor import SafeExecutor
+from kernel.sandbox.permission_policy import load_policy
+from kernel.protocol.frontend_protocol import (
     ErrorEvent,
     FinalEvent,
     FrontendChannel,
@@ -197,7 +197,7 @@ def test_remembering_an_approval_does_not_invalidate_the_approved_run(tmp_path):
     # The rule used to be saved while the person answered, so the policy digest
     # bound to the approval no longer matched at spawn and the command was
     # refused with "approved execution context changed".
-    from kernel.terminal import TerminalExecutor
+    from kernel.sandbox.terminal import TerminalExecutor
 
     (tmp_path / "notes.txt").write_text("one\ntwo\nthree\n", encoding="utf-8")
     channel = FrontendChannel()

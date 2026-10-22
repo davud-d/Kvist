@@ -16,9 +16,9 @@ REPO = Path(__file__).resolve().parents[3]
 os.environ["HOME"] = os.environ["USERPROFILE"] = tempfile.mkdtemp(prefix="kvist-fixture-")
 sys.path.insert(0, str(REPO))
 
-from kernel.anymodel_onboarding import ANYMODEL_REGISTER_URL  # noqa: E402
-from kernel.config_info import build_config_info  # noqa: E402
-from kernel.core_manifest import build_manifest  # noqa: E402
+from kernel.llm.anymodel_onboarding import ANYMODEL_REGISTER_URL  # noqa: E402
+from kernel.config.config_info import build_config_info  # noqa: E402
+from kernel.protocol.core_manifest import build_manifest  # noqa: E402
 
 manifest = build_manifest()
 info = build_config_info()

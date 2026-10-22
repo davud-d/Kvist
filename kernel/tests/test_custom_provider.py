@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.custom_provider import (
+from kernel.llm.custom_provider import (
     CustomProviderError,
     normalize_base_url,
     normalize_custom_provider_payload,

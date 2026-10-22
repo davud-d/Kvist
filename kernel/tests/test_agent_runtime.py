@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from kernel.executor import ExecutionResult
+from kernel.sandbox.executor import ExecutionResult
 from kernel.tests.conftest import make_command
 
 
@@ -68,7 +68,7 @@ def test_legitimate_long_inspection_does_not_trigger_hard_stagnation_stop(agent_
 
 
 def test_a_repeated_result_replaces_its_own_copy_instead_of_evicting_a_read(agent_factory):
-    from kernel.agent_runtime import _keep_result_in_view
+    from kernel.agent.agent_runtime import _keep_result_in_view
 
     agent = agent_factory(detailed_feedback_limit=3)
     _keep_result_in_view(agent, '{"read": "billing.py"}', "file content")
@@ -80,8 +80,8 @@ def test_a_repeated_result_replaces_its_own_copy_instead_of_evicting_a_read(agen
 
 
 def test_prompt_names_reads_whose_content_left_the_prompt(agent_factory):
-    from kernel.agent_context import _read_files_out_of_view
-    from kernel.agent_runtime import _keep_result_in_view
+    from kernel.agent.agent_context import _read_files_out_of_view
+    from kernel.agent.agent_runtime import _keep_result_in_view
 
     agent = agent_factory(detailed_feedback_limit=2)
     agent._state.files_read = ["src/billing.py", "src/invoice.py"]
@@ -483,7 +483,7 @@ def test_run_loop_cleanup_does_not_mask_keyboard_interrupt(agent_factory):
 
 
 def test_response_text_is_kept_as_the_step_note(agent_factory):
-    from kernel.agent_runtime import _keep_step_summary
+    from kernel.agent.agent_runtime import _keep_step_summary
 
     agent = agent_factory(max_steps=1)
     note = "billing.py:40 already rounds half-up; the reported cause is ruled out"
@@ -494,7 +494,7 @@ def test_response_text_is_kept_as_the_step_note(agent_factory):
 
 
 def test_response_text_shared_by_a_batch_is_kept_once(agent_factory):
-    from kernel.agent_runtime import _keep_step_summary
+    from kernel.agent.agent_runtime import _keep_step_summary
 
     agent = agent_factory(max_steps=1)
     note = "invoice.py never applies the discount"
@@ -510,7 +510,7 @@ def test_response_text_shared_by_a_batch_is_kept_once(agent_factory):
 
 def test_api_timeout_default_value():
     """P0: AgentConfig has api_timeout with default 60.0."""
-    from kernel.agent_state import AgentConfig
+    from kernel.agent.agent_state import AgentConfig
     config = AgentConfig()
     assert hasattr(config, "api_timeout")
     assert config.api_timeout == 60.0
@@ -520,7 +520,7 @@ def test_api_timeout_default_value():
 
 def test_is_modify_goal_detects_fix_and_edit_intents():
     """P1: _is_modify_goal returns True for fix/modify/change/edit patterns."""
-    from kernel.agent_runtime import _is_modify_goal
+    from kernel.agent.agent_runtime import _is_modify_goal
     assert _is_modify_goal("Add markdown rendering to ui.py")
     assert _is_modify_goal("Fix the bug in main.py")
     assert _is_modify_goal("fix: error in login")
@@ -673,7 +673,7 @@ def test_devops_run_shell_parsed_and_executed(agent_factory):
 
 def test_devops_run_shell_string_command_rejected(agent_factory):
     """DevOps run_shell: command as string → clear parse error, not generic 'Invalid model response'."""
-    from kernel.parser import CommandValidationError
+    from kernel.protocol.parser import CommandValidationError
     from kernel.tests.conftest import commands_from_response
 
     devops_response_bad = json.dumps({
@@ -712,7 +712,7 @@ def test_read_only_shell_allows_sqlite3_select(agent_factory):
     data/users.db and fell back to read_file on the raw binary, guessing
     the answer instead of reporting it.
     """
-    from kernel.agent_runtime import _is_read_only_violation
+    from kernel.agent.agent_runtime import _is_read_only_violation
 
     agent = agent_factory()
     agent._state.read_only_goal = True
@@ -737,7 +737,7 @@ def test_read_only_shell_allows_sqlite3_select(agent_factory):
     ids=["insert", "drop", "attach", "dot-import", "dot-shell"],
 )
 def test_read_only_shell_rejects_sqlite3_write_forms(agent_factory, sql_command):
-    from kernel.agent_runtime import _is_read_only_violation
+    from kernel.agent.agent_runtime import _is_read_only_violation
 
     agent = agent_factory()
     agent._state.read_only_goal = True
@@ -749,7 +749,7 @@ def test_read_only_shell_rejects_sqlite3_write_forms(agent_factory, sql_command)
 
 def test_read_only_shell_rejects_sqlite3_multi_statement_with_a_trailing_write(agent_factory):
     """A leading SELECT must not launder a later write in the same argument."""
-    from kernel.agent_runtime import _is_read_only_violation
+    from kernel.agent.agent_runtime import _is_read_only_violation
 
     agent = agent_factory()
     agent._state.read_only_goal = True
@@ -775,7 +775,7 @@ def test_read_only_shell_still_rejects_python_dash_c(agent_factory):
     tests/test_terminal.py); this confirms the read-only-goal gate never
     grew a bypass for it.
     """
-    from kernel.agent_runtime import _is_read_only_violation
+    from kernel.agent.agent_runtime import _is_read_only_violation
 
     agent = agent_factory()
     agent._state.read_only_goal = True
@@ -793,7 +793,7 @@ def test_read_only_shell_still_rejects_python_dash_c(agent_factory):
 def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
     """Devops run_shell with systemctl status passes terminal allowlist."""
     from kernel.tests.conftest import commands_from_response
-    from kernel.terminal import TerminalExecutor
+    from kernel.sandbox.terminal import TerminalExecutor
 
     devops_response = json.dumps({
         "thought": "Проверяю статус nginx",
@@ -822,7 +822,7 @@ def test_devops_systemctl_status_passes_terminal_validation(agent_factory):
 
 def test_devops_systemctl_dangerous_blocked_by_terminal(agent_factory):
     """Dangerous systemctl subcommands (restart, enable) are blocked by terminal."""
-    from kernel.terminal import TerminalExecutor, TerminalError
+    from kernel.sandbox.terminal import TerminalExecutor, TerminalError
 
     agent = agent_factory()
     terminal = TerminalExecutor(agent.executor.workspace, profile="dev")
@@ -902,7 +902,7 @@ def test_devops_status_nginx_no_parse_error(agent_factory):
 
 def test_devops_systemctl_nonzero_exit_includes_stderr_in_error(agent_factory):
     """When systemctl returns nonzero, error text includes stderr, not generic 'Action failed'."""
-    from kernel.executor import ExecutionResult
+    from kernel.sandbox.executor import ExecutionResult
 
     agent = agent_factory()
     agent._state.current_agent_role = "devops"
@@ -943,7 +943,7 @@ def test_run_loop_feeds_the_response_text_to_the_live_panel(agent_factory):
 
 
 def test_no_blocker_label_once_the_change_is_verified(agent_factory):
-    from kernel.agent_runtime import _run_position
+    from kernel.agent.agent_runtime import _run_position
 
     agent = agent_factory()
     agent._state.files_changed = ["main.py"]
@@ -1286,7 +1286,7 @@ def test_run_loop_records_a_batch_user_message_once(agent_factory):
 
 
 def test_modify_goal_detects_the_verbs_stress_round_r2_missed():
-    from kernel.agent_runtime import _is_modify_goal
+    from kernel.agent.agent_runtime import _is_modify_goal
 
     assert _is_modify_goal("Переименуй get_usr в get_user везде и проверь, что всё работает.")
     assert _is_modify_goal(
@@ -1314,7 +1314,7 @@ def test_modify_goal_detects_the_verbs_stress_round_r2_missed():
 
 
 def test_modify_goal_ignores_identifiers_and_read_only_requests():
-    from kernel.agent_runtime import _is_modify_goal
+    from kernel.agent.agent_runtime import _is_modify_goal
 
     assert not _is_modify_goal("Check if main.py exists")
     assert not _is_modify_goal("Create a new file")
@@ -1373,7 +1373,7 @@ def test_feedback_line_for_a_commandless_handoff_says_nothing_ran(agent_factory)
 
 
 def test_empty_data_cells_finds_blank_csv_fields_and_ignores_other_files():
-    from kernel.agent_runtime import _empty_data_cells
+    from kernel.agent.agent_runtime import _empty_data_cells
 
     csv_text = "item,qty,unit_price\nwidget,4,2.50\ngadget,2,\nbolt,10,0.30\n"
     assert _empty_data_cells("orders.csv", csv_text) == ["orders.csv line 3, column unit_price"]
@@ -1383,7 +1383,7 @@ def test_empty_data_cells_finds_blank_csv_fields_and_ignores_other_files():
 
 
 def test_blank_cells_are_observed_without_refusing_the_final_answer(agent_factory):
-    from kernel.agent_runtime import _finish_with_final_answer
+    from kernel.agent.agent_runtime import _finish_with_final_answer
 
     agent = agent_factory(max_steps=1)
     agent._state.read_only_goal = True
@@ -1404,7 +1404,7 @@ def test_blank_cells_are_observed_without_refusing_the_final_answer(agent_factor
 
 
 def test_final_answer_is_not_held_without_blank_cells(agent_factory):
-    from kernel.agent_runtime import _finish_with_final_answer
+    from kernel.agent.agent_runtime import _finish_with_final_answer
 
     agent = agent_factory(max_steps=1)
     agent._state.read_only_goal = True
@@ -1424,7 +1424,7 @@ def _shell_ok_log(argv, status="ok"):
 
 
 def test_a_successful_mv_counts_as_a_changed_file(agent_factory):
-    from kernel.agent_runtime import _note_moved_files
+    from kernel.agent.agent_runtime import _note_moved_files
 
     agent = agent_factory()
     (Path(agent.executor.workspace) / "out").mkdir()
@@ -1437,7 +1437,7 @@ def test_a_successful_mv_counts_as_a_changed_file(agent_factory):
 
 
 def test_a_temp_name_in_a_rename_chain_is_not_left_awaiting_verification(agent_factory):
-    from kernel.agent_runtime import _note_moved_files
+    from kernel.agent.agent_runtime import _note_moved_files
 
     agent = agent_factory()
 
@@ -1664,7 +1664,7 @@ def test_shell_never_runs_in_parallel_with_reads(agent_factory):
 def test_native_answers_follow_call_order_and_cover_every_call(agent_factory):
     from types import SimpleNamespace
 
-    from kernel import agent_model
+    from kernel.agent import agent_model
     def call(call_id, name, **args):
         return SimpleNamespace(id=call_id, function=SimpleNamespace(name=name, arguments=json.dumps(args)))
 
@@ -1763,7 +1763,7 @@ def test_a_response_of_only_calls_leaves_their_labels_as_the_step_note(agent_fac
 
 
 def test_verify_only_goal_matches_english_counting_like_the_russian_one():
-    from kernel.agent_runtime import _is_verify_only_goal
+    from kernel.agent.agent_runtime import _is_verify_only_goal
 
     assert _is_verify_only_goal("how many files are in src?")
     assert _is_verify_only_goal("count the TODO comments")

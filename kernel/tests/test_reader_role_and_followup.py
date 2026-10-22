@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from kernel.role_router import (
+from kernel.agent.role_router import (
     RoleRouteResult,
     has_no_write_marker,
     route_role,

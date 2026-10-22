@@ -4,7 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
-from kernel.user_config import load_user_config, save_user_config
+from kernel.config.user_config import load_user_config, save_user_config
 
 
 _SECRET_WORDS = ("api_key", "apikey", "password", "secret", "token")

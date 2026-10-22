@@ -6,7 +6,7 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel.change_journal import (
+from kernel.session.change_journal import (
     build_diff_report,
     build_session_diff_report,
     clear_journal,
@@ -239,7 +239,7 @@ def test_session_diff_reports_missing_legacy_history(tmp_path):
 
 
 def test_executor_records_session_diff_without_changing_revert_baseline(tmp_path, monkeypatch):
-    from kernel.executor import SafeExecutor
+    from kernel.sandbox.executor import SafeExecutor
 
     monkeypatch.setenv("AGENT_WRITE_APPROVAL", "0")
     executor = SafeExecutor(tmp_path)
@@ -313,7 +313,7 @@ def test_revert_refuses_paths_through_symlinks(tmp_path):
 def test_corrupt_journal_is_surfaced_not_silently_treated_as_empty(tmp_path):
     # The write-ahead journal is a safety mechanism: corruption must be
     # surfaced (so a mutation can be refused), never mistaken for empty history.
-    from kernel.change_journal import JournalUnavailableError
+    from kernel.session.change_journal import JournalUnavailableError
 
     journal = journal_path(tmp_path)
     journal.parent.mkdir(parents=True, exist_ok=True)

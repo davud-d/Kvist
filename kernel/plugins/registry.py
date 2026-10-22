@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from kernel.durable_json import JsonStorageError, read_json_object, update_json_object
+from kernel.session.durable_json import JsonStorageError, read_json_object, update_json_object
 from kernel.plugins.manifest import (
     KIND_TOOLS,
     MAX_PACKAGE_BYTES,

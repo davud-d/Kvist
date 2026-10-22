@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from kernel import session_events
-from kernel.event_stream_ui import EventStreamUI
-from kernel.executor import ExecutionResult
-from kernel.frontend_protocol import FrontendChannel
-from kernel.session_events import JOURNAL_SUFFIX, SessionJournal
-from kernel.session_store import run_session_op
+from kernel.session import session_events
+from kernel.protocol.event_stream_ui import EventStreamUI
+from kernel.sandbox.executor import ExecutionResult
+from kernel.protocol.frontend_protocol import FrontendChannel
+from kernel.session.session_events import JOURNAL_SUFFIX, SessionJournal
+from kernel.session.session_store import run_session_op
 from kernel.tests.conftest import FakeLLMClient, requires_posix
 
 
@@ -68,7 +68,7 @@ def _coder_agent(agent_factory):
 def _chat_agent(agent_factory, monkeypatch, answer: str, **overrides):
     agent = agent_factory(stream=False, **overrides)
     agent.client = FakeLLMClient(content=answer)
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
     return agent
 
 
@@ -142,7 +142,7 @@ def test_chat_turn_journals_route_reply_and_end(agent_factory, monkeypatch):
 def test_streamed_chat_reply_is_journaled_once_at_its_final_text(agent_factory, monkeypatch):
     agent = agent_factory(stream=True)
     agent.client = FakeLLMClient(stream_chunks=["Hel", "lo ", "there"])
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
     agent.run("hi", routed_role="chat")
 
     events = _events(agent)

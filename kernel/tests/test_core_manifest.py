@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from kernel.core_manifest import build_manifest
-from kernel.frontend_protocol import ManifestEvent
+from kernel.protocol.core_manifest import build_manifest
+from kernel.protocol.frontend_protocol import ManifestEvent
 
 
 def test_build_manifest_keys():

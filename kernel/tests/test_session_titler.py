@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from kernel.agent_state import AgentConfig
-from kernel.session_titler import (
+from kernel.agent.agent_state import AgentConfig
+from kernel.session.session_titler import (
     clean_generated_title,
     fallback_session_title,
     generate_session_title,

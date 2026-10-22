@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-from kernel.input_history import MAX_ENTRIES, InputHistoryStore
+from kernel.session.input_history import MAX_ENTRIES, InputHistoryStore
 from prompt_history import WorkspaceInputHistory
 
 

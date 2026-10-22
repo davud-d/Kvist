@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from kernel import skill_ops
+from kernel.plugins import skill_ops
 from kernel.plugins import bundled
 from kernel.plugins.registry import SkillRegistry
 from kernel.tests.skill_fixtures import write_skill

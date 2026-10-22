@@ -18,7 +18,7 @@ import urllib.request
 from urllib.parse import urlsplit
 from typing import Any
 
-from kernel.redaction import redact_text
+from kernel.sandbox.redaction import redact_text
 
 ANYMODEL_MODELS_URL = "https://anymodel.org/v1/models"
 

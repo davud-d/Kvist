@@ -15,9 +15,9 @@ from prompt_toolkit.formatted_text import AnyFormattedText, to_formatted_text
 from rich.console import Console
 
 from banner_frames import CURSOR_GLYPH, Frame, Rgb, frame_at
-from kernel.llm_clients import provider_label
-from kernel.redaction import sanitize_display_text
-from kernel.user_config import get_saved_role
+from kernel.llm.llm_clients import provider_label
+from kernel.sandbox.redaction import sanitize_display_text
+from kernel.config.user_config import get_saved_role
 
 
 BANNER_TEXT = "Kvist"

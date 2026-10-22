@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from kernel import plan_mode
-from kernel.agent import LocalAgent
-from kernel.agent_context import render_session_history
-from kernel.agent_model import build_role_system_prompt
-from kernel.agent_state import PLAN_APPROVED, PLAN_OFFERED, PLAN_PLANNING, AgentConfig
-from kernel.executor import SafeExecutor
-from kernel.parser import CommandValidationError, validate_action_args
+from kernel.plan import plan_mode
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_context import render_session_history
+from kernel.agent.agent_model import build_role_system_prompt
+from kernel.agent.agent_state import PLAN_APPROVED, PLAN_OFFERED, PLAN_PLANNING, AgentConfig
+from kernel.sandbox.executor import SafeExecutor
+from kernel.protocol.parser import CommandValidationError, validate_action_args
 from kernel.tests.conftest import FakeLLMClient, NullPerfLogger, NullUI, make_command
 
 _REASON = "Two designs fit, and they differ in what breaks."
@@ -202,8 +202,8 @@ def test_a_plan_outside_plan_mode_is_turned_away(tmp_path):
 
 
 def _tool_names(agent):
-    from kernel.agent_model import _load_role_prompt
-    from kernel.native_tools import tools_for_role
+    from kernel.agent.agent_model import _load_role_prompt
+    from kernel.agent.native_tools import tools_for_role
 
     tools = plan_mode.tools_for_phase(tools_for_role(_load_role_prompt("coder")), agent)
     return {tool["function"]["name"] for tool in tools}

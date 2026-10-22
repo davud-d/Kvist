@@ -8,13 +8,13 @@ import threading
 import pytest
 
 from kernel.tests.conftest import SYSTEM_CAT, requires_posix
-from kernel.permission_policy import (
+from kernel.sandbox.permission_policy import (
     PermissionPolicy,
     append_allow_rule,
     load_policy,
     policy_file_path,
 )
-from kernel.terminal import HardDenyError, TerminalError, TerminalExecutor, TerminalResult
+from kernel.sandbox.terminal import HardDenyError, TerminalError, TerminalExecutor, TerminalResult
 
 
 def write_policy(workspace, allow=(), deny=(), ask=()):
@@ -147,8 +147,7 @@ def test_permission_policy_is_private_and_recovers_previous_generation(
 
 
 def test_concurrent_allow_updates_do_not_lose_a_rule(tmp_path, monkeypatch):
-    from kernel import permission_policy
-
+    from kernel.sandbox import permission_policy
     write_barrier = threading.Barrier(2)
     original_write = getattr(permission_policy, "write_json_object", None)
 
@@ -256,7 +255,7 @@ def test_unrequested_run_is_denied_without_a_dialog(tmp_path, monkeypatch):
 
 
 def test_git_context_summary_never_asks_the_person(tmp_path, monkeypatch):
-    from kernel.executor import SafeExecutor
+    from kernel.sandbox.executor import SafeExecutor
 
     write_policy(tmp_path, ask=["git status *"])
     requested = deny_approval(monkeypatch)
@@ -359,8 +358,8 @@ def test_auto_fallback_policy_tamper_cannot_suppress_per_run_approval(
     trusted_python_name,
 ):
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
-    monkeypatch.setattr("kernel.sandbox.resolve_bubblewrap_path", lambda: None)
-    monkeypatch.setattr("kernel.terminal.resolve_bubblewrap_path", lambda: None)
+    monkeypatch.setattr("kernel.sandbox.sandbox.resolve_bubblewrap_path", lambda: None)
+    monkeypatch.setattr("kernel.sandbox.terminal.resolve_bubblewrap_path", lambda: None)
     pattern = f"{trusted_python_name} *"
     write_policy(tmp_path)
     (tmp_path / "script.py").write_text("print('fixture')\n", encoding="utf-8")

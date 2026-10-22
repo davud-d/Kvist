@@ -17,7 +17,7 @@ from kernel.memory.extractor import ModelAccess, process_session
 from kernel.memory.schema import RECORD_KINDS, STATUSES
 from kernel.memory.service import MemoryService
 from kernel.memory.store import PERSON, MemoryStore
-from kernel.user_config import (
+from kernel.config.user_config import (
     get_memory_paused,
     get_memory_processing_allowed,
     save_memory_paused,

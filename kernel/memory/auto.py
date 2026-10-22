@@ -23,11 +23,11 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-from kernel.durable_json import JsonStorageError
+from kernel.session.durable_json import JsonStorageError
 from kernel.memory.errors import MemoryStoreError
 from kernel.memory.extractor import ModelAccess, process_session
 from kernel.memory.store import MemoryStore
-from kernel.user_config import get_memory_paused, get_memory_processing_allowed
+from kernel.config.user_config import get_memory_paused, get_memory_processing_allowed
 
 IDLE_SECONDS = 600
 LEASE_SECONDS = 300
@@ -68,7 +68,7 @@ class AutoProcessor:
 
     def catch_up(self, exclude: str) -> None:
         """At launch: the latest sessions, in case an earlier run closed before reading them."""
-        from kernel.session_search import list_sessions
+        from kernel.session.session_search import list_sessions
 
         try:
             sessions = list_sessions(self._workspace, include_service=False)

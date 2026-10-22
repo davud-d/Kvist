@@ -5,8 +5,8 @@ import json
 import pytest
 
 
-from kernel.agent import LocalAgent
-from kernel.change_journal import load_baseline, revert_workspace
+from kernel.agent.agent import LocalAgent
+from kernel.session.change_journal import load_baseline, revert_workspace
 from kernel.tests.conftest import last_json_line, make_command
 
 pytestmark = pytest.mark.slow
@@ -68,8 +68,8 @@ def test_revert_does_not_resurrect_user_deleted_file(agent_factory):
 
 def test_interrupted_revert_restore_leaves_no_partial_file(tmp_path, monkeypatch):
     import os as _os
-    from kernel import change_journal
-    from kernel.change_journal import content_digest, record_baseline, promote_baseline
+    from kernel.session import change_journal
+    from kernel.session.change_journal import content_digest, record_baseline, promote_baseline
 
     (tmp_path / "big.txt").write_text("ORIGINAL-BASELINE-CONTENT\n" * 50, encoding="utf-8", newline="")
     baseline_text = (tmp_path / "big.txt").read_text(encoding="utf-8")
@@ -114,7 +114,7 @@ def test_interrupted_revert_restore_leaves_no_partial_file(tmp_path, monkeypatch
 
 def test_changes_cannot_disclose_files_outside_the_workspace(tmp_path):
     import json
-    from kernel.change_journal import build_diff_report, journal_path, revert_workspace
+    from kernel.session.change_journal import build_diff_report, journal_path, revert_workspace
 
     secret = tmp_path.parent / "outside-secret.txt"
     secret.write_text("TOP-SECRET-MARKER-9F3\n", encoding="utf-8", newline="")
@@ -160,7 +160,7 @@ def _seed_pending(agent, *, path, pre_digest, intended_digest, step=1, goal="do 
 
 
 def test_reconcile_agent_committed_advances_with_ownership(agent_factory):
-    from kernel.change_journal import content_digest, load_baseline, promote_baseline, record_baseline
+    from kernel.session.change_journal import content_digest, load_baseline, promote_baseline, record_baseline
     agent = agent_factory()
     ws = agent.executor.workspace
     record_baseline(ws, relative_path="x.txt", existed=False, content=None,
@@ -180,7 +180,7 @@ def test_reconcile_agent_committed_advances_with_ownership(agent_factory):
 
 
 def test_reconcile_desired_present_advances_without_ownership(agent_factory):
-    from kernel.change_journal import content_digest, load_baseline, record_baseline
+    from kernel.session.change_journal import content_digest, load_baseline, record_baseline
     agent = agent_factory()
     ws = agent.executor.workspace
     # Write-ahead pending recorded, file holds intended content, but NO promote
@@ -200,7 +200,7 @@ def test_reconcile_desired_present_advances_without_ownership(agent_factory):
 
 
 def test_reconcile_not_executed_retries_same_step(agent_factory):
-    from kernel.change_journal import content_digest, record_baseline
+    from kernel.session.change_journal import content_digest, record_baseline
     agent = agent_factory()
     ws = agent.executor.workspace
     (ws / "y.txt").write_text("BEFORE\n", encoding="utf-8", newline="")
@@ -214,7 +214,7 @@ def test_reconcile_not_executed_retries_same_step(agent_factory):
 
 
 def test_reconcile_ambiguous_fails_safely(agent_factory):
-    from kernel.change_journal import content_digest
+    from kernel.session.change_journal import content_digest
     agent = agent_factory()
     ws = agent.executor.workspace
     (ws / "z.txt").write_text("SOMETHING-ELSE\n", encoding="utf-8", newline="")
@@ -225,7 +225,7 @@ def test_reconcile_ambiguous_fails_safely(agent_factory):
 
 
 def test_resume_aborts_safely_on_ambiguous_pending(agent_factory):
-    from kernel.change_journal import content_digest
+    from kernel.session.change_journal import content_digest
     agent = agent_factory()
     ws = agent.executor.workspace
     (ws / "z.txt").write_text("MYSTERY\n", encoding="utf-8", newline="")
@@ -246,9 +246,9 @@ def test_resume_aborts_safely_on_ambiguous_pending(agent_factory):
 _CRASH_SCRIPT = r'''
 import json, os, sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
@@ -287,9 +287,9 @@ print("NO_CRASH")
 _RESUME_SCRIPT = r'''
 import json, sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 ws = Path(sys.argv[1])
@@ -372,12 +372,12 @@ def test_new_session_failure_preserves_session_in_memory_and_on_disk(agent_facto
 def test_launch_and_serve_stdio_emit_identical_session_hello(monkeypatch, tmp_path):
     import io
 
-    from kernel import event_stdio
-    from kernel.agent_state import AgentConfig
-    from kernel.event_session import EventSession
-    from kernel.event_stream_ui import EventStreamUI
-    from kernel.executor import SafeExecutor
-    from kernel.frontend_protocol import FrontendChannel
+    from kernel.protocol import event_stdio
+    from kernel.agent.agent_state import AgentConfig
+    from kernel.protocol.event_session import EventSession
+    from kernel.protocol.event_stream_ui import EventStreamUI
+    from kernel.sandbox.executor import SafeExecutor
+    from kernel.protocol.frontend_protocol import FrontendChannel
     from kernel.tests.conftest import FakeLLMClient, NullUI
 
     monkeypatch.setenv("AGENT_LLM_PROVIDER", "openai")
@@ -433,12 +433,12 @@ def test_launch_and_serve_stdio_emit_identical_session_hello(monkeypatch, tmp_pa
 def test_hello_has_checkpoint_is_captured_before_worker_clears_it(tmp_path):
     import io
 
-    from kernel import event_stdio
-    from kernel.agent_state import AgentConfig
-    from kernel.event_session import EventSession
-    from kernel.event_stream_ui import EventStreamUI
-    from kernel.executor import SafeExecutor
-    from kernel.frontend_protocol import FrontendChannel
+    from kernel.protocol import event_stdio
+    from kernel.agent.agent_state import AgentConfig
+    from kernel.protocol.event_session import EventSession
+    from kernel.protocol.event_stream_ui import EventStreamUI
+    from kernel.sandbox.executor import SafeExecutor
+    from kernel.protocol.frontend_protocol import FrontendChannel
     from kernel.tests.conftest import FakeLLMClient, NullUI
 
     seed = LocalAgent(

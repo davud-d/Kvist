@@ -10,12 +10,12 @@
 
 - `kernel/prompts/system/`: `constitution.txt`, `chat_prompt.txt`, `coder_prompt.txt`, `devops_prompt.txt`, `reader_prompt.txt`, `universal_prompt.txt`, `report_prompt.txt`, `router_prompt.txt`, `commit_prompt.txt`, `complete_prompt.txt`, `native_tools.txt`, `plan_mode.txt`, `end_session.txt`, `end_session_chat.txt`.
 - все 9 файлов `kernel/prompts/styles/agents/` и все 5 файлов `kernel/prompts/styles/chat/`.
-- `kernel/end_session.py` (450 строк).
+- `kernel/plan/end_session.py` (450 строк).
 
 Частично:
 
-- `kernel/native_tools.py`: строки 70–82, 180–207, 210–232. Остальное не читал. `OPENING_NOTE` прочитан целиком.
-- `kernel/agent_model.py`: строки 300–470. `kernel/agent_runtime.py`: строки 255–445, 1476–1496, остальное только через grep. `kernel/agent.py`: строки 1150–1200. `kernel/agent_logging.py`: 105–134, 550–625. `kernel/user_config.py`: 80–140. `kernel/self_info.py`: 210–260.
+- `kernel/agent/native_tools.py`: строки 70–82, 180–207, 210–232. Остальное не читал. `OPENING_NOTE` прочитан целиком.
+- `kernel/agent/agent_model.py`: строки 300–470. `kernel/agent/agent_runtime.py`: строки 255–445, 1476–1496, остальное только через grep. `kernel/agent/agent.py`: строки 1150–1200. `kernel/session/agent_logging.py`: 105–134, 550–625. `kernel/config/user_config.py`: 80–140. `kernel/sandbox/self_info.py`: 210–260.
 - строки `agent_runtime.py` 633, 1066, 1221, 1371, 1436 видел только в выводе grep, без окружающего кода.
 
 Не делал:
@@ -54,7 +54,7 @@
 | `prompts/system/universal_prompt.txt:83-87` | «exactly two» причины остановиться; «Never invent a third reason to stop» | `plan_mode.txt:8`: ещё пять причин предложить план (блокирующий диалог); `explainer.txt:77-80`: не править, пока не понял | Х |
 | `styles/agents/fast-and-dirty.txt:16-18` | Обязательная метка: «no tests, errors unhandled, will fall over under load, not fit for the project» | EVIDENCE: «will fall over under load» и «no tests» утверждаются заранее, без проверки этого кода | Ч (слабо) |
 | `styles/agents/explainer.txt:43-44` | «Say once that … it will come back» | EVIDENCE: «will come back» прогноз, не факт | Ч (слабо) |
-| `kernel/end_session.py:98-99` | «Do not mention it, the warning or the tool» после отклонённого ревью | Конституция уровень 3 (правда о том, что произошло): если человек спросит, модели запрещено ответить честно | Ч (условно, решение за Давудом) |
+| `kernel/plan/end_session.py:98-99` | «Do not mention it, the warning or the tool» после отклонённого ревью | Конституция уровень 3 (правда о том, что произошло): если человек спросит, модели запрещено ответить честно | Ч (условно, решение за Давудом) |
 | `prompts/system/coder_prompt.txt:81-82`, `devops_prompt.txt:18` | «EXECUTE: 1-3 steps. INFORM: 1-4 steps», «After 2-3 successful commands you usually have enough» | `coder_prompt.txt:88` и `devops_prompt.txt:205-206` «not a step count»; конституция `:89-92` | К |
 | `styles/chat/*:15` (все пять) | «If I'm wrong, say so directly» | Голос: «I» это человек, остальной файл обращён к агенту | К (см. H1) |
 | `prompts/system/chat_prompt.txt:92` | «Opinionated when asked, balanced by default» | `honest.txt:25, 52`: «Commit to a position», «Don't give a balanced "on one hand, on the other"» | К |

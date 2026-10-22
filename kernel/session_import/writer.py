@@ -19,11 +19,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from kernel.agent_logging import create_session, delete_session, get_journal_path
-from kernel.durable_json import JsonStorageError
-from kernel.language_policy import detect_response_language
-from kernel.redaction import redact_text, redact_value
-from kernel.session_events import write_imported_turns
+from kernel.session.agent_logging import create_session, delete_session, get_journal_path
+from kernel.session.durable_json import JsonStorageError
+from kernel.context.language_policy import detect_response_language
+from kernel.sandbox.redaction import redact_text, redact_value
+from kernel.session.session_events import write_imported_turns
 from kernel.session_import.model import ImportedSession, ImportedTurn, Source
 
 # Matches the cap ``LocalAgent._add_to_session_history`` applies.

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from kernel.plugins.mcp import save_server
-from kernel.resources import Owner
+from kernel.plugins.resources import Owner
 from kernel.tests.conftest import NullUI
 
 SERVER = Path(__file__).parent / "fixtures" / "mcp_echo_server.py"
@@ -55,9 +55,9 @@ def test_attaching_shows_the_tools_for_approval_and_names_them_apart_from_everyt
 
 
 def test_a_call_runs_through_the_parser_and_its_result_is_untrusted(mcp_agent):
-    from kernel.agent_tools import run_agent_tool
-    from kernel.parser import build_command
-    from kernel.protocol import ToolCallRequest
+    from kernel.agent.agent_tools import run_agent_tool
+    from kernel.protocol.parser import build_command
+    from kernel.protocol.protocol import ToolCallRequest
 
     agent, ui = mcp_agent
     agent.skills.attach("mcp:echo")
@@ -70,8 +70,8 @@ def test_a_call_runs_through_the_parser_and_its_result_is_untrusted(mcp_agent):
 
 
 def test_the_servers_own_read_only_hint_is_not_trusted(mcp_agent):
-    from kernel.agent_runtime import _is_read_only_violation
-    from kernel.protocol import Action, AgentCommand
+    from kernel.agent.agent_runtime import _is_read_only_violation
+    from kernel.protocol.protocol import Action, AgentCommand
 
     agent, ui = mcp_agent
     agent.skills.attach("mcp:echo")

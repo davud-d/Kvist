@@ -9,14 +9,16 @@ from __future__ import annotations
 import os
 import threading
 
-from kernel import llm_clients as llm, user_config as config
-from kernel.anymodel_onboarding import ANYMODEL_DEFAULT_MODELS, ANYMODEL_REGISTER_URL
-from kernel.config_info import build_config_info
+from kernel.llm import llm_clients as llm
+
+from kernel.config import user_config as config
+from kernel.llm.anymodel_onboarding import ANYMODEL_DEFAULT_MODELS, ANYMODEL_REGISTER_URL
+from kernel.config.config_info import build_config_info
 from kernel.providers.chatgpt_auth import account_status
 # The manifest's own builders: the status chips need roles and reasoning levels with
 # their descriptions before any core of a session is running.
-from kernel.core_manifest import _effort_levels, _roles
-from kernel.reasoning_effort import EFFORT_LEVELS
+from kernel.protocol.core_manifest import _effort_levels, _roles
+from kernel.llm.reasoning_effort import EFFORT_LEVELS
 
 _lock = threading.RLock()
 ROLE_CHOICES = frozenset(entry["value"] for entry in _roles())

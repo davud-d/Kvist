@@ -21,7 +21,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from kernel.sandbox import RUNTIME_MOUNT_ROOTS, _trusted_system_binary, resolve_bubblewrap_path
+from kernel.sandbox.sandbox import RUNTIME_MOUNT_ROOTS, _trusted_system_binary, resolve_bubblewrap_path
 
 RUNNER_DIR = Path(__file__).resolve().parent / "runner"
 SYSTEM_PYTHON = Path("/usr/bin/python3")

@@ -12,8 +12,8 @@ import pytest
 
 from kernel.tests.conftest import requires_posix
 
-from kernel import durable_json
-from kernel.durable_json import JsonStorageError
+from kernel.session import durable_json
+from kernel.session.durable_json import JsonStorageError
 
 pytestmark = pytest.mark.slow
 
@@ -49,9 +49,9 @@ def test_session_survives_real_process_restart(tmp_path):
     save_script = """
 import sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 workspace = Path(sys.argv[1])
@@ -70,9 +70,9 @@ agent.save_session()
 import json
 import sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 agent = LocalAgent(
@@ -354,9 +354,9 @@ def test_interrupted_task_survives_switch_and_process_restart(tmp_path):
     interrupt_script = """
 import sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 workspace = Path(sys.argv[1])
@@ -376,9 +376,9 @@ agent._save_checkpoint("другая задача", 2)
 import json
 import sys
 from pathlib import Path
-from kernel.agent import LocalAgent
-from kernel.agent_state import AgentConfig
-from kernel.executor import SafeExecutor
+from kernel.agent.agent import LocalAgent
+from kernel.agent.agent_state import AgentConfig
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import FakeLLMClient, NullUI
 
 agent = LocalAgent(

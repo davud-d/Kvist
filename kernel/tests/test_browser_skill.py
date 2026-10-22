@@ -18,7 +18,7 @@ import pytest
 
 from kernel.plugins.grants import GrantStore
 from kernel.plugins.registry import SkillRegistry
-from kernel.resources import Owner
+from kernel.plugins.resources import Owner
 from kernel.tests.conftest import AllowAllApprovals, NullUI
 
 pytestmark = pytest.mark.slow
@@ -179,11 +179,11 @@ def test_a_dev_server_reaches_the_browser_only_through_the_broker(agent_factory,
                                                                     trusted_python_name):
     import socket
 
-    from kernel.protocol import Action, AgentCommand
+    from kernel.protocol.protocol import Action, AgentCommand
 
     monkeypatch.setenv("AGENT_SANDBOX_MODE", "auto")
     agent, ui = browser_agent
-    from kernel.executor import SafeExecutor
+    from kernel.sandbox.executor import SafeExecutor
 
     agent.executor._terminal = SafeExecutor(agent.executor.workspace, approvals=AllowAllApprovals())._terminal
     (agent.executor.workspace / "index.html").write_text(_SITE, encoding="utf-8")

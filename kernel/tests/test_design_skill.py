@@ -11,8 +11,8 @@ from pathlib import Path
 import pytest
 
 import kernel
-from kernel.terminal_interpreters import _interpreter_target
-from kernel.terminal_limits import _MAX_COMMAND_CHARS
+from kernel.sandbox.terminal_interpreters import _interpreter_target
+from kernel.sandbox.terminal_limits import _MAX_COMMAND_CHARS
 
 PACKAGE = Path(kernel.__file__).parent / "skills_bundled" / "design"
 requires_pty = pytest.mark.skipif(not hasattr(os, "fork") or sys.platform == "win32", reason="needs a POSIX pty")

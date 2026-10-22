@@ -34,8 +34,8 @@ from kernel.plugins.runner.kvist_wire import STATUSES, Channel, ProtocolError, e
 from kernel.plugins.sandbox import RunnerSpec, build_runner_argv, runner_unavailable_reason
 from kernel.plugins.schema import validate
 from kernel.plugins.screen import ScreenViewer
-from kernel.resources import ManagedProcess, Owner, Resource, ResourceManager, StopOutcome
-from kernel.task_control import TaskControl
+from kernel.plugins.resources import ManagedProcess, Owner, Resource, ResourceManager, StopOutcome
+from kernel.agent.task_control import TaskControl
 
 START_TIMEOUT = 45.0
 PAUSE_GRACE = 3.0

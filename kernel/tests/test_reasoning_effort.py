@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from kernel.agent_state import AgentConfig
-from kernel.llm_clients import AnthropicCompatibleClient
+from kernel.agent.agent_state import AgentConfig
+from kernel.llm.llm_clients import AnthropicCompatibleClient
 from kernel.tests.conftest import FakeLLMClient
-from kernel.reasoning_effort import (
+from kernel.llm.reasoning_effort import (
     DEFAULT_EFFORT,
     EFFORT_LEVELS,
     anthropic_request_config,
@@ -21,7 +21,7 @@ from kernel.reasoning_effort import (
     reasoning_request_kwargs,
     strip_reasoning_kwargs,
 )
-from kernel.user_config import get_saved_reasoning_effort, save_reasoning_effort
+from kernel.config.user_config import get_saved_reasoning_effort, save_reasoning_effort
 
 
 # ── scale / normalization ───────────────────────────────────────────────────
@@ -385,7 +385,7 @@ def test_reasoning_rejection_retries_without_it_and_keeps_warning(agent_factory)
 def test_anthropic_false_is_raised_to_the_minimum_not_disabled():
     """Thinking-off is the state where these models narrate an action instead
     of emitting one, so 'false' buys the cheapest thinking rather than none."""
-    from kernel.reasoning_effort import anthropic_thinking_config, effort_advisory
+    from kernel.llm.reasoning_effort import anthropic_thinking_config, effort_advisory
 
     off = anthropic_thinking_config("false")
     assert off is not None
@@ -398,7 +398,7 @@ def test_anthropic_false_is_raised_to_the_minimum_not_disabled():
 
 def test_absent_reasoning_marker_still_means_no_thinking_block():
     """Only an explicit 'false' is raised; no marker at all stays no marker."""
-    from kernel.llm_clients import _anthropic_thinking_from_effort
+    from kernel.llm.llm_clients import _anthropic_thinking_from_effort
 
     assert _anthropic_thinking_from_effort(None) is None
     assert _anthropic_thinking_from_effort("") is None

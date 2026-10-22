@@ -5,8 +5,8 @@ import re
 
 import pytest
 
-from kernel.agent_model import _load_role_prompt
-from kernel.parser import ALLOWED_ACTIONS
+from kernel.agent.agent_model import _load_role_prompt
+from kernel.protocol.parser import ALLOWED_ACTIONS
 from kernel.tests.conftest import commands_from_response
 
 _WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}

@@ -13,8 +13,22 @@ drive the same Python core; each lives in its own directory under `frontends/`.
 ## Repository layout
 
 ```
-kernel/                 the core: Python package `kernel` (run: python -m kernel)
-  prompts/ themes/ providers/   data and subpackages read relative to the modules
+kernel/                 the core: Python package `kernel` (run: python -m kernel); only
+                        `main.py`, `__main__.py`, `__init__.py` sit at the top
+  agent/     the loop and everything it runs on: agent*, role_router, task_intent/control,
+             native_tools, helpers, narrator, background_jobs, scheduler
+  plan/      plan_mode, end_session
+  protocol/  action protocol (protocol, parser), frontend events (frontend_protocol, event_*,
+             core_manifest, ui), frontend dispatch
+  sandbox/   executor, terminal*, command_policy, permission_policy, sandbox, process_tree,
+             secret_paths, approvals, redaction, self_info
+  session/   session_store/events/search/titler, agent_logging, change_journal, durable_json
+  context/   context_budget/meter/utils, system_context, language_*, attachments, import_resolver
+  llm/       llm_clients, api_settings, custom_provider, request_log, reasoning_effort
+  vision/ tray/ config/ ide/ (commit_message, completion*)
+  plugins/ memory/ providers/ session_import/ skills_bundled/   (older subpackages)
+  prompts/ themes/              data read relative to the modules (a module one level down uses
+                                `Path(__file__).parent.parent`)
   tests/                pytest suite of the core (conftest.py holds the shared fakes)
 frontends/
   tui/classic/          classic prompt_toolkit terminal (flat modules) + assets/ + tests/
@@ -36,7 +50,7 @@ branding/  docs/ (UI_API.md = frontend protocol, media/)  site/ (kvist.site, own
 The core imports the classic terminal and the Zed frontend by bare module name:
 `kernel/__init__.py` appends `frontends/tui/classic` and `frontends/zed` to `sys.path`, and
 `pytest.ini` does the same. Every other import of a core module is `kernel.<module>`
-(`from kernel.agent import LocalAgent`, `monkeypatch.setattr("kernel.agent_model._load_role_prompt", …)`).
+(`from kernel.agent.agent import LocalAgent`, `monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", …)`).
 The Ink app's modules (`state.ts`, `protocol.ts`, `commands.ts`, …) are also imported by the VS
 Code extension and its webview, so a change there is checked from both sides.
 Local untracked files (`AGENTS.md`, `plan.md`, `progress.json`, `tools/`, …) stay at the root;
@@ -1253,11 +1267,11 @@ writing `.env` files**.
 and child-HOME handling) and re-exports the names others import. `TerminalExecutor` composes four mixins:
 `ArgumentValidationMixin` (`terminal_validation.py`), `GitValidationMixin` (`terminal_git.py`),
 `InterpreterValidationMixin` (`terminal_interpreters.py`), `ExecutableBindingMixin` (`terminal_bindings.py`); a
-mixin never imports `kernel.terminal`. Module-level: `terminal_types.py` (results, errors, context dataclasses),
+mixin never imports `kernel.sandbox.terminal`. Module-level: `terminal_types.py` (results, errors, context dataclasses),
 `terminal_rules.py` (forbidden executables/operators, secret-token regexes, per-profile allowlists),
 `terminal_limits.py`, `terminal_env.py` (child environment, controlled PATH), `terminal_paths.py`,
 `terminal_trust.py` (shebang parsing, venv launcher, trusted system executables), `terminal_hitl.py`. Tests patch
-`assess_command` and `resolve_bubblewrap_path` on `kernel.terminal`, so `_assess_risk` and `__init__`, the only
+`assess_command` and `resolve_bubblewrap_path` on `kernel.sandbox.terminal`, so `_assess_risk` and `__init__`, the only
 callers, stay in `terminal.py`.
 
 Before any of that, `SafeExecutor._relativize_workspace_paths` rewrites an absolute `cwd`, absolute argv tokens

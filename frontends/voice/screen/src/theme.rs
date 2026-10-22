@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn file_icons_follow_the_extension() {
-        assert_eq!(file_icon("kernel/agent.py").0, "\u{e606}");
+        assert_eq!(file_icon("kernel/agent/agent.py").0, "\u{e606}");
         assert_eq!(file_icon("src/main.rs").0, "\u{e68b}");
         assert_eq!(file_icon("ui/app.tsx").0, "\u{e625}");
         assert_eq!(file_icon("Makefile").0, "\u{e64e}");

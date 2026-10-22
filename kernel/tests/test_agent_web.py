@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from kernel.agent_state import RunState
-from kernel.protocol import Action, AgentCommand
+from kernel.agent.agent_state import RunState
+from kernel.protocol.protocol import Action, AgentCommand
 
 
 def make_web_command(query: str, text: str = "Need current SDK docs"):

@@ -13,7 +13,7 @@ from kernel.tests.conftest import FakeLLMClient
 def test_local_agent_run_chat_path_uses_router_result(agent_factory, monkeypatch):
     agent = agent_factory(stream=False)
     agent.client = FakeLLMClient(content="Hello **world**")
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
 
     result = agent.run("hello", routed_role="chat")
 
@@ -29,7 +29,7 @@ def test_chat_redacts_credentials_before_provider_request(
     agent = agent_factory(stream=False)
     client = FakeLLMClient(content="safe response")
     agent.client = client
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
 
     result = agent.run(
         f"neutral conversation api_key={synthetic}",
@@ -88,7 +88,7 @@ def test_chat_failure_does_not_echo_provider_credentials(
 
     agent.client.chat.completions.create = fail
     monkeypatch.setattr(
-        "kernel.llm_clients.fallback_candidates_for_model",
+        "kernel.llm.llm_clients.fallback_candidates_for_model",
         lambda *args, **kwargs: [],
     )
     agent._state.response_language = "en"
@@ -131,9 +131,9 @@ def _chat_agent(agent_factory, monkeypatch, *, stream: bool):
 
     agent._ui.live_markdown = live_markdown
     agent.rendered_chunks = rendered
-    monkeypatch.setattr("kernel.agent_model._load_role_prompt", lambda role: "chat prompt")
+    monkeypatch.setattr("kernel.agent.agent_model._load_role_prompt", lambda role: "chat prompt")
     monkeypatch.setattr(
-        "kernel.llm_clients.fallback_candidates_for_model",
+        "kernel.llm.llm_clients.fallback_candidates_for_model",
         lambda *args, **kwargs: [],
     )
     agent._state.response_language = "en"
@@ -254,7 +254,7 @@ def test_local_agent_run_coder_path_starts_the_loop_and_detects_dependencies(age
         return "finished"
 
     agent._run_loop = fake_run_loop
-    monkeypatch.setattr("kernel.agent.detect_dependency_versions", lambda workspace: {"pytest": "==8"})
+    monkeypatch.setattr("kernel.agent.agent.detect_dependency_versions", lambda workspace: {"pytest": "==8"})
 
     result = agent.run("edit file", routed_role="coder")
 
