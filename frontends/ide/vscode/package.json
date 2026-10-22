@@ -11,6 +11,9 @@
   "engines": {
     "vscode": "^1.106.0"
   },
+  "enabledApiProposals": [
+    "inlineCompletionsAdditions"
+  ],
   "categories": [
     "Other"
   ],
@@ -136,7 +139,7 @@
         },
         "kvist.inlineCompletion.debounceMs": {
           "type": "number",
-          "default": 300,
+          "default": 100,
           "minimum": 0,
           "markdownDescription": "Milliseconds to wait after you stop typing before requesting an inline completion. Cached suggestions return immediately when you undo or delete a typo."
         }

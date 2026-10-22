@@ -12,8 +12,11 @@ import {
     CompletionHistory,
     CompletionClient,
     isDocumentTooLargeForCompletion,
+    NO_COMPLETION,
     parseServerMessage
 } from './completionClient';
+
+const plain = (text: string) => ({ text, before: 0, after: 0 });
 
 test('buildCompletionRequest splits the buffer at the cursor offset', () => {
     const request = buildCompletionRequest('src/foo.py', 'Python', 'before|after', 'before'.length);
@@ -111,21 +114,21 @@ test('CompletionCache reading an entry keeps it from being the next eviction', (
 test('history restores the suggestion after a typo, consuming only matching forward input', () => {
     const history = new CompletionHistory();
     const anchor = buildCompletionRequest('a.py', 'python', 'pri', 3);
-    history.set('project A', anchor, 'nt(foo)');
-    assert.equal(history.get('project A', { ...anchor, prefix: 'prin' }), 't(foo)');
-    assert.equal(history.get('project A', { ...anchor, prefix: 'print(foo)' }), undefined);
-    assert.equal(history.get('project A', { ...anchor, prefix: 'prixxx' }), undefined);
-    assert.equal(history.get('project A', anchor), 'nt(foo)');
-    assert.equal(history.get('project B', anchor), undefined);
-    assert.equal(history.get('project A', { ...anchor, suffix: 'changed' }), undefined);
-    assert.equal(history.get('project A', { ...anchor, language: 'javascript' }), undefined);
+    history.set('project A', anchor, plain('nt(foo)'));
+    assert.equal(history.get('project A', { ...anchor, prefix: 'prin' })?.text, 't(foo)');
+    assert.equal(history.get('project A', { ...anchor, prefix: 'print(foo)' })?.text, undefined);
+    assert.equal(history.get('project A', { ...anchor, prefix: 'prixxx' })?.text, undefined);
+    assert.equal(history.get('project A', anchor)?.text, 'nt(foo)');
+    assert.equal(history.get('project B', anchor)?.text, undefined);
+    assert.equal(history.get('project A', { ...anchor, suffix: 'changed' })?.text, undefined);
+    assert.equal(history.get('project A', { ...anchor, language: 'javascript' })?.text, undefined);
 });
 
 test('history remembers that the model had nothing to add', () => {
     const history = new CompletionHistory();
     const anchor = buildCompletionRequest('a.py', 'python', 'x', 1);
-    history.set('scope', anchor, '');
-    assert.equal(history.get('scope', anchor), '');
+    history.set('scope', anchor, NO_COMPLETION);
+    assert.equal(history.get('scope', anchor)?.text, '');
 });
 
 function mockTimeouts(t: TestContext): void {
@@ -183,7 +186,7 @@ test('pause before a request resets on edits; cancelled keystrokes send nothing'
     t.mock.timers.tick(299);
     assert.equal(io.children.length, 0);
     first.cancel();
-    assert.equal(await pending, '');
+    assert.equal((await pending).text, '');
     const second = cancellation();
     const next = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'prin' }, second.token);
     t.mock.timers.tick(299);
@@ -194,7 +197,7 @@ test('pause before a request resets on edits; cancelled keystrokes send nothing'
     const [sent] = io.requests(0);
     assert.equal(sent.prefix, 'prin');
     io.send(0, { id: sent.id, delta: 't(' }, { id: sent.id, delta: 'foo)' }, { id: sent.id, done: true });
-    assert.equal(await next, 't(foo)');
+    assert.equal((await next).text, 't(foo)');
     assert.equal(second.listeners.size, 0);
     client.dispose();
 });
@@ -214,7 +217,7 @@ test('one process serves every request and is started with --complete-server', a
         await flush();
         const sent = io.requests(0)[index];
         io.send(0, { id: sent.id, delta: 'x' }, { id: sent.id, done: true });
-        assert.equal(await pending, 'x');
+        assert.equal((await pending).text, 'x');
     }
     assert.equal(io.children.length, 1);
     assert.deepEqual(spawned, [['--workspace', 'workspace', '--complete-server']]);
@@ -234,7 +237,7 @@ test('replies split across chunks are reassembled and replies for other ids are 
     io.children[0].stdout?.emit('data', Buffer.from(JSON.stringify({ id: id + 99, delta: 'other' }) + '\n' + line.slice(0, 7)));
     io.children[0].stdout?.emit('data', Buffer.from(line.slice(7)));
     io.send(0, { id, done: true });
-    assert.equal(await pending, 'whole');
+    assert.equal((await pending).text, 'whole');
     client.dispose();
 });
 
@@ -247,20 +250,20 @@ test('a failure reply or a dying process gives no suggestion and the next reques
     t.mock.timers.tick(0);
     await flush();
     io.send(0, { id: io.requests(0)[0].id, error: 'No provider is configured.' });
-    assert.equal(await failed, '');
+    assert.equal((await failed).text, '');
 
     const crashed = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'ab' }, cancellation().token);
     t.mock.timers.tick(0);
     await flush();
     io.children[0].emit('close', 1);
-    assert.equal(await crashed, '');
+    assert.equal((await crashed).text, '');
 
     const again = client.requestCompletion('binary', 'workspace', { ...request, prefix: 'abc' }, cancellation().token);
     t.mock.timers.tick(0);
     await flush();
     assert.equal(io.children.length, 2);
     io.send(1, { id: io.requests(1)[0].id, done: true });
-    assert.equal(await again, '');
+    assert.equal((await again).text, '');
     client.dispose();
 });
 
@@ -274,7 +277,7 @@ test('cancelling a sent request tells the process to stop it', async t => {
     await flush();
     const { id } = io.requests(0)[0];
     cancelled.cancel();
-    assert.equal(await pending, '');
+    assert.equal((await pending).text, '');
     await flush();
     assert.deepEqual(io.requests(0)[1], { cancel: id });
     io.send(0, { id, delta: 'late' }, { id, done: true });
@@ -296,10 +299,10 @@ test('backspace cache hit cancels stale work and late answers cannot replace it'
     await flush();
     const typoId = io.requests(0)[1].id;
     const restored = await client.requestCompletion('binary', 'workspace', request, cancellation().token);
-    assert.equal(restored, 'nt(foo)');
-    assert.equal(await typo, '');
+    assert.equal(restored.text, 'nt(foo)');
+    assert.equal((await typo).text, '');
     io.send(0, { id: typoId, delta: 'stale' }, { id: typoId, done: true });
-    assert.equal(await client.requestCompletion('binary', 'workspace', request, cancellation().token), restored);
+    assert.deepEqual(await client.requestCompletion('binary', 'workspace', request, cancellation().token), restored);
     client.dispose();
 });
 
@@ -311,9 +314,9 @@ test('a request that gets no answer times out and cancellation before cache look
     const pending = client.requestCompletion('binary', 'workspace', request, cancellation().token);
     t.mock.timers.tick(300);
     t.mock.timers.tick(6000);
-    assert.equal(await pending, '');
+    assert.equal((await pending).text, '');
     const cancelled = cancellation(); cancelled.cancel();
-    assert.equal(await client.requestCompletion('binary', 'workspace', request, cancelled.token), '');
+    assert.equal((await client.requestCompletion('binary', 'workspace', request, cancelled.token)).text, '');
     assert.equal(io.children.length, 1);
     client.dispose();
 });
@@ -332,4 +335,31 @@ test('a different binary or workspace gets its own process and the old one is st
     assert.equal(io.children.length, 2);
     assert.equal(io.children[0].killedByTest, true);
     client.dispose();
+});
+
+test('a replacement is delivered whole, asked for with edits, and reused only at its anchor', async t => {
+    mockTimeouts(t);
+    const io = transport();
+    const client = new CompletionClient(0, io.fakeSpawn);
+    const request = buildCompletionRequest('a.txt', 'plaintext', '# Gradle saz', 12);
+    const pending = client.requestCompletion('binary', 'workspace', request, cancellation().token, true);
+    t.mock.timers.tick(0);
+    await flush();
+    const [sent] = io.requests(0);
+    assert.equal(sent.edits, true);
+    io.send(0, { id: sent.id, replace: { text: 'cache\n.gradle', before: 3, after: 0 } }, { id: sent.id, done: true });
+    const edit = await pending;
+    assert.deepEqual(edit, { text: 'cache\n.gradle', before: 3, after: 0 });
+    const again = await client.requestCompletion('binary', 'workspace', request, cancellation().token);
+    assert.deepEqual(again, edit);
+    const typed = { ...request, prefix: request.prefix + 'c' };
+    const history = new CompletionHistory();
+    history.set('s', request, edit);
+    assert.equal(history.get('s', typed), undefined);
+});
+
+test('a malformed replacement is an error, not a range', () => {
+    const bad = parseServerMessage(JSON.stringify({ id: 1, replace: { text: 'x', before: -1.5, after: 0 } }));
+    assert.equal(bad?.error, 'malformed replacement');
+    assert.equal(parseServerMessage(JSON.stringify({ id: 1, replace: { text: 'x', before: 3, after: 0 } }))?.replace?.before, 3);
 });

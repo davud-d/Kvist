@@ -10,10 +10,21 @@ export interface CompletionRequest {
     suffix: string;
 }
 
+/** What to put in the editor: `text` replaces `before` UTF-16 units left of the cursor
+ * through `after` units right of it. Both are 0 for a plain continuation. */
+export interface Completion {
+    text: string;
+    before: number;
+    after: number;
+}
+
+export const NO_COMPLETION: Completion = { text: '', before: 0, after: 0 };
+
 /** One line of the `kvist --complete-server` reply stream. */
 interface ServerMessage {
     id: number;
     delta?: string;
+    replace?: Completion;
     done?: boolean;
     error?: string;
 }
@@ -48,11 +59,19 @@ export function buildCompletionRequest(
     };
 }
 
+function isReplacement(value: unknown): value is Completion {
+    const edit = value as Partial<Completion> | null;
+    return typeof edit === 'object' && edit !== null && typeof edit.text === 'string'
+        && Number.isInteger(edit.before) && Number.isInteger(edit.after);
+}
+
 export function parseServerMessage(line: string): ServerMessage | undefined {
     try {
         const parsed = JSON.parse(line);
         if (typeof parsed === 'object' && parsed !== null && typeof parsed.id === 'number') {
-            return parsed as ServerMessage;
+            // A malformed replacement must not reach the editor as a range.
+            return isReplacement(parsed.replace) || parsed.replace === undefined
+                ? parsed as ServerMessage : { id: parsed.id, error: 'malformed replacement' };
         }
     } catch {
         // A stray non-JSON line (a library warning) is not a reply.
@@ -100,28 +119,30 @@ export class CompletionCache<T = string> {
 }
 
 /** History is scoped to the binary/workspace/language and exact buffer context.
- * Matching forward typing consumes the suggestion; deleting text restores the anchor. */
+ * Matching forward typing consumes a continuation; deleting text restores the anchor.
+ * A replacement is only reused at its exact anchor: typing changes what it replaces. */
 export class CompletionHistory {
     private readonly cache = new CompletionCache<{
-        scope: string; request: CompletionRequest; completion: string;
+        scope: string; request: CompletionRequest; completion: Completion;
     }>();
 
-    get(scope: string, request: CompletionRequest): string | undefined {
+    get(scope: string, request: CompletionRequest): Completion | undefined {
         const exact = this.cache.get(this.key(scope, request));
         if (exact) { return exact.completion; }
         for (const entry of this.cache.recentValues()) {
             const old = entry.request;
+            if (entry.completion.before || entry.completion.after) { continue; }
             if (scope !== entry.scope || request.file_path !== old.file_path || request.language !== old.language
                 || request.suffix !== old.suffix || !request.prefix.startsWith(old.prefix)) { continue; }
             const typed = request.prefix.slice(old.prefix.length);
-            if (!entry.completion.startsWith(typed)) { continue; }
-            const rest = entry.completion.slice(typed.length);
-            if (rest) { return rest; }
+            if (!entry.completion.text.startsWith(typed)) { continue; }
+            const rest = entry.completion.text.slice(typed.length);
+            if (rest) { return { text: rest, before: 0, after: 0 }; }
         }
         return undefined;
     }
 
-    set(scope: string, request: CompletionRequest, completion: string): void {
+    set(scope: string, request: CompletionRequest, completion: Completion): void {
         this.cache.set(this.key(scope, request), { scope, request: { ...request }, completion });
     }
 
@@ -135,7 +156,8 @@ const REQUEST_TIMEOUT_MS = 6000;
 
 interface PendingRequest {
     text: string;
-    onDone(text: string): void;
+    replacement?: Completion;
+    onDone(completion: Completion): void;
     onFail(): void;
 }
 
@@ -158,7 +180,7 @@ export class CompletionClient {
     constructor(private debounceMs: number, private readonly spawnProcess: typeof spawn = spawn) {}
 
     setDebounceMs(debounceMs: number): void {
-        this.debounceMs = Number.isFinite(debounceMs) ? Math.max(0, debounceMs) : 300;
+        this.debounceMs = Number.isFinite(debounceMs) ? Math.max(0, debounceMs) : 100;
     }
 
     requestCompletion(
@@ -167,20 +189,20 @@ export class CompletionClient {
         request: CompletionRequest,
         token: vscode.CancellationToken,
         explicit = false
-    ): Promise<string> {
+    ): Promise<Completion> {
         this.cancelPending?.();
-        if (token.isCancellationRequested) { return Promise.resolve(''); }
+        if (token.isCancellationRequested) { return Promise.resolve(NO_COMPLETION); }
         const scope = JSON.stringify([binaryPath, workspaceDir]);
         const cached = this.history.get(scope, request);
         if (cached !== undefined) { return Promise.resolve(cached); }
 
-        return new Promise<string>((resolve) => {
+        return new Promise<Completion>((resolve) => {
             let timer: ReturnType<typeof setTimeout> | undefined;
             let timeout: ReturnType<typeof setTimeout> | undefined;
             let subscription: vscode.Disposable | undefined;
             let sent: { server: Server; id: number } | undefined;
             let done = false;
-            const finish = (value: string, stopRemote: boolean) => {
+            const finish = (value: Completion, stopRemote: boolean) => {
                 if (done) { return; }
                 done = true;
                 clearTimeout(timer);
@@ -190,7 +212,7 @@ export class CompletionClient {
                 if (this.cancelPending === cancel) { this.cancelPending = undefined; }
                 resolve(value);
             };
-            const cancel = () => finish('', true);
+            const cancel = () => finish(NO_COMPLETION, true);
             this.cancelPending = cancel;
             subscription = token.onCancellationRequested(cancel);
             if (done || token.isCancellationRequested) {
@@ -201,19 +223,20 @@ export class CompletionClient {
             timer = setTimeout(() => {
                 if (done || token.isCancellationRequested) { cancel(); return; }
                 const server = this.ensureServer(binaryPath, workspaceDir);
-                if (!server) { finish('', false); return; }
+                if (!server) { finish(NO_COMPLETION, false); return; }
                 const id = this.nextId++;
                 sent = { server, id };
                 server.pending.set(id, {
                     text: '',
-                    onDone: text => {
-                        this.history.set(scope, request, text);
-                        finish(text, false);
+                    onDone: completion => {
+                        this.history.set(scope, request, completion);
+                        finish(completion, false);
                     },
-                    onFail: () => finish('', false)
+                    onFail: () => finish(NO_COMPLETION, false)
                 });
                 timeout = setTimeout(cancel, REQUEST_TIMEOUT_MS);
-                server.child.stdin?.write(JSON.stringify({ id, ...request }) + '\n');
+                // `edits`: this editor can draw a replacement, so the core may offer one.
+                server.child.stdin?.write(JSON.stringify({ id, edits: true, ...request }) + '\n');
             }, explicit ? 0 : this.debounceMs);
         });
     }
@@ -267,7 +290,10 @@ export class CompletionClient {
             const request = message && server.pending.get(message.id);
             if (!message || !request) { continue; }
             if (message.error !== undefined) { request.onFail(); }
-            else if (message.done) { request.onDone(request.text); }
+            else if (message.replace) { request.replacement = message.replace; }
+            else if (message.done) {
+                request.onDone(request.replacement ?? { text: request.text, before: 0, after: 0 });
+            }
             else if (typeof message.delta === 'string') {
                 request.text = (request.text + message.delta).slice(0, MAX_COMPLETION_CHARS);
             }

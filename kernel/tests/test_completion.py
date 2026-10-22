@@ -324,18 +324,37 @@ def test_provider_specific_no_reasoning(provider, expected):
     assert all(client.requests[0][key] == value for key, value in expected.items())
 
 
-def test_reasoning_required_model_uses_lowest_accepted_effort():
+@pytest.mark.parametrize("accepted, tried", [
+    ("low", ["none", "minimal", "instant", "low"]),
+    ("instant", ["none", "minimal", "instant"]),
+    ("minimal", ["none", "minimal"]),
+])
+def test_reasoning_required_model_uses_lowest_accepted_effort(accepted, tried):
     client = FakeLLMClient(content="")
     attempts = []
     def create(**kwargs):
         attempts.append(kwargs)
-        if kwargs.get("reasoning_effort") != "low":
+        if kwargs.get("reasoning_effort") != accepted:
             raise ValueError("Unsupported reasoning_effort value")
         return "response"
     client.chat.completions.create = create
     caller = completion._ModelCaller(client, AgentConfig(provider="openai"), completion._StderrUI())
     assert completion._request_completion(caller, "fast", [], False) == "response"
-    assert [a["reasoning_effort"] for a in attempts] == ["none", "minimal", "low"]
+    assert [a["reasoning_effort"] for a in attempts] == tried
+
+
+def test_an_endpoint_that_accepts_no_effort_name_gets_the_control_removed():
+    client = FakeLLMClient(content="")
+    attempts = []
+    def create(**kwargs):
+        attempts.append(kwargs)
+        if "reasoning_effort" in kwargs:
+            raise ValueError("Unsupported reasoning_effort value")
+        return "response"
+    client.chat.completions.create = create
+    caller = completion._ModelCaller(client, AgentConfig(provider="openai"), completion._StderrUI())
+    assert completion._request_completion(caller, "fast", [], False) == "response"
+    assert [a.get("reasoning_effort") for a in attempts] == ["none", "minimal", "instant", "low", None]
 
 
 # ── streamed cleanup ─────────────────────────────────────────────────────
@@ -431,3 +450,199 @@ def test_whole_line_above_a_fresh_cursor_is_not_inserted_again():
 
 def test_wrapper_tags_from_the_prompt_are_cut():
     assert clean_model_output('= "tcp"\n</UNTRUSTED_TOOL_OUTPUT>', "name") == '= "tcp"\n'
+
+
+# ── replacements ─────────────────────────────────────────────────────────
+
+
+def _edit_request(prefix: str, suffix: str, edits: bool = True) -> CompletionRequest:
+    return CompletionRequest("a.txt", "plaintext", prefix, suffix, edits=edits)
+
+
+def _reply(old: str, new: str) -> str:
+    return f"<<<REPLACE\n{old}\n>>>WITH\n{new}\n>>>END"
+
+
+def test_a_replacement_spanning_the_cursor_is_split_around_it():
+    request = _edit_request("# Gradle saz", "cache\n.gradle")
+    replacement = completion.parse_replacement(_reply("sazcache", "cache"), request)
+    assert replacement == completion.Replacement(before=3, after=5, text="cache")
+
+
+def test_a_replacement_may_write_several_lines_over_one():
+    request = _edit_request("a\nfoo", "bar\nz")
+    reply = "```\n" + _reply("foobar", "x\ny\nw") + "\n```"
+    assert completion.parse_replacement(reply, request) == completion.Replacement(3, 3, "x\ny\nw")
+    assert completion.parse_replacement(_reply("a\nfoo", "x"), request) is None
+
+
+def test_a_quotation_that_is_not_at_the_cursor_is_dropped():
+    request = _edit_request("alpha beta ", "gamma\nbeta")
+    assert completion.parse_replacement(_reply("gamma", "gamma"), request) is None
+    assert completion.parse_replacement(_reply("delta", "x"), request) is None
+    assert completion.parse_replacement("<<<REPLACE\ngamma", request) is None
+
+
+def test_offsets_count_utf16_units():
+    request = _edit_request("😀", "x")
+    assert completion.parse_replacement(_reply("😀x", "y"), request) == completion.Replacement(2, 1, "y")
+
+
+def test_a_replacement_reply_is_never_a_continuation():
+    prefix = "# Gradle saz"
+    assert clean_model_output(_reply("saz", "cache"), prefix) == ""
+    assert _cleaned_pieces(prefix, ["<<<REPL", "ACE\nsaz\n>>>WITH\ncache\n>>>END"]) == []
+
+
+def test_edits_are_offered_only_to_a_client_that_asked(fake_caller, tmp_path):
+    plain = completion.prepare_completion(_edit_request("x = ", "", edits=False), tmp_path)
+    asked = completion.prepare_completion(_edit_request("x = ", ""), tmp_path)
+    assert "<<<REPLACE" not in plain[0]["content"]
+    assert "<<<REPLACE" in asked[0]["content"]
+
+
+def test_iter_completion_yields_the_replacement_last(fake_caller, tmp_path):
+    fake_caller.stream_chunks = ["<<<REPLACE\nsaz\n", ">>>WITH\ncache\n>>>END"]
+    fake_caller.content = "".join(fake_caller.stream_chunks)
+    request = _edit_request("# Gradle saz", "cache")
+    caller, model = completion._build_caller()
+    pieces = list(completion.iter_completion(caller, model, request, completion.prepare_completion(request, tmp_path)))
+    assert pieces == [completion.Replacement(3, 0, "cache")]
+
+
+def test_the_server_sends_a_replacement_as_one_message(fake_caller, tmp_path):
+    import threading
+
+    from kernel.completion_server import CompletionServer
+
+    fake_caller.stream_chunks = [_reply("saz", "cache")]
+    fake_caller.content = fake_caller.stream_chunks[0]
+    out = io.StringIO()
+    server = CompletionServer(tmp_path, out)
+    server._callers.get = completion._build_caller
+    payload = {"id": 7, "file_path": "a.txt", "language": "", "prefix": "# Gradle saz", "suffix": "", "edits": True}
+    server._answer(7, payload, threading.Event())
+    lines = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert lines == [{"id": 7, "replace": {"before": 3, "after": 0, "text": "cache"}}, {"id": 7, "done": True}]
+
+
+def test_a_client_that_can_replace_is_not_told_to_never_touch_the_word_before_the_cursor(fake_caller, tmp_path):
+    plain = completion.prepare_completion(_edit_request("x = ", "", edits=False), tmp_path)[0]["content"]
+    asked = completion.prepare_completion(_edit_request("x = ", ""), tmp_path)[0]["content"]
+    assert "Never rewrite, correct or repeat the word before the cursor" in plain
+    assert "Never rewrite, correct or repeat the word before the cursor" not in asked
+
+
+def test_a_reply_that_retypes_the_line_to_add_to_it_is_a_continuation():
+    request = _edit_request("for i in x:\n    print(i", "\n")
+    assert completion.parse_replacement(_reply("    print(i", "    print(i)"), request) == ")"
+
+
+def test_the_typed_text_is_kept_when_only_the_right_side_changes():
+    request = _edit_request("x = fo", "o_bar + 1")
+    assert completion.parse_replacement(_reply("foo_bar", "foo_baz"), request) == completion.Replacement(0, 5, "o_baz")
+
+
+def test_a_typo_is_still_deleted_and_retyped():
+    request = _edit_request("return x\n    retrun", "")
+    assert completion.parse_replacement(_reply("retrun", "return"), request) == completion.Replacement(6, 0, "return")
+
+
+def test_a_mistake_elsewhere_on_the_cursor_line_is_offered_with_signed_offsets():
+    left = _edit_request("Copyrigth (c) 2026 All contributors", "\nnext line")
+    assert completion.parse_replacement(_reply("Copyrigth", "Copyright"), left) == completion.Replacement(35, -26, "Copyright")
+    right = _edit_request("x = ", " retrun y\nretrun")
+    assert completion.parse_replacement(_reply("retrun", "return"), right) == completion.Replacement(-1, 7, "return")
+
+
+def test_the_occurrence_nearest_the_cursor_wins():
+    request = _edit_request("retrun a; retrun b; ", "retrun c")
+    assert completion.parse_replacement(_reply("retrun", "return"), request) == completion.Replacement(0, 6, "return")
+
+
+def test_cursor_facts_state_what_the_text_alone_does_not():
+    facts = completion.cursor_facts("class A:\n    def f(self):\n        ", "")
+    assert "8 spaces typed before the cursor" in facts
+    assert "the nearest non-empty line above is indented 4 spaces and opens a block" in facts
+    assert "indents one level with 4 spaces" in facts
+
+
+def test_cursor_facts_for_tabs_and_for_a_cursor_after_typed_text():
+    tabs = completion.cursor_facts("def f():\n\tif x:\n\t\t", "")
+    assert "2 tabs typed" in tabs and "indents one level with a tab" in tabs
+    mid = completion.cursor_facts("x = foo(", ")")
+    assert "follows text already typed" in mid and "more text follows the cursor" in mid
+
+
+def test_the_prompt_carries_the_cursor_facts():
+    request = CompletionRequest("a.py", "python", "def f():\n    ", "", )
+    assert "Cursor: the cursor's line has 4 spaces" in build_user_prompt(request, [])
+
+
+def test_a_reply_of_only_blanks_is_no_suggestion():
+    assert clean_model_output("       ", "x = 1\n        ") == ""
+    assert clean_model_output("\n\n", "x = 1\n") == ""
+
+
+# ── what stands to the right of the cursor ───────────────────────────────
+
+
+@pytest.mark.parametrize("reply, suffix, expected", [
+    ('}")', '}")\n', ""),                               # the whole reply is already in the file
+    ('"Toyota", 2022)', ")\nnext()", '"Toyota", 2022'),  # the closer after the cursor is the file's
+    ("foo(x)", ")\n", "foo(x)"),                         # a closer the reply opened itself is its own
+    ('Hello"', '"\n', "Hello"),                          # a quote the reply did not open
+    ('"Hello"', '"\n', '"Hello"'),                       # a quote the reply opened
+    ("x = 1", "\n", "x = 1"),                            # nothing follows the cursor
+    ("x, y", "foo\n)", "x, y"),                          # text, not a closer, follows
+    ("2022", "2022)\nnext()", ""),                       # the argument is already there
+    ('"Camry", 2022', "2022)\n", '"Camry", '),            # its end is
+    ("a1", "1)\n", "a1"),                                # one coincident letter is not an overlap
+    ("foo(2022)", "2022)\n", "foo(2022)"),               # its own closer: nothing is cut
+])
+def test_closers_the_file_already_has_are_not_written_again(reply, suffix, expected):
+    assert clean_model_output(reply, "call(", suffix) == expected
+
+
+def test_streamed_closers_wait_until_the_reply_has_ended():
+    cleaner = completion.CompletionStreamCleaner("call(", ")\n")
+    pieces = [cleaner.feed("a, b"), cleaner.feed(")"), cleaner.finish()]
+    assert "".join(pieces) == "a, b"
+
+
+def test_a_reply_wrapped_in_single_backticks_is_unwrapped():
+    assert clean_model_output('`Car("Toyota")`', "x = ") == 'Car("Toyota")'
+    assert clean_model_output("a `b` c", "x = ") == "a `b` c"
+
+
+def test_the_cursor_line_is_shown_with_a_mark_inside_an_untrusted_block():
+    request = CompletionRequest("a.py", "python", 'print(f"{self.color', '}")\nnext()\n')
+    prompt = build_user_prompt(request, [])
+    assert 'source="cursor_line"' in prompt
+    assert f'print(f"{{self.color{completion.CURSOR_MARK}}}")' in prompt
+
+
+def test_the_model_is_given_more_than_thirty_lines_after_the_cursor():
+    suffix = "".join(f"line {number}\n" for number in range(120))
+    prompt = build_user_prompt(CompletionRequest("a.py", "python", "x = ", suffix), [])
+    assert "line 119" in prompt
+
+
+def test_the_cursor_facts_say_when_the_line_is_a_comment():
+    assert "the cursor's line is a comment" in completion.cursor_facts("x = 1\n# fix the", "\n", "python")
+    assert "becomes part of the comment" in completion.cursor_facts("x = 1\n# fix the", "\n", "python")
+    assert "is a comment" not in completion.cursor_facts("x = 1\n# fix the", "\n", "")
+    assert "is a comment" in completion.cursor_facts("int x;\n// note", "", "java")
+    assert "is a comment" not in completion.cursor_facts("x = 1  ", "", "python")
+
+
+@pytest.mark.parametrize("prefix, reply, expected", [
+    ("# характеристики машины", " машины", ""),              # the last word again
+    ("# fix the bug", "the bug", ""),                        # the end of the line again
+    ("# характеристики машин", "ы", "ы"),                    # finishing a word
+    ("print(foo(x)", ")", ")"),                              # closers can be legitimate
+    ("x = fo", "o", "o"),                                    # one letter is a word being finished
+    ("def f():\n    return a", "\n    return a", "\n    return a"),   # several lines are not a tail
+])
+def test_the_end_of_what_is_typed_is_not_suggested_again(prefix, reply, expected):
+    assert clean_model_output(reply, prefix) == expected

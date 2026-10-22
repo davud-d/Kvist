@@ -60,7 +60,15 @@ and interpreter start-up and the provider connection are paid once. Where the
 provider supports streaming the core streams the reply; VS Code shows the
 suggestion once it is complete.
 
-Automatic requests wait for **300 ms without typing** by default
+A suggestion may also **replace** text instead of continuing it: when what you
+just typed or the line stands wrong (a typo, a stale name), the editor shows the
+old text struck through and the new text, possibly several lines, beside it.
+The replaced piece is always on the cursor's line and is checked against the
+file by the core, so a quotation that does not match is dropped. The extension
+asks for this with `edits` in its request; a replacement is reused from history
+only at the exact spot it was made, since typing changes what it replaces.
+
+Automatic requests wait for **100 ms without typing** by default
 (`kvist.inlineCompletion.debounceMs`). A manual inline-suggestion request skips
 the pause. Matching input consumes the existing suggestion. A typo hides it;
 deleting the typo or undoing restores the cached suggestion immediately. History

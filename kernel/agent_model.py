@@ -112,6 +112,7 @@ _ROLE_PROMPT_FILES: dict[str, str] = {
     "report": "report_prompt.txt",
     "commit": "commit_prompt.txt",
     "complete": "complete_prompt.txt",
+    "complete_replace": "complete_replace_prompt.txt",
 }
 
 # Direct official-API providers (OpenAI, ChatGPT, Anthropic, DeepSeek) and

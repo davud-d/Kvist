@@ -34,6 +34,8 @@ data class CompletionPayload(
         json.addProperty("language", language)
         json.addProperty("prefix", prefix)
         json.addProperty("suffix", suffix)
+        // This editor can draw a deletion, so the core may offer a replacement.
+        json.addProperty("edits", true)
         return json
     }
 }
@@ -50,32 +52,40 @@ class KvistCompletionClient {
     private val history = CompletionHistory()
     private var server: CompletionServer? = null
 
-    fun cached(target: KvistTarget, payload: CompletionPayload): String? =
+    fun cached(target: KvistTarget, payload: CompletionPayload): Completion? =
         history.get(scopeOf(target), payload)
 
-    fun stream(target: KvistTarget, payload: CompletionPayload): Flow<String> = channelFlow {
+    /** Continuations arrive as pieces; a replacement arrives whole, as the only item. */
+    fun stream(target: KvistTarget, payload: CompletionPayload): Flow<Completion> = channelFlow {
         val server = serverFor(target)
         val events = Channel<JsonObject>(Channel.UNLIMITED)
         val id = server.start(payload) { events.trySend(it) }
         val text = StringBuilder()
+        var replacement: Completion? = null
         var finished = false
         try {
             withTimeoutOrNull(timeoutMs) {
                 for (event in events) {
+                    val replace = event.get("replace")?.takeIf { it.isJsonObject }?.asJsonObject
+                    if (replace != null) {
+                        replacement = parseReplacement(replace) ?: break
+                        send(replacement)
+                        continue
+                    }
                     val delta = event.get("delta")?.takeIf { it.isJsonPrimitive }?.asString
                     if (delta == null) {
                         finished = event.get("done")?.takeIf { it.isJsonPrimitive }?.asBoolean == true
                         break
                     }
                     text.append(delta)
-                    send(delta)
+                    send(Completion(delta))
                 }
             }
         }
         finally {
             server.finish(id, cancel = !finished)
         }
-        if (finished) history.set(scopeOf(target), payload, text.take(maxCompletionChars).toString())
+        if (finished) history.set(scopeOf(target), payload, replacement ?: Completion(text.take(maxCompletionChars).toString()))
     }
 
     @Synchronized
@@ -175,6 +185,19 @@ private class CompletionServer private constructor(val key: List<String>, privat
             return CompletionServer(key, process)
         }
     }
+}
+
+/** The `replace` object of a reply; null when it is not a text with whole offsets, so a bad one never becomes a range. */
+internal fun parseReplacement(replace: JsonObject): Completion? {
+    val text = replace.get("text")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isString }?.asString ?: return null
+    val before = replace.wholeOffset("before") ?: return null
+    val after = replace.wholeOffset("after") ?: return null
+    return Completion(text, before, after).takeIf { it.isReplacement }
+}
+
+private fun JsonObject.wholeOffset(name: String): Int? {
+    val value = get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asBigDecimal ?: return null
+    return runCatching { value.intValueExact() }.getOrNull()
 }
 
 /** One stdout line as a reply object with a numeric `id`; anything else (a stray warning) is not a reply. */

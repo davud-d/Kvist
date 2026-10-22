@@ -8,13 +8,19 @@ a fresh TLS connection per request; this process pays them once.
 Wire protocol, one JSON object per line.
 
 stdin (IDE → Kvist):
-  ``{"id": N, "file_path", "language", "prefix", "suffix"}``  start request N.
+  ``{"id": N, "file_path", "language", "prefix", "suffix"[, "edits": true]}``
+                                                            start request N.
+                                                            ``edits`` says the editor can draw a deletion.
   ``{"cancel": N}``                                         stop request N.
 A new request also cancels every request still running: the editor has moved
 on, and its answer could only be discarded.
 
 stdout (Kvist → IDE), ASCII only:
   ``{"id": N, "delta": "text"}``   the next piece of the completion.
+  ``{"id": N, "replace": {"before": b, "after": a, "text": "new"}}``
+                                   only for ``edits`` requests: ``text`` takes the
+                                   place of the ``b`` UTF-16 units before the cursor
+                                   through the ``a`` after it. Sent instead of deltas.
   ``{"id": N, "done": true}``      the completion is complete.
   ``{"id": N, "error": "text"}``   the request failed.
 A cancelled request sends nothing further. EOF on stdin ends the process.
@@ -25,11 +31,13 @@ import io
 import json
 import sys
 import threading
+from dataclasses import asdict
 from pathlib import Path
 from typing import IO, Any
 
 from kernel.completion import (
     CompletionError,
+    Replacement,
     _ModelCaller,
     _build_caller,
     completion_target,
@@ -108,6 +116,9 @@ class CompletionServer:
             for piece in iter_completion(caller, model, request, messages, stop.is_set):
                 if stop.is_set():
                     return
+                if isinstance(piece, Replacement):
+                    self._send({"id": request_id, "replace": asdict(piece)})
+                    continue
                 self._send({"id": request_id, "delta": piece})
             if not stop.is_set():
                 self._send({"id": request_id, "done": True})

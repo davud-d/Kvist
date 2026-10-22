@@ -62,8 +62,8 @@ MAX_COMPLETION_CHARS = 2_000
 # Imports live at the top of a file; scanning further only costs time on a
 # file that will not benefit from the enrichment anyway.
 IMPORT_SCAN_CHARS = 4_000
-MAX_PREFIX_CHARS = 6_000
-MAX_SUFFIX_CHARS = 1_500
+MAX_PREFIX_CHARS = 8_000
+MAX_SUFFIX_CHARS = 4_000
 # Defensive ceiling on the raw payload, independent of whatever cap the
 # client already applied — the client's cap is never trusted on its own.
 MAX_RAW_FIELD_CHARS = 200_000
@@ -83,6 +83,11 @@ _WORD_AT_END_RE = re.compile(r"[A-Za-z_]\w*$")
 _WORD_AT_START_RE = re.compile(r"[A-Za-z_]\w*")
 _MIN_REWRITE_WORD_CHARS = 4
 _REWRITE_SIMILARITY = 0.8
+# A replacement reply: the old text, then the new text (see complete_replace_prompt.txt).
+_REPLACE_OPEN = "<<<REPLACE"
+_REPLACE_WITH = "\n>>>WITH\n"
+_REPLACE_END = "\n>>>END"
+_INSERT_ONLY_RULE = "- Only insert text after the cursor."
 
 
 class CompletionError(ValueError):
@@ -95,6 +100,22 @@ class CompletionRequest:
     language: str
     prefix: str
     suffix: str
+    # Only a client that can draw a deletion asks for replacements; the others
+    # would paste the new text next to the old.
+    edits: bool = False
+
+
+@dataclass(slots=True)
+class Replacement:
+    """New text for the span from ``before`` units left of the cursor to ``after`` units right of it.
+
+    Either may be negative: a span on the cursor's line that lies wholly to one side of it.
+    Units are UTF-16 code units: the editors the offsets go to count that way.
+    """
+
+    before: int
+    after: int
+    text: str
 
 
 class _StderrUI:
@@ -146,6 +167,7 @@ def request_from_payload(payload: object) -> CompletionRequest:
         language=language.strip().lower(),
         prefix=prefix[-MAX_RAW_FIELD_CHARS:],
         suffix=suffix[:MAX_RAW_FIELD_CHARS],
+        edits=payload.get("edits") is True,
     )
 
 
@@ -189,13 +211,93 @@ def _render_imports_block(resolved: list[ResolvedImport]) -> str:
     return _wrap_untrusted("project_imports", "\n\n".join(parts))
 
 
+def _indent_of(line: str) -> str:
+    return line[: len(line) - len(line.lstrip(" \t"))]
+
+
+def _describe_indent(indent: str) -> str:
+    if not indent:
+        return "no indentation"
+    if "\t" in indent:
+        return f"{len(indent)} tab{'s' if len(indent) != 1 else ''}"
+    return f"{len(indent)} spaces"
+
+
+def _indent_unit(lines: list[str]) -> str | None:
+    """How the file indents one level, read off its own lines: tabs, or the smallest step in spaces."""
+    indents = [_indent_of(line) for line in lines if line.strip()]
+    if any(indent.startswith("\t") for indent in indents):
+        return "a tab"
+    widths = sorted({len(indent) for indent in indents if indent})
+    if not widths:
+        return None
+    steps = [later - earlier for earlier, later in zip([0, *widths], widths)]
+    return f"{min(steps)} spaces"
+
+
+_LINE_COMMENT = {
+    **dict.fromkeys(("python", "py", "shellscript", "sh", "bash", "ruby", "rb", "yaml", "yml", "toml", "perl", "r",
+                     "makefile", "dockerfile", "powershell", "ps1"), "#"),
+    **dict.fromkeys(("javascript", "js", "typescript", "ts", "javascriptreact", "jsx", "typescriptreact", "tsx",
+                     "java", "kotlin", "kt", "c", "cpp", "cc", "h", "csharp", "cs", "go", "rust", "rs", "swift",
+                     "scala", "dart", "php"), "//"),
+    **dict.fromkeys(("sql", "lua", "haskell", "hs"), "--"),
+}
+
+
+def cursor_facts(prefix: str, suffix: str, language: str = "") -> str:
+    """What the model cannot see in the text itself: where in its line the cursor is and how the code indents."""
+    *above, typed = prefix.split("\n")
+    after = rest_of_line(suffix)
+    previous = next((line for line in reversed(above) if line.strip()), None)
+    facts = []
+    if typed.strip():
+        facts.append("the cursor follows text already typed on its line")
+    else:
+        facts.append(f"the cursor's line has {_describe_indent(typed)} typed before the cursor")
+    leader = _LINE_COMMENT.get(language)
+    if leader and typed.lstrip().startswith(leader):
+        facts.append(
+            "the cursor's line is a comment: anything written here becomes part of the comment, so a reply "
+            "can only continue its words on this line (or be NO_COMPLETION)"
+        )
+    if after.strip():
+        facts.append("more text follows the cursor on the same line")
+    if previous is not None:
+        opens = previous.rstrip().endswith((":", "{", "(", "["))
+        facts.append(
+            f"the nearest non-empty line above is indented {_describe_indent(_indent_of(previous))}"
+            + (" and opens a block" if opens else "")
+        )
+    unit = _indent_unit(prefix.split("\n")[-200:])
+    if unit:
+        facts.append(f"the file indents one level with {unit}")
+    return "; ".join(facts) + "."
+
+
+# Shows the model exactly where its reply lands; the character cannot be mistaken for code.
+CURSOR_MARK = "⟦cursor⟧"
+_CURSOR_LINE_SIDE = 120
+
+
+def cursor_line(prefix: str, suffix: str) -> str:
+    typed = prefix.rsplit("\n", 1)[-1][-_CURSOR_LINE_SIDE:]
+    rest = suffix.split("\n", 1)[0][:_CURSOR_LINE_SIDE]
+    return f"{typed}{CURSOR_MARK}{rest}"
+
+
 def build_user_prompt(request: CompletionRequest, resolved_imports: list[ResolvedImport]) -> str:
     prefix = request.prefix[-MAX_PREFIX_CHARS:]
     suffix = request.suffix[:MAX_SUFFIX_CHARS]
-    sections = [f"Language: {request.language or 'unknown'}", f"File: {request.file_path}"]
+    sections = [
+        f"Language: {request.language or 'unknown'}",
+        f"File: {request.file_path}",
+        f"Cursor: {cursor_facts(prefix, suffix, request.language)}",
+    ]
     imports_block = _render_imports_block(resolved_imports)
     if imports_block:
         sections.append(imports_block)
+    sections.append(_wrap_untrusted("cursor_line", cursor_line(prefix, suffix)))
     sections.append(_wrap_untrusted("prefix", prefix))
     sections.append(_wrap_untrusted("suffix", suffix))
     return "\n\n".join(sections)
@@ -256,9 +358,64 @@ def _unfence(text: str) -> str:
     return body[:-3].rstrip("\n") if body.endswith("```") else body
 
 
+def _unquote_inline(text: str) -> str:
+    """A reply wrapped in single backticks, as chat models like to write code."""
+    if text.count("`") == 2 and text.startswith("`") and text.endswith("`") and "\n" not in text:
+        return text[1:-1]
+    return text
+
+
 def _strip_markup(raw: str, prefix: str) -> str:
     text = _strip_echo(_unfence(_cut_tool_markup(raw)), prefix)
-    return text[:MAX_COMPLETION_CHARS]
+    return _unquote_inline(text)[:MAX_COMPLETION_CHARS]
+
+
+_OPENERS = {")": "(", "]": "[", "}": "{"}
+_QUOTES = "\"'`"
+
+
+def _unclosed_brackets(text: str) -> list[str]:
+    stack: list[str] = []
+    for char in text:
+        if char in "([{":
+            stack.append(char)
+        elif char in _OPENERS and stack and stack[-1] == _OPENERS[char]:
+            stack.pop()
+    return stack
+
+
+def _closes_what_text_opened(closers: str, text: str) -> bool:
+    stack = _unclosed_brackets(text)
+    for char in closers:
+        if char in _OPENERS and stack and stack[-1] == _OPENERS[char]:
+            return True
+        if char in _QUOTES and text.count(char) % 2 == 1:
+            return True
+    return False
+
+
+_HELD_AT_MOST = 40
+
+
+def rest_of_line(suffix: str) -> str:
+    return suffix.split("\n", 1)[0]
+
+
+def _trim_suffix_overlap(text: str, suffix: str) -> str:
+    """Drop the end of the reply that the file already has right after the cursor.
+
+    A model that cannot tell a bracket, or the argument after the cursor, is already there writes
+    it a second time. One closing character is enough to recognise; any other text needs two, so a
+    chance match of one letter is left alone. A closer the reply opened itself is its own and stays.
+    """
+    rest = rest_of_line(suffix)
+    for length in range(min(len(rest), len(text)), 0, -1):
+        piece = rest[:length]
+        if length == 1 and piece not in ")]}" + _QUOTES:
+            continue
+        if text.endswith(piece) and not _closes_what_text_opened(piece, text[:-length]):
+            return text[:-length]
+    return text
 
 
 def _rewrites_word_before_cursor(text: str, prefix: str) -> bool:
@@ -278,11 +435,94 @@ def _rewrites_word_before_cursor(text: str, prefix: str) -> bool:
     return SequenceMatcher(None, typed, replied).ratio() >= _REWRITE_SIMILARITY
 
 
-def clean_model_output(raw: str, prefix: str) -> str:
+def _repeats_what_is_typed(text: str, prefix: str) -> bool:
+    """True when the reply is only the end of the line again, e.g. the last word of a comment just typed.
+
+    One character is left alone: ``fo`` + ``o`` is a word being finished, not an echo. Closing brackets
+    and quotes are left out too: a second ``)`` can close an outer call.
+    """
+    reply = text.strip()
+    if len(reply) < 2 or "\n" in text or all(char in ")]}" + _QUOTES for char in reply):
+        return False
+    return prefix.rsplit("\n", 1)[-1].rstrip().endswith(reply)
+
+
+def clean_model_output(raw: str, prefix: str, suffix: str = "") -> str:
     if NO_COMPLETION in raw:
         return ""
-    text = _strip_markup(raw, prefix)
-    return "" if _rewrites_word_before_cursor(text, prefix) else text
+    if _replacement_body(raw) is not None:
+        return ""
+    text = _trim_suffix_overlap(_strip_markup(raw, prefix), suffix)
+    # Only blanks is no suggestion: it would show as an empty ghost that Tab accepts.
+    if not text.strip() or _repeats_what_is_typed(text, prefix) or _rewrites_word_before_cursor(text, prefix):
+        return ""
+    return text
+
+
+def _replacement_body(raw: str) -> str | None:
+    body = _unfence(_cut_tool_markup(raw)).lstrip()
+    return body if body.startswith(_REPLACE_OPEN) else None
+
+
+def _utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def parse_replacement(raw: str, request: CompletionRequest) -> Replacement | str | None:
+    """The replacement a reply asks for, or None when it is not one.
+
+    The old text is the model's quotation; it is only believed where it really
+    stands on the cursor's line (the nearest place, when it occurs twice), which
+    also fixes how far it reaches to each side of the cursor.
+
+    A reply that keeps everything left of the cursor does not delete it: the model has
+    retyped the line to add to it, which is a continuation, or a replacement of the
+    right side only.
+    """
+    body = _replacement_body(raw)
+    if body is None or NO_COMPLETION in raw:
+        return None
+    old, with_marker, rest = body[len(_REPLACE_OPEN):].removeprefix("\n").partition(_REPLACE_WITH)
+    if not with_marker:
+        return None
+    new = _cut_tool_markup(rest.partition(_REPLACE_END)[0])
+    # Editors take a replaced range on one line; the new text may have many.
+    if not old or "\n" in old or old == new or len(new) > MAX_COMPLETION_CHARS:
+        return None
+    left = request.prefix.rsplit("\n", 1)[-1]
+    line = left + request.suffix.split("\n", 1)[0]
+    start = _nearest_occurrence(line, old, len(left))
+    if start is None:
+        return None
+    end = start + len(old)
+    if start <= len(left) <= end:
+        return _keep_typed_text(old, new, len(left) - start)
+    return Replacement(_signed_utf16(line, start, len(left)), _signed_utf16(line, len(left), end), new)
+
+
+def _nearest_occurrence(line: str, old: str, cursor: int) -> int | None:
+    best: tuple[int, int] | None = None
+    start = line.find(old)
+    while start != -1:
+        distance = max(start - cursor, cursor - (start + len(old)), 0)
+        if best is None or distance < best[0]:
+            best = (distance, start)
+        start = line.find(old, start + 1)
+    return None if best is None else best[1]
+
+
+def _signed_utf16(text: str, a: int, b: int) -> int:
+    """UTF-16 units from ``a`` to ``b``, negative when ``b`` lies before ``a``."""
+    return _utf16_len(text[a:b]) if a <= b else -_utf16_len(text[b:a])
+
+
+def _keep_typed_text(old: str, new: str, split: int) -> Replacement | str:
+    typed, rest = old[:split], old[split:]
+    if not typed or not new.startswith(typed):
+        return Replacement(_utf16_len(typed), _utf16_len(rest), new)
+    if not rest:
+        return new[split:]
+    return Replacement(0, _utf16_len(rest), new[split:])
 
 
 def _resolve_provider() -> str:
@@ -346,6 +586,11 @@ def _build_caller() -> tuple[_ModelCaller, str]:
     return _ModelCaller(client=client, config=config, _ui=_StderrUI()), model
 
 
+# Names for "as little reasoning as the model allows", lowest first, tried in turn on a rejection.
+# "instant" is how Inception's Mercury spells what OpenAI calls "none".
+_EFFORT_LADDER = ("none", "minimal", "instant", "low")
+
+
 def _request_completion(caller: _ModelCaller, model: str, messages: list[dict], stream: bool) -> Any:
     # Completion has its own latency policy, independent of chat's /effort or env.
     # Omit sampling controls: reasoning-only models often reject temperature.
@@ -367,8 +612,8 @@ def _request_completion(caller: _ModelCaller, model: str, messages: list[dict], 
             # A model may require reasoning. Try its lowest supported effort,
             # and only omit the control if the endpoint rejects it altogether.
             effort = kwargs.get("reasoning_effort")
-            if effort in ("none", "minimal"):
-                kwargs["reasoning_effort"] = "minimal" if effort == "none" else "low"
+            if effort in _EFFORT_LADDER[:-1]:
+                kwargs["reasoning_effort"] = _EFFORT_LADDER[_EFFORT_LADDER.index(effort) + 1]
                 continue
             stripped = strip_reasoning_kwargs(kwargs)
             if stripped == kwargs:
@@ -386,11 +631,18 @@ class CompletionStreamCleaner:
     turn out to be one of them.
     """
 
-    def __init__(self, prefix: str) -> None:
+    def __init__(self, prefix: str, suffix: str = "") -> None:
         self._prefix = prefix
+        self._suffix = suffix
+        # What the reply may still turn out to repeat from the file is not shown until it ends.
+        self._held = min(len(rest_of_line(suffix)), _HELD_AT_MOST)
         self._echo_starts = tuple(text for text, _ in _echo_candidates(prefix))
         self._raw = ""
         self.emitted = 0
+
+    @property
+    def raw(self) -> str:
+        return self._raw
 
     def feed(self, piece: str) -> str:
         self._raw += piece
@@ -405,14 +657,17 @@ class CompletionStreamCleaner:
         stripped = self._raw.lstrip()
         if stripped.startswith("```") or "```".startswith(stripped):
             return True
+        if _REPLACE_OPEN.startswith(stripped) or _replacement_body(self._raw) is not None:
+            return True
         if any(start.startswith(self._raw) for start in self._echo_starts):
             return True
         # The first word is not known until a character that ends it arrives.
         return self.emitted == 0 and _WORD_AT_START_RE.fullmatch(_strip_markup(self._raw, self._prefix)) is not None
 
     def _new_text(self, final: bool) -> str:
-        cleaned = clean_model_output(self._raw, self._prefix)
+        cleaned = clean_model_output(self._raw, self._prefix, self._suffix)
         if not final:
+            cleaned = cleaned[: max(len(cleaned) - self._held, 0)]
             partial_tag = _PARTIAL_TAG_RE.search(cleaned)
             if partial_tag:
                 cleaned = cleaned[:partial_tag.start()]
@@ -434,12 +689,22 @@ def _stream_pieces(stream: Any) -> Iterator[str]:
             close()
 
 
+def _system_prompt(request: CompletionRequest) -> str:
+    base = _load_role_prompt("complete")
+    if not request.edits:
+        return base
+    # The base rule forbids touching the word before the cursor; the replacement section lifts it,
+    # and a model shown both follows the stricter one.
+    kept = [line for line in base.splitlines() if not line.startswith(_INSERT_ONLY_RULE)]
+    return "\n".join(kept) + "\n\n" + _load_role_prompt("complete_replace")
+
+
 def prepare_completion(request: CompletionRequest, workspace: Path) -> list[dict]:
     target_file = _resolve_target_file(workspace, request.file_path)
     raw_imports = extract_raw_imports(request.prefix[:IMPORT_SCAN_CHARS], request.language)
     resolved_imports = resolve_project_imports(workspace, target_file, raw_imports, request.language)
     return [
-        {"role": "system", "content": _load_role_prompt("complete")},
+        {"role": "system", "content": _system_prompt(request)},
         {"role": "user", "content": build_user_prompt(request, resolved_imports)},
     ]
 
@@ -450,16 +715,17 @@ def iter_completion(
     request: CompletionRequest,
     messages: list[dict],
     should_stop: Callable[[], bool] = lambda: False,
-) -> Iterator[str]:
+) -> Iterator[str | Replacement]:
     """Yield the completion text in pieces as the model produces it.
 
     Providers without verified streaming answer with one piece. Stops early,
     closing the provider stream, once ``should_stop`` is true or the reply
-    reaches ``MAX_COMPLETION_CHARS``.
+    reaches ``MAX_COMPLETION_CHARS``. A replacement is only known once the
+    whole reply is in, so it comes as a single last item.
     """
     provider = caller.config.provider
     streaming = provider_supports_streaming(provider)
-    cleaner = CompletionStreamCleaner(request.prefix[-MAX_PREFIX_CHARS:])
+    cleaner = CompletionStreamCleaner(request.prefix[-MAX_PREFIX_CHARS:], request.suffix[:MAX_SUFFIX_CHARS])
     try:
         if should_stop():
             return
@@ -472,8 +738,12 @@ def iter_completion(
             fresh = cleaner.feed(piece)
             if fresh:
                 yield fresh
-            if should_stop() or cleaner.emitted >= MAX_COMPLETION_CHARS:
+            if should_stop() or cleaner.emitted >= MAX_COMPLETION_CHARS or len(cleaner.raw) >= 2 * MAX_COMPLETION_CHARS:
                 return
+        replacement = parse_replacement(cleaner.raw, request) if request.edits else None
+        if replacement:
+            yield replacement
+            return
         tail = cleaner.finish()
         if tail:
             yield tail
@@ -487,4 +757,4 @@ def generate_completion(payload_text: str, workspace: Path) -> str:
     request = parse_payload(payload_text)
     messages = prepare_completion(request, workspace)
     caller, model = _build_caller()
-    return "".join(iter_completion(caller, model, request, messages))
+    return "".join(piece for piece in iter_completion(caller, model, request, messages) if isinstance(piece, str))

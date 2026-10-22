@@ -3,7 +3,7 @@ import { BinaryResolver } from './binaryResolver';
 import { CompletionClient, buildCompletionRequest, isDocumentTooLargeForCompletion } from './completionClient';
 
 const CONFIG_SECTION = 'kvist.inlineCompletion';
-const DEFAULT_DEBOUNCE_MS = 300;
+const DEFAULT_DEBOUNCE_MS = 100;
 
 /**
  * Inline completion (ghost text) provider. Requests go to a dedicated
@@ -59,10 +59,24 @@ export class KvistInlineCompletionProvider implements vscode.InlineCompletionIte
             binaryPath, folder.uri.fsPath, request, token,
             context.triggerKind === vscode.InlineCompletionTriggerKind.Invoke
         );
-        if (token.isCancellationRequested || document.version !== version || !completion.trim()) {
+        if (token.isCancellationRequested || document.version !== version || !completion.text.trim()) {
             return undefined;
         }
-        return [new vscode.InlineCompletionItem(completion, new vscode.Range(position, position))];
+        const offset = document.offsetAt(position);
+        const range = new vscode.Range(
+            document.positionAt(offset - completion.before), document.positionAt(offset + completion.after)
+        );
+        const item = new vscode.InlineCompletionItem(completion.text, range);
+        if (completion.before || completion.after) {
+            // A plain item is ghost text: VS Code shows it only when what was typed in its range is a
+            // prefix of the new text, which a correction never is. `isInlineEdit` (proposed API
+            // `inlineCompletionsAdditions`, ignored unless the user enables it for this extension) draws
+            // it as a real edit with the old text struck through; `filterText` keeps the item from being
+            // dropped before that.
+            item.filterText = document.getText(range);
+            Object.assign(item, { isInlineEdit: true });
+        }
+        return [item];
     }
 
     private isEnabled(): boolean {
