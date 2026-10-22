@@ -13,6 +13,13 @@ export interface ConfigInfo {
     saved_provider: string;
     saved_role: string;
     providers: ProviderInfo[];
+    // Providers the person defined themselves (id `custom:<name>`) are listed apart from the built-in ones.
+    custom_providers?: ProviderInfo[];
+}
+
+/** A provider by id, among the built-in ones and the person's own. */
+export function findProvider(info: ConfigInfo, id: string): ProviderInfo | undefined {
+    return [...info.providers, ...(info.custom_providers ?? [])].find((item) => item.id === id);
 }
 
 export interface SessionItem {

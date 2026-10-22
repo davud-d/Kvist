@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks"
 
 import { EFFORTS } from "../../../tui/ink/commands"
+import { findProvider } from "../src/messages"
 import type { ConfigInfo } from "../src/messages"
 import { post } from "./host"
 import { Icon } from "./icons"
@@ -130,7 +131,7 @@ export function Settings({ config, provider, role, effort, environment, busy, ru
     post({ type: "getConfig" })
     post({ type: "getEnvironment" })
   }, [])
-  const current = config?.providers.find((item) => item.id === provider)
+  const current = config && findProvider(config, provider)
 
   return (
     <div class="settings">

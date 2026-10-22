@@ -7,6 +7,7 @@ import { BinaryResolver } from './binaryResolver';
 import { splitEnvironment } from './environment';
 import { pickWorkspaceFiles } from './filePicker';
 import type { JournalEvent } from '../../../tui/ink/protocol';
+import { findProvider } from './messages';
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToHost, ToWebview } from './messages';
 
 // The newest events of a session: enough for well over a hundred turns of a typical run.
@@ -152,7 +153,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             return;
         }
         const info = await readJson<ConfigInfo>(command, workspace, ['--config-info']);
-        const current = info?.providers.find((item) => item.id === info.saved_provider);
+        const current = info && findProvider(info, info.saved_provider);
         if (info && !current?.has_credentials) {
             // FIRST_RUN_PROVIDERS' own order is the priority order (AnyModel first, Kvist's
             // own shipped default); the source list isn't sorted that way, so this is too.

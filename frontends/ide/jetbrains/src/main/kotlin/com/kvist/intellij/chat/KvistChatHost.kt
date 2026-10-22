@@ -208,7 +208,9 @@ internal class KvistChatHost(
         val info = KvistCli.readJson(target, listOf("--config-info"))
         if (info != null) {
             val providers = info.objectList("providers")
-            val current = providers.find { it.stringField("id") == info.stringField("saved_provider") }
+            // The person's own providers (`custom:<name>`) are listed apart from the built-in ones.
+            val current = (providers + info.objectList("custom_providers"))
+                .find { it.stringField("id") == info.stringField("saved_provider") }
             if (current?.booleanField("has_credentials") != true) {
                 val offered = FIRST_RUN_PROVIDERS.mapNotNull { id -> providers.find { it.stringField("id") == id } }
                 post(message("needsSetup") { add("providers", jsonArrayOf(offered)) })
