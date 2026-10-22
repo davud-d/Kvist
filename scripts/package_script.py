@@ -34,9 +34,13 @@ def create_source_archive(
 
 
 def main() -> None:
-    archive = create_source_archive()
-    print(f"Created {archive}")
-
+    try:
+        archive = create_source_archive()
+        print(f"Created {archive}")
+    except KeyboardInterrupt:
+        print("Interrupted; no archive created.")
+    except Exception as exc:
+        print(f"Failed to create archive: {exc}")
 
 if __name__ == "__main__":
     main()
