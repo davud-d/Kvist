@@ -169,10 +169,13 @@ From source:
 .venv/bin/python -m kernel --frontend claude   # Claude Code style skin of the same app
 .venv/bin/python -m kernel --frontend terminal # Classic Legacy terminal
 .venv/bin/python -m kernel --frontend voice    # voice screen (kitty/Ghostty; build it first, see frontends/voice/README.md)
+(cd frontends/tui/opencode && bun install)    # once; Bun 1.3.14+, no build step
+.venv/bin/python -m kernel --frontend opencode # OpenCode's terminal interface (frontends/tui/opencode/README.md)
 ```
 
 `/tui` saves the choice. If Node.js, the built file, a provider or a TTY is
-missing, Kvist starts Classic Legacy and says why. The Claude-style skin
+missing, Kvist starts Classic Legacy and says why; the OpenCode interface falls
+back to Ink the same way (no Bun, no `bun install`, no TTY). The Claude-style skin
 uses the alternate screen, so it scrolls itself (`PgUp`/`PgDn`,
 `Ctrl+Home`/`Ctrl+End`, mouse wheel) and handles the mouse: drag selects, double
 click selects a word, triple click a line, and `Shift` plus drag uses the

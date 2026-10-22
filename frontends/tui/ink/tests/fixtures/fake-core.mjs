@@ -15,6 +15,29 @@ if (args.includes("--session-op")) {
 
 out({ type: "hello", protocol_version: process.env.FAKE_PROTOCOL ? Number(process.env.FAKE_PROTOCOL) : 1, provider: "fake", models: { fast: "fake-fast" }, role: "auto", session: "chat-fake" })
 
+// Only for frontends that fill their pickers from the manifest (UI_API.md §7); the Ink app ignores it.
+if (process.env.FAKE_MANIFEST) {
+  out({
+    type: "manifest",
+    roles: [
+      { value: "auto", description: "Auto-detect role based on the task" },
+      { value: "coder", description: "Edits code and runs checks" },
+      { value: "reader", description: "Reads and reports, never writes" },
+      { value: "devops", description: "Shell and infrastructure work" },
+      { value: "chat", description: "Plain conversation, no tools" },
+    ],
+    effort_levels: ["false", "low", "medium", "high", "xhigh", "max"].map((value) => ({ value, description: `effort ${value}`, default: value === "medium" ? "true" : "" })),
+    providers: [{ value: "fake", label: "Fake Provider" }, { value: "other", label: "Other Provider" }],
+    model_roles: ["fast", "smart"],
+    default_models: {},
+    action_types: [],
+    slash_commands: [],
+    api_settings: [],
+    styles: [],
+    themes: { available: [], slots: [] },
+  })
+}
+
 const waiting = new Map()
 const rl = readline.createInterface({ input: process.stdin })
 
@@ -101,6 +124,10 @@ async function turn(goal) {
     // Drives the secret / text dialogs from a turn, without going through a command.
     const reply = await ask(goal === "secret" ? { kind: "secret", title: "API key for fake", help_text: "Stored in ~/.kvist/config.json" } : { kind: "text", title: "Session name", current_value: "chat-default" })
     out({ type: "final", message: `answered: ${reply.value === null ? "cancelled" : `${reply.value.length} chars`}`, user_messages: [] })
+  } else if (goal === "insult") {
+    // end_session closed the conversation: its closing words, then the notice for the input's place.
+    out({ type: "final", message: "This conversation is over.", user_messages: [], outcome: "incomplete", closed: true })
+    out({ type: "session_ended", session_id: "chat-fake", warned_msg_id: 1, closed_msg_id: 2, reason: "abuse", closed_notice: "conversation over \u00b7 Enter \u2014 new session" })
   } else if (goal === "slow") {
     await new Promise((resolve) => setTimeout(resolve, 400))
     out({ type: "final", message: "done: slow", user_messages: [] })
@@ -284,7 +311,16 @@ const handlers = {
   },
   async new(args) {
     const name = args[0] ?? "chat-new"
+    out({ type: "session", session: name, has_checkpoint: false })
     finish("new", true, `Session ${name} created. / ${TR}`, { session: name, sessions: ["chat-fake", name], has_checkpoint: false, changed: true })
+  },
+  async catalog() {
+    finish("catalog", true, "", {
+      providers: [
+        { provider: "fake", label: "Fake Provider", current: true, chosen: { fast: "fake-fast", smart: "fake-smart" }, models: ["fake-fast", "fake-smart", "fake-mini"] },
+        { provider: "other", label: "Other Provider", current: false, chosen: { fast: "other-a", smart: "other-b" }, models: ["other-a", "other-b"] },
+      ],
+    })
   },
   async changes() {
     await pause()

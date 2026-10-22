@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid",
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [
+      "bun"
+    ],
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@opencode/theme/tui": [
+        "./src/oc/theme/index.ts"
+      ],
+      "@opencode/theme/tui/v1": [
+        "./src/oc/theme/v1.ts"
+      ],
+      "@opencode/plugin/tui/context": [
+        "./src/oc/plugin/tui/context.ts"
+      ],
+      "@opencode/client": [
+        "./src/oc/client.ts"
+      ],
+      "@opencode/client/promise": [
+        "./src/oc/client.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
+  ]
+}

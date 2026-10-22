@@ -174,10 +174,13 @@ Kvist. `AGENT_NATIVE_TOOLS=0` включает JSON-протокол прину�
 .venv/bin/python -m kernel --frontend claude   # скин в стиле Claude Code того же приложения
 .venv/bin/python -m kernel --frontend terminal # классический терминал
 .venv/bin/python -m kernel --frontend voice    # экран голоса (kitty/Ghostty; сначала соберите, см. frontends/voice/README.ru.md)
+(cd frontends/tui/opencode && bun install)    # один раз; Bun 1.3.14+, сборки нет
+.venv/bin/python -m kernel --frontend opencode # терминал OpenCode (frontends/tui/opencode/README.ru.md)
 ```
 
 `/tui` сохраняет выбор. Если нет Node.js, собранного файла, провайдера или TTY,
-Kvist запускает классический терминал и сообщает причину. Скин в стиле Claude
+Kvist запускает классический терминал и сообщает причину. Интерфейс OpenCode так же
+уходит на Ink (нет Bun, не выполнен `bun install`, нет TTY). Скин в стиле Claude
 работает на альтернативном экране, поэтому прокручивает ленту сам (`PgUp`/`PgDn`,
 `Ctrl+Home`/`Ctrl+End`, колесо мыши) и забирает мышь: протяжка выделяет текст,
 двойной клик — слово, тройной — строку, а `Shift` с протяжкой включает выделение

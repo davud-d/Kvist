@@ -153,9 +153,11 @@ kvist
 
 ## Интерфейсы
 
-- **Терминал.** Основной. Четыре вида одного приложения: Ink, в стиле Claude Code,
-  Classic (поверх фотографии, kitty или Ghostty) и Classic Legacy на
-  prompt_toolkit; переключение — `/tui`.
+- **Терминал.** Основной. Пять видов одного приложения: Ink, в стиле Claude Code,
+  терминал OpenCode (`/tui opencode`, нужен Bun;
+  [`frontends/tui/opencode`](frontends/tui/opencode/README.ru.md)), Classic (поверх
+  фотографии, kitty или Ghostty) и Classic Legacy на prompt_toolkit;
+  переключение — `/tui`.
 - **Голос.** Шар, с которым разговариваешь: скажи «Kvist», и она слушает,
   отвечает коротко вслух (`/tui voice`, kitty или Ghostty;
   [`frontends/voice`](frontends/voice/README.ru.md)).
@@ -256,13 +258,14 @@ devops) и `KVIST-CHAT.md`. Один раз опишите там команды
 .venv/bin/python -m pytest              # ядро, классический терминал, Zed, скрипты
 .venv/bin/python -m ruff check .
 (cd frontends/tui/ink && npm install && npm test)
+(cd frontends/tui/opencode && bun install && bun test)
 (cd frontends/ide/vscode && npm install && npm test)
 (cd frontends/gui/electron && npm ci && npm test)
 ```
 
 ```text
 kernel/            Python-ядро (python -m kernel)
-frontends/         tui/classic, tui/ink, gui/electron, ide/vscode, ide/jetbrains, zed, web-local, tray
+frontends/         tui/classic, tui/ink, tui/opencode, gui/electron, ide/vscode, ide/jetbrains, zed, web-local, tray
 scripts/           установщики и скрипты релиза
 docs/              протокол, скиллы, конфигурация, медиа
 site/              лендинг kvist.site

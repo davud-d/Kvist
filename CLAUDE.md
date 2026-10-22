@@ -20,6 +20,7 @@ frontends/
   tui/classic/          classic prompt_toolkit terminal (flat modules) + assets/ + tests/
   tui/ink/              Node/Ink terminal app, skins in ui/skins/{kvist,claude-code}/,
                         mascot/ (frames + generator), tests/ (npm test)
+  tui/opencode/         OpenCode's terminal interface on Kvist (TypeScript, OpenTUI + SolidJS, runs on Bun)
   tui/glass/            Rust interface over a photograph (kitty graphics only)
   gui/electron/         Electron desktop app
   ide/vscode/           VS Code extension; webview/ is the chat panel JetBrains reuses
@@ -845,6 +846,69 @@ alternate screen, SGR mouse, bracketed paste, row-diff painting, effects). Tests
   (`listing.listDrives`). Terminal.app's old `ESC [ M` mouse reports are parsed too. Linux is exercised
   for real; macOS and Windows are not.
 - Copy is bilingual (`setup/strings.ts`, locale from `KVIST_LANG`/`LC_ALL`/`LANG`).
+
+### OpenCode-style terminal (`frontends/tui/opencode/`, TypeScript: OpenTUI + SolidJS on Bun)
+OpenCode's *interface*, **copied from its MIT source** (`packages/tui`, `theme`, `plugin`) into `src/oc/` with the
+same relative paths and cut down to what Kvist has: none of its server, SDK, sessions, providers, agent loop,
+plugins or workspaces. The user's rule: the look must be OpenCode's own because the code is its own, not a lookalike;
+attribution lives in `THIRD_PARTY.md` and the README. Docs: `README.md` / `.ru.md`. Where OpenCode has what Kvist
+lacks, the nearest Kvist feature stands in: agents → roles (Shift+Tab), model variants → reasoning effort (Ctrl+T),
+todo/MCP → background jobs/skills, `/export` → the core's import, permission prompt → the core's approvals. Share,
+compaction, workspaces, terminal panes and plugins are absent. `/tui` lists it (`commands.FRONTENDS` in Ink), the saved
+value is `opencode`, `main.launch_opencode` runs `bun src/main.ts` with the same arguments, `KVIST_CORE_CMD`,
+`KVIST_SWITCH_FILE` (exit 64 switches) and `KVIST_COMMAND_FRONTEND=ink` as the Ink launcher; **no Bun, no
+`node_modules/@opentui`, no `main.ts` (release binaries do not ship it) or no TTY falls back to Ink with the reason**.
+No build step: `src/main.ts` imports `@opentui/solid/preload` (Solid's JSX transform is a Bun plugin) and only then
+`cli.tsx`, so it starts from any cwd; `bunfig.toml` does the same for `bun test` and `bun run`.
+- **Vendoring.** `tsconfig` `paths` alias OpenCode's package names (`@opencode/theme/tui`, `@opencode/plugin/tui/context`,
+  `@opencode/client`) to files in `src/oc/`, and `package.json` `imports` carries `#string-width`; the compiler options
+  are upstream's (`noUncheckedIndexedAccess: false`, lib ESNext+DOM, no `baseUrl` under TypeScript 7). Edits to a copied
+  file are only cuts or Kvist data (the wordmark in `oc/tui/logo.ts`, `oc/tui/config/index.tsx` and `oc/client.ts` are
+  small stand-ins for OpenCode's config and SDK types, `message-parts.tsx` has its plugin references removed). **When
+  updating from upstream, re-copy and re-apply those cuts; do not restyle a copied file.** Upstream's themes
+  (`oc/tui/theme/assets`, v1 migrated to v2 by `migrateV1`), key-binding layer (`Keymap.Provider/createLayer`, leader
+  `ctrl+x`, default ids like `session.new`, `agent.cycle`, `command.palette.show`), `DialogProvider/DialogSelect/
+  DialogPrompt/DialogConfirm`, `Toast` (**`<Toast/>` must be rendered**), `PatchDiff`, `SessionQuestion` (the approval
+  prompt), `InlineToolRow/ReasoningPart/TextPart`, spinner, logo components and `Selection` (copy on mouse release) are
+  used as they are.
+- **The core side is Ink's.** `src/kvist.tsx` is the only file that talks to the core, and it imports Ink's `state.ts`
+  (reducer), `core.ts`, `session.ts`, `format.ts`, `diff.ts`, `approval.ts`, `commands.ts`, `ui/logo.ts`: a change there is
+  checked from both sides, and the package must keep typechecking and testing **without Ink's `node_modules`**. The
+  reducer's `State` is one Solid signal; events that arrive together are folded in one `batch`. Never `{ equals: false }`
+  on it: every effect on it then fires on every event (a `setTerminalTitle` call did, and crashed the native renderer).
+- **Screens** (`src/screens/`, Kvist's own, laid out as upstream's): `home`, `session` (scrollbox, docked sidebar from
+  120 columns, overlay below), `prompt` (upstream's render tree; history, `/` and `@` lists are ours), `transcript`
+  (reducer items → OpenCode's rows: `tools.ts` words every action, `blockOf` says which get a block — run_shell,
+  write_file, append_file, replace_in_file; an edit's patch is made by `editPatch`; reads/searches arrive as the reducer's
+  `explored` labels, drawn as OpenCode's "Explored: N reads"), `approval` (SessionQuestion: once / always / reject,
+  `ARM_MS` guard, `Allow always` only when the core sent `remember_pattern`), `palette`, `dialogs` (sessions, roles,
+  effort, models via the core's `catalog` + fast/smart/both → `models PROVIDER FAST SMART`, rename, status, help),
+  `footers`, `sidebar`. `src/commands.tsx` lists the commands under OpenCode's ids and slash names plus `kvist.<name>`
+  for what only the core has. Route: home until an item other than the banner or a note exists. Notes (a command's result like "Role set to: coder", warnings, skill/helper notices) are toasts everywhere and never transcript rows (`visibleItems`); only an error note stays on the page (and is a toast on Home).
+- **Home logo** (`oc/tui/component/logo.tsx`): the wordmark Kvist prints on exit, i.e. Ink's `logoRows` (`ink/ui/logo.ts`, 48×6 cells large / 24×3 compact) in `LOGO_COLORS`, imported so the two never drift; OpenCode's own `go` mark only on a tiny window. The user rejected, in order: a smooth picture (clashes with OpenCode's pixel design; kitty graphics also drops alpha and left a patch on the terminal's background image), then a down-scaled pixel-art copy of `branding/logo.png` (unreadable). Keep it the crisp exit mark.
+- **Themes:** `oc/tui/theme/discovery.ts` skips any `system.json`. The core ships `kernel/themes/system.json`, and a custom theme named like the generated "system" made an endless reactive loop (GBs of memory, frozen, deaf to SIGHUP).
+- **Arrows** (`screens/prompt.tsx`): `prompt.history.previous/next` are a keymap layer (priority 1, target the textarea, off while the `/`/`@` list is open) copied in logic from OpenCode's own prompt: inside the text they move lines; at the edge the first press goes to the start/end, the next walks `kvist.history()` (recalled text puts the cursor at 0 for Up, at the end for Down). A handler in the textarea's `onKeyDown` never sees arrows (the managed textarea layer takes them first). Under an empty box on Home, with no typed history and no request, the Ink interface's `starterSet` (`ink/starters.ts`) offers three first requests that the same two commands choose among; `kvist.historyRead()` makes them wait for the history so they do not flash.
+- **A closed session** (`end_session`): `state.closed` (Ink's reducer) puts `screens/closed.tsx` in the prompt's place (the same slot as an approval, `approvalView` in `app.tsx`): laid out as Kvist Glass's `draw_closed`: one row in the prompt's frame, `×` and the core's `closed_notice` (its trailing "· Enter — new session" cut, `noticeWords`) on the left, `enter` and a clickable "New session"/"Новая сессия" button on the right (language from the notice); no editor, Enter or a click runs `/new` (the core's `session` event without `closed` brings the prompt back). The Ink fixture's `insult` goal drives it. **What a running turn shows, for every role:** `LiveRows` draws the in-flight calls, a live thought, the streamed words (the core streams an action role's `user_message` words through `live_markdown` too, not only chat) and, while none of those is there, a spinner with the core's `status` line (`Writing write_file → path · N characters · edit · step 3`). The e2e FakeProvider does not stream, so streamed words of an action role were not seen against the real core.
+- **Core questions are dialogs.** An `input_request` without `subject` opens a vendored DialogSelect/DialogPrompt/
+  DialogConfirm (`showRequest` in `app.tsx`; Esc answers `null`/`false`, guarded against answering twice); with a
+  `subject` it replaces the prompt.
+- **OpenTUI facts that cost time.** A global key handler runs **before** the focused renderable and `preventDefault()`
+  stops delivery to it; the managed textarea layer in the keymap handles Enter, so the `/`/`@` list navigates through a
+  keymap layer pushed in mode `"autocomplete"` (`prompt.autocomplete.*`). Inside a non-global mode `useCommands()` shrinks:
+  the slash candidates come from the static `commands` prop, never from it (reading it there flip-flops forever and hangs
+  the app). Dialog content renders inside `DialogProvider`, so providers it reads (`KvistProvider`) must wrap it.
+  `Show` with a function child needs a typed parameter. `mockInput.pressKey` takes `"ESCAPE"`, `"TAB"`, `"ARROW_DOWN"`
+  (tests map lowercase names), `typeText` is async. `bun test` shows `solid-js/dist/server.js` in stacks: the plugin
+  serves `solid.js` under that path. Theme files may name other slots and use `#rgb`; the kernel's `system.json`
+  (`ansicyan` refs) is not loadable by upstream's pipeline.
+- **Tests:** `tests/pure.test.ts` (modules without a screen) and `tests/app.test.tsx` (the whole app on `testRender` against
+  the Ink suite's scripted core; `SHOW_FRAMES=1` prints frames). They see characters, not colours: check the look in
+  kitty on a private Xvfb (`import -window <id>`, `LIBGL_ALWAYS_SOFTWARE=1`), with the real core and
+  `scripts/e2e_tools_smoke.py`'s `FakeProvider` for real events. CI: the `opencode` job in `platforms.yml` (Linux only).
+- **Open work:** the first-run setup screen's interface step does not offer it (it would need Bun detection there);
+  release binaries do not ship it; OpenCode's session tabs bar is not drawn; seen in kitty against the real core (also
+  through `--frontend opencode`): home, transcript, write/edit/shell blocks, approvals with a diff, palette, models,
+  sessions, themes, light mode, Esc Esc arming. Not seen: mouse selection copy, a real streamed answer, macOS and Windows.
 
 ### Kvist Glass (`frontends/tui/glass/`, Rust: ratatui + crossterm)
 User-facing name: **Classic** (pickers, notices, READMEs); ids, paths and `--frontend glass` keep "glass".

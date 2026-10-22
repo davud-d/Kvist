@@ -70,14 +70,15 @@ def _build_cli_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frontend",
-        choices=("terminal", "tui", "claude", "glass", "voice", "stdio", "stdio-multi"),
+        choices=("terminal", "tui", "claude", "glass", "voice", "opencode", "stdio", "stdio-multi"),
         default=None,
         help=(
             "Frontend (defaults to the saved /tui preference). Use 'tui' for "
             "the Node/Ink terminal UI (frontends/tui/ink), 'claude' for the same app drawn "
             "like Claude Code, 'glass' for Classic, the Rust interface over a photograph "
             "(frontends/tui/glass; kitty graphics only), 'voice' for the voice screen "
-            "(frontends/voice; kitty graphics only), 'terminal' for the Classic Legacy UI, "
+            "(frontends/voice; kitty graphics only), 'opencode' for the OpenCode-style "
+            "terminal UI (frontends/tui/opencode; runs on Bun), 'terminal' for the Classic Legacy UI, "
             "'stdio' for the single-turn NDJSON event "
             "protocol, 'stdio-multi' for a long-lived process serving one goal "
             "per stdin line."
@@ -990,7 +991,7 @@ def parse_tui_choice(raw: str, current: str) -> str | None:
     value = parts[1].strip("<>").casefold()
     if value in {"true", "on", "1", "tui"}:
         return "tui"
-    if value in {"claude", "glass", "voice"}:
+    if value in {"claude", "glass", "voice", "opencode"}:
         return value
     if value in {"false", "off", "0", "terminal"}:
         return "terminal"
@@ -1020,6 +1021,7 @@ _TUI_SAVED_NOTICE = {
     "claude": "The Claude-style terminal UI will open on the next launch.",
     "glass": "Classic will open on the next launch (kitty or Ghostty).",
     "voice": "Voice will open on the next launch (kitty or Ghostty).",
+    "opencode": "The OpenCode-style terminal UI will open on the next launch (needs Bun).",
     "terminal": "Classic Legacy will open on the next launch.",
 }
 # Kvist Glass (frontends/tui/glass): a Rust program, built with `cargo build --release`.
@@ -1156,6 +1158,86 @@ def launch_voice(args: argparse.Namespace) -> int | None:
             "KVIST_CORE_CMD": json.dumps(core),
             "KVIST_VOICE_SCREEN": screen,
             "KVIST_SWITCH_FILE": str(switch_file),
+        }
+        try:
+            code = subprocess.call(command, env=env)
+        except KeyboardInterrupt:
+            return 130
+        if code != _TUI_SWITCH_CODE:
+            return code
+        return _switch_frontend(switch_file, args)
+
+
+# The OpenCode-style interface (frontends/tui/opencode): TypeScript on OpenTUI + SolidJS, run by Bun
+# straight from source (Bun compiles it on the fly; there is no build step).
+_OPENCODE_DIR = _APP_ROOT / "frontends" / "tui" / "opencode"
+_OPENCODE_ENTRY = _OPENCODE_DIR / "src" / "main.ts"
+
+
+def find_bun() -> str | None:
+    """The Bun runtime the OpenCode-style interface runs on: ``KVIST_BUN``, then ``bun`` on PATH, then ``~/.bun``."""
+    import shutil
+
+    for candidate in (
+        os.environ.get("KVIST_BUN"),
+        shutil.which("bun"),
+        str(Path.home() / ".bun" / "bin" / "bun"),
+    ):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def launch_opencode(args: argparse.Namespace) -> int | None:
+    """Run the OpenCode-style interface with this program as its core; None when it cannot run here.
+
+    The reason is printed and the caller falls back to the Ink UI. Exit code 64 means the person
+    picked another interface with ``/tui``.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    bun = find_bun()
+    if bun is None:
+        print(
+            "The OpenCode-style UI needs Bun 1.3.14 or newer (https://bun.sh); using the Ink UI.",
+            file=sys.stderr,
+        )
+        return None
+    if not _OPENCODE_ENTRY.is_file():
+        print("The OpenCode-style UI is not part of this build of Kvist; using the Ink UI.", file=sys.stderr)
+        return None
+    if not (_OPENCODE_DIR / "node_modules" / "@opentui").is_dir():
+        print(
+            "The OpenCode-style UI has no packages yet: run `bun install` in frontends/tui/opencode. "
+            "Using the Ink UI.",
+            file=sys.stderr,
+        )
+        return None
+    workspace = resolve_workspace_path(args.workspace)
+    core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
+    command = [
+        bun, str(_OPENCODE_ENTRY),
+        "--workspace", str(workspace),
+        "--role", args.role,
+        "--approval-mode", args.approval_mode,
+    ]
+    if args.resume:
+        command += ["--resume", str(args.resume) if isinstance(args.resume, str) else ""]
+    if args.provider:
+        command += ["--provider", args.provider]
+    if args.fast_model and args.smart_model:
+        command += ["--fast-model", args.fast_model, "--smart-model", args.smart_model]
+    with tempfile.TemporaryDirectory(prefix="kvist-switch-") as scratch:
+        switch_file = Path(scratch) / "frontend"
+        env = {
+            **os.environ,
+            "KVIST_CORE_CMD": json.dumps(core),
+            "KVIST_SWITCH_FILE": str(switch_file),
+            "KVIST_COMMAND_FRONTEND": "ink",
         }
         try:
             code = subprocess.call(command, env=env)
@@ -1311,7 +1393,7 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
     except ValueError:
         print(f"Unknown interface '{chosen}'; using Classic Legacy.", file=sys.stderr)
         return None
-    if chosen not in TUI_FRONTENDS + ("glass", "voice"):
+    if chosen not in TUI_FRONTENDS + ("glass", "voice", "opencode"):
         return None
     args.frontend = chosen
     # Setup has just saved a provider; the interface it chose is the agent itself.
@@ -1325,6 +1407,11 @@ def _switch_frontend(switch_file: Path, args: argparse.Namespace) -> int | None:
         args.frontend = "tui"
     if chosen == "voice":
         code = launch_voice(args)
+        if code is not None:
+            return code
+        args.frontend = "tui"
+    if chosen == "opencode":
+        code = launch_opencode(args)
         if code is not None:
             return code
         args.frontend = "tui"
@@ -4718,6 +4805,12 @@ def main() -> None:
         exit_code = launch_voice(args)
         if exit_code is not None:
             raise SystemExit(exit_code)
+        args.frontend = "tui"
+    if not first_run and (args.frontend or get_saved_frontend()) == "opencode" and not args.no_banner:
+        exit_code = launch_opencode(args)
+        if exit_code is not None:
+            raise SystemExit(exit_code)
+        # Bun or its packages are missing and the reason is printed; the Ink UI is the nearest interface.
         args.frontend = "tui"
     if (first_run or (args.frontend or get_saved_frontend()) in TUI_FRONTENDS) and not args.no_banner:
         # The reason for falling back to the classic terminal is always printed: a machine

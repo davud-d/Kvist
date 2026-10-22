@@ -427,6 +427,8 @@ def test_installer_switch_starts_the_agent_instead_of_reopening_setup(monkeypatc
         ("/tui off", "claude", "terminal"),
         ("/tui glass", "terminal", "glass"),
         ("/tui voice", "terminal", "voice"),
+        ("/tui opencode", "terminal", "opencode"),
+        ("/tui", "opencode", "tui"),
         ("/tui", "voice", "tui"),
         ("/tui", "glass", "tui"),
         ("/tui hologram", "terminal", None),
@@ -772,3 +774,93 @@ def test_force_glass_missing_binary_is_error(monkeypatch):
 
 def test_force_glass_cli_flag():
     assert main._build_cli_parser().parse_args(["--force-glass"]).force_glass
+
+
+def _opencode(monkeypatch, tmp_path, *, packages=True, entry=True):
+    """A folder that looks like frontends/tui/opencode, and a `bun` the launcher finds."""
+    folder = tmp_path / "opencode"
+    (folder / "src").mkdir(parents=True)
+    if entry:
+        (folder / "src" / "main.ts").write_text("")
+    if packages:
+        (folder / "node_modules" / "@opentui").mkdir(parents=True)
+    bun = tmp_path / "bun"
+    bun.write_text("")
+    bun.chmod(0o755)
+    monkeypatch.setenv("KVIST_BUN", str(bun))
+    monkeypatch.setattr(main, "_OPENCODE_DIR", folder)
+    monkeypatch.setattr(main, "_OPENCODE_ENTRY", folder / "src" / "main.ts")
+    monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(main, "resolve_workspace_path", lambda raw: raw)
+    return bun, folder
+
+
+def test_opencode_runs_bun_with_this_program_as_its_core(monkeypatch, tmp_path):
+    bun, folder = _opencode(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(subprocess, "call", lambda command, env: calls.append((command, env)) or 0)
+
+    assert main.launch_opencode(_tui_args(frontend="opencode", role="coder", provider="openai")) == 0
+
+    command, env = calls[0]
+    assert command[:3] == [str(bun), str(folder / "src" / "main.ts"), "--workspace"]
+    assert command[3:] == ["ws", "--role", "coder", "--approval-mode", "ask", "--provider", "openai"]
+    assert json.loads(env["KVIST_CORE_CMD"])[-1].endswith("__main__.py")
+    assert "KVIST_SWITCH_FILE" in env
+    assert env["KVIST_COMMAND_FRONTEND"] == "ink"
+
+
+def test_opencode_without_bun_falls_back_with_the_reason(monkeypatch, tmp_path, capsys):
+    _opencode(monkeypatch, tmp_path)
+    monkeypatch.setenv("KVIST_BUN", str(tmp_path / "missing"))
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    monkeypatch.setattr(main.Path, "home", classmethod(lambda cls: tmp_path / "nobody"))
+    monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
+
+    assert main.launch_opencode(_tui_args(frontend="opencode")) is None
+    assert "needs Bun" in capsys.readouterr().err
+
+
+def test_opencode_without_packages_says_how_to_install_them(monkeypatch, tmp_path, capsys):
+    _opencode(monkeypatch, tmp_path, packages=False)
+    monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
+
+    assert main.launch_opencode(_tui_args(frontend="opencode")) is None
+    assert "bun install" in capsys.readouterr().err
+
+
+def test_opencode_without_a_tty_falls_back(monkeypatch, tmp_path):
+    _opencode(monkeypatch, tmp_path)
+    monkeypatch.setattr(main.sys.stdout, "isatty", lambda: False)
+    monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
+
+    assert main.launch_opencode(_tui_args(frontend="opencode")) is None
+
+
+def test_tui_inside_opencode_starts_the_chosen_interface(monkeypatch, tmp_path):
+    _opencode(monkeypatch, tmp_path)
+    saved = []
+    monkeypatch.setattr(main, "save_frontend", saved.append)
+    monkeypatch.setattr(main, "launch_tui", lambda args: f"launched {args.frontend}")
+
+    def choose_ink(command, env):
+        Path(env["KVIST_SWITCH_FILE"]).write_text("tui\n", encoding="utf-8")
+        return main._TUI_SWITCH_CODE
+
+    monkeypatch.setattr(subprocess, "call", choose_ink)
+
+    assert main.launch_opencode(_tui_args(frontend="opencode")) == "launched tui"
+    assert saved == ["tui"]
+
+
+def test_tui_switch_to_opencode_starts_it_and_falls_back_to_ink_when_it_cannot(monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "save_frontend", lambda value: None)
+    switch = tmp_path / "frontend"
+    switch.write_text("opencode\n", encoding="utf-8")
+    monkeypatch.setattr(main, "launch_opencode", lambda args: 7)
+    assert main._switch_frontend(switch, _tui_args(frontend="tui")) == 7
+
+    monkeypatch.setattr(main, "launch_opencode", lambda args: None)
+    monkeypatch.setattr(main, "launch_tui", lambda args: f"launched {args.frontend}")
+    assert main._switch_frontend(switch, _tui_args(frontend="tui")) == "launched tui"

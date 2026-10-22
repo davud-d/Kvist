@@ -151,9 +151,11 @@ interrupted task stays in the session, so `/resume` or a new message picks it up
 
 ## Interfaces
 
-- **Terminal.** The default. Four looks of the same app: Ink, a Claude Code
-  style, Classic (over a photograph, kitty or Ghostty) and the Classic Legacy
-  prompt_toolkit one; `/tui` switches between them.
+- **Terminal.** The default. Five looks of the same app: Ink, a Claude Code
+  style, OpenCode's terminal interface (`/tui opencode`, needs Bun;
+  [`frontends/tui/opencode`](frontends/tui/opencode/README.md)), Classic (over a
+  photograph, kitty or Ghostty) and the Classic Legacy prompt_toolkit one;
+  `/tui` switches between them.
 - **Voice.** An orb you talk to: say "Kvist" and it listens, short spoken
   answers (`/tui voice`, kitty or Ghostty;
   [`frontends/voice`](frontends/voice/README.md)).
@@ -253,13 +255,14 @@ Kvist treats their content as data that cannot change its safety rules.
 .venv/bin/python -m pytest              # kernel, classic terminal, Zed, scripts
 .venv/bin/python -m ruff check .
 (cd frontends/tui/ink && npm install && npm test)
+(cd frontends/tui/opencode && bun install && bun test)
 (cd frontends/ide/vscode && npm install && npm test)
 (cd frontends/gui/electron && npm ci && npm test)
 ```
 
 ```text
 kernel/            the Python core (python -m kernel)
-frontends/         tui/classic, tui/ink, gui/electron, ide/vscode, ide/jetbrains, zed, web-local, tray
+frontends/         tui/classic, tui/ink, tui/opencode, gui/electron, ide/vscode, ide/jetbrains, zed, web-local, tray
 scripts/           installers and release scripts
 docs/              protocol, skills, configuration, media
 site/              kvist.site landing page
