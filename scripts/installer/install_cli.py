@@ -76,6 +76,10 @@ STEPS = {
     "build_voice": "Building the Kvist voice screen",
     "voice_no_cargo": "[yellow]Rust not found — the Kvist voice screen will not be included (install Rust from the installer)[/yellow]",
     "voice_failed": "[yellow]Kvist voice screen build failed — it will not be included (see the log)[/yellow]",
+    "build_opencode": "Installing the OpenCode-style UI packages",
+    "opencode_no_bun": "[yellow]Bun not found — the OpenCode-style UI will not be included (tick Bun in the release installer, or set KVIST_BUN)[/yellow]",
+    "build_opencode_binary": "Compiling the OpenCode-style UI",
+    "opencode_failed": "[yellow]OpenCode-style UI build failed — it will not be included (see the log)[/yellow]",
     "build_binary": "Building binary",
     "build_done": "Binary built successfully",
     "copy_binary": "Copying binary to install directory",
@@ -97,6 +101,11 @@ GLASS_BINARY = GLASS_DIR / "target" / "release" / "kvist-glass"
 # The voice screen, another Rust program of its own; kvist.spec packs it the same way.
 VOICE_SCREEN_DIR = PROJECT_ROOT / "frontends" / "voice" / "screen"
 VOICE_SCREEN_BINARY = VOICE_SCREEN_DIR / "target" / "release" / "kvist-voice-screen"
+# The OpenCode-style UI runs from source on Bun; the checkout only needs its packages.
+OPENCODE_DIR = PROJECT_ROOT / "frontends" / "tui" / "opencode"
+OPENCODE_PACKAGES = OPENCODE_DIR / "node_modules" / "@opentui"
+# The compiled interface kvist.spec packs into the binary (OPENCODE_DIR/build.ts makes it).
+OPENCODE_BINARY = OPENCODE_DIR / "dist" / ("kvist-opencode.exe" if IS_WINDOWS else "kvist-opencode")
 REQUIREMENTS_FILE = PROJECT_ROOT / "requirements.txt"
 # Dedicated venv, kept separate from the project's own dev .venv so building
 # never touches (or has to match the interpreter of) the dev environment.
@@ -431,6 +440,42 @@ def build_voice_screen(status: Status | None = None) -> bool:
     )
 
 
+def find_bun() -> str | None:
+    """Same search order as ``kernel.main.find_bun``: this script cannot import the core."""
+    for candidate in (
+        os.environ.get("KVIST_BUN"),
+        str(Path.home() / ".local" / "share" / "kvist" / "bun" / "bun"),
+        shutil.which("bun"),
+        str(Path.home() / ".bun" / "bin" / "bun"),
+    ):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def build_opencode(status: Status | None = None) -> bool:
+    """Compile the OpenCode-style UI (``--frontend opencode``) into one executable that kvist.spec packs.
+
+    Optional like the other interfaces: without Bun or on a failed build the binary lacks
+    it and the launcher falls back to the Ink UI. Returns whether the executable exists.
+    """
+    bun = find_bun()
+    if bun is None:
+        show_step(status, STEPS["opencode_no_bun"])
+        return OPENCODE_BINARY.is_file()
+    try:
+        if not OPENCODE_PACKAGES.is_dir():
+            show_step(status, STEPS["build_opencode"])
+            run_logged([bun, "install", "--frozen-lockfile"], cwd=OPENCODE_DIR)
+        show_step(status, STEPS["build_opencode_binary"])
+        run_logged([bun, "build.ts", str(OPENCODE_BINARY)], cwd=OPENCODE_DIR)
+    except InstallCommandError as error:
+        log(str(error))
+        show_step(status, STEPS["opencode_failed"])
+        return False
+    return OPENCODE_BINARY.is_file()
+
+
 def build_binary(status: Status | None = None) -> Path:
     if not SPEC_FILE.is_file():
         raise SystemExit(f"error: spec file not found: {SPEC_FILE}")
@@ -439,6 +484,7 @@ def build_binary(status: Status | None = None) -> Path:
     build_terminal_ui(status)
     build_glass(status)
     build_voice_screen(status)
+    build_opencode(status)
 
     show_step(status, STEPS["build_binary"])
     run_logged(

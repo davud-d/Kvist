@@ -397,3 +397,27 @@ def test_rust_is_present_when_cargo_is_in_the_cargo_home(tmp_path):
 
     rust = next(item for item in json.loads(result.stdout)["components"] if item["id"] == "rust")
     assert (rust["available"], rust["reason"]) == (False, "present")
+
+
+def test_plan_offers_the_pinned_bun_beside_the_private_tools(tmp_path):
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--plan",))
+    bun = next(item for item in json.loads(result.stdout)["components"] if item["id"] == "bun")
+    assert bun["available"] is True
+    assert bun["targets"] == [
+        "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux-x64.zip",
+        str(home / ".local" / "share" / "kvist" / "bun"),
+    ]
+
+
+def test_bun_that_does_not_match_the_pinned_checksum_is_refused_and_nothing_is_written(tmp_path):
+    assets = tmp_path / "assets"
+    assets.mkdir()
+    (assets / "bun-linux-x64.zip").write_bytes(b"not the pinned file")
+
+    result, home = _run(tmp_path, "Linux", "x86_64", "kvist-linux-x64", args=("--only", "bun", "--events"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [json.loads(line) for line in result.stdout.splitlines()]
+    assert "does not match the pinned SHA-256" in next(e for e in events if e["event"] == "warning")["message"]
+    assert {"event": "component", "id": "bun", "status": "failed"} in events
+    assert not (home / ".local").exists()

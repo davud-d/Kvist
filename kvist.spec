@@ -96,12 +96,18 @@ _voice_datas = (
     if _voice_binaries else []
 )
 
+# The OpenCode-style interface compiled into one executable by `bun build --compile`
+# (frontends/tui/opencode/build.ts, run by install_cli.build_opencode); optional like the others.
+_OPENCODE_EXE = 'kvist-opencode.exe' if sys.platform == 'win32' else 'kvist-opencode'
+_OPENCODE_BIN = os.path.join(SPECPATH, 'frontends', 'tui', 'opencode', 'dist', _OPENCODE_EXE)
+_opencode_binaries = [(_OPENCODE_BIN, 'frontends/tui/opencode/dist')] if os.path.isfile(_OPENCODE_BIN) else []
+
 # Data keeps its path relative to the module that reads it: kernel modules
 # unpack under kernel/, the classic terminal's modules at the top level.
 a = Analysis(
     ['kernel/__main__.py'],
     pathex=[SPECPATH, _CLASSIC_DIR, _ZED_DIR, os.path.join(SPECPATH, 'frontends', 'web-local')],
-    binaries=_glass_binaries + _voice_binaries,
+    binaries=_glass_binaries + _voice_binaries + _opencode_binaries,
     datas=[
         ('kernel/prompts', 'kernel/prompts'),
         ('kernel/themes', 'kernel/themes'),

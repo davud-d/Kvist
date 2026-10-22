@@ -13,6 +13,7 @@ import {
   RECOMMENDED_PROVIDER,
   REGISTERABLE_PROVIDER,
   BUILD_TOOLS,
+  NEEDS_RIGHTS,
   choiceRows,
   filteredModels,
   offeredProviders,
@@ -197,6 +198,7 @@ function previewLines(id: InterfaceId, strings: Strings, width: number): PanelLi
   const ask = "❯ Ask Kvist, or / for commands"
   if (id === "claude") return [text(` ${"─".repeat(span)}`, "dim"), text(` ${ask}`, "text"), text(` ${"─".repeat(span)}`, "dim")]
   if (id === "tui") return [text(` ╭${"─".repeat(span - 2)}╮`, "dim"), text(` │ ${ask.padEnd(span - 3)}│`, "text"), text(` ╰${"─".repeat(span - 2)}╯`, "dim")]
+  if (id === "opencode") return [blank(), text(` ${strings.previewOpencode}`, "dim"), blank()]
   if (id === "glass") return [blank(), text(` ${strings.previewGlass}`, "dim"), blank()]
   return [blank(), text(` ${strings.previewClassic}`, "dim"), blank()]
 }
@@ -293,7 +295,7 @@ function actionLines(state: SetupState, strings: Strings, width: number, room: n
   const shown = component.targets.slice(0, Math.max(1, room - lines.length))
   shown.forEach((target) => lines.push(text(`  ${truncate(target, width - 2)}`, "dim")))
   // What will be asked of the person, for the items that need administrator rights.
-  const needsRights = BUILD_TOOLS.includes(component.id)
+  const needsRights = NEEDS_RIGHTS.includes(component.id)
   if (needsRights && lines.length < room) {
     if (install.privilege === "password") lines.push(...paragraph(strings.privilegePassword, width, "dim").slice(0, room - lines.length))
     if (install.privilege === "none") lines.push(...paragraph(strings.privilegeNone, width, "dim").slice(0, room - lines.length))
@@ -675,6 +677,7 @@ function build(input: SceneInput, width: number, listRows: number): Built {
         claude: strings.interfaceClaude,
         glass: strings.interfaceGlass,
         tui: strings.interfaceInk,
+        opencode: strings.interfaceOpencode,
         terminal: strings.interfaceClassic,
       }
       const ids = interfaces(state.glass)

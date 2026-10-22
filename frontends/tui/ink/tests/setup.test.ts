@@ -157,8 +157,10 @@ test("Classic is offered after Claude-style only where the terminal shows pictur
   assert.match(shown(atInterface(true)), /2 {2}Classic {2,}A photograph/)
   const second = send(atInterface(true), key("down")).state
   assert.deepEqual(send(second, key("enter")).effect, { type: "finish", outcome: { kind: "frontend", value: "glass" } })
-  assert.deepEqual(send(atInterface(true), key("char", "4")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
-  assert.deepEqual(send(atInterface(false), key("char", "3")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
+  assert.deepEqual(send(atInterface(true), key("char", "4")).effect, { type: "finish", outcome: { kind: "frontend", value: "opencode" } })
+  assert.deepEqual(send(atInterface(true), key("char", "5")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
+  assert.deepEqual(send(atInterface(false), key("char", "3")).effect, { type: "finish", outcome: { kind: "frontend", value: "opencode" } })
+  assert.deepEqual(send(atInterface(false), key("char", "4")).effect, { type: "finish", outcome: { kind: "frontend", value: "terminal" } })
 })
 
 test("sessions of other agents are offered after the interface and before Kvist starts", () => {
@@ -591,11 +593,11 @@ test("build tools: folded but ticked by default, and the folding row says how ma
   const state = withTools()
   assert.equal(state.install!.buildOpen, false)
   assert.deepEqual(chosenComponents(state.install!), ["cli", "node", "vscode", "path", "python", "libpython"])
-  assert.match(sceneOf(state), /▸\s+Build from source\s+2 ticked/)
+  assert.match(sceneOf(state), /▸\s+Developer tools\s+2 ticked/)
   const rows = choiceRows(state.install!)
   assert.equal(rows.filter((row) => row.kind === "component").length, 4 + 1)
   assert.equal(rows.at(-1)?.kind, "group")
-  assert.match(sceneOf(state), /▸\s+Build from source/)
+  assert.match(sceneOf(state), /▸\s+Developer tools/)
 })
 
 test("build tools: a click on the folding row unfolds and folds it, and a click on an item ticks it", () => {
@@ -603,7 +605,7 @@ test("build tools: a click on the folding row unfolds and folds it, and a click 
   const header = groupIndex(state)
   state = send(state, { type: "click", target: { kind: "option", index: header } }).state
   assert.equal(state.install!.buildOpen, true)
-  assert.match(sceneOf(state), /▾\s+Build from source/)
+  assert.match(sceneOf(state), /▾\s+Developer tools/)
   assert.match(sceneOf(state), /\[ \] {2}binutils \(objdump\)\s+already installed/)
   assert.match(sceneOf(state), /\[x\] {2}Python 3, venv, pip/)
   // The item right under the folding row is Python: a click unticks it.
@@ -612,7 +614,7 @@ test("build tools: a click on the folding row unfolds and folds it, and a click 
   state = send(state, { type: "click", target: { kind: "option", index: header } }).state
   assert.equal(state.install!.buildOpen, false)
   // A folded group still reports what is ticked inside it.
-  assert.match(sceneOf(state), /▸\s+Build from source\s+1 ticked/)
+  assert.match(sceneOf(state), /▸\s+Developer tools\s+1 ticked/)
 })
 
 test("build tools: → unfolds and ← folds from the row or from inside, Space on the row does both", () => {
@@ -676,14 +678,14 @@ test("build tools: the highlighted item shows the commands and what will be aske
   const header = groupIndex(state)
   state = send(state, { type: "click", target: { kind: "option", index: header } }).state
   const folded = sceneOf(send(state, { type: "click", target: { kind: "option", index: header } }).state)
-  assert.match(folded, /Only needed to build Kvist yourself/)
+  assert.match(folded, /Python, Rust and the packages for building Kvist yourself/)
   state = send(state, key("down")).state
   const text = sceneOf(state)
   assert.match(text, /Runs the package manager \(administrator rights\):/)
   assert.match(text, /sudo apt-get install -y python3 python3-venv python3-pip/)
   assert.match(text, /Your password will be asked for first/)
   const noSudo = sceneOf(send(withTools("none"), { type: "click", target: { kind: "option", index: header } }).state)
-  assert.ok(noSudo.includes("Build from source"))
+  assert.ok(noSudo.includes("Developer tools"))
 })
 
 test("build tools: a command that could not run is marked failed and its advice survives to the welcome screen", () => {

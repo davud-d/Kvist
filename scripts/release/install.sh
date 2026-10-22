@@ -36,6 +36,10 @@ NODE_URL="https://nodejs.org/dist/v${NODE_VERSION}"
 # server sends, only the exact pinned file is kept. The fastest one for this machine is used, since
 # routes to a single server can be slow or blocked for a whole provider.
 NODE_MIRRORS=("https://cdn.npmmirror.com/binaries/node/v${NODE_VERSION}" "https://mirrors.ustc.edu.cn/node/v${NODE_VERSION}")
+# The Bun the OpenCode-style interface runs on, pinned: the SHA-256 sums are those of the
+# oven-sh/bun release's own SHASUMS256.txt. It lives beside the other private tools, never on PATH.
+BUN_VERSION="1.3.14"
+BUN_URL="https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}"
 FFMPEG_MIRRORS=("https://cdn.npmmirror.com/binaries/ffmpeg-static/b6.0")
 # The ffmpeg that plays the preview video of the setup screen: the static FFmpeg 6.0 builds that
 # the ffmpeg-static npm package ships, from its tagged GitHub release (a fast CDN, and the files
@@ -145,10 +149,14 @@ OS_NAME="$(uname -s)"
 ARCH="$(uname -m)"
 FFMPEG_ASSET=""
 FFMPEG_SHA256=""
+BUN_ASSET=""
+BUN_SHA256=""
 case "$OS_NAME/$ARCH" in
 	Linux/x86_64)
 		FFMPEG_ASSET="ffmpeg-linux-x64.gz"
 		FFMPEG_SHA256="17c1ae10b52ac499180679fe6ba77e17642390c4eedb0f1e3b0ac045da55128f"
+		BUN_ASSET="bun-linux-x64.zip"
+		BUN_SHA256="951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f"
 		BINARY_ASSET="kvist-linux-x64"
 		NODE_ASSET="node-v${NODE_VERSION}-linux-x64.tar.gz"
 		NODE_SHA256="1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
@@ -156,6 +164,8 @@ case "$OS_NAME/$ARCH" in
 	Darwin/arm64)
 		FFMPEG_ASSET="ffmpeg-darwin-arm64.gz"
 		FFMPEG_SHA256="6be74d6f449889c2e87a75873894f8520cad56c08ac76f2a628d85b0519daaca"
+		BUN_ASSET="bun-darwin-aarch64.zip"
+		BUN_SHA256="d8b96221828ad6f97ac7ac0ab7e95872341af763001e8803e8267652c2652620"
 		BINARY_ASSET="kvist-macos-arm64"
 		NODE_ASSET="node-v${NODE_VERSION}-darwin-arm64.tar.gz"
 		NODE_SHA256="23b25245dcfb9af7262f8ff142e9e2e0af025368117329e7a7458a51e5922f53"
@@ -163,6 +173,8 @@ case "$OS_NAME/$ARCH" in
 	Darwin/x86_64)
 		FFMPEG_ASSET="ffmpeg-darwin-x64.gz"
 		FFMPEG_SHA256="a12354fce7eb62361473bbe10d53a1893695babd35869ec8e92e5dfea8d0440b"
+		BUN_ASSET="bun-darwin-x64.zip"
+		BUN_SHA256="4183df3374623e5bab315c547cfa0974533cd457d86b73b639f7a87974cd6633"
 		BINARY_ASSET="kvist-macos-x64"
 		NODE_ASSET="node-v${NODE_VERSION}-darwin-x64.tar.gz"
 		NODE_SHA256="8a677b0219178efd6eb0e475457c4afb452b521a92f6e67845a73bd85727f2a8"
@@ -389,6 +401,60 @@ install_ffmpeg() {
 	rm -rf "$LIB_DIR/ffmpeg"
 	mv "$LIB_DIR/.ffmpeg.new" "$LIB_DIR/ffmpeg"
 	step "Installed ffmpeg $FFMPEG_VERSION as $LIB_DIR/ffmpeg/ffmpeg"
+}
+
+# Sets BUN_HOME to a folder holding the unpacked bun: downloaded, checked against the pinned
+# SHA-256, and only then unpacked. Without Bun only the OpenCode-style interface is lost (the
+# launcher falls back to Ink), so a failure is a warning and a non-zero status.
+fetch_bun() {
+	local archive="$WORK_DIR/$BUN_ASSET"
+	if [[ -z "$BUN_ASSET" ]]; then
+		warn "there is no pinned Bun build for $OS_NAME on $ARCH"
+		return 1
+	fi
+	if ! command -v unzip >/dev/null 2>&1; then
+		warn "unzip not found, skipping Bun"
+		return 1
+	fi
+	if [[ -n "$FROM_DIR" ]]; then
+		if [[ ! -f "$FROM_DIR/$BUN_ASSET" ]]; then
+			warn "$BUN_ASSET not found in $FROM_DIR"
+			return 1
+		fi
+		archive="$FROM_DIR/$BUN_ASSET"
+	elif [[ -n "$CACHE_DIR" && -f "$CACHE_DIR/$BUN_ASSET" ]]; then
+		archive="$CACHE_DIR/$BUN_ASSET"
+	else
+		if ! command -v curl >/dev/null 2>&1; then
+			warn "curl is required to download Bun"
+			return 1
+		fi
+		if ! download_verified "$archive" "Bun $BUN_VERSION" "$BUN_SHA256" "$BUN_URL/$BUN_ASSET"; then
+			warn "could not download Bun; the OpenCode-style interface will use the Ink one"
+			return 1
+		fi
+	fi
+	if [[ "$(sha256_of "$archive")" != "$BUN_SHA256" ]]; then
+		warn "$BUN_ASSET does not match the pinned SHA-256; refusing to use it"
+		return 1
+	fi
+	mkdir -p "$WORK_DIR/bun"
+	if ! unzip -q -o "$archive" -d "$WORK_DIR/bun" || [[ ! -f "$WORK_DIR/bun/${BUN_ASSET%.zip}/bun" ]]; then
+		warn "could not unpack $BUN_ASSET"
+		return 1
+	fi
+	BUN_HOME="$WORK_DIR/bun/${BUN_ASSET%.zip}"
+}
+
+install_bun() {
+	mkdir -p "$LIB_DIR"
+	rm -rf "$LIB_DIR/.bun.new"
+	mkdir -p "$LIB_DIR/.bun.new"
+	cp "$BUN_HOME/bun" "$LIB_DIR/.bun.new/"
+	chmod 755 "$LIB_DIR/.bun.new/bun"
+	rm -rf "$LIB_DIR/bun"
+	mv "$LIB_DIR/.bun.new" "$LIB_DIR/bun"
+	step "Installed Bun $BUN_VERSION as $LIB_DIR/bun/bun"
 }
 
 install_cli() {
@@ -837,6 +903,16 @@ print_plan() {
 	fi
 	printf ',{"id":"ffmpeg","available":%s,"reason":%s,"targets":%s}' \
 		"$ffmpeg_available" "$(json_string "$ffmpeg_state")" "$(json_array "$FFMPEG_URL/$FFMPEG_ASSET" "$LIB_DIR/ffmpeg")"
+	local bun_state="" bun_available=false
+	if [[ -z "$BUN_ASSET" ]]; then
+		bun_state="unsupported"
+	elif command -v bun >/dev/null 2>&1 || [[ -x "$LIB_DIR/bun/bun" ]]; then
+		bun_state="present"
+	else
+		bun_available=true
+	fi
+	printf ',{"id":"bun","available":%s,"reason":%s,"targets":%s}' \
+		"$bun_available" "$(json_string "$bun_state")" "$(json_array "$BUN_URL/$BUN_ASSET" "$LIB_DIR/bun")"
 	printf ',{"id":"jetbrains","available":%s,"targets":%s}' \
 		"$([[ ${#jetbrains_targets[@]} -gt 0 ]] && echo true || echo false)" "$(json_array ${jetbrains_targets[@]+"${jetbrains_targets[@]}"})"
 	printf ',{"id":"vscode","available":%s,"targets":%s}' \
@@ -910,7 +986,7 @@ fi
 # Every selected asset is fetched before anything is installed, so a missing one stops the run
 # with the machine untouched. Each component announces itself as it is fetched, so the screen
 # shows what is being waited for.
-binary="" jetbrains_zip="" vsix="" ffmpeg_ok=0
+binary="" jetbrains_zip="" vsix="" ffmpeg_ok=0 bun_ok=0
 if wanted cli; then
 	emit component id cli status start
 	fetch "$BINARY_ASSET"
@@ -926,6 +1002,14 @@ if wanted ffmpeg; then
 		ffmpeg_ok=1
 	else
 		emit component id ffmpeg status failed
+	fi
+fi
+if wanted bun; then
+	emit component id bun status start
+	if fetch_bun; then
+		bun_ok=1
+	else
+		emit component id bun status failed
 	fi
 fi
 if wanted jetbrains; then
@@ -952,6 +1036,7 @@ run_component() {
 if wanted cli; then run_component cli install_cli "$binary"; fi
 if wanted node; then run_component node install_node; fi
 if wanted ffmpeg && [[ "$ffmpeg_ok" == 1 ]]; then run_component ffmpeg install_ffmpeg; fi
+if wanted bun && [[ "$bun_ok" == 1 ]]; then run_component bun install_bun; fi
 if wanted jetbrains; then run_component jetbrains install_jetbrains "$jetbrains_zip"; fi
 if wanted vscode; then run_component vscode install_vscode "$vsix"; fi
 if wanted path; then run_component path install_path; fi

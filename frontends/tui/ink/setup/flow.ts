@@ -9,11 +9,12 @@ export type Step = "components" | "installing" | "welcome" | "broad" | "folder" 
 
 // What the release installer can put on a machine, in the order it is offered. The first one is
 // the program itself and cannot be unticked.
-export const COMPONENT_IDS = ["cli", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils", "rust"] as const
+export const COMPONENT_IDS = ["cli", "node", "ffmpeg", "jetbrains", "vscode", "path", "python", "libpython", "binutils", "rust", "bun"] as const
 export const REQUIRED_COMPONENT = "cli"
-// System packages for building Kvist from source: they sit under one folding row and are the only
-// items that need administrator rights.
-export const BUILD_TOOLS: readonly string[] = ["python", "libpython", "binutils", "rust"]
+// Developer tools: they sit under one folding row. Python's packages and Rust's compiler are the
+// only items that need administrator rights; Bun is a private download like ffmpeg.
+export const BUILD_TOOLS: readonly string[] = ["python", "libpython", "binutils", "rust", "bun"]
+export const NEEDS_RIGHTS: readonly string[] = ["python", "libpython", "binutils", "rust"]
 // Offered, never ticked for the person: a toolchain of hundreds of megabytes that a release binary
 // does not need (it already carries Classic and the voice screen).
 const UNTICKED = ["rust"]
@@ -66,12 +67,12 @@ export const KEY_PAGES: Readonly<Record<string, string>> = {
 
 // The interfaces the launcher can save, newcomers' favourite first (Claude Code's look is the
 // one most people already know).
-export type InterfaceId = "claude" | "glass" | "tui" | "terminal"
+export type InterfaceId = "claude" | "glass" | "tui" | "opencode" | "terminal"
 
 // Classic (the Rust interface over a photograph, saved as "glass") draws with the kitty graphics protocol,
 // so it is offered only where this screen found a terminal that shows pictures.
 export function interfaces(glass: boolean): readonly InterfaceId[] {
-  return glass ? ["claude", "glass", "tui", "terminal"] : ["claude", "tui", "terminal"]
+  return glass ? ["claude", "glass", "tui", "opencode", "terminal"] : ["claude", "tui", "opencode", "terminal"]
 }
 
 // "done" ends a provider-only setup: the provider is saved and there is no interface to choose.
@@ -371,7 +372,7 @@ function startInstall(state: SetupState): Update {
   only.forEach((id) => (status[id] = "waiting"))
   const running = { ...withInstall(state, { status, message: "", warnings: [], error: "" }), step: "installing" as const }
   // A sudo that wants a password cannot ask inside this screen: the terminal is handed over first.
-  const needsPassword = install.privilege === "password" && only.some((id) => BUILD_TOOLS.includes(id))
+  const needsPassword = install.privilege === "password" && only.some((id) => NEEDS_RIGHTS.includes(id))
   return { state: running, effect: needsPassword ? { type: "elevate" } : { type: "install", only } }
 }
 

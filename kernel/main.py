@@ -1172,14 +1172,17 @@ def launch_voice(args: argparse.Namespace) -> int | None:
 # straight from source (Bun compiles it on the fly; there is no build step).
 _OPENCODE_DIR = _APP_ROOT / "frontends" / "tui" / "opencode"
 _OPENCODE_ENTRY = _OPENCODE_DIR / "src" / "main.ts"
+# `bun build --compile` output (frontends/tui/opencode/build.ts); it carries Bun, so it needs nothing else.
+_OPENCODE_BUILD = _OPENCODE_DIR / "dist" / ("kvist-opencode.exe" if os.name == "nt" else "kvist-opencode")
 
 
 def find_bun() -> str | None:
-    """The Bun runtime the OpenCode-style interface runs on: ``KVIST_BUN``, then ``bun`` on PATH, then ``~/.bun``."""
+    """The Bun runtime the OpenCode-style interface runs on: ``KVIST_BUN``, the installer's private copy, ``bun`` on PATH, then ``~/.bun``."""
     import shutil
 
     for candidate in (
         os.environ.get("KVIST_BUN"),
+        str(Path.home() / ".local" / "share" / "kvist" / "bun" / "bun"),
         shutil.which("bun"),
         str(Path.home() / ".bun" / "bin" / "bun"),
     ):
@@ -1188,18 +1191,19 @@ def find_bun() -> str | None:
     return None
 
 
-def launch_opencode(args: argparse.Namespace) -> int | None:
-    """Run the OpenCode-style interface with this program as its core; None when it cannot run here.
+def find_opencode_binary() -> str | None:
+    """The compiled OpenCode-style interface: ``KVIST_OPENCODE``, then the one packed with or built beside this program."""
+    for candidate in (os.environ.get("KVIST_OPENCODE"), str(_OPENCODE_BUILD)):
+        if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
 
-    The reason is printed and the caller falls back to the Ink UI. Exit code 64 means the person
-    picked another interface with ``/tui``.
-    """
-    import json
-    import subprocess
-    import tempfile
 
-    if not (sys.stdin.isatty() and sys.stdout.isatty()):
-        return None
+def _opencode_command() -> list[str] | None:
+    """What starts the interface: the compiled program, else Bun on the sources; None (reason printed) when neither can."""
+    compiled = find_opencode_binary()
+    if compiled is not None:
+        return [compiled]
     bun = find_bun()
     if bun is None:
         print(
@@ -1217,10 +1221,28 @@ def launch_opencode(args: argparse.Namespace) -> int | None:
             file=sys.stderr,
         )
         return None
+    return [bun, str(_OPENCODE_ENTRY)]
+
+
+def launch_opencode(args: argparse.Namespace) -> int | None:
+    """Run the OpenCode-style interface with this program as its core; None when it cannot run here.
+
+    The reason is printed and the caller falls back to the Ink UI. Exit code 64 means the person
+    picked another interface with ``/tui``.
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    start = _opencode_command()
+    if start is None:
+        return None
     workspace = resolve_workspace_path(args.workspace)
     core = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable, str(_CORE_ENTRY)]
     command = [
-        bun, str(_OPENCODE_ENTRY),
+        *start,
         "--workspace", str(workspace),
         "--role", args.role,
         "--approval-mode", args.approval_mode,

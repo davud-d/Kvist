@@ -912,8 +912,8 @@ No build step: `src/main.ts` imports `@opentui/solid/preload` (Solid's JSX trans
   the Ink suite's scripted core; `SHOW_FRAMES=1` prints frames). They see characters, not colours: check the look in
   kitty on a private Xvfb (`import -window <id>`, `LIBGL_ALWAYS_SOFTWARE=1`), with the real core and
   `scripts/e2e_tools_smoke.py`'s `FakeProvider` for real events. CI: the `opencode` job in `platforms.yml` (Linux only).
-- **Open work:** the first-run setup screen's interface step does not offer it (it would need Bun detection there);
-  release binaries do not ship it; OpenCode's session tabs bar is not drawn; seen in kitty against the real core (also
+- **Open work:** the first-run setup screen's interface step offers it always (no Bun detection there; the launcher
+  falls back to Ink with the reason when Bun is missing); `install_cli.build_opencode` compiles it (`build.ts`, `bun build --compile`, ~110 MB) to `dist/kvist-opencode` and `kvist.spec` packs it, but the release CI does not build it yet (`main._opencode_command` prefers the compiled program, else Bun on the sources); OpenCode's session tabs bar is not drawn; seen in kitty against the real core (also
   through `--frontend opencode`): home, transcript, write/edit/shell blocks, approvals with a diff, palette, models,
   sessions, themes, light mode, Esc Esc arming. Not seen: mouse selection copy, a real streamed answer, macOS and Windows.
 

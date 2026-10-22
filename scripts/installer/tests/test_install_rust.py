@@ -147,3 +147,36 @@ def test_windows_builds_no_voice_screen(monkeypatch):
     monkeypatch.setattr(cli, "IS_WINDOWS", True)
     monkeypatch.setattr(cli, "find_cargo", lambda: pytest.fail("must not look for cargo"))
     assert cli.build_voice_screen() is False
+
+
+def test_the_cli_build_compiles_the_opencode_ui_with_bun(monkeypatch, tmp_path):
+    packages = tmp_path / "node_modules" / "@opentui"
+    built = tmp_path / "dist" / "kvist-opencode"
+    monkeypatch.setattr(cli, "OPENCODE_PACKAGES", packages)
+    monkeypatch.setattr(cli, "OPENCODE_BINARY", built)
+    monkeypatch.setattr(cli, "find_bun", lambda: "/opt/bun")
+    commands = []
+
+    def run(command, cwd=None):
+        commands.append((command, cwd))
+        if command[1] == "install":
+            packages.mkdir(parents=True)
+        else:
+            built.parent.mkdir()
+            built.write_text("")
+
+    monkeypatch.setattr(cli, "run_logged", run)
+    assert cli.build_opencode() is True
+    assert commands == [
+        (["/opt/bun", "install", "--frozen-lockfile"], cli.OPENCODE_DIR),
+        (["/opt/bun", "build.ts", str(built)], cli.OPENCODE_DIR),
+    ]
+
+
+def test_the_cli_build_goes_on_without_bun_and_says_so(monkeypatch, tmp_path):
+    steps = []
+    monkeypatch.setattr(cli, "OPENCODE_BINARY", tmp_path / "missing")
+    monkeypatch.setattr(cli, "find_bun", lambda: None)
+    monkeypatch.setattr(cli, "show_step", lambda status, text: steps.append(text))
+    assert cli.build_opencode() is False
+    assert steps == [cli.STEPS["opencode_no_bun"]]
