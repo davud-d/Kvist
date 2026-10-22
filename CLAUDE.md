@@ -772,10 +772,17 @@ alternate screen, SGR mouse, bracketed paste, row-diff painting, effects). Tests
   `DIMMED` (0.55) while the panel fades in over 0.25 s (`run.introFrame`); a slow fade reads as a lagging
   computer (an image frame costs ~70 ms and ~2 MB), so frames in motion are half size. A key or click
   before the panel shows only brings it up. `KVIST_REDUCE_MOTION=1` skips the intro.
-- **Demo video** (`setup/video.ts`): on the interface step the Claude-style demo plays in the preview slot.
-  A 60 fps recording does not compress without a real codec, so the clip is an H.264 720p60 file
-  (`demo/claude-style.mp4`, ~3.6 MB, made by `demo/make_demo.py` from `docs/media/Claude-Code-demo-kvist.mp4`)
-  that `build.mjs` copies beside the bundle (also in `kvist.spec` and the wheel's package data) and the
+- **Demo video** (`setup/video.ts`): on the interface step the highlighted interface's demo plays in the
+  preview slot: Claude-style and Classic each have a clip (`ClipId`, `isClipId`), the others keep the text
+  preview. The slot is reserved for every interface so the panel keeps its height; the player's key holds the
+  clip id, so moving the highlight restarts it. A 60 fps recording does not compress without a real codec, so
+  a clip is an H.264 720p file (`demo/claude-style.mp4` ~3.6 MB, `demo/classic-style.mp4` ~3.5 MB at 30 fps,
+  made by `demo/make_demo.py` from `docs/media/Claude-Code-demo-kvist.mp4` and
+  `docs/media/Classic-demo-kvist.mp4`; Classic's window is a little wider than 16:9, so the script crops the
+  sides from the middle). Classic's recording was made on a private Xvfb with `KVIST_CONFIG_DIR` pointing at a
+  copy of `config.json` only: the person's own memory (`<config dir>/memory.db`) otherwise greets by name and
+  answers in their language. `build.mjs` copies the clips beside the bundle (also in `kvist.spec` and the
+  wheel's package data) and the
   **user's own ffmpeg** decodes. Plays only where an image terminal reported its cell size, `ffmpeg` is on
   PATH (or `KVIST_FFMPEG`) and the clip is found; otherwise the text preview stays. `KVIST_SETUP_VIDEO=off`
   disables it; reduced motion shows one poster frame. Frames are deflated on the thread pool and drawn at

@@ -29,7 +29,10 @@ import { PICTURE_Z, pictureSize, renderPicture } from "./picture.js"
 import { listDirectory, listDrives, makeDirectory } from "./listing.js"
 import { DIMMED, renderScene, sameTarget, type Hit, type Rect } from "./scene.js"
 import { detectLocale, stringsFor } from "./strings.js"
-import { FramePacer, findClip, findFfmpeg, frameSize, startClip, type Clip } from "./video.js"
+import { CLIP_IDS, FramePacer, findClip, findFfmpeg, frameSize, startClip, type Clip, type ClipId } from "./video.js"
+
+// Whether any demo clip is beside the bundle; each interface then plays its own, if it has one.
+const clipsFound = () => CLIP_IDS.some((id) => findClip(id) !== null)
 
 // A hundred sessions of a long-used agent take a few seconds to read.
 const IMPORT_TIMEOUT_MS = 120_000
@@ -121,12 +124,11 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
   const reducedMotion = Boolean(env.KVIST_REDUCE_MOTION && env.KVIST_REDUCE_MOTION !== "0")
   // The cell size in pixels sizes the image; a terminal that does not say gets an assumed one.
   const cell = image ? (await probeTerminal(stdin, stdout)).cell : null
-  // The demo video needs the cell size (to keep its proportions), a decoder and the clip.
+  // The demo video needs the cell size (to keep its proportions), a decoder and the clips.
   const canPlayVideo = Boolean(image && cell && cell.width > 0 && cell.height > 0 && env.KVIST_SETUP_VIDEO !== "off")
   // Looked up again once an installation has finished: it may have just put ffmpeg in place.
   let ffmpeg = canPlayVideo ? findFfmpeg(env) : null
-  let clip = ffmpeg ? findClip() : null
-  let videoCell = ffmpeg && clip ? cell : null
+  let videoCell = ffmpeg && clipsFound() ? cell : null
 
   return new Promise((resolve) => {
     const script = options.install ?? null
@@ -188,16 +190,19 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
       stdout.write(deleteImage(VIDEO_ID))
     }
 
-    // Keeps the video in step with the screen: playing in `rect` while it is there and the panel is
-    // at rest, gone otherwise. `cleared` says a full repaint took the picture off the terminal.
-    const syncVideo = (rect: Rect | null, cleared: boolean) => {
-      const at = videoCell && clip && ffmpeg && rect && !intro && panel >= 1 && !ghost ? rect : null
-      if (!at || !videoCell || !clip || !ffmpeg) return stopVideo()
-      const key = `${at.col},${at.row},${at.width},${at.height}`
+    // Keeps the video in step with the screen: playing the clip of the highlighted interface in its
+    // rectangle while it is there and the panel is at rest, gone otherwise. `cleared` says a full
+    // repaint took the picture off the terminal.
+    const syncVideo = (video: (Rect & { clip: ClipId }) | null, cleared: boolean) => {
+      const at = videoCell && ffmpeg && video && !intro && panel >= 1 && !ghost ? video : null
+      if (!at || !videoCell || !ffmpeg) return stopVideo()
+      const key = `${at.clip}|${at.col},${at.row},${at.width},${at.height}`
       if (player?.key === key) return cleared && shownFrame ? sendFrame(shownFrame, true) : undefined
       stopVideo()
+      const file = findClip(at.clip)
+      if (!file) return
       const size = frameSize({ columns: at.width, rows: at.height }, videoCell)
-      const started = startClip({ ffmpeg, clip, width: size.width, height: size.height, still: reducedMotion, onFrame: sendFrame })
+      const started = startClip({ ffmpeg, id: at.clip, clip: file, width: size.width, height: size.height, still: reducedMotion, onFrame: sendFrame })
       player = { key, rect: at, width: size.width, height: size.height, clip: started, pacer: new FramePacer() }
     }
 
@@ -399,8 +404,7 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
       const next = update(state, action, strings)
       if (action.type === "installed" && action.reply.ok && canPlayVideo && !ffmpeg) {
         ffmpeg = findFfmpeg(env)
-        clip = ffmpeg ? findClip() : null
-        videoCell = ffmpeg && clip ? cell : null
+        videoCell = ffmpeg && clipsFound() ? cell : null
       }
       state = next.state
       syncSpinner()

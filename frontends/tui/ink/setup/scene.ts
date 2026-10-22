@@ -20,7 +20,7 @@ import {
   type Target,
 } from "./flow.js"
 import type { Strings } from "./strings.js"
-import { videoFit, type CellSize } from "./video.js"
+import { isClipId, videoFit, type CellSize, type ClipId } from "./video.js"
 
 export const MIN_COLS = 50
 export const MIN_ROWS = 20
@@ -109,8 +109,8 @@ export interface Scene {
   // The panel's rectangle in cells, or null while it is not shown. `glass` panels let more of
   // the picture through (the folder chooser is large, and the picture is part of why it is there).
   panel: (Rect & { glass: boolean }) | null
-  // The cells the demo video fills, when it is to play on this screen.
-  video?: Rect | null
+  // The cells the demo video fills, when it is to play on this screen, and whose clip it is.
+  video?: (Rect & { clip: ClipId }) | null
 }
 
 // Brightness the picture rests at behind the panel: dim enough for text, bright enough to keep the detail.
@@ -391,8 +391,8 @@ interface Built {
   scroll?: { line: number; count: number; total: number; first: number }
   // The line holding a text cursor and its column inside the panel's content, if any.
   caret?: { line: number; column: number }
-  // The first line of the demo video's slot and its size in cells; the lines are blank.
-  video?: { line: number; columns: number; rows: number }
+  // The first line of the demo video's slot and its size in cells (the lines are blank), and the clip.
+  video?: { line: number; columns: number; rows: number; clip: ClipId }
   hint: string
   step: number
   steps: number
@@ -692,12 +692,13 @@ function build(input: SceneInput, width: number, listRows: number): Built {
       let video: Built["video"]
       if (input.rows >= 28) {
         // Where the demo video can play, its slot is reserved for every interface so the panel does
-        // not change height when the highlight moves; the video itself shows only on the first one.
+        // not change height when the highlight moves; the video itself shows on the ones with a clip.
         const fit = input.video ? videoFit(width, input.rows - 12 - lines.length, input.video) : null
-        const preview = previewLines(ids[state.interfaceIndex] ?? "claude", strings, width)
+        const highlighted = ids[state.interfaceIndex] ?? "claude"
+        const preview = previewLines(highlighted, strings, width)
         lines.push(blank())
-        if (fit && ids[state.interfaceIndex] === "claude") {
-          video = { line: lines.length, ...fit }
+        if (fit && isClipId(highlighted)) {
+          video = { line: lines.length, ...fit, clip: highlighted }
           for (let row = 0; row < fit.rows; row++) lines.push(blank())
         } else {
           lines.push(...preview)
@@ -943,6 +944,8 @@ export function renderScene(input: SceneInput): Scene {
     else fadeText(canvas, left, top, panelWidth, height, input.panel)
   }
   const slot = built.video
-  const video = slot ? { col: x0 + Math.floor((inner - slot.columns) / 2), row: contentTop + slot.line, width: slot.columns, height: slot.rows } : null
+  const video = slot
+    ? { col: x0 + Math.floor((inner - slot.columns) / 2), row: contentTop + slot.line, width: slot.columns, height: slot.rows, clip: slot.clip }
+    : null
   return { rows: canvas.toRows(level), hits, panel: panelRect, video }
 }

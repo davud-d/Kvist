@@ -64,6 +64,6 @@ export const options = {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   await build(options)
-  // The setup screen plays this clip beside the bundle (setup/video.ts); the bundle stays one JS file.
-  copyFileSync("demo/claude-style.mp4", "dist-ui/claude-style.mp4")
+  // The setup screen plays these clips beside the bundle (setup/video.ts); the bundle stays one JS file.
+  for (const clip of ["claude-style.mp4", "classic-style.mp4"]) copyFileSync(`demo/${clip}`, `dist-ui/${clip}`)
 }

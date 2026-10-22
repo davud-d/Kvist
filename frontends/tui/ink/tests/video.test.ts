@@ -64,8 +64,9 @@ test("ffmpeg is KVIST_FFMPEG when it runs, else the first one on PATH, else the 
   assert.equal(findFfmpeg({ PATH: directory }, "linux", emptyHome), binary)
 })
 
-test("the demo clip is found beside the sources", () => {
-  assert.match(findClip() ?? "", /claude-style\.mp4$/)
+test("each interface with a clip finds its own beside the sources", () => {
+  assert.match(findClip("claude") ?? "", /claude-style\.mp4$/)
+  assert.match(findClip("glass") ?? "", /classic-style\.mp4$/)
 })
 
 test("an image can be placed at a cell, and sits in the window's corner without one", () => {
@@ -122,12 +123,22 @@ test("the interface step reserves a video slot inside the panel and leaves the t
   assert.doesNotMatch(shown.rows.map(plain).join("\n"), /Ask Kvist, or \/ for commands/)
 })
 
-test("the panel keeps its height when the highlight moves, and only the first interface has the video", () => {
+test("the panel keeps its height when the highlight moves, and an interface without a clip has no video", () => {
   const first = scene(done, 50, cell)
   const second = scene({ ...done, interfaceIndex: 1 }, 50, cell)
   assert.equal(second.video ?? null, null)
   assert.equal(second.panel?.height, first.panel?.height)
   assert.match(second.rows.map(plain).join("\n"), /Ask Kvist, or \/ for commands/)
+})
+
+test("on an image terminal Classic plays its own clip, and the ones without a clip play none", () => {
+  const withClassic: SetupState = { ...done, glass: true }
+  assert.equal(scene(withClassic, 50, cell).video?.clip, "claude")
+  const classic = scene({ ...withClassic, interfaceIndex: 1 }, 50, cell)
+  assert.equal(classic.video?.clip, "glass")
+  assert.equal(classic.panel?.height, scene(withClassic, 50, cell).panel?.height)
+  assert.doesNotMatch(classic.rows.map(plain).join("\n"), /Glass cards over a photograph/)
+  assert.equal(scene({ ...withClassic, interfaceIndex: 2 }, 50, cell).video ?? null, null)
 })
 
 test("without a decoder, or in a short window, the text preview stays", () => {

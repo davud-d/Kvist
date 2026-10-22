@@ -1,7 +1,8 @@
-// Plays the Claude-style demo clip on the interface step. The terminal has no video of its own, so
-// the user's ffmpeg decodes the clip to raw RGB at the size of the rectangle it is shown in and the
-// setup screen sends each frame as a terminal image (kitty graphics, see run.ts). Without ffmpeg
-// or without the clip beside the bundle there is no video and the step keeps its text preview.
+// Plays the demo clip of the highlighted interface (Claude-style, Classic) on the interface step. The
+// terminal has no video of its own, so the user's ffmpeg decodes the clip to raw RGB at the size of
+// the rectangle it is shown in and the setup screen sends each frame as a terminal image (kitty
+// graphics, see run.ts). Without ffmpeg or without the clip beside the bundle there is no video and
+// the step keeps its text preview.
 import { spawn } from "node:child_process"
 import { accessSync, constants } from "node:fs"
 import { homedir } from "node:os"
@@ -19,8 +20,19 @@ const MAX_FRAME_WIDTH = 960
 // The clip's own rate: motion is smooth at 60, and the pacer below drops to 30 when sending
 // frames costs more than the machine or the terminal link can spare.
 export const VIDEO_FPS = 60
-// The frame shown when motion is off (a transcript with the agent writing a README).
-const POSTER_SECONDS = 28
+
+// The interfaces that have a clip, and the second of it shown when motion is off (a transcript with
+// the agent's work in it).
+export type ClipId = "claude" | "glass"
+const CLIPS: Readonly<Record<ClipId, { file: string; poster: number }>> = {
+  claude: { file: "claude-style.mp4", poster: 28 },
+  glass: { file: "classic-style.mp4", poster: 38 },
+}
+export const CLIP_IDS = Object.keys(CLIPS) as readonly ClipId[]
+
+export function isClipId(id: string): id is ClipId {
+  return id in CLIPS
+}
 
 export interface CellSize {
   width: number
@@ -74,8 +86,9 @@ export function findFfmpeg(env: NodeJS.ProcessEnv, platform: NodeJS.Platform = p
 }
 
 // The clip sits beside the bundle (dist-ui/), or in demo/ when running from source.
-export function findClip(): string | null {
-  const candidates = [new URL("./claude-style.mp4", import.meta.url), new URL("../demo/claude-style.mp4", import.meta.url)]
+export function findClip(id: ClipId): string | null {
+  const { file } = CLIPS[id]
+  const candidates = [new URL(`./${file}`, import.meta.url), new URL(`../demo/${file}`, import.meta.url)]
   for (const candidate of candidates) {
     const path = fileURLToPath(candidate)
     try {
@@ -143,6 +156,7 @@ export class FramePacer {
 
 export interface ClipOptions {
   ffmpeg: string
+  id: ClipId
   clip: string
   width: number
   height: number
@@ -158,7 +172,7 @@ export interface Clip {
 // Decodes the clip, looping, at its own speed (-re), to `width` x `height` RGB frames.
 export function startClip(options: ClipOptions): Clip {
   const { width, height } = options
-  const input = options.still ? ["-ss", String(POSTER_SECONDS)] : ["-re", "-stream_loop", "-1"]
+  const input = options.still ? ["-ss", String(CLIPS[options.id].poster)] : ["-re", "-stream_loop", "-1"]
   const output = options.still ? ["-frames:v", "1"] : []
   const args = [
     ...["-v", "error", "-nostdin"],
