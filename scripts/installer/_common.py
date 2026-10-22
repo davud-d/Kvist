@@ -337,6 +337,36 @@ def human_size(path: Path) -> str:
     return f"{size / (1024 * 1024):.1f} MB"
 
 
+# Folders whose files never end up in a built plugin.
+_UNBUILT_DIRS = frozenset({
+    "__pycache__", "node_modules", ".git", ".venv", ".build", "build", "dist", "dist-ui", "out", "tests",
+})
+_UNBUILT_SUFFIXES = (".pyc", ".log")
+
+
+def newest_source_mtime(sources: list[Path]) -> float:
+    """Modification time of the most recently changed file under ``sources`` (files or folders).
+
+    Test folders and build output are skipped: changing them does not change what a build contains.
+    """
+    newest = 0.0
+    for source in sources:
+        if source.is_file():
+            newest = max(newest, source.stat().st_mtime)
+            continue
+        for folder, dirs, files in os.walk(source):
+            dirs[:] = [name for name in dirs if name not in _UNBUILT_DIRS]
+            for name in files:
+                if not name.endswith(_UNBUILT_SUFFIXES):
+                    newest = max(newest, os.stat(os.path.join(folder, name)).st_mtime)
+    return newest
+
+
+def is_older_than_sources(artifact: Path, sources: list[Path]) -> bool:
+    """True when something the artifact is built from changed after it was built."""
+    return artifact.stat().st_mtime < newest_source_mtime(sources)
+
+
 def safe_extract_zip(zip_path: Path, dest_dir: Path) -> None:
     """Extract every member of `zip_path` under `dest_dir`, refusing escapes.
 

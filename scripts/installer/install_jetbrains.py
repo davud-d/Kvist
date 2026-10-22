@@ -36,6 +36,7 @@ from _common import (
     discover_jetbrains_ides,
     hold_last_step,
     human_size,
+    is_older_than_sources,
     log,
     remove_path,
     report_command_failure,
@@ -83,6 +84,18 @@ def plugins_dir_for(config_dir: Path) -> Path:
 PLUGIN_DIR = REPO_ROOT / "frontends" / "ide" / "jetbrains"
 # The unpacked plugin's own top-level folder name (matches the ZIP root entry).
 PLUGIN_FOLDER_NAME = "kvist-intellij"
+# What the ZIP is built from: the core it bundles, the plugin, and the VS Code webview (with the Ink modules it
+# imports) that the chat tool window shows.
+BUILD_SOURCES = [
+    REPO_ROOT / "kernel",
+    REPO_ROOT / "kvist.spec",
+    REPO_ROOT / "frontends" / "tui" / "ink",
+    REPO_ROOT / "frontends" / "ide" / "vscode" / "src",
+    REPO_ROOT / "frontends" / "ide" / "vscode" / "webview",
+    PLUGIN_DIR / "src",
+    PLUGIN_DIR / "build.gradle.kts",
+    PLUGIN_DIR / "gradle.properties",
+]
 
 
 def find_plugin_zip() -> Path | None:
@@ -206,6 +219,9 @@ def resolve_plugin_zip(
             "error: no plugin ZIP found. Re-run with --build, or build it via "
             "frontends/ide/jetbrains/build-plugin.sh (.bat on Windows)."
         )
+    if is_older_than_sources(found, BUILD_SOURCES):
+        log(f"{found.name} is older than its sources; rebuilding the ZIP")
+        return build_plugin_zip(status)
     return found
 
 

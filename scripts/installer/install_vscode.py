@@ -30,6 +30,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import jsonc_settings
 from _common import (
     IS_MACOS,
     IS_WINDOWS,
@@ -39,6 +40,7 @@ from _common import (
     close_log,
     hold_last_step,
     human_size,
+    is_older_than_sources,
     log,
     probe_command,
     report_command_failure,
@@ -48,6 +50,7 @@ from _common import (
     spinner,
     warn,
 )
+from install_zed import backup_settings, read_settings, write_settings_file
 
 if TYPE_CHECKING:
     from rich.status import Status
@@ -61,6 +64,7 @@ STEPS = {
     "find_editors": "Searching for VS Code-compatible editors",
     "found_editors": "Preparing to install into {count} editor(s)",
     "check_installed": "Checking for an already installed extension",
+    "enable_proposed": "Letting {label} use the extension's inline-edit API (argv.json)",
     "installed_found": "Extension is already installed — rebuilding the VSIX",
     "installed_none": "No installed extension found",
     "build_extension": "Building the VS Code extension VSIX (PyInstaller, then vsce)",
@@ -138,6 +142,17 @@ def discover_vscode_editors(status: Status | None = None) -> list[tuple[str, str
         seen.add(canonical)
         found.append((label, resolved))
     return found
+
+
+# What the VSIX is built from: the core it bundles, the extension, and the Ink modules its webview imports.
+BUILD_SOURCES = [
+    REPO_ROOT / "kernel",
+    REPO_ROOT / "kvist.spec",
+    REPO_ROOT / "frontends" / "tui" / "ink",
+    EXTENSION_DIR / "src",
+    EXTENSION_DIR / "webview",
+    EXTENSION_DIR / "package.json",
+]
 
 
 def find_extension_vsix() -> Path | None:
@@ -233,6 +248,9 @@ def resolve_extension_vsix(
             "error: no VSIX found. Re-run with --build, or build it via "
             "frontends/ide/vscode/build-plugin.sh (.bat on Windows)."
         )
+    if is_older_than_sources(found, BUILD_SOURCES):
+        log(f"{found.name} is older than its sources; rebuilding the VSIX")
+        return build_extension_vsix(status)
     return found
 
 
@@ -252,7 +270,46 @@ def install_into_all(editors: list[tuple[str, str]], vsix_path: Path, status: St
                 failures.append(f"{label}: {retry_exc}")
                 continue
         show_step(status, STEPS["installed_into"].format(label=label))
+        show_step(status, STEPS["enable_proposed"].format(label=label))
+        enable_proposed_api(label)
     return failures
+
+
+# Where each editor keeps argv.json (its permanent command-line flags), under the home folder.
+ARGV_FOLDERS = {"VS Code": ".vscode", "VS Code Insiders": ".vscode-insiders", "VSCodium": ".vscode-oss"}
+PROPOSED_API_FLAG = "enable-proposed-api"
+
+
+def enable_proposed_api(label: str) -> bool:
+    """Put the extension in the editor's ``enable-proposed-api`` list, in ``argv.json``.
+
+    VS Code draws a correction (old text struck through, new text beside it) only for an
+    extension allowed to use the proposed ``inlineCompletionsAdditions`` API, and the
+    allowance is that list. Only this one entry is added: the user's other flags,
+    comments and layout stay as they were, a copy of the original is kept once, and a
+    file that already lists the extension is not written at all.
+
+    :returns: True when the file changed.
+    """
+    folder = ARGV_FOLDERS.get(label)
+    if folder is None or not (Path.home() / folder).is_dir():
+        return False
+    path = Path.home() / folder / "argv.json"
+    before = read_settings(path)
+    try:
+        after = jsonc_settings.add_string_to_array(before, PROPOSED_API_FLAG, VSCODE_EXTENSION_ID)
+    except jsonc_settings.JsoncError as error:
+        warn(f"could not edit {path}: {error}. Add \"{PROPOSED_API_FLAG}\": [\"{VSCODE_EXTENSION_ID}\"] to it by hand.")
+        return False
+    if after == before:
+        log(f"{path} already lists {VSCODE_EXTENSION_ID}")
+        return False
+    backup = backup_settings(path)
+    if backup is not None:
+        log(f"backed up {path.name} to {backup.name}")
+    write_settings_file(path, after)
+    log(f"added {VSCODE_EXTENSION_ID} to {PROPOSED_API_FLAG} in {path}")
+    return True
 
 
 def uninstall_from_all(editors: list[tuple[str, str]], status: Status | None = None) -> list[str]:
@@ -348,6 +405,8 @@ def main() -> None:
         )
     action = "removed from" if args.uninstall else "installed into"
     print(f"\nDone. Extension {action} {len(editors)} editor(s). Reload VS Code if it was open.")
+    if not args.uninstall:
+        print("If argv.json was changed (see the log), quit VS Code completely and start it again: Reload Window does not re-read it.")
 
 
 if __name__ == "__main__":

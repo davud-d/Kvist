@@ -125,6 +125,72 @@ def has_agent_server(text: str, name: str) -> bool:
     return _find_member(text, servers.value_start, servers.value_end - 1, name) is not None
 
 
+def add_string_to_array(text: str, key: str, value: str) -> str:
+    """Make ``key`` (a top-level array of strings) contain ``value``, touching nothing else.
+
+    Adds the member when it is absent and appends to the array when it is there,
+    in the array's own layout (one line or one element per line); an array that
+    already holds ``value`` and every other element, comment and comma stay as they are.
+
+    :param text: the whole document.
+    :param key: the top-level member, e.g. ``"enable-proposed-api"``.
+    :param value: the string that must be in the array.
+    :returns: the updated document, unchanged when ``value`` is already there.
+    :raises JsoncError: when the document cannot be edited safely or ``key`` is not an array.
+    """
+    root_open, root_close = _root_object(text)
+    member = _find_member(text, root_open, root_close, key)
+    quoted = json.dumps(value, ensure_ascii=False)
+    if member is None:
+        return _insert_member(text, root_open, root_close, f"{json.dumps(key)}: [{quoted}]")
+    if text[member.value_start : member.value_start + 1] != "[":
+        raise JsoncError(f"{key!r} is not an array in this file; fix it by hand before installing.")
+    open_index = member.value_start
+    close_index = _matching_brace(_tokenize(text), open_index, text)
+    elements = _array_elements(text, open_index, close_index)
+    if any(_is_string_equal(text, element, value) for element in elements):
+        return text
+    if not elements:
+        return text[: open_index + 1] + quoted + text[open_index + 1 :]
+    last_start, last_end = elements[-1]
+    if "\n" not in text[open_index:last_end]:
+        return text[:last_end] + f", {quoted}" + text[last_end:]
+    return text[:last_end] + f",\n{_line_indent(text, last_start)}{quoted}" + text[last_end:]
+
+
+def _array_elements(text: str, open_index: int, close_index: int) -> list[tuple[int, int]]:
+    """``(start, end)`` of each top-level element of the array between the two brackets."""
+    elements: list[tuple[int, int]] = []
+    depth = 0
+    start: int | None = None
+    for token in _tokenize(text):
+        if token.start <= open_index or token.start >= close_index or token.kind == "comment":
+            continue
+        char = text[token.start]
+        if depth == 0 and token.kind == "punct" and char == ",":
+            start = None
+            continue
+        if start is None:
+            start = token.start
+        if token.kind == "punct" and char in "[{":
+            depth += 1
+        elif token.kind == "punct" and char in "]}":
+            depth -= 1
+        if depth == 0:
+            if elements and elements[-1][0] == start:
+                elements[-1] = (start, token.end)
+            else:
+                elements.append((start, token.end))
+    return elements
+
+
+def _is_string_equal(text: str, element: tuple[int, int], value: str) -> bool:
+    try:
+        return json.loads(text[element[0] : element[1]]) == value
+    except json.JSONDecodeError:
+        return False
+
+
 def _validated_entry(entry_text: str) -> str:
     try:
         parsed = json.loads(entry_text)

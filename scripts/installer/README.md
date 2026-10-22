@@ -82,6 +82,20 @@ code --install-extension <kvist.vsix> --force
 Use `--build` to rebuild the bundled Kvist binary and VSIX before installing, or
 `--vsix path/to/file.vsix` to install a specific package.
 
+Without either flag the VS Code and JetBrains installers still rebuild when the
+package they would install is older than the code it is built from (the core,
+`kvist.spec`, the plugin and the Ink modules its webview imports; tests and
+build output do not count), so an old build is never installed by accident.
+
+The VS Code installer also lists `kvist.kvist` in the editor's `argv.json`
+(`enable-proposed-api`), which VS Code requires before it will draw a correction
+with the old text struck through. Only that one entry is added: the other flags,
+comments and layout stay, the original is copied once to `argv.json.kvist-backup`,
+a file that already lists the extension is not written, and a file it cannot edit
+safely is left alone with a warning. Uninstalling leaves the entry (it does
+nothing without the extension). Quit VS Code completely and start it again
+afterwards; Reload Window does not re-read `argv.json`.
+
 ## How Zed is configured
 
 Zed reaches coding agents through the Agent Client Protocol and finds them under
