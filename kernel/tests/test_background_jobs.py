@@ -27,7 +27,23 @@ from kernel.protocol.frontend_protocol import (
 )
 from kernel.protocol.parser import CommandValidationError, validate_action_args
 from kernel.sandbox.process_tree import run_supervised
+from kernel.sandbox.sandbox import host_network_launcher
 from kernel.tests.conftest import AllowAllApprovals, requires_posix
+
+
+def _commands_without_network_can_start() -> bool:
+    try:
+        host_network_launcher(False)
+    except ValueError:
+        return False
+    return True
+
+
+requires_network_isolation = pytest.mark.skipif(
+    not _commands_without_network_can_start(),
+    reason="a command without network needs an OS network boundary (Bubblewrap on Linux, "
+    "sandbox-exec on macOS); this machine has none, so Kvist refuses to start one",
+)
 
 
 def _spawn_script(lines: list[str], gate: threading.Event | None = None, code: int = 0):
@@ -259,7 +275,9 @@ def test_a_real_command_runs_in_the_background_and_is_followed(tmp_path):
 def test_expose_port_on_a_foreground_command_is_ignored_with_a_note(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
 
-    result = executor._run_shell(["python3", "-c", "print('ok')"], expose_port=8000)
+    result = executor._run_shell(
+        ["python3", "-c", "print('ok')"], expose_port=8000, network=True, justification="test",
+    )
 
     assert result.ok and result.data["stdout"].strip() == "ok"
     assert "expose_port was ignored" in result.data["port_note"]
@@ -301,6 +319,7 @@ def test_a_job_without_timeout_lives_up_to_the_profile_ceiling(tmp_path):
 
 
 @requires_posix
+@requires_network_isolation
 def test_the_start_note_says_a_job_without_network_is_unreachable(tmp_path):
     executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
     offline = executor._run_shell(["python3", "-c", "pass"], background=True)

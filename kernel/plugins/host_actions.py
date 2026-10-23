@@ -143,9 +143,12 @@ def _visible_name(path: Path) -> str:
     return entry.get("Name", "").strip()
 
 
+_MAC_SYSTEM_APP_ROOTS = (Path("/Applications"), Path("/Applications/Utilities"), Path("/System/Applications"),
+                         Path("/System/Applications/Utilities"))
+
+
 def _mac_apps() -> dict[str, str]:
-    roots = [Path("/Applications"), Path("/Applications/Utilities"), Path("/System/Applications"),
-             Path("/System/Applications/Utilities"), Path.home() / "Applications"]
+    roots = [*_MAC_SYSTEM_APP_ROOTS, Path.home() / "Applications"]
     return {path.stem: path.stem for root in roots if root.is_dir() for path in sorted(root.glob("*.app"))}
 
 

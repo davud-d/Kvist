@@ -6,6 +6,8 @@ Fixtures copy the record layouts seen in real session files of each agent.
 from __future__ import annotations
 
 import json
+import nturl2path
+import posixpath
 import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +25,7 @@ from kernel.session_import import (
     opencode,
     qwen_code,
 )
+from kernel.session_import import model
 from kernel.session_import.model import ImportedSession, ImportedTurn, SessionSummary
 from kernel.session_import.wizard import run_export, setup_import, setup_listing
 from kernel.session_import.writer import HISTORY_TURNS, import_session, session_name
@@ -232,11 +235,38 @@ def test_opencode_reads_both_schemas_and_skips_child_sessions(home, workspace):
     assert (new.user, new.answer, new.files_changed) == ("make a page", "Done.", ["/p/index.html"])
 
 
+# --- file: URIs ------------------------------------------------------------------
+
+
+def test_file_uris_become_this_systems_paths(monkeypatch):
+    monkeypatch.setattr(model, "url2pathname", nturl2path.url2pathname)
+    assert model.file_uri_path("file:///D:/work/my%20app") == "D:\\work\\my app"
+    # Windows paths ignore case; its own url2pathname writes the drive letter in capitals.
+    assert model.file_uri_path("file:///d%3A/work") == "D:\\work"
+    assert model.file_uri_path("file://server/share/app") == "\\\\server\\share\\app"
+    assert model.file_uri_path("C:\\plain") == "C:\\plain"
+
+
+def test_file_uris_on_posix_keep_one_leading_slash_and_decode_once(monkeypatch):
+    monkeypatch.setattr(model, "url2pathname", lambda path: __import__("urllib.parse").parse.unquote(path))
+    assert posixpath.isabs(model.file_uri_path("file:///home/me/my%20app"))
+    assert model.file_uri_path("file:///home/me/my%20app") == "/home/me/my app"
+    assert model.file_uri_path("file:///home/me/100%2525") == "/home/me/100%25"
+
+
 # --- Cursor --------------------------------------------------------------------
 
 
-def test_cursor_reads_bubbles_and_the_workspace_folder(home, workspace):
-    user_dir = home / ".config" / "Cursor" / "User"
+# Cursor keeps its data where each system puts an Electron app's user data.
+@pytest.mark.parametrize("platform, folder", [
+    ("linux", (".config",)),
+    ("darwin", ("Library", "Application Support")),
+    ("win32", ("AppData", "Roaming")),
+])
+def test_cursor_reads_bubbles_and_the_workspace_folder(home, workspace, monkeypatch, platform, folder):
+    monkeypatch.setattr(cursor.sys, "platform", platform)
+    monkeypatch.delenv("APPDATA", raising=False)
+    user_dir = home.joinpath(*folder, "Cursor", "User")
     (user_dir / "globalStorage").mkdir(parents=True)
     (user_dir / "workspaceStorage" / "w1").mkdir(parents=True)
     (user_dir / "workspaceStorage" / "w1" / "workspace.json").write_text(json.dumps({"folder": workspace.as_uri()}))

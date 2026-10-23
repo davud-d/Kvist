@@ -16,7 +16,6 @@ import sqlite3
 import sys
 from contextlib import closing
 from pathlib import Path
-from urllib.parse import unquote
 
 from kernel.session_import.model import (
     ImportedSession,
@@ -52,7 +51,7 @@ def _workspace_folders(user_dir: Path) -> dict[str, str]:
         except (OSError, ValueError):
             continue
         if isinstance(folder, str):
-            folders[descriptor.parent.name] = unquote(file_uri_path(folder))
+            folders[descriptor.parent.name] = file_uri_path(folder)
     return folders
 
 

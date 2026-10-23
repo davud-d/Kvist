@@ -12,7 +12,6 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
 
 from kernel.session_import.model import (
     ImportedSession,
@@ -58,7 +57,7 @@ def find(home: Path, _workspace: Path) -> list[SessionSummary]:
         document = _document(path)
         if not any(_text((item.get("message") or {}).get("content")) for item in document.get("history", [])):
             continue
-        folder = unquote(file_uri_path(str(document.get("workspaceDirectory") or "")))
+        folder = file_uri_path(str(document.get("workspaceDirectory") or ""))
         title = str(document.get("title") or "") or short_title(path.stem)
         found.append(SessionSummary("continue", str(document.get("sessionId") or path.stem), title, folder, path.stat().st_mtime, str(path)))
     return found

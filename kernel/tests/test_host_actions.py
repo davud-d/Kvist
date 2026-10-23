@@ -400,13 +400,14 @@ def test_a_missing_program_and_a_hanging_command_are_reported(monkeypatch):
 
 
 def test_macos_apps_are_bundles_started_with_open(monkeypatch, tmp_path):
-    (tmp_path / "Applications").mkdir()
-    (tmp_path / "Applications" / "Telegram.app").mkdir()
+    (tmp_path / "system" / "Safari.app").mkdir(parents=True)
+    (tmp_path / "home" / "Applications" / "Telegram.app").mkdir(parents=True)
+    monkeypatch.setattr(host_actions, "_MAC_SYSTEM_APP_ROOTS", (tmp_path / "system",))
     monkeypatch.setattr(host_actions.sys, "platform", "darwin")
-    monkeypatch.setattr(host_actions.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(host_actions.Path, "home", lambda: tmp_path / "home")
     commands = Commands(monkeypatch, {("open", "-a"): ""})
 
-    assert host_actions.installed_apps() == {"Telegram": "Telegram"}
+    assert host_actions.installed_apps() == {"Safari": "Safari", "Telegram": "Telegram"}
     assert host_actions.open_app("telegram") == "Telegram"
     assert commands.sent == [["open", "-a", "Telegram"]]
 

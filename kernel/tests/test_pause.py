@@ -32,6 +32,11 @@ def _agent(agent_factory):
     return agent, ui
 
 
+# Without Bubblewrap (or sandbox-exec) a command without network is refused by
+# design; these tests are about pause, so their jobs ask for network to start anywhere.
+_RUNS_ANYWHERE = {"network": True, "justification": "test"}
+
+
 def _calls(*calls):
     return "".join(f'<tool_call>{json.dumps({"name": n, "arguments": a})}</tool_call>' for n, a in calls)
 
@@ -98,7 +103,7 @@ def test_background_jobs_survive_a_pause_and_stop_all_ends_them(agent_factory, t
 
     def first(prompt):
         if not agent.executor.jobs.ids():
-            return _calls(("run_shell", {"command": sleeper, "purpose": "wait", "background": True}))
+            return _calls(("run_shell", {"command": sleeper, "purpose": "wait", "background": True, **_RUNS_ANYWHERE}))
         agent.request_pause()
         return _calls(("list_dir", {"path": "."}))
 
@@ -126,7 +131,7 @@ def test_a_job_ending_during_a_pause_queues_its_note_without_waking_the_model(ag
     def model(prompt):
         calls["n"] += 1
         if calls["n"] == 1:
-            return _calls(("run_shell", {"command": quick, "purpose": "build", "background": True}))
+            return _calls(("run_shell", {"command": quick, "purpose": "build", "background": True, **_RUNS_ANYWHERE}))
         agent.request_pause()
         return _calls(("list_dir", {"path": "."}))
 

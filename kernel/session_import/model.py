@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 
 @dataclass(slots=True)
@@ -119,11 +121,23 @@ def millis_to_epoch(value: object) -> float:
     return 0.0
 
 
+_ESCAPED_DRIVE_RE = re.compile(r"^/([A-Za-z])%3[Aa]")
+
+
 def file_uri_path(value: str) -> str:
-    """``file:///a/b`` as ``/a/b``; any other text is returned unchanged."""
-    if value.startswith("file://"):
-        return value[len("file://"):]
-    return value
+    """A ``file:`` URI as this system's path, percent-escapes decoded; any other text unchanged.
+
+    ``url2pathname`` applies the local rules, so ``file:///D:/x`` and VS Code's
+    ``file:///d%3A/x`` become drive paths on Windows instead of ``/D:/x``.
+    """
+    if not value.startswith("file:"):
+        return value
+    parts = urlsplit(value)
+    # url2pathname finds a drive only by its literal colon, and VS Code escapes it.
+    path = _ESCAPED_DRIVE_RE.sub(r"/\1:", parts.path)
+    if parts.netloc and parts.netloc != "localhost":
+        path = f"//{parts.netloc}{path}"
+    return url2pathname(path)
 
 
 def short_title(text: str, limit: int = 80) -> str:
