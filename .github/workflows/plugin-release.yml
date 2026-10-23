@@ -31,55 +31,9 @@ jobs:
             gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
           done
 
-  plan:
-    # macOS minutes count ten times on a private repository. Rebuild on manual
-    # runs, every tenth run, and whenever the web payload, its frozen dispatch,
-    # or its release wrappers change. Other runs can reuse the rolling release's
-    # macOS artifacts (see "Prepare macOS binaries").
-    name: Plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    outputs:
-      macos: ${{ steps.plan.outputs.macos }}
-    steps:
-      - name: Check out history for the web payload comparison
-        if: github.event_name == 'push'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Decide whether to build macOS
-        id: plan
-        env:
-          EVENT: ${{ github.event_name }}
-          RUN_NUMBER: ${{ github.run_number }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          if [ "$EVENT" = workflow_dispatch ] || [ $((RUN_NUMBER % 10)) -eq 0 ]; then
-            echo "macos=true" >> "$GITHUB_OUTPUT"
-          elif [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            # A new branch/history has no safe predecessor to compare.
-            echo "macos=true" >> "$GITHUB_OUTPUT"
-          elif ! git diff --quiet "$BEFORE" "$GITHUB_SHA" -- \
-              frontends/web-local \
-              frontends/tui/ink \
-              kernel/__main__.py \
-              kvist.spec \
-              pyproject.toml \
-              requirements.txt \
-              scripts/release/install.sh \
-              scripts/release/install.ps1; then
-            # Never pair a new kvist-web wrapper or payload with a stale binary.
-            echo "macos=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "macos=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build-macos-binary:
     name: Build macOS binary (${{ matrix.arch }})
-    needs: [cleanup-artifacts, plan]
-    if: needs.plan.outputs.macos == 'true'
+    needs: [cleanup-artifacts]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -186,7 +140,7 @@ jobs:
   build-plugin:
     name: Build IntelliJ plugin and publish
     needs: [build-windows-binary, build-macos-binary]
-    # The macOS job is skipped on most runs, which would skip this one with it.
+    # A failed macOS build must not stop the release; its binaries fall back to the previous ones.
     if: ${{ !cancelled() && needs.build-windows-binary.result == 'success' }}
     # The Linux binary is built here and needs the glibc of the machine it is built on: 22.04's
     # (2.35) runs on Ubuntu 22.04 and later and Debian 12; ubuntu-latest's did not run on 22.04.
@@ -269,7 +223,7 @@ jobs:
             if [ -f "$fresh" ]; then
               cp "$fresh" "$target"
             else
-              # Not rebuilt on this run: take the binary the rolling release already holds.
+              # The macOS build failed: keep the binary the rolling release already holds.
               gh release download latest-plugin-build --repo "$GITHUB_REPOSITORY" --pattern "kvist-macos-$arch" --dir release --clobber || true
             fi
             [ -f "$target" ] || continue

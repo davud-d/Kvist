@@ -32,19 +32,13 @@ jobs:
       os: ${{ steps.plan.outputs.os }}
       python: ${{ steps.plan.outputs.python }}
     steps:
-      # run_number counts every run of this workflow, so macOS joins about one
-      # push in ten, and every manual run.
       - name: Choose the systems
         id: plan
-        env:
-          EVENT: ${{ github.event_name }}
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
           python3 - >> "$GITHUB_OUTPUT" <<'PY'
-          import json, os
+          import json
 
-          macos = os.environ["EVENT"] == "workflow_dispatch" or int(os.environ["RUN_NUMBER"]) % 10 == 0
-          systems = ["ubuntu-22.04", "windows-latest"] + (["macos-latest"] if macos else [])
+          systems = ["ubuntu-22.04", "windows-latest", "macos-latest"]
           python_legs = [
               # A clean server image: no Bubblewrap, so the default sandbox mode
               # refuses arbitrary-code commands.

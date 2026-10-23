@@ -1072,8 +1072,8 @@ as a warning only. BSD `install` has no `-D`, so Gradle's `hostBinaryPath` and t
 finds VS Code inside its `.app`, and **must stay valid bash 3.2**. `install_cli.py` prints the PATH command
 (`path_hint`) and drops the quarantine mark; `install_gui.py` copies `Kvist.app` into `~/Applications` with
 `symlinks=True`; electron-builder's `mac` target makes dmg and zip. `plugin-release.yml` builds the macOS
-binaries only on manual runs and every tenth run (other runs reuse the rolling release's assets, so they can
-lag behind `main`). `platforms.yml` covers the macOS layout on its mac runner only. Not covered: Intel Macs,
+binaries on every run (the repo is public, so minutes are free); only a failed macOS build falls back to the
+rolling release's previous binaries. `platforms.yml` covers the macOS layout on its mac runner only. Not covered: Intel Macs,
 Android Studio, notarization, a real IDE run.
 
 ### Tray icon (`tray_link.py`, `tray_bar.py`, `frontends/tray/`)
