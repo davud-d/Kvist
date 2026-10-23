@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -15,6 +16,13 @@ from kernel.plugins.services import MAX_HOST_OPENS_PER_RUN, CoreServices
 def _desktop_entry(directory, name, title, extra=""):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / name).write_text(f"[Desktop Entry]\nType=Application\nName={title}\nExec=true\n{extra}", encoding="utf-8")
+
+
+xdg_data_dirs = pytest.mark.skipif(
+    os.name == "nt",
+    reason="XDG_DATA_DIRS is colon-separated (the XDG spec), so it cannot name a Windows temporary folder (C:\\...); "
+    "desktop entries are looked up on Linux only",
+)
 
 
 @pytest.fixture
@@ -61,6 +69,7 @@ def test_a_missing_browser_is_unavailable_not_success(monkeypatch):
 # --- applications ------------------------------------------------------------
 
 
+@xdg_data_dirs
 def test_applications_are_found_by_id_or_name_and_hidden_ones_are_not_offered(apps_home):
     _desktop_entry(apps_home / "system" / "applications", "org.telegram.desktop.desktop", "Telegram Desktop")
     _desktop_entry(apps_home / "system" / "applications", "secret.desktop", "Secret", "NoDisplay=true\n")
@@ -85,6 +94,7 @@ def test_an_ambiguous_or_unknown_name_is_answered_with_the_candidates(apps_home)
     assert host_actions.resolve_app("firefox", apps)[0] == "firefox"
 
 
+@xdg_data_dirs
 def test_an_application_is_started_through_its_desktop_entry(apps_home, monkeypatch):
     _desktop_entry(apps_home / "system" / "applications", "firefox.desktop", "Firefox")
     ran = []
@@ -96,6 +106,7 @@ def test_an_application_is_started_through_its_desktop_entry(apps_home, monkeypa
     assert ran == [["/usr/bin/gtk-launch", "firefox.desktop"]]
 
 
+@xdg_data_dirs
 def test_an_id_that_itself_ends_in_desktop_is_launched_with_the_full_file_id(apps_home, monkeypatch):
     _desktop_entry(apps_home / "system" / "applications", "org.telegram.desktop.desktop", "Telegram")
     ran = []

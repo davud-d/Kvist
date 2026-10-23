@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -596,6 +597,13 @@ def test_acp_login_reports_what_the_setup_screen_did(monkeypatch, capsys):
     assert main._acp_login(_acp_args()) == 3
 
 
+kitty_terminals_only = pytest.mark.skipif(
+    os.name == "nt",
+    reason="Glass and Voice need kitty graphics, which no Windows terminal has: the launcher refuses there "
+    "before the build lookup, the --check and the run (test_glass_and_voice_refuse_windows_terminals)",
+)
+
+
 def _glass(monkeypatch, tmp_path, check_code=0, check_err=""):
     """A fake kvist-glass: ``--check`` answers with ``check_code``; the run is recorded."""
     glass = tmp_path / "kvist-glass"
@@ -614,6 +622,7 @@ def _glass(monkeypatch, tmp_path, check_code=0, check_err=""):
     return glass
 
 
+@kitty_terminals_only
 def test_glass_runs_with_this_program_as_its_core(monkeypatch, tmp_path):
     glass = _glass(monkeypatch, tmp_path)
     calls = []
@@ -627,6 +636,7 @@ def test_glass_runs_with_this_program_as_its_core(monkeypatch, tmp_path):
     assert "KVIST_SWITCH_FILE" in env
 
 
+@kitty_terminals_only
 def test_glass_on_a_terminal_it_refuses_falls_back_with_the_reason(monkeypatch, tmp_path, capsys):
     _glass(monkeypatch, tmp_path, check_code=3, check_err="no kitty graphics here")
     monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
@@ -635,6 +645,7 @@ def test_glass_on_a_terminal_it_refuses_falls_back_with_the_reason(monkeypatch, 
     assert "no kitty graphics here" in capsys.readouterr().err
 
 
+@kitty_terminals_only
 def test_glass_without_a_build_falls_back(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("KVIST_GLASS", str(tmp_path / "missing"))
     monkeypatch.setattr(main, "_GLASS_BUILD", tmp_path / "missing")
@@ -646,6 +657,7 @@ def test_glass_without_a_build_falls_back(monkeypatch, tmp_path, capsys):
     assert "cargo build --release" in capsys.readouterr().err
 
 
+@kitty_terminals_only
 def test_tui_inside_glass_starts_the_chosen_interface(monkeypatch, tmp_path):
     _glass(monkeypatch, tmp_path)
     saved = []
@@ -677,6 +689,7 @@ def _voice(monkeypatch, tmp_path, check_code=0, check_err=""):
     return screen
 
 
+@kitty_terminals_only
 def test_voice_runs_the_screen_with_this_program_as_its_core(monkeypatch, tmp_path):
     screen = _voice(monkeypatch, tmp_path)
     calls = []
@@ -690,6 +703,7 @@ def test_voice_runs_the_screen_with_this_program_as_its_core(monkeypatch, tmp_pa
     assert "KVIST_SWITCH_FILE" in env
 
 
+@kitty_terminals_only
 def test_tui_inside_voice_starts_the_chosen_interface(monkeypatch, tmp_path):
     _voice(monkeypatch, tmp_path)
     saved = []
@@ -706,6 +720,7 @@ def test_tui_inside_voice_starts_the_chosen_interface(monkeypatch, tmp_path):
     assert saved == ["tui"]
 
 
+@kitty_terminals_only
 def test_voice_starts_through_its_launcher_when_it_ships_beside_the_screen(monkeypatch, tmp_path):
     screen = _voice(monkeypatch, tmp_path)
     folder = tmp_path / "voice"
@@ -724,6 +739,7 @@ def test_voice_starts_through_its_launcher_when_it_ships_beside_the_screen(monke
     assert env["KVIST_VOICE_SCREEN"] == str(screen)
 
 
+@kitty_terminals_only
 def test_voice_on_a_terminal_it_refuses_falls_back_with_the_reason(monkeypatch, tmp_path, capsys):
     _voice(monkeypatch, tmp_path, check_code=3, check_err="no kitty graphics here")
     monkeypatch.setattr(subprocess, "call", lambda command, env: pytest.fail("must not start"))
@@ -732,6 +748,7 @@ def test_voice_on_a_terminal_it_refuses_falls_back_with_the_reason(monkeypatch, 
     assert "no kitty graphics here" in capsys.readouterr().err
 
 
+@kitty_terminals_only
 def test_voice_without_a_build_falls_back(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("KVIST_VOICE_SCREEN", str(tmp_path / "missing"))
     monkeypatch.setattr(main, "_VOICE_SCREEN_BUILD", tmp_path / "missing")
@@ -741,6 +758,26 @@ def test_voice_without_a_build_falls_back(monkeypatch, tmp_path, capsys):
 
     assert main.launch_voice(_tui_args(frontend="voice")) is None
     assert "frontends/voice/screen" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("frontend", "launch", "name"), [("glass", "launch_glass", "Classic"), ("voice", "launch_voice", "Voice")]
+)
+def test_glass_and_voice_refuse_windows_terminals(monkeypatch, tmp_path, capsys, frontend, launch, name):
+    _glass(monkeypatch, tmp_path)
+    _voice(monkeypatch, tmp_path)
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: pytest.fail("must not ask the terminal"))
+    monkeypatch.setattr(subprocess, "call", lambda *args, **kwargs: pytest.fail("must not start"))
+
+    # os.name is global (pathlib reads it too), so it is Windows only for the call itself.
+    with monkeypatch.context() as windows:
+        windows.setattr(main.os, "name", "nt")
+        result = getattr(main, launch)(_tui_args(frontend=frontend))
+
+    assert result is None
+    assert capsys.readouterr().err == (
+        f"{name} needs kitty graphics, which Windows terminals do not have. Using the Ink UI.\n"
+    )
 
 
 def test_tui_switch_to_voice_starts_it(monkeypatch, tmp_path):

@@ -19,9 +19,11 @@ def _only_tools(monkeypatch, *names):
     monkeypatch.setattr(rust.shutil, "which", lambda name: f"/usr/bin/{name}" if name in names else None)
 
 
-def test_cargo_is_found_where_rustup_puts_it_before_it_is_on_path(monkeypatch, tmp_path):
+@pytest.mark.parametrize(("windows", "name"), [(False, "cargo"), (True, "cargo.exe")])
+def test_cargo_is_found_where_rustup_puts_it_before_it_is_on_path(monkeypatch, tmp_path, windows, name):
     _only_tools(monkeypatch)
-    cargo = tmp_path / "bin" / "cargo"
+    monkeypatch.setattr(rust, "IS_WINDOWS", windows)
+    cargo = tmp_path / "bin" / name
     cargo.parent.mkdir()
     cargo.write_text("")
     cargo.chmod(0o755)
@@ -49,8 +51,9 @@ def test_without_a_package_manager_there_is_no_command(monkeypatch):
     assert rust.compiler_install_commands() is None
 
 
+# os.geteuid exists on POSIX only; the sudo decision itself is plain logic and is checked everywhere.
 def test_a_password_for_sudo_stops_with_the_commands_to_run(monkeypatch):
-    monkeypatch.setattr(rust.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(rust.os, "geteuid", lambda: 1000, raising=False)
     _only_tools(monkeypatch, "sudo")
     monkeypatch.setattr(rust, "probe_command", lambda command: subprocess.CompletedProcess(command, 1))
     with pytest.raises(SystemExit, match="sudo dnf install -y gcc"):
@@ -58,7 +61,7 @@ def test_a_password_for_sudo_stops_with_the_commands_to_run(monkeypatch):
 
 
 def test_passwordless_sudo_runs_the_commands_as_root(monkeypatch):
-    monkeypatch.setattr(rust.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(rust.os, "geteuid", lambda: 1000, raising=False)
     _only_tools(monkeypatch, "sudo")
     monkeypatch.setattr(rust, "probe_command", lambda command: subprocess.CompletedProcess(command, 0))
     assert rust._as_root([["dnf", "install", "-y", "gcc"]]) == [["sudo", "-n", "dnf", "install", "-y", "gcc"]]

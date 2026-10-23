@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -51,18 +52,36 @@ for line in sys.stdin:
 """
 
 
+def fake_core(tmp_path: Path, reply: str) -> Path:
+    """A program the extension can spawn as kvist-core, answering every request with ``reply``."""
+    source = f"REPLY = {reply!r}\n{FAKE_CORE}"
+    if os.name != "nt":
+        core = tmp_path / "core.py"
+        core.write_text(source, encoding="utf-8")
+        launcher = tmp_path / "core"
+        launcher.write_text(f"#!/bin/sh\nexec {sys.executable} {core} \"$@\"\n", encoding="utf-8")
+        launcher.chmod(0o755)
+        return launcher
+    # Windows spawns only real executables (kvide gets kvist-core.exe there), so the script is
+    # wrapped the way pip wraps console scripts: its .exe launcher runs the script with this Python.
+    # The maker wraps only a file whose first line names Python.
+    scripts = pytest.importorskip("pip._vendor.distlib.scripts", reason="pip's script launchers are needed on Windows")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "core.py").write_text(f"#!python\n{source}", encoding="utf-8")
+    [launcher] = scripts.ScriptMaker(str(tmp_path / "src"), str(tmp_path / "bin")).make("core.py")
+    return Path(launcher)
+
+
 def run_provider(tmp_path: Path, reply: str, text: str = "pri", offset: int = 3, file: str = "a.py") -> list[dict]:
-    core = tmp_path / "core.py"
-    core.write_text(f"REPLY = {reply!r}\n{FAKE_CORE}", encoding="utf-8")
-    launcher = tmp_path / "core"
-    launcher.write_text(f"#!/bin/sh\nexec {sys.executable} {core} \"$@\"\n", encoding="utf-8")
-    launcher.chmod(0o755)
+    env = {"KVIST_CORE": str(fake_core(tmp_path, reply)), "PATH": "/usr/bin:/bin"}
+    # Without SystemRoot, Node on Windows cannot seed its random generator and aborts at start.
+    if "SYSTEMROOT" in os.environ:
+        env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
     harness = tmp_path / "harness.cjs"
     harness.write_text(HARNESS, encoding="utf-8")
     result = subprocess.run(
         [NODE, str(harness), str(tmp_path), str(EXTENSION), file, text, str(offset)],
-        env={"KVIST_CORE": str(launcher), "PATH": "/usr/bin:/bin"},
-        capture_output=True, text=True, timeout=15,
+        env=env, capture_output=True, text=True, timeout=15,
     )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
