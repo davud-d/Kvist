@@ -58,8 +58,28 @@ pub fn command(env_value: Option<&str>) -> Result<Vec<String>, String> {
     }
 }
 
+/// Each app launch owns a fresh session; earlier conversations remain in the store.
+fn prepare_session(argv: &[String], workspace: &Path) -> io::Result<()> {
+    let output = Command::new(&argv[0])
+        .args(&argv[1..])
+        .args(["--workspace", &workspace.display().to_string(), "--session-op", "launch"])
+        .stdin(Stdio::null())
+        .output()?;
+    check_launch(output.status.success(), &String::from_utf8_lossy(&output.stdout))
+}
+
+fn check_launch(success: bool, stdout: &str) -> io::Result<()> {
+    let reply = stdout.trim().lines().next_back().and_then(|line| serde_json::from_str::<Value>(line).ok());
+    if success && reply.as_ref().and_then(|reply| reply["ok"].as_bool()) == Some(true) {
+        return Ok(());
+    }
+    let error = reply.as_ref().and_then(|reply| reply["error"].as_str()).unwrap_or("could not create a session for this launch");
+    Err(io::Error::other(error))
+}
+
 impl Core {
     pub fn spawn(argv: &[String], workspace: &Path) -> io::Result<Core> {
+        prepare_session(argv, workspace)?;
         let log = std::env::temp_dir().join(format!("kvist-glass-core-{}.log", std::process::id()));
         let mut child = Command::new(&argv[0])
             .args(&argv[1..])
@@ -228,6 +248,14 @@ mod tests {
         assert!(command(Some("kvist-core")).is_err());
         let default = command(None).unwrap();
         assert!(default[0].ends_with(".venv/bin/python") && default[1].ends_with("kernel/__main__.py"));
+    }
+
+    #[test]
+    fn launch_requires_a_successful_session_operation() {
+        assert!(check_launch(true, "noise\n{\"ok\":true}").is_ok());
+        assert!(check_launch(false, r#"{"ok":true}"#).is_err());
+        assert!(check_launch(true, "").is_err());
+        assert!(check_launch(true, r#"{"ok":false,"error":"storage unavailable"}"#).unwrap_err().to_string().contains("storage unavailable"));
     }
 
     #[test]
