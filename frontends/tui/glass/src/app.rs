@@ -28,11 +28,11 @@ use crate::model::{CoreEvent, Session};
 use crate::models::ModelPicker;
 use crate::pictures::{
     Backdrop, CardSpec, CardStyle, Pictures, PopupSpec, SLOT_BROWSER_CARD, SLOT_DIALOG, SLOT_DIFF, SLOT_HELPERS,
-    SLOT_ATTACH, SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, WaterSpec, Worker,
+    DEVELOP_STEP_MS, DEVELOP_STEPS, SLOT_ATTACH, SLOT_INPUT, SLOT_LEFT, SLOT_MENU, SLOT_READING, Scene, ThumbSpec, WaterSpec, Worker,
 };
 use crate::probe::Caps;
 use crate::protocol;
-use crate::screen::Feed;
+use crate::screen::{Feed, load_image};
 use crate::slash::{self, Command, Enter};
 use crate::strings::{self, strings};
 use crate::term;
@@ -105,6 +105,15 @@ pub struct App {
     core: Option<Core>,
     /// Frames of the agent's browser, while it has one.
     feed: Option<Feed>,
+    /// A picture is being drawn or decoded: the card shows a spinner until it arrives.
+    pub image_pending: bool,
+    /// When the latest picture arrived; it develops from blurred and dark.
+    developed_at: Option<Instant>,
+    /// A saved picture being decoded for the browser's card.
+    image_in: Option<Receiver<Result<Arc<WebFrame>, String>>>,
+    /// Versions of saved pictures, above any a browser feed reaches, so the
+    /// card's textures are never mistaken for a browser frame's.
+    image_version: u64,
     /// The browser closed: its pictures are to be dropped.
     web_closed: bool,
     /// Width / height of the browser's latest frame.
@@ -200,6 +209,10 @@ impl App {
             session: Session::default(),
             core: None,
             feed: None,
+            image_in: None,
+            image_pending: false,
+            developed_at: None,
+            image_version: 1 << 40,
             web_closed: false,
             web_aspect: None,
             stop_armed: None,
@@ -269,7 +282,7 @@ impl App {
         }
         Shape {
             left_rows,
-            browser: self.session.browser.as_ref().map(|_| self.web_aspect.unwrap_or(BROWSER_ASPECT)),
+            browser: self.session.browser.as_ref().map(|_| self.web_aspect.unwrap_or(if self.image_pending { 1.0 } else { BROWSER_ASPECT })),
             input_lines,
             input_at_bottom: self.input_pos.value(now),
             diff: self.diff.is_some(),
@@ -417,10 +430,38 @@ impl App {
                         Err(error) => self.notify(error, true, now),
                     }
                 }
+                self.image_pending = false;
+                self.developed_at = None;
+                self.browser_in.go(1.0, now, 520, Ease::OutBack);
+            }
+            CoreEvent::ImageDrawing { .. } => {
+                self.feed = None;
+                self.image_in = None;
+                // The last picture goes; the card waits for the new one.
+                self.web_closed = true;
+                self.image_pending = true;
+                self.developed_at = None;
+                self.browser_in.go(1.0, now, 520, Ease::OutBack);
+            }
+            CoreEvent::ImageFailed { error } => {
+                self.image_pending = false;
+                self.web_closed = true;
+                self.browser_in = Tween::settled(0.0);
+                self.notify(error.clone(), true, now);
+            }
+            CoreEvent::Image { path, .. } => {
+                // The picture takes the card from a live browser feed, whose
+                // next frame would otherwise cover it.
+                self.feed = None;
+                self.image_pending = true;
+                self.image_in = Some(load_image(path.clone(), self.image_version));
+                self.image_version += 1;
                 self.browser_in.go(1.0, now, 520, Ease::OutBack);
             }
             CoreEvent::ScreenClosed => {
                 self.feed = None;
+                self.image_in = None;
+                self.image_pending = false;
                 self.web_closed = true;
                 self.browser_in = Tween::settled(0.0);
                 if matches!(self.modal, Some(Modal::Browser)) {
@@ -437,6 +478,26 @@ impl App {
             pictures.set_web(None);
         }
         let mut failure = None;
+        if let Some(incoming) = self.image_in.as_ref() {
+            match incoming.try_recv() {
+                Err(TryRecvError::Empty) => {}
+                Ok(Ok(frame)) => {
+                    pictures.set_web(Some(frame));
+                    self.image_in = None;
+                    self.image_pending = false;
+                    self.developed_at = Some(now);
+                }
+                Ok(Err(error)) => {
+                    failure = Some(error);
+                    self.image_in = None;
+                    self.image_pending = false;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.image_in = None;
+                    self.image_pending = false;
+                }
+            }
+        }
         if let Some(feed) = self.feed.as_ref() {
             while let Ok(frame) = feed.frames.try_recv() {
                 match frame {
@@ -751,6 +812,13 @@ impl App {
         }
     }
 
+    /// How far the latest picture has developed; a browser frame is always whole.
+    fn develop_step(&self, now: Instant) -> u8 {
+        self.developed_at.map_or(DEVELOP_STEPS, |at| {
+            (now.saturating_duration_since(at).as_millis() / DEVELOP_STEP_MS).min(u128::from(DEVELOP_STEPS)) as u8
+        })
+    }
+
     fn animating(&self, now: Instant) -> bool {
         let tweens = [&self.left_in, &self.input_pos, &self.input_rise, &self.helpers_in, &self.browser_in, &self.diff_in, &self.modal_p, &self.menu_in, &self.strip_in];
         matches!(self.phase, Phase::Splash)
@@ -758,6 +826,8 @@ impl App {
             || self.command.is_some()
             || tweens.iter().any(|t| t.running(now))
             || view::revealing(self, now)
+            || self.image_pending
+            || self.develop_step(now) < DEVELOP_STEPS
             || self.pour.as_ref().is_some_and(|pour| pour.moving(now))
             || self.session.files.iter().any(|f| now.saturating_duration_since(f.touched) < Duration::from_millis(1700))
             || self.session.helpers.iter().any(|h| h.state == crate::model::HelperState::Running)
@@ -842,7 +912,7 @@ impl App {
         let browser_open = matches!(self.modal, Some(Modal::Browser));
         let thumb = match (self.layout.thumb, &self.session.browser) {
             (Some(rect), Some(_)) if !(browser_open && self.modal_p.value(now) > 0.001) => {
-                Some(ThumbSpec { rect, dx: browser_dx, dy: 0.0, frame: None, dim })
+                Some(ThumbSpec { rect, dx: browser_dx, dy: 0.0, frame: None, dim, develop: self.develop_step(now) })
             }
             _ => None,
         };
@@ -858,7 +928,7 @@ impl App {
             .enumerate()
             .filter(|(_, (_, attachment))| Some(attachment.id) != opened)
             .map(|(i, (rect, attachment))| {
-                let spec = ThumbSpec { rect, dx: 0.0, dy: input_dy, frame: Some(attachment.frame.clone()), dim };
+                let spec = ThumbSpec { rect, dx: 0.0, dy: input_dy, frame: Some(attachment.frame.clone()), dim, develop: DEVELOP_STEPS };
                 (SLOT_ATTACH + i as u32, spec)
             })
             .collect();
@@ -1319,7 +1389,7 @@ impl App {
     }
 
     fn open_browser(&mut self, now: Instant) {
-        if self.session.browser.is_none() {
+        if self.session.browser.is_none() || self.image_pending {
             return;
         }
         self.modal = Some(Modal::Browser);

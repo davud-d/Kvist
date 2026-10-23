@@ -62,6 +62,19 @@ impl Drop for Feed {
     }
 }
 
+/// Decodes a picture the agent saved, off the interface's thread (a blur of
+/// a large picture takes a moment), and sends it as a frame of the card.
+pub fn load_image(path: String, version: u64) -> Receiver<Result<Arc<WebFrame>, String>> {
+    let (sender, frames) = mpsc::channel();
+    thread::spawn(move || {
+        let frame = image::open(&path)
+            .map(|picture| Arc::new(backdrop::web_frame(picture.to_rgb8(), version)))
+            .map_err(|error| format!("cannot show {path}: {error}"));
+        let _ = sender.send(frame);
+    });
+    frames
+}
+
 /// Splits a loopback `http://` URL into "host:port" and the request path.
 fn loopback(url: &str) -> Result<(String, String), String> {
     let rest = url.strip_prefix("http://").ok_or_else(|| format!("not an http address: {url}"))?;

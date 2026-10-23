@@ -37,6 +37,16 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
             _ if text("frame_url").is_empty() => Vec::new(),
             _ => vec![CoreEvent::Screen { title: text("title"), frame_url: text("frame_url") }],
         },
+        "image_job" => match text("state").as_str() {
+            "generating" => vec![CoreEvent::ImageDrawing { title: text("name") }],
+            "failed" => vec![CoreEvent::ImageFailed { error: text("error") }],
+            _ => Vec::new(),
+        },
+        // A picture the agent saved (generate_image, or a skill's image): shown
+        // in the browser's place on the right.
+        "artifact" if text("mime").starts_with("image/") && !text("path").is_empty() => {
+            vec![CoreEvent::Image { title: text("name"), path: text("path") }]
+        }
         "session_ended" => vec![CoreEvent::SessionEnded { notice: text("closed_notice") }],
         "session" if event.get("closed").and_then(Value::as_bool) == Some(true) => {
             vec![CoreEvent::SessionEnded { notice: text("closed_notice") }]
@@ -189,6 +199,21 @@ mod tests {
         let done = json!({"type": "helper_activity", "agent_id": "h1", "phase": "result", "call_id": "x",
             "action_type": "run_shell", "ok": true, "summary": "exit 0", "output": "48 passed"});
         assert_eq!(translate(&done), vec![CoreEvent::HelperResult { id: "h1".into(), call: "x".into(), ok: true, summary: "exit 0".into(), output: "48 passed".into() }]);
+    }
+
+    #[test]
+    fn a_picture_being_drawn_or_failed_is_reported() {
+        let drawing = json!({"type": "image_job", "state": "generating", "name": "fox", "image_id": "img_1"});
+        assert_eq!(translate(&drawing), vec![CoreEvent::ImageDrawing { title: "fox".into() }]);
+        let failed = json!({"type": "image_job", "state": "failed", "name": "fox", "error": "no key"});
+        assert_eq!(translate(&failed), vec![CoreEvent::ImageFailed { error: "no key".into() }]);
+    }
+
+    #[test]
+    fn a_saved_picture_goes_to_the_card_and_other_files_do_not() {
+        let picture = json!({"type": "artifact", "name": "fox.png", "mime": "image/png", "path": "/w/fox.png"});
+        assert_eq!(translate(&picture), vec![CoreEvent::Image { title: "fox.png".into(), path: "/w/fox.png".into() }]);
+        assert!(translate(&json!({"type": "artifact", "name": "a.pdf", "mime": "application/pdf", "path": "/w/a.pdf"})).is_empty());
     }
 
     #[test]

@@ -38,6 +38,12 @@ pub enum CoreEvent {
     FileChanged { path: String, added: u32, removed: u32, patch: Option<String> },
     Screen { title: String, frame_url: String },
     ScreenClosed,
+    /// A picture is being drawn in the background; the card waits for it.
+    ImageDrawing { title: String },
+    /// The picture could not be made.
+    ImageFailed { error: String },
+    /// A picture saved on disk for the person; shown in the browser's card.
+    Image { title: String, path: String },
     Helper { id: String, task: String, state: HelperState, summary: String },
     /// A helper's call started (`helper_activity`, phase `step`).
     HelperStep { id: String, call: String, kind: ToolKind, label: String },
@@ -139,8 +145,10 @@ impl Session {
             CoreEvent::Result { call, ok, summary, diff } => self.finish_call(&call, CallState::Done { ok, summary, diff }, now),
             CoreEvent::FileChanged { path, added, removed, patch } => self.change_file(path, added, removed, patch, now),
             // The frames themselves are fetched by the interface (screen.rs).
-            CoreEvent::Screen { title, .. } => self.browser = Some(Browser { title }),
-            CoreEvent::ScreenClosed => self.browser = None,
+            CoreEvent::Screen { title, .. } | CoreEvent::Image { title, .. } | CoreEvent::ImageDrawing { title } => {
+                self.browser = Some(Browser { title })
+            }
+            CoreEvent::ScreenClosed | CoreEvent::ImageFailed { .. } => self.browser = None,
             CoreEvent::Helper { id, task, state, summary } => self.update_helper(id, task, state, summary),
             CoreEvent::HelperStep { id, call, kind, label } => {
                 let helper = self.helper_mut(&id);

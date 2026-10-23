@@ -383,6 +383,11 @@ fn draw_browser_label(p: &mut Painter, app: &App, now: Instant, drawn: &mut Draw
         return;
     };
     let off = slide_cols(card, app.browser_in.value(now));
+    if app.image_pending {
+        let waiting = format!("{} {}", theme::spinner(now.saturating_duration_since(app.started).as_millis()), strings().drawing);
+        let x = thumb.x as i32 + (thumb.width as i32 - waiting.chars().count() as i32) / 2 + off;
+        p.text(x, thumb.y as i32 + thumb.height as i32 / 2, &waiting, st(MIST));
+    }
     let y = thumb.bottom() as i32;
     let x = card.x as i32 + 2 + off;
     let right = card.right() as i32 - 2 + off;

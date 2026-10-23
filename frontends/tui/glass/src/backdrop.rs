@@ -255,6 +255,16 @@ pub fn thumbnail(frame: &RgbImage, width: u32, height: u32, light: f32) -> RgbaI
     rounded(&brightness(&cover(frame, width, height), light), 7.0)
 }
 
+/// A picture part-way through developing: blurred and dark at step 0,
+/// sharp and in full light at `steps`.
+pub fn developing_thumbnail(frame: &RgbImage, width: u32, height: u32, light: f32, step: u8, steps: u8) -> RgbaImage {
+    let left = 1.0 - f32::from(step) / f32::from(steps);
+    let fitted = cover(frame, width, height);
+    let radius = (left * width.max(height) as f32 / 14.0).round() as u32;
+    let softened = if radius == 0 { fitted } else { blur(&fitted, 2, radius) };
+    rounded(&brightness(&softened, light * (0.25 + 0.75 * (1.0 - left))), 7.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +305,16 @@ mod tests {
         let blurred = blur(&flat, 4, 2);
         assert_eq!(blurred.dimensions(), (64, 48));
         assert!(blurred.pixels().all(|p| p.0.iter().zip([90, 120, 150]).all(|(&a, b)| (a as i32 - b).abs() <= 1)));
+    }
+
+    #[test]
+    fn a_picture_develops_from_dark_and_blurred_to_the_finished_one() {
+        let stripes = RgbImage::from_fn(64, 64, |x, _| if x % 2 == 0 { image::Rgb([240, 240, 240]) } else { image::Rgb([10, 10, 10]) });
+        let first = developing_thumbnail(&stripes, 64, 64, 1.0, 0, 8);
+        let last = developing_thumbnail(&stripes, 64, 64, 1.0, 8, 8);
+        let sum = |picture: &RgbaImage| picture.pixels().map(|p| u64::from(p.0[0])).sum::<u64>();
+        assert!(sum(&first) < sum(&last) / 3, "the first step is much darker");
+        let contrast = |picture: &RgbaImage| (picture.get_pixel(32, 32).0[0] as i32 - picture.get_pixel(33, 32).0[0] as i32).abs();
+        assert!(contrast(&first) < contrast(&last) / 4, "and blurred");
     }
 }

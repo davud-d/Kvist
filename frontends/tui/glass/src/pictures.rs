@@ -160,6 +160,10 @@ pub struct CardSpec {
     pub dy: f32,
 }
 
+/// A picture develops over this many steps, each `DEVELOP_STEP_MS` long.
+pub const DEVELOP_STEPS: u8 = 8;
+pub const DEVELOP_STEP_MS: u128 = 260;
+
 pub struct ThumbSpec {
     pub rect: Rect,
     pub dx: f32,
@@ -168,6 +172,8 @@ pub struct ThumbSpec {
     pub frame: Option<Arc<WebFrame>>,
     /// Darkened, while a dialog is open over it.
     pub dim: bool,
+    /// How far the picture has developed, `0..=DEVELOP_STEPS`.
+    pub develop: u8,
 }
 
 pub struct PopupSpec {
@@ -230,7 +236,7 @@ pub struct Pictures {
     /// The picture of the pool now shown, by what it was drawn from.
     water: Option<(u64, u32)>,
     /// (frame version, width, height, dimmed) -> picture.
-    thumbs: HashMap<(u64, u32, u32, bool), (u32, u64)>,
+    thumbs: HashMap<(u64, u32, u32, bool, u8), (u32, u64)>,
     /// Formula pictures by (tex, cols, rows, em, dimmed); `None` is a formula that would not draw.
     formulas: HashMap<(String, u16, u16, u32, bool), (Option<u32>, u64)>,
     formula_slots: usize,
@@ -443,7 +449,7 @@ impl Pictures {
     fn thumb_placement(&mut self, grid: &Grid, spec: &ThumbSpec) -> io::Result<Option<Placement>> {
         let Some(web) = spec.frame.clone().or_else(|| self.web.clone()) else { return Ok(None) };
         let (x, y, w, h) = grid.px(spec.rect);
-        let key = (web.version, w as u32, h as u32, spec.dim);
+        let key = (web.version, w as u32, h as u32, spec.dim, spec.develop);
         let image = match self.thumbs.get_mut(&key) {
             Some(entry) => {
                 entry.1 = self.frame;
@@ -451,7 +457,11 @@ impl Pictures {
             }
             None => {
                 let light = if spec.dim { 0.3 } else { 1.0 };
-                let thumb = backdrop::thumbnail(&web.raw, w as u32, h as u32, light);
+                let thumb = if spec.develop >= DEVELOP_STEPS {
+                    backdrop::thumbnail(&web.raw, w as u32, h as u32, light)
+                } else {
+                    backdrop::developing_thumbnail(&web.raw, w as u32, h as u32, light, spec.develop, DEVELOP_STEPS)
+                };
                 let id = self.gpu.upload_rgba(w as u32, h as u32, thumb.as_raw())?;
                 self.thumbs.insert(key, (id, self.frame));
                 id
