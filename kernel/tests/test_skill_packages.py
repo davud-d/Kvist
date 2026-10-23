@@ -142,14 +142,16 @@ def test_installed_versions_are_immutable_and_activation_is_separate(tmp_path):
 
 def test_a_crash_after_copying_leaves_the_active_version_working(tmp_path, monkeypatch):
     registry = _registry(tmp_path)
-    install(registry, write_skill(tmp_path / "v1"))
+    # Instructions only: a tools skill is unavailable wherever the runner is missing, so `available` would say
+    # nothing about the install there.
+    install(registry, write_skill(tmp_path / "v1", kind="instructions"))
 
     def crash(*args, **kwargs):
         raise OSError("disk full")
 
     monkeypatch.setattr("kernel.plugins.registry.os.rename", crash)
     with pytest.raises(OSError):
-        registry.install(write_skill(tmp_path / "v2", version="0.2.0"))
+        registry.install(write_skill(tmp_path / "v2", version="0.2.0", kind="instructions"))
 
     entry = registry.entry("echo")
     assert entry.available and entry.version == "0.1.0"

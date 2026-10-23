@@ -166,6 +166,7 @@ def test_a_declined_approval_attaches_nothing(agent_factory, registry, tmp_path)
     assert agent.skills.attached == {}
 
 
+@requires_runner
 def test_without_a_person_a_tools_skill_cannot_be_approved(agent_factory, registry, tmp_path):
     install(registry, write_skill(tmp_path / "src"))
     agent, ui = _agent(agent_factory, interactive=False)
@@ -175,6 +176,7 @@ def test_without_a_person_a_tools_skill_cannot_be_approved(agent_factory, regist
     assert ui.confirms == []
 
 
+@requires_runner
 def test_a_skill_tool_is_unknown_before_attach_and_after_detach(agent_factory, registry, tmp_path):
     install(registry, write_skill(tmp_path / "src"))
     agent, _ui = _agent(agent_factory)
@@ -200,6 +202,7 @@ def test_skill_call_cannot_be_named_directly_by_the_model(agent_factory):
                       resolve_skill_tool=agent.skills.resolve)
 
 
+@requires_runner
 def test_arguments_are_checked_against_the_tool_schema(agent_factory, registry, tmp_path):
     from kernel.protocol.parser import CommandValidationError, build_command
     from kernel.protocol.protocol import ToolCallRequest
@@ -215,6 +218,7 @@ def test_arguments_are_checked_against_the_tool_schema(agent_factory, registry, 
                       resolve_skill_tool=agent.skills.resolve)
 
 
+@requires_runner
 def test_native_tool_list_carries_attached_skill_tools(agent_factory, registry, tmp_path, monkeypatch):
     from kernel.agent.agent_runtime import _call_native_turn
 
@@ -235,6 +239,7 @@ def test_native_tool_list_carries_attached_skill_tools(agent_factory, registry, 
     assert "echo__say" in seen[1]
 
 
+@requires_runner
 def test_a_new_version_needs_a_new_approval_even_with_the_same_permissions(agent_factory, registry, tmp_path):
     install(registry, write_skill(tmp_path / "v1"))
     agent, ui = _agent(agent_factory)
@@ -249,6 +254,7 @@ def test_a_new_version_needs_a_new_approval_even_with_the_same_permissions(agent
     assert "new content" in ui.confirms[0][1]
 
 
+@requires_runner
 def test_an_unapproved_new_permission_does_not_take_effect_after_an_update(agent_factory, registry, tmp_path):
     install(registry, write_skill(tmp_path / "v1"))
     agent, ui = _agent(agent_factory, interactive=False)

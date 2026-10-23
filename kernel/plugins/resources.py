@@ -460,7 +460,7 @@ class ResourceManager:
             return report
         kept: list[dict[str, Any]] = []
         for entry in document.get("resources", []):
-            if _process_matches(entry.get("core_pid"), entry.get("core_start")):
+            if _core_may_be_running(entry):
                 kept.append(entry)
                 continue
             outcome = _stop_leftover(entry)
@@ -485,6 +485,13 @@ class ResourceManager:
 
 def _new_id(kind: str) -> str:
     return f"{kind}_{uuid.uuid4().hex[:10]}"
+
+
+def _core_may_be_running(entry: dict[str, Any]) -> bool:
+    # Start times come from /proc, so on macOS and Windows a core records none and a running core cannot be
+    # told from a crashed one; its records are kept rather than remove what a live core still uses.
+    start = entry.get("core_start")
+    return start is None or _process_matches(entry.get("core_pid"), start)
 
 
 def _process_matches(pid: Any, start: Any) -> bool:

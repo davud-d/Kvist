@@ -248,7 +248,7 @@ def test_cleanup_stops_a_tree_and_reports_it(tmp_path, trusted_python_path):
     assert "server" in report.summary("en")
 
 
-def test_recovery_never_kills_a_process_whose_pid_was_reused(tmp_path):
+def test_recovery_never_kills_a_process_whose_pid_was_reused(tmp_path, monkeypatch):
     from kernel.session.durable_json import write_json_object
 
     registry = tmp_path / ".kvist" / "resources.json"
@@ -257,11 +257,32 @@ def test_recovery_never_kills_a_process_whose_pid_was_reused(tmp_path):
         "id": "proc_x", "kind": "process", "label": "old server", "core_pid": 999_999_999, "core_start": 1,
         "pid": os.getpid(), "start_time": 1, "cgroup": "",
     }]}, boundary=tmp_path)
+    signalled: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "killpg", lambda pid, sig: signalled.append((pid, sig)), raising=False)
 
     report = ResourceManager(tmp_path).recover()
 
-    assert report.outcomes[0].stopped  # forgotten, not killed: this test process is still alive
-    assert os.path.exists(f"/proc/{os.getpid()}")
+    assert report.outcomes[0].stopped  # forgotten, not killed: the pid now belongs to this test process
+    assert signalled == []
+
+
+def test_recovery_keeps_what_a_core_without_a_start_time_left(tmp_path):
+    from kernel.session.durable_json import read_json_object, write_json_object
+
+    # macOS and Windows have no /proc start time, so a live core's records look like this one.
+    leftover = tmp_path / "kvist-core-x" / "service-8000"
+    leftover.mkdir(parents=True)
+    registry = tmp_path / ".kvist" / "resources.json"
+    registry.parent.mkdir()
+    record = {"id": "dir_x", "kind": "tempdir", "label": "service-8000", "core_pid": 999_999_999,
+              "core_start": None, "path": str(leftover)}
+    write_json_object(registry, {"resources": [record]}, boundary=tmp_path)
+
+    report = ResourceManager(tmp_path).recover()
+
+    assert report.outcomes == []
+    assert leftover.is_dir()
+    assert read_json_object(registry, boundary=tmp_path)["resources"] == [record]
 
 
 def test_a_cleanup_that_cannot_be_confirmed_is_reported_as_such(tmp_path):

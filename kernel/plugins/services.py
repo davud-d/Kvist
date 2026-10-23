@@ -578,9 +578,13 @@ class CoreServices:
                                                    "path": self._directory(call, params)})
 
     def _files_search(self, call: SkillCall, params: dict[str, Any]) -> Any:
-        return self._run_read(call, "search_code", {"query": _str(params, "query", limit=1000),
-                                                    "max_results": _int(params, "max_results", 50, 1, 200),
-                                                    "path": self._directory(call, params)})
+        found = self._run_read(call, "search_code", {"query": _str(params, "query", limit=1000),
+                                                     "max_results": _int(params, "max_results", 50, 1, 200),
+                                                     "path": self._directory(call, params)})
+        # Without ripgrep the executor walks the tree and follows file symlinks, so a hit inside a covered
+        # directory can be a file elsewhere; each hit is checked where it really is.
+        found["results"] = [hit for hit in found["results"] if self._in_path_scope(call, hit["path"], "files.read")]
+        return found
 
     def _files_read_bytes(self, call: SkillCall, params: dict[str, Any]) -> dict[str, Any]:
         path = self._path(call, params, "files.read")
@@ -640,15 +644,20 @@ class CoreServices:
         everything under it is (``allowed/**`` covers ``allowed``), because a
         listing or search reports every file below it.
         """
+        if self._in_path_scope(call, path, capability, directory=directory):
+            return
+        patterns = call.skill.scope(capability).get("paths")
+        raise ServiceError("denied", f"{path} is outside the paths {call.skill.id} may use: {', '.join(patterns)}")
+
+    def _in_path_scope(self, call: SkillCall, path: str, capability: str, *, directory: bool = False) -> bool:
         patterns = call.skill.scope(capability).get("paths")
         if not patterns:
-            return
+            return True
         relative = self._canonical_relative(path)
-        if relative is not None:
-            candidate = (f"{relative}/" if relative else "") if directory else relative
-            if any(fnmatch.fnmatch(candidate, pattern) for pattern in patterns):
-                return
-        raise ServiceError("denied", f"{path} is outside the paths {call.skill.id} may use: {', '.join(patterns)}")
+        if relative is None:
+            return False
+        candidate = (f"{relative}/" if relative else "") if directory else relative
+        return any(fnmatch.fnmatch(candidate, pattern) for pattern in patterns)
 
     def _canonical_relative(self, path: str) -> str | None:
         """The workspace-relative POSIX form of ``path`` after resolving it; None outside the workspace."""
@@ -1461,29 +1470,32 @@ class CoreServices:
                 shutil.rmtree(holder)
 
 
-_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+def _directory_flags() -> int:
+    # Not a module constant: Windows has no O_DIRECTORY/O_NOFOLLOW, and the core must import there.
+    # An exchange exists only beside a Bubblewrap runner, so these flags are only needed on Linux.
+    return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
 def _open_inbox(root: Path) -> int:
     """A descriptor of the exchange's ``in`` directory, made if missing; OSError when it is anything else."""
-    parent = os.open(root, _DIRECTORY_FLAGS)
+    parent = os.open(root, _directory_flags())
     try:
         try:
             os.mkdir(_EXCHANGE_IN, 0o700, dir_fd=parent)
         except FileExistsError:
             # An earlier call or the runner made it; the open below accepts only a real directory.
             pass
-        return os.open(_EXCHANGE_IN, _DIRECTORY_FLAGS, dir_fd=parent)
+        return os.open(_EXCHANGE_IN, _directory_flags(), dir_fd=parent)
     finally:
         os.close(parent)
 
 
 def _open_exchange_file(root: Path, parts: tuple[str, ...]) -> int:
     """A read descriptor of ``root/parts``, reached without following any symlink; OSError otherwise."""
-    directory = os.open(root, _DIRECTORY_FLAGS)
+    directory = os.open(root, _directory_flags())
     try:
         for part in parts[:-1]:
-            child = os.open(part, _DIRECTORY_FLAGS, dir_fd=directory)
+            child = os.open(part, _directory_flags(), dir_fd=directory)
             os.close(directory)
             directory = child
         # O_NONBLOCK: opening a FIFO left in the exchange must not wait for a writer.

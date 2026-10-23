@@ -156,6 +156,7 @@ def test_a_directory_inside_the_scope_can_be_read_listed_and_searched(make_call,
     hits = services.handle(call, "files.search", {"query": "scope", "path": "allowed"})
 
     assert "out of scope" not in str(hits)
+    assert [hit["path"] for hit in hits["results"]] == ["allowed/a.txt"]
 
 
 def test_a_write_scope_is_checked_on_the_canonical_location(make_call, tmp_path):

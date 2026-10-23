@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from kernel.plugins.grants import GrantStore
+from kernel.plugins.manifest import PLATFORMS
 from kernel.plugins.registry import SkillRegistry
 from kernel.plugins.sandbox import runner_unavailable_reason
 
@@ -45,7 +46,8 @@ def write_skill(
         "kind": kind,
         "name": {"en": skill_id.title(), "ru": skill_id.title()},
         "summary": {"en": f"The {skill_id} test skill", "ru": f"Тестовый скилл {skill_id}"},
-        "platforms": ["linux"],
+        # Code runs only in the Linux runner; instructions alone work everywhere, as the bundled ones declare.
+        "platforms": ["linux"] if kind == "tools" else sorted(PLATFORMS),
         "capabilities": {"required": capabilities if capabilities is not None else ["input.read"]},
         "tools": tools if tools is not None else ([ECHO_TOOL] if kind == "tools" else []),
         **(extra or {}),
