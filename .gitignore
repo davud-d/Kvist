@@ -138,3 +138,6 @@ clickjacking-test.png
 
 # freebuff
 .freebuff
+
+# Local notes.
+*.private.md

@@ -58,12 +58,12 @@ Local untracked files (`AGENTS.md`, `plan.md`, `progress.json`, `tools/`, …) s
 
 ## Pushing commits (MANDATORY)
 
-Commits go to the backup relay server, never straight to GitHub.
+Commits go to a private backup remote, never straight to GitHub.
 
-- **Push only to the `relay` remote:** `git push relay <branch>` (stores commits on
-  `backup-host:git-relay/Kvist.git`; a safety-net backup, not publication).
-- **NEVER push to GitHub.** No `git push origin`, no `github.com` URL, no `kvist-push`, nothing
-  that triggers the server→GitHub publish. Publishing is a manual, human-only action.
+- **Push only to the `relay` remote:** `git push relay <branch>` (a safety-net backup, not
+  publication).
+- **NEVER push to GitHub.** No `git push origin`, no `github.com` URL, nothing that publishes.
+  Publishing is a manual, human-only action.
 - Only push when the user explicitly asks; committing/pushing is never implied by a code change.
 
 ## Branches (MANDATORY)
@@ -684,7 +684,7 @@ Public docs: `docs/SKILLS.md` (+ `.ru.md`); events and control messages: `docs/U
   `gdbus`, KDE `kdotool`, X11 `wmctrl` (never on Wayland), macOS JXA, Windows PowerShell; `_no_backend_hint`
   says what to install). `host.open` is capped at 12 per run and refuses an address `redact_text` would
   change; `close` always asks via `ui.confirm`. **Tabs of the person's browser are not reachable** (never
-  probe `:9222`, it is Spotify's CEF on many desktops). macOS/Windows/GNOME/KDE/niri backends have
+  probe `:9222`: other apps' CEF debuggers, Spotify's for one, listen there). macOS/Windows/GNOME/KDE/niri backends have
   only faked-command tests; skills do not load on Windows yet (POSIX-only package reader). Tests:
   `test_host_actions.py`, core-tool tests at the end of `test_skill_runtime.py`.
 - **Network** (`net_broker.py`): the only way out of a runner or MCP sandbox (task-exposed ports, granted

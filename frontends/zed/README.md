@@ -45,7 +45,7 @@ setup in that terminal and exits — secrets never travel over the ACP connectio
 ## How Zed launches the agent
 
 Zed spawns an `agent_servers` entry as `<login shell> -c '<command> <args>'`, where
-the login shell is `$SHELL` — on this machine, fish. It passes no `--no-config`, and
+the login shell is `$SHELL` (fish, zsh, bash…). It passes no `--no-config`, and
 the agent cannot pass one either: the wrapper shell starts and finishes its own
 startup before the binary exists. (Zed 1.20.2, `crates/agent_servers/src/acp.rs` —
 `ShellBuilder::new(&Shell::System, …).non_interactive()`.)

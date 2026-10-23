@@ -163,99 +163,31 @@ npx html-validate dist/index.html dist/ru/index.html \
 `audit.mjs` and `perf.mjs` use the system Chrome when one is installed rather
 than downloading a second copy.
 
-## Deploying to nginx
+## Deploying
 
-`dist/` is the document root. Nothing is generated at request time.
+`dist/` is the document root. Nothing is generated at request time, so any
+static host serves it.
 
 `deploy/security-headers.conf` is written by the build. It carries the CSP, HSTS
 and the rest, and it is generated rather than kept here because the policy names
 the digest of the inline theme script — a hand-copied digest goes stale the
 first time that script is edited, and a stale digest is a page that stops
-theming itself. Include it in every `location` that sets a header of its own:
-nginx's `add_header` does not inherit into a block that adds headers, so a
+theming itself. On nginx, include it in every `location` that sets a header of
+its own: `add_header` does not inherit into a block that adds headers, so a
 `location` with a `Cache-Control` line and no `include` silently ships no CSP.
 
-```nginx
-# Port 8443, not 443: on backup-host port 443 belongs to another service and must stay
-# untouched. Cloudflare reaches 8443 through an Origin Rule (below).
-server {
-    listen 8443 ssl http2;
-    server_name kvist.site;
+Nothing is content-hashed, so HTML should stay fresh (`max-age=0,
+must-revalidate`) while assets revalidate. The `location` for HTML must also
+match `index.html`: `index` redirects the directory URI to the file internally
+and the location is matched again on the file, so matching only the directory
+means its `Cache-Control` never ships. Fonts can be cached as immutable.
 
-    root /srv/kvist-site;
-    index index.html;
-
-    ssl_certificate     /etc/ssl/kvist/origin-cf.pem;
-    ssl_certificate_key /etc/ssl/kvist/origin-cf.key;
-
-    # Only Cloudflare may reach this origin. Keyed on $realip_remote_addr,
-    # never $remote_addr: real_ip rewrites $remote_addr to the visitor's own
-    # address before the access phase runs, so an allow/deny list there tests
-    # the reader instead of the proxy and 403s the entire internet.
-    if ($kvist_from_cloudflare = 0) { return 444; }
-
-    gzip on;
-    gzip_types text/css application/javascript application/json
-               image/svg+xml application/xml;
-    gzip_min_length 512;
-
-    include /srv/kvist-site/security-headers.conf;
-
-    # Nothing is content-hashed, so HTML stays fresh and assets revalidate.
-    # index.html is part of the pattern because `index` redirects the directory
-    # URI to the file internally and the location is matched again on the file —
-    # match only the directory and this Cache-Control never ships.
-    location ~ ^/(ru/)?(guides/)?(index\.html)?$ {
-        include /srv/kvist-site/security-headers.conf;
-        add_header Cache-Control "public, max-age=0, must-revalidate";
-    }
-
-    location /assets/fonts/ {
-        include /srv/kvist-site/security-headers.conf;
-        add_header Cache-Control "public, max-age=31536000, immutable";
-    }
-    location /assets/ {
-        include /srv/kvist-site/security-headers.conf;
-        add_header Cache-Control "public, max-age=3600";
-    }
-
-    # The snippet is configuration, not content.
-    location = /security-headers.conf { return 404; }
-
-    location / { try_files $uri $uri/ =404; }
-}
-```
-
-`$kvist_from_cloudflare` is a `geo` block in the http context, generated from
-<https://www.cloudflare.com/ips-v4> and `ips-v6`, alongside the `set_real_ip_from`
-list and `real_ip_header CF-Connecting-IP`. A default server on the same ports
-answers `444` to any other Host, so the origin stays quiet under scanning.
-
-Publishing:
-
-```fish
-cd web
-node build.mjs
-# --delete clears whatever dist/ no longer ships, so re-sync the conf after it.
-rsync -av --delete dist/ backup-host:/srv/kvist-site/
-rsync -av deploy/security-headers.conf backup-host:/srv/kvist-site/security-headers.conf
-ssh backup-host 'chown -R www-data:www-data /srv/kvist-site && nginx -t && systemctl reload nginx'
-```
-
-Three things on the Cloudflare side, because the origin is not on 443:
-
-- an **Origin Rule** rewriting the destination port to **8443** (Free plan
-  includes these) — without it Cloudflare dials 443 and lands on another service;
-- **SSL/TLS mode Full (strict)** with a Cloudflare **Origin CA** certificate on
-  the origin. Generate the CSR *on the server* and paste only the CSR into the
-  dashboard, so the private key never leaves the host;
-- **Always Use HTTPS** on. Cloudflare preserves the visitor's scheme to the
-  origin, so an `http://` request would otherwise arrive as plain HTTP on the
-  TLS port and come back `400`.
-
-Beyond that: do not enable Cloudflare's HTML minifier or
-Rocket Loader: the theme decision is an inline script in `<head>` that has to
-run before the first paint, and deferring it brings back the white flash.
+Behind a CDN, keep HTML minifiers and script deferral (Cloudflare's Rocket
+Loader and the like) off: the theme decision is an inline script in `<head>`
+that has to run before the first paint, and deferring it brings back the white
+flash. If the origin only accepts the CDN, test the proxy's address
+(`$realip_remote_addr` on nginx), not the visitor's one that `real_ip` puts
+into `$remote_addr`, or the allow list refuses everyone.
 
 ## Things worth knowing before editing
 

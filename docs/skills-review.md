@@ -27,7 +27,7 @@
 
 - **ID / Severity / Confidence:** SK-01 / CRITICAL / CONFIRMED — воспроизведено настоящим скиллом в Bubblewrap.
 - **Статус:** ИСПРАВЛЕНО 2026-10-13.
-- **Ссылки:** [services.py](/path/to/Kvist/kernel/plugins/services.py) (`_to_exchange`, `_from_exchange`, `_open_inbox`, `_open_exchange_file`), [sandbox.py:121](/path/to/Kvist/kernel/plugins/sandbox.py:121).
+- **Ссылки:** [services.py](../kernel/plugins/services.py) (`_to_exchange`, `_from_exchange`, `_open_inbox`, `_open_exchange_file`), [sandbox.py:121](../kernel/plugins/sandbox.py:121).
 - **Описание и причина:** ядро копировало прочитанный файл в exchange/in/<случайное-имя>. Runner мог заранее создать exchange/in как симлинк на каталог хоста. mkdir(exist_ok=True) принимал уже существующий каталог по симлинку, а копирование ядра шло по нему. Запись выполнялась от имени ядра, в обход files.write, runtime-журнала и согласования.
 - **Воздействие:** тест создал файл с синтетическим содержимым вне workspace. Имя включает случайный префикс; перезапись конкретного файла этим тестом не доказана. Реальные секреты не читались.
 - **Исправление:** ядро открывает корень обмена дескриптором и идёт от него с `O_NOFOLLOW | O_DIRECTORY` на каждом компоненте; файл для скилла создаётся с `O_CREAT | O_EXCL | O_NOFOLLOW`. Если `in` — не настоящий каталог, вызов получает `denied`. Приём файлов от runner (`images.add`, `artifacts.save`) идёт так же: путь без `..`, каждый компонент без симлинков, обычный файл по `fstat`. FIFO открывается с `O_NONBLOCK` и отклоняется, не дожидаясь писателя. Размер ограничен во время копирования, ядро работает с приватной копией вне каталога обмена и удаляет её после использования. Смонтировать `in` только для чтения нельзя: browser skill перемещает полученные файлы оттуда (`shutil.move`).
@@ -39,7 +39,7 @@
 
 - **ID / Severity / Confidence:** SK-02 / HIGH / CONFIRMED — два варианта отказали ожидаемой проверке доступа.
 - **Статус:** ИСПРАВЛЕНО 2026-10-13.
-- **Ссылка:** [services.py](/path/to/Kvist/kernel/plugins/services.py) (`_check_path_scope`, `_canonical_relative`, `_directory`).
+- **Ссылка:** [services.py](../kernel/plugins/services.py) (`_check_path_scope`, `_canonical_relative`, `_directory`).
 - **Описание и причина:** область проверялась строковым fnmatch до канонизации пути. Запрос allowed/../private.txt удовлетворял шаблону allowed/\*\*, хотя фактически читал private.txt. Кроме того, files.search не проверял scope вообще: поиск с path: "." обнаружил файл вне allowed/\*\*. Проверки не было и в files.list, files.tree и files.find.
 - **Воздействие:** утечка файлов проекта за пределами выданного скиллу пути; граница workspace при этом сама по себе остаётся отдельной проверкой executor.
 - **Исправление:** шаблон сверяется с каноническим путём относительно workspace, после разрешения `..` и симлинков; путь вне workspace (включая внешние read roots) скилл со scope не получает. `list`, `tree`, `find` и `search` всегда проходят проверку и требуют каталог, который scope покрывает целиком (`allowed/**` покрывает `allowed`); без `path` это корень, который покрывает только grant без scope. Контракт описан в `docs/SKILLS.md` и `docs/SKILLS.ru.md`.
@@ -50,7 +50,7 @@
 
 - **ID / Severity / Confidence:** SK-03 / HIGH / CONFIRMED — воспроизведено локальной парой Unix-сокетов.
 - **Статус:** ИСПРАВЛЕНО 2026-10-13.
-- **Ссылка:** [kvist_wire.py](/path/to/Kvist/kernel/plugins/runner/kvist_wire.py) (`Channel.receive`, `Channel._fill`).
+- **Ссылка:** [kvist_wire.py](../kernel/plugins/runner/kvist_wire.py) (`Channel.receive`, `Channel._fill`).
 - **Описание и причина:** таймаут применялся только к первому чтению заголовка. После получения хотя бы одного байта _read_exact выставлял socket timeout в None; чтение оставшейся части заголовка или объявленного тела становилось бессрочным.
 - **Воздействие (уточнено):** `RunnerHost.call` читает канал на потоке ядра, который ведёт ход агента. Поэтому неполный кадр от runner вешал не только канал, но и весь ход: проверки дедлайна вызова, паузы и отмены в этом цикле переставали выполняться, и отмена из GUI (`request_cancel`) до него не доходила.
 - **Исправление:** один дедлайн на весь кадр, заголовок и тело. По истечении `receive` возвращает None, а пришедшие байты остаются в буфере, и следующий вызов продолжает тот же кадр. Цикл `RunnerHost.call` сохраняет контроль: он, как и раньше, сам отменяет вызов по дедлайну и после отсрочки завершает runner. Отдельно закрывать канал не нужно.
@@ -66,7 +66,7 @@
 
 - **ID / Severity / Confidence:** SK-05 / MEDIUM / HIGH CONFIDENCE — следует из кода, сценарий не запускался.
 - **Статус:** ИСПРАВЛЕНО 2026-10-13: `permissions.request` добавлен в обязательные права browser (версия 0.1.1), статическая проверка `undeclared_ctx_call` ловит вызов `ctx.*` без объявленного права; тесты в `test_skill_checks.py`, мутация (убрать право из манифеста) валит `test_every_bundled_skill_declares_what_its_code_calls`. Установленная в `~/.kvist` версия 0.1.0 остаётся старой до `--skill-op install --skill-path bundled:browser` и нового подтверждения.
-- **Ссылки:** [browser plugin.py:255](/path/to/Kvist/kernel/skills_bundled/browser/plugin.py:255), [browser manifest.json:17](/path/to/Kvist/kernel/skills_bundled/browser/manifest.json:17), [services.py](/path/to/Kvist/kernel/plugins/services.py) (`_permissions_request`).
+- **Ссылки:** [browser plugin.py:255](../kernel/skills_bundled/browser/plugin.py:255), [browser manifest.json:17](../kernel/skills_bundled/browser/manifest.json:17), [services.py](../kernel/plugins/services.py) (`_permissions_request`).
 - **Описание:** browser skill вызывает ctx.permissions.request для интернет-домена и исходного изображения, но permissions.request не объявлен среди обязательных или необязательных разрешений browser manifest. При попытке открыть внешний домен или загрузить вложение запрос должен быть отклонён на проверке capability.
 - **Воздействие:** сценарии внешнего сайта и загрузки вложения могут быть недоступны, даже если пользователь хочет выдать узкое разрешение.
 - **Что проверить:** запустить browser skill с установленными зависимостями; проверить запрос права на один домен и один attachment. Если подтверждается, добавить минимальное optional permission и проверить диалог согласования.

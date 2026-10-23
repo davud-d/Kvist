@@ -790,6 +790,9 @@ def _opencode(monkeypatch, tmp_path, *, packages=True, entry=True):
     monkeypatch.setenv("KVIST_BUN", str(bun))
     monkeypatch.setattr(main, "_OPENCODE_DIR", folder)
     monkeypatch.setattr(main, "_OPENCODE_ENTRY", folder / "src" / "main.ts")
+    # A compiled build in the checkout would win over Bun on the sources.
+    monkeypatch.setattr(main, "_OPENCODE_BUILD", folder / "dist" / "kvist-opencode")
+    monkeypatch.delenv("KVIST_OPENCODE", raising=False)
     monkeypatch.setattr(main.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr(main.sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(main, "resolve_workspace_path", lambda raw: raw)

@@ -19,6 +19,7 @@ from kernel.agent.native_tools import (
     calls_from_turn,
     compact_history,
     native_role_prompt,
+    opening_note,
     tools_for_role,
 )
 from kernel.protocol.parser import CommandValidationError, build_command
@@ -249,6 +250,13 @@ def test_kill_switch_skips_the_probe(agent_factory, monkeypatch):
 
     assert agent_model.native_tools_supported(agent, "m") is False
     assert agent.client.requests == []
+
+
+def test_opening_note_gives_the_russian_example_only_to_a_russian_request():
+    assert opening_note("en") == OPENING_NOTE
+    assert not any("\u0400" <= ch <= "\u04ff" for ch in opening_note("en"))
+    assert opening_note("ru").startswith(OPENING_NOTE)
+    assert "я прочитала" in opening_note("ru")
 
 
 def test_native_run_keeps_one_conversation_and_answers_every_call(agent_factory):

@@ -489,9 +489,13 @@ class TerminalExecutor(
                 command=command,
                 returncode=-1,
                 stdout="",
+                # Inviting "an alternative way" made models rerun the same thing as
+                # another command (npm run build refused, then node build.js).
                 stderr=(
-                    "Error: Command execution denied by user for security reasons. "
-                    f"{reason}. Find an alternative way to solve the task without this command."
+                    f"Error: this command needs the person's approval and did not get it ({reason}). "
+                    "The approval is about what the command does, so another command with the same "
+                    "effect needs the same approval. Work that does not need it can go on, and what "
+                    "stays unchecked is worth telling the person."
                 ),
                 denied=True,
             )

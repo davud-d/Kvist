@@ -400,8 +400,18 @@ OPENING_NOTE = (
     "of the person's own), that line is where you notice it: one remark about the specific absurd detail, in "
     "words you have not used before, then the work, built in full. A request that is only ordinary gets no joke."
     "\nGENDER: in languages that mark the speaker's gender you are feminine in every message, "
-    "including the last one after the tools finish (Russian: \"я прочитала\", \"перенесла\", never \"прочитал\")."
+    "including the last one after the tools finish."
 )
+_RUSSIAN_GENDER_EXAMPLE = " In Russian: \"я прочитала\", \"перенесла\", never \"прочитал\"."
+
+
+def opening_note(language: str) -> str:
+    """The note that closes a native run's first message, for a request in ``language``.
+
+    The Russian example goes only to a Russian request: as the last words before the
+    reply, it pulled about one English request in four into a Russian answer.
+    """
+    return OPENING_NOTE + (_RUSSIAN_GENDER_EXAMPLE if language == "ru" else "")
 
 
 class NativeToolsRejected(RuntimeError):

@@ -6,7 +6,7 @@ Usage:
     --model deepseek:deepseek-v4-pro \\
     --out-dir workspace/_runs/end_session_eval \\
     --budget 2000000 \\
-    --stop-at 2026-10-01T19:15:00+06:00
+    --stop-at 2026-10-01T19:15:00+02:00
 
 A model is ``provider:model`` (``deepseek:deepseek-v4-pro``, ``anymodel:ds/deepseek-v4-pro``).
 ``main.build_agent`` runs once per model (the product path, with the saved settings and
@@ -398,7 +398,7 @@ def main() -> int:
 
     stop_time = datetime.fromisoformat(args.stop_at)
     if stop_time.tzinfo is None:
-        parser.error("--stop-at needs a UTC offset, e.g. 2026-10-01T19:15:00+06:00")
+        parser.error("--stop-at needs a UTC offset, e.g. 2026-10-01T19:15:00+02:00")
     only = {int(item) for item in args.only.split(",")} if args.only else None
     args.out_dir.mkdir(parents=True, exist_ok=True)
     ordered = [(index, case) for index, case in interleaved(load_cases(CASES_PATH)) if only is None or index in only]

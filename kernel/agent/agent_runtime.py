@@ -66,12 +66,12 @@ from kernel.agent.agent_state import PLAN_PLANNING, RunCancelled, RunState
 from kernel.sandbox.executor import UNTRUSTED_CONTENT_NOTICE, ExecutorError
 from kernel.agent.call_labels import call_label
 from kernel.agent.native_tools import (
-    OPENING_NOTE,
     READONLY_TOOLS,
     NativeToolsRejected,
     NativeTurn,
     assistant_message,
     calls_from_turn,
+    opening_note,
     tool_definition,
     tool_message,
     tools_for_role,
@@ -803,7 +803,7 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     if not state.native_messages:
         state.native_messages = [
             {"role": "system", "content": build_role_system_prompt(self, role, native_tools=True)},
-            {"role": "user", "content": self._build_runtime_prompt(user_goal, step) + OPENING_NOTE},
+            {"role": "user", "content": self._build_runtime_prompt(user_goal, step) + opening_note(state.response_language)},
         ]
         state.native_note_sent = state.pending_instruction
     elif state.pending_instruction and state.pending_instruction != state.native_note_sent:
