@@ -52,6 +52,7 @@ from kernel.llm.llm_clients import (
     MANUAL_MODEL_PROVIDERS,
 )
 from kernel.plan import end_session
+from kernel.agent import image_generation
 from kernel.plan import plan_mode
 from kernel.agent.agent_state import RunCancelled
 from kernel.agent.cancellable_call import call_cancellable, iterate_cancellable
@@ -467,6 +468,8 @@ def build_role_system_prompt(
     role_prompt = _load_role_prompt(role)
     if offer_end_session and end_session.available(self, role):
         role_prompt = end_session.offer_in_prompt(role_prompt, role)
+    if image_generation.available(self, role):
+        role_prompt = image_generation.with_tool_in_prompt(role_prompt)
     if native_tools:
         role_prompt = native_role_prompt(role_prompt, _load_native_channel_section())
     from kernel.protocol.slash_commands import slash_commands_context

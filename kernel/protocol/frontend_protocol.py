@@ -303,6 +303,25 @@ class HelperActivityEvent:
 
 
 @dataclass(slots=True)
+class ImageJobEvent:
+    """A picture from ``generate_image`` is being drawn in the background, or could not be made (live only).
+
+    A finished picture is an ``artifact`` event with ``skill: "image"``.
+    """
+
+    image_id: str
+    state: str
+    name: str
+    prompt: str = ""
+    error: str = ""
+    type: ClassVar[str] = "image_job"
+
+    def to_dict(self) -> dict:
+        return {"type": self.type, "image_id": self.image_id, "state": self.state, "name": self.name,
+                "prompt": self.prompt, "error": self.error}
+
+
+@dataclass(slots=True)
 class ArtifactEvent:
     """A file or image a skill produced for the person; ``preview`` is a small JPEG data URL (live only)."""
 

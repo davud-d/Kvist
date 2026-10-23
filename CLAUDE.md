@@ -563,6 +563,35 @@ model says its piece and ends the turn.
   a closed Kvist runs nothing. Helpers have neither tool. A woken turn has nobody watching: approvals
   still go through the normal gates. Tests: `test_scheduler.py` (fake clock, timer thread off).
 
+### Image generation (`image_generation.py`)
+`generate_image {prompt, path, high_quality?}` draws a picture with AnyModel's image models (OpenAI images
+endpoint through `agent.client`) and saves it as a **new** file. A conditional tool like `end_session`: offered only
+when `config.provider == "anymodel"`, in coder/devops/universal, never to a helper (`available`; the prompt block is
+`prompts/system/generate_image.txt`, added by `with_tool_in_prompt`, and `test_prompt_protocol_sync._CONDITIONAL`
+lists it). `cx/gpt-image-2` by default, `cx/gpt-image-2.5` with `high_quality`; `nano-banana` answered 503 when tried,
+so it is not the default. The extension comes from the returned bytes (PNG/JPEG/WebP), never from the model's name.
+- **Writing:** `SafeExecutor.create_binary_file` (O_EXCL, O_NOFOLLOW, workspace boundary, `.env` guard) never
+  overwrites. The change journal stores text, so a picture is **not** in `/revert`. The action is in
+  `_WRITE_ACTIONS` (reader and plan mode refuse it) and `_NON_RECONCILABLE_SIDE_EFFECTS` (a paid call is never replayed).
+- **Background when the agent can be woken** (`wake_listener` set: Ink, Glass, VS Code), synchronous elsewhere.
+  `ImageJobs` (`agent.images`) starts a thread, answers at once (`status: "drawing"`), and on its end leaves a notice
+  that `_collect_image_note` folds into the next request (`Images:` section of `job_note`); `has_background_news`
+  counts it, so an idle agent is woken. At most `MAX_RUNNING` = 3 at once. `stop_all` (a stop, `/new`, shutdown,
+  `_stop_left_running`) drops what is still drawing: the cancel event is captured in `start`, and a reply that lands in
+  the same instant as a stop is checked against it (`call_cancellable` only looks at the event on its poll).
+- **A turn ended `incomplete` keeps its checkpoint and is never woken** (`wake_due`). A model that polled with
+  `wait`/`list_dir` and then marked its answer incomplete got no wake for either; the tool's text says why not to
+  (reason, not an order). Do not "fix" it by waking over a checkpoint: that revives a stopped task.
+- **Events:** `image_job` (`generating` | `failed`, live-only, in `_TRANSIENT_EVENTS`) and the finished picture as
+  an `artifact` event with `skill: "image"` and the workspace path. Glass puts both in the browser's right-hand card:
+  a spinner while drawing, then the picture develops (blurred and dark to sharp, `DEVELOP_STEPS` x `DEVELOP_STEP_MS`)
+  using `backdrop::developing_thumbnail`. The provider sends no partial frames (`partial_images` produced an empty
+  stream), so the reveal is ours and starts when the picture arrives. A live `screen` event takes the card back.
+- **Not seen:** the GPT models in the background mode against the real gateway (checked with a local fake server that
+  waits 8 s and returns a PNG, and by hand in Glass); how Ink, VS Code and the OpenCode interface show the `artifact`
+  and `image_job` events was not checked.
+  Tests: `test_image_generation.py`, the protocol and backdrop tests in `frontends/tui/glass`.
+
 ### Stopping a turn (Ctrl+C / Escape)
 **A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt` around its whole
 loop; the answer becomes `build_cancellation_message` and the `finally` still seals session,

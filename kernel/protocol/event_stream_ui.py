@@ -14,6 +14,7 @@ from kernel.protocol.frontend_protocol import (
     ArtifactEvent,
     HelperActivityEvent,
     HelperEvent,
+    ImageJobEvent,
     ScreenEvent,
     SkillEvent,
     TaskStateEvent,
@@ -386,6 +387,12 @@ class EventStreamUI:
             call_id=str(payload.get("call_id") or ""), action_type=str(payload.get("action_type") or ""),
             label=redact_text(str(payload.get("label") or "")), ok=None if ok is None else bool(ok),
             summary=redact_text(str(payload.get("summary") or "")), output=redact_text(str(payload.get("output") or "")),
+        ))
+
+    def print_image_job(self, payload: dict) -> None:
+        self._channel.emit(ImageJobEvent(
+            image_id=str(payload["image_id"]), state=str(payload["state"]), name=redact_text(str(payload["name"])),
+            prompt=redact_text(str(payload.get("prompt") or "")), error=redact_text(str(payload.get("error") or "")),
         ))
 
     def print_artifact(self, payload: dict) -> None:

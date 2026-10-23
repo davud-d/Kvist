@@ -50,6 +50,8 @@ ALLOWED_ACTIONS = {
     # Offered only by an interactive frontend (end_session.available); the
     # runtime answers it as an unknown tool everywhere else.
     "end_session",
+    # Offered only in an AnyModel session (image_generation.available).
+    "generate_image",
     "skills",
     "memory",
     "sessions",
@@ -446,6 +448,14 @@ def validate_action_args(action_type: str, args: dict[str, Any]) -> None:
 
     elif action_type == "end_session":
         _validate_end_session(args)
+
+    elif action_type == "generate_image":
+        require_keys(args, {"prompt", "path"})
+        require_only_allowed_keys(args, {"prompt", "path", "high_quality"})
+        require_str(args, "prompt")
+        require_str(args, "path")
+        if not isinstance(args.get("high_quality", False), bool):
+            raise CommandValidationError("'high_quality' must be a boolean")
 
     elif action_type == "skills":
         _validate_skills(args)

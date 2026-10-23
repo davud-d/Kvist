@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from kernel.agent.image_generation import ImageError, generate as generate_image
 from kernel.plugins.builder import BuildError, check_draft, install_draft, scaffold_files
 from kernel.plugins.skills import SkillUseError
 from kernel.protocol.protocol import AgentCommand
@@ -23,7 +24,7 @@ from kernel.memory.errors import MemoryProviderError
 from kernel.memory.extractor import ModelAccess
 from kernel.memory.schema import KINDS
 
-AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "skill_call"})
+AGENT_TOOL_ACTIONS = frozenset({"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule", "generate_image", "skill_call"})
 SKILL_OPS = ("list", "attach", "detach", "read", "status")
 SESSION_OPS = ("list", "search", "read")
 HELPER_OPS = ("start", "message", "update", "status", "wait", "inspect", "result", "stop")
@@ -38,7 +39,7 @@ def run_agent_tool(agent: Any, command: AgentCommand) -> dict[str, Any]:
         if action_type == "skill_call":
             return agent.skills.call(args["skill"], args["tool"], args.get("arguments") or {}, command.call_id)
         data = _HANDLERS[action_type](agent, args)
-    except (SkillUseError, MemoryStoreError, SessionSearchError, HelperError, BuildError, ScheduleError) as error:
+    except (SkillUseError, MemoryStoreError, SessionSearchError, HelperError, BuildError, ScheduleError, ImageError) as error:
         return _error(action_type, str(error))
     return {"ok": True, "action_type": action_type, "data": data}
 
@@ -288,6 +289,7 @@ _HANDLERS = {
     "ask_user": _ask_user,
     "wait": _wait,
     "schedule": _schedule,
+    "generate_image": generate_image,
 }
 
 

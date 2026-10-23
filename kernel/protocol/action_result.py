@@ -118,6 +118,8 @@ def _ok_summary(action_type: str, args: dict[str, Any], data: dict[str, Any]) ->
         return f"{data.get('skill', 'skill')}.{data.get('tool', '')}: {data.get('status', 'done')} in {data.get('duration_seconds', 0)} s"
     if action_type == "ask_user":
         return f"Answer: {data.get('status', '')}"
+    if action_type == "generate_image":
+        return "Drawing in the background" if data.get("status") == "drawing" else f"Saved {data.get('path', 'the picture')}"
     if action_type == "wait" and data.get("wakes_at"):
         return f"Wakes at {data['wakes_at']}"
     if action_type == "schedule":

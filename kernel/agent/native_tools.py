@@ -234,6 +234,20 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         },
         (),
     ),
+    # Never in a role prompt's ALLOWED ACTIONS: added only where
+    # image_generation.available holds (an AnyModel session).
+    "generate_image": ToolSpec(
+        "Draw a picture from a description with an image model and save it as a new file in the workspace. "
+        "It costs the person money and tens of seconds: call it when they asked for a picture or the task "
+        "needs one. An existing file is never overwritten. The picture is drawn in the background and you are "
+        "woken when it is ready: do not poll, and do not end the turn as incomplete while you wait.",
+        {
+            "prompt": {"type": "string", "description": "The picture as an art brief: subject, style, composition, colours, any text in it."},
+            "path": {"type": "string", "description": "Where to save it, relative to the workspace, without an extension: the file type is the model's. The result gives the final path."},
+            "high_quality": {"type": "boolean", "description": "True for a better, slower and dearer picture; leave out for an ordinary one."},
+        },
+        ("prompt", "path"),
+    ),
 }
 
 ACTION_TOOLS.update({

@@ -276,6 +276,7 @@ class SafeExecutor:
         self.max_find_results = 200
         self.max_file_size_bytes = 256 * 1024
         self.max_writable_file_bytes = 2 * 1024 * 1024
+        self.max_binary_file_bytes = 20 * 1024 * 1024
 
         terminal_profile = (os.getenv("AGENT_TERMINAL_PROFILE", "dev").strip().lower() or "dev")
         terminal_timeout = self._read_float_env(
@@ -1497,6 +1498,44 @@ class SafeExecutor:
             "pre_digest": content_digest(pre_text) if pre_text is not None else None,
             "intended_digest": content_digest(intended),
         }
+
+    def create_binary_file(self, path: str, data: bytes) -> str:
+        """Create a new binary file inside the workspace and return its workspace-relative path.
+
+        Never overwrites: the change journal stores text, so a binary file it
+        could not restore must not replace anything. A caller wanting a
+        different name gets the refusal.
+        """
+        target = self._guard_env_file_access(path)
+        if len(data) > self.max_binary_file_bytes:
+            raise ExecutorError(f"File size ({len(data)} bytes) exceeds limit ({self.max_binary_file_bytes} bytes)")
+        try:
+            with exclusive_storage_lock(self._source_write_lock, boundary=self.workspace):
+                self._create_new_file(target, data)
+        except JsonStorageError as error:
+            raise ExecutorError("Cannot acquire the source-file write lock safely") from error
+        return str(target.relative_to(self.workspace))
+
+    def _create_new_file(self, target: Path, data: bytes) -> None:
+        directory_descriptor = self._open_source_parent(target)
+        try:
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                descriptor = os.open(target.name, flags, 0o644, dir_fd=directory_descriptor)
+            except FileExistsError:
+                raise ExecutorError(f"File already exists: {target.name}. Pick another name.") from None
+            except OSError as error:
+                raise ExecutorError(f"Cannot create file: {target.name}") from error
+            try:
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(data)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+            except OSError as error:
+                os.unlink(target.name, dir_fd=directory_descriptor)
+                raise ExecutorError(f"Cannot write file: {target.name}") from error
+        finally:
+            os.close(directory_descriptor)
 
     def _write_file(self, path: str, content: str) -> ExecutionResult:
         try:

@@ -19,7 +19,7 @@ from typing import Any
 # Externally visible actions whose effect cannot be reconciled from workspace
 # state after a crash (their stdout/exit status are lost). Resume never replays
 # them; it stops and reports the state as ambiguous.
-_NON_RECONCILABLE_SIDE_EFFECTS = frozenset({"run_shell", "delegate_task"})
+_NON_RECONCILABLE_SIDE_EFFECTS = frozenset({"run_shell", "delegate_task", "generate_image"})
 
 
 def _build_pending_action(self, command: AgentCommand, step: int) -> dict[str, Any] | None:
@@ -85,6 +85,7 @@ from kernel.protocol.parser import (
 )
 from kernel.protocol.protocol import Action, AgentCommand, ModelResponse, ToolCallRequest
 from kernel.sandbox.redaction import defang_prompt_boundary_tags, redact_text, redact_value
+from kernel.agent import image_generation
 from kernel.plan import end_session
 from kernel.plan import plan_mode
 from kernel.agent.role_router import has_change_verb, has_deferred_write_marker, has_no_write_marker, mentions_any
@@ -100,7 +101,7 @@ _READ_ONLY_ACTIONS = {
     "list_tree", "find_files", "search_code",
 }
 
-_WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file"}
+_WRITE_ACTIONS = {"write_file", "append_file", "replace_in_file", "generate_image"}
 # The agent's own tools never change the workspace, except a skill tool not
 # declared read-only (checked per call).
 _AGENT_STATE_ACTIONS = {"skills", "memory", "sessions", "helper", "ask_user", "wait", "schedule"}
@@ -501,6 +502,7 @@ def run_loop(self, user_goal: str, start_step: int) -> str:
             turn: NativeTurn | None = None
             _collect_job_note(self)
             _collect_helper_note(self)
+            _collect_image_note(self)
             _collect_schedule_note(self)
             _drain_inbox(self)
             try:
@@ -647,6 +649,8 @@ def _stop_left_running(self, reason: str) -> list[StopOutcome]:
     if self.helpers is not None:
         for agent_id in self.helpers.stop_all(reason):
             outcomes.append(StopOutcome(agent_id, f"helper {agent_id}", stopped=True, kind="helper"))
+    for image_id in self.images.stop_all():
+        outcomes.append(StopOutcome(image_id, f"picture {image_id}", stopped=True, kind="job"))
     for job in _stop_background_jobs(self):
         outcomes.append(StopOutcome(job.job_id, f"background job {job.job_id}", stopped=True, kind="job"))
     return outcomes
@@ -659,6 +663,13 @@ def _collect_helper_note(self) -> None:
     text = self.helpers.take_notices()
     if text:
         self._state.job_note = f"{self._state.job_note}\nHelpers:\n{text}".strip()
+
+
+def _collect_image_note(self) -> None:
+    """Pictures that finished since the last request go into the next one, as facts."""
+    text = self.images.take_notices()
+    if text:
+        self._state.job_note = f"{self._state.job_note}\n{text}".strip()
 
 
 def _collect_schedule_note(self) -> None:
@@ -781,6 +792,8 @@ def _call_native_turn(self, user_goal: str, step: int) -> NativeTurn:
     tools = tools_for_role(_load_role_prompt(role))
     if end_session.available(self, role):
         tools.append(tool_definition(end_session.ACTION))
+    if image_generation.available(self, role):
+        tools.append(tool_definition(image_generation.ACTION))
     if self.is_helper:
         # A helper never manages helpers and never asks the person directly:
         # its questions go through the main agent.

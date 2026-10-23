@@ -62,7 +62,7 @@ _TRUNCATION_MARKER = "\n[... {omitted} characters omitted ...]\n"
 
 # Live-only state: a frontend never needs it to redraw a finished conversation.
 _TRANSIENT_EVENTS = frozenset(
-    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output", "context", "narration"}
+    {"status", "live_start", "live_stop", "debug", "stream_chunk", "action_output", "job_output", "context", "narration", "image_job"}
 )
 _ANSWER_EVENTS = frozenset({"final", "message", "stream_commit"})
 _ESSENTIAL_EVENTS = _ANSWER_EVENTS | {"error", "journal_notice", "turn_end", "session_ended"}
@@ -572,6 +572,10 @@ class JournalingUI:
     def print_helper_activity(self, payload: dict) -> None:
         # Live only: the helper's own service session journals this activity.
         self._forward("print_helper_activity", payload)
+
+    def print_image_job(self, payload: dict) -> None:
+        # Live only: the finished picture is journaled as an artifact.
+        self._forward("print_image_job", payload)
 
     def print_artifact(self, payload: dict) -> None:
         # The preview is a data URL: shown live, never stored in the journal.

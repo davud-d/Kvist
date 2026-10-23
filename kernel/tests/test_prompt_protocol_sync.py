@@ -22,7 +22,7 @@ def _example_calls(prompt_text: str) -> list[str]:
 _LEGACY_FINISHES = {"report_to_user"}
 # Added to the prompt at run time, and only by an interactive frontend
 # (end_session.with_tool_in_prompt); the static prompt files never list it.
-_CONDITIONAL = {"end_session"}
+_CONDITIONAL = {"end_session", "generate_image"}
 
 
 @pytest.mark.parametrize("role", ["coder", "devops", "reader", "universal"])

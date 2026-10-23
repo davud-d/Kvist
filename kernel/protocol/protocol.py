@@ -31,6 +31,7 @@ ActionType = Literal[
     "edit_plan",
     "cancel_plan",
     "end_session",
+    "generate_image",
     "skills",
     "memory",
     "sessions",

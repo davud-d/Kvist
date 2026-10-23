@@ -116,6 +116,7 @@ from kernel.agent.agent_web import (
 )
 from kernel.sandbox.executor import SafeExecutor
 from kernel.agent.helpers import HelperManager
+from kernel.agent.image_generation import ImageJobs
 from kernel.agent.scheduler import Scheduler
 from kernel.plugins.skills import SkillManager
 from kernel.plugins.resources import Owner, ResourceManager
@@ -300,6 +301,7 @@ class LocalAgent:
         self.skills = SkillManager(self)
         self.helpers = None if self.is_helper else HelperManager(self)
         self.scheduler = None if self.is_helper else Scheduler(executor.workspace)
+        self.images = ImageJobs()
         # Loading tiktoken's rank table costs tens of MiB and is unnecessary
         # for session recovery and chat-only runs. count_tokens initializes it
         # on the first context-budget calculation.
@@ -707,7 +709,7 @@ class LocalAgent:
         """Whether a helper or background job ended on its own and the model has not been told."""
         helpers_done = self.helpers is not None and self.helpers.has_finish_notice()
         timer_due = self.scheduler is not None and self.scheduler.has_due()
-        return helpers_done or timer_due or self.executor.jobs.has_unreported_finish()
+        return helpers_done or timer_due or self.images.has_notice() or self.executor.jobs.has_unreported_finish()
 
     def wake_due(self) -> bool:
         """Whether ``wake`` would run a turn now.
@@ -754,6 +756,7 @@ class LocalAgent:
         if self.helpers is not None:
             self.helpers.stop_all(reason)
         self.skills.finish_task(reason)
+        self.images.stop_all()
         self.executor.jobs.stop_all()
         report = self.resources.shutdown(reason)
         for outcome in report.failed:
@@ -834,10 +837,16 @@ class LocalAgent:
         self._reset_run_state()
         if woken:
             # Taken before anything can fail, so the same news never wakes the agent twice.
-            from kernel.agent.agent_runtime import _collect_helper_note, _collect_job_note, _collect_schedule_note
+            from kernel.agent.agent_runtime import (
+                _collect_helper_note,
+                _collect_image_note,
+                _collect_job_note,
+                _collect_schedule_note,
+            )
 
             _collect_job_note(self)
             _collect_helper_note(self)
+            _collect_image_note(self)
             _collect_schedule_note(self)
         self._state.message_id = end_session.next_message_id(self, from_person=not woken)
         self._state.user_goal = user_goal
