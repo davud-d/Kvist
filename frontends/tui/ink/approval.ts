@@ -2,8 +2,18 @@
 // which choices exist, how keys and mouse reports map onto them. No terminal
 // access here, so all of it is testable.
 
-import type { DialogKey } from "./dialog.js"
 import type { InputRequest } from "./protocol.js"
+
+// Declared here rather than taken from dialog.ts: that would pull the editor
+// and its string-width into the OpenCode package, which imports this file but
+// has none of Ink's node_modules.
+export interface ApprovalKey {
+  escape?: boolean
+  ctrl?: boolean
+  upArrow?: boolean
+  downArrow?: boolean
+  return?: boolean
+}
 
 // Enter and digits typed in the moment the screen appears most likely belong
 // to whatever the user was typing, not to the question.
@@ -61,7 +71,7 @@ export interface ApprovalStep {
 }
 
 // Esc and Ctrl+C deny at any moment (the safe answer needs no arming).
-export function stepApproval(model: ApprovalModel, options: readonly ApprovalOption[], input: string, key: DialogKey, now: number): ApprovalStep {
+export function stepApproval(model: ApprovalModel, options: readonly ApprovalOption[], input: string, key: ApprovalKey, now: number): ApprovalStep {
   const count = options.length
   if (key.escape || (key.ctrl && input === "c")) return { model, decision: "no" }
   if (key.upArrow) return { model: { ...model, selected: (model.selected - 1 + count) % count } }

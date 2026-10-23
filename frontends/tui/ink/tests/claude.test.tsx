@@ -406,14 +406,19 @@ test("a live thought is revealed at a steady pace instead of landing in one bloc
   const reasoning = "thinking about the request ".repeat(8).trim()
   const state: State = { ...agent(), running: true, startedAt: Date.now(), live: { streamId: "s", answer: "", reasoning, thinking: true, thinkingSince: Date.now() } }
   const app = render(createElement(ViewContext.Provider, { value: view }, createElement(ClaudeLiveBody, { state })))
-  const length = () => plain(app.lastFrame()).replace(/\s+/g, " ").trim().length
-  await new Promise((resolve) => setTimeout(resolve, 70))
-  const early = length()
-  await new Promise((resolve) => setTimeout(resolve, 900))
-  const late = length()
+  const length = (frame: string | undefined) => plain(frame).replace(/\s+/g, " ").trim().length
+  // The reveal moves once per timer tick, so its duration follows the platform's timer (Windows
+  // stretches a 33 ms interval to three 15.6 ms quanta): wait for the end, not for a fixed time.
+  const deadline = Date.now() + 10_000
+  while (length(app.lastFrame()) < reasoning.length && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20))
+  const lengths = app.frames.map(length)
   app.unmount()
-  assert.ok(early < late, `${early} should be less than ${late}`)
-  assert.equal(late, reasoning.length)
+  assert.equal(lengths.at(-1), reasoning.length)
+  assert.deepEqual(lengths, [...lengths].sort((a, b) => a - b), "the shown text never shrinks")
+  // This text takes about twenty ticks to reveal; two ticks share a frame only when the event loop
+  // stalls past a whole tick, so a text that lands in one or two blocks shows fewer partial frames.
+  const partial = new Set(lengths.filter((n) => n > 0 && n < reasoning.length))
+  assert.ok(partial.size >= 3, `partial frames: ${[...partial].join(", ")}`)
 })
 
 test("the tip changes every three seconds and cycles through all of them", () => {
