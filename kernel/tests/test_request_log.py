@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import stat
 
 import httpx
@@ -43,6 +44,15 @@ def test_logs_request_body_status_headers_and_reply(monkeypatch, tmp_path):
     assert record["status"] == 200
     assert record["response_headers"]["x-request-id"] == "req_42"
     assert "sk-secret" not in log.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no mode bits: the log keeps the ACL inherited "
+                    "from its folder, Kvist sets no ACL of its own")
+def test_the_log_is_private_to_the_owner(monkeypatch, tmp_path):
+    client, log = _client(monkeypatch, tmp_path, lambda request: httpx.Response(200))
+
+    client.post("https://gw.example/v1/x", json={})
+
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
 
 

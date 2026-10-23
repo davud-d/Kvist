@@ -255,9 +255,12 @@ class MemoryStore:
         """The newest session recaps, never the one of ``exclude_session`` (it is that session's own history)."""
         if not self._has_data():
             return []
+        # Recaps written in one clock tick (about 16 ms on Windows before Python 3.13) tie on
+        # updated_at; seq then keeps the later-written one first instead of an arbitrary pick.
         with self._read() as db:
             rows = db.execute("SELECT * FROM records WHERE kind = 'session_recap' AND status = 'active' "
-                              "AND session != ? ORDER BY updated_at DESC LIMIT ?", (exclude_session, limit)).fetchall()
+                              "AND session != ? ORDER BY updated_at DESC, seq DESC LIMIT ?",
+                              (exclude_session, limit)).fetchall()
         return [self._record(row) for row in rows]
 
     def recap_of(self, session: str) -> Record | None:

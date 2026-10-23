@@ -6,6 +6,7 @@ Every test checks what is actually stored or refused, not the wording of an answ
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -78,6 +79,8 @@ def test_reading_an_empty_workspace_creates_no_database(tmp_path):
     assert not (tmp_path / ".kvist" / "memory" / "memory.db").exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows has no mode bits: the database keeps the ACL inherited "
+                    "from the workspace folder, Kvist sets no ACL of its own")
 def test_the_database_is_private_to_the_owner(store):
     _remember(store, "Builds run through make")
     assert store.path.stat().st_mode & 0o777 == 0o600

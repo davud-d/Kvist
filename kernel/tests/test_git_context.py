@@ -32,7 +32,9 @@ def test_git_context_lists_changes_and_recent_commits(tmp_path):
 
 def test_git_context_of_a_clean_repo_has_only_commits(tmp_path):
     _git(tmp_path, "init", "-q", "-b", "main")
-    (tmp_path / "a.py").write_text("x\n")
+    # LF bytes: Kvist's git reads no system or global config, so a CRLF file committed under
+    # Git for Windows' system core.autocrlf=true would differ from its blob for Kvist alone.
+    (tmp_path / "a.py").write_bytes(b"x\n")
     _git(tmp_path, "add", ".")
     _git(tmp_path, "commit", "-q", "-m", "only commit")
 

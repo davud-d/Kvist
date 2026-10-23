@@ -1091,8 +1091,9 @@ def test_delegation_without_commands_says_nothing_was_performed(tmp_path):
 
 
 def test_read_multiple_files_returns_found_files_and_names_the_missing_one(tmp_path):
-    (tmp_path / "a.py").write_text("a = 1\n", encoding="utf-8")
-    (tmp_path / "c.py").write_text("c = 3\n", encoding="utf-8")
+    # Bytes, not write_text: on Windows text mode writes CRLF, and reads return the file's real endings.
+    (tmp_path / "a.py").write_bytes(b"a = 1\n")
+    (tmp_path / "c.py").write_bytes(b"c = 3\n")
     executor = SafeExecutor(tmp_path)
 
     result = executor._read_multiple_files(["a.py", "b.py", "c.py"])

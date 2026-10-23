@@ -37,7 +37,8 @@ def _source(lines: int = 381) -> str:
 
 def _write_source(workspace, lines: int = 381) -> str:
     text = _source(lines)
-    (workspace / "main.py").write_text(text, encoding="utf-8")
+    # Bytes, not write_text: on Windows text mode writes CRLF, and the journal keeps the file's real endings.
+    (workspace / "main.py").write_bytes(text.encode("utf-8"))
     return text
 
 

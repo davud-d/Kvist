@@ -12,6 +12,7 @@ from kernel.agent.agent_tools import run_agent_tool
 from kernel.agent.agent_model import _load_role_prompt
 from kernel.agent.native_tools import tool_definition
 from kernel.protocol.parser import ALLOWED_ACTIONS
+from kernel.sandbox.executor import SafeExecutor
 from kernel.tests.conftest import NullUI, commands_from_response, make_command
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
@@ -92,6 +93,54 @@ def test_a_path_outside_the_workspace_is_refused(agent_factory, tmp_path):
 
     assert result["ok"] is False
     assert not (tmp_path.parent / "fox.png").exists()
+
+
+@pytest.fixture(params=["directory descriptors", "resolved paths"])
+def file_writer(request, monkeypatch):
+    if request.param == "resolved paths":
+        # Windows has no directory descriptors; its writer runs here, where links are easy to make.
+        monkeypatch.setattr(SafeExecutor, "_create_new_file", SafeExecutor._create_new_file_by_path)
+
+
+def _link(link, target, *, target_is_directory=False):
+    try:
+        link.symlink_to(target, target_is_directory=target_is_directory)
+    except OSError as error:
+        pytest.skip(f"this account cannot create symbolic links: {error}")
+
+
+def _checked_before_the_link_appeared(agent, monkeypatch, tmp_path):
+    """The path check passed while the link was not there yet; the writer must hold on its own."""
+    monkeypatch.setattr(agent.executor, "_guard_env_file_access", lambda path: tmp_path / path)
+
+
+def test_a_link_at_the_name_is_not_followed(agent_factory, tmp_path, tmp_path_factory, monkeypatch, file_writer):
+    outside = tmp_path_factory.mktemp("outside") / "theirs.png"
+    outside.write_bytes(b"theirs")
+    _link(tmp_path / "fox.png", outside)
+    agent = _agent(agent_factory)
+    _checked_before_the_link_appeared(agent, monkeypatch, tmp_path)
+
+    result = _call(agent, prompt="a red fox", path="fox")
+
+    assert result["ok"] is False
+    assert "already exists" in result["error"]
+    assert outside.read_bytes() == b"theirs"
+
+
+def test_a_linked_folder_leading_out_of_the_workspace_is_refused(
+    agent_factory, tmp_path, tmp_path_factory, monkeypatch, file_writer
+):
+    outside = tmp_path_factory.mktemp("outside")
+    _link(tmp_path / "art", outside, target_is_directory=True)
+    agent = _agent(agent_factory)
+    _checked_before_the_link_appeared(agent, monkeypatch, tmp_path)
+
+    result = _call(agent, prompt="a red fox", path="art/fox")
+
+    assert result["ok"] is False
+    assert "source directory safely" in result["error"]
+    assert list(outside.iterdir()) == []
 
 
 def test_a_reply_that_is_not_a_picture_is_an_error(agent_factory, tmp_path):

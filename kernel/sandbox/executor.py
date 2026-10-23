@@ -1511,10 +1511,45 @@ class SafeExecutor:
             raise ExecutorError(f"File size ({len(data)} bytes) exceeds limit ({self.max_binary_file_bytes} bytes)")
         try:
             with exclusive_storage_lock(self._source_write_lock, boundary=self.workspace):
-                self._create_new_file(target, data)
+                if os.name == "nt":
+                    self._create_new_file_by_path(target, data)
+                else:
+                    self._create_new_file(target, data)
         except JsonStorageError as error:
             raise ExecutorError("Cannot acquire the source-file write lock safely") from error
-        return str(target.relative_to(self.workspace))
+        return self._relative_path(target)
+
+    def _create_new_file_by_path(self, target: Path, data: bytes) -> None:
+        """Windows fallback: no directory descriptors, so the parent is checked by its resolved path.
+
+        O_EXCL still never follows a link at the final name (an existing link is an
+        existing file); O_BINARY keeps the CRT from turning LF bytes into CRLF.
+        """
+        existing = target.parent
+        while not existing.exists():
+            existing = existing.parent
+        try:
+            # Checked before mkdir too: a linked folder must not get even an empty directory made outside.
+            existing.resolve(strict=True).relative_to(self.workspace)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.parent.resolve(strict=True).relative_to(self.workspace)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise ExecutorError(f"Cannot create or open source directory safely: {target.parent.name}") from error
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOINHERIT", 0)
+        try:
+            descriptor = os.open(target, flags, 0o644)
+        except FileExistsError:
+            raise ExecutorError(f"File already exists: {target.name}. Pick another name.") from None
+        except OSError as error:
+            raise ExecutorError(f"Cannot create file: {target.name}") from error
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except OSError as error:
+            target.unlink()
+            raise ExecutorError(f"Cannot write file: {target.name}") from error
 
     def _create_new_file(self, target: Path, data: bytes) -> None:
         directory_descriptor = self._open_source_parent(target)
