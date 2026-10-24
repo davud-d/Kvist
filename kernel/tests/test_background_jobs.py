@@ -297,7 +297,7 @@ def test_output_arrives_while_the_command_runs_when_the_pipe_stays_blocking(monk
 
     outcome = run_supervised(
         [sys.executable, "-c", code], cwd=None, env=None, timeout=10, max_capture_bytes=1000,
-        rlimit_setter=None, is_windows=False, use_cgroup=False,
+        rlimit_setter=None, is_windows=os.name == "nt", use_cgroup=False,
         on_output=lambda text: seen.append((time.monotonic(), text)),
     )
 
