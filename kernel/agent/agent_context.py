@@ -456,8 +456,13 @@ def format_web_facts_for_prompt(self, language: str = "en") -> str:
     return "\n".join(lines)
 
 
+# A skill's page snapshot sits five levels down (result, page, elements, element, fields), and a
+# marker in place of an element's ref left the model unable to click anything.
+_PROMPT_DEPTH_LIMIT = 8
+
+
 def compact_for_prompt(self, value: Any, depth: int = 0) -> Any:
-    if depth >= 4:
+    if depth >= _PROMPT_DEPTH_LIMIT and isinstance(value, (list, dict)):
         return "[TRUNCATED_DEPTH]"
 
     if isinstance(value, str):
