@@ -584,6 +584,7 @@ def test_native_build_and_repeated_checks_do_not_require_source_edits(agent_fact
 
 
 def test_a_stream_of_bare_call_headers_is_asked_again_without_streaming(agent_factory, monkeypatch):
+    monkeypatch.setattr(agent_model, "_STREAM_LOSES_ARGUMENTS", set())
     agent = agent_factory(max_steps=1)
     agent.config.stream = True
 
@@ -610,3 +611,7 @@ def test_a_stream_of_bare_call_headers_is_asked_again_without_streaming(agent_fa
 
     assert sent == [True, False]
     assert [(c.name, c.arguments) for c in turn.tool_calls] == [("find_files", '{"pattern": "*.py"}')]
+
+    agent_model._request_native_turn(agent, "m", [{"role": "user", "content": "x"}], [])
+
+    assert sent == [True, False, False]

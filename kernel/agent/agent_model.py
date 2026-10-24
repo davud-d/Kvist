@@ -750,7 +750,8 @@ def _request_native_turn(
     if _sends_temperature(self, model):
         request["temperature"] = self.config.model_temperature
     merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
-    if not self.config.stream:
+    key = (self.config.provider, model)
+    if not self.config.stream or key in _STREAM_LOSES_ARGUMENTS:
         return _request_whole_turn(self, request)
     streamed = {**request, "stream": True, "stream_options": {"include_usage": True}}
     # The thinking clock starts with the request: a provider may hold the
@@ -763,6 +764,8 @@ def _request_native_turn(
     try:
         return _native_turn_from_stream(self, response, started)
     except StreamedArgumentsLost:
+        # Learned once per process: the same gateway route would lose them again.
+        _STREAM_LOSES_ARGUMENTS.add(key)
         self._ui.debug_print("The stream carried no arguments for a tool call; asking again without streaming")
         return _request_whole_turn(self, request)
 
@@ -814,6 +817,9 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         input_tokens=_usage_token_count(usage, "prompt_tokens"),
         output_tokens=_usage_token_count(usage, "completion_tokens"),
     )
+
+
+_STREAM_LOSES_ARGUMENTS: set[tuple[str, str]] = set()
 
 
 class StreamedArgumentsLost(Exception):
