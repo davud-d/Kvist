@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "browser",
-  "version": "0.2.1",
+  "version": "0.2.5",
   "plugin_api": 1,
   "kind": "tools",
   "name": {"en": "Browser", "ru": "Браузер"},
@@ -12,7 +12,7 @@
   "instructions": "SKILL.md",
   "entrypoint": "plugin.py",
   "platforms": ["linux"],
-  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.1"},
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.5"},
   "dependencies": {
     "python": ["playwright==1.63.0", "greenlet==3.5.6", "pyee==13.0.0", "typing_extensions==4.16.0"],
     "system": ["Xvfb", "i3", "chromium"]

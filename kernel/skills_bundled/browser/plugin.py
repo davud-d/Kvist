@@ -36,6 +36,48 @@ _CHROMIUM_CANDIDATES = ("/usr/lib/chromium/chromium", "/usr/bin/chromium", "/usr
                         "/usr/bin/google-chrome")
 _LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
 
+# Travel time of the on-screen cursor: a slow start, a quick middle, a slow arrival. Each pair is
+# (milliseconds since the start, share of the distance covered by then).
+_GLIDE_CURVE = ((0, 0.0), (750, 0.4), (950, 0.62), (1400, 1.0))
+
+_GLIDE_JS = """
+([from, to, curve]) => {
+  const ID = 'kvist-cursor';
+  let cursor = document.getElementById(ID);
+  if (!cursor) {
+    cursor = document.createElement('div');
+    cursor.id = ID;
+    cursor.style.cssText = 'position:fixed;left:0;top:0;width:32px;height:32px;z-index:2147483647;' +
+      'pointer-events:none;will-change:transform;filter:drop-shadow(0 0 5px rgba(40,110,220,.95)) ' +
+      'drop-shadow(0 0 12px rgba(40,110,220,.55))';
+    cursor.innerHTML = '<svg width="32" height="32" viewBox="0 0 32 32"><path d="M3 3 L27 12 L13.5 13.5 L12 27 Z" ' +
+      'fill="#000" stroke="#c9ced6" stroke-width="2.2" stroke-linejoin="round"/></svg>';
+    document.documentElement.appendChild(cursor);
+  }
+  // Monotone cubic Hermite through the curve points, resting at both ends, so speed never kinks or overshoots.
+  const t = curve.map(p => p[0]), y = curve.map(p => p[1]);
+  const secant = t.slice(1).map((_, i) => (y[i + 1] - y[i]) / (t[i + 1] - t[i]));
+  const slope = t.map((_, i) => i === 0 || i === t.length - 1 ? 0 : 2 / (1 / secant[i - 1] + 1 / secant[i]));
+  const share = ms => {
+    let i = 0;
+    while (i < t.length - 2 && ms > t[i + 1]) i += 1;
+    const h = t[i + 1] - t[i], s = Math.min(Math.max((ms - t[i]) / h, 0), 1);
+    return (2*s**3 - 3*s**2 + 1) * y[i] + (s**3 - 2*s**2 + s) * h * slope[i] +
+           (-2*s**3 + 3*s**2) * y[i + 1] + (s**3 - s**2) * h * slope[i + 1];
+  };
+  const total = t[t.length - 1];
+  return new Promise(resolve => {
+    const start = performance.now();
+    const frame = now => {
+      const ms = Math.min(now - start, total), k = share(ms);
+      cursor.style.transform = `translate(${from[0] + (to[0] - from[0]) * k - 3}px, ${from[1] + (to[1] - from[1]) * k - 3}px)`;
+      ms < total ? requestAnimationFrame(frame) : resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+}
+"""
+
 _SNAPSHOT_JS = """
 (maxItems) => {
   for (const old of document.querySelectorAll('[data-kvist-ref]')) old.removeAttribute('data-kvist-ref');
@@ -98,6 +140,7 @@ class _Tab:
         self.events: list[dict[str, Any]] = []
         self.seq = 0
         self.last_text = ""
+        self.cursor_at: tuple[float, float] | None = None
 
     def add(self, kind: str, **data: Any) -> None:
         self.seq += 1
@@ -393,13 +436,31 @@ def _locator(tab: _Tab, args: dict[str, Any]) -> Any:
     raise ValueError("give ref (from snapshot), selector, label or text")
 
 
-def _act(tab: _Tab, args: dict[str, Any], ctx: Any, action: Callable[[], None], what: str) -> dict[str, Any]:
+def _glide_to(tab: _Tab, target: Any) -> None:
+    """Move the visible cursor to the middle of ``target``; the page then sees a real mouse move there."""
+    target.scroll_into_view_if_needed(timeout=15000)
+    box = target.bounding_box(timeout=15000)
+    if box is None:
+        return
+    end = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    # A navigation wipes the overlay, so a start remembered from the previous page is still a fine place to begin.
+    size = tab.page.viewport_size or {"width": 0, "height": 0}
+    start = tab.cursor_at or (size["width"] / 2, size["height"] / 2)
+    tab.page.evaluate(_GLIDE_JS, [list(start), list(end), [list(p) for p in _GLIDE_CURVE]])
+    tab.page.mouse.move(*end)
+    tab.cursor_at = end
+
+
+def _act(tab: _Tab, args: dict[str, Any], ctx: Any, action: Callable[[], None], what: str,
+         target: Any = None) -> dict[str, Any]:
     before_url = BROWSER.worker.run(lambda: tab.page.url)
     before_text = tab.last_text or BROWSER.worker.run(lambda: tab.page.evaluate("document.body ? document.body.innerText : ''"))
     seq = tab.seq
     ctx.ui.notify(what)
 
     def perform() -> None:
+        if target is not None:
+            _glide_to(tab, target)
         action()
         try:
             tab.page.wait_for_load_state("domcontentloaded", timeout=5000)
@@ -438,7 +499,7 @@ def _act(tab: _Tab, args: dict[str, Any], ctx: Any, action: Callable[[], None], 
 def _click(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     tab = BROWSER.tab(args.get("tab"))
     target = _locator(tab, args)
-    return _act(tab, args, ctx, lambda: target.click(timeout=15000), f"click {_describe_target(args)}")
+    return _act(tab, args, ctx, lambda: target.click(timeout=15000), f"click {_describe_target(args)}", target)
 
 
 def _type(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -453,7 +514,7 @@ def _type(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
         if args.get("submit"):
             target.press("Enter")
 
-    return _act(tab, args, ctx, action, f"type into {_describe_target(args)}")
+    return _act(tab, args, ctx, action, f"type into {_describe_target(args)}", target)
 
 
 def _select(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
@@ -520,6 +581,15 @@ def _condition_met(tab: _Tab, args: dict[str, Any]) -> bool:
     return bool(args.get("url_contains") or args.get("selector") or args.get("text"))
 
 
+def _may_analyze(ctx: Any) -> bool:
+    """images.analyze is optional, so it is asked for the first time a screenshot is to be described."""
+    granted = ctx.permissions.current()
+    if "images.analyze" in granted["granted"] or "images.analyze" in granted["for_this_task"]:
+        return True
+    answer = ctx.permissions.request("images.analyze", "describe a screenshot of the page with the Vision model")
+    return bool(answer.get("granted"))
+
+
 def _screenshot(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     tab = BROWSER.tab(args.get("tab"))
     EXCHANGE_OUT.mkdir(parents=True, exist_ok=True)
@@ -539,7 +609,9 @@ def _screenshot(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
                               "attachment_id": attachment["id"], "width": attachment["width"],
                               "height": attachment["height"], "url": url}
     question = args.get("question")
-    if question:
+    if question and not _may_analyze(ctx):
+        result["description_error"] = "the person did not allow describing screenshots with the Vision model"
+    elif question:
         try:
             result["description"] = ctx.images.analyze([attachment["id"]], question)["text"]
         except Exception as error:  # noqa: BLE001 - Vision being unavailable is reported, the screenshot stays
