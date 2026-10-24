@@ -1056,7 +1056,8 @@ def test_only_the_answer_after_the_tool_is_told_not_to_reproach(tmp_path, monkey
     assert _last_user_text(words).endswith(_AFTER_TOOL_NOTE)
 
 
-def test_a_refused_chat_tag_is_answered_without_the_tool(tmp_path):
+def test_a_refused_chat_tag_is_answered_without_the_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr("kernel.agent.agent.current_time_context", lambda: {"current_time": "2026-10-22 Thursday 12:00:00 UTC"})
     agent, ui, client = _chat(tmp_path, [_FLAG_1, ['<end_session message="9"/>'], ["Line 3 is wrong."]])
     agent.run(_INSULT, routed_role="chat")
 
@@ -1068,7 +1069,8 @@ def test_a_refused_chat_tag_is_answered_without_the_tool(tmp_path):
     assert ui.streams[-1][-1] == answer
 
 
-def test_a_tag_where_words_were_due_is_retried_once_and_never_shown(tmp_path):
+def test_a_tag_where_words_were_due_is_retried_once_and_never_shown(tmp_path, monkeypatch):
+    monkeypatch.setattr("kernel.agent.agent.current_time_context", lambda: {"current_time": "2026-10-22 Thursday 12:00:00 UTC"})
     agent, ui, client = _chat(
         tmp_path,
         [
