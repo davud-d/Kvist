@@ -26,7 +26,8 @@ def test_the_path_is_named_before_anything_exists():
     scratch = Scratchpad()
     assert not scratch.path.exists()
     assert scratch.ensure() == scratch.path
-    assert oct(scratch.path.stat().st_mode & 0o777) == "0o700"
+    if os.name != "nt":  # Windows reports 0o777 for everything; its ACLs decide access
+        assert oct(scratch.path.stat().st_mode & 0o777) == "0o700"
     scratch.clear()
     assert not scratch.path.exists()
 
