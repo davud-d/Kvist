@@ -17,6 +17,7 @@ import hmac
 import html
 import io
 import mmap
+import os
 import secrets
 import struct
 import threading
@@ -28,10 +29,19 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 FRAME_FILE = "Xvfb_screen0"
-MAX_FPS = 4.0
+# A 1280x800 frame takes ~10 ms to read and encode, so 30 fps costs ~30% of one core while a viewer is open
+# and 60 fps ~60%. KVIST_SCREEN_FPS overrides it (1..60).
+DEFAULT_FPS = 30.0
 PREVIEW_WIDTH = 1280
 _COOKIE = "kvist_screen"
 _STATES = frozenset({"starting", "running", "paused", "unavailable", "closed"})
+
+
+def _max_fps() -> float:
+    try:
+        return min(max(float(os.environ.get("KVIST_SCREEN_FPS", DEFAULT_FPS)), 1.0), 60.0)
+    except ValueError:
+        return DEFAULT_FPS
 
 
 class FramebufferError(RuntimeError):
@@ -244,7 +254,7 @@ setTimeout(poll,1000)}}poll()</script></body></html>""".encode("utf-8")
                     self.wfile.flush()
                 except OSError:
                     return
-            viewer._closed.wait(max(0.0, 1.0 / MAX_FPS - (time.monotonic() - started)))
+            viewer._closed.wait(max(0.0, 1.0 / _max_fps() - (time.monotonic() - started)))
 
     def _plain(self, status: HTTPStatus, text: str) -> None:
         self._send(status, "text/plain; charset=utf-8", (text + "\n").encode("utf-8"))
