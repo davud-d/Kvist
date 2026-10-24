@@ -521,6 +521,7 @@ impl Voice {
             ("glass", "Classic", s.voice_frontend_classic),
             ("tui", "Ink", others.frontend_ink),
             ("claude", "Claude-style", others.frontend_claude),
+            ("opencode", "OpenCode", others.frontend_opencode),
             ("voice", "Voice", s.voice_frontend_here),
             ("terminal", "Classic Legacy", others.frontend_classic),
         ]
@@ -2145,6 +2146,9 @@ mod tests {
         type_line(&mut voice, "/tui", now);
         let ask = voice.ask.as_ref().expect("the picker opens");
         assert_eq!(ask.request_id, FRONTEND_REQUEST);
+        let crate::dialog::Body::Choice { choices, .. } = &ask.body else { panic!("expected choices") };
+        assert_eq!(choices.len(), 6);
+        assert!(choices.iter().any(|choice| choice.value == "opencode" && choice.label == "OpenCode"));
         assert_ne!(voice.resolve(now), OrbState::Approval, "the picker is not an approval");
         voice.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE), now);
         assert!(voice.ask.is_none() && !voice.quit && voice.take_outbox().is_empty());
@@ -2154,12 +2158,12 @@ mod tests {
         unsafe { std::env::set_var("KVIST_SWITCH_FILE", &file) };
         voice.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), now);
         voice.key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE), now);
-        for c in "Ink".chars() {
+        for c in "OpenCode".chars() {
             voice.key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE), now);
         }
         voice.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE), now);
         assert!(voice.quit && voice.exit_code == SWITCH_FRONTEND);
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "tui\n");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "opencode\n");
         assert!(voice.take_outbox().is_empty(), "the choice never goes to the core");
         let _ = std::fs::remove_file(&file);
     }

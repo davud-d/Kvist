@@ -1278,6 +1278,7 @@ impl App {
             ("glass", "Classic", s.frontend_glass),
             ("tui", "Ink", s.frontend_ink),
             ("claude", "Claude-style", s.frontend_claude),
+            ("opencode", "OpenCode", s.frontend_opencode),
             ("voice", "Voice", s.frontend_voice),
             ("terminal", "Classic Legacy", s.frontend_classic),
         ]
