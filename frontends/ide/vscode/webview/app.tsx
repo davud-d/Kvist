@@ -174,8 +174,8 @@ export function App() {
   useEffect(() => {
     const field = input.current
     if (!field) return
-    field.style.height = "auto"
-    field.style.height = `${Math.min(field.scrollHeight, 200)}px`
+    field.style.height = "0px"
+    field.style.height = `${field.scrollHeight}px`
   }, [text])
 
   useEffect(() => bottom.current?.scrollIntoView({ block: "end" }), [state.items.length, state.live?.answer, state.live?.reasoning, state.pending])
