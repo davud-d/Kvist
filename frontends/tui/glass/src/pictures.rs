@@ -163,6 +163,8 @@ pub struct CardSpec {
 /// A picture develops over this many steps, each `DEVELOP_STEP_MS` long.
 pub const DEVELOP_STEPS: u8 = 8;
 pub const DEVELOP_STEP_MS: u128 = 260;
+/// The browser card's picture is remade at most this often.
+const THUMB_EVERY: Duration = Duration::from_millis(120);
 
 pub struct ThumbSpec {
     pub rect: Rect,
@@ -213,8 +215,9 @@ type BackdropIds = HashMap<Backdrop, u32>;
 struct WebIds {
     version: u64,
     sharp: u32,
-    soft: u32,
-    softer: u32,
+    /// Made from whichever frame was current when the picture first opened,
+    /// and kept across frames: a blur only has to hide the opening.
+    blurred: Option<(u32, u32)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -229,6 +232,8 @@ pub struct Pictures {
     web: Option<Arc<WebFrame>>,
     backdrop: Option<BackdropIds>,
     web_ids: Option<WebIds>,
+    /// When the browser card's picture was last made, and its key.
+    last_thumb: Option<(Instant, (u64, u32, u32, bool, u8))>,
     /// Uploads of an older browser frame, freed once nothing shows them.
     stale_web: Vec<u32>,
     stale_canvas: Vec<u32>,
@@ -251,6 +256,7 @@ impl Pictures {
             web: None,
             backdrop: None,
             web_ids: None,
+            last_thumb: None,
             stale_web: Vec::new(),
             stale_canvas: Vec::new(),
             cards: HashMap::new(),
@@ -272,7 +278,8 @@ impl Pictures {
         if frame.is_none()
             && let Some(old) = self.web_ids.take()
         {
-            self.stale_web.extend([old.sharp, old.soft, old.softer]);
+            self.stale_web.push(old.sharp);
+            self.stale_web.extend(old.blurred.into_iter().flat_map(|(soft, softer)| [soft, softer]));
         }
         self.web = frame;
     }
@@ -310,6 +317,7 @@ impl Pictures {
         self.cards.clear();
         self.water = None;
         self.thumbs.clear();
+        self.last_thumb = None;
         self.formulas.clear();
         self.formula_slots = 0;
     }
@@ -450,6 +458,18 @@ impl Pictures {
         let Some(web) = spec.frame.clone().or_else(|| self.web.clone()) else { return Ok(None) };
         let (x, y, w, h) = grid.px(spec.rect);
         let key = (web.version, w as u32, h as u32, spec.dim, spec.develop);
+        // A thumbnail takes ~25 ms to make: a live feed of thirty frames a second
+        // would stall the interface, so the card keeps its last picture for a moment.
+        // The redraws keep coming, so the newest frame is shown within `THUMB_EVERY`.
+        if !self.thumbs.contains_key(&key)
+            && let Some((at, last)) = self.last_thumb
+            && at.elapsed() < THUMB_EVERY
+            && (last.1, last.2, last.3, last.4) == (key.1, key.2, key.3, key.4)
+            && let Some(entry) = self.thumbs.get_mut(&last)
+        {
+            entry.1 = self.frame;
+            return Ok(clipped(entry.0, x + spec.dx, y + spec.dy, w, h, grid, Z_THUMB));
+        }
         let image = match self.thumbs.get_mut(&key) {
             Some(entry) => {
                 entry.1 = self.frame;
@@ -464,6 +484,7 @@ impl Pictures {
                 };
                 let id = self.gpu.upload_rgba(w as u32, h as u32, thumb.as_raw())?;
                 self.thumbs.insert(key, (id, self.frame));
+                self.last_thumb = Some((Instant::now(), key));
                 id
             }
         };
@@ -512,17 +533,30 @@ impl Pictures {
     fn popup_placement(&mut self, grid: &Grid, spec: &PopupSpec) -> io::Result<Option<Placement>> {
         let Some(web) = spec.frame.clone().or_else(|| self.web.clone()) else { return Ok(None) };
         if self.web_ids.as_ref().is_none_or(|ids| ids.version != web.version) {
-            let mut upload = |image: &image::RgbaImage| self.gpu.upload_rgba(image.width(), image.height(), image.as_raw());
-            let fresh = WebIds { version: web.version, sharp: upload(&web.sharp)?, soft: upload(&web.soft)?, softer: upload(&web.softer)? };
+            let sharp = self.gpu.upload_rgba(web.sharp.width(), web.sharp.height(), web.sharp.as_raw())?;
+            let blurred = self.web_ids.as_ref().and_then(|ids| ids.blurred);
             // The slot moves to the new picture before the old one is freed.
-            if let Some(old) = self.web_ids.replace(fresh) {
-                self.stale_web.extend([old.sharp, old.soft, old.softer]);
+            if let Some(old) = self.web_ids.replace(WebIds { version: web.version, sharp, blurred }) {
+                self.stale_web.push(old.sharp);
             }
         }
+        if spec.sharpness < 2 && self.web_ids.as_ref().is_some_and(|ids| ids.blurred.is_none()) {
+            let mut upload = |image: &image::RgbaImage| self.gpu.upload_rgba(image.width(), image.height(), image.as_raw());
+            let blurred = (upload(web.soft())?, upload(web.softer())?);
+            if let Some(ids) = self.web_ids.as_mut() {
+                ids.blurred = Some(blurred);
+            }
+        }
+        if spec.sharpness >= 2
+            && let Some((soft, softer)) = self.web_ids.as_mut().and_then(|ids| ids.blurred.take())
+        {
+            // Open: the blur served its purpose and would be stale by the next opening.
+            self.stale_web.extend([soft, softer]);
+        }
         let Some(ids) = self.web_ids.as_ref() else { return Ok(None) };
-        let image = match spec.sharpness {
-            0 => ids.softer,
-            1 => ids.soft,
+        let image = match (spec.sharpness, ids.blurred) {
+            (0, Some((_, softer))) => softer,
+            (1, Some((soft, _))) => soft,
             _ => ids.sharp,
         };
         let cols = (spec.w / grid.cw as f32).round().max(1.0) as u16;

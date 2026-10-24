@@ -105,6 +105,8 @@ pub struct App {
     core: Option<Core>,
     /// Frames of the agent's browser, while it has one.
     feed: Option<Feed>,
+    /// The core's page for the agent's screen: a real browser shows it at 30-60 fps, the card at about one.
+    screen_url: String,
     /// A picture is being drawn or decoded: the card shows a spinner until it arrives.
     pub image_pending: bool,
     /// When the latest picture arrived; it develops from blurred and dark.
@@ -209,6 +211,7 @@ impl App {
             session: Session::default(),
             core: None,
             feed: None,
+            screen_url: String::new(),
             image_in: None,
             image_pending: false,
             developed_at: None,
@@ -423,9 +426,10 @@ impl App {
     fn on_session(&mut self, event: CoreEvent, now: Instant) {
         match &event {
             CoreEvent::FileChanged { .. } | CoreEvent::Helper { .. } => self.left_in.go(1.0, now, 480, Ease::Burst),
-            CoreEvent::Screen { frame_url, .. } => {
-                if self.feed.as_ref().is_none_or(|feed| feed.url != *frame_url) {
-                    match Feed::start(frame_url) {
+            CoreEvent::Screen { stream_url, url, .. } => {
+                self.screen_url = url.clone();
+                if self.feed.as_ref().is_none_or(|feed| feed.url != *stream_url) {
+                    match Feed::start(stream_url) {
                         Ok(feed) => self.feed = Some(feed),
                         Err(error) => self.notify(error, true, now),
                     }
@@ -983,11 +987,29 @@ impl App {
             Some(Modal::Ask(_)) => self.ask_key(key, now),
             Some(Modal::Models(_)) => self.models_key(key, now),
             Some(Modal::Browser | Modal::Image(_)) => {
-                if key.code == KeyCode::Esc {
-                    self.close_modal(now);
+                match key.code {
+                    KeyCode::Esc => self.close_modal(now),
+                    KeyCode::Char('o' | 'O') => self.open_screen_in_browser(now),
+                    _ => {}
                 }
             }
             None => self.main_key(key, now),
+        }
+    }
+
+    fn open_screen_in_browser(&mut self, now: Instant) {
+        if self.screen_url.is_empty() || !self.screen_url.starts_with("http://127.0.0.1:") {
+            return;
+        }
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let started = std::process::Command::new(opener)
+            .arg(&self.screen_url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Err(error) = started {
+            self.notify(format!("{opener}: {error}"), true, now);
         }
     }
 

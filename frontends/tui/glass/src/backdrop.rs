@@ -4,6 +4,8 @@
 // rim of light along the edge, which cells alone cannot draw.
 
 use image::imageops::{self, FilterType};
+use std::sync::OnceLock;
+
 use image::{RgbImage, RgbaImage};
 
 pub const PHOTO: &[u8] = include_bytes!("../assets/backdrop-night-forest.png");
@@ -228,25 +230,35 @@ pub fn rounded(image: &RgbImage, radius: f32) -> RgbaImage {
     })
 }
 
-/// One frame of the agent's browser: sharp, and two blurred steps it
-/// sharpens through while it opens. `version` grows with every new frame.
+/// One frame of the agent's browser: sharp, and two blurred steps (made when
+/// asked for) it sharpens through while it opens. `version` grows with every new frame.
 pub struct WebFrame {
     pub raw: RgbImage,
     pub sharp: RgbaImage,
-    pub soft: RgbaImage,
-    pub softer: RgbaImage,
+    soft: OnceLock<RgbaImage>,
+    softer: OnceLock<RgbaImage>,
     pub version: u64,
+}
+
+impl WebFrame {
+    /// The blurred steps are only needed while the picture opens, so a live
+    /// feed of thirty frames a second does not pay for them on every frame.
+    pub fn soft(&self) -> &RgbaImage {
+        self.soft.get_or_init(|| rounded(&blur(&self.raw, 3, 2), self.radius()))
+    }
+
+    pub fn softer(&self) -> &RgbaImage {
+        self.softer.get_or_init(|| rounded(&blur(&self.raw, 6, 3), self.radius()))
+    }
+
+    fn radius(&self) -> f32 {
+        self.raw.width() as f32 / 90.0
+    }
 }
 
 pub fn web_frame(raw: RgbImage, version: u64) -> WebFrame {
     let radius = raw.width() as f32 / 90.0;
-    WebFrame {
-        sharp: rounded(&raw, radius),
-        soft: rounded(&blur(&raw, 3, 2), radius),
-        softer: rounded(&blur(&raw, 6, 3), radius),
-        raw,
-        version,
-    }
+    WebFrame { sharp: rounded(&raw, radius), soft: OnceLock::new(), softer: OnceLock::new(), raw, version }
 }
 
 /// A screenshot reduced to thumbnail size with a high-quality filter (the

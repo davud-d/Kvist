@@ -1,9 +1,9 @@
-// The agent's browser as pictures: a thread fetches the core's `frame_url`
-// (one JPEG of the virtual screen) about once a second and hands every new
-// frame to the interface. The core serves it on loopback only; any other
-// address is refused (docs/UI_API.md §8f, "Previews").
+// The agent's browser as pictures: a thread reads the core's `stream_url` (an
+// MJPEG stream of the virtual screen, 30 frames a second by default) and hands
+// every new frame to the interface. The core serves it on loopback only; any
+// other address is refused (docs/UI_API.md §8f, "Previews").
 
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +13,6 @@ use std::time::Duration;
 
 use crate::backdrop::{self, WebFrame};
 
-const EVERY: Duration = Duration::from_millis(900);
 const TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct Feed {
@@ -31,8 +30,16 @@ impl Feed {
         thread::spawn(move || {
             let mut last: Vec<u8> = Vec::new();
             let mut version = 0;
+            let mut stream = match open_stream(&host, &path) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    sender.send(Err(error.to_string())).ok();
+                    return;
+                }
+            };
             while !stopped.load(Ordering::Relaxed) {
-                let message = match fetch(&host, &path) {
+                let message = match next_frame(&mut stream) {
+                    // A still screen is sent over and over; decoding it again shows nothing new.
                     Ok(jpeg) if jpeg == last => None,
                     Ok(jpeg) => match image::load_from_memory(&jpeg) {
                         Ok(picture) => {
@@ -44,12 +51,15 @@ impl Feed {
                     },
                     Err(error) => Some(Err(error.to_string())),
                 };
+                let failed = matches!(message, Some(Err(_)));
                 if let Some(message) = message
                     && sender.send(message).is_err()
                 {
                     return;
                 }
-                thread::sleep(EVERY);
+                if failed {
+                    return;
+                }
             }
         });
         Ok(Feed { url: url.to_string(), stop, frames })
@@ -86,7 +96,8 @@ fn loopback(url: &str) -> Result<(String, String), String> {
     Ok((host.to_string(), path))
 }
 
-fn fetch(host: &str, path: &str) -> io::Result<Vec<u8>> {
+/// Connects and reads the response head; what follows are the stream's parts.
+fn open_stream(host: &str, path: &str) -> io::Result<BufReader<TcpStream>> {
     let address: SocketAddr = host
         .to_socket_addrs()?
         .next()
@@ -95,23 +106,47 @@ fn fetch(host: &str, path: &str) -> io::Result<Vec<u8>> {
     stream.set_read_timeout(Some(TIMEOUT))?;
     let request = format!("GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n");
     stream.write_all(request.as_bytes())?;
-    let mut response = Vec::new();
-    stream.read_to_end(&mut response)?;
-    body(&response)
-}
-
-/// The body of an HTTP/1.x response with status 200.
-fn body(response: &[u8]) -> io::Result<Vec<u8>> {
-    let split = response
-        .windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .ok_or_else(|| io::Error::other("an incomplete HTTP response"))?;
-    let status = response[..split].split(|&b| b == b'\n').next().unwrap_or_default();
-    let status = String::from_utf8_lossy(status);
+    let mut reader = BufReader::new(stream);
+    let mut status = String::new();
+    reader.read_line(&mut status)?;
     if status.split_whitespace().nth(1) != Some("200") {
         return Err(io::Error::other(format!("the preview answered {}", status.trim())));
     }
-    Ok(response[split + 4..].to_vec())
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(io::Error::other("an incomplete HTTP response"));
+        }
+        if line.trim().is_empty() {
+            return Ok(reader);
+        }
+    }
+}
+
+/// The JPEG of the next part: lines up to a blank one, then `Content-Length` bytes.
+fn next_frame(reader: &mut BufReader<TcpStream>) -> io::Result<Vec<u8>> {
+    let mut length = None;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(io::Error::other("the preview stream ended"));
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            if length.is_some() {
+                break;
+            }
+            continue;
+        }
+        if let Some((name, value)) = line.split_once(':')
+            && name.eq_ignore_ascii_case("content-length")
+        {
+            length = value.trim().parse::<usize>().ok();
+        }
+    }
+    let mut jpeg = vec![0u8; length.unwrap_or_default()];
+    reader.read_exact(&mut jpeg)?;
+    Ok(jpeg)
 }
 
 #[cfg(test)]
@@ -129,12 +164,20 @@ mod tests {
 
     #[test]
     fn a_non_200_answer_is_an_error() {
-        assert!(body(b"HTTP/1.0 403 Forbidden\r\n\r\nno").is_err());
-        assert_eq!(body(b"HTTP/1.0 200 OK\r\nContent-Type: image/jpeg\r\n\r\nJPEG").unwrap(), b"JPEG");
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let host = listener.local_addr().unwrap().to_string();
+        let server = thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            let mut chunk = [0u8; 256];
+            socket.read(&mut chunk).unwrap();
+            socket.write_all(b"HTTP/1.0 403 Forbidden\r\n\r\nno").unwrap();
+        });
+        assert!(open_stream(&host, "/stream").is_err());
+        server.join().unwrap();
     }
 
     #[test]
-    fn a_frame_is_fetched_from_a_local_server() {
+    fn frames_are_read_one_part_at_a_time() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let host = listener.local_addr().unwrap().to_string();
         let server = thread::spawn(move || {
@@ -145,13 +188,21 @@ mod tests {
                 let read = socket.read(&mut chunk).unwrap();
                 request.extend_from_slice(&chunk[..read]);
             }
-            let request = String::from_utf8_lossy(&request).to_string();
-            socket.write_all(b"HTTP/1.0 200 OK\r\n\r\nFRAME").unwrap();
-            request
+            socket
+                .write_all(
+                    b"HTTP/1.0 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=kvistframe\r\n\r\n\
+                      --kvistframe\r\nContent-Type: image/jpeg\r\nContent-Length: 5\r\n\r\nFRAME\r\n\
+                      --kvistframe\r\nContent-Type: image/jpeg\r\nContent-Length: 3\r\n\r\nTWO\r\n",
+                )
+                .unwrap();
+            String::from_utf8_lossy(&request).to_string()
         });
-        assert_eq!(fetch(&host, "/frame?token=x").unwrap(), b"FRAME");
+        let mut reader = open_stream(&host, "/stream?token=x").unwrap();
+        assert_eq!(next_frame(&mut reader).unwrap(), b"FRAME");
+        assert_eq!(next_frame(&mut reader).unwrap(), b"TWO");
+        assert!(next_frame(&mut reader).is_err());
         let request = server.join().unwrap();
-        assert!(request.starts_with("GET /frame?token=x HTTP/1.0\r\n"));
+        assert!(request.starts_with("GET /stream?token=x HTTP/1.0\r\n"));
         assert!(request.contains(&format!("Host: {host}\r\n")));
     }
 }

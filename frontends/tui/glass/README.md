@@ -92,6 +92,7 @@ the mouse.
 | `/tui` + Enter | | choose the terminal interface; the launcher starts it now and on later launches |
 | Esc, Esc | | stop the running turn (the first Esc says what the second does) |
 | | click the browser preview | open the browser in the middle; Esc closes |
+| | `O` in the opened browser | open the preview in your own browser |
 | Ctrl+T | click "Helpers" or a helper | open the helpers panel; Esc closes |
 | PageUp / PageDown | wheel | scroll the conversation |
 | | press and drag over the conversation | pour water on the text: the selection flows after the pointer and is copied when the button is released |
@@ -159,8 +160,11 @@ them shows the counts only.
 - Only the visible backdrop level and cards are uploaded for each frame
   (as files in `/dev/shm` when supported, otherwise inline and compressed).
   Previous images are freed after their replacements are placed.
-- The browser preview is the core's `screen` event: `screen.rs` fetches its
-  `frame_url` (loopback only) about once a second.
+- The browser preview is the core's `screen` event: `screen.rs` reads its
+  `stream_url` (an MJPEG stream, loopback only; 30 frames a second, `KVIST_SCREEN_FPS`
+  in the core changes it). The opened browser shows every frame; the small card
+  remakes its picture at most every 120 ms, and the blurred steps of the opening
+  are made only when it opens.
 - Motion uses "burst" timing (`anim.rs`): a slow start, a short fast middle
   and a long soft landing (for 600 ms: about 200, 50 and 350 ms). Opening
   the browser and the preview's arrival overshoot slightly instead.

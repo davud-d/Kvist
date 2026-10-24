@@ -36,7 +36,7 @@ pub enum CoreEvent {
     Result { call: String, ok: bool, summary: String, diff: Option<(u32, u32)> },
     /// A successful write; `patch` is its unified diff when the core sent one.
     FileChanged { path: String, added: u32, removed: u32, patch: Option<String> },
-    Screen { title: String, frame_url: String },
+    Screen { title: String, frame_url: String, stream_url: String, url: String },
     ScreenClosed,
     /// A picture is being drawn in the background; the card waits for it.
     ImageDrawing { title: String },
