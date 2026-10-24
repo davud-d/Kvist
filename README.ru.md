@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="docs/media/kvist_x_anymodel.mp4"><img src="docs/media/kvist_x_anymodel-poster.jpg" width="480" alt="Видео-превью Kvist x AnyModel"></a>
+  <img src="docs/media/kvist_x_anymodel.webp" width="480" alt="Видео-превью Kvist x AnyModel">
 </p>
 
 # Kvist
