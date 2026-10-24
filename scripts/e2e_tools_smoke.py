@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -54,13 +55,18 @@ SCENARIOS = (
             "command": ["git", "--version"], "purpose": "check git", "background": True}},
         {"name": "job_output", "arguments": {"job_id": "job_1", "wait": 10}},
     ], None),
-    # The scratchpad: a throwaway script goes into the temp folder, runs there and leaves
-    # nothing in the workspace.
-    ("try 2 + 2 in a scratch script", [
-        {"name": "write_file", "arguments": {"path": "{scratch}/add.py", "content": "print(2 + 2)\n"}},
-        {"name": "run_shell", "arguments": {"command": [PYTHON, "{scratch}/add.py"], "purpose": "run the script"}},
-    ], None, "4"),
 )
+
+# The scratchpad: a throwaway script goes into the temp folder, runs there and leaves
+# nothing in the workspace. Kvist refuses to run arbitrary code without Bubblewrap, so
+# the turn exists only where the sandbox does.
+if sys.platform.startswith("linux") and shutil.which("bwrap"):
+    SCENARIOS += (
+        ("try 2 + 2 in a scratch script", [
+            {"name": "write_file", "arguments": {"path": "{scratch}/add.py", "content": "print(2 + 2)\n"}},
+            {"name": "run_shell", "arguments": {"command": [PYTHON, "{scratch}/add.py"], "purpose": "run the script"}},
+        ], None, "4"),
+    )
 
 
 class LocalServer(ThreadingHTTPServer):
