@@ -88,6 +88,22 @@ kvist --workspace /path/to/project                       # терминальн�
 (В разработке, без собранного бинаря:
 `.venv/bin/python -m kernel --workspace … --frontend stdio`.)
 
+Необязательные переопределения stdio на один запуск:
+
+```bash
+kvist --workspace /path/to/project --frontend stdio \
+  --provider omniroute \
+  --fast-model ds-web/deepseek-v4-flash \
+  --smart-model ds-web/deepseek-v4-pro \
+  --role devops \
+  --approval-mode ask
+```
+
+Переопределения моделей атомарны: передайте оба флага моделей или ни одного.
+`--role` принимает `auto`, `coder`, `reader`, `devops`, `chat` или `universal`.
+`--approval-mode` принимает `ask` или `deny`; небезопасного режима `allow-all`
+намеренно нет.
+
 ---
 
 ## 4. Версия протокола и правила совместимости (ПРОЧИТАЙ)
@@ -165,7 +181,7 @@ fail-closed).
 | `live_start` / `live_stop` | — | живой статус начался / закончился |
 | `status` | `user_message:str, status:str, step:int, progress:int, plan_step:str, is_error:bool` | прогресс по шагу; во время вызова `user_message` — подпись вызова, которую строит ядро («читает src/x.py») |
 | `step` | `step:int, plan_step:str, thought:str, user_message:str, action_type:str, action_args:object, reasoning_seconds:number, action_description:str, call_id:str, batch_id:str` | один вызов инструмента из ответа модели. `reasoning_seconds` — сколько модель думала перед ним (0, если не думала). `action_description` — подпись вызова, ядро строит её из аргументов («читает src/x.py», `ищет "role" в src/`; у `run_shell` это purpose от модели). `batch_id` называет ответ модели: вызовы одного ответа делят его, их можно показать группой. `call_id` называет вызов, его `action_result` несёт тот же. `thought` всегда `""` (модель его больше не пишет). `user_message` — текст ответа для человека на первом `step` пачки и `""` на остальных, поэтому фронтенд, который показывает его на каждом шаге, покажет его один раз. |
-| `action_result` | `step:int, action_type:str, ok:bool, summary:str, output:str, exit_code:int\|null, path:str\|null, first_line:int\|null, lines_added:int\|null, lines_removed:int\|null, call_id:str, batch_id:str` | итог одного выполненного действия (сопоставляйте с шагом по `call_id` или по `step`). Читающие вызовы одного ответа выполняются параллельно, поэтому несколько `step` могут прийти раньше своих результатов; результаты всё равно приходят в порядке вызовов. Пишущий вызов, пропущенный из-за упавшей записи в том же ответе, приходит с `ok:false` и сводкой «Skipped: an earlier write failed». `summary` — одна короткая строка («Wrote 3 lines», «Command exited with code 0», «2 matches»). `output` — вывод команды после редакции секретов (`run_shell`, `git_status`, `git_diff`, `delegate_task`) или текст ошибки неудачного действия; ограничен 4000 символами: сохраняются начало и конец, между ними маркер `[... N characters omitted ...]`. `exit_code` задан только у `run_shell` (`null`, если команда отклонена или упала по таймауту). `path` и `first_line` заданы для `write_file`/`append_file`/`replace_in_file`: `first_line` — 1-based строка получившегося файла, с которой начинается записанный текст (`1` для `write_file`, первая строка дописанного текста для `append_file`, первое заменённое вхождение для `replace_in_file`), чтобы можно было нумеровать строки диффа; у неудачной записи `null`. `lines_added`/`lines_removed` — построчный дифф записи, его считает исполнитель, который видел заменённый текст (`null` у всего, кроме успешной записи); нужен интерфейсу, который показывает счётчики по файлам. Не отправляется для `final_answer`/`report_to_user`/`refuse` и для действий, отклонённых защитой рантайма до выполнения (read-only или отсутствие согласования плана); отказ по лимиту web_search/URL приходит как `ok:false`. |
+| `action_result` | `step:int, action_type:str, ok:bool, summary:str, output:str, exit_code:int\|null, path:str\|null, first_line:int\|null, lines_added:int\|null, lines_removed:int\|null, patch:str\|null, call_id:str, batch_id:str` | итог одного выполненного действия (сопоставляйте с шагом по `call_id` или по `step`). Читающие вызовы одного ответа выполняются параллельно, поэтому несколько `step` могут прийти раньше своих результатов; результаты всё равно приходят в порядке вызовов. Пишущий вызов, пропущенный из-за упавшей записи в том же ответе, приходит с `ok:false` и сводкой «Skipped: an earlier write failed». `summary` — одна короткая строка («Wrote 3 lines», «Command exited with code 0», «2 matches»). `output` — вывод команды после редакции секретов (`run_shell`, `git_status`, `git_diff`, `delegate_task`) или текст ошибки неудачного действия; ограничен 4000 символами: сохраняются начало и конец, между ними маркер `[... N characters omitted ...]`. `exit_code` задан только у `run_shell` (`null`, если команда отклонена или упала по таймауту). `path` и `first_line` заданы для `write_file`/`append_file`/`replace_in_file`: `first_line` — 1-based строка получившегося файла, с которой начинается записанный текст (`1` для `write_file`, первая строка дописанного текста для `append_file`, первое заменённое вхождение для `replace_in_file`), чтобы можно было нумеровать строки диффа; у неудачной записи `null`. `lines_added`/`lines_removed` — построчный дифф записи, его считает исполнитель, который видел заменённый текст (`null` у всего, кроме успешной записи); нужен интерфейсу, который показывает счётчики по файлам. `patch` — та же запись в формате unified diff (`--- a/PATH` / `+++ b/PATH` или `/dev/null`, затем блоки `@@ -a,b +c,d @@` с тремя строками контекста и скрытыми секретами), чтобы фронтенд показывал изменения файла. Номера строк относятся к самому файлу, прибавлять `first_line` не нужно. Значение `null` у всего, кроме успешной записи, и у записи без изменений; после 200 000 символов дифф обрезается на границе строки и заканчивается `\ patch truncated`. Модель его не видит. Не отправляется для `final_answer`/`report_to_user`/`refuse` и для действий, отклонённых защитой рантайма до выполнения (read-only или отсутствие согласования плана); отказ по лимиту web_search/URL приходит как `ok:false`. |
 | `action_output` | `step:int, output:str, call_id:str` | живой вывод выполняющейся команды `run_shell`: приходит, пока она работает, и до её `action_result`. `output` — **снапшот** последнего вывода (не больше 4000 символов, редакция секретов применена ко всему целиком), а не дельта, поэтому заменяйте показанное. События идут не чаще раза в ~120 мс, и последнее не теряется. Это только предпросмотр: полный ограниченный вывод по-прежнему приходит в `action_result`, который завершает живой вывод этого `step`. Команда, которая ничего не печатает, не шлёт ничего. |
 | `job_started` | `job_id:str, command:string[], purpose:str, call_id:str` | вызов `run_shell` с `background: true` запустил фоновое задание; сам вызов ответил сразу с идентификатором задания, а процесс продолжает работать. `command` — argv, `purpose` — подпись самой модели, `call_id` — вызов `step`, который его запустил, поэтому фронтенд может прикрепить задание к карточке этого вызова. Записывается в журнал сессии. |
 | `job_output` | `job_id:str, output:str` | живой вывод работающего фонового задания: **снапшот** его хвоста (с редакцией секретов, с ограничением), а не дельта, поэтому заменяйте показанное. Не чаще раза в ~120 мс, последнее не теряется. Только «вживую», в журнал не пишется; ограниченный хвост приходит ещё раз с `job_finished`. |
@@ -302,7 +318,7 @@ fail-closed).
 
 ```
 <<< do the thing
->>> {"type": "hello", "protocol_version": 1, "session": "default", "has_checkpoint": false}
+>>> {"type": "hello", "protocol_version": 1, "provider": "omniroute", "models": {"fast": "ds-web/deepseek-v4-flash", "smart": "ds-web/deepseek-v4-pro"}, "role": "devops", "approval_mode": "ask", "session": "default", "has_checkpoint": false}
 >>> {"type": "status", "user_message": "Choosing provider", "status": "working", "step": 1, "progress": 10, "plan_step": "inspect", "is_error": false}
 >>> {"type": "input_request", "request_id": "b7dca6b0…", "kind": "choice", "title": "Pick provider", "body": "", "options": [{"value": "openai", "label": "OpenAI"}, {"value": "freeflow", "label": "FreeFlow"}], "current_value": "", "help_text": ""}
 <<< {"request_id": "b7dca6b0…", "value": "freeflow"}
@@ -686,7 +702,7 @@ MCP-серверов, ни аудио- и image-промптов. Что кон�
 
 `frontends/tray` — резидентная иконка для каждого ядра, живущего в терминале. Ядро подключается к ней через `kernel/tray/tray_link.py`; обратно в ядро ничего не приходит. Это не поток событий из §8.
 
-- **Обнаружение.** Демон пишет `~/.kvist/tray.json` (`{"port", "token", "pid"}`, права 0600) и слушает `127.0.0.1:<port>`. Ядро, до которого демон не достучался, один раз за процесс запускает его (`KVIST_TRAY_CMD` — JSON-массив argv, либо `frontends/tray/node_modules/electron` из исходников) с `KVIST_CORE_CMD`, равным его собственной команде.
+- **Обнаружение.** Демон пишет `~/.kvist/tray.json` (`{"port", "token", "pid"}`, права 0600) и слушает `127.0.0.1:<port>`. Ядро, которому демон недоступен, один раз за процесс запускает его (`KVIST_TRAY_CMD` — JSON-массив argv, либо `frontends/tray/node_modules/electron` из исходников) с `KVIST_CORE_CMD`, равным его собственной команде.
 - **Формат.** NDJSON. Первая строка — `{"type": "hello", "token": "..."}`; неверный токен закрывает соединение. Дальше по одному `{"type": "state", "pid", "workspace", "session", "state"}` на каждое изменение, где `state` — `running` (ход начался) или `done` (закончился). Каждое сообщение — полный снимок, поэтому отправитель вправе отбросить все, кроме последнего.
 - **Кто отправляет.** Только терминальные ядра: `main()` ставит `KVIST_TRAY_HOST=1` до запуска терминальных фронтендов, ядро Ink-приложения наследует его. Ядра, запущенные GUI, ACP или `run_task.py`, ничего не отправляют.
 - **Переключатель.** `tray_enabled` в `~/.kvist/config.json` (отсутствие значит «включено») читается перед каждой отправкой; `kvist --tray-op enable|disable|status` печатает `{"ok", "enabled"}` и завершается.
@@ -815,7 +831,8 @@ Electron просто спавнит бинарь `kvist`.
   или поставьте конфиг. Если провайдер/модель отсутствуют и нет TTY, ядро завершается с
   ненулевым кодом и сообщением в stderr (fail-closed).
 - **Подтверждения fail-closed.** Без внедрённого gate — терминальные запросы; через
-  события закрытый/молчащий фронтенд отклоняет опасные команды.
+  события закрытый/молчащий фронтенд отклоняет опасные команды. `--approval-mode deny`
+  отклоняет все запросы подтверждения без показа диалога.
 - **Цикл агента не менялся.** Фронтенды не вызывают внутренности агента — только
   рендерят события и отвечают на запросы.
 - **Терминал — особый дефолт.** Его REPL добавляет slash-команды и визарды
