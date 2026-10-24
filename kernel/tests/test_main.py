@@ -106,6 +106,8 @@ def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch
         lambda provider, models, available, language_hint=None: (models, ["warn"]),
     )
     monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+    # The network note is checked on its own below; here only the provider's warnings may appear.
+    monkeypatch.setattr(main, "network_isolation_available", lambda: True)
 
     agent, config, warnings = main.build_agent(
         executor=SafeExecutor(tmp_path),
@@ -120,6 +122,22 @@ def test_build_agent_wires_config_without_real_credentials(tmp_path, monkeypatch
     assert warnings[0] == "warn"
     # May contain reasoning effort advisory if config differs from default
     assert all("warn" in w or "Reasoning effort" in w for w in warnings)
+
+
+def test_build_agent_says_when_commands_cannot_be_cut_off_the_network(tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "get_saved_provider_or_none", lambda: "openai")
+    monkeypatch.setattr(main, "get_saved_models", lambda provider: {})
+    monkeypatch.setattr(main, "ensure_provider_credentials", lambda **kwargs: {"openai_api_key": "key"})
+    monkeypatch.setattr(main, "fetch_available_models", lambda provider, credentials, force_refresh=False: (["gpt-test"], None))
+    monkeypatch.setattr(main, "create_llm_client", lambda provider, credentials, verbose=False: SimpleNamespace(chat=None))
+
+    def warnings_with(isolation: bool) -> list[str]:
+        monkeypatch.setattr(main, "network_isolation_available", lambda: isolation)
+        return main.build_agent(executor=SafeExecutor(tmp_path), max_steps=7, persist_logs=False,
+                                verbose=False, language_hint="en")[2]
+
+    assert f"{main.NETWORK_UNENFORCED_NOTE}." in warnings_with(False)
+    assert not any(main.NETWORK_UNENFORCED_NOTE in warning for warning in warnings_with(True))
 
 
 def test_build_agent_wires_manual_tier_provider(tmp_path, monkeypatch):

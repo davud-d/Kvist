@@ -220,29 +220,27 @@ def test_a_host_command_where_network_cannot_be_cut_runs_and_says_so(shell, monk
     assert executor._run_sandbox == "default" and executor._run_network_unenforced is False
 
 
-def test_a_command_where_network_cannot_be_cut_runs_and_its_approval_says_so(shell, monkeypatch):
-    executor, _gate, calls = shell
+def test_a_command_where_network_cannot_be_cut_keeps_its_sandbox_mode_and_is_marked(shell, monkeypatch):
+    executor, _gate, _calls = shell
     monkeypatch.setattr(terminal, "host_network_launcher", _no_network_boundary)
     executor.sandbox_mode = SandboxMode.WORKSPACE_ONLY
+    executor._run_network = False
+
+    assert executor._effective_sandbox() == (SandboxMode.WORKSPACE_ONLY, True, executor._bwrap_path)
+    assert executor._run_network_unenforced is True
+
+
+@pytest.mark.parametrize("unenforced", [True, False])
+def test_an_approval_says_so_only_where_network_cannot_be_cut(shell, monkeypatch, unenforced):
+    executor, _gate, _calls = shell
     reasons = []
-    monkeypatch.setattr(executor, "_request_user_approval", lambda command, reason: reasons.append(reason) or True)
+    monkeypatch.setattr(executor, "_request_user_approval", lambda command, reason: reasons.append(reason) or False)
+    executor._run_network_unenforced = unenforced
 
-    result = executor.run(["python3", "-c", "pass"], network=False)
+    executor._approve_or_deny(["tool"], "runs code", lambda: None, offer_rule=False)
 
-    assert result.returncode == 0 and len(calls) == 1
-    assert reasons and sandbox.NETWORK_UNENFORCED_NOTE in reasons[0]
-    assert executor._run_network_unenforced is False
-
-
-def test_a_command_where_network_can_be_cut_carries_no_such_note(shell, monkeypatch):
-    executor, _gate, calls = shell
-    executor.sandbox_mode = SandboxMode.WORKSPACE_ONLY
-    reasons = []
-    monkeypatch.setattr(executor, "_request_user_approval", lambda command, reason: reasons.append(reason) or True)
-
-    executor.run(["python3", "-c", "pass"], network=False)
-
-    assert len(calls) == 1 and all(sandbox.NETWORK_UNENFORCED_NOTE not in reason for reason in reasons)
+    assert reasons[0].startswith("runs code")
+    assert (sandbox.NETWORK_UNENFORCED_NOTE in reasons[0]) is unenforced
 
 
 def test_frontend_channel_has_two_non_rememberable_requests(shell):
