@@ -27,3 +27,13 @@ def test_workspace_fact_ignores_kvists_own_files(tmp_path):
 
     (tmp_path / "main.py").write_text("", encoding="utf-8")
     assert current_workspace_context(tmp_path) == f"{tmp_path.name}, 1 top-level entries"
+
+
+def test_identity_fact_names_model_and_effort():
+    fact = system_context.identity_fact("chatgpt", "gpt-6.1-sol", "medium")
+    assert "model = gpt-6.1-sol" in fact
+    assert "reasoning effort = medium" in fact
+
+
+def test_identity_fact_says_when_reasoning_is_off():
+    assert "off (no reasoning)" in system_context.identity_fact("openai", "gpt-5", "false")

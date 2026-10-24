@@ -402,7 +402,11 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
 
     # Built every step, not cached with the prefix: the run may escalate from
     # the fast to the smart model, and the line must name the model that answers.
-    identity = identity_fact(self.config.provider, self._state.selected_action_model or self.config.fast_model)
+    identity = identity_fact(
+        self.config.provider,
+        self._state.selected_action_model or self.config.fast_model,
+        self.config.reasoning_effort,
+    )
     environment_header = "System environment:\n"
     prefix = f"{environment_header}- Identity: {identity}\n{cached_prefix[len(environment_header):]}"
     return prefix + dynamic + cached_suffix

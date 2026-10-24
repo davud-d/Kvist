@@ -1422,7 +1422,7 @@ class LocalAgent:
         # Who the model is and which model serves this turn are two facts: given
         # only the second, the model named itself after its vendor or another product.
         model_note = (
-            f"(Runtime fact: {identity_fact(self.config.provider, self.config.fast_model)})\n\n"
+            f"(Runtime fact: {identity_fact(self.config.provider, self.config.fast_model, self.config.reasoning_effort)})\n\n"
         )
         # Without the host fact a chat reply to "restart the editor" invented
         # that the conversation would be lost; it is on disk.

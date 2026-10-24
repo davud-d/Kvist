@@ -141,15 +141,18 @@ def current_sandbox_context(sandbox_mode: str, network_allowed: bool) -> str:
     return f"{sandbox_mode}, net {'allowed' if network_allowed else 'denied'}"
 
 
-def identity_fact(provider: str, model: str) -> str:
+def identity_fact(provider: str, model: str, effort: str) -> str:
     """Who the model is, and which language model runs it, as two separate facts.
 
     Given only the model name, a model took it for its identity and named itself
-    after its vendor or after another coding agent.
+    after its vendor or after another coding agent. The effort is here because a
+    commit trailer names the model and the effort the work was done at.
     """
+    effort_name = "off (no reasoning)" if effort == "false" else effort
     return (
         "you are Kvist, an open-source coding agent. The language model running you this turn "
-        f"is provider = {provider}, model = {model}; it is a separate thing and it changes. "
+        f"is provider = {provider}, model = {model}, reasoning effort = {effort_name}; "
+        "it is a separate thing and it changes. "
         "Asked what you are, you are Kvist. Asked which model runs you, name this one."
     )
 
