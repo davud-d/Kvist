@@ -1,8 +1,10 @@
 # Browser skill
 
-This is a test bench, not the person's browser. Use it to check a page you built or a
-service the task started. When the person wants to see a site or a video themselves, use
-the `desktop` skill: it opens the exact address in their own browser.
+This is your own browser, not the person's. Use it to check a page you built or a
+service the task started, and to work on a site on the internet yourself: open it, read it,
+click, fill in forms. The person allows each internet address when the call asks, so a site
+is not off limits. When the person wants to see a site or a video themselves, use the
+`desktop` skill: it opens the exact address in their own browser.
 
 A Chromium browser that runs on the skill's own virtual screen (a separate X
 display with i3), controlled through Playwright. It never touches the person's

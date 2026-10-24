@@ -1,18 +1,18 @@
 {
   "manifest_version": 1,
   "id": "browser",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "plugin_api": 1,
   "kind": "tools",
   "name": {"en": "Browser", "ru": "Браузер"},
   "summary": {
-    "en": "For testing: its own Chromium on a hidden screen the person does not use, to check a page you built (clicks, forms, layout, console and network errors). Not for showing the person a site or a video: use desktop for that.",
-    "ru": "Для проверки: собственный Chromium на скрытом экране, которым пользователь не пользуется, чтобы проверить страницу, которую вы сделали (клики, формы, вёрстка, ошибки консоли и сети). Не для того, чтобы показать пользователю сайт или видео: для этого desktop."
+    "en": "Its own Chromium on a hidden screen: check a page you built, or work on a site on the internet yourself (open, read, click, fill forms; the person allows each address when asked). Not for showing the person a site or a video: use desktop.",
+    "ru": "Собственный Chromium на скрытом экране: проверить свою страницу или самим работать с сайтом в интернете (открыть, прочитать, кликнуть, заполнить форму; адрес пользователь разрешает по запросу). Чтобы показать сайт или видео пользователю: desktop."
   },
   "instructions": "SKILL.md",
   "entrypoint": "plugin.py",
   "platforms": ["linux"],
-  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.5"},
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.6"},
   "dependencies": {
     "python": ["playwright==1.63.0", "greenlet==3.5.6", "pyee==13.0.0", "typing_extensions==4.16.0"],
     "system": ["Xvfb", "i3", "chromium"]
