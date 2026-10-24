@@ -4049,9 +4049,16 @@ def _stdio_memory(ctx: CommandContext) -> CommandResult:
     from kernel.memory.commands import run_slash
 
     agent = ctx.session.agent
+    confirm = lambda title, details: bool(ctx.ui.confirm(title, details))  # noqa: E731
     try:
-        ok, text = run_slash(agent.executor.workspace, ctx.args, lambda title, details: bool(ctx.ui.confirm(title, details)),
-                             _speaks_russian(agent), model=memory_model(agent), session=agent.current_session)
+        if not ctx.args:
+            from kernel.memory.dialog import run_dialog
+
+            text = run_dialog(agent.executor.workspace, ctx.ui, confirm, _speaks_russian(agent),
+                              model=memory_model(agent), session=agent.current_session)
+            return CommandResult(True, sanitize_display_text(text)) if text else _command_cancelled()
+        ok, text = run_slash(agent.executor.workspace, ctx.args, confirm, _speaks_russian(agent),
+                             model=memory_model(agent), session=agent.current_session)
     except MemoryStoreError as error:
         return CommandResult(False, sanitize_display_text(str(error)), {"code": error.code})
     return CommandResult(ok, sanitize_display_text(text))
@@ -5469,14 +5476,27 @@ def main() -> None:
                     with paused_interactive_screen(interactive_screen):
                         return bool(agent._ui.confirm(title, details))
 
+                memory_args = user_goal.split()[1:]
                 try:
-                    ok, text = run_slash(agent.executor.workspace, user_goal.split()[1:], confirm_memory,
-                                         _speaks_russian(agent), model=memory_model(agent),
-                                         session=agent.current_session)
+                    if memory_args:
+                        ok, text = run_slash(agent.executor.workspace, memory_args, confirm_memory,
+                                             _speaks_russian(agent), model=memory_model(agent),
+                                             session=agent.current_session)
+                    else:
+                        from kernel.memory.dialog import run_dialog
+
+                        with paused_interactive_screen(interactive_screen):
+                            text = run_dialog(agent.executor.workspace,
+                                              TerminalBannerUI(console=console, verbose=verbose),
+                                              lambda title, details: bool(agent._ui.confirm(title, details)),
+                                              _speaks_russian(agent), model=memory_model(agent),
+                                              session=agent.current_session)
+                        ok = True
                 except MemoryStoreError as error:
                     ok, text = False, str(error)
-                console.print(Panel(Text(sanitize_display_text(text)), title="/memory",
-                                    border_style="bright_cyan" if ok else "red"))
+                if text:
+                    console.print(Panel(Text(sanitize_display_text(text)), title="/memory",
+                                        border_style="bright_cyan" if ok else "red"))
                 continue
 
             if user_goal.lower() == "/context":
