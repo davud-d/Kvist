@@ -46,6 +46,7 @@ from kernel.sandbox.sandbox import (
     sandbox_network_allowed,
     wrap_command_for_sandbox,
 )
+from kernel.sandbox.scratchpad import Scratchpad
 from kernel.sandbox.secret_paths import UnsafeSecretPathError, enumerate_secret_targets
 from kernel.sandbox.self_info import ancestor_chain, detect_host
 from kernel.sandbox.terminal_bindings import ExecutableBindingMixin
@@ -146,8 +147,10 @@ class TerminalExecutor(
         extra_allowed: dict[str, set[str] | None] | None = None,
         extra_forbidden: set[str] | None = None,
         approvals: ApprovalGate | None = None,
+        scratch: Scratchpad | None = None,
     ) -> None:
         self._approvals = approvals or TerminalApprovalGate()
+        self.scratch = scratch
         # Set by the caller around one command to watch its output live; the
         # captured, bounded result is unaffected.
         self.output_sink: Callable[[str], None] | None = None
@@ -850,6 +853,7 @@ class TerminalExecutor(
                 links=venv_interpreter_links(bindings, workspace),
                 secret_targets=secret_targets,
                 service=(expose.socket_dir, expose.port) if isolated_service else None,
+                scratch=self.scratch.ensure() if self.scratch is not None else None,
             )
         except ValueError as error:
             raise HardDenyError(f"Hard security denial: {error}") from error

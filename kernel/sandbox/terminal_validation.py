@@ -496,6 +496,7 @@ class ArgumentValidationMixin:
                     and not allow_executable_path
                     and executable.casefold() not in _ABSOLUTE_PATH_SAFE_COMMANDS
                     and not docker_host_path
+                    and not self._names_scratch_path(fragment)
                 ):
                     raise HardDenyError(
                         "Hard security denial: Absolute paths are forbidden in arguments"
@@ -685,6 +686,15 @@ class ArgumentValidationMixin:
 
         return candidate
 
+    def _names_scratch_path(self, fragment: str) -> bool:
+        """True for an absolute path whose real location is inside the scratchpad."""
+        if self.scratch is None:
+            return False
+        try:
+            return self.scratch.owns(Path(os.path.normpath(fragment)).resolve(strict=False))
+        except (OSError, RuntimeError):
+            return False
+
     def _resolve_workspace_reference(self, token: str, work_dir: Path, kind: str) -> Path:
         raw = Path(token).expanduser()
         try:
@@ -693,6 +703,8 @@ class ArgumentValidationMixin:
             raise HardDenyError(
                 f"Hard security denial: cannot resolve {kind}: {error}"
             ) from error
+        if self.scratch is not None and self.scratch.owns(candidate):
+            return candidate
         try:
             candidate.relative_to(self.workspace)
         except ValueError as error:

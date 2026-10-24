@@ -70,6 +70,7 @@ def main() -> int:
         for directory in (home, workspace):
             directory.mkdir()
         smoke.configure(home, provider.url)
+        smoke.allow_python(workspace)
         core = None
         try:
             run_installer(home, lib_dir, bin_dir)

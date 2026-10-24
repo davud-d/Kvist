@@ -130,6 +130,7 @@ from kernel.context.system_context import (
     current_os_context,
     current_project_context,
     current_workspace_context,
+    scratchpad_context,
     current_sandbox_context,
     current_shell_context,
     current_time_context,
@@ -549,6 +550,7 @@ class LocalAgent:
             raise ValueError(f"Session {name!r} already exists")
         # Their wake-up turn would land in a conversation that never asked for it.
         self.stop_left_running()
+        self.executor.scratchpad.clear()
         self.save_session()
         previous = self.current_session
         resolved = name or self._generate_session_name()
@@ -606,6 +608,7 @@ class LocalAgent:
         if not target_document:
             raise ValueError(f"Unknown session: {name!r}")
         self.stop_left_running()
+        self.executor.scratchpad.clear()
         self.save_session()
         previous = self.current_session
         self._save_active_session(name)
@@ -635,6 +638,7 @@ class LocalAgent:
         self._state.system_git = git_header
         self._state.system_git_details = git_details
         self._state.system_workspace = current_workspace_context(self.executor.workspace)
+        self._state.system_scratchpad = scratchpad_context(self.executor.scratchpad)
         self._state.system_sandbox = current_sandbox_context(
             self.executor.sandbox_mode, False
         )
@@ -758,6 +762,7 @@ class LocalAgent:
         self.skills.finish_task(reason)
         self.images.stop_all()
         self.executor.jobs.stop_all()
+        self.executor.scratchpad.clear()
         report = self.resources.shutdown(reason)
         for outcome in report.failed:
             self._ui.debug_print(f"[resources] {outcome.label}: not confirmed stopped ({outcome.error})")

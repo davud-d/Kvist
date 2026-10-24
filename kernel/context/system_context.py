@@ -175,6 +175,17 @@ def current_workspace_context(workspace) -> str:
     state = f"{len(entries)} top-level entries" if entries else "empty, nothing there yet"
     return f"{root.name}, {state}"
 
+
+def scratchpad_context(scratchpad) -> str:
+    """One line: where a throwaway script can go, and why it is safe to leave there."""
+    megabytes = scratchpad.limit_bytes // (1024 * 1024)
+    return (
+        f"{scratchpad.path} ({megabytes} MB, shared with helpers, deleted when this session ends). "
+        "For a quick script that only tries something out: write_file, append_file, read_file and run_shell "
+        "reach it by this absolute path, so nothing is left in the project and nothing needs cleaning up. "
+        "It is not in the change journal; work the project should keep belongs in the workspace."
+    )
+
 # Instructions ride along with every request of a run, so a runaway file would
 # silently eat the context budget. Cut it and say so.
 _MAX_INSTRUCTIONS_CHARS = 24_000

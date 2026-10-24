@@ -592,6 +592,28 @@ so it is not the default. The extension comes from the returned bytes (PNG/JPEG/
   and `image_job` events was not checked.
   Tests: `test_image_generation.py`, the protocol and backdrop tests in `frontends/tui/glass`.
 
+### Scratchpad (`sandbox/scratchpad.py`)
+A throwaway directory `<tempdir>/kvist-scratch-<random>` (0700, 500 MB) for a quick test script that must leave no
+trace. **One per core process**: `SafeExecutor.scratchpad`, handed to helpers' executors (`helpers.py`), so the main
+agent and all helpers share it. The name is fixed at construction and the directory made on first use (`ensure`).
+Cleared (`clear`) by `LocalAgent.new_session`, `switch_session` and `shutdown`, after `stop_left_running`; **not** by
+`reset_session`/`delete_session` (headless ops with no live pad; the active session cannot be deleted).
+- **Reach:** the prompt's `Scratchpad:` line (`system_context.scratchpad_context`) gives the absolute path.
+  `write_file`/`append_file` take that absolute path (`_scratch_target` → `_write_scratch`: no journal, no overwrite
+  approval, so not in `/revert`; `.env` guard and per-call size caps still apply; every component opened with
+  `O_NOFOLLOW` relative to the previous one because a sandboxed script can rename things meanwhile; Windows has no
+  `dir_fd` and takes `_write_scratch_by_path`, where commands run unsandboxed anyway). `read_file`/`list_dir` see it
+  through `_read_boundary_for`. `replace_in_file` does not: rewrite the file.
+- **Shell:** Bubblewrap binds the pad read-write at its own path and sets `KVIST_SCRATCH`
+  (`wrap_command_for_sandbox(scratch=)`). `TerminalExecutor(scratch=)` lets an absolute path through the
+  "absolute paths are forbidden" check only when its real location is inside the pad (`_names_scratch_path`), and
+  `_resolve_workspace_reference` accepts a script there; its content hash is keyed by absolute path. Running code
+  from it still goes through the normal risk assessment and approval. The cwd stays in the workspace.
+- **Limit:** `check_room` applies to the executor's writes; a shell command can still outgrow it (per-file
+  `RLIMIT_FSIZE` only), the pad is gone with the session anyway.
+- Linux (Bubblewrap) checked end to end with a real script; macOS and Windows have the same code path but are
+  not run. Tests: `test_scratchpad.py`.
+
 ### Stopping a turn (Ctrl+C / Escape)
 **A stop ends the turn, never the session.** `run_loop` catches `KeyboardInterrupt` around its whole
 loop; the answer becomes `build_cancellation_message` and the `finally` still seals session,

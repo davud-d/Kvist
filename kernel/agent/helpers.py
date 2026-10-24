@@ -259,7 +259,7 @@ class HelperManager:
         main_gate = main.executor.approvals
         shared_gate = not read_only and getattr(main_gate, "answers_from_any_thread", False)
         executor = SafeExecutor(main.executor.workspace, approvals=main_gate if shared_gate else DenyApprovalGate(),
-                                read_roots=main.executor.read_roots)
+                                read_roots=main.executor.read_roots, scratchpad=main.executor.scratchpad)
         agent = LocalAgent(main.client, executor, config, ui=_HelperUI(lambda payload: self._activity(helper, payload)),
                            console=main.console,
                            service_session={"kind": "helper", "agent_id": helper.agent_id,

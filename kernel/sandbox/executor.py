@@ -53,6 +53,7 @@ from kernel.sandbox.secret_paths import (
     is_secret_path,
 )
 from kernel.sandbox.approvals import ApprovalGate, TerminalApprovalGate
+from kernel.sandbox.scratchpad import Scratchpad, ScratchpadFull
 from kernel.sandbox.permission_policy import append_web_domain, load_policy
 from kernel.config.user_config import get_web_search_settings
 from kernel.sandbox.terminal import TerminalExecutor, TerminalError, _is_trusted_system_executable, is_hitl_active
@@ -246,8 +247,11 @@ class SafeExecutor:
         *,
         approvals: ApprovalGate | None = None,
         read_roots: tuple[str | Path, ...] = (),
+        scratchpad: Scratchpad | None = None,
     ) -> None:
         self._approvals = approvals or TerminalApprovalGate()
+        # Helpers are handed the main agent's scratchpad, so they all share one.
+        self.scratchpad = scratchpad or Scratchpad()
         self.workspace = Path(workspace).expanduser().resolve()
         self.workspace.mkdir(parents=True, exist_ok=True)
         # Extra directories the read-only actions may leave the workspace for.
@@ -317,6 +321,7 @@ class SafeExecutor:
             max_output_chars=self.max_output_chars,
             profile=terminal_profile,
             approvals=self._approvals,
+            scratch=self.scratchpad,
         )
 
         # Sandbox honesty + policy-file notices — surfaced once by the
@@ -764,6 +769,8 @@ class SafeExecutor:
         """Return the boundary that contains ``target``, or None if none does."""
         if target == self.workspace or target.is_relative_to(self.workspace):
             return self.workspace
+        if self.scratchpad.owns(target):
+            return self.scratchpad.path
         return next(
             (
                 root
@@ -1572,7 +1579,97 @@ class SafeExecutor:
         finally:
             os.close(directory_descriptor)
 
+    def _scratch_target(self, path: str | None) -> Path | None:
+        """The resolved file when ``path`` is an absolute path inside the scratchpad."""
+        raw = Path(self._normalize_user_path(path)).expanduser()
+        if not raw.is_absolute():
+            return None
+        resolved = raw.resolve()
+        if resolved == self.scratchpad.path or not self.scratchpad.owns(resolved):
+            return None
+        return resolved
+
+    def _open_scratch_parent(self, target: Path) -> int:
+        """Open (creating) the target's directory below the scratchpad without following symlinks.
+
+        A script running in the sandbox can rename things in here at any moment,
+        so each component is opened relative to the previous one.
+        """
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+        try:
+            descriptor = os.open(self.scratchpad.ensure(), flags)
+        except OSError as error:
+            raise ExecutorError("Cannot open the scratchpad safely") from error
+        try:
+            for part in target.parent.relative_to(self.scratchpad.path).parts:
+                try:
+                    os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                except FileExistsError:
+                    pass
+                child = os.open(part, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = child
+            return descriptor
+        except OSError as error:
+            os.close(descriptor)
+            raise ExecutorError(f"Cannot open the scratchpad folder safely: {target.parent.name}") from error
+
+    def _write_scratch_by_descriptor(self, target: Path, data: bytes, append: bool) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC | os.O_NOFOLLOW
+        flags |= os.O_APPEND if append else os.O_TRUNC
+        directory = self._open_scratch_parent(target)
+        try:
+            with os.fdopen(os.open(target.name, flags, 0o600, dir_fd=directory), "wb") as handle:
+                handle.write(data)
+        finally:
+            os.close(directory)
+
+    def _write_scratch_by_path(self, target: Path, data: bytes, append: bool) -> None:
+        """Windows has no dir_fd; commands there run unsandboxed as the person, so there is no sandbox to race."""
+        self.scratchpad.ensure()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not self.scratchpad.owns(target.parent.resolve(strict=True)) or target.is_symlink():
+            raise ExecutorError(f"The scratchpad folder leads elsewhere: {target.parent.name}")
+        with open(target, "ab" if append else "wb") as handle:
+            handle.write(data)
+
+    def _write_scratch(self, action: str, path: str, target: Path, content: str) -> ExecutionResult:
+        """Write or append a file in the scratchpad: no journal, no approval, nothing to revert."""
+        self._check_env_file(target)
+        data = content.encode("utf-8")
+        append = action == "append_file"
+        limit = self.max_writable_file_bytes if append else self.max_file_size_bytes
+        if len(data) > limit:
+            raise ExecutorError(f"File size ({len(data)} bytes) exceeds limit ({limit} bytes)")
+        replaced = 0 if append or not target.is_file() else target.stat().st_size
+        try:
+            self.scratchpad.check_room(len(data), replaced)
+        except ScratchpadFull as error:
+            raise ExecutorError(str(error)) from error
+        try:
+            if os.name == "nt":
+                self._write_scratch_by_path(target, data, append)
+            else:
+                self._write_scratch_by_descriptor(target, data, append)
+        except OSError as error:
+            raise ExecutorError(f"Cannot write to the scratchpad: {target.name}") from error
+        key = "bytes_appended" if append else "bytes_written"
+        return ExecutionResult(
+            ok=True,
+            action_type=action,
+            data={
+                "path": path,
+                key: len(data),
+                "first_line": 1,
+                "lines_added": len(content.splitlines()),
+                "lines_removed": 0,
+            },
+        )
+
     def _write_file(self, path: str, content: str) -> ExecutionResult:
+        scratch_target = self._scratch_target(path)
+        if scratch_target is not None:
+            return self._write_scratch("write_file", path, scratch_target, content)
         try:
             with exclusive_storage_lock(
                 self._source_write_lock,
@@ -1616,6 +1713,9 @@ class SafeExecutor:
         )
 
     def _append_file(self, path: str, content: str) -> ExecutionResult:
+        scratch_target = self._scratch_target(path)
+        if scratch_target is not None:
+            return self._write_scratch("append_file", path, scratch_target, content)
         try:
             with exclusive_storage_lock(
                 self._source_write_lock,

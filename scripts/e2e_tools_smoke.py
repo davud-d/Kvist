@@ -28,12 +28,16 @@ ROOT = Path(__file__).resolve().parent.parent
 TURN_BUDGET_SECONDS = 45
 TURN_TIMEOUT_SECONDS = 15
 
+# `python` is what Windows installs; the others ship `python3`.
+PYTHON = "python" if sys.platform == "win32" else "python3"
 CREATED = b"hello from kvist\n"
 EDITED = b"goodbye from kvist\n"
 APPENDED = EDITED + b"and another line\n"
 # (goal, the tool call the fake provider makes, the file content to expect or
-# None for the terminal turn). A scenario's call may be a list: the provider
-# makes them one per request, then answers "Done.".
+# None for the terminal turn, optionally the text the terminal output must hold,
+# "git version" by default). A scenario's call may be a list: the provider makes
+# them one per request, then answers "Done.". "{scratch}" in an argument becomes
+# the scratchpad path the prompt names.
 SCENARIOS = (
     ("create hello.txt with a greeting", {"name": "write_file", "arguments": {
         "path": "hello.txt", "content": CREATED.decode()}}, CREATED),
@@ -50,6 +54,12 @@ SCENARIOS = (
             "command": ["git", "--version"], "purpose": "check git", "background": True}},
         {"name": "job_output", "arguments": {"job_id": "job_1", "wait": 10}},
     ], None),
+    # The scratchpad: a throwaway script goes into the temp folder, runs there and leaves
+    # nothing in the workspace.
+    ("try 2 + 2 in a scratch script", [
+        {"name": "write_file", "arguments": {"path": "{scratch}/add.py", "content": "print(2 + 2)\n"}},
+        {"name": "run_shell", "arguments": {"command": [PYTHON, "{scratch}/add.py"], "purpose": "run the script"}},
+    ], None, "4"),
 )
 
 
@@ -69,6 +79,7 @@ class FakeProvider:
         # The file the current run changes: it is read back before the run says it is done.
         self.pending_calls: list[dict] = []
         self.requests: list[dict] = []
+        self.scratch = ""
         provider = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -100,6 +111,7 @@ class FakeProvider:
     def completion(self, request: dict) -> dict:
         tools = {tool["function"]["name"] for tool in request.get("tools") or []}
         messages = request.get("messages") or []
+        self.scratch = self.scratch or self._scratch_named_in(messages)
         if tools == {"ping"}:
             message = self._call("ping", {"ok": True})
         elif not tools:
@@ -107,7 +119,7 @@ class FakeProvider:
         elif any(item.get("role") == "tool" for item in messages):
             answered = sum(1 for item in messages if item.get("role") == "tool")
             if answered < len(self.pending_calls):
-                message = self._call(**self.pending_calls[answered])
+                message = self._call(**self._filled(self.pending_calls[answered]))
             else:
                 message = {"role": "assistant", "content": "Done."}
         else:
@@ -121,7 +133,7 @@ class FakeProvider:
                 # goal would continue it instead of starting a run of its own.
                 self.pending_calls.append({"name": "read_file", "arguments": {"path": "hello.txt"}})
             self.runs_started += 1
-            message = self._call(**self.pending_calls[0])
+            message = self._call(**self._filled(self.pending_calls[0]))
         finish = "tool_calls" if message.get("tool_calls") else "stop"
         return {
             "id": "chatcmpl-smoke", "object": "chat.completion", "created": 0,
@@ -129,6 +141,18 @@ class FakeProvider:
             "choices": [{"index": 0, "message": message, "finish_reason": finish}],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
+
+    @staticmethod
+    def _scratch_named_in(messages: list[dict]) -> str:
+        for item in messages:
+            content = item.get("content")
+            if isinstance(content, str) and "- Scratchpad: " in content:
+                return content.split("- Scratchpad: ", 1)[1].split(" (500 MB", 1)[0]
+        return ""
+
+    def _filled(self, call: dict) -> dict:
+        text = json.dumps(call["arguments"]).replace("{scratch}", json.dumps(self.scratch)[1:-1])
+        return {"name": call["name"], "arguments": json.loads(text)}
 
     @staticmethod
     def _call(name: str, arguments: dict) -> dict:
@@ -209,7 +233,14 @@ def configure(home: Path, base_url: str) -> None:
         "models": {"fast": "fake-fast", "smart": "fake-smart"}, "streaming": False})
 
 
-def check_turn(expected: bytes | None, events: list[dict], workspace: Path) -> None:
+def allow_python(workspace: Path) -> None:
+    """Running a script is asked about; nobody answers in the smoke, so the project allows it up front."""
+    (workspace / ".kvist").mkdir(exist_ok=True)
+    (workspace / ".kvist" / "permissions.json").write_text(
+        json.dumps({"allow": [f"{PYTHON} *"]}), encoding="utf-8")
+
+
+def check_turn(expected: bytes | None, events: list[dict], workspace: Path, needle: str = "git version") -> None:
     """Assertions after each scenario; raises AssertionError with what was seen."""
     types = [event.get("type") for event in events]
     asked = [event for event in events if event.get("type") == "input_request"]
@@ -226,7 +257,8 @@ def check_turn(expected: bytes | None, events: list[dict], workspace: Path) -> N
     # before the next request (job_notice is exactly that note); which one wins is timing.
     output = " ".join(str(r.get("output", "")) for r in results)
     output += " ".join(str(e.get("text", "")) for e in events if e.get("type") == "job_notice")
-    assert "git version" in output, f"the terminal returned nothing useful: {results}"
+    assert needle in output, f"the terminal returned nothing useful: {results}"
+    assert not (workspace / "add.py").exists(), "the scratch script landed in the workspace"
     if "job_started" in types:
         assert types.index("job_started") < types.index("job_finished") < types.index("turn_end"), types
         assert any(r.get("action_type") == "job_output" for r in results), f"job_output never ran: {results}"
@@ -235,10 +267,10 @@ def check_turn(expected: bytes | None, events: list[dict], workspace: Path) -> N
 def run_turns(core: Kvist, workspace: Path) -> float:
     """Send every scenario goal, check after each turn; returns the seconds the turns took."""
     started = mark = time.monotonic()
-    for goal, _call, expected in SCENARIOS:
+    for goal, _call, expected, *needle in SCENARIOS:
         core.send_goal(goal)
         events = core.collect_until("turn_end", TURN_TIMEOUT_SECONDS)
-        check_turn(expected, events, workspace)
+        check_turn(expected, events, workspace, *needle)
         now = time.monotonic()
         print(f"ok  turn: {goal}  (+{now - mark:.1f}s)")
         mark = now
@@ -261,6 +293,7 @@ def main() -> int:
         home.mkdir()
         workspace.mkdir()
         configure(home, provider.url)
+        allow_python(workspace)
         launched = time.monotonic()
         core = Kvist([sys.executable, "-m", "kernel", "--workspace", str(workspace)], ROOT, home)
         try:

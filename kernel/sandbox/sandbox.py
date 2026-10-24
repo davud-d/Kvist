@@ -400,6 +400,7 @@ def wrap_command_for_sandbox(
     links: tuple[tuple[str, str], ...] = (),
     secret_targets: tuple[list[Path], list[Path]] | None = None,
     service: tuple[Path, int] | None = None,
+    scratch: Path | None = None,
 ) -> list[str]:
     """Wrap a validated command in a minimal Bubblewrap filesystem.
 
@@ -410,6 +411,7 @@ def wrap_command_for_sandbox(
     ``service`` (socket directory, port) runs the command under Kvist's
     in-sandbox bridge, which exposes that port of the sandbox's own loopback
     as ``service.sock`` in the directory — the core's proxy is its only client.
+    ``scratch`` is the agent's throwaway directory, writable at its own path.
     """
     if mode is SandboxMode.HOST:
         return _wrap_host_command(command, cwd, bool(network_allowed), bwrap_path)
@@ -457,6 +459,8 @@ def wrap_command_for_sandbox(
             "--bind", str(workspace), str(workspace),
         )
     )
+    if scratch is not None:
+        wrapped.extend(("--bind", str(scratch), str(scratch), "--setenv", "KVIST_SCRATCH", str(scratch)))
     _append_tool_path_mounts(wrapped, tool_paths, workspace)
     for target, path in links:
         wrapped.extend(("--symlink", target, path))

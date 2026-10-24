@@ -501,6 +501,10 @@ class ExecutableBindingMixin:
                     ) from error
                 if not canonical.is_file():
                     raise HardDenyError("Hard security denial: referenced execution input is not a regular file")
+                if self.scratch is not None and self.scratch.owns(canonical):
+                    # Absolute key: a scratch file has no workspace-relative name.
+                    paths[canonical.as_posix()] = canonical
+                    continue
                 try:
                     relative = canonical.relative_to(self.workspace).as_posix()
                 except ValueError as error:

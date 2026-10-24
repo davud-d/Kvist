@@ -309,6 +309,8 @@ def build_runtime_prompt(self, user_goal: str, step: int) -> str:
             system_lines.append(_untrusted_git_details(self._state.system_git_details))
         if self._state.system_workspace:
             system_lines.append(f"- Workspace: {self._state.system_workspace}")
+        if self._state.system_scratchpad:
+            system_lines.append(f"- Scratchpad: {self._state.system_scratchpad}")
         if self._state.system_host:
             system_lines.append(f"- Host: {self._state.system_host}")
         system_block = "\n".join(system_lines) + "\n\n"
