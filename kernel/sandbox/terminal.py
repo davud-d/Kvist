@@ -37,6 +37,7 @@ from kernel.sandbox.process_tree import (
 )
 from kernel.sandbox.redaction import redact_text, sanitize_display_text
 from kernel.sandbox.sandbox import (
+    NETWORK_UNENFORCED_NOTE,
     SandboxMode,
     detect_sandbox_mode,
     host_network_launcher,
@@ -166,6 +167,8 @@ class TerminalExecutor(
         self._ask_user = True
         self._run_sandbox = "default"
         self._run_network: bool | None = None
+        # True while a command runs where nothing can cut it off the network.
+        self._run_network_unenforced = False
         self._run_justification = ""
         self._run_background: BackgroundLaunch | None = None
         self._child_home_manager: tempfile.TemporaryDirectory[str] | None = None
@@ -264,6 +267,7 @@ class TerminalExecutor(
             finally:
                 self._run_sandbox = "default"
                 self._run_network = None
+                self._run_network_unenforced = False
                 self._run_justification = ""
                 self._run_background = None
 
@@ -274,8 +278,14 @@ class TerminalExecutor(
         ):
             try:
                 launcher = host_network_launcher(network)
-            except ValueError as error:
-                raise HardDenyError(f"Hard security denial: {error}") from error
+            except ValueError:
+                # Nothing on this OS (Windows, Linux without Bubblewrap) can cut a command off the
+                # network. Refusing every command left the agent without a shell there, so the
+                # command runs with network it cannot be denied, and the person is told so.
+                self._run_network_unenforced = True
+                if self._run_sandbox == "host":
+                    return SandboxMode.HOST, True, None
+                return self.sandbox_mode, True, self._bwrap_path
             return SandboxMode.HOST, network, launcher
         if self._run_network is None:
             network = sandbox_network_allowed()
@@ -295,7 +305,8 @@ class TerminalExecutor(
                 body + "This command can access and change host files with your permissions; "
                 "sandbox file masking is disabled. Network access is a separate permission.\n"
                 "Команда получит доступ к файлам системы с вашими правами. "
-                "Доступ к сети разрешается отдельно.",
+                "Доступ к сети разрешается отдельно."
+                + (f"\n{NETWORK_UNENFORCED_NOTE}." if self._run_network_unenforced else ""),
                 "Allow this host command once? / Разрешить этот запуск вне песочницы?",
             )
             if approved is not True:
@@ -484,6 +495,8 @@ class TerminalExecutor(
         to persist a project allow-rule. Never offered for hard validation
         failures: those are non-interactive hard denials.
         """
+        if self._run_network_unenforced:
+            reason = f"{reason}. {NETWORK_UNENFORCED_NOTE}"
         if not (self._ask_user and self._request_user_approval(command, reason)):
             return TerminalResult(
                 command=command,

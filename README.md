@@ -43,7 +43,9 @@ Kvist is for the case where you want to choose the model yourself.
 - **One place where actions are checked.** Every file write and shell command
   goes through a single executor. Commands run in a Bubblewrap sandbox on Linux
   with no network by default, secret files (`.env`, SSH keys, certificates) are
-  hidden from them, and `.env` files are never read by the agent.
+  hidden from them, and `.env` files are never read by the agent. Windows (and
+  Linux without Bubblewrap) has nothing that can cut a command off the network;
+  Kvist says so at start and in every approval.
 - **Undo.** Agent edits are journaled. `/changes` lists them and `/revert`
   restores the files.
 - **Tasks survive interruptions.** Sessions are named and saved. After a crash

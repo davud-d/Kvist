@@ -204,15 +204,45 @@ def test_host_permission_enables_discovery_without_leaking_host_path(shell, tmp_
     assert str(tools_dir) not in executor._build_env(None)["PATH"].split(os.pathsep)
 
 
-def test_offline_failure_does_not_prompt_or_start_process(shell, monkeypatch):
+def _no_network_boundary(network):
+    raise ValueError("No supported network isolation backend")
+
+
+def test_a_host_command_where_network_cannot_be_cut_runs_and_says_so(shell, monkeypatch):
     executor, gate, calls = shell
-    def unavailable(network):
-        raise ValueError("No supported network isolation backend")
-    monkeypatch.setattr(terminal, "host_network_launcher", unavailable)
-    with pytest.raises(HardDenyError, match="network isolation"):
-        executor.run(["echo", "hello"], sandbox="host", network=False, justification="Find compiler")
-    assert not gate.requests and not calls
-    assert executor._run_sandbox == "default"
+    monkeypatch.setattr(terminal, "host_network_launcher", _no_network_boundary)
+
+    result = executor.run(["echo", "hello"], sandbox="host", network=False, justification="Find compiler")
+
+    assert result.returncode == 0 and len(calls) == 1
+    [(title, body, _question)] = gate.requests
+    assert title.startswith("Host execution") and sandbox.NETWORK_UNENFORCED_NOTE in body
+    assert executor._run_sandbox == "default" and executor._run_network_unenforced is False
+
+
+def test_a_command_where_network_cannot_be_cut_runs_and_its_approval_says_so(shell, monkeypatch):
+    executor, _gate, calls = shell
+    monkeypatch.setattr(terminal, "host_network_launcher", _no_network_boundary)
+    executor.sandbox_mode = SandboxMode.WORKSPACE_ONLY
+    reasons = []
+    monkeypatch.setattr(executor, "_request_user_approval", lambda command, reason: reasons.append(reason) or True)
+
+    result = executor.run(["python3", "-c", "pass"], network=False)
+
+    assert result.returncode == 0 and len(calls) == 1
+    assert reasons and sandbox.NETWORK_UNENFORCED_NOTE in reasons[0]
+    assert executor._run_network_unenforced is False
+
+
+def test_a_command_where_network_can_be_cut_carries_no_such_note(shell, monkeypatch):
+    executor, _gate, calls = shell
+    executor.sandbox_mode = SandboxMode.WORKSPACE_ONLY
+    reasons = []
+    monkeypatch.setattr(executor, "_request_user_approval", lambda command, reason: reasons.append(reason) or True)
+
+    executor.run(["python3", "-c", "pass"], network=False)
+
+    assert len(calls) == 1 and all(sandbox.NETWORK_UNENFORCED_NOTE not in reason for reason in reasons)
 
 
 def test_frontend_channel_has_two_non_rememberable_requests(shell):

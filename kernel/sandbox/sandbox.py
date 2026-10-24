@@ -25,6 +25,21 @@ class SandboxMode(Enum):
     HOST = "host"
 
 
+NETWORK_UNENFORCED_NOTE = (
+    "This system cannot cut a command off the network, so it may go online / "
+    "На этой системе Kvist не может отключить команде сеть: она может выйти в интернет"
+)
+
+
+def network_isolation_available() -> bool:
+    """Whether this OS can run a command with its network cut off."""
+    try:
+        host_network_launcher(False)
+    except ValueError:
+        return False
+    return True
+
+
 def host_network_launcher(network_allowed: bool) -> str | None:
     """Never treat lack of an OS network boundary as permission to go online."""
     if sys.platform.startswith("linux"):

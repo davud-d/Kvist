@@ -659,6 +659,7 @@ from kernel.llm.llm_clients import (
     validate_omniroute_model_id,
 )
 from kernel.sandbox.redaction import sanitize_display_text
+from kernel.sandbox.sandbox import NETWORK_UNENFORCED_NOTE, network_isolation_available
 from kernel.llm.custom_provider import (
     CustomProviderError,
     normalize_custom_provider_payload,
@@ -1960,6 +1961,8 @@ def build_agent(
         else TerminalBannerUI(console=agent_console, verbose=verbose, perf_logger=perf_logger)
     )
     warnings.extend(sync_bundled(SkillRegistry()))
+    if not network_isolation_available():
+        warnings.append(f"{NETWORK_UNENFORCED_NOTE}.")
     agent = LocalAgent(
         client=client,
         executor=executor,

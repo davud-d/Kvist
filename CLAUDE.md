@@ -1371,7 +1371,10 @@ process namespaces, and denies network unless `AGENT_SANDBOX_NET=allow`. It neve
 neutralises relative/absolute/symlink/runtime-constructed paths in any child code. If auto cannot find trusted
 bwrap, arbitrary-code commands enter a per-execution-approval fallback that project allow cannot silence, and
 are hard-denied without a cgroup v2 scope. Explicit `workspace` is the weaker user-selected mode (warned; no
-secret masking or `.kvist` isolation); explicit unavailable `bubblewrap` blocks shell execution.
+secret masking or `.kvist` isolation); explicit unavailable `bubblewrap` blocks shell execution. Where no OS
+network boundary exists (Windows, Linux without bwrap; `sandbox.network_isolation_available`) a command is not
+refused: it runs with network that cannot be denied (`TerminalExecutor._run_network_unenforced`), every approval
+carries `NETWORK_UNENFORCED_NOTE`, and `build_agent` warns at start. Refusing left those systems without a shell.
 
 **Process-tree control & bounded output** (`process_tree.py`): every spawn runs under a supervisor. Detached
 descendants cannot survive a timeout or completion: Bubblewrap's PID namespace reaps them, a cgroup v2 scope with
