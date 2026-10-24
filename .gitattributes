@@ -1,3 +1,5 @@
 * text=auto
 *.kt text eol=lf
 *.py text eol=lf
+# Bundled skills are identified by a digest of their files, so they must check out byte for byte on every OS.
+kernel/skills_bundled/** text=auto eol=lf

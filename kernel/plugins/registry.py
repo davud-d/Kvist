@@ -354,10 +354,15 @@ def _make_read_only(root: Path) -> None:
 
 
 def _remove_tree(root: Path) -> None:
-    for current, directories, _files in os.walk(root):
+    for current, directories, files in os.walk(root):
         os.chmod(current, stat.S_IRWXU)
         for name in directories:
             path = os.path.join(current, name)
             if not os.path.islink(path):
                 os.chmod(path, stat.S_IRWXU)
+        # POSIX deletes a read-only file from a writable folder; Windows refuses while the file itself is read-only.
+        for name in files:
+            path = os.path.join(current, name)
+            if not os.path.islink(path):
+                os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
     shutil.rmtree(root)

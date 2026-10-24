@@ -174,3 +174,26 @@ def test_digest_covers_every_file(tmp_path):
 
     assert package_digest(source) != before
     assert json.loads((source / "manifest.json").read_text())["id"] == "echo"
+
+
+def test_an_installed_read_only_version_can_be_removed_where_read_only_files_cannot_be_deleted(monkeypatch, tmp_path):
+    # Windows refuses to delete a read-only file even from a writable folder; POSIX does not,
+    # so the rule is imposed here to check that removal makes the files writable first.
+    from kernel.plugins import registry as registry_module
+
+    root = tmp_path / "versions" / "0.1.0"
+    (root / "references").mkdir(parents=True)
+    (root / "SKILL.md").write_text("guide", encoding="utf-8")
+    (root / "references" / "page.md").write_text("page", encoding="utf-8")
+    registry_module._make_read_only(root)
+    real_unlink = os.unlink
+
+    def windows_unlink(path, *, dir_fd=None):
+        if not os.stat(path, dir_fd=dir_fd, follow_symlinks=False).st_mode & stat.S_IWUSR:
+            raise PermissionError(13, "Access is denied", path)
+        real_unlink(path, dir_fd=dir_fd)
+
+    monkeypatch.setattr(os, "unlink", windows_unlink)
+    registry_module._remove_tree(root)
+
+    assert not root.exists()
