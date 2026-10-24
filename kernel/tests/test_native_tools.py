@@ -581,3 +581,32 @@ def test_native_build_and_repeated_checks_do_not_require_source_edits(agent_fact
     assert agent._state.files_changed == []
     assert agent._state.run_status == "completed"
     assert not any(log.get("status") in {"repeat_blocked", "blocked_final_answer"} for log in agent._state.step_logs)
+
+
+def test_a_stream_of_bare_call_headers_is_asked_again_without_streaming(agent_factory, monkeypatch):
+    agent = agent_factory(max_steps=1)
+    agent.config.stream = True
+
+    def header(index, call_id, name):
+        fragment = SimpleNamespace(index=index, id=call_id, function=SimpleNamespace(name=name, arguments=""))
+        return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[fragment]))])
+
+    whole = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(
+            content="", tool_calls=[SimpleNamespace(
+                id="c1", function=SimpleNamespace(name="find_files", arguments='{"pattern": "*.py"}'))],
+        ))],
+        usage=None,
+    )
+    sent: list[bool] = []
+
+    def create(_agent, request):
+        sent.append(bool(request.get("stream")))
+        return iter([header(0, "c1", "find_files"), header(1, "c2", "list_tree")]) if request.get("stream") else whole
+
+    monkeypatch.setattr(agent_model, "_create_completion_with_reasoning_fallback", create)
+
+    turn = agent_model._request_native_turn(agent, "m", [{"role": "user", "content": "x"}], [])
+
+    assert sent == [True, False]
+    assert [(c.name, c.arguments) for c in turn.tool_calls] == [("find_files", '{"pattern": "*.py"}')]

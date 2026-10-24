@@ -222,7 +222,10 @@ def check_turn(expected: bytes | None, events: list[dict], workspace: Path) -> N
         actual = (workspace / "hello.txt").read_bytes()
         assert actual == expected, f"hello.txt is {actual!r}, expected {expected!r}"
         return
+    # A background job's output reaches the model in a tool answer or in the job note taken
+    # before the next request (job_notice is exactly that note); which one wins is timing.
     output = " ".join(str(r.get("output", "")) for r in results)
+    output += " ".join(str(e.get("text", "")) for e in events if e.get("type") == "job_notice")
     assert "git version" in output, f"the terminal returned nothing useful: {results}"
     if "job_started" in types:
         assert types.index("job_started") < types.index("job_finished") < types.index("turn_end"), types

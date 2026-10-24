@@ -749,22 +749,33 @@ def _request_native_turn(
     }
     if _sends_temperature(self, model):
         request["temperature"] = self.config.model_temperature
-    if self.config.stream:
-        request["stream"] = True
-        request["stream_options"] = {"include_usage": True}
     merge_reasoning_kwargs(request, self.config.provider, self.config.reasoning_effort)
+    if not self.config.stream:
+        return _request_whole_turn(self, request)
+    streamed = {**request, "stream": True, "stream_options": {"include_usage": True}}
     # The thinking clock starts with the request: a provider may hold the
     # connection silently for the whole time the model thinks.
     started = time.monotonic()
     _note_thinking(self, "")
     response = call_cancellable(
+        self._cancel_event, lambda: _create_completion_with_reasoning_fallback(self, streamed)
+    )
+    try:
+        return _native_turn_from_stream(self, response, started)
+    except StreamedArgumentsLost:
+        self._ui.debug_print("The stream carried no arguments for a tool call; asking again without streaming")
+        return _request_whole_turn(self, request)
+
+
+def _request_whole_turn(self, request: dict[str, Any]) -> NativeTurn:
+    started = time.monotonic()
+    _note_thinking(self, "")
+    response = call_cancellable(
         self._cancel_event, lambda: _create_completion_with_reasoning_fallback(self, request)
     )
-    if not self.config.stream:
-        turn = _native_turn_from_message(response.choices[0].message, getattr(response, "usage", None))
-        self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
-        return turn
-    return _native_turn_from_stream(self, response, started)
+    turn = _native_turn_from_message(response.choices[0].message, getattr(response, "usage", None))
+    self._last_reasoning_seconds = _thinking_seconds(time.monotonic() - started, bool(turn.reasoning))
+    return turn
 
 
 # Reasoning models fix temperature at its default and refuse any other value
@@ -803,6 +814,15 @@ def _native_turn_from_message(message: Any, usage: Any = None) -> NativeTurn:
         input_tokens=_usage_token_count(usage, "prompt_tokens"),
         output_tokens=_usage_token_count(usage, "completion_tokens"),
     )
+
+
+class StreamedArgumentsLost(Exception):
+    """A streamed call ended with no argument text at all.
+
+    AnyModel's GPT routes stream parallel calls as bare headers (name, empty
+    arguments) and drop the rest; the same request without streaming is whole.
+    A real call always sends at least ``{}``.
+    """
 
 
 def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
@@ -881,6 +901,8 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
         self._ui.debug_print(
             f"Dropped {len(''.join(after_calls))} characters the model wrote after its tool call began"
         )
+    if any(not entry["arguments"] for entry in calls.values()):
+        raise StreamedArgumentsLost
     return NativeTurn(
         content="".join(content),
         text_after_calls="".join(after_calls),
