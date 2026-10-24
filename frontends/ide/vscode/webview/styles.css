@@ -107,6 +107,7 @@ pre.output {
 }
 .thought-text { margin: 4px 0 2px; white-space: pre-wrap; font-size: .92em; }
 .work.live { animation: rise .3s var(--ease); }
+.work.live .verb, .work.quiet .verb { margin-right: 6px; }
 /* The model's one-line comment: the model's own voice, so it reads a touch softer than
    the plain fact lines around it. */
 .say { font-style: italic; }
