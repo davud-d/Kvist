@@ -71,6 +71,8 @@ def _wrap_host_command(
     wrapped = [
         launcher, "--die-with-parent", "--new-session", "--unshare-pid",
         "--unshare-ipc", "--unshare-uts", "--bind", "/", "/", "--proc", "/proc",
+        # A plain bind of / is nodev inside the user namespace: git could not even open /dev/null.
+        "--dev-bind", "/dev", "/dev",
     ]
     if not network_allowed:
         wrapped.append("--unshare-net")

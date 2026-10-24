@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import os
+import shutil
 import sys
 import threading
 import time
@@ -269,6 +271,40 @@ def test_a_real_command_runs_in_the_background_and_is_followed(tmp_path):
     last = executor._job_output(job_id, 10).data
     assert last["state"] == "exited with code 0"
     assert "done" in last["output"]
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_a_background_command_reports_its_output_on_every_system(tmp_path):
+    # Runs on Windows too, where a background job once ended with no output at all.
+    executor = SafeExecutor(tmp_path, approvals=AllowAllApprovals())
+
+    started = executor._run_shell(["git", "--version"], background=True)
+    result = executor._job_output(started.data["job_id"], 10).data
+
+    assert result["state"] == "exited with code 0", result["output"]
+    assert "git version" in result["output"]
+
+
+def test_output_arrives_while_the_command_runs_when_the_pipe_stays_blocking(monkeypatch):
+    # Windows keeps its pipes blocking; output must still arrive as it is printed.
+    def refuse(fd, blocking):
+        raise OSError("no non-blocking pipes here")
+
+    monkeypatch.setattr(os, "set_blocking", refuse)
+    seen: list[tuple[float, str]] = []
+    code = "import time\nprint('up', flush=True)\ntime.sleep(1)\nprint('done', flush=True)"
+    started = time.monotonic()
+
+    outcome = run_supervised(
+        [sys.executable, "-c", code], cwd=None, env=None, timeout=10, max_capture_bytes=1000,
+        rlimit_setter=None, is_windows=False, use_cgroup=False,
+        on_output=lambda text: seen.append((time.monotonic(), text)),
+    )
+
+    finished = time.monotonic()
+    assert outcome.returncode == 0 and b"done" in outcome.stdout
+    first_at, first_text = seen[0]
+    assert first_text.startswith("up") and finished - first_at > 0.5
 
 
 @requires_posix

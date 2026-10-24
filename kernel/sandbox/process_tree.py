@@ -77,11 +77,14 @@ class _BoundedReader(threading.Thread):
         self._size = 0
         self._stop_requested = threading.Event()
         self._nonblocking = False
-        try:
-            os.set_blocking(self._stream.fileno(), False)
-            self._nonblocking = True
-        except (AttributeError, OSError, ValueError):
-            pass
+        # Windows (pipes since Python 3.12) reports an empty non-blocking pipe as an
+        # error, not BlockingIOError, so the reader left before the child had written.
+        if os.name != "nt":
+            try:
+                os.set_blocking(self._stream.fileno(), False)
+                self._nonblocking = True
+            except (AttributeError, OSError, ValueError):
+                pass
         self.truncated = False
 
     def _notify(self, chunk: bytes) -> None:
@@ -100,7 +103,9 @@ class _BoundedReader(threading.Thread):
                     if self._nonblocking:
                         chunk = os.read(self._stream.fileno(), _CHUNK)
                     else:
-                        chunk = self._stream.read(_CHUNK)
+                        # read1 returns what has arrived; read() would hold live
+                        # output back until a full chunk or the end of the stream.
+                        chunk = self._stream.read1(_CHUNK)
                 except BlockingIOError:
                     self._stop_requested.wait(_KILL_POLL_INTERVAL)
                     continue
