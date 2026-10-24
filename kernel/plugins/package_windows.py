@@ -11,6 +11,9 @@ def read_file(path: Path, max_bytes: int) -> bytes:
         import pywintypes
         import win32con
         import win32file
+        # GetFileInformationByHandle imports it lazily to build its timestamps; named here so
+        # PyInstaller packs it (the frozen Windows binary crashed at start without it).
+        import win32timezone  # noqa: F401
     except ImportError:
         # A source checkout without pywin32 still starts: the skill is reported unreadable instead.
         raise OSError("reading skill packages on Windows needs pywin32") from None

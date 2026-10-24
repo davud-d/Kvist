@@ -39,6 +39,7 @@ def windows(monkeypatch):
     monkeypatch.setitem(sys.modules, 'win32file', SimpleNamespace(FILE_FLAG_OPEN_REPARSE_POINT=0x200000,
                                                                CreateFile=create, GetFileInformationByHandle=info,
                                                                GetFileType=lambda handle: state.file_type, ReadFile=read))
+    monkeypatch.setitem(sys.modules, 'win32timezone', SimpleNamespace())
     return state
 
 
@@ -70,5 +71,12 @@ def test_windows_bounds_reads_before_allocating_and_accepts_empty_files(windows,
 
 def test_without_pywin32_a_package_is_unreadable_rather_than_a_crash(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, 'win32file', None)
+    with pytest.raises(OSError, match='pywin32'):
+        read_file(tmp_path / 'manifest.json', 100)
+
+
+def test_without_win32timezone_a_package_is_unreadable_rather_than_a_crash(windows, monkeypatch, tmp_path):
+    # A frozen binary missing pywin32's lazily imported win32timezone crashed at start.
+    monkeypatch.setitem(sys.modules, 'win32timezone', None)
     with pytest.raises(OSError, match='pywin32'):
         read_file(tmp_path / 'manifest.json', 100)
