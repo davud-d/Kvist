@@ -7,14 +7,19 @@ from pathlib import Path
 
 
 def read_file(path: Path, max_bytes: int) -> bytes:
-    import pywintypes
-    import win32con
-    import win32file
+    try:
+        import pywintypes
+        import win32con
+        import win32file
+    except ImportError:
+        # A source checkout without pywin32 still starts: the skill is reported unreadable instead.
+        raise OSError("reading skill packages on Windows needs pywin32") from None
 
     target = path.absolute()
     # No FILE_SHARE_WRITE/DELETE: a checked directory cannot be replaced or
     # turned into a junction before the child is opened, nor can the file grow.
-    flags = win32con.FILE_FLAG_OPEN_REPARSE_POINT | win32con.FILE_FLAG_BACKUP_SEMANTICS
+    # pywin32's win32con stops at FILE_FLAG_POSIX_SEMANTICS; only win32file names this flag.
+    flags = win32file.FILE_FLAG_OPEN_REPARSE_POINT | win32con.FILE_FLAG_BACKUP_SEMANTICS
     try:
         with ExitStack() as stack:
             for parent in reversed(target.parents):

@@ -13,9 +13,9 @@ from kernel.plugins.package_windows import read_file
 
 @pytest.fixture
 def windows(monkeypatch):
-    constants = SimpleNamespace(FILE_FLAG_OPEN_REPARSE_POINT=0x200000, FILE_FLAG_BACKUP_SEMANTICS=0x2000000,
-                               FILE_SHARE_READ=1, OPEN_EXISTING=3, FILE_ATTRIBUTE_REPARSE_POINT=0x400,
-                               FILE_ATTRIBUTE_DIRECTORY=16, GENERIC_READ=0x80000000, FILE_TYPE_DISK=1)
+    # Laid out as pywin32 ships them: win32con has no FILE_FLAG_OPEN_REPARSE_POINT, win32file has it.
+    constants = SimpleNamespace(FILE_FLAG_BACKUP_SEMANTICS=0x2000000, FILE_SHARE_READ=1, OPEN_EXISTING=3,
+                               FILE_ATTRIBUTE_REPARSE_POINT=0x400, FILE_ATTRIBUTE_DIRECTORY=16, GENERIC_READ=0x80000000, FILE_TYPE_DISK=1)
     state = SimpleNamespace(handles=[], content=b'line1\r\nline2\x00', attributes=0, parent_attributes=16, links=1,
                             file_type=1, reads=0)
 
@@ -36,7 +36,8 @@ def windows(monkeypatch):
 
     monkeypatch.setitem(sys.modules, 'win32con', constants)
     monkeypatch.setitem(sys.modules, 'pywintypes', SimpleNamespace(error=type('WindowsError', (Exception,), {})))
-    monkeypatch.setitem(sys.modules, 'win32file', SimpleNamespace(CreateFile=create, GetFileInformationByHandle=info,
+    monkeypatch.setitem(sys.modules, 'win32file', SimpleNamespace(FILE_FLAG_OPEN_REPARSE_POINT=0x200000,
+                                                               CreateFile=create, GetFileInformationByHandle=info,
                                                                GetFileType=lambda handle: state.file_type, ReadFile=read))
     return state
 
@@ -65,3 +66,9 @@ def test_windows_bounds_reads_before_allocating_and_accepts_empty_files(windows,
     windows.handles.clear()
     windows.content = b''
     assert read_file(tmp_path / 'empty', 10) == b''
+
+
+def test_without_pywin32_a_package_is_unreadable_rather_than_a_crash(monkeypatch, tmp_path):
+    monkeypatch.setitem(sys.modules, 'win32file', None)
+    with pytest.raises(OSError, match='pywin32'):
+        read_file(tmp_path / 'manifest.json', 100)

@@ -107,11 +107,13 @@ def test_cancelling_a_call_says_the_remote_effect_is_unknown(mcp_agent):
 def test_the_server_process_belongs_to_the_task_and_stops_with_it(mcp_agent):
     agent, ui = mcp_agent
     agent.skills.attach("mcp:echo")
-    pid = agent.skills.mcp_attached["echo"].client.process.pid
+    process = agent.skills.mcp_attached["echo"].client.process
+    pid = process.pid
 
     report = agent.skills.finish_task("task_finished")
 
     assert report.ok
+    assert not process.alive()
     assert not os.path.exists(f"/proc/{pid}")
     assert agent.resources.owned_by(Owner()) == []
 

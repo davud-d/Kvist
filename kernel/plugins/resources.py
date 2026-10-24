@@ -35,6 +35,8 @@ from kernel.sandbox.process_tree import _CgroupScope, _linux_process_start_time
 
 REGISTRY_FILE = "resources.json"
 _STOP_POLL = 0.05
+# Windows has no SIGKILL; there Popen turns SIGTERM into TerminateProcess, which is already forceful.
+_SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 DEFAULT_GRACE_SECONDS = 3.0
 # The marker every process the core spawns carries in its environment, so a
 # recovering core can tell its own leftovers from an unrelated program that
@@ -219,7 +221,7 @@ class ManagedProcess:
             outcome.forced = True
             error = self.scope.kill() if self.scope is not None else None
             if error or self.scope is None:
-                self._signal_group(signal.SIGKILL)
+                self._signal_group(_SIGKILL)
             if error:
                 outcome.error = error
         try:
@@ -262,6 +264,11 @@ class ManagedProcess:
 
     def _signal_group(self, sig: int) -> None:
         assert self.proc is not None
+        if not hasattr(os, "killpg"):
+            # Windows has no process group to signal: only the direct child is ended,
+            # so cleaning up its descendants there is best-effort.
+            self.proc.send_signal(sig)
+            return
         try:
             os.killpg(self.proc.pid, sig)
         except ProcessLookupError:

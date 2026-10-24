@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import os
 import stat
+import sys
 
 import pytest
 
 from kernel.plugins.host import RunnerStartError, check_description
-from kernel.plugins.manifest import ManifestError, load_manifest, package_digest, parse_manifest
+from kernel.plugins.manifest import PLATFORMS, ManifestError, load_manifest, package_digest, parse_manifest
 from kernel.plugins.registry import RegistryError, SkillRegistry
 from kernel.tests.skill_fixtures import ECHO_TOOL, install, write_skill
 
@@ -40,7 +41,7 @@ def execute(tool_name, arguments, context):
     ("change", "reason"),
     [
         ({"plugin_api": {"min": 2, "max": 3}}, "needs plugin API 2..3"),
-        ({"platforms": ["win32"]}, "not supported on"),
+        ({"platforms": [min(PLATFORMS - {sys.platform})]}, "not supported on"),
     ],
 )
 def test_an_incompatible_package_is_listed_as_unavailable_with_the_reason(tmp_path, change, reason):

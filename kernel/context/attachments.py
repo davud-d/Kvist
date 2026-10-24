@@ -265,7 +265,10 @@ def _inspect(data: bytes) -> dict[str, Any]:
 
 
 def _write_private(path: Path, data: bytes) -> None:
-    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    # Windows has no O_NOFOLLOW; O_EXCL still refuses a name that already exists, a link included.
+    # Without O_BINARY it would write image bytes in text mode, turning every LF into CRLF.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o600)
     try:
         view = memoryview(data)
         while view:

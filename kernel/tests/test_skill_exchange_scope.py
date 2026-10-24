@@ -12,6 +12,11 @@ from kernel.plugins.registry import SkillRegistry
 from kernel.plugins.services import AttachedSkill, SkillCall
 from kernel.tests.skill_fixtures import ECHO_TOOL, install, write_skill
 
+exchange_is_posix_only = pytest.mark.skipif(
+    os.name != "posix",
+    reason="the skill file exchange exists only beside the Linux runner and is opened with O_DIRECTORY/O_NOFOLLOW, "
+    "which Windows lacks")
+
 
 @pytest.fixture
 def make_call(agent_factory, tmp_path, monkeypatch):
@@ -35,6 +40,7 @@ def make_call(agent_factory, tmp_path, monkeypatch):
     return build
 
 
+@exchange_is_posix_only
 def test_a_handed_file_lands_as_a_new_file_of_the_inbox(make_call, tmp_path):
     agent, call, exchange = make_call(["files.read"])
     (tmp_path / "public.txt").write_text("hello", encoding="utf-8")
@@ -46,6 +52,7 @@ def test_a_handed_file_lands_as_a_new_file_of_the_inbox(make_call, tmp_path):
     assert (exchange / "in" / name).read_text(encoding="utf-8") == "hello"
 
 
+@exchange_is_posix_only
 def test_the_core_refuses_to_hand_a_file_through_a_symlinked_inbox(make_call, tmp_path, tmp_path_factory):
     agent, call, exchange = make_call(["files.read"])
     (tmp_path / "public.txt").write_text("hello", encoding="utf-8")
@@ -63,6 +70,7 @@ def _save(agent, call, path):
     return agent.skills.services.handle(call, "artifacts.save", {"path": path})
 
 
+@exchange_is_posix_only
 def test_a_skill_file_is_taken_when_it_is_a_regular_file_and_its_copy_is_removed(make_call):
     agent, call, exchange = make_call(["artifacts"])
     (exchange / "out").mkdir()
@@ -74,7 +82,8 @@ def test_a_skill_file_is_taken_when_it_is_a_regular_file_and_its_copy_is_removed
     assert list((exchange.parent / "received").iterdir()) == []
 
 
-@pytest.mark.parametrize("layout", ["leaf-symlink", "directory-symlink", "dot-dot"])
+@pytest.mark.parametrize("layout", [pytest.param("leaf-symlink", marks=exchange_is_posix_only),
+                                    pytest.param("directory-symlink", marks=exchange_is_posix_only), "dot-dot"])
 def test_a_skill_file_reached_through_a_symlink_or_dot_dot_is_refused(make_call, tmp_path_factory, layout):
     agent, call, exchange = make_call(["artifacts"])
     outside = tmp_path_factory.mktemp("outside")
@@ -95,6 +104,7 @@ def test_a_skill_file_reached_through_a_symlink_or_dot_dot_is_refused(make_call,
     assert error.value.code == "denied"
 
 
+@exchange_is_posix_only
 def test_a_fifo_in_the_exchange_is_refused_without_waiting_for_a_writer(make_call):
     agent, call, exchange = make_call(["artifacts"])
     os.mkfifo(exchange / "pipe")

@@ -25,7 +25,8 @@ def _receive_in_thread(channel: Channel, timeout: float) -> tuple[threading.Thre
 
 @pytest.fixture
 def pair():
-    core, runner = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    # The default family: AF_UNIX where it exists, a loopback TCP pair on Windows; framing is the same.
+    core, runner = socket.socketpair()
     yield Channel(core), runner
     core.close()
     runner.close()

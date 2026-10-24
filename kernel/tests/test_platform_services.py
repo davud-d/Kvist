@@ -425,7 +425,9 @@ def test_runtime_directory_is_private_unique_and_thread_safe(tmp_path, monkeypat
     with ThreadPoolExecutor(max_workers=8) as pool:
         roots = list(pool.map(lambda _: manager.runtime_dir(), range(32)))
     assert len(set(roots)) == 1
-    assert stat.S_IMODE(roots[0].stat().st_mode) == 0o700
+    # Windows reports synthetic mode bits; there the folder is private through the per-user temp folder's ACL.
+    if os.name == "posix":
+        assert stat.S_IMODE(roots[0].stat().st_mode) == 0o700
     other = ResourceManager(tmp_path).runtime_dir()
     assert other != roots[0]
 
