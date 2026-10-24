@@ -11,6 +11,7 @@ import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSug
 import com.intellij.codeInsight.inline.completion.suggestion.InlineCompletionSuggestionUpdateManager
 import com.intellij.codeInsight.inline.completion.suggestion.invoke
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.util.TextRange
 import com.kvist.intellij.runtime.KvistLauncher
 import kotlinx.coroutines.delay
@@ -47,16 +48,22 @@ class KvistInlineCompletionProvider : DebouncedInlineCompletionProvider() {
             is InlineCompletionEvent.DirectCall -> event.editor
             else -> return false
         }
+        val file = com.intellij.openapi.fileEditor.FileDocumentManager.getInstance().getFile(editor.document)
+            ?: return false
+        if (CompletionFilePolicy.isBlocked(file)) return false
         return editor.document.textLength <= MAX_DOCUMENT_CHARS
     }
 
     override suspend fun getDebounceDelay(request: InlineCompletionRequest): Duration = 0.milliseconds
 
     override suspend fun getSuggestionDebounced(request: InlineCompletionRequest): InlineCompletionSuggestion {
+        val virtualFile = request.file.virtualFile ?: return InlineCompletionSuggestion.Empty
+        if (CompletionFilePolicy.isBlocked(virtualFile)) return InlineCompletionSuggestion.Empty
         val project = request.editor.project ?: return InlineCompletionSuggestion.Empty
         val target = KvistLauncher.prepareTarget(project) { message -> LOG.debug(message) }
             ?: return InlineCompletionSuggestion.Empty
         val filePath = relativeFilePath(target.workspace, request) ?: return InlineCompletionSuggestion.Empty
+        if (CompletionFilePolicy.isBlocked(target.workspace, filePath)) return InlineCompletionSuggestion.Empty
 
         val document = request.document
         val payload = CompletionPayload(

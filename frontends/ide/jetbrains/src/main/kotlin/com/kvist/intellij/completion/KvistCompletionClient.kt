@@ -52,11 +52,14 @@ class KvistCompletionClient {
     private val history = CompletionHistory()
     private var server: CompletionServer? = null
 
-    fun cached(target: KvistTarget, payload: CompletionPayload): Completion? =
-        history.get(scopeOf(target), payload)
+    fun cached(target: KvistTarget, payload: CompletionPayload): Completion? {
+        if (CompletionFilePolicy.isBlocked(target.workspace, payload.filePath)) return null
+        return history.get(scopeOf(target), payload)
+    }
 
     /** Continuations arrive as pieces; a replacement arrives whole, as the only item. */
     fun stream(target: KvistTarget, payload: CompletionPayload): Flow<Completion> = channelFlow {
+        if (CompletionFilePolicy.isBlocked(target.workspace, payload.filePath)) return@channelFlow
         val server = serverFor(target)
         val events = Channel<JsonObject>(Channel.UNLIMITED)
         val id = server.start(payload) { events.trySend(it) }

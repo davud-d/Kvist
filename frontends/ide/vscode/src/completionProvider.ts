@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { BinaryResolver } from './binaryResolver';
+import { canReadCompletionDocument } from './completionSafety';
 import { CompletionClient, buildCompletionRequest, isDocumentTooLargeForCompletion } from './completionClient';
 
 const CONFIG_SECTION = 'kvist.inlineCompletion';
@@ -38,8 +39,9 @@ export class KvistInlineCompletionProvider implements vscode.InlineCompletionIte
             return undefined;
         }
 
-        const fullText = document.getText();
-        if (isDocumentTooLargeForCompletion(fullText)) {
+        if (document.uri.scheme !== 'file') { return undefined; }
+        const fullText = canReadCompletionDocument(document.uri.fsPath, () => document.getText());
+        if (fullText === undefined || isDocumentTooLargeForCompletion(fullText)) {
             return undefined;
         }
 

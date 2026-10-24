@@ -1,6 +1,7 @@
 import type * as vscode from 'vscode';
 import { spawn, ChildProcess } from 'child_process';
 import { createHash } from 'crypto';
+import { isEnvCompletionPath } from './completionSafety';
 
 /** The wire shape `kvist --complete` reads on stdin. */
 export interface CompletionRequest {
@@ -191,7 +192,9 @@ export class CompletionClient {
         explicit = false
     ): Promise<Completion> {
         this.cancelPending?.();
-        if (token.isCancellationRequested) { return Promise.resolve(NO_COMPLETION); }
+        if (token.isCancellationRequested || isEnvCompletionPath(request.file_path)) {
+            return Promise.resolve(NO_COMPLETION);
+        }
         const scope = JSON.stringify([binaryPath, workspaceDir]);
         const cached = this.history.get(scope, request);
         if (cached !== undefined) { return Promise.resolve(cached); }

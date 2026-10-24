@@ -643,3 +643,21 @@ def test_the_cursor_facts_say_when_the_line_is_a_comment():
 ])
 def test_the_end_of_what_is_typed_is_not_suggested_again(prefix, reply, expected):
     assert clean_model_output(reply, prefix) == expected
+
+
+@pytest.mark.parametrize('path', ['.env.local', '.ENV.production', '.env.example', '.env/data.py'])
+def test_environment_variants_never_prepare_context(tmp_path, monkeypatch, path):
+    def forbidden(*args, **kwargs):
+        pytest.fail('Protected completion reached context/model preparation')
+    monkeypatch.setattr(completion, 'extract_raw_imports', forbidden)
+    monkeypatch.setattr(completion, '_build_caller', forbidden)
+    with pytest.raises(CompletionError):
+        generate_completion(_payload(file_path=path), tmp_path)
+
+
+def test_environment_symlink_never_prepares_context(tmp_path, monkeypatch):
+    # No secret file is created or read: resolution alone must reject the alias.
+    (tmp_path / 'alias.py').symlink_to(tmp_path / '.env.local')
+    monkeypatch.setattr(completion, 'extract_raw_imports', lambda *args: pytest.fail('context read'))
+    with pytest.raises(CompletionError):
+        generate_completion(_payload(file_path='alias.py'), tmp_path)

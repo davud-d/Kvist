@@ -363,3 +363,14 @@ test('a malformed replacement is an error, not a range', () => {
     assert.equal(bad?.error, 'malformed replacement');
     assert.equal(parseServerMessage(JSON.stringify({ id: 1, replace: { text: 'x', before: 3, after: 0 } }))?.replace?.before, 3);
 });
+
+for (const file_path of ['.env', 'config/.ENV.local', '.env.example', '.env/data.py']) {
+    test(`transport rejects ${file_path} even for explicit invocation`, async () => {
+        const io = transport();
+        const client = new CompletionClient(0, io.fakeSpawn);
+        const request = { file_path, language: 'plaintext', prefix: 'synthetic', suffix: '' };
+        assert.deepEqual(await client.requestCompletion('binary', 'workspace', request, cancellation().token, true), NO_COMPLETION);
+        assert.equal(io.children.length, 0);
+        client.dispose();
+    });
+}

@@ -190,6 +190,11 @@ def _resolve_target_file(workspace: Path, file_path: str) -> Path:
     resolved = (workspace / file_path).resolve()
     if not resolved.is_relative_to(workspace):
         raise CompletionError("Refusing to complete outside the workspace.")
+    if journal_path_violation(workspace, resolved.relative_to(workspace).as_posix()) is not None:
+        raise CompletionError("Refusing to complete inside a protected or invalid path.")
+    path_parts = Path(file_path.replace("\\", "/")).parts + resolved.parts
+    if any(part.casefold().startswith(".env") for part in path_parts):
+        raise CompletionError("Refusing to complete environment files.")
     return resolved
 
 
