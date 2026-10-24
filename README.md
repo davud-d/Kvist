@@ -1,7 +1,5 @@
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/642438c5-9c91-4c3d-8dab-47aec9e7d278" controls width="480">
-    Kvist x AnyModel preview video
-  </video>
+  <a href="docs/media/kvist_x_anymodel.mp4"><img src="docs/media/kvist_x_anymodel-poster.jpg" width="480" alt="Kvist x AnyModel preview video"></a>
 </p>
 
 # Kvist
