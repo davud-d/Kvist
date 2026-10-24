@@ -105,6 +105,26 @@ _SNAPSHOT_JS = """
     items.push(item);
     if (items.length >= maxItems) break;
   }
+  // Grids of tiles and image cells are often plain divs whose click handler is attached by a script.
+  // The pointer cursor is how the page itself says they are clickable; only the outermost one counts.
+  if (items.length < maxItems && document.body) {
+    for (const el of document.body.querySelectorAll('div,span,li,td,img,canvas,svg,label,figure')) {
+      if (items.length >= maxItems) break;
+      if (el.closest(selector) || el.hasAttribute('data-kvist-ref')) continue;
+      const box = el.getBoundingClientRect();
+      if (box.width < 8 || box.height < 8 || box.bottom < 0 || box.top > innerHeight) continue;
+      const style = getComputedStyle(el);
+      if (style.cursor !== 'pointer' || style.visibility === 'hidden' || style.display === 'none') continue;
+      if (el.parentElement && getComputedStyle(el.parentElement).cursor === 'pointer') continue;
+      n += 1;
+      const ref = 'e' + n;
+      el.setAttribute('data-kvist-ref', ref);
+      const name = (el.getAttribute('aria-label') || el.innerText || el.getAttribute('alt') || el.title || '')
+        .trim().replace(/\\s+/g, ' ').slice(0, 100);
+      items.push({ref, tag: el.tagName.toLowerCase(), role: 'clickable', name,
+                  box: [box.x, box.y, box.width, box.height].map(Math.round)});
+    }
+  }
   const text = document.body ? document.body.innerText : '';
   return {title: document.title, url: location.href, elements: items, truncated: n > items.length, text};
 }
@@ -437,12 +457,16 @@ def _locator(tab: _Tab, args: dict[str, Any]) -> Any:
 
 
 def _glide_to(tab: _Tab, target: Any) -> None:
-    """Move the visible cursor to the middle of ``target``; the page then sees a real mouse move there."""
-    target.scroll_into_view_if_needed(timeout=15000)
-    box = target.bounding_box(timeout=15000)
-    if box is None:
-        return
-    end = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    """Move the visible cursor to the middle of ``target`` (a locator, or an (x, y) point); the page then
+    sees a real mouse move there."""
+    if isinstance(target, tuple):
+        end = target
+    else:
+        target.scroll_into_view_if_needed(timeout=15000)
+        box = target.bounding_box(timeout=15000)
+        if box is None:
+            return
+        end = (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     # A navigation wipes the overlay, so a start remembered from the previous page is still a fine place to begin.
     size = tab.page.viewport_size or {"width": 0, "height": 0}
     start = tab.cursor_at or (size["width"] / 2, size["height"] / 2)
@@ -498,6 +522,9 @@ def _act(tab: _Tab, args: dict[str, Any], ctx: Any, action: Callable[[], None], 
 
 def _click(args: dict[str, Any], ctx: Any) -> dict[str, Any]:
     tab = BROWSER.tab(args.get("tab"))
+    if args.get("x") is not None and args.get("y") is not None:
+        point = (float(args["x"]), float(args["y"]))
+        return _act(tab, args, ctx, lambda: tab.page.mouse.click(*point), f"click at ({point[0]:.0f}, {point[1]:.0f})", point)
     target = _locator(tab, args)
     return _act(tab, args, ctx, lambda: target.click(timeout=15000), f"click {_describe_target(args)}", target)
 

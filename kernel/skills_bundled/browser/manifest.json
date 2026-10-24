@@ -1,7 +1,7 @@
 {
   "manifest_version": 1,
   "id": "browser",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "plugin_api": 1,
   "kind": "tools",
   "name": {"en": "Browser", "ru": "Браузер"},
@@ -12,7 +12,7 @@
   "instructions": "SKILL.md",
   "entrypoint": "plugin.py",
   "platforms": ["linux"],
-  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.6"},
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.2.7"},
   "dependencies": {
     "python": ["playwright==1.63.0", "greenlet==3.5.6", "pyee==13.0.0", "typing_extensions==4.16.0"],
     "system": ["Xvfb", "i3", "chromium"]
@@ -75,10 +75,12 @@
     },
     {
       "name": "click",
-      "summary": "Click an element (by ref from snapshot, CSS selector, or visible text) and report what changed: URL, new text, console and network errors. Give expect_text to verify the effect.",
+      "summary": "Click an element (by ref from snapshot, CSS selector, or visible text), or a point of the page (x, y in pixels from its top-left corner, as on a screenshot), and report what changed: URL, new text, console and network errors. Give expect_text to verify the effect.",
       "readonly": false,
       "parameters": {"type": "object", "additionalProperties": false, "properties": {
         "ref": {"type": "string"}, "selector": {"type": "string"}, "text": {"type": "string"},
+        "x": {"type": "number", "description": "With y: click this point instead of an element."},
+        "y": {"type": "number"},
         "expect_text": {"type": "string", "description": "Text that must appear after the click."},
         "tab": {"type": "string"}
       }}

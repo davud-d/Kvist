@@ -27,6 +27,10 @@ screen in the preview of the Kvist window or through the local link Kvist shows.
 1. Open the page, then read the `elements` list: every interactive element has
    a `ref` (`e7`). Address elements by `ref`; refs are renewed by every
    `snapshot` and by every action that changes the page.
+   Cells of a grid and other tiles that a script made clickable have no button tag;
+   they are listed with `role: clickable` and a `box` (`[x, y, width, height]` in pixels
+   from the page's top-left corner). If something you see on a screenshot is not in the
+   list, `click` also takes `x` and `y`, the same pixels.
 2. An action is not its outcome. `click`, `type`, `select` and `press` report
    what changed (URL, new text, console errors, failed requests). When you know
    what should happen, pass `expect_text` and read `expectation_met`; otherwise
