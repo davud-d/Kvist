@@ -6,9 +6,12 @@ from kernel.tests.conftest import FakeLLMClient
 
 _IDENTITY = (
     "you are Kvist, an open-source coding agent. The language model running you this turn "
-    "is provider = {provider}, model = {model}; it is a separate thing and it changes. "
+    "is provider = {provider}, model = {model}, reasoning effort = {effort}; "
+    "it is a separate thing and it changes. "
     "Asked what you are, you are Kvist. Asked which model runs you, name this one."
 )
+
+_EFFORT = "medium"
 
 
 def _chat_message_sent(agent_factory, monkeypatch, goal: str = "что ты такое?") -> str:
@@ -25,7 +28,7 @@ def _chat_message_sent(agent_factory, monkeypatch, goal: str = "что ты та
 def test_a_chat_turn_says_who_the_model_is_and_which_model_runs_it(agent_factory, monkeypatch):
     sent = _chat_message_sent(agent_factory, monkeypatch)
 
-    fact = _IDENTITY.format(provider="anymodel", model="ds/some-model")
+    fact = _IDENTITY.format(provider="anymodel", model="ds/some-model", effort=_EFFORT)
     assert f"(Runtime fact: {fact})\n\n" in sent
 
 
@@ -35,7 +38,7 @@ def test_the_action_prompt_opens_its_environment_with_the_same_fact(agent_factor
 
     prompt = agent._build_runtime_prompt("goal", 1)
 
-    fact = _IDENTITY.format(provider="anymodel", model="ds/fast")
+    fact = _IDENTITY.format(provider="anymodel", model="ds/fast", effort=_EFFORT)
     assert prompt.startswith(f"System environment:\n- Identity: {fact}\n- OS:")
 
 
@@ -47,7 +50,7 @@ def test_the_action_prompt_follows_the_model_after_an_escalation(agent_factory):
     agent._state.selected_action_model = "ds/smart"
     prompt = agent._build_runtime_prompt("goal", 2)
 
-    assert "model = ds/smart;" in prompt and "model = ds/fast;" not in prompt
+    assert "model = ds/smart," in prompt and "model = ds/fast," not in prompt
 
 
 _ENDING = (
