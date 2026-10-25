@@ -83,6 +83,10 @@ class EventApprovalGate:
         if pattern:
             self._save_allow_pattern(pattern)
 
+    def waiting_confirm_command(self) -> threading.Timer | None:
+        # The frontend shows the pending request itself; no extra reminder.
+        return None
+
     def confirm(self, title: str, body: str, question: str) -> bool:
         _ = question
         # `_remembered_pattern` is left alone: it belongs to the command approved
