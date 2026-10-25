@@ -23,6 +23,7 @@ const webview = {
   platform: "browser",
   format: "iife",
   target: "chrome120",
+  loader: { ".svg": "dataurl" },
   jsx: "automatic",
   jsxImportSource: "preact",
   sourcemap: true,

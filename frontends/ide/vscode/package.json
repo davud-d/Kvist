@@ -168,6 +168,7 @@
     "typescript": "^5.3.3"
   },
   "dependencies": {
+    "lucide-preact": "^1.61.0",
     "markdown-it": "^15.0.2",
     "preact": "^10.29.8"
   }

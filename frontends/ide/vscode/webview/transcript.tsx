@@ -5,6 +5,7 @@ import { clipLines, formatSeconds, formatThought, lastLines, outputLines } from 
 import { actionTarget, exploreSummary, type ActionResult, type Item } from "../../../tui/ink/state"
 import { post } from "./host"
 import { Icon } from "./icons"
+import { FileIcon } from "./file-icons"
 import { Markdown } from "./markdown"
 import { turnSlice, turnToText } from "./export"
 import { classifyRun, worseOf, type Tone } from "./outcome"
@@ -13,26 +14,27 @@ import { verbOf } from "./verbs"
 
 type ToolItem = Extract<Item, { kind: "tool" }>
 
-const OUTPUT_LINES = 15
+export const OUTPUT_LINES = 15
 const WRITE_LINES = 12
 const DIFF_ROWS = 30
 // How long a finished thought stays open before it folds itself away.
 const FOLD_AFTER_MS = 1400
-const HIDDEN_STEPS = new Set(["final_answer", "report_to_user", "refuse"])
+export const HIDDEN_STEPS = new Set(["final_answer", "report_to_user", "refuse"])
 
 const text = (value: unknown): string => (typeof value === "string" ? value : "")
 
 // The action names are the core's vocabulary; a person reads what was done.
-const FILE_SUBJECT = new Set(["read_file", "write_file", "append_file", "replace_in_file"])
+export const FILE_SUBJECT = new Set(["read_file", "write_file", "append_file", "replace_in_file"])
 
 // The file name carries the meaning, so it leads and its folder recedes.
 function FilePath({ path, open }: { path: string; open?: number | null }) {
-  const cut = path.lastIndexOf("/")
-  const name = path.slice(cut + 1)
-  const dir = cut >= 0 ? path.slice(0, cut + 1) : ""
+  const normalized = path.replaceAll("\\", "/")
+  const cut = normalized.lastIndexOf("/")
+  const name = normalized.slice(cut + 1)
+  const dir = cut >= 0 ? normalized.slice(0, cut + 1) : ""
   const body = (
     <>
-      <span class="file-name">{name}</span>
+      <FileIcon path={path} /><span class="file-name">{name}</span>
       {dir ? <span class="file-dir">{dir}</span> : null}
     </>
   )
@@ -48,13 +50,13 @@ function Subject({ action, args, detail }: { action: string; args: Record<string
   if (FILE_SUBJECT.has(action) && text(args.path)) return <FilePath path={text(args.path)} open={null} />
   if (action === "read_multiple_files" && Array.isArray(args.paths)) {
     const paths = args.paths.map(String)
-    return <span class="file"><span class="file-name">{paths[0]}</span><span class="file-dir">{paths.length > 1 ? ` and ${paths.length - 1} more` : ""}</span></span>
+    return <span class="file"><FileIcon path={paths[0]} /><span class="file-name">{paths[0]}</span><span class="file-dir">{paths.length > 1 ? ` and ${paths.length - 1} more` : ""}</span></span>
   }
-  if (action === "search_code" || action === "find_files") return <span class="query">{detail}</span>
-  return <span class="file"><span class="file-name">{detail}</span></span>
+  if (action === "search_code" || action === "find_files") return <span class="query"><FileIcon action={action} />{detail}</span>
+  return <span class="file"><FileIcon action={action} path={detail} /><span class="file-name">{detail}</span></span>
 }
 
-function commandLine(args: Record<string, unknown>): string {
+export function commandLine(args: Record<string, unknown>): string {
   const command = args.command
   return Array.isArray(command) ? command.map(String).join(" ") : text(command)
 }
@@ -67,7 +69,7 @@ function Node({ kind }: { kind: "ok" | "warn" | "bad" | "idle" | "run" }) {
   )
 }
 
-function Output({ text: value }: { text: string }) {
+export function Output({ text: value }: { text: string }) {
   const { shown, more } = clipLines(outputLines(value), OUTPUT_LINES)
   if (shown.length === 0) return null
   return (
@@ -78,7 +80,7 @@ function Output({ text: value }: { text: string }) {
   )
 }
 
-function Failure({ result }: { result: ActionResult }) {
+export function Failure({ result }: { result: ActionResult }) {
   const detail = result.output.trim()
   return (
     <>
@@ -88,7 +90,7 @@ function Failure({ result }: { result: ActionResult }) {
   )
 }
 
-interface CodeLine {
+export interface CodeLine {
   no: number | null
   sign: string
   text: string
@@ -111,7 +113,7 @@ export function CodeBlock({ lines, more }: { lines: CodeLine[]; more: number }) 
   )
 }
 
-function fileLines(content: string, first: number, sign: string, kind: CodeLine["kind"]): { lines: CodeLine[]; more: number } {
+export function fileLines(content: string, first: number, sign: string, kind: CodeLine["kind"]): { lines: CodeLine[]; more: number } {
   const all = toLines(content)
   const shown = all.slice(0, WRITE_LINES)
   return { lines: shown.map((line, i) => ({ no: first + i, sign, text: line, kind })), more: all.length - shown.length }
@@ -180,7 +182,7 @@ const FINISH_MS = 1000
 const HOLD_MS = 700
 const LIVE_LINES = 6
 
-function tailLines(value: string, count: number): { shown: string[]; earlier: number } {
+export function tailLines(value: string, count: number): { shown: string[]; earlier: number } {
   const lines = outputLines(value)
   return { shown: lines.slice(-count), earlier: Math.max(0, lines.length - count) }
 }
@@ -224,7 +226,7 @@ export function ShellCard({ args, result, startedAt, live }: ShellProps) {
       <Node kind={!result ? "run" : tone} />
       <div class={`term tone-${tone} ${phase === "idle" ? "" : `ring-${phase}`}`}>
         <div class="term-head">
-          <span class="prompt">$</span>
+          <span class="prompt">{document.getElementById("root")?.dataset.layout === "workspace" ? <FileIcon action="run_shell" /> : "$"}</span>
           <span class="term-cmd">{commandLine(args)}</span>
           {code !== null ? <span class={`exit ${tone}`}>exit {code}</span> : null}
         </div>
@@ -251,7 +253,7 @@ function JobCard({ item }: { item: Extract<Item, { kind: "job" }> }) {
       <Node kind={failed ? "bad" : "ok"} />
       <div class={`term tone-${failed ? "bad" : "ok"}`}>
         <div class="term-head">
-          <span class="prompt">$</span>
+          <span class="prompt">{document.getElementById("root")?.dataset.layout === "workspace" ? <FileIcon action="run_shell" /> : "$"}</span>
           <span class="term-cmd" title={item.command.join(" ")}>{jobLabel(item)}</span>
           <span class="exit">{copy.background}</span>
           <span class={`exit ${failed ? "bad" : ""}`}>{copy.ended(item.status, item.exitCode)} · {formatSeconds(item.seconds)}</span>
@@ -267,7 +269,7 @@ function JobCard({ item }: { item: Extract<Item, { kind: "job" }> }) {
   )
 }
 
-function diffLineKind(line: string): string {
+export function diffLineKind(line: string): string {
   if (/^(diff --git|index |--- |\+\+\+ |@@)/.test(line)) return "meta"
   if (line.startsWith("+")) return "add"
   if (line.startsWith("-")) return "del"
@@ -282,7 +284,7 @@ function GitDiffCard({ item }: { item: ToolItem }) {
     <details class="work" open={shown.length > 0}>
       <summary>
         <Node kind={result.ok ? "ok" : "bad"} />
-        <span class="prompt">$</span>
+        <span class="prompt">{document.getElementById("root")?.dataset.layout === "workspace" ? <FileIcon action="run_shell" /> : "$"}</span>
         <span class="target cmd">git diff{target ? ` ${target}` : ""}</span>
       </summary>
       {!result.ok ? <Failure result={result} /> : null}
@@ -404,12 +406,13 @@ export function Thinking({ reasoning, since }: { reasoning: string; since: numbe
   )
 }
 
-export function Working({ label, target }: { label: string; target: string }) {
+export function Working({ label, target, action = "list_dir", hint = "" }: { label: string; target: string; action?: string; hint?: string }) {
   return (
     <div class="work live">
       <span class="node run" />
       <span class="verb">{label}</span>
-      {target ? <span class="file"><span class="file-name">{target}</span></span> : null}
+      {target ? <span class="file"><FileIcon action={action} path={target} /><span class="file-name">{target}</span></span> : null}
+      {hint ? <span class="live-hint">{hint}</span> : null}
     </div>
   )
 }
@@ -421,7 +424,7 @@ function ExploredName({ label }: { label: string }) {
   return (
     <>
       <span class="verb">{verbOf(action)}</span>
-      {FILE_SUBJECT.has(action) && target ? <FilePath path={target} /> : <span class="file"><span class="file-name">{target}</span></span>}
+      {FILE_SUBJECT.has(action) && target ? <FilePath path={target} /> : <span class="file"><FileIcon action={action} path={target} /><span class="file-name">{target}</span></span>}
     </>
   )
 }
@@ -568,7 +571,7 @@ export function TranscriptItem({ item, uid, settled, items }: { item: Item; uid:
         <div class="work quiet">
           <Node kind="idle" />
           <span class="verb">{verbOf(item.action)}</span>
-          <span class="file"><span class="file-name">{item.target}</span></span>
+          <span class="file"><FileIcon action={item.action} path={item.target} /><span class="file-name">{item.target}</span></span>
         </div>
       )
     case "tool":

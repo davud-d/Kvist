@@ -11,7 +11,7 @@ import com.intellij.ui.jcef.JBCefJSQuery
 import javax.swing.JComponent
 
 /** The VS Code panel in a JCEF browser; the page reaches the plugin through one JBCefJSQuery. */
-internal class KvistChatPanel(project: Project) : Disposable {
+internal class KvistChatPanel(project: Project, private val workspacePage: Boolean = false) : Disposable {
     private val browser = JBCefBrowser()
     // Created before the page loads, so its function exists when the bundle posts `ready`.
     private val query = JBCefJSQuery.create(browser as JBCefBrowserBase)
@@ -42,7 +42,7 @@ internal class KvistChatPanel(project: Project) : Disposable {
     // The page's `ready` starts a new core, so this is also how an exited core is restarted.
     fun load() {
         host.pageLoading()
-        browser.loadHTML(KvistWebviewPage.html(query.inject("json")))
+        browser.loadHTML(KvistWebviewPage.html(query.inject("json"), workspacePage))
     }
 
     private fun applyTheme() {

@@ -1,7 +1,6 @@
 package com.kvist.intellij.chat
 
 import com.intellij.icons.AllIcons
-import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbAware
@@ -20,8 +19,6 @@ import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
-
-private const val RUN_IN_TERMINAL_ACTION = "com.kvist.intellij.RunKvistAction"
 
 private const val NO_JCEF_MESSAGE =
     "The Kvist chat needs the IDE's embedded browser (JCEF), and this IDE runs without it. " +
@@ -61,7 +58,7 @@ class KvistToolWindowFactory : ToolWindowFactory, DumbAware {
                 PanelAction("New Session", AllIcons.General.Add) { panel.host.newSession() },
                 PanelAction("Settings", AllIcons.General.Settings) { panel.host.showSettings() },
                 PanelAction("Reload", AllIcons.Actions.Refresh) { panel.load() },
-                ActionManager.getInstance().getAction(RUN_IN_TERMINAL_ACTION),
+                PanelAction("Open Kvist in Terminal", AllIcons.Actions.Execute) { KvistLauncher.launch(project) },
             )
         )
     }
