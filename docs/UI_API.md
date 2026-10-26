@@ -90,6 +90,7 @@ one of `auto`, `coder`, `devops`, or `chat`. `--approval-mode` is `ask` or
 - `--frontend stdio --resume` → resume the active session's checkpoint instead
   of submitting a goal (no stdin goal line is read; §8a).
 - `--session-op …` → one headless session lifecycle operation, JSON out (§8a).
+- `--doctor` → a plain-text health report (modules, frontends, provider, keys, settings), exit 1 when a check failed; `--yes` agrees to the model test request
 - `--commit-message` → a commit message for a change payload on stdin, JSON
   out (§8b).
 - `--acp` → the Agent Client Protocol on stdin/stdout, for hosts such as Zed
