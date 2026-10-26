@@ -9,6 +9,7 @@ import { clip, clipLines, contextLabel, formatSeconds, outputLines } from "../..
 import { actionTarget, requestIsRussian, type ActionResult, type ExploreCounts, type Item, type State } from "../../../state.js"
 import { ViewContext } from "../../context.js"
 import { IDLE_THOUGHTS, IDLE_THOUGHT_MS } from "./idle-thoughts.js"
+import { HEIST_STARS, heistLine, isHeistDay } from "./heist.js"
 import { MASCOT_COLUMNS, MASCOT_ROWS, Mascot, syncMascotImage, useIdle } from "./mascot.js"
 import { jobFailed, jobLabel, jobsCopy, jobTail } from "../../jobs.js"
 import { Markdown, renderInline } from "../../markdown.js"
@@ -139,6 +140,12 @@ function Banner() {
             </Text>
             <Text color={color.dim} wrap="truncate-end">{detail}</Text>
             <Text color={color.dim} wrap="truncate-end">{workspace}</Text>
+            {isHeistDay() ? (
+              <Text wrap="truncate-end">
+                <Text color="#ffd23f">{HEIST_STARS}</Text>
+                <Text color={color.dim}> {heistLine()}</Text>
+              </Text>
+            ) : null}
           </>
         )}
       </Rest>

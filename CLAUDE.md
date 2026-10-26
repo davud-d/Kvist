@@ -209,6 +209,16 @@ cd frontends/gui/electron && npm test
   Protected paths are dropped via `journal_path_violation`, the diff is capped at `MAX_DIFF_TOKENS`,
   diff and history travel in `<UNTRUSTED_TOOL_OUTPUT source="git_diff"|"recent_commits">`.
   JetBrains calls it from `GenerateCommitMessageAction` (`kvist-git.xml`, optional `Git4Idea`).
+- **Doctor:** `/doctor` (classic REPL, `STDIO_COMMANDS["doctor"]`, hence every Ink/Glass/Voice/OpenCode/ACP surface) and
+  `main.py --doctor` run `config/doctor.py::diagnose` (environment, core module imports, packages, prompts,
+  `config.json`, `api_settings`, `permissions.json`, provider/models/key *presence by name*, each frontend's
+  launcher prerequisites: Node 22+ and the Ink bundle, Bun/OpenCode, Glass and Voice binaries with `--check`
+  on a real tty). A problem with the *saved* interface is a warning (the launcher falls back to Ink), with
+  the others only info. Checks read and never write. `probe_model` is the only network call: it asks the
+  person first (`ui.confirm`; the flag asks on a tty, `--yes` answers it, no tty means no), then sends
+  "Reply with the single word: pong" to the fast model at effort `low`, and is offered only when
+  `provider_ready`. The flag builds its client like `--commit-message` (no `LocalAgent`, nothing written to
+  `.kvist/`); exit code 1 on any failed check. Tests: `test_doctor.py`.
 - **Command permissions:** `<workspace>/.kvist/permissions.json` (`allow`/`deny`/`ask` patterns,
   `permission_policy.py`); deny and built-in hard blocks always beat allow; intrinsic DANGEROUS
   commands stay per-execution approval-only. `fetch_url` trusts a built-in documentation-host list
@@ -782,6 +792,13 @@ decodes the PNG (`png.ts`), scales by nearest neighbour and encodes (`sixel.ts`,
 the graphics layer and does not move with text, so `ClaudeScreen` re-syncs after every render and the
 picture is clipped like the text; a Sixel picture is part of the cells (repaint rows to erase), a kitty
 one is deleted by id. iTerm2/WezTerm inline images are not supported.
+**One day a year the squirrel is a thief** (`heist.ts`, 19 November local date, or `KVIST_HEIST=1` on any day): a
+second frame set `mascot/frames-heist/` (the six frames edited with Codex's image tool: bandit mask, car key) is
+turned by the same generator into `mascot-heist-frames.ts` / `mascot-heist-images.ts`
+(`make_mascot_frames.py --source mascot/frames-heist --output … --images-output …`; run it with the system Python
+3.14, the venv's `unicodedata` has no Unicode 16 octant names). `mascot.tsx` picks the set per call, the welcome
+block adds `★★★★★` and a line (EN/RU by `detectLocale`). In the cell modes the key shrinks to a pale blob and only the
+mask reads; the key is clear on image terminals. Tests: `tests/heist.test.tsx`. Not seen live in a real terminal.
 
 A `manifest` event (`ManifestEvent`, `core_manifest.build_manifest`) follows `hello` so frontends
 populate pickers (roles, effort levels, providers, models, action types, slash commands, api settings,
