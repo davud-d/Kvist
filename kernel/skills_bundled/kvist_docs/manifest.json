@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "id": "kvist_docs",
+  "version": "0.1.1",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {"en": "Kvist Docs", "ru": "Документация Kvist"},
+  "summary": {
+    "en": "Answers questions about Kvist itself: install, commands, providers and models, sandbox and approvals, sessions, undo, memory, interfaces, skills, troubleshooting.",
+    "ru": "Отвечает на вопросы о самом Kvist: установка, команды, провайдеры и модели, песочница и подтверждения, сессии, откат, память, интерфейсы, скиллы, диагностика."
+  },
+  "instructions": "SKILL.md",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.1"},
+  "capabilities": {"required": []}
+}
