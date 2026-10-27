@@ -973,7 +973,15 @@ class TerminalExecutor(
         the test patch points remain stable. The default gate reproduces the
         historical terminal prompt and stays fail-closed off a TTY.
         """
-        return self._approvals.confirm_command(command, reason)
+        # Reminder timers are an optional extension of the gate protocol:
+        # older custom gates may not provide them, so probe for the method.
+        waiting_confirm = getattr(self._approvals, "waiting_confirm_command", None)
+        notification_timer = waiting_confirm() if waiting_confirm is not None else None
+        try:
+            return self._approvals.confirm_command(command, reason)
+        finally:
+            if notification_timer is not None:
+                notification_timer.cancel()
 
     def _build_allowed_commands(self) -> dict[str, set[str] | None]:
         allowed: dict[str, set[str] | None] = dict(_COMMON_ALLOWED)

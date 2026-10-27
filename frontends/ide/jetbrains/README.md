@@ -267,3 +267,30 @@ kvist --workspace "<project_path>"
 - macOS (best-effort)
 
 macOS is best-effort: the plugin ships binaries for Apple Silicon and Intel, but they are not verified on a Mac.
+### Kvist editor tab
+
+The Kvist icon in the main toolbar (and Tools → Open Kvist) opens a web page
+as an editor tab beside source files. Repeated clicks focus the existing tab;
+closing the tab disposes its embedded browser. No terminal process is started.
+The Terminal action in the chat tool window remains available separately.
+
+The editor uses `KvistChatPanel` with the workspace layout, sharing the existing
+JCEF bridge, session lifecycle, approvals and core protocol with the tool window.
+Closing the tab disposes the browser and its core process. The UI sources are
+`../vscode/webview/app.tsx` and `../vscode/webview/workspace.css`; the latter is
+scoped to the editor page, so the compact tool window keeps its own layout.
+`KvistWebviewPage` inlines the compiled bundle with the existing content security
+policy. The old `kvist-page/index.html` scaffold is no longer loaded.
+
+The workspace has a session sidebar, starter prompts, a translucent composer,
+Catppuccin Mocha/Latte colours and reduced-motion support. Below 620 px the sidebar
+folds away; sessions and settings remain available in the header. If JCEF is
+unavailable, the editor shows a message explaining the requirement.
+
+The workspace uses the existing Kvist SVG wordmark and Lucide controls. File and
+action rows use 51 original Catppuccin icons in both flavours, including live
+reads, explored history, edits, folder listings and shell commands. Unknown file
+types fall back to the generic file icon. SVGs are bundled as data URLs, so icons
+work offline under the existing CSP. Upstream commit and licenses are recorded in
+`../vscode/webview/assets/catppuccin/`; packaged third-party notices are in
+`kvist-webview/THIRD_PARTY_NOTICES.txt`.

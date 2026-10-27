@@ -617,7 +617,7 @@ def test_every_registered_command_has_a_handler_with_the_shared_signature():
     assert set(main.STDIO_COMMANDS) == {
         "role", "effort", "verbose", "style", "session", "export", "new", "rename", "models", "catalog",
         "changes", "provider", "change-api", "del-provider", "full-reset", "settings-api",
-        "strime", "revert", "bug", "commit-message", "web-search-provider", "context", "memory",
+        "strime", "revert", "bug", "commit-message", "web-search-provider", "context", "memory", "doctor",
     }
     for handler in main.STDIO_COMMANDS.values():
         assert callable(handler)
@@ -1124,3 +1124,20 @@ def test_export_wizard_imports_through_input_requests(home, agent_factory):
     assert result.ok
     assert [item["session"] for item in result.effects["imported"]] == ["cc-s1"]
     assert "cc-s1" in agent._list_sessions()
+
+
+def test_doctor_asks_before_the_ping_and_sends_it_only_on_yes(home, agent_factory, monkeypatch):
+    from kernel.config import doctor
+
+    monkeypatch.setattr(doctor, "provider_ready", lambda _checks, _ru: True)
+
+    agent = agent_factory(provider="deepseek", fast_model="deepseek-flash")
+    agent.client.content = "pong"
+    result, requests, _ = _run_handler("doctor", agent, answers=[False])
+    assert [r.kind for r in requests] == ["confirm"]
+    assert agent.client.requests == []
+    assert "not tested" in result.message
+
+    result, requests, _ = _run_handler("doctor", agent, answers=[True])
+    assert len(agent.client.requests) == 1
+    assert "answered «pong»" in result.message

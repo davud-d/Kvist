@@ -214,6 +214,13 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         help="Print the saved run configuration as JSON and exit (no LLM call).",
     )
     parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Check the modules, frontends, provider, API keys and settings, print "
+        "the report and exit. Asks before sending the model a test request "
+        "(--yes answers it).",
+    )
+    parser.add_argument(
         "--journal-op",
         choices=("changes", "revert"),
         help="Run one headless change-journal operation, print JSON, exit.",
@@ -354,6 +361,30 @@ def _run_tray_op(args: argparse.Namespace) -> None:
         print(json.dumps({"ok": False, "error": str(error)}, ensure_ascii=False))
         raise SystemExit(1) from error
     print(json.dumps(payload))
+
+
+def _terminal_yes_no(title: str, body: str) -> bool:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return False
+    print(f"\n{title}\n{body}")
+    try:
+        answer = input("[y/N] ").strip().casefold()
+    except EOFError:
+        return False
+    return answer in ("y", "yes", "д", "да")
+
+
+def _run_doctor(args: argparse.Namespace) -> int:
+    from kernel.config import doctor
+    from kernel.ide.commit_message import _build_caller
+
+    ru = os.environ.get("LANG", "").lower().startswith("ru")
+    checks = doctor.diagnose(resolve_workspace_path(args.workspace), ru)
+    if doctor.provider_ready(checks, ru):
+        ask = (lambda _title, _body: True) if args.yes else _terminal_yes_no
+        checks.append(doctor.probe_model(_build_caller, ask, ru))
+    print(doctor.render(checks, ru))
+    return 1 if doctor.has_failures(checks) else 0
 
 
 def _run_commit_message_op() -> None:
@@ -4083,6 +4114,21 @@ def _stdio_context(ctx: CommandContext) -> CommandResult:
     )
 
 
+def _stdio_doctor(ctx: CommandContext) -> CommandResult:
+    from kernel.config import doctor
+
+    agent = ctx.session.agent
+    ru = _speaks_russian(agent)
+    checks = doctor.diagnose(agent.executor.workspace, ru, agent.config.provider)
+    if doctor.provider_ready(checks, ru):
+        checks.append(doctor.probe_model(
+            lambda: doctor.caller_for_agent(agent),
+            lambda title, body: bool(ctx.ui.confirm(title, body)),
+            ru,
+        ))
+    return CommandResult(not doctor.has_failures(checks), doctor.render(checks, ru))
+
+
 def _stdio_bug(ctx: CommandContext) -> CommandResult:
     from kernel.config.bug_report import save_bug_report
     from kernel.session.durable_json import JsonStorageError
@@ -4516,6 +4562,7 @@ STDIO_COMMANDS: dict[str, CommandHandler] = {
     "strime": _stdio_strime,
     "revert": _stdio_revert,
     "bug": _stdio_bug,
+    "doctor": _stdio_doctor,
 }
 
 
@@ -4560,6 +4607,9 @@ def main() -> None:
             raise SystemExit(1) from error
         print(_json.dumps(payload, ensure_ascii=False))
         return
+
+    if args.doctor:
+        raise SystemExit(_run_doctor(args))
 
     if args.commit_message:
         _run_commit_message_op()
@@ -5454,6 +5504,27 @@ def main() -> None:
                     )
                     continue
                 console.print(_display_text(f"Bug report saved to {report_path}", "green"))
+                continue
+
+            if user_goal.lower() == "/doctor":
+                from kernel.config import doctor
+
+                ru = _speaks_russian(agent)
+
+                def confirm_ping(title: str, details: str) -> bool:
+                    with paused_interactive_screen(interactive_screen):
+                        return bool(agent._ui.confirm(title, details))
+
+                checks = doctor.diagnose(agent.executor.workspace, ru, agent.config.provider)
+                if doctor.provider_ready(checks, ru):
+                    checks.append(doctor.probe_model(
+                        lambda: doctor.caller_for_agent(agent), confirm_ping, ru
+                    ))
+                console.print(Panel(
+                    Text(sanitize_display_text(doctor.render(checks, ru))),
+                    title="/doctor",
+                    border_style="red" if doctor.has_failures(checks) else "bright_cyan",
+                ))
                 continue
 
             if user_goal.lower() == "/changes":

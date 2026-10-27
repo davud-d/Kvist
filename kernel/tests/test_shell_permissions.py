@@ -38,6 +38,9 @@ class Approvals:
     def commit_remembered_rule(self):
         pass
 
+    def waiting_confirm_command(self):
+        return None
+
 
 @pytest.fixture
 def shell(tmp_path, monkeypatch):

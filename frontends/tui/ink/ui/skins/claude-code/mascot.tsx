@@ -13,7 +13,10 @@ import { useContext, useEffect, useRef, useState } from "react"
 import type { Pointer } from "../../../pointer.js"
 import { ViewContext } from "../../context.js"
 import { MASCOT_OCTANTS, MASCOT_QUADRANTS, MASCOT_THINKING_OCTANTS, MASCOT_THINKING_QUADRANTS, type MascotCell, type MascotFrames } from "./mascot-frames.js"
+import { MASCOT_OCTANTS as HEIST_OCTANTS, MASCOT_QUADRANTS as HEIST_QUADRANTS } from "./mascot-heist-frames.js"
+import { MASCOT_PNGS as HEIST_PNGS } from "./mascot-heist-images.js"
 import { MASCOT_PNGS, MASCOT_THINKING_PNG } from "./mascot-images.js"
+import { isHeistDay } from "./heist.js"
 
 export const MASCOT_FPS = 2
 // With no key pressed for this long the squirrel sits and thinks, until the next key.
@@ -91,12 +94,14 @@ export function syncMascotImage(pointer: Pointer | null): void {
   const skipTop = view ? Math.max(0, view.y - y) : 0
   const skipBottom = view ? Math.max(0, y + height - (view.y + view.height)) : 0
   if (width <= 0 || skipTop + skipBottom >= height) return pointer.showImage(null)
-  pointer.showImage({ png: (mascotSlot.frame === THINKING_FRAME ? MASCOT_THINKING_PNG : MASCOT_PNGS[mascotSlot.frame]) ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height, skipTop, skipBottom })
+  const pictures = isHeistDay() ? HEIST_PNGS : MASCOT_PNGS
+  pointer.showImage({ png: (mascotSlot.frame === THINKING_FRAME ? MASCOT_THINKING_PNG : pictures[mascotSlot.frame]) ?? "", key: String(mascotSlot.frame), row: y, col: x, columns: width, rows: height, skipTop, skipBottom })
 }
 
 function mascotFrames(thinking = false): MascotFrames {
   const octants = mascotGlyphs(process.env) === "octants"
   if (thinking) return octants ? MASCOT_THINKING_OCTANTS : MASCOT_THINKING_QUADRANTS
+  if (isHeistDay()) return octants ? HEIST_OCTANTS : HEIST_QUADRANTS
   return octants ? MASCOT_OCTANTS : MASCOT_QUADRANTS
 }
 

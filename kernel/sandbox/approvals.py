@@ -12,6 +12,8 @@ import ``TerminalApprovalGate`` at module load time without an import cycle.
 from __future__ import annotations
 
 import json
+import subprocess
+import threading
 from typing import Literal, Protocol, runtime_checkable
 
 FetchDecision = Literal["once", "always", "deny"]
@@ -46,6 +48,14 @@ class ApprovalGate(Protocol):
         """
         ...
 
+    def waiting_confirm_command(self) -> threading.Timer | None:
+        """Start a reminder timer for a pending confirmation, if supported.
+
+        The caller must ``cancel()`` the returned timer once the answer arrived.
+        Returning ``None`` means no reminder is needed.
+        """
+        ...
+
 
 class TerminalApprovalGate:
     """Default gate: interactive terminal prompts, fail-closed off a TTY."""
@@ -71,6 +81,41 @@ class TerminalApprovalGate:
         if answer in ("y", "yes"):
             return "once"
         return "deny"
+
+    def waiting_confirm_command(self) -> threading.Timer | None:
+        """Start a timer that reminds the user to answer a pending confirmation.
+
+        Returns the started timer; the caller cancels it once the answer arrived.
+        """
+        TIMEOUT: int = 120
+
+        def send_notification():
+            import sys
+
+            if sys.platform == "win32":
+                subprocess.Popen(
+                    [
+                        "powershell",
+                        "-NoProfile",
+                        "-Command",
+                        'msg "$env:USERNAME" "Kvist waiting your approval"',
+                    ],
+                    creationflags=0x08000000,
+                )
+            elif sys.platform == "darwin":
+                subprocess.Popen(["osascript", "-e", 'display notification "Kvist waiting your approval"'])
+            else:
+                subprocess.Popen(["notify-send", "Kvist", "Kvist waiting your approval"])
+                subprocess.run(["dbus-send", "--session", "--type=method_call", "--dest=org.freedesktop.Notifications",
+                                "/org/freedesktop/Notifications", "org.freedesktop.Notifications.Notify",
+                                "string:Kvist",
+                                "uint32:0", "string:", "string:Kvist waiting your approval", "string:", "array:string:",
+                                "dict:string:string:", "int32:-1"])
+
+        notification_timer = threading.Timer(TIMEOUT, send_notification)
+        notification_timer.daemon = True
+        notification_timer.start()
+        return notification_timer
 
     def confirm_command(self, command: list[str], reason: str) -> bool:
         """Interactive approval prompt (Human-in-the-Loop).
@@ -113,6 +158,8 @@ class TerminalApprovalGate:
         # Pause background TUI rendering
         if TerminalExecutor._hitl_suspend_fn is not None:
             TerminalExecutor._hitl_suspend_fn()
+
+
 
         _enter_hitl()
         try:
@@ -173,3 +220,6 @@ class DenyApprovalGate:
 
     def confirm_fetch_domain(self, host: str, url: str) -> FetchDecision:
         return "deny"
+
+    def waiting_confirm_command(self) -> threading.Timer | None:
+        return None

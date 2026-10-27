@@ -28,6 +28,7 @@ body.vscode-light { --kv: #0a86c2; --kv-ink: #ffffff; --green: #1a7f37; --yellow
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; padding: 0; }
 body {
+  color-scheme: dark;
   color: var(--vscode-foreground);
   background: var(--vscode-sideBar-background, var(--vscode-editor-background));
   font-family: var(--vscode-font-family);
@@ -35,6 +36,14 @@ body {
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
 }
+body.vscode-light { color-scheme: light; }
+
+/* JCEF needs explicit scrollbar styling; its native tracks stay white in dark IDE themes. */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 button, select, input, textarea { font: inherit; color: inherit; }
 button { border: 0; background: none; padding: 0; cursor: pointer; border-radius: var(--r-sm); }
 button:disabled { opacity: .45; cursor: default; }

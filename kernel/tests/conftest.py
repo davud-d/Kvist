@@ -71,6 +71,9 @@ class AllowAllApprovals:
     def commit_remembered_rule(self) -> None:
         pass
 
+    def waiting_confirm_command(self) -> None:
+        return None
+
 
 class NullUI:
     def start_live(self):

@@ -1,3 +1,7 @@
+import { Plus, SlidersHorizontal, ChevronLeft, Check, X, ChevronDown, ArrowUp, Square, Copy, Paperclip, Image, ScanText, GitPullRequest, FlaskConical, Terminal, ArrowRight, ArrowUpRight } from "lucide-preact"
+
+const workspaceIcons = { add: Plus, settings: SlidersHorizontal, back: ChevronLeft, check: Check, cross: X, chevron: ChevronDown, arrowUp: ArrowUp, stop: Square, copy: Copy, paperclip: Paperclip, image: Image, scan: ScanText, review: GitPullRequest, test: FlaskConical, terminal: Terminal, arrowRight: ArrowRight, arrowUpRight: ArrowUpRight }
+
 interface Glyph {
   d: string
   filled?: boolean
@@ -13,11 +17,18 @@ const glyphs: Record<string, Glyph> = {
   arrowUp: { d: "M8 13V3.5M4 7l4-3.5L12 7" },
   stop: { d: "M4.5 4.5h7v7h-7z", filled: true },
   copy: { d: "M6 6h6.5v6.5H6zM3.5 9.5v-6H10" },
+  terminal: { d: "M3 4.5l4 3.5-4 3.5M8.5 12h4.5" },
+  arrowRight: { d: "M3 8h10M9 4l4 4-4 4" },
+  arrowUpRight: { d: "M4.5 11.5l7-7M5.5 4.5h6v6" },
 }
 
 export type IconName = keyof typeof glyphs
 
 export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
+  if (document.getElementById("root")?.dataset.layout === "workspace") {
+    const Glyph = workspaceIcons[name as keyof typeof workspaceIcons]
+    if (Glyph) return <Glyph size={size} strokeWidth={1.65} aria-hidden="true" />
+  }
   const glyph = glyphs[name]
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill={glyph.filled ? "currentColor" : "none"} stroke={glyph.filled ? "none" : "currentColor"} stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

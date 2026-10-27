@@ -23,7 +23,7 @@ internal object KvistWebviewPage {
     private val random = SecureRandom()
 
     /** [postCall] is JavaScript that sends the string variable `json` to the plugin. */
-    fun html(postCall: String): String {
+    fun html(postCall: String, workspacePage: Boolean = false): String {
         val script = inlineSafe(resource("webview.js"), "script")
         val style = inlineSafe(resource("webview.css"), "style")
         val logo = "data:image/png;base64," + Base64.getEncoder().encodeToString(resourceBytes("kvist-logo.png"))
@@ -43,8 +43,8 @@ internal object KvistWebviewPage {
 <style nonce="$nonce">$style</style>
 <title>Kvist</title>
 </head>
-<body>
-<div id="root" data-logo="$logo"></div>
+<body class="${if (workspacePage) "workspace-page" else ""}">
+<div id="root" data-logo="$logo" data-layout="${if (workspacePage) "workspace" else "panel"}"></div>
 <script nonce="$nonce">${bridge(postCall)}</script>
 <script nonce="$nonce">$script</script>
 </body>

@@ -1,8 +1,9 @@
+import workspaceLogo from "../../../gui/electron/renderer/kvist-logo.svg"
 import { readImages, imageGoal, MAX_IMAGES, type ImageAttachment } from "../../../gui/electron/renderer/image-attachments.js"
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
-import { contextLabel, formatSeconds, formatTokens } from "../../../tui/ink/format"
+import { contextLabel, formatSeconds, formatTokens, outputLines } from "../../../tui/ink/format"
 import { actionTarget, exploreSummary, initialState, lastInflight, reduce, requestIsRussian } from "../../../tui/ink/state"
 import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
@@ -16,12 +17,14 @@ import { Markdown } from "./markdown"
 import { NO_METRICS, shortSeconds, trackMetrics, type TurnMetrics } from "./metrics"
 import { RecentSessions } from "./sessions"
 import { Settings } from "./settings"
-import { ShellCard, Thinking, TranscriptItem, Working } from "./transcript"
+import { ActivityGroup, isActivity, type ActivityItem } from "./activity"
+import { HIDDEN_STEPS, ShellCard, Thinking, TranscriptItem, Working, commandLine } from "./transcript"
 import { verbOf } from "./verbs"
 
 // The terminal-only commands make no sense inside an editor panel.
 const PANEL_COMMANDS = COMMANDS.filter((command) => command.name !== "tui" && command.name !== "quit")
-const logoUrl = document.getElementById("root")?.dataset.logo ?? ""
+const workspacePage = document.getElementById("root")?.dataset.layout === "workspace"
+const logoUrl = workspacePage ? workspaceLogo : document.getElementById("root")?.dataset.logo ?? ""
 const STARTERS = ["Explain this project", "Review my uncommitted changes", "Find and fix failing tests"]
 const HELP = PANEL_COMMANDS.map((command) => `/${command.name} — ${command.hint}`).join("\n")
 
@@ -280,18 +283,40 @@ export function App() {
   const running = lastInflight(state)
   // Typing and the elapsed timer do not change the transcript or its DOM selection.
   const feed = useMemo(() => {
-    const cards = state.items
-      .filter((item) => item.kind !== "note" || item.tone !== "debug" || state.showDebug)
-      .map((item) =>
-        item.kind === "tool" && item.action === "run_shell"
-          ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
-          : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
+    const visible = state.items.filter((item) => item.kind !== "note" || item.tone !== "debug" || state.showDebug)
+    if (workspacePage) return groupedFeed(visible)
+    const cards = visible.map((item) =>
+      item.kind === "tool" && item.action === "run_shell"
+        ? <ShellCard key={shellKey(item.step)} args={item.args} result={item.result} startedAt={startOf(item.step)} live="" />
+        : <TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
     if (running?.action === "run_shell") {
       const { step, args } = running
       cards.push(<ShellCard key={shellKey(step)} args={args} result={null} startedAt={startOf(step)} live={liveOutput?.step === step ? liveOutput.text : ""} />)
     }
     return cards
-  }, [state.items, state.epoch, state.settledThrough, state.showDebug, running, liveOutput])
+  }, [state.items, state.epoch, state.settledThrough, state.showDebug, state.running, running, liveOutput])
+
+  // The editor page folds the agent's work between two things it says into one quiet line.
+  function groupedFeed(visible: typeof state.items) {
+    const cards: preact.ComponentChildren[] = []
+    let group: ActivityItem[] = []
+    const flush = (last: boolean) => {
+      if (group.length === 0) return
+      cards.push(<ActivityGroup key={`${state.epoch}-act-${group[0].id}`} items={group} live={last && state.running} />)
+      group = []
+    }
+    for (const item of visible) {
+      if (item.kind === "step" && HIDDEN_STEPS.has(item.action)) continue
+      if (isActivity(item)) {
+        group.push(item)
+        continue
+      }
+      flush(false)
+      cards.push(<TranscriptItem key={`${state.epoch}-${item.id}`} uid={`${state.epoch}-${item.id}`} settled={item.id <= state.settledThrough} item={item} items={state.items} />)
+    }
+    flush(true)
+    return cards
+  }
 
   if (needsSetup) {
     return (
@@ -332,7 +357,17 @@ export function App() {
   }
 
   return (
-    <div class="app">
+    <div class={`app ${workspacePage ? `workspace-app ${isEmpty ? "workspace-idle" : ""}` : ""}`}>
+      {workspacePage ? <aside class="workspace-nav" aria-label="Sessions">
+        <div class="workspace-brand"><img class="workspace-wordmark" src={logoUrl} alt="Kvist" /> <span class="workspace-badge">IDE</span></div>
+        <button class="workspace-new" disabled={busy} onClick={() => runCommand("new")}><Icon name="add" /> New session</button>
+        <div class="workspace-history">
+          <RecentSessions items={items} disabled={busy} open={(name) => runCommand("session", [name])} />
+          {!items.length ? <p class="workspace-empty">No sessions yet.</p> : null}
+        </div>
+        <button class="workspace-settings" onClick={() => setView("settings")}><Icon name="settings" /> Settings</button>
+        <div class="workspace-footnote">Kvist for JetBrains</div>
+      </aside> : null}
       <CursorGlow />
       <header class="header">
         <label class="session-picker" title="Switch session">
@@ -356,16 +391,17 @@ export function App() {
       <main class="transcript">
         {isEmpty ? (
           <>
-            <RecentSessions items={recent} disabled={busy} open={(name) => runCommand("session", [name])} />
+            {!workspacePage ? <RecentSessions items={recent} disabled={busy} open={(name) => runCommand("session", [name])} /> : null}
             <div class="welcome">
               <div class="logo-wrap" style={{ "--logo": `url(${logoUrl})` }}>
                 <img class="logo" src={logoUrl} alt="Kvist" />
                 <div class="logo-sheen" />
               </div>
-              <div class="welcome-title">What should Kvist work on?</div>
+              <div class="welcome-title">{workspacePage ? "What are we building?" : "What should Kvist work on?"}</div>
+              {workspacePage ? <p class="welcome-subtitle">A small change. A difficult bug. Your next big thing.</p> : null}
               <div class="starters">
                 {STARTERS.map((starter) => (
-                  <button key={starter} class="starter" disabled={busy} onClick={() => { setText(starter); input.current?.focus() }}>{starter}</button>
+                  <button key={starter} class="starter" disabled={busy} onClick={() => { setText(starter); input.current?.focus() }}>{workspacePage ? <Icon name={["scan", "review", "test"][STARTERS.indexOf(starter)]} size={16} /> : null}{starter}</button>
                 ))}
               </div>
             </div>
@@ -373,7 +409,8 @@ export function App() {
         ) : null}
         {feed}
         {state.exploring ? <Working label="Exploring" target={exploreSummary(state.exploring)} /> : null}
-        {running && running.action !== "run_shell" ? <Working label={verbOf(running.action)} target={actionTarget(running.args)} /> : null}
+        {running && running.action !== "run_shell" ? <Working action={running.action} label={verbOf(running.action)} target={actionTarget(running.args)} /> : null}
+        {workspacePage && running?.action === "run_shell" ? <Working action="run_shell" label="Running" target={commandLine(running.args)} hint={liveOutput?.step === running.step ? outputLines(liveOutput.text).filter((line) => line.trim()).at(-1) ?? "" : ""} /> : null}
         {thinking ? <Thinking reasoning={state.live?.reasoning ?? ""} since={state.live?.thinkingSince ?? null} /> : null}
         {state.live?.answer ? <Markdown text={state.live.answer} /> : null}
         {state.pending ? <Dialog key={state.pending.request_id} request={state.pending} answer={answer} /> : null}
@@ -447,8 +484,8 @@ export function App() {
             onKeyDown={onKeyDown}
           />
           <div class="toolbar">
-            <button class="icon" title="Attach images / Прикрепить изображения" disabled={busy || loadingImages} onClick={() => imagePicker.current?.click()}>▧</button>
-            <button class="icon" title="Attach files by name" disabled={busy} onClick={() => post({ type: "pickFiles" })}><Icon name="add" /></button>
+            <button class="icon" title="Attach images / Прикрепить изображения" disabled={busy || loadingImages} onClick={() => imagePicker.current?.click()}>{workspacePage ? <Icon name="image" /> : "▧"}</button>
+            <button class="icon" title="Attach files by name" disabled={busy} onClick={() => post({ type: "pickFiles" })}><Icon name={workspacePage ? "paperclip" : "add"} /></button>
             <button class="pill" title="Change models" disabled={busy} onClick={() => runCommand("models")}>{state.info.model || "Model"}</button>
             <button class="pill" title="Reasoning effort" disabled={busy} onClick={() => runCommand("effort")}>{effort}</button>
             <span class="spacer" />
@@ -468,6 +505,7 @@ export function App() {
           </div>
         </div>
         )}
+        {workspacePage ? <div class="composer-hint">Enter to send <span>Shift + Enter for a new line</span></div> : null}
       </footer>
     </div>
   )

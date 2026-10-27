@@ -187,6 +187,7 @@ Type `/` to see the list. The common ones:
 | `/session`, `/new`, `/resume` | Named sessions and continuing an interrupted run |
 | `/changes`, `/diff`, `/revert` | What the agent changed, and undoing it |
 | `/context`, `/status`, `/permissions` | Context usage, state, command permissions |
+| `/doctor` (or `kvist --doctor`) | Checks modules, frontends, provider, API keys and settings; asks before sending the model a test request that must answer "pong" (`--yes` answers it) |
 | `/web-search-provider` | Tavily, Brave or SearXNG for web search |
 | `/settings-api` | Request pacing, timeouts, retries, context window, fallbacks |
 | `/tui` | Choose the terminal interface |

@@ -43,6 +43,7 @@ const CORE_COMMANDS: { name: string; title: string; group: string; aliases?: str
   { name: "export", title: "Import sessions from other agents", group: "Session" },
   { name: "context", title: "Show context size", group: "Session", aliases: ["stats"] },
   { name: "memory", title: "What Kvist remembers", group: "Session" },
+  { name: "doctor", title: "Check the installation", group: "System" },
   { name: "style", title: "Working style", group: "Agent" },
   { name: "provider", title: "Switch or configure provider", group: "Provider" },
   { name: "change-api", title: "Change API key", group: "Provider" },

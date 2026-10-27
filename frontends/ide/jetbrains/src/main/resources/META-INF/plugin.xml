@@ -29,6 +29,7 @@
             canCloseContents="false"
             factoryClass="com.kvist.intellij.chat.KvistToolWindowFactory"
         />
+        <fileEditorProvider implementation="com.kvist.intellij.editor.KvistPageEditorProvider" />
         <inline.completion.provider implementation="com.kvist.intellij.completion.KvistInlineCompletionProvider" />
     </extensions>
 
@@ -36,9 +37,9 @@
         <action
             id="com.kvist.intellij.RunKvistAction"
             class="com.kvist.intellij.actions.RunKvistAction"
-            text="Run Kvist"
+            text="Open Kvist"
             icon="/icons/kvist.svg"
-            description="Start Kvist in the IDE Terminal"
+            description="Open the Kvist web page in an editor tab"
         >
             <add-to-group group-id="MainToolbarRight" anchor="last" />
             <add-to-group group-id="ToolsMenu" anchor="last" />

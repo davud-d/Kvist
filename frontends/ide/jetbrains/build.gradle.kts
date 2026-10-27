@@ -78,6 +78,7 @@ val buildWebview = tasks.register<Exec>("buildWebview") {
     workingDir = vscodeExtensionDir.asFile
     commandLine(npmCommand("run", "build"))
     inputs.file(vscodeExtensionDir.file("../../gui/electron/renderer/image-attachments.js"))
+    inputs.file(vscodeExtensionDir.file("../../gui/electron/renderer/kvist-logo.svg"))
     inputs.dir(vscodeExtensionDir.dir("webview"))
     inputs.dir(vscodeExtensionDir.dir("src"))
     // The panel also bundles the Ink app's shared modules (state, protocol, commands, …).
@@ -91,7 +92,7 @@ val syncWebview = tasks.register<Sync>("syncWebview") {
     description = "Copies the webview bundle and the logo into the plugin resources."
     dependsOn(buildWebview)
     from(vscodeExtensionDir.file("out/webview.js"), vscodeExtensionDir.file("out/webview.css"))
-    from(vscodeExtensionDir.file("resources/kvist-logo.png"))
+    from(vscodeExtensionDir.file("resources/kvist-logo.png"), vscodeExtensionDir.file("resources/THIRD_PARTY_NOTICES.txt"))
     into(webviewResourcesDir.map { it.dir("kvist-webview") })
 }
 
