@@ -161,6 +161,15 @@ case "$OS_NAME/$ARCH" in
 		NODE_ASSET="node-v${NODE_VERSION}-linux-x64.tar.gz"
 		NODE_SHA256="1084aa36196bba4c3a5e69a1ee388a6e4ff729dad09445fbcd434b28fe3c24af"
 		;;
+	Linux/aarch64 | Linux/arm64)
+		FFMPEG_ASSET="ffmpeg-linux-arm64.gz"
+		FFMPEG_SHA256="2b708b2d15041d2a192c1db24c7a8a1d24f645a8242dce1c744ff2392b86ada1"
+		BUN_ASSET="bun-linux-aarch64.zip"
+		BUN_SHA256="a27ffb63a8310375836e0d6f668ae17fa8d8d18b88c37c821c65331973a19a3b"
+		BINARY_ASSET="kvist-linux-arm64"
+		NODE_ASSET="node-v${NODE_VERSION}-linux-arm64.tar.gz"
+		NODE_SHA256="5ced2d48d1d7198739b7f86804de0171aefb6823b684b12341d3321afc3cb0b2"
+		;;
 	Darwin/arm64)
 		FFMPEG_ASSET="ffmpeg-darwin-arm64.gz"
 		FFMPEG_SHA256="6be74d6f449889c2e87a75873894f8520cad56c08ac76f2a628d85b0519daaca"

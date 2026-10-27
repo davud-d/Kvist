@@ -122,6 +122,23 @@ def test_linux_keeps_its_binary_and_the_flat_jetbrains_layout(tmp_path):
     assert "~/.bashrc" in result.stdout
 
 
+@pytest.mark.parametrize("machine", ["aarch64", "arm64"])
+def test_linux_on_arm_installs_the_arm64_binary(tmp_path, machine):
+    result, home = _run(tmp_path, "Linux", machine, "kvist-linux-arm64", shell="/bin/bash")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / ".local" / "share" / "kvist" / "kvist-core").read_bytes() == b"core:kvist-linux-arm64"
+
+
+def test_plan_names_the_arm_downloads_on_linux(tmp_path):
+    result, _home = _run(tmp_path, "Linux", "aarch64", "kvist-linux-arm64", args=("--plan",))
+
+    plan = json.loads(result.stdout)
+    targets = {item["id"]: item["targets"][0] for item in plan["components"] if item.get("targets")}
+    assert targets["node"].endswith("/node-v22.23.3-linux-arm64.tar.gz")
+    assert targets["ffmpeg"].endswith("/ffmpeg-linux-arm64.gz")
+
+
 @pytest.mark.parametrize("version", ["2025.3", "2026.1", "2026.2", "2027.1"])
 def test_linux_finds_a_fresh_pycharm_from_settings_only(tmp_path, version):
     name = f"PyCharmCE{version}"
@@ -165,7 +182,7 @@ def test_linux_settings_and_data_do_not_install_the_same_ide_twice(tmp_path):
     assert result.stdout.count("JetBrains plugin installed into") == 1
 
 
-@pytest.mark.parametrize(("system", "machine"), [("Linux", "aarch64"), ("Darwin", "ppc")])
+@pytest.mark.parametrize(("system", "machine"), [("Linux", "riscv64"), ("Darwin", "ppc")])
 def test_an_architecture_without_a_release_binary_is_refused(tmp_path, system, machine):
     result, _home = _run(tmp_path, system, machine, "kvist-linux-x64")
 

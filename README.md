@@ -80,7 +80,7 @@ until you press Install. Downloads are checked against SHA-256 sums. With no
 terminal (CI), `KVIST_INSTALL_PLAIN=1 bash install.sh` installs the defaults.
 
 The release assets can also be downloaded one by one: `kvist-linux-x64`,
-`kvist-windows-x64.exe`, `kvist-macos-arm64`, `kvist-macos-x64`,
+`kvist-linux-arm64`, `kvist-windows-x64.exe`, `kvist-macos-arm64`, `kvist-macos-x64`,
 `kvist-jetbrains.zip` and `kvist-vscode.vsix`. To install from files already on
 disk, run `bash install.sh --from <dir>` or `.\install.ps1 -From <dir>`.
 

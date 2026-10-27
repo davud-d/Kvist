@@ -80,7 +80,7 @@ irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/insta
 `KVIST_INSTALL_PLAIN=1 bash install.sh` ставит набор по умолчанию.
 
 Ассеты релиза можно скачать и по отдельности: `kvist-linux-x64`,
-`kvist-windows-x64.exe`, `kvist-macos-arm64`, `kvist-macos-x64`,
+`kvist-linux-arm64`, `kvist-windows-x64.exe`, `kvist-macos-arm64`, `kvist-macos-x64`,
 `kvist-jetbrains.zip`, `kvist-vscode.vsix`. Чтобы поставить из файлов на диске,
 запустите `bash install.sh --from <dir>` или `.\install.ps1 -From <dir>`.
 

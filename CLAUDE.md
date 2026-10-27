@@ -1106,8 +1106,9 @@ A binary per platform is bundled: `bin/win/kvist.exe`, `bin/linux/kvist.bin`, `b
 `frontends/ide/vscode/src/platform.ts`; Rosetta reports x64), treat Linux and macOS alike as POSIX (shell
 launch, `chmod +x`, on a Mac `xattr -d com.apple.quarantine`), and build with a missing other-platform binary
 as a warning only. BSD `install` has no `-D`, so Gradle's `hostBinaryPath` and the two `build-plugin.sh`
-`mkdir -p` first. `scripts/release/install.sh` maps `uname` to `kvist-linux-x64`/`kvist-macos-arm64`/
-`kvist-macos-x64`, nests the JetBrains plugin under `~/Library/Application Support/JetBrains/<Product><version>`,
+`mkdir -p` first. `scripts/release/install.sh` maps `uname` to `kvist-linux-x64`/`kvist-linux-arm64`/
+`kvist-macos-arm64`/`kvist-macos-x64` (the arm64 Linux binary is built on `ubuntu-22.04-arm` in
+`plugin-release.yml`, not run on a real ARM machine, glibc only so not Termux itself; the IDE plugins still bundle x64 only), nests the JetBrains plugin under `~/Library/Application Support/JetBrains/<Product><version>`,
 finds VS Code inside its `.app`, and **must stay valid bash 3.2**. `install_cli.py` prints the PATH command
 (`path_hint`) and drops the quarantine mark; `install_gui.py` copies `Kvist.app` into `~/Applications` with
 `symlinks=True`; electron-builder's `mac` target makes dmg and zip. `plugin-release.yml` builds the macOS
