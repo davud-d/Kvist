@@ -538,6 +538,37 @@ def test_words_before_a_call_stream_to_a_ui_that_takes_them_and_the_call_stays_o
     assert shown and shown[-1] == "Reading the file."
 
 
+def test_a_final_answer_streams_its_message_and_shows_no_writing_status(agent_factory):
+    agent = agent_factory(max_steps=1)
+    agent._ui.streams_words = True
+    shown: list[str] = []
+    statuses: list[str] = []
+
+    class _Live:
+        def __enter__(self):
+            return shown.append
+
+        def __exit__(self, *exc):
+            return False
+
+    agent._ui.live_markdown = lambda: _Live()
+    agent._ui.update_live = lambda **kwargs: statuses.append(kwargs["user_message"])
+
+    def call(name, arguments):
+        piece = SimpleNamespace(index=0, id="c1", function=SimpleNamespace(name=name, arguments=arguments))
+        return SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content=None, tool_calls=[piece]))]
+        )
+
+    stream = [call("final_answer", '{"message": "All do'), call(None, 'ne\\n'), call(None, 'ok"}')]
+
+    turn = agent_model._native_turn_from_stream(agent, iter(stream), time.monotonic())
+
+    assert shown[-1] == "All done\nok"
+    assert statuses == []
+    assert turn.tool_calls[0].name == "final_answer"
+
+
 def test_a_ui_without_streams_words_gets_no_live_stream(agent_factory):
     agent = agent_factory(max_steps=1)
     opened: list[str] = []

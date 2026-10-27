@@ -881,7 +881,9 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                     spoken.feed("".join(content))
             for piece in pieces:
                 _merge_tool_call_delta(calls, piece)
-            if calls and time.monotonic() - last_call_push > 0.5:
+            if calls and _final_answer_words(calls):
+                spoken.feed_words(_spoken_with_answer("".join(content), calls))
+            elif calls and _writes_a_call(calls) and time.monotonic() - last_call_push > 0.5:
                 _note_tool_call_progress(self, calls[max(calls)])
                 last_call_push = time.monotonic()
             note_generated(
@@ -891,7 +893,7 @@ def _native_turn_from_stream(self, stream: Any, started: float) -> NativeTurn:
                 + "".join(call["arguments"] for call in calls.values()),
             )
     finally:
-        spoken.close("".join(content))
+        spoken.close(_spoken_with_answer("".join(content), calls))
         close = getattr(stream, "close", None)
         if close is not None:
             try:
@@ -947,6 +949,39 @@ def _seal_thinking(self, reasoning: list[str]) -> None:
 
 
 _PATH_IN_ARGUMENTS_RE = re.compile(r'"path"\s*:\s*"([^"]*)"')
+_MESSAGE_IN_ARGUMENTS_RE = re.compile(r'"message"\s*:\s*"((?:[^"\\]|\\.)*)')
+# Calls that carry the person's words, not work: the words stream as an answer
+# and a "Writing ..." status would only describe the same text twice.
+_ANSWER_TOOLS = frozenset({"final_answer", "report_to_user", "refuse"})
+
+
+def _writes_a_call(calls: dict[int, dict[str, str]]) -> bool:
+    return calls[max(calls)]["name"] not in _ANSWER_TOOLS
+
+
+def _final_answer_words(calls: dict[int, dict[str, str]]) -> str:
+    """The part of a ``final_answer`` message that has arrived so far."""
+    entry = calls[max(calls)]
+    if entry["name"] != "final_answer":
+        return ""
+    found = _MESSAGE_IN_ARGUMENTS_RE.search(entry["arguments"])
+    if found is None:
+        return ""
+    raw = found.group(1)
+    # A chunk can end inside an escape (a lone backslash or half a \uXXXX).
+    for cut in range(len(raw), max(len(raw) - 6, -1), -1):
+        try:
+            return json.loads(f'"{raw[:cut]}"')
+        except json.JSONDecodeError:
+            continue
+    return ""
+
+
+def _spoken_with_answer(content: str, calls: dict[int, dict[str, str]]) -> str:
+    """Words said before the call, then the answer being written."""
+    opening = speakable_prefix(content)
+    answer = _final_answer_words(calls) if calls else ""
+    return f"{opening}\n\n{answer}" if opening and answer else opening or answer
 
 
 def _note_tool_call_progress(self, entry: dict[str, str]) -> None:
@@ -1293,7 +1328,9 @@ class _SpokenStream:
         self._last_push = 0.0
 
     def feed(self, content: str) -> None:
-        words = speakable_prefix(content)
+        self.feed_words(speakable_prefix(content))
+
+    def feed_words(self, words: str) -> None:
         if not self._enabled or not words or words == self._shown:
             return
         now = time.monotonic()
@@ -1305,8 +1342,7 @@ class _SpokenStream:
         self._shown = words
         self._update(words)
 
-    def close(self, content: str) -> None:
-        words = speakable_prefix(content)
+    def close(self, words: str) -> None:
         if self._update is not None and words != self._shown:
             self._update(words)
         self._stack.close()
@@ -1404,7 +1440,7 @@ def call_model_streaming(
                         preview_shown = True
                         print(f"  [streaming] {rendered[:120]}...", flush=True)
     finally:
-        spoken.close("".join(chunks))
+        spoken.close(speakable_prefix("".join(chunks)))
         # An abandoned HTTP stream would otherwise hold its connection open;
         # applies to cancellation, provider failure, and normal completion.
         close = getattr(stream, "close", None)
