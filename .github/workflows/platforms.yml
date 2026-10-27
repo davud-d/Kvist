@@ -6,7 +6,7 @@ name: Platforms
 # tests, the Ink UI, the packaged artifacts (wheel, PyInstaller binary), the
 # agent tools against a fake provider and the CLI installer.
 # macOS counts ten times a Linux minute on a private repository, so it joins
-# manual runs and every tenth run only; the other runs cover Linux and Windows
+# manual runs and every tenth run only (the experimental BSD job runs every time); the other runs cover Linux and Windows
 # (about 46 billed minutes; a run with macOS is about 136).
 on:
   push:
@@ -163,6 +163,63 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test --timeout 30000
+
+  # FreeBSD, OpenBSD and NetBSD have no hosted runners: the action boots each system in QEMU on
+  # an Ubuntu runner and runs the script inside it. Experimental: the core has no sandbox there
+  # (no Bubblewrap, no cgroups), so only the credential-free smoke subset runs, and a failure
+  # never fails the workflow (continue-on-error). Native dependencies (cryptography, Pillow,
+  # pydantic-core, tiktoken, jiter) have no BSD wheels, so they come from the system's own
+  # packages; the names were checked against each system's package index. NetBSD has no
+  # tiktoken/jiter package, so pip builds those two with Rust. The images ship `sudo` without a
+  # password (also OpenBSD's) and `bash`.
+  bsd:
+    name: Python smoke on ${{ matrix.name }} ${{ matrix.version }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: freebsd
+            version: "15.1"
+            python: python3.12
+            install: >-
+              sudo pkg install -y python312 py312-pip py312-sqlite3 py312-pillow
+              py312-cryptography py312-pydantic2 py312-pydantic-core py312-tiktoken py312-jiter
+              py312-keyring py312-paramiko git ripgrep
+          - name: openbsd
+            version: "8.0"
+            python: python3.14
+            install: >-
+              sudo pkg_add python py3-pip py3-Pillow py3-cryptography py3-pydantic
+              py3-pydantic-core py3-tiktoken py3-jiter py3-keyring py3-paramiko git ripgrep
+          - name: netbsd
+            version: "11.0"
+            python: python3.12
+            install: >-
+              sudo pkgin -y install python312 py312-pip py312-Pillow py312-cryptography
+              py312-pydantic py312-pydantic-core py312-keyring py312-paramiko git-base ripgrep rust
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Run the smoke tests inside ${{ matrix.name }}
+        uses: cross-platform-actions/action@82668f1fbd89d9c99487604f822cbf6716f124d3 # v1.7.0
+        with:
+          operating_system: ${{ matrix.name }}
+          version: ${{ matrix.version }}
+          shell: bash
+          run: |
+            set -euo pipefail
+            ${{ matrix.install }}
+            ${{ matrix.python }} -m venv --system-site-packages .venv
+            # requirements-dev.txt is not used: ruff and pyinstaller have no BSD builds.
+            .venv/bin/python -m pip install --disable-pip-version-check -r requirements.txt "pytest>=8.3,<10" defusedxml==0.7.1
+            .venv/bin/python -m pytest -ra -m offline_smoke
 
   package:
     name: Wheel and binary on ${{ matrix.os }}
