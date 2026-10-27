@@ -93,7 +93,6 @@ function head({ t, css, meta, path, otherPath }) {
     operatingSystem: "Linux, Windows",
     description: meta.description,
     url,
-    softwareVersion: "beta",
     programmingLanguage: "Python",
     license: "https://opensource.org/licenses/MIT",
     inLanguage: t.lang,
@@ -194,11 +193,7 @@ ${header({ t, home: t.dir, rail })}
       <div class="hero-links">
         <a class="linkout" href="#demo">${esc(t.hero.cta)}</a>
         <a class="linkout" href="${esc(t.dir)}guides/">${esc(t.hero.guidesLink)}</a>
-        <span class="repo-boarded" role="img" aria-label="${esc(t.hero.repo)} — ${esc(t.hero.repoHint)}">
-          <span aria-hidden="true">${esc(t.hero.repo)}</span>
-          <span class="plank plank-a" aria-hidden="true"></span>
-          <span class="plank plank-b" aria-hidden="true"></span>
-        </span>
+        <a class="linkout" href="https://github.com/davud-d/Kvist">${esc(t.hero.repo)}</a>
       </div>
       <p class="hero-note">${esc(t.hero.note)}</p>
     </div>
@@ -274,10 +269,10 @@ ${header({ t, home: t.dir, rail })}
 
 <footer class="foot">
   <div class="wrap">
-    <p>${esc(t.footer.beta)}</p>
+    <p>${esc(t.footer.release)}</p>
     <div class="foot-row" style="margin-top:var(--s-4)">
       <span>${esc(t.footer.license)}</span>
-      <span>${esc(t.footer.repo)}</span>
+      <a href="https://github.com/davud-d/Kvist">${esc(t.footer.repo)}</a>
       <span>${esc(t.footer.builtWith)}</span>
     </div>
   </div>
@@ -370,7 +365,7 @@ ${header({ t, home: t.dir, rail })}
   <div class="wrap">
     <div class="foot-row">
       <a class="linkout" href="${esc(t.dir)}">${esc(t.guides.back)}</a>
-      <span>${esc(t.footer.repo)}</span>
+      <a href="https://github.com/davud-d/Kvist">${esc(t.footer.repo)}</a>
       <span>${esc(t.footer.license)}</span>
     </div>
   </div>

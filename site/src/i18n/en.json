@@ -9,7 +9,7 @@
   },
   "meta": {
     "title": "Kvist — a supervised coding agent for one workspace",
-    "description": "Kvist is a terminal coding agent that works in one project directory. It works through tool calling (JSON fallback for models without it) in a sandbox that masks secrets, blocks .env, and asks before anything dangerous. Python, MIT, beta.",
+    "description": "Kvist is a terminal coding agent that works in one project directory. It works through tool calling (JSON fallback for models without it) in a sandbox that masks secrets, blocks .env, and asks before anything dangerous. Python, MIT, open source.",
     "ogAlt": "The Kvist wordmark drawn in terminal half-blocks"
   },
   "nav": {
@@ -31,14 +31,13 @@
     "dismiss": "Dismiss"
   },
   "hero": {
-    "status": "Beta",
+    "status": "Available now",
     "h1": "One workspace. One gate for every action.",
     "lede": "Kvist is a terminal coding agent that works in a single project directory. It works through tool calling — read, edit, run, verify — and feeds the results back before deciding the next step. Models without tool calling fall back to JSON. Every action goes through one executor that can refuse it.",
     "cta": "Watch it run",
     "guidesLink": "Browse the guides",
     "repo": "Open the repository",
-    "repoHint": "Boarded up until launch.",
-    "note": "The source isn't public yet. Everything below — the run, the twelve guides — is the real interface, recorded end to end, not a mockup. Python 3.11+ · Linux and Windows · macOS without guarantees · MIT"
+    "note": "Kvist is released, with source available under the MIT license. The run and twelve guides below show the real interface. Linux and Windows · macOS without guarantees"
   },
   "demo": {
     "kicker": "Recorded run",
@@ -160,40 +159,44 @@
     ]
   },
   "install": {
-    "kicker": "Not released yet",
-    "h2": "What installing will look like",
-    "lede": "The repository is private while this is finished. When it opens, this is the path start to finish — the installer builds its own environment, needs no development venv, and touches nothing in your shell configuration beyond the launcher.",
+    "kicker": "Install",
+    "h2": "Get started with Kvist",
+    "lede": "Run the release installer to install the kvist command and the Node.js needed by its terminal interface. No Python or administrator rights are needed. Choose your components and confirm installation.",
     "steps": [
       {
         "n": "01",
-        "term": "Clone and run it",
-        "text": "python3 installer/install.py --cli builds the binary in a dedicated .venv-build, installs it under ~/.local/share/kvist and puts a kvist launcher in ~/.local/bin. On Windows it goes to %LOCALAPPDATA%\\Kvist and adds the bin directory to your user PATH."
+        "term": "Install the release",
+        "text": "Linux / macOS: curl -fsSL https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.sh | bash"
       },
       {
         "n": "02",
+        "term": "Windows (PowerShell)",
+        "text": "irm https://github.com/davud-d/Kvist/releases/download/latest-plugin-build/install.ps1 | iex"
+      },
+      {
+        "n": "03",
         "term": "Start it in a project",
         "text": "cd into the project and run kvist. The launcher uses the current directory as the workspace. The first launch asks for a provider, the models and the key, and saves them in ~/.kvist/config.json."
       },
       {
-        "n": "03",
+        "n": "04",
         "term": "Give it a task",
         "text": "Type the task, or / for the command list. Approvals appear inline; answer them and the run continues. /changes shows what was written, /revert puts it back."
       }
     ],
-    "reqTitle": "What it will need",
+    "reqTitle": "What you need",
     "req": [
-      "Python 3.11 or newer — tested in CI on 3.11 and 3.12",
-      "A key for one of the supported providers",
-      "A terminal, for the configuration and approval prompts",
-      "Linux is the main platform and Windows works; macOS should start, but there is no guarantee"
+      "A provider API key or sign-in with a ChatGPT Plus/Pro subscription",
+      "A terminal for setup and approvals",
+      "Linux and Windows; macOS without guarantees"
     ],
-    "alt": "Running from source will look the same: requirements.txt has nine entries, and main.py --workspace takes it from there."
+    "alt": "Running from source requires Python 3.11+: clone the repository, install requirements.txt in a venv, and run main.py --workspace <path>. See the repository README for details."
   },
   "footer": {
-    "beta": "Kvist is beta. There is no release version yet; the interface and the protocol can still change.",
     "license": "MIT, © 2026 Davud",
-    "repo": "Not public yet",
-    "builtWith": "This page ships no third-party requests, no analytics and no fonts from a CDN."
+    "repo": "GitHub · davud-d/Kvist",
+    "builtWith": "This page ships no third-party requests, no analytics and no fonts from a CDN.",
+    "release": "Kvist is available to install. The source code is open under the MIT license."
   },
   "guides": {
     "nav": "Guides",
