@@ -2264,11 +2264,13 @@ def _is_read_only_violation(self, command: AgentCommand) -> bool:
     if not self._state.read_only_goal:
         return False
 
-    # DevOps role: run_shell is always allowed — it's the primary devops tool
-    if self._state.current_agent_role == "devops":
+    # DevOps and universal roles: run_shell stays open — diagnosing a machine
+    # (lsusb, dmesg, journalctl) needs it, and "don't change my settings" is
+    # enforced by the approval gate for every non-read-only command.
+    if self._state.current_agent_role in {"devops", "universal"}:
         if command.action.type == "run_shell":
             return False
-        # Still block file writes for devops read-only tasks
+        # Still block file writes for read-only tasks
         if command.action.type in _WRITE_ACTIONS:
             return True
         return False

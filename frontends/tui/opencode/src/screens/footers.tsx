@@ -68,9 +68,6 @@ export function PromptFooter(props: { armed: boolean; stopArmedColor?: boolean }
           <PromptRunning armed={props.armed} color={roleColor(theme, role())} frames={spinner().frames} colors={spinner().colors} />
         </Show>
       </box>
-      <Show when={state().running && state().status?.text}>
-        <text fg={theme.text.muted} wrapMode="none" truncate flexShrink={1}>{state().status?.text}</text>
-      </Show>
       <Show when={layout().usage && usage()}>
         <text fg={theme.text.muted} wrapMode="none" flexShrink={0}>{usage()}</text>
       </Show>
