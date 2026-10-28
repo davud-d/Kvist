@@ -426,7 +426,7 @@ def test_json_plan_tools_update_then_cancel_and_release_the_task(tmp_path, monke
     assert result == "Task cancelled. The person asked to cancel"
     assert agent._state.task_cancelled
     assert agent._peek_checkpoint() is None
-    agent._run_turn = lambda goal, role, images: "new task"
+    agent._run_turn = lambda goal, role, images, *, language_text=None: "new task"
     assert agent.run("Start another task") == "new task"
 
 

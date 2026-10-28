@@ -341,7 +341,7 @@ def test_continue_does_not_resume_an_unrelated_task(agent_factory, case):
     elif case == "other_session":
         agent.new_session("other")
 
-    agent._run_turn = lambda text, routed, images: (text, routed)
+    agent._run_turn = lambda text, routed, images, *, language_text=None: (text, routed)
     assert agent.run(request, routed_role=role) == (request, role)
 
 
