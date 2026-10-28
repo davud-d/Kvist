@@ -77,6 +77,7 @@ SLASH_COMMANDS: tuple[SlashCommand, ...] = (
         "permissions",
         "Show project permission rules and explain a command's decision",
     ),
+    SlashCommand("website", "Build a website: Kvist interviews you, builds it and checks it"),
     SlashCommand("bug", "Save a local bug report for a beta tester (never sent)"),
     SlashCommand("doctor", "Check modules, frontends, provider, API keys and settings"),
     SlashCommand("strime", "Toggle streaming for the active custom provider"),

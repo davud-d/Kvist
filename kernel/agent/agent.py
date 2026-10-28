@@ -117,6 +117,7 @@ from kernel.agent.agent_web import (
 from kernel.sandbox.executor import SafeExecutor
 from kernel.agent.helpers import HelperManager
 from kernel.agent.image_generation import ImageJobs
+from kernel.agent.prompt_commands import expand_prompt_command
 from kernel.agent.scheduler import Scheduler
 from kernel.plugins.skills import SkillManager
 from kernel.plugins.resources import Owner, ResourceManager
@@ -785,13 +786,15 @@ class LocalAgent:
         if self.helpers is not None and user_goal.strip():
             self.helpers.person_wrote()
         labels = " ".join(f"[Image #{index + 1}]" for index in range(len(attachments)))
-        note_pending(self, user_goal)
-        self._journal.begin_turn(f"{user_goal} {labels}".strip())
+        typed_goal = user_goal
+        user_goal, language_text = expand_prompt_command(user_goal)
+        note_pending(self, typed_goal)
+        self._journal.begin_turn(f"{typed_goal} {labels}".strip())
         self._announce_turn_started()
         try:
             if active_task:
                 return self._resume_turn(user_goal, attachments)
-            return self._run_turn(user_goal, routed_role, attachments)
+            return self._run_turn(user_goal, routed_role, attachments, language_text=language_text)
         finally:
             self._journal.end_turn()
             self._announce_turn_finished()
@@ -834,7 +837,13 @@ class LocalAgent:
         return reply
 
     def _run_turn(
-        self, user_goal: str, routed_role: str | None, images: list[dict] | None = None, *, woken: bool = False
+        self,
+        user_goal: str,
+        routed_role: str | None,
+        images: list[dict] | None = None,
+        *,
+        woken: bool = False,
+        language_text: str | None = None,
     ) -> str:
         # Cleared before routing so a cancel requested during a previous turn
         # never aborts this one's setup.
@@ -861,7 +870,10 @@ class LocalAgent:
         self._state.response_language = (
             self._last_response_language or "en"
             if woken
-            else resolve_response_language(user_goal, previous_language=self._last_response_language)
+            else resolve_response_language(
+                user_goal if language_text is None else language_text,
+                previous_language=self._last_response_language,
+            )
         )
         self._last_response_language = self._state.response_language
         self._set_environment_facts()

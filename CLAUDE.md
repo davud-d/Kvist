@@ -394,6 +394,27 @@ parsed as a header. The chat preamble lists the same turns with `Answered:` for 
 `trim_chat_messages_to_token_limit` does the cutting. The 10-turn cap on stored entries and the
 per-output caps in `_harvest_run_outputs` still apply.
 
+### Prompt commands (`agent/prompt_commands.py`, `/website`)
+A slash command that starts a turn with a ready workflow. It is not a `STDIO_COMMANDS` entry (those run between
+turns and answer with `command_result`): the whole line travels as an ordinary goal, and `LocalAgent.run` calls
+`expand_prompt_command`, which frames it for the model ("attach the `<name>` skill and follow it"). The workflow is a
+bundled instructions skill of the same name (SKILL.md short, detail in `references/*.md`, so nothing long rides along
+with every request). The journal, `note_pending` and the screen keep **what the person typed**; the model gets the
+framed goal.
+- **The framing is English whatever the person writes, so it must not take part in language detection:**
+  `expand_prompt_command` returns `(framed, typed)` and `_run_turn(language_text=typed)` resolves the reply language from
+  `typed` (a bare `/website` has none and falls back to the session's language). The skill pages are English only; they tell
+  the model to talk in the person's language.
+- **A new prompt command needs:** the name in `PROMPT_COMMANDS`, a bundled skill of that name (+ `pyproject.toml` package
+  and package-data lines, + `bundled_skill_digests.json`), a `SLASH_COMMANDS` entry, and a `route: "goal"` entry in Ink's
+  `commands.ts` (`app.tsx` sends a goal-route line as plain text, so the claude skin shows no command echo).
+  `test_prompt_commands.py` checks the skill/slash pairing.
+- **Frontends that still reject an unknown `/name` themselves** (Glass `slash.rs`, VS Code/JetBrains panel, OpenCode,
+  Voice, ACP): `/website` is not wired there yet. The classic REPL passes an unknown slash on to `run()` and works.
+- `/website` interviews with `ask_user` (one question per call, at most six), offers a plan, builds plain static files by
+  default (commands run with no network, so a framework install usually cannot run), and checks the result in a browser.
+  Not run against a real model yet.
+
 ### Importing other agents' sessions (`session_import/`, `/export`, alias `/import`)
 One module per agent reads its on-disk format (read-only) into the neutral `ImportedSession`
 (requests, last answer, files changed, command count; never tool output): `claude_code`, `codex`,

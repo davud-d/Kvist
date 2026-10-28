@@ -82,6 +82,8 @@ packages = [
     "kernel.skills_bundled.design",
     "kernel.skills_bundled.design.references",
     "kernel.skills_bundled.desktop",
+    "kernel.skills_bundled.website",
+    "kernel.skills_bundled.website.references",
     "kernel.skills_bundled.visualize",
     "kernel.skills_bundled.visualize.references",
     "frontends.gui.electron.renderer",
@@ -113,6 +115,7 @@ kvist_web = "frontends/web-local/kvist_web"
 "kernel.skills_bundled.kvist_docs" = ["manifest.json", "SKILL.md", "references/*.md"]
 "kernel.skills_bundled.design" = ["manifest.json", "SKILL.md", "references/*.md"]
 "kernel.skills_bundled.desktop" = ["manifest.json", "SKILL.md"]
+"kernel.skills_bundled.website" = ["manifest.json", "SKILL.md", "references/*.md"]
 "kernel.skills_bundled.visualize" = ["manifest.json", "SKILL.md", "references/*.md", "*.css", "*.js"]
 "frontends.gui.electron.renderer" = ["image-attachments.js"]
 kvist_web = [

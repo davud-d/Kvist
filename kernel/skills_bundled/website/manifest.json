@@ -1,0 +1,16 @@
+{
+  "manifest_version": 1,
+  "id": "website",
+  "version": "0.1.0",
+  "plugin_api": 1,
+  "kind": "instructions",
+  "name": {"en": "Website", "ru": "Сайт"},
+  "summary": {
+    "en": "The /website workflow: look at the folder, interview the person, build a site, check it in a browser, report the assumptions.",
+    "ru": "Сценарий /website: посмотреть папку, расспросить человека, собрать сайт, проверить в браузере, назвать допущения."
+  },
+  "instructions": "SKILL.md",
+  "platforms": ["linux", "darwin", "win32"],
+  "source": {"origin": "bundled", "author": "Kvist", "revision": "0.1.0"},
+  "capabilities": {"required": []}
+}

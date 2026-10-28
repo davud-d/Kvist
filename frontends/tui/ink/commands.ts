@@ -1,8 +1,10 @@
 import type { Skin } from "./ui/theme.js"
 
 // Where a command runs: here in the UI, in the core process over the
-// `command` message (UI_API.md §8c), or only in the classic terminal.
-export type Route = "local" | "core" | "classic"
+// `command` message (UI_API.md §8c), only in the classic terminal, or as a
+// goal: the core expands `/name request` itself (kernel/agent/prompt_commands.py),
+// so the whole line travels as an ordinary request.
+export type Route = "local" | "core" | "classic" | "goal"
 
 export interface SlashCommand {
   name: string
@@ -28,6 +30,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   { name: "context", route: "core", hint: "Context size of the model and how much is used" },
   { name: "memory", route: "core", hint: "What Kvist remembers: inspect, why <id>, forget <id>, remember <text>, pause" },
   { name: "doctor", route: "core", hint: "Check modules, frontends, provider, API keys and settings" },
+  { name: "website", route: "goal", hint: "Build a website: Kvist interviews you, builds it and checks it" },
   { name: "revert", route: "core", hint: "Undo the agent's changes" },
   { name: "resume", route: "core", hint: "Continue an interrupted run" },
   { name: "provider", route: "core", hint: "Switch or configure the provider" },

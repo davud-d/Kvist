@@ -233,7 +233,8 @@ export function App(props: AppProps) {
     if (!text) return
     setHistory((old) => [...old, shown])
     void addInputHistory(props.command, props.workspace, shown)
-    if (text.startsWith("/")) {
+    // A "goal" command is an ordinary request the core expands itself.
+    if (text.startsWith("/") && routeOf(parseSlash(text)?.name ?? "") !== "goal") {
       // The reply of a command hangs off its echo, as in Claude Code.
       if (props.skin === "claude") dispatch({ type: "echo", text })
       return void runCommand(text)
