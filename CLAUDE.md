@@ -1385,7 +1385,8 @@ untrusted executable content), attested shebang interpreter identity/digest, the
 the external tool-path set, and hashes of directly selected scripts/common build files. `_execute_validated`
 requires it, repeats validation, and aborts if it changed. Parent environment inheritance is allowlisted;
 `AGENT_CHILD_ENV_ALLOW` is the explicit extension and cannot re-enable secrets or loader/startup controls. Every
-run uses a new private, verified-empty child HOME, including explicit workspace mode and the weak fallback.
+run uses a new private, verified-empty child HOME, including explicit workspace mode and the weak fallback;
+**the one exception is `sandbox="host"`, which runs with the person's real HOME** (the approval dialog says so; the person's "yes" is consent to act as them, and without it git/gh/ssh/npm report "not logged in"). The environment stays sanitized: no secret names, no `DBUS_SESSION_BUS_ADDRESS`/`SSH_AUTH_SOCK`/`XDG_*`.
 
 **Inline Python is one argument.** `_interpreter_target` returns mode `inline` for `python [safe flags] -c CODE`
 with exactly one non-empty code item; anything else with `-c` (extra arguments, `-cCODE`, `-c` after a script)

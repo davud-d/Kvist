@@ -6,6 +6,7 @@ import os
 import socket
 import sys
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -205,6 +206,20 @@ def test_host_permission_enables_discovery_without_leaking_host_path(shell, tmp_
     assert calls[0][1]["env"]["PATH"].split(os.pathsep)[0] == str(tools_dir)
     executor._rotate_child_home()
     assert str(tools_dir) not in executor._build_env(None)["PATH"].split(os.pathsep)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable fixture")
+def test_host_run_uses_the_persons_home_and_the_default_run_keeps_a_private_one(shell, tmp_path):
+    executor, gate, calls = shell
+    tool = tmp_path / "gh"
+    tool.write_text(f"#!{sys.executable}\nprint('ok')\n", encoding="utf-8")
+    tool.chmod(0o700)
+    result = executor.run(["./gh", "auth", "status"], sandbox="host", justification="Read CI status")
+    assert result.returncode == 0
+    assert calls[0][1]["env"]["HOME"] == str(Path.home())
+    assert "real HOME" in gate.requests[0][1]
+    executor._rotate_child_home()
+    assert executor._build_env(None)["HOME"] == str(executor._child_home)
 
 
 def _no_network_boundary(network):

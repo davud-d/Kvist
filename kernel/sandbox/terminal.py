@@ -305,10 +305,12 @@ class TerminalExecutor(
         if self._run_sandbox == "host":
             approved = self._ask_user and self._approvals.confirm(
                 "Host execution / Запуск вне песочницы",
-                body + "This command can access and change host files with your permissions; "
+                body + "This command can access and change host files with your permissions and runs "
+                "with your real HOME, so git, gh, ssh and similar tools act under your logins; "
                 "sandbox file masking is disabled. Network access is a separate permission.\n"
-                "Команда получит доступ к файлам системы с вашими правами. "
-                "Доступ к сети разрешается отдельно."
+                "Команда получит доступ к файлам системы с вашими правами и запустится с вашим "
+                "настоящим HOME: git, gh, ssh и подобные инструменты будут работать под вашими "
+                "логинами. Доступ к сети разрешается отдельно."
                 + (f"\n{NETWORK_UNENFORCED_NOTE}." if self._run_network_unenforced else ""),
                 "Allow this host command once? / Разрешить этот запуск вне песочницы?",
             )
@@ -1016,6 +1018,9 @@ class TerminalExecutor(
                 if part and Path(part).is_absolute()
             ]
             env["PATH"] = os.pathsep.join([*host_paths, env["PATH"]])
+            # The person approved this run as themselves; with a blank HOME git, gh, ssh and npm
+            # all report "not logged in".
+            env["HOME"] = str(Path.home())
         explicitly_allowed = _explicit_child_env_names()
         for name, value in os.environ.items():
             upper = name.upper()
