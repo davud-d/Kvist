@@ -128,6 +128,18 @@ async function turn(goal) {
     // end_session closed the conversation: its closing words, then the notice for the input's place.
     out({ type: "final", message: "This conversation is over.", user_messages: [], outcome: "incomplete", closed: true })
     out({ type: "session_ended", session_id: "chat-fake", warned_msg_id: 1, closed_msg_id: 2, reason: "abuse", closed_notice: "conversation over \u00b7 Enter \u2014 new session" })
+  } else if (goal === "words") {
+    // Words that arrive in blocks, then the call they introduce.
+    const said = "Looking at the last run of the workflow on this branch to see whether it passed and which check failed."
+    out({ type: "stream_start", stream_id: "w1" })
+    for (const end of [20, 50, said.length]) {
+      out({ type: "stream_chunk", stream_id: "w1", text: said.slice(0, end) })
+      await new Promise((resolve) => setTimeout(resolve, 110))
+    }
+    out({ type: "stream_commit", stream_id: "w1", text: said })
+    out({ type: "step", step: 1, plan_step: "edit", thought: "", user_message: "", action_type: "run_shell", action_args: { command: "echo hi" }, reasoning_seconds: 0, action_description: "Run" })
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    out({ type: "final", message: "ok", user_messages: [] })
   } else if (goal === "slow") {
     await new Promise((resolve) => setTimeout(resolve, 400))
     out({ type: "final", message: "done: slow", user_messages: [] })

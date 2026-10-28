@@ -8,7 +8,6 @@ import { createMemo, For, Match, Show, Switch, type JSX } from "solid-js"
 import type { Item } from "../../../ink/state"
 import { useConfig } from "../oc/tui/config"
 import type { KeymapCommand } from "../oc/tui/context/keymap"
-import { Spinner } from "../oc/tui/component/spinner"
 import { useTheme } from "../oc/tui/context/theme"
 import { context as renderContext } from "../oc/tui/routes/session/render-context"
 import { SESSION_SIDEBAR_WIDTH } from "../oc/tui/ui/layout"
@@ -20,6 +19,7 @@ import { Prompt, type PromptRef } from "./prompt"
 import { Sidebar, SidebarOverlay, sidebarDocked } from "./sidebar"
 import {
   Answer,
+  stillTyping,
   AssistantFooter,
   ExploredGroup,
   JobBlock,
@@ -57,6 +57,11 @@ export function visibleItems(items: readonly Item[], showDebug = false): Item[] 
   })
 }
 
+// Calls and thoughts come after the words that introduce them; they appear once those words are out.
+function heldWhileTyping(kind: Item["kind"]): boolean {
+  return kind === "tool" || kind === "step" || kind === "explored" || kind === "thought" || kind === "job"
+}
+
 function ItemRow(props: { item: Item }) {
   const item = () => props.item
   return (
@@ -65,7 +70,7 @@ function ItemRow(props: { item: Item }) {
         <UserMessage text={(item() as Extract<Item, { kind: "user" }>).text} />
       </Match>
       <Match when={item().kind === "say" || item().kind === "answer"}>
-        <Answer text={(item() as Extract<Item, { kind: "say" }>).text} />
+        <Answer text={(item() as Extract<Item, { kind: "say" }>).text} fresh={(item() as Extract<Item, { kind: "say" }>).fresh} />
       </Match>
       <Match when={item().kind === "thought"}>
         <Thought text={(item() as Extract<Item, { kind: "thought" }>).text} seconds={(item() as Extract<Item, { kind: "thought" }>).seconds} />
@@ -112,27 +117,22 @@ function LiveRows() {
   const state = kvist.state
   const counts = createMemo(() => (state().exploring ?? {}) as unknown as Record<string, number>)
   const calls = createMemo(() => state().inflight.filter((call) => !isAnswerAction(call.action)))
-  // Between the model's words, for any role: what the core says it is doing (an action role's long write
-  // shows as "Writing write_file → path · N characters"), until a thought or an answer streams in.
-  const waiting = () => state().running && !state().pending && !state().live?.thinking && !state().live?.answer.trim()
-  const statusLine = () => {
-    const status = state().status
-    return [status?.text || "Working", status?.planStep, status?.step ? `step ${status.step}` : ""].filter(Boolean).join(" · ")
-  }
   return (
     <>
-      <Show when={state().exploringNames.length}>
+      <Show when={state().exploringNames.length && !stillTyping()}>
         <box marginTop={1} flexShrink={0}>
           <ExploredGroup names={state().exploringNames} counts={counts()} completed={false} />
         </box>
       </Show>
-      <For each={calls()}>
-        {(call) => (
-          <box marginTop={1} flexShrink={0}>
-            <ToolPart part={partOfCall(call)} />
-          </box>
-        )}
-      </For>
+      <Show when={!stillTyping()}>
+        <For each={calls()}>
+          {(call) => (
+            <box marginTop={1} flexShrink={0}>
+              <ToolPart part={partOfCall(call)} />
+            </box>
+          )}
+        </For>
+      </Show>
       <Show when={state().live?.thinking}>
         <box marginTop={1} flexShrink={0}>
           <Thought text={state().live?.reasoning ?? ""} seconds={0} live />
@@ -141,11 +141,6 @@ function LiveRows() {
       <Show when={state().live?.answer.trim()}>
         <box marginTop={1} flexShrink={0}>
           <Answer text={state().live?.answer ?? ""} live />
-        </box>
-      </Show>
-      <Show when={waiting()}>
-        <box marginTop={1} flexShrink={0}>
-          <Spinner>{statusLine()}</Spinner>
         </box>
       </Show>
     </>
@@ -218,9 +213,11 @@ export function Session(props: {
             >
               <For each={items()}>
                 {(item) => (
-                  <box marginTop={1} flexShrink={0}>
-                    <ItemRow item={item} />
-                  </box>
+                  <Show when={!(stillTyping() && heldWhileTyping(item.kind))}>
+                    <box marginTop={1} flexShrink={0}>
+                      <ItemRow item={item} />
+                    </box>
+                  </Show>
                 )}
               </For>
               <LiveRows />

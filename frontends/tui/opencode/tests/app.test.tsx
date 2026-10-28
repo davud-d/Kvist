@@ -316,13 +316,34 @@ describe("a closed session", () => {
 })
 
 describe("what the core is doing", () => {
-  test("a running turn shows the core's status line until words stream in", async () => {
+  test("a running turn shows no status line of its own", async () => {
     app = await mount({ height: 40 })
     await app.waitFor("fake-fast")
     await app.type("slow")
     app.enter()
-    await app.waitFor("Reading files · inspect · step 1")
+    await app.settle(600)
+    expect(app.frame()).not.toContain("Reading files")
+    expect(app.frame()).not.toContain("inspect")
   })
+})
+
+describe("words before a call", () => {
+  test("stream in at full width and the call waits for them", async () => {
+    app = await mount({ height: 40 })
+    await app.waitFor("fake-fast")
+    await app.type("words")
+    app.enter()
+    await app.waitFor("Looking at")
+    await app.settle(150)
+    show("words-mid", app)
+    const lines = app.frame().split("\n").filter((line) => /[a-z]{3}/.test(line) && !line.includes("fake-"))
+    expect(lines.some((line) => line.includes("Looking at the last run"))).toBe(true)
+    await app.settle(1500)
+    show("words-late", app)
+    expect(app.frame()).not.toContain("whethe\n")
+    await app.waitFor("echo hi")
+    expect(app.frame()).toContain("check failed.")
+  }, 15000)
 })
 
 describe("aliases", () => {

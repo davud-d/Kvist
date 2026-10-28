@@ -5,7 +5,7 @@
 import { RGBA, TextAttributes } from "@opentui/core"
 import { useRenderer } from "@opentui/solid"
 import stripAnsi from "strip-ansi"
-import { createMemo, createSignal, For, Match, Show, Switch, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Match, onCleanup, Show, Switch, type Accessor, type JSX } from "solid-js"
 
 import { formatSeconds } from "../../../ink/format"
 import { subjectOf } from "../../../ink/approval"
@@ -467,6 +467,28 @@ export function ExploredGroup(props: { names: readonly string[]; counts: Record<
 
 // Reasoning as OpenCode's part, from the reducer's thought item.
 export function Thought(props: { text: string; seconds: number; live?: boolean }) {
+  const theme = useTheme()
+  const silent = () => !props.live && !props.text.trim()
+  return (
+    <Show when={!silent()} fallback={<ThoughtTime seconds={props.seconds} color={theme.text.feedback.warning.base} />}>
+      <ThoughtText {...props} />
+    </Show>
+  )
+}
+
+// A model that streams no reasoning still took time: one line, as OpenCode words it, so the gap has a name.
+function ThoughtTime(props: { seconds: number; color: RGBA }) {
+  const seconds = () => Math.max(1, Math.round(props.seconds))
+  return (
+    <box paddingLeft={3} flexShrink={0}>
+      <text fg={props.color} wrapMode="none">
+        ✻ Thought for {seconds()} {seconds() === 1 ? "second" : "seconds"}
+      </text>
+    </box>
+  )
+}
+
+function ThoughtText(props: { text: string; seconds: number; live?: boolean }) {
   const message = createMemo<SessionMessageAssistant>(() => ({
     id: "thought",
     type: "assistant",
@@ -483,15 +505,65 @@ export function Thought(props: { text: string; seconds: number; live?: boolean }
   return <ReasoningPart last={false} part={part()} message={{ ...message(), time: { created: 0, completed: props.live ? undefined : Math.round(props.seconds * 1000) } }} />
 }
 
-export function Answer(props: { text: string; live?: boolean }) {
+// Words reach the screen in blocks (the core sends what it has about nine times a second), so they are
+// revealed at a steady pace, as the Claude-style interface does; calls wait until the words are out.
+const REVEAL_MS = 33
+const CATCH_UP = 5
+const MAX_STEP = 24
+const MAX_LAG = 160
+
+const [typingRows, setTypingRows] = createSignal(0)
+export const stillTyping = () => typingRows() > 0
+
+// What the live answer had shown when it was committed: the settled answer continues from there.
+let lastLiveShown = ""
+
+function createTypewriter(text: Accessor<string>, start: number, live: boolean) {
+  const [revealed, setRevealed] = createSignal(Math.min(start, text().length))
+  const timer = setInterval(() => {
+    const goal = text().length
+    setRevealed((n) => (n > goal ? goal : Math.max(n + Math.min(MAX_STEP, Math.ceil((goal - n) / CATCH_UP)), goal - MAX_LAG)))
+  }, REVEAL_MS)
+  const typing = () => revealed() < text().length
+  // The row counts itself once while it is typing; a row that goes away in the same tick it finishes
+  // must still hand its count back, so the flag is the row's own, not read from `typing` at cleanup.
+  let counted = false
+  createEffect(() => {
+    const now = typing()
+    if (now === counted) return
+    counted = now
+    setTypingRows((n) => n + (now ? 1 : -1))
+  })
+  onCleanup(() => {
+    clearInterval(timer)
+    if (!counted) return
+    counted = false
+    setTypingRows((n) => n - 1)
+  })
+  const shown = () => text().slice(0, revealed())
+  if (live) createEffect(() => (lastLiveShown = shown()))
+  return { shown, typing }
+}
+
+export function Answer(props: { text: string; live?: boolean; fresh?: boolean }) {
+  const [start] = createSignal(
+    props.fresh && props.text.startsWith(lastLiveShown) ? lastLiveShown.length : 0,
+  )
+  if (props.fresh) lastLiveShown = ""
+  const gradual = props.live || props.fresh
+  const reveal = gradual ? createTypewriter(() => props.text, start(), Boolean(props.live)) : null
+  const shown = () => (reveal ? reveal.shown() : props.text)
+  // A markdown block that is not streaming does not re-measure when its text grows: it wraps at the width of
+  // the first few words. It counts as streaming until the last word is out.
+  const writing = () => Boolean(props.live) || Boolean(reveal?.typing())
   const message = createMemo<SessionMessageAssistant>(() => ({
     id: "answer",
     type: "assistant",
     agent: "",
     model: { providerID: "", id: "" },
-    time: { created: 0, completed: props.live ? undefined : 1 },
+    time: { created: 0, completed: writing() ? undefined : 1 },
   }))
-  const part = createMemo<SessionMessageAssistantText>(() => ({ type: "text", id: "answer", text: props.text }))
+  const part = createMemo<SessionMessageAssistantText>(() => ({ type: "text", id: "answer", text: shown() }))
   return <TextPart last={false} part={part()} message={message()} />
 }
 
