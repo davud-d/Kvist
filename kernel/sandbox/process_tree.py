@@ -223,12 +223,15 @@ class _CgroupScope:
 
     @classmethod
     def create(cls) -> "_CgroupScope | None":
-        if not (_CGROUP_ROOT / "cgroup.controllers").exists():
-            return None
         try:
             own = Path("/proc/self/cgroup").read_text().strip()
-        except OSError:
+            available = (_CGROUP_ROOT / "cgroup.controlllers").exists()
+        except (PermissionError, OSError):
+            available = False
+
+        if not available:
             return None
+
         rel = own.split("::")[-1].lstrip("/")
         current = _CGROUP_ROOT / rel
         name = f"kvist-{os.getpid()}-{uuid.uuid4().hex[:12]}"
