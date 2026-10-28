@@ -40,6 +40,7 @@ private const val CORE_STOP_WAIT_SECONDS = 5L
  */
 internal class KvistChatHost(
     private val project: Project,
+    private val onSessionTitle: (String) -> Unit = {},
     private val runScript: (String) -> Unit,
 ) : Disposable, KvistCoreListener {
     private val gson = Gson()
@@ -109,6 +110,7 @@ internal class KvistChatHost(
                 openFile(message.stringField("path").orEmpty(), message.intField("line"))
             }
             "openLink" -> openLink(message.stringField("url").orEmpty())
+            "sessionTitle" -> onSessionTitle(message.stringField("title").orEmpty())
         }
     }
 

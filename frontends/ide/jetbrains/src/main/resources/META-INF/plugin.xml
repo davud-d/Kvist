@@ -30,6 +30,10 @@
             factoryClass="com.kvist.intellij.chat.KvistToolWindowFactory"
         />
         <fileEditorProvider implementation="com.kvist.intellij.editor.KvistPageEditorProvider" />
+        <fileIconProvider implementation="com.kvist.intellij.editor.KvistPageIconProvider" order="first" />
+        <iconProvider implementation="com.kvist.intellij.editor.KvistPageIconProvider" order="first, before IconProvider" />
+        <editorTabTitleProvider implementation="com.kvist.intellij.editor.KvistPageTabTitleProvider" order="first" />
+        <fileType name="Kvist" implementationClass="com.kvist.intellij.editor.KvistPageFileType" fieldName="INSTANCE" fileNames="Kvist" />
         <inline.completion.provider implementation="com.kvist.intellij.completion.KvistInlineCompletionProvider" />
     </extensions>
 

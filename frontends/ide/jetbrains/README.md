@@ -282,12 +282,21 @@ scoped to the editor page, so the compact tool window keeps its own layout.
 `KvistWebviewPage` inlines the compiled bundle with the existing content security
 policy. The old `kvist-page/index.html` scaffold is no longer loaded.
 
-The workspace has a session sidebar, starter prompts, a translucent composer,
-Catppuccin Mocha/Latte colours and reduced-motion support. Below 620 px the sidebar
-folds away; sessions and settings remain available in the header. If JCEF is
-unavailable, the editor shows a message explaining the requirement.
+The workspace opens on a home screen: the Kvist mark, the project name, four groups of
+starter requests (Code, Documents, Automation, Build) written as results rather than
+tools, the latest sessions to continue, and what Kvist promises about risky commands,
+`.env` files and `/revert`. A starter only fills the composer; nothing is sent until the
+person presses Enter. The page takes its colours from the IDE theme and adds Kvist's
+cyan; text follows the IDE locale (English or Russian). The header carries the project,
+the session picker, Changes (`/changes`), New session and Settings. The editor tab is titled
+"Kvist | <session name>" (`KvistPageTabTitleProvider`; the page reports the name with a
+`sessionTitle` message) and, with the breadcrumbs, shows the coloured Kvist icon (`KvistPageFileType` and `KvistPageIconProvider`; IDE versions differ in which of the two the tab asks).
+Settings open as their own page (`settingsPage.tsx`): a section list on the left, then Connection,
+Behavior, Safety and Advanced, each control next to its current value, with roles, thinking depth and
+the sandbox named in plain words. The compact tool window keeps the narrow `settings.tsx` list. If JCEF is unavailable,
+the editor shows a message explaining the requirement.
 
-The workspace uses the existing Kvist SVG wordmark and Lucide controls. File and
+The workspace uses the Kvist mark and Lucide controls. File and
 action rows use 51 original Catppuccin icons in both flavours, including live
 reads, explored history, edits, folder listings and shell commands. Unknown file
 types fall back to the generic file icon. SVGs are bundled as data URLs, so icons

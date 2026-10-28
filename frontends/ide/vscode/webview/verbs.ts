@@ -11,6 +11,8 @@ const VERBS: Record<string, string> = {
   web_search: "Searched the web",
   fetch_url: "Fetched",
   delegate_task: "Delegated a task",
+  job_output: "Checked a background command",
+  job_stop: "Stopped a background command",
 }
 
 export const verbOf = (action: string): string => VERBS[action] ?? action

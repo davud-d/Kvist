@@ -67,7 +67,7 @@ export function ScreenStrip({ screen, stream, onOpen }: { screen: { title: strin
   )
 }
 
-export function JobStrip({ jobs, russian, now }: { jobs: readonly JobView[]; russian: boolean; now: number }) {
+export function JobStrip({ jobs, russian, now, compact = false }: { jobs: readonly JobView[]; russian: boolean; now: number; compact?: boolean }) {
   const running = jobs.filter((job) => job.status === "running")
   if (running.length === 0) return null
   const copy = jobsCopy(russian)
@@ -75,7 +75,7 @@ export function JobStrip({ jobs, russian, now }: { jobs: readonly JobView[]; rus
   return (
     <div class="jobs" aria-label={copy.running}>
       {shown.map((job) => {
-        const lines = outputLines(job.output).slice(-TAIL_LINES)
+        const lines = outputLines(job.output).slice(compact ? -1 : -TAIL_LINES)
         return (
           <div key={job.id} class="job">
             <div class="job-head">

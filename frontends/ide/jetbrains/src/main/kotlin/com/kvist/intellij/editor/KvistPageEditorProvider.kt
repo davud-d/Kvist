@@ -1,9 +1,11 @@
 package com.kvist.intellij.editor
 
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.fileEditor.FileEditor
 import com.intellij.openapi.fileEditor.FileEditorPolicy
 import com.intellij.openapi.fileEditor.FileEditorProvider
 import com.intellij.openapi.fileEditor.FileEditorState
+import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -30,13 +32,20 @@ private class KvistPageEditor(private val project: Project, private val pageFile
             if (!JBCefApp.isSupported()) {
                 return JBLabel("Kvist requires an IDE runtime with JCEF. / Для Kvist требуется JCEF.")
             }
-            val panel = KvistChatPanel(project, workspacePage = true)
+            val panel = KvistChatPanel(project, workspacePage = true, onSessionTitle = ::showSessionTitle)
             Disposer.register(this, panel)
             return panel.component
         }
         catch (error: NoClassDefFoundError) {
             return JBLabel("Enable Web Browser (JCEF) in Settings | Plugins and restart the IDE. / Включите плагин JCEF.")
         }
+    }
+
+    private fun showSessionTitle(title: String) {
+        val file = pageFile as? KvistPageFile ?: return
+        if (file.sessionTitle == title) return
+        file.sessionTitle = title
+        ApplicationManager.getApplication().invokeLater({ FileEditorManagerEx.getInstanceEx(project).updateFilePresentation(file) }, project.disposed)
     }
 
     override fun getComponent() = view

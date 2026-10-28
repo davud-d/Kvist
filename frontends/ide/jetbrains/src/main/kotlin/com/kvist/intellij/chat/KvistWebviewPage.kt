@@ -2,6 +2,7 @@ package com.kvist.intellij.chat
 
 import com.google.gson.Gson
 import com.intellij.openapi.editor.colors.EditorColorsManager
+import com.intellij.openapi.util.text.StringUtil
 import com.intellij.ui.ColorUtil
 import com.intellij.ui.JBColor
 import com.intellij.ui.scale.JBUIScale
@@ -23,7 +24,7 @@ internal object KvistWebviewPage {
     private val random = SecureRandom()
 
     /** [postCall] is JavaScript that sends the string variable `json` to the plugin. */
-    fun html(postCall: String, workspacePage: Boolean = false): String {
+    fun html(postCall: String, workspacePage: Boolean = false, projectName: String = ""): String {
         val script = inlineSafe(resource("webview.js"), "script")
         val style = inlineSafe(resource("webview.css"), "style")
         val logo = "data:image/png;base64," + Base64.getEncoder().encodeToString(resourceBytes("kvist-logo.png"))
@@ -44,7 +45,7 @@ internal object KvistWebviewPage {
 <title>Kvist</title>
 </head>
 <body class="${if (workspacePage) "workspace-page" else ""}">
-<div id="root" data-logo="$logo" data-layout="${if (workspacePage) "workspace" else "panel"}"></div>
+<div id="root" data-logo="$logo" data-layout="${if (workspacePage) "workspace" else "panel"}" data-project="${StringUtil.escapeXmlEntities(projectName)}"></div>
 <script nonce="$nonce">${bridge(postCall)}</script>
 <script nonce="$nonce">$script</script>
 </body>

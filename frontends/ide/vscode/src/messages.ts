@@ -68,4 +68,6 @@ export type ToHost =
     | { type: 'listModels'; provider: string; apiKey: string }
     | { type: 'openRegistration'; provider: string }
     | { type: 'openFile'; path: string; line: number | null }
-    | { type: 'openLink'; url: string };
+    | { type: 'openLink'; url: string }
+    // The session on screen, "" while it has no name yet: a host may show it next to its own title.
+    | { type: 'sessionTitle'; title: string };

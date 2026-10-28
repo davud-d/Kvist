@@ -1,22 +1,27 @@
-import workspaceLogo from "../../../gui/electron/renderer/kvist-logo.svg"
+import workspaceMark from "../../../gui/electron/renderer/kvist-mark.svg"
 import { readImages, imageGoal, MAX_IMAGES, type ImageAttachment } from "../../../gui/electron/renderer/image-attachments.js"
+import { FolderOpen, History } from "lucide-preact"
 import { useEffect, useMemo, useReducer, useRef, useState } from "preact/hooks"
 
 import { COMMANDS, parseSlash, routeOf, sessionArgs, suggest } from "../../../tui/ink/commands"
 import { contextLabel, formatSeconds, formatTokens, outputLines } from "../../../tui/ink/format"
 import { actionTarget, exploreSummary, initialState, lastInflight, reduce, requestIsRussian } from "../../../tui/ink/state"
-import type { ConfigInfo, ProviderInfo, SessionInfo, ToWebview } from "../src/messages"
+import { findProvider, type ConfigInfo, type ProviderInfo, type SessionInfo, type ToWebview } from "../src/messages"
 import { Dialog, type Answer } from "./dialog"
 import { FirstRun, type ModelListState, type RegistrationState } from "./firstRun"
 import { CursorGlow } from "./glow"
+import { Home } from "./home"
 import { Icon, Ring } from "./icons"
+import { KvistMark } from "./mark"
 import { JobStrip, ScreenStrip } from "./jobs"
+import { plainStatus } from "./jobText"
 import { opensNewSession } from "./closed"
 import { onMessage, post } from "./host"
 import { Markdown } from "./markdown"
 import { NO_METRICS, shortSeconds, trackMetrics, type TurnMetrics } from "./metrics"
 import { RecentSessions } from "./sessions"
 import { Settings } from "./settings"
+import { SettingsPage } from "./settingsPage"
 import { ActivityGroup, isActivity, type ActivityItem } from "./activity"
 import { HIDDEN_STEPS, ShellCard, Thinking, TranscriptItem, Working, commandLine } from "./transcript"
 import { verbOf } from "./verbs"
@@ -24,7 +29,10 @@ import { verbOf } from "./verbs"
 // The terminal-only commands make no sense inside an editor panel.
 const PANEL_COMMANDS = COMMANDS.filter((command) => command.name !== "tui" && command.name !== "quit")
 const workspacePage = document.getElementById("root")?.dataset.layout === "workspace"
-const logoUrl = workspacePage ? workspaceLogo : document.getElementById("root")?.dataset.logo ?? ""
+const logoUrl = workspacePage ? workspaceMark : document.getElementById("root")?.dataset.logo ?? ""
+const projectName = document.getElementById("root")?.dataset.project ?? ""
+// The IDE page has no language setting of its own; the page follows the IDE's locale.
+const russianUi = /^ru/i.test(navigator.language)
 const STARTERS = ["Explain this project", "Review my uncommitted changes", "Find and fix failing tests"]
 const HELP = PANEL_COMMANDS.map((command) => `/${command.name} — ${command.hint}`).join("\n")
 
@@ -270,6 +278,8 @@ export function App() {
   const recent = items.filter((item) => item.name !== active)
   // The core's hello leaves an invisible banner item, so the chat counts as empty with only that.
   const isEmpty = !state.live && state.items.every((item) => item.kind === "banner")
+  const sessionTitle = isEmpty ? "" : items.find((item) => item.name === active)?.title ?? state.info.title ?? ""
+  useEffect(() => post({ type: "sessionTitle", title: sessionTitle }), [sessionTitle])
   const usage = contextLabel(state.usage.context, state.usage.limit)
   const contextShare = state.usage.limit > 0 ? state.usage.context / state.usage.limit : 0
   const elapsed = state.startedAt ? formatSeconds((Date.now() - state.startedAt) / 1000) : ""
@@ -307,6 +317,8 @@ export function App() {
     }
     for (const item of visible) {
       if (item.kind === "step" && HIDDEN_STEPS.has(item.action)) continue
+      // What the model was told about its background jobs is plumbing; it stays in the debug view.
+      if (item.kind === "job_notice" && !state.showDebug) continue
       if (isActivity(item)) {
         group.push(item)
         continue
@@ -337,6 +349,24 @@ export function App() {
     )
   }
 
+  if (view === "settings" && workspacePage) {
+    return (
+      <SettingsPage
+        russian={russianUi}
+        config={config}
+        provider={state.info.provider}
+        model={state.info.model}
+        role={state.info.role || "auto"}
+        effort={effort}
+        environment={environment}
+        busy={busy}
+        run={runCommand}
+        applyEnvironment={applyEnvironment}
+        close={() => setView("chat")}
+      />
+    )
+  }
+
   if (view === "settings") {
     return (
       <>
@@ -358,18 +388,15 @@ export function App() {
 
   return (
     <div class={`app ${workspacePage ? `workspace-app ${isEmpty ? "workspace-idle" : ""}` : ""}`}>
-      {workspacePage ? <aside class="workspace-nav" aria-label="Sessions">
-        <div class="workspace-brand"><img class="workspace-wordmark" src={logoUrl} alt="Kvist" /> <span class="workspace-badge">IDE</span></div>
-        <button class="workspace-new" disabled={busy} onClick={() => runCommand("new")}><Icon name="add" /> New session</button>
-        <div class="workspace-history">
-          <RecentSessions items={items} disabled={busy} open={(name) => runCommand("session", [name])} />
-          {!items.length ? <p class="workspace-empty">No sessions yet.</p> : null}
-        </div>
-        <button class="workspace-settings" onClick={() => setView("settings")}><Icon name="settings" /> Settings</button>
-        <div class="workspace-footnote">Kvist for JetBrains</div>
-      </aside> : null}
       <CursorGlow />
       <header class="header">
+        {workspacePage ? (
+          <div class="brand">
+            <KvistMark size={22} still />
+            <span class="brand-name">Kvist</span>
+            {projectName ? <span class="brand-project" title={projectName}><FolderOpen size={14} strokeWidth={1.65} aria-hidden="true" /><span>{projectName}</span></span> : null}
+          </div>
+        ) : null}
         <label class="session-picker" title="Switch session">
           <span class="session-current">{isEmpty ? "New session" : (items.find((item) => item.name === active)?.title ?? active)}</span>
           <Icon name="chevron" size={14} />
@@ -384,6 +411,7 @@ export function App() {
             ))}
           </select>
         </label>
+        {workspacePage ? <button class="icon" title="Files Kvist changed: review them or undo with /revert" disabled={busy} onClick={() => runCommand("changes")}><History size={16} strokeWidth={1.65} aria-hidden="true" /></button> : null}
         <button class="icon" title="New session" disabled={busy} onClick={() => runCommand("new")}><Icon name="add" /></button>
         <button class="icon" title="Settings" onClick={() => setView("settings")}><Icon name="settings" /></button>
       </header>
@@ -391,20 +419,33 @@ export function App() {
       <main class="transcript">
         {isEmpty ? (
           <>
-            {!workspacePage ? <RecentSessions items={recent} disabled={busy} open={(name) => runCommand("session", [name])} /> : null}
-            <div class="welcome">
-              <div class="logo-wrap" style={{ "--logo": `url(${logoUrl})` }}>
-                <img class="logo" src={logoUrl} alt="Kvist" />
-                <div class="logo-sheen" />
-              </div>
-              <div class="welcome-title">{workspacePage ? "What are we building?" : "What should Kvist work on?"}</div>
-              {workspacePage ? <p class="welcome-subtitle">A small change. A difficult bug. Your next big thing.</p> : null}
-              <div class="starters">
-                {STARTERS.map((starter) => (
-                  <button key={starter} class="starter" disabled={busy} onClick={() => { setText(starter); input.current?.focus() }}>{workspacePage ? <Icon name={["scan", "review", "test"][STARTERS.indexOf(starter)]} size={16} /> : null}{starter}</button>
-                ))}
-              </div>
-            </div>
+            {workspacePage ? (
+              <Home
+                russian={russianUi}
+                project={projectName}
+                provider={(config && findProvider(config, state.info.provider)?.label) || state.info.provider}
+                sessions={recent}
+                disabled={busy}
+                pick={(prompt) => { setText(prompt); input.current?.focus() }}
+                open={(name) => runCommand("session", [name])}
+              />
+            ) : (
+              <>
+                <RecentSessions items={recent} disabled={busy} open={(name) => runCommand("session", [name])} />
+                <div class="welcome">
+                  <div class="logo-wrap" style={{ "--logo": `url(${logoUrl})` }}>
+                    <img class="logo" src={logoUrl} alt="Kvist" />
+                    <div class="logo-sheen" />
+                  </div>
+                  <div class="welcome-title">What should Kvist work on?</div>
+                  <div class="starters">
+                    {STARTERS.map((starter) => (
+                      <button key={starter} class="starter" disabled={busy} onClick={() => { setText(starter); input.current?.focus() }}>{starter}</button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </>
         ) : null}
         {feed}
@@ -429,14 +470,14 @@ export function App() {
           </div>
         ) : null}
         <ScreenStrip screen={state.screen} stream={state.screen?.stream ?? ""} onOpen={(url) => post({ type: "openLink", url })} />
-        <JobStrip jobs={state.jobs} russian={requestIsRussian(state)} now={Date.now()} />
+        <JobStrip jobs={state.jobs} russian={requestIsRussian(state)} now={Date.now()} compact={workspacePage} />
         {state.running || metrics.thinking > 0 || metrics.tokensPerSecond ? (
           <div class="strip">
-            {state.running ? <span class="shimmer strip-status">{state.status?.text ?? "Working"}</span> : null}
+            {state.running ? <span class="shimmer strip-status">{workspacePage && state.status ? plainStatus(state.status.text, requestIsRussian(state)) : state.status?.text ?? "Working"}</span> : null}
             {state.running ? <span>{elapsed}</span> : null}
-            {state.running && state.status?.step ? <span>Step {state.status.step}</span> : null}
+            {state.running && state.status?.step && !workspacePage ? <span>Step {state.status.step}</span> : null}
             {metrics.thinking > 0 ? <span>Thought for {shortSeconds(metrics.thinking)}</span> : null}
-            {metrics.tokensPerSecond ? <span title="Estimated from output tokens and call time">≈{Math.round(metrics.tokensPerSecond)} tokens/s</span> : null}
+            {metrics.tokensPerSecond && !workspacePage ? <span title="Estimated from output tokens and call time">≈{Math.round(metrics.tokensPerSecond)} tokens/s</span> : null}
           </div>
         ) : null}
         {state.closed !== null ? (
@@ -471,7 +512,7 @@ export function App() {
             ref={input}
             rows={1}
             disabled={busy || state.pending !== null}
-            placeholder={busy ? "Working…" : "Ask Kvist, or type / for commands"}
+            placeholder={workspacePage && russianUi ? (busy ? "Работаю…" : "Опишите задачу или введите / для команд") : busy ? "Working…" : "Ask Kvist, or type / for commands"}
             value={text}
             onInput={(event) => {
               setText((event.target as HTMLTextAreaElement).value)
@@ -505,7 +546,7 @@ export function App() {
           </div>
         </div>
         )}
-        {workspacePage ? <div class="composer-hint">Enter to send <span>Shift + Enter for a new line</span></div> : null}
+        {workspacePage ? <div class="composer-hint">{russianUi ? "Enter — отправить" : "Enter to send"} <span>{russianUi ? "Shift + Enter — новая строка" : "Shift + Enter for a new line"}</span></div> : null}
       </footer>
     </div>
   )

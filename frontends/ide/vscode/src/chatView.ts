@@ -97,6 +97,9 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.applyEnvironment(message.env);
             case 'getConfig':
                 return this.sendConfig();
+            case 'sessionTitle':
+                if (this.view) this.view.description = message.title || undefined;
+                return;
             case 'getSessions':
                 return this.sendSessions();
             case 'getHistory':

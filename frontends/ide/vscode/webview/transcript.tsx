@@ -10,6 +10,7 @@ import { Markdown } from "./markdown"
 import { turnSlice, turnToText } from "./export"
 import { classifyRun, worseOf, type Tone } from "./outcome"
 import { jobFailed, jobLabel, jobsCopy } from "./jobs"
+import { gistOf, jobOutcome } from "./jobText"
 import { verbOf } from "./verbs"
 
 type ToolItem = Extract<Item, { kind: "tool" }>
@@ -243,11 +244,30 @@ export function ShellCard({ args, result, startedAt, live }: ShellProps) {
   )
 }
 
+// The editor page tells how a background command went in words and keeps its output one click away.
+function JobOutcome({ item, failed, shown, earlier }: { item: Extract<Item, { kind: "job" }>; failed: boolean; shown: string[]; earlier: number }) {
+  const copy = jobsCopy(item.russian)
+  const gist = gistOf(item.output)
+  return (
+    <details class={`outcome ${failed ? "bad" : "ok"}`}>
+      <summary class="outcome-line">
+        <span class="outcome-mark"><Icon name={failed ? "cross" : "check"} size={13} /></span>
+        <span class="outcome-title" title={item.command.join(" ")}>{jobLabel(item)}</span>
+        <span class="outcome-state">{jobOutcome(item.status, item.exitCode, item.russian)} · {formatSeconds(item.seconds)}</span>
+        {shown.length > 0 ? <span class="act-chev"><Icon name="chevron" size={11} /></span> : null}
+        {gist ? <span class="outcome-gist">{gist}</span> : null}
+      </summary>
+      {shown.length > 0 ? <pre class="outcome-out">{earlier > 0 ? `${copy.earlier(earlier)}\n` : ""}{shown.join("\n")}</pre> : null}
+    </details>
+  )
+}
+
 // A background job that ended. The running ones live in the strip above the composer.
 function JobCard({ item }: { item: Extract<Item, { kind: "job" }> }) {
   const copy = jobsCopy(item.russian)
   const failed = jobFailed(item.status, item.exitCode)
   const { shown, earlier } = tailLines(item.output, OUTPUT_LINES)
+  if (document.getElementById("root")?.dataset.layout === "workspace") return <JobOutcome item={item} failed={failed} shown={shown} earlier={earlier} />
   return (
     <div class="work">
       <Node kind={failed ? "bad" : "ok"} />

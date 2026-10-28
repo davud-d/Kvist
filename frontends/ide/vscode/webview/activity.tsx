@@ -81,6 +81,8 @@ function subjectOf(action: string, args: Record<string, unknown>, detail: string
     return <><Name path={paths[0]} />{paths.length > 1 ? <span class="act-dir">and {paths.length - 1} more</span> : null}</>
   }
   if (action === "search_code" || action === "find_files" || action === "web_search") return <span class="act-query">{detail}</span>
+  // A background command is named by an id nobody typed; the verb already says which kind of step this is.
+  if (action === "job_output" || action === "job_stop") return null
   return <Name path={detail} />
 }
 
@@ -108,7 +110,7 @@ function shellRow(item: ToolItem): Row {
   return {
     key: `tool-${item.id}`, category: "run", weight: 1, path: "", icon: "terminal", verb: "",
     subject: <span class="act-command" title={command}>{command}</span>,
-    meta: code !== null && code !== 0 ? <span class="act-chip bad">exit {code}</span> : null,
+    meta: code !== null && code !== 0 ? <span class="act-chip bad" title={`exit ${code}`}>failed</span> : null,
     body: hasBody ? body : null,
     failed,
   }
@@ -181,7 +183,7 @@ function lineRow(item: ToolItem): Row {
   return {
     key: `tool-${item.id}`, category, weight, path: "", icon: ICON[category], verb: verbOf(action),
     subject: subjectOf(action, args, detail),
-    meta: result.ok && !DETAIL_IS_SUMMARY.has(action) && result.summary ? <span class="act-meta-text">{result.summary}</span> : null,
+    meta: result.ok && !DETAIL_IS_SUMMARY.has(action) && !action.startsWith("job_") && result.summary ? <span class="act-meta-text">{result.summary}</span> : null,
     body,
     failed: !result.ok,
   }

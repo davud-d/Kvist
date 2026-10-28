@@ -39,7 +39,7 @@ interface Props {
   close: () => void
 }
 
-function Row({ title, hint, children }: { title: string; hint?: string; children?: preact.ComponentChildren }) {
+export function Row({ title, hint, children }: { title: string; hint?: string; children?: preact.ComponentChildren }) {
   return (
     <div class="row">
       <div class="row-text">
@@ -51,34 +51,69 @@ function Row({ title, hint, children }: { title: string; hint?: string; children
   )
 }
 
-function Segmented({ options, value, disabled, pick }: { options: readonly string[]; value: string; disabled: boolean; pick: (value: string) => void }) {
+export function Segmented({ options, value, disabled, pick, labels }: { options: readonly string[]; value: string; disabled: boolean; pick: (value: string) => void; labels?: Record<string, string> }) {
   return (
     <div class="segmented" role="radiogroup">
       {options.map((option) => (
         <button key={option} role="radio" aria-checked={option === value} class={option === value ? "on" : ""} disabled={disabled} onClick={() => option !== value && pick(option)}>
-          {EFFORT_LABELS[option] ?? option}
+          {labels?.[option] ?? EFFORT_LABELS[option] ?? option}
         </button>
       ))}
     </div>
   )
 }
 
-function Environment({ environment, busy, apply }: { environment: Record<string, string>; busy: boolean; apply: (environment: Record<string, string>) => void }) {
+const SANDBOX_HINTS_RU: Record<string, string> = {
+  auto: "Использует Bubblewrap, если он установлен",
+  workspace: "Команды выполняются прямо на этом компьютере: без изоляции Bubblewrap, секреты не скрыты, папка .kvist не защищена",
+  bubblewrap: "Команды оболочки блокируются, если Bubblewrap не найден",
+}
+
+interface EnvironmentProps {
+  environment: Record<string, string>
+  busy: boolean
+  apply: (environment: Record<string, string>) => void
+  russian?: boolean
+  // Words instead of the variable's raw values, for people who have never seen a sandbox.
+  plain?: boolean
+}
+
+// A choice equal to the core's default is not stored, so "auto" and "deny" leave the variable unset.
+function chooseVariable(environment: Record<string, string>, apply: EnvironmentProps["apply"], name: string, value: string, fallback: string): void {
+  const next = { ...environment }
+  if (value === fallback) delete next[name]
+  else next[name] = value
+  apply(next)
+}
+
+export function SandboxRows({ environment, busy, apply, russian = false, plain = false }: EnvironmentProps) {
+  const mode = environment[SANDBOX_MODE] ?? "auto"
+  const net = environment[SANDBOX_NET] ?? "deny"
+  const hints = russian ? SANDBOX_HINTS_RU : SANDBOX_HINTS
+  const t = (en: string, ru: string) => (russian ? ru : en)
+  const modeLabels = plain ? { auto: t("Auto", "Авто"), workspace: t("None", "Без изоляции"), bubblewrap: t("Strict", "Строго") } : undefined
+  const netLabels = plain ? { deny: t("Blocked", "Запрещена"), allow: t("Allowed", "Разрешена") } : undefined
+  return (
+    <>
+      <div class="row stack">
+        <div class="row-title">{russian ? "Изоляция команд" : "Command sandbox"}</div>
+        <Segmented options={SANDBOX_MODES} value={mode} labels={modeLabels} disabled={busy} pick={(value) => chooseVariable(environment, apply, SANDBOX_MODE, value, "auto")} />
+        <div class={`row-hint ${mode === "workspace" ? "caution" : ""}`}>{hints[mode]}</div>
+      </div>
+      <div class="row stack">
+        <div class="row-title">{russian ? "Сеть для команд" : "Network for commands"}</div>
+        <Segmented options={SANDBOX_NETS} value={net} labels={netLabels} disabled={busy} pick={(value) => chooseVariable(environment, apply, SANDBOX_NET, value, "deny")} />
+        <div class="row-hint">{russian ? "Работает только внутри Bubblewrap" : "Applies inside Bubblewrap only"}</div>
+      </div>
+    </>
+  )
+}
+
+export function VariableRows({ environment, busy, apply, russian = false }: EnvironmentProps) {
   const [draft, setDraft] = useState<Variables>(customVariables(environment))
   useEffect(() => setDraft(customVariables(environment)), [JSON.stringify(environment)])
 
-  const mode = environment[SANDBOX_MODE] ?? "auto"
-  const net = environment[SANDBOX_NET] ?? "deny"
   const managed = (): Record<string, string> => Object.fromEntries(Object.entries(environment).filter(([name]) => name === SANDBOX_MODE || name === SANDBOX_NET))
-
-  // A choice equal to the core's default is not stored, so "auto" and "deny" leave the variable unset.
-  const choose = (name: string, value: string, fallback: string) => {
-    const next = { ...environment }
-    if (value === fallback) delete next[name]
-    else next[name] = value
-    apply(next)
-  }
-
   const names = draft.map(([name]) => name.trim())
   const invalid = names.some((name) => name !== "" && !VARIABLE_NAME.test(name))
   const saved = JSON.stringify(customVariables(environment))
@@ -92,35 +127,36 @@ function Environment({ environment, busy, apply }: { environment: Record<string,
     setDraft((rows) => rows.map((row, i) => (i === index ? (part === 0 ? [value, row[1]] : [row[0], value]) : row)))
 
   return (
+    <div class="row stack">
+      <div class="row-title">{russian ? "Переменные окружения" : "Other variables"}</div>
+      {draft.map(([name, value], index) => (
+        <div key={index} class="variable">
+          <input class="field name" placeholder="NAME" value={name} disabled={busy} onInput={(event) => edit(index, 0, (event.target as HTMLInputElement).value)} />
+          <input class="field" placeholder={russian ? "значение" : "value"} value={value} disabled={busy} onInput={(event) => edit(index, 1, (event.target as HTMLInputElement).value)} />
+          <button class="icon" title={russian ? "Удалить" : "Remove"} disabled={busy} onClick={() => setDraft(draft.filter((_, i) => i !== index))}><Icon name="cross" /></button>
+        </div>
+      ))}
+      {invalid ? <div class="row-hint caution">{russian ? "Имя может содержать буквы, цифры и подчёркивание и не начинается с цифры" : "Names may use letters, digits and underscores, and cannot start with a digit"}</div> : null}
+      <div class="row-hint">
+        {russian
+          ? "Применяются при перезапуске ядра, он произойдёт сразу после «Применить». Хранятся открытым текстом, ключи API держите в настройках провайдера."
+          : "Applied when the core restarts, which happens as soon as you apply. Stored in plain text, so keep API keys in the provider settings."}
+      </div>
+      <div class="buttons">
+        <button class="btn" disabled={busy} onClick={() => setDraft([...draft, ["", ""]])}>{russian ? "Добавить переменную" : "Add variable"}</button>
+        <button class="btn primary" disabled={busy || invalid || !changed} onClick={save}>{russian ? "Применить и перезапустить" : "Apply and restart"}</button>
+      </div>
+    </div>
+  )
+}
+
+function Environment(props: EnvironmentProps) {
+  return (
     <>
       <div class="group-title">Environment</div>
       <div class="group">
-        <div class="row stack">
-          <div class="row-title">Command sandbox</div>
-          <Segmented options={SANDBOX_MODES} value={mode} disabled={busy} pick={(value) => choose(SANDBOX_MODE, value, "auto")} />
-          <div class={`row-hint ${mode === "workspace" ? "caution" : ""}`}>{SANDBOX_HINTS[mode]}</div>
-        </div>
-        <div class="row stack">
-          <div class="row-title">Network for commands</div>
-          <Segmented options={SANDBOX_NETS} value={net} disabled={busy} pick={(value) => choose(SANDBOX_NET, value, "deny")} />
-          <div class="row-hint">Applies inside Bubblewrap only</div>
-        </div>
-        <div class="row stack">
-          <div class="row-title">Other variables</div>
-          {draft.map(([name, value], index) => (
-            <div key={index} class="variable">
-              <input class="field name" placeholder="NAME" value={name} disabled={busy} onInput={(event) => edit(index, 0, (event.target as HTMLInputElement).value)} />
-              <input class="field" placeholder="value" value={value} disabled={busy} onInput={(event) => edit(index, 1, (event.target as HTMLInputElement).value)} />
-              <button class="icon" title="Remove" disabled={busy} onClick={() => setDraft(draft.filter((_, i) => i !== index))}><Icon name="cross" /></button>
-            </div>
-          ))}
-          {invalid ? <div class="row-hint caution">Names may use letters, digits and underscores, and cannot start with a digit</div> : null}
-          <div class="row-hint">Applied when the core restarts, which happens as soon as you apply. Stored in plain text, so keep API keys in the provider settings.</div>
-          <div class="buttons">
-            <button class="btn" disabled={busy} onClick={() => setDraft([...draft, ["", ""]])}>Add variable</button>
-            <button class="btn primary" disabled={busy || invalid || !changed} onClick={save}>Apply and restart</button>
-          </div>
-        </div>
+        <SandboxRows {...props} />
+        <VariableRows {...props} />
       </div>
     </>
   )
