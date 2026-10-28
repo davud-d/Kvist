@@ -3242,13 +3242,14 @@ def _config_dir_inside(workspace: Path) -> Path | None:
 
 def _background_note(max_seconds: float, network: bool, outlives_answer: bool) -> str:
     after = (
-        "If you give your final answer while it runs, it keeps running, and when it ends you get "
-        "its result as a new turn: to wait for it without blocking, say so and answer."
-        if outlives_answer else "It is also ended when you give your final answer."
+        "If you give your final answer while it runs, it keeps running, and its end reaches you as a "
+        "new turn: give your answer now instead of watching it."
+        if outlives_answer else
+        "It is ended when you give your final answer, so to wait for it, use job_output with wait."
     )
     note = (
-        "The command is running. Its new output is shown to you before each request; "
-        "use job_output to wait for it and job_stop to end it. "
+        "The command is running. Its new output is shown to you before each request, so checking on it "
+        "is not needed; job_stop ends it. "
         f"It is ended after {max_seconds:g} s. {after}"
     )
     if network:

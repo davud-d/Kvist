@@ -149,7 +149,7 @@ ACTION_TOOLS: dict[str, ToolSpec] = {
         ("command", "purpose"),
     ),
     "job_output": ToolSpec(
-        "Read what a background job printed since you last saw it. With wait, block up to that many seconds until it prints something or ends.",
+        "Read what a background job printed since you last saw it. Its output reaches you before each request, so call this only when the next step needs it now. With wait, block up to that many seconds until it prints something or ends instead of polling.",
         {
             "job_id": _STRING,
             "wait": {"type": "number", "minimum": 0, "maximum": 120, "description": "Seconds to wait; 0 returns at once."},
