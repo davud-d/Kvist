@@ -35,7 +35,7 @@ const STRINGS = {
     goToTerminal: "Перейти в терминал",
     disable: "Отключить иконку",
     stateRunning: "работает",
-    stateDone: "завершил",
+    stateDone: "завершила",
     stateIdle: "ждёт",
     sessionEnded: "Эта терминальная сессия завершена.",
     historyFailed: "Не удалось прочитать историю сессии",

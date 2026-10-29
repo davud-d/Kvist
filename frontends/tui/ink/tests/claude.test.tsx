@@ -141,10 +141,19 @@ test("searches split by bare thoughts fold into one line; a thought with text st
   assert.deepEqual(split.map((entry) => ("item" in entry ? entry.item.kind : "group")), ["group", "thought", "explored"])
 })
 
+test("a hidden debug note between commands does not split their fold; a shown one does", () => {
+  const debug = (id: number): Item => ({ id, kind: "note", tone: "debug", text: "native notice" })
+  const items = [shell(1), debug(2), shell(3), debug(4), shell(5)]
+  const hidden = collapse(items)
+  assert.equal(hidden.length, 1)
+  assert.ok("shells" in hidden[0]! && hidden[0].shells === 3)
+  assert.equal(collapse(items, true).length, 5)
+})
+
 test("the fold line is worded in Russian with the right plural forms", () => {
-  assert.equal(exploreLine({ reads: 1, searches: 2, lists: 0, git: 0 }, 0, true), "Искал 2 запроса, прочитал 1 файл")
-  assert.equal(exploreLine({ reads: 5, searches: 0, lists: 0, git: 1 }, 21, true), "Прочитал 5 файлов, выполнил 1 проверку git, выполнил 21 команду shell")
-  assert.equal(exploreLine({ reads: 12, searches: 0, lists: 0, git: 0 }, 0, true), "Прочитал 12 файлов")
+  assert.equal(exploreLine({ reads: 1, searches: 2, lists: 0, git: 0 }, 0, true), "Искала 2 запроса, прочитала 1 файл")
+  assert.equal(exploreLine({ reads: 5, searches: 0, lists: 0, git: 1 }, 21, true), "Прочитала 5 файлов, выполнила 1 проверку git, выполнила 21 команду shell")
+  assert.equal(exploreLine({ reads: 12, searches: 0, lists: 0, git: 0 }, 0, true), "Прочитала 12 файлов")
 })
 
 test("a folded run of commands is one line under Ctrl+O's opposite, and the full commands under Ctrl+O", async () => {

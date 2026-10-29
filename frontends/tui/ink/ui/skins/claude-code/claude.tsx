@@ -83,11 +83,11 @@ function pluralRu(count: number, one: string, few: string, many: string): string
 export function exploreLine(counts: ExploreCounts, shells = 0, russian = false): string {
   const parts = russian
     ? [
-        counts.searches > 0 ? `искал ${pluralRu(counts.searches, "запрос", "запроса", "запросов")}` : "",
-        counts.reads > 0 ? `прочитал ${pluralRu(counts.reads, "файл", "файла", "файлов")}` : "",
-        counts.lists > 0 ? `просмотрел ${pluralRu(counts.lists, "каталог", "каталога", "каталогов")}` : "",
-        counts.git > 0 ? `выполнил ${pluralRu(counts.git, "проверку", "проверки", "проверок")} git` : "",
-        shells > 0 ? `выполнил ${pluralRu(shells, "команду", "команды", "команд")} shell` : "",
+        counts.searches > 0 ? `искала ${pluralRu(counts.searches, "запрос", "запроса", "запросов")}` : "",
+        counts.reads > 0 ? `прочитала ${pluralRu(counts.reads, "файл", "файла", "файлов")}` : "",
+        counts.lists > 0 ? `просмотрела ${pluralRu(counts.lists, "каталог", "каталога", "каталогов")}` : "",
+        counts.git > 0 ? `выполнила ${pluralRu(counts.git, "проверку", "проверки", "проверок")} git` : "",
+        shells > 0 ? `выполнила ${pluralRu(shells, "команду", "команды", "команд")} shell` : "",
       ]
     : [
         counts.searches > 0 ? `searched for ${plural(counts.searches, "pattern", "patterns")}` : "",
@@ -598,21 +598,24 @@ function quiet(item: Item): boolean {
   return item.kind === "tool" && item.action === "run_shell" && item.result.ok && (item.result.exit_code ?? 0) === 0
 }
 
-// A thought with no text of its own is only a duration; between two folded items it adds no
-// information, so it folds with them instead of splitting the run into one line per call.
-function bareThought(item: Item): boolean {
-  return item.kind === "thought" && !item.text
+// Items that add nothing between two folded ones: a thought with no text of its own is only a
+// duration, and a hidden debug note or a terminal step draws nothing. Left in place they would
+// split one run into a line per call.
+function inconsequential(item: Item, showDebug: boolean): boolean {
+  if (item.kind === "thought") return !item.text
+  if (item.kind === "note") return item.tone === "debug" && !showDebug
+  return item.kind === "step" && TERMINAL_ACTIONS.has(item.action)
 }
 
-// Where the run of quiet items that starts at `start` ends (exclusive), skipping bare thoughts
-// that sit between quiet items.
-function quietRunEnd(items: readonly Item[], start: number): number {
+// Where the run of quiet items that starts at `start` ends (exclusive), skipping inconsequential
+// items that sit between quiet ones.
+function quietRunEnd(items: readonly Item[], start: number, showDebug: boolean): number {
   let end = start
   let scan = start
   while (scan < items.length) {
     const item = items[scan]!
     if (quiet(item)) end = ++scan
-    else if (bareThought(item)) scan++
+    else if (inconsequential(item, showDebug)) scan++
     else break
   }
   return end
@@ -620,7 +623,7 @@ function quietRunEnd(items: readonly Item[], start: number): number {
 
 // Consecutive quiet items become one dim line, "Searched for 2 patterns, ran 2 shell commands".
 // A lone read summary keeps its own line.
-export function collapse(items: readonly Item[]): Entry[] {
+export function collapse(items: readonly Item[], showDebug = false): Entry[] {
   const entries: Entry[] = []
   for (let start = 0; start < items.length; ) {
     const first = items[start]!
@@ -629,7 +632,7 @@ export function collapse(items: readonly Item[]): Entry[] {
       start++
       continue
     }
-    const end = quietRunEnd(items, start)
+    const end = quietRunEnd(items, start, showDebug)
     const run = items.slice(start, end).filter(quiet)
     start = end
     const shells = run.filter((item) => item.kind === "tool").length
@@ -669,7 +672,7 @@ export function ClaudeScreen({ items, showDebug, followKey, live, spinner, hint 
   const { pointer, expanded } = useContext(ViewContext)
   // Whatever moved the text may have moved the mascot, and a picture does not move by itself.
   useEffect(() => syncMascotImage(pointer))
-  const entries = useMemo(() => (expanded ? items.map((item): Entry => ({ key: item.id, item })) : collapse(items)), [items, expanded])
+  const entries = useMemo(() => (expanded ? items.map((item): Entry => ({ key: item.id, item })) : collapse(items, showDebug)), [items, expanded, showDebug])
   // The wheel sends "toward newer" as a positive number of lines.
   const scrollBy = useRef((_lines: number) => {})
   scrollBy.current = (lines) => setScroll(Math.max(0, Math.min(max, shown - lines)))
