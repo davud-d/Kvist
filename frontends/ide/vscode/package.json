@@ -192,8 +192,8 @@
     "typecheck": "tsc -p . --noEmit && tsc -p webview --noEmit",
     "test": "tsx --test webview/*.test.ts src/*.test.ts",
     "lint": "eslint src --ext ts",
-    "package": "vsce package --no-dependencies --skip-license",
-    "package:proposals": "node package-proposals.mjs --skip-license"
+    "package": "node package.mjs --skip-license",
+    "package:proposals": "node package.mjs --proposals --skip-license"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",

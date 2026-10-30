@@ -14,5 +14,6 @@ esbuild.mjs
 build-plugin.*
 media/**
 bin/mac-*/.gitkeep
-package-proposals.mjs
+package.mjs
 .package.json.orig
+.vscodeignore.target

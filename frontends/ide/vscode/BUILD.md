@@ -189,13 +189,17 @@ The Marketplace refuses extensions that enable proposed APIs, so `package.json`
 has no `enabledApiProposals`. `completionProvider.ts` still sets `isInlineEdit`
 on replacement suggestions; stable VS Code ignores it.
 
+`npm run package -- --target linux-x64` builds one platform's package and leaves the
+other platforms' binaries out of it (targets: `win32-x64`, `linux-x64`, `darwin-arm64`,
+`darwin-x64`). Without `--target` it packs whatever is in `bin/`.
+
 `npm run package:proposals -- --target linux-x64` builds the same package with
 `inlineCompletionsAdditions` added to the manifest (file name ends in
 `-proposals.vsix`) and restores `package.json` afterwards. That file goes to
 GitHub Releases, never to the Marketplace. Whoever installs it still has to
 enable the proposal for `kvist.kvist` (see the README).
 
-Publish one package per platform (`vsce package --target win32-x64 | linux-x64 |
+Publish one package per platform (`npm run package -- --target win32-x64 | linux-x64 |
 darwin-arm64 | darwin-x64`), each carrying only its own binary from `bin/`.
 README images are relative paths that vsce resolves against the repository, so
 `media/` has to be on GitHub before the page is published.
