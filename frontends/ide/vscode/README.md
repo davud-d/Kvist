@@ -1,8 +1,10 @@
 # Kvist for VS Code
 
-![Classic interface: a task, an approval dialog and the result, drawn over a photograph](media/classic-ui.gif)
+[![Classic interface: a task, an approval dialog and the result, drawn over a photograph](media/classic-ui.gif)](https://youtu.be/eF0gsdJZCfA)
 
-![Claude-style interface writing a Python project](media/claude-style-ui.gif)
+[![Claude-style interface writing a Python project](media/claude-style-ui.gif)](https://youtu.be/6idLmVHNBgk)
+
+The animations are short previews. Full videos at 60 fps: [Classic interface](https://youtu.be/eF0gsdJZCfA), [Claude-style interface](https://youtu.be/6idLmVHNBgk).
 
 Kvist is a coding agent that works on one project folder at a time. You describe a task, it reads the code, edits files, runs commands and tests, and reports what it did. This extension puts it in VS Code: a chat panel in the secondary side bar, commit messages from your staged changes, inline suggestions, and rewrite, translate and explain actions for selected text.
 
