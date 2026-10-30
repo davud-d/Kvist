@@ -1,5 +1,9 @@
 # Kvist for VS Code
 
+![Classic interface: a task, an approval dialog and the result, drawn over a photograph](media/classic-ui.gif)
+
+![Claude-style interface writing a Python project](media/claude-style-ui.gif)
+
 Kvist is a coding agent that works on one project folder at a time. You describe a task, it reads the code, edits files, runs commands and tests, and reports what it did. This extension puts it in VS Code: a chat panel in the secondary side bar, commit messages from your staged changes, inline suggestions, and rewrite, translate and explain actions for selected text.
 
 The agent runs on your machine as a bundled program. It talks to the model provider you pick and to nothing else you did not ask for. Your API key stays in `~/.kvist/config.json`.
@@ -34,13 +38,9 @@ Kvist works with AnyModel, OpenAI, Anthropic, DeepSeek, OpenRouter, ChatGPT sign
 
 ## Kvist in the terminal
 
-The same core also has full-screen terminal interfaces. You pick one the first time you start Kvist outside the editor, and you can switch later with `/tui`.
-
-![Classic interface: a task, an approval dialog and the result, drawn over a photograph](media/classic-ui.gif)
+The same core also has full-screen terminal interfaces, shown at the top of this page: Classic and Claude-style. You pick one the first time you start Kvist outside the editor, and you can switch later with `/tui`.
 
 The Claude-style interface follows the layout of Claude Code: a transcript with diffs, a spinner with the current step, and a footer with the model and effort level.
-
-![Claude-style interface writing a Python project](media/claude-style-ui.gif)
 
 ![Approval dialog for a command that runs project code](media/classic-approval.png)
 
