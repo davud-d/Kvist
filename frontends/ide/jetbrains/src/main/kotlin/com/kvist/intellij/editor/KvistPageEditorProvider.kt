@@ -18,7 +18,7 @@ import java.beans.PropertyChangeListener
 import javax.swing.JComponent
 
 class KvistPageEditorProvider : FileEditorProvider, DumbAware {
-    override fun accept(project: Project, file: VirtualFile) = file is KvistPageFile
+    override fun accept(project: Project, file: VirtualFile) = file is KvistPageFile || file is KvistBrowserFile
     override fun createEditor(project: Project, file: VirtualFile): FileEditor = KvistPageEditor(project, file)
     override fun getEditorTypeId() = "kvist-web-page"
     override fun getPolicy() = FileEditorPolicy.HIDE_DEFAULT_EDITOR
@@ -31,6 +31,11 @@ private class KvistPageEditor(private val project: Project, private val pageFile
         try {
             if (!JBCefApp.isSupported()) {
                 return JBLabel("Kvist requires an IDE runtime with JCEF. / Для Kvist требуется JCEF.")
+            }
+            if (pageFile is KvistBrowserFile) {
+                val browser = com.intellij.ui.jcef.JBCefBrowser(pageFile.viewerUrl)
+                Disposer.register(this, browser)
+                return browser.component
             }
             val panel = KvistChatPanel(project, workspacePage = true, onSessionTitle = ::showSessionTitle)
             Disposer.register(this, panel)

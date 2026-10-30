@@ -22,26 +22,50 @@ const FIRST_RUN_PROVIDERS = ['anymodel', 'openai', 'anthropic', 'deepseek', 'ope
 export class KvistChatView implements vscode.WebviewViewProvider {
     static readonly viewType = 'kvist.chat';
 
-    private view: vscode.WebviewView | undefined;
+    // The surface this instance draws on: the sidebar view, or an editor tab for the page.
+    private webview: vscode.Webview | undefined;
+    private describe: (title: string) => void = () => {};
     private core: KvistCore | undefined;
+    private panel: vscode.WebviewPanel | undefined;
+    private screenPanel: vscode.WebviewPanel | undefined;
     private ready = false;
     private queued: ToWebview[] = [];
     private readonly binaryResolver: BinaryResolver;
 
-    constructor(private readonly context: vscode.ExtensionContext) {
+    constructor(private readonly context: vscode.ExtensionContext, private readonly page = false) {
         this.binaryResolver = new BinaryResolver(context);
     }
 
     resolveWebviewView(view: vscode.WebviewView): void {
-        this.view = view;
+        this.attach(view.webview, (title) => { view.description = title || undefined; }, view.onDidDispose);
+    }
+
+    // The same chat in an editor tab, with a core of its own like the JetBrains page.
+    static openPage(context: vscode.ExtensionContext, existing: KvistChatView | undefined): KvistChatView {
+        if (existing?.webview) {
+            existing.panel?.reveal();
+            return existing;
+        }
+        const chat = new KvistChatView(context, true);
+        const panel = vscode.window.createWebviewPanel('kvist.page', 'Kvist', vscode.ViewColumn.Active,
+            { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'out'), vscode.Uri.joinPath(context.extensionUri, 'resources')] });
+        panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'kvist.svg');
+        chat.panel = panel;
+        chat.attach(panel.webview, (title) => { panel.title = title ? `Kvist | ${title}` : 'Kvist'; }, panel.onDidDispose);
+        return chat;
+    }
+
+    private attach(webview: vscode.Webview, describe: (title: string) => void, onDispose: vscode.Event<void>): void {
+        this.webview = webview;
+        this.describe = describe;
         this.ready = false;
         const media = vscode.Uri.joinPath(this.context.extensionUri, 'out');
         const resources = vscode.Uri.joinPath(this.context.extensionUri, 'resources');
-        view.webview.options = { enableScripts: true, localResourceRoots: [media, resources] };
-        view.webview.html = this.html(view.webview, media, resources);
-        view.webview.onDidReceiveMessage((message: ToHost) => void this.onMessage(message));
-        view.onDidDispose(() => {
-            this.view = undefined;
+        webview.options = { enableScripts: true, localResourceRoots: [media, resources] };
+        webview.html = this.html(webview, media, resources);
+        webview.onDidReceiveMessage((message: ToHost) => void this.onMessage(message));
+        onDispose(() => {
+            this.webview = undefined;
             void this.core?.stop();
             this.core = undefined;
         });
@@ -58,11 +82,13 @@ export class KvistChatView implements vscode.WebviewViewProvider {
     }
 
     dispose(): void {
+        this.screenPanel?.dispose();
+        this.panel?.dispose();
         void this.core?.stop();
     }
 
     private post(message: ToWebview): void {
-        void this.view?.webview.postMessage(message);
+        void this.webview?.postMessage(message);
     }
 
     private async onMessage(message: ToHost): Promise<void> {
@@ -98,7 +124,7 @@ export class KvistChatView implements vscode.WebviewViewProvider {
             case 'getConfig':
                 return this.sendConfig();
             case 'sessionTitle':
-                if (this.view) this.view.description = message.title || undefined;
+                this.describe(message.title);
                 return;
             case 'getSessions':
                 return this.sendSessions();
@@ -106,6 +132,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
                 return this.sendHistory(message.name);
             case 'openFile':
                 return this.openFile(message.path, message.line);
+            case 'openScreen':
+                return this.openScreen(message.url);
             case 'openLink':
                 await vscode.env.openExternal(vscode.Uri.parse(message.url));
                 return;
@@ -311,6 +339,27 @@ export class KvistChatView implements vscode.WebviewViewProvider {
         this.post({ type: 'history', name, events: (reply.events ?? []).map((entry) => entry.event), hasMore: reply.has_more === true });
     }
 
+    private openScreen(url: string): void {
+        let viewer: URL;
+        try { viewer = new URL(url); } catch { return; }
+        // Only Kvist's authenticated loopback screen viewer belongs in this tab.
+        if (viewer.protocol !== 'http:' || viewer.hostname !== '127.0.0.1' || !viewer.port ||
+            viewer.pathname !== '/' || !viewer.searchParams.get('t') || viewer.username || viewer.password) return;
+        viewer.pathname = '/stream.mjpeg';
+        const stream = viewer.href.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+        if (!this.screenPanel) {
+            const panel = vscode.window.createWebviewPanel('kvist.browser', 'Kvist Browser', vscode.ViewColumn.Active,
+                { enableScripts: false, localResourceRoots: [] });
+            this.screenPanel = panel;
+            panel.onDidDispose(() => { if (this.screenPanel === panel) this.screenPanel = undefined; });
+        }
+        this.screenPanel.webview.html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${viewer.origin}; style-src 'unsafe-inline'">
+<style>html,body{margin:0;height:100%;background:#181818}body{display:flex;align-items:center;justify-content:center}img{max-width:100%;max-height:100%;object-fit:contain}</style>
+<title>Kvist Browser</title></head><body><img src="${stream}" alt="Agent browser — live view only"></body></html>`;
+        this.screenPanel.reveal();
+    }
+
     private async openFile(relativePath: string, line: number | null): Promise<void> {
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!root) {
@@ -347,8 +396,8 @@ export class KvistChatView implements vscode.WebviewViewProvider {
 <link rel="stylesheet" href="${style}">
 <title>Kvist</title>
 </head>
-<body>
-<div id="root" data-logo="${logo}"></div>
+<body class="${this.page ? 'workspace-page' : ''}">
+<div id="root" data-logo="${logo}" data-layout="${this.page ? 'workspace' : 'panel'}" data-project="${escapeHtml(vscode.workspace.workspaceFolders?.[0]?.name ?? '')}"></div>
 <script nonce="${nonce}" src="${script}"></script>
 </body>
 </html>`;
@@ -366,6 +415,10 @@ function readJson<T>(command: CoreCommand, workspace: string, args: string[]): P
             }
         });
     });
+}
+
+function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
 function randomNonce(): string {

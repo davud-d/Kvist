@@ -1,0 +1,40 @@
+{
+  "id": "kvist",
+  "name": "Kvist",
+  "version": "0.1.0",
+  "description": "A coding agent that reads your code, edits files and runs tests in a sandbox. Bring your own model provider.",
+  "repository": "https://github.com/davud-d/Kvist",
+  "website": "https://kvist.site",
+  "authors": ["Davud"],
+  "license": "MIT",
+  "license_url": "https://github.com/davud-d/Kvist/blob/main/LICENSE",
+  "distribution": {
+    "binary": {
+      "linux-x86_64": {
+        "archive": "https://github.com/davud-d/Kvist/releases/download/v0.1.0/kvist-linux-x64",
+        "cmd": "./kvist-linux-x64",
+        "args": ["--acp"]
+      },
+      "linux-aarch64": {
+        "archive": "https://github.com/davud-d/Kvist/releases/download/v0.1.0/kvist-linux-arm64",
+        "cmd": "./kvist-linux-arm64",
+        "args": ["--acp"]
+      },
+      "darwin-aarch64": {
+        "archive": "https://github.com/davud-d/Kvist/releases/download/v0.1.0/kvist-macos-arm64",
+        "cmd": "./kvist-macos-arm64",
+        "args": ["--acp"]
+      },
+      "darwin-x86_64": {
+        "archive": "https://github.com/davud-d/Kvist/releases/download/v0.1.0/kvist-macos-x64",
+        "cmd": "./kvist-macos-x64",
+        "args": ["--acp"]
+      },
+      "windows-x86_64": {
+        "archive": "https://github.com/davud-d/Kvist/releases/download/v0.1.0/kvist-windows-x64.exe",
+        "cmd": "kvist-windows-x64.exe",
+        "args": ["--acp"]
+      }
+    }
+  }
+}

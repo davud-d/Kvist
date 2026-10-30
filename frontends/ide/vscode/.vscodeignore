@@ -12,3 +12,7 @@ BUILD.md
 tsconfig.json
 esbuild.mjs
 build-plugin.*
+media/**
+bin/mac-*/.gitkeep
+package-proposals.mjs
+.package.json.orig

@@ -51,8 +51,8 @@ const TAIL_LINES = 4
 
 // One row per running job above the composer, each with the newest lines it printed.
 // The agent's own screen while a skill shows one: a small live preview from Kvist's loopback
-// viewer (view only); a click opens the full viewer in the browser.
-export function ScreenStrip({ screen, stream, onOpen }: { screen: { title: string; state: string; url: string } | null; stream: string; onOpen: (url: string) => void }) {
+// viewer (view only); a click opens the full viewer in an IDE editor tab.
+export function ScreenStrip({ screen, stream, onOpen, russian = false }: { russian?: boolean; screen: { title: string; state: string; url: string } | null; stream: string; onOpen: (url: string) => void }) {
   if (!screen) return null
   return (
     <div class="screen-strip">
@@ -60,7 +60,7 @@ export function ScreenStrip({ screen, stream, onOpen }: { screen: { title: strin
         <span class="job-dot" aria-hidden="true" />
         <span class="job-label">{screen.title}</span>
         <span class="job-time">{screen.state}</span>
-        <button class="link" title="Open the agent's screen in the browser" onClick={() => onOpen(screen.url)}>open ↗</button>
+        <button class="link" title={russian ? "Открыть браузер агента во вкладке IDE" : "Open the agent’s browser in an IDE tab"} onClick={() => onOpen(screen.url)}>{russian ? "Открыть в IDE" : "Open in IDE"}</button>
       </div>
       {stream ? <img class="screen-thumb" src={stream} alt="The agent's own screen (view only)" onClick={() => onOpen(screen.url)} /> : null}
     </div>

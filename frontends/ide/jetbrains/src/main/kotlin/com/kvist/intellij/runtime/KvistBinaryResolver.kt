@@ -11,7 +11,7 @@ import kotlin.io.path.invariantSeparatorsPathString
 
 object KvistBinaryResolver {
     private val LOG = logger<KvistBinaryResolver>()
-    private const val PLUGIN_ID = "com.kvist.intellij"
+    private const val PLUGIN_ID = "com.kvist.agent"
     private val WINDOWS_BINARY: Path = Path.of("bin", "win", "kvist.exe")
     private val LINUX_BINARY: Path = Path.of("bin", "linux", "kvist.bin")
     private val MACOS_ARM64_BINARY: Path = Path.of("bin", "mac-arm64", "kvist.bin")

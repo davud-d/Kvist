@@ -21,6 +21,7 @@ dependencies {
         bundledPlugin("org.jetbrains.plugins.terminal")
         bundledPlugin("Git4Idea")
         testFramework(TestFrameworkType.Platform)
+        pluginVerifier()
     }
 
     testImplementation("junit:junit:4.13.2")
@@ -34,6 +35,17 @@ kotlin {
 // nothing to instrument, and the task would download a Java compiler for nothing.
 intellijPlatform {
     instrumentCode = false
+
+    // The token comes from the environment and never from a file in the repository.
+    publishing {
+        token = providers.environmentVariable("PUBLISH_TOKEN")
+    }
+
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
 }
 
 // Platform tests build real editors; without a display they need AWT in headless mode.

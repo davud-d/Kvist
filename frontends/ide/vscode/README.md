@@ -1,202 +1,75 @@
-# Kvist VS Code Extension
+# Kvist for VS Code
 
-Launch the Kvist coding agent directly in VS Code and generate commit messages with AI.
+Kvist is a coding agent that works on one project folder at a time. You describe a task, it reads the code, edits files, runs commands and tests, and reports what it did. This extension puts it in VS Code: a chat panel in the secondary side bar, commit messages from your staged changes, inline suggestions, and rewrite, translate and explain actions for selected text.
 
-## Features
+The agent runs on your machine as a bundled program. It talks to the model provider you pick and to nothing else you did not ask for. Your API key stays in `~/.kvist/config.json`.
 
-- **Launch Kvist**: Open Kvist in a VS Code terminal with one command
-- **Generate Commit Messages**: AI-powered commit message generation based on staged changes
+## What you get
 
-## The chat panel in JetBrains IDEs
+- A chat panel in the secondary side bar, also available as an editor tab. Streamed answers, file edits shown as diffs, and a question box when the agent needs a decision.
+- Commit messages. Click the sparkle icon in Source Control and the message is written from your staged diff and the style of your recent commits.
+- Inline completion. Ghost text from your configured fast model.
+- Selection actions in the editor context menu under Kvist: Rewrite as Senior, Translate Selection, Explain and Fix. Each opens a diff and applies nothing until you press Apply.
+- The same agent in a terminal, started from the Command Palette with `Kvist: Open Kvist in Terminal`.
 
-The chat panel's webview (`webview/`) is also the JetBrains plugin's chat tool
-window: the plugin's Gradle build runs `npm run build` here and packs
-`out/webview.js` and `out/webview.css`. `webview/host.ts` is the only file that
-knows the host: it calls `acquireVsCodeApi` in VS Code and the `window.kvistHost`
-bridge the JetBrains plugin injects. Keep IDE-specific code out of the other
-webview files, and keep `src/messages.ts` in step with
-`frontends/ide/jetbrains/.../chat/KvistChatHost.kt`, which answers the same messages.
+![Kvist asks before overwriting a file and shows the diff](media/vscode-approval.png)
 
-## Usage
+![A command waiting for approval in the chat panel](media/vscode-command.png)
 
-### Launch Kvist
+![The finished task: two edits and a passing test run](media/vscode-result.png)
 
-1. Open a workspace folder
-2. Open the Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
-3. Run `Kvist: Launch Kvist`
+![The Kvist submenu in the editor context menu](media/vscode-menu.png)
 
-The agent will start in a new terminal window.
+## Safety
 
-### Generate Commit Message
+Shell commands run in a sandbox (Bubblewrap on Linux) with a private home directory and no network by default. Files named `.env` are never read or written, and keys, certificates and SSH folders are hidden from commands. The agent asks before running anything risky and before overwriting a file. Every change goes into a journal, and `/revert` undoes what the agent wrote.
 
-1. Stage your changes in Git
-2. Click the sparkle icon in the Source Control panel, or
-3. Open the Command Palette and run `Kvist: Generate Commit Message with Kvist`
+## Getting started
 
-The generated message will be inserted into the commit message input box.
+1. Install the extension and open a project folder.
+2. Open the Kvist icon in the secondary side bar (Ctrl+Alt+B toggles it) and choose a provider on the first screen.
+3. Type a task, for example "add a --verbose flag to the CLI and cover it with a test".
 
-### Selection actions
+Kvist works with AnyModel, OpenAI, Anthropic, DeepSeek, OpenRouter, ChatGPT sign-in, a local OpenAI-compatible gateway, and about forty other OpenAI-compatible providers. Answers and prompts are written in English or Russian, matching the language you use.
 
-Select text in an editor, then open the editor context menu (right click, or the
-menu key) and choose `Kvist`:
+## Kvist in the terminal
 
-- `Rewrite as Senior` rewrites the selection for readability, keeping its behavior.
-- `Translate Selection` translates the human-readable text in the selection into a language you pick.
-- `Explain and Fix` opens a review (explanation, risks, bugs) and, when the fix is local and safe, offers a patch.
+The same core also has full-screen terminal interfaces. You pick one the first time you start Kvist outside the editor, and you can switch later with `/tui`.
 
-Each change opens a diff first and is applied only after you press `Apply`. The
-actions run `kvist --selection-task`, the same core mode the JetBrains plugin uses;
-the document must not change while the model works, or the action asks you to retry.
+![Classic interface: a task, an approval dialog and the result, drawn over a photograph](media/classic-ui.gif)
 
-## Inline completion
+The Claude-style interface follows the layout of Claude Code: a transcript with diffs, a spinner with the current step, and a footer with the model and effort level.
 
-Kvist uses your configured fast model and requests disabled reasoning where the
-provider supports it, falling back to minimal/low effort when necessary. Each
-request returns one suggestion.
+![Claude-style interface writing a Python project](media/claude-style-ui.gif)
 
-Requests go to one long-lived `kvist --complete-server` process per workspace,
-independent of the chat core, so a running agent turn never delays completion
-and interpreter start-up and the provider connection are paid once. Where the
-provider supports streaming the core streams the reply; VS Code shows the
-suggestion once it is complete.
+![Approval dialog for a command that runs project code](media/classic-approval.png)
 
-A suggestion may also **replace** text instead of continuing it: when what you
-just typed or the line stands wrong (a typo, a stale name), the editor shows the
-old text struck through and the new text, possibly several lines, beside it.
-The replaced piece is always on the cursor's line and is checked against the
-file by the core, so a quotation that does not match is dropped. The extension
-asks for this with `edits` in its request; a replacement is reused from history
-only at the exact spot it was made, since typing changes what it replaces.
+## Settings
 
-Automatic requests wait for **100 ms without typing** by default
-(`kvist.inlineCompletion.debounceMs`). A manual inline-suggestion request skips
-the pause. Matching input consumes the existing suggestion. A typo hides it;
-deleting the typo or undoing restores the cached suggestion immediately. History
-is bounded and scoped to the workspace, file, language and buffer context.
-A new request, or further typing, cancels the running one in the core, and late
-results are discarded. Toggle suggestions with `kvist.inlineCompletion.enabled`.
-The bundled core must support `--complete-server`; rebuild it if completion
-stays empty after an update. A change of provider or fast model is picked up by
-the next request; a newly entered API key needs a window reload.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `kvist.binaryPath` | empty | Path to a Kvist executable. Empty means the one inside the extension. |
+| `kvist.environment` | `{}` | Environment variables for the core, such as `AGENT_SANDBOX_MODE` or `AGENT_SANDBOX_NET`. Stored in plain text, so keep API keys in the provider settings. |
+| `kvist.inlineCompletion.enabled` | `true` | Turns inline suggestions on or off. |
+| `kvist.inlineCompletion.debounceMs` | `100` | Pause after typing before a suggestion is requested. |
+
+Inline suggestions go to a separate `kvist --complete-server` process, so a running agent task never delays them. A manual inline-suggestion request skips the pause.
+
+When the text you typed is wrong (a typo, a stale name), Kvist can suggest a replacement and VS Code can show the old text struck through. That display needs a VS Code proposed API, which the Marketplace does not allow in a published extension. To get it, install the package ending in `-proposals.vsix` from the [GitHub releases](https://github.com/davud-d/Kvist/releases) and start VS Code with `--enable-proposed-api kvist.kvist` (or add `"enable-proposed-api": ["kvist.kvist"]` to `argv.json`). Without it, the same suggestion appears as ordinary ghost text or not at all. A newly entered API key needs a window reload.
 
 ## Requirements
 
-- VS Code 1.85 or newer
-- Node.js 18+ and npm for building the extension
-- Python with the Kvist project dependencies and PyInstaller available when using the helper build scripts
-- Git must be initialized in your workspace for commit-message generation
-- Configure Kvist once in a terminal first; the extension uses `~/.kvist/config.json` and never prompts for API keys
+- VS Code 1.106 or newer.
+- Windows x64, Linux x64, or macOS (Apple Silicon and Intel). The macOS builds are included but nobody has run them on a Mac yet, so expect rough edges there.
+- A Git repository in the folder for commit messages.
+- An API key for one of the providers above, or a local gateway.
 
-## Supported Platforms
+## Links
 
-- Windows (x64)
-- Linux (x64)
-- macOS (Apple Silicon and Intel), best-effort: the extension ships a binary for each, but
-  nobody has verified it on a Mac, so there is no guarantee that every feature works there.
+- Source and issues: https://github.com/davud-d/Kvist
+- Kvist site: https://kvist.site
+- Building from source: [BUILD.md](BUILD.md)
 
-## Quick Build
+## License
 
-The helper scripts mirror the JetBrains plugin flow: they build the Kvist binary
-for the current host OS, copy it into the extension's `bin/` directory, compile
-TypeScript, and package a VSIX.
-
-### Linux
-
-```bash
-cd frontends/ide/vscode
-./build-plugin.sh
-```
-
-What it updates:
-
-- `bin/linux/kvist.bin`
-- `.build/vsix/kvist-*-linux-x64.vsix`
-
-### macOS
-
-```bash
-cd frontends/ide/vscode
-./build-plugin.sh
-```
-
-The same script as on Linux. It needs Python 3 with PyInstaller (the repository's `.venv`
-is used when it exists) and Node.js. What it updates:
-
-- `bin/mac-arm64/kvist.bin` on Apple Silicon, `bin/mac-x64/kvist.bin` on Intel
-- `.build/vsix/kvist-*-macos-arm64.vsix` (`macos-x64` on Intel)
-
-The binary is not notarized. The extension clears the quarantine mark before it starts
-the binary, but a copy downloaded by a browser may need "Open" from the context menu once.
-
-### Windows PowerShell
-
-```powershell
-cd frontends/ide/vscode
-.\build-plugin.ps1
-```
-
-What it updates:
-
-- `bin\win\kvist.exe`
-- `.build\vsix\kvist-*-win32-x64.vsix`
-
-### Windows Command Prompt
-
-```bat
-cd frontends/ide/vscode
-build-plugin.bat
-```
-
-Use this if you prefer plain `cmd.exe` instead of PowerShell.
-
-The scripts build only the current host's binary. For a VSIX that should work on
-several platforms, keep their binaries in `bin/` as well; the release build does that
-(`.github/workflows/plugin-release.yml`).
-
-Install the generated package from VS Code with Extensions > Install from VSIX,
-or from the command line:
-
-```bash
-code --install-extension .build/vsix/kvist-0.1.0-linux-x64.vsix
-```
-
-## Extension Settings
-
-This extension does not add any VS Code settings. Configuration is managed by Kvist itself through `~/.kvist/config.json`.
-
-## Manual Build
-
-Use this path when you do not want the helper script to rebuild the bundled
-binary.
-
-```bash
-npm install
-npm run compile
-```
-
-Before packaging, place the Kvist binary in the expected location:
-
-- Windows: `bin/win/kvist.exe`
-- Linux: `bin/linux/kvist.bin`
-- macOS: `bin/mac-arm64/kvist.bin` (Apple Silicon) and `bin/mac-x64/kvist.bin` (Intel)
-
-Then package the extension:
-
-```bash
-npm run package
-```
-
-The `npm run package` path writes `kvist-0.1.0.vsix` in the extension directory.
-The OS-specific helper scripts write their packages under `.build/vsix/`.
-
-## Known Issues
-
-None yet.
-
-## Release Notes
-
-### 0.1.0
-
-Initial release:
-- Launch Kvist in VS Code terminal
-- Generate commit messages from staged changes
+MIT. Third-party notices are in `resources/THIRD_PARTY_NOTICES.txt`.

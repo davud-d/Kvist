@@ -279,7 +279,7 @@ def test_initialize_offers_terminal_auth():
             methods = (await wire.initialize())["result"]["authMethods"]
 
             assert [m["type"] for m in methods] == ["terminal"]
-            assert methods[0]["args"] == ["--login"]
+            assert methods[0]["args"] == ["--acp", "--login"]
 
     run(scenario())
 

@@ -10,6 +10,7 @@ export function activate(context: vscode.ExtensionContext) {
     const launcher = new KvistLauncher(context);
     const commitMessageGenerator = new CommitMessageGenerator(context);
     const chat = new KvistChatView(context);
+    let page: KvistChatView | undefined;
     const inlineCompletionProvider = new KvistInlineCompletionProvider(context);
 
     const selectionActions = new SelectionActions(new BinaryResolver(context));
@@ -24,6 +25,8 @@ export function activate(context: vscode.ExtensionContext) {
         inlineCompletionProvider,
         vscode.languages.registerInlineCompletionItemProvider({ scheme: 'file' }, inlineCompletionProvider),
         vscode.commands.registerCommand('kvist.focus', () => vscode.commands.executeCommand(`${KvistChatView.viewType}.focus`)),
+        { dispose: () => page?.dispose() },
+        vscode.commands.registerCommand('kvist.openPage', () => { page = KvistChatView.openPage(context, page); }),
         vscode.commands.registerCommand('kvist.newSession', () => chat.invoke({ type: 'invoke', name: 'new', args: [] })),
         vscode.commands.registerCommand('kvist.settings', () => chat.invoke({ type: 'showSettings' })),
         vscode.commands.registerCommand('kvist.launch', () => {

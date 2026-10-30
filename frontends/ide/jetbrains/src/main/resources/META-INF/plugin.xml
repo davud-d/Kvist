@@ -1,16 +1,30 @@
 <idea-plugin package="com.kvist.intellij">
-    <id>com.kvist.intellij</id>
-    <name>Kvist Launcher</name>
+    <id>com.kvist.agent</id>
+    <name>Kvist</name>
     <version>0.1.0</version>
-    <vendor>Kvist</vendor>
+    <vendor url="https://kvist.site">Kvist</vendor>
 
     <description><![CDATA[
-    The Kvist coding agent as a chat tool window (the same panel as the VS Code
-    extension, in the IDE's embedded browser), a launcher that runs Kvist inside the
-    IDE Terminal, commit messages for the changes selected in the commit dialog,
-    ghost-text inline completion as you type, and a Kvist submenu in the editor
-    context menu (rewrite, translate, explain and fix the selection).
+    <p>Kvist is a coding agent that works on one project folder at a time. You describe a task,
+    it reads the code, edits files, runs commands and tests in a sandbox, and tells you what changed.
+    It runs on your machine and uses the model provider you choose (AnyModel, OpenAI, Anthropic,
+    DeepSeek, OpenRouter, ChatGPT sign-in, or any OpenAI-compatible endpoint).</p>
+    <ul>
+      <li>Chat tool window with streamed answers, diffs for every edit, and approvals before risky commands.</li>
+      <li>Commit messages written from the changes selected in the commit dialog.</li>
+      <li>Inline completion as ghost text, from your configured fast model.</li>
+      <li>Editor context menu: Rewrite as Senior, Translate Selection, Explain and Fix. Each shows a diff first.</li>
+      <li>The full-screen terminal interface inside the IDE Terminal.</li>
+    </ul>
+    <p>Commands run without network access and with a private home folder. Files named .env are never
+    read, and /revert undoes what the agent wrote. Source and issues:
+    <a href="https://github.com/davud-d/Kvist">github.com/davud-d/Kvist</a>.</p>
     ]]></description>
+
+    <change-notes><![CDATA[
+    <p>0.1.0: first public release. Chat tool window, commit messages, inline completion,
+    selection actions, terminal launcher.</p>
+    ]]></change-notes>
 
     <idea-version since-build="253" />
 
@@ -85,4 +99,4 @@
             />
         </group>
     </actions>
-</idea-plugin>
+</idea-plugin>

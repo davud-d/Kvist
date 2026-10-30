@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Install the Kvist Launcher plugin into every JetBrains IDE on this machine.
+"""Install the Kvist plugin into every JetBrains IDE on this machine.
 
 Works on Linux and Windows, and best-effort on macOS. It finds each installed IDE by its
 per-user data directory, then unpacks the plugin ZIP into that IDE's

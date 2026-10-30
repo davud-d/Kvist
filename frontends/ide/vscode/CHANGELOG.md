@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+- Marketplace listing: new README, icon, categories and keywords
+- The `inlineCompletionsAdditions` API proposal is no longer in the manifest (the Marketplace does not accept it); a separate `-proposals` package keeps it
+
 ### Added
 - `Kvist` submenu in the editor context menu: Rewrite as Senior, Translate Selection, Explain and Fix, each with a diff preview before applying
 

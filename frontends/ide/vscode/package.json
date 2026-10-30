@@ -1,27 +1,59 @@
 {
   "name": "kvist",
   "displayName": "Kvist",
-  "description": "Kvist coding agent as a chat panel in the VS Code secondary side bar, plus commit message generation",
+  "description": "A coding agent in the side bar: it reads your code, edits files and runs tests in a sandbox. Bring your own model. Also commit messages and inline completion.",
   "version": "0.1.0",
   "publisher": "kvist",
+  "icon": "resources/icon.png",
+  "license": "MIT",
+  "homepage": "https://kvist.site",
+  "bugs": {
+    "url": "https://github.com/davud-d/Kvist/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/davud-d/Kvist.git"
+    "url": "https://github.com/davud-d/Kvist.git",
+    "directory": "frontends/ide/vscode"
+  },
+  "galleryBanner": {
+    "color": "#0f1722",
+    "theme": "dark"
   },
   "engines": {
     "vscode": "^1.106.0"
   },
-  "enabledApiProposals": [
-    "inlineCompletionsAdditions"
-  ],
   "categories": [
+    "AI",
+    "Chat",
+    "SCM Providers",
     "Other"
   ],
   "keywords": [
     "ai",
-    "coding-agent",
+    "agent",
+    "ai agent",
+    "coding agent",
+    "ai coding assistant",
+    "autonomous agent",
+    "llm",
+    "chat",
+    "code generation",
+    "code completion",
+    "inline completion",
+    "refactoring",
+    "code review",
+    "commit message",
+    "git",
     "terminal",
-    "commit-message"
+    "sandbox",
+    "openai",
+    "anthropic",
+    "claude",
+    "deepseek",
+    "openrouter",
+    "local llm",
+    "byok",
+    "multi-model"
   ],
   "activationEvents": [
     "onView:kvist.chat",
@@ -57,6 +89,12 @@
         "title": "Open Kvist Chat",
         "category": "Kvist",
         "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "kvist.openPage",
+        "title": "Open Kvist in an Editor Tab",
+        "category": "Kvist",
+        "icon": { "light": "resources/kvist.svg", "dark": "resources/kvist.svg" }
       },
       {
         "command": "kvist.newSession",
@@ -96,6 +134,7 @@
           "when": "scmProvider == git"
         }
       ],
+      "editor/title": [{ "command": "kvist.openPage", "group": "navigation@1" }],
       "scm/title": [
         {
           "command": "kvist.generateCommitMessage",
@@ -153,7 +192,8 @@
     "typecheck": "tsc -p . --noEmit && tsc -p webview --noEmit",
     "test": "tsx --test webview/*.test.ts src/*.test.ts",
     "lint": "eslint src --ext ts",
-    "package": "vsce package --no-dependencies --skip-license"
+    "package": "vsce package --no-dependencies --skip-license",
+    "package:proposals": "node package-proposals.mjs --skip-license"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",

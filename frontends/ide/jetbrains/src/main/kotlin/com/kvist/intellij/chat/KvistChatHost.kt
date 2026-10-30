@@ -109,6 +109,9 @@ internal class KvistChatHost(
             "openFile" -> ApplicationManager.getApplication().invokeLater {
                 openFile(message.stringField("path").orEmpty(), message.intField("line"))
             }
+            "openScreen" -> ApplicationManager.getApplication().invokeLater {
+                com.kvist.intellij.editor.KvistBrowser.open(project, message.stringField("url").orEmpty())
+            }
             "openLink" -> openLink(message.stringField("url").orEmpty())
             "sessionTitle" -> onSessionTitle(message.stringField("title").orEmpty())
         }

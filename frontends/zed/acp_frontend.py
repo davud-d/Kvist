@@ -584,7 +584,7 @@ class KvistAcpAgent:
                         "Runs `kvist --acp --login` in a terminal so an API key can "
                         "be entered without sending it over this connection."
                     ),
-                    args=["--login"],
+                    args=["--acp", "--login"],
                     type="terminal",
                 )
             ],

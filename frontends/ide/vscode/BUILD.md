@@ -172,3 +172,30 @@ To publish to the VS Code Marketplace:
 4. Publish: `vsce publish`
 
 For now, distribute the `.vsix` file directly.
+
+## The chat panel in JetBrains IDEs
+
+The chat panel's webview (`webview/`) is also the JetBrains plugin's chat tool
+window: the plugin's Gradle build runs `npm run build` here and packs
+`out/webview.js` and `out/webview.css`. `webview/host.ts` is the only file that
+knows the host: it calls `acquireVsCodeApi` in VS Code and the `window.kvistHost`
+bridge the JetBrains plugin injects. Keep IDE-specific code out of the other
+webview files, and keep `src/messages.ts` in step with
+`frontends/ide/jetbrains/.../chat/KvistChatHost.kt`, which answers the same messages.
+
+## Publishing
+
+The Marketplace refuses extensions that enable proposed APIs, so `package.json`
+has no `enabledApiProposals`. `completionProvider.ts` still sets `isInlineEdit`
+on replacement suggestions; stable VS Code ignores it.
+
+`npm run package:proposals -- --target linux-x64` builds the same package with
+`inlineCompletionsAdditions` added to the manifest (file name ends in
+`-proposals.vsix`) and restores `package.json` afterwards. That file goes to
+GitHub Releases, never to the Marketplace. Whoever installs it still has to
+enable the proposal for `kvist.kvist` (see the README).
+
+Publish one package per platform (`vsce package --target win32-x64 | linux-x64 |
+darwin-arm64 | darwin-x64`), each carrying only its own binary from `bin/`.
+README images are relative paths that vsce resolves against the repository, so
+`media/` has to be on GitHub before the page is published.

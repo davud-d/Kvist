@@ -469,7 +469,7 @@ export function App() {
             ))}
           </div>
         ) : null}
-        <ScreenStrip screen={state.screen} stream={state.screen?.stream ?? ""} onOpen={(url) => post({ type: "openLink", url })} />
+        <ScreenStrip screen={state.screen} stream={state.screen?.stream ?? ""} russian={russianUi} onOpen={(url) => post({ type: "openScreen", url })} />
         <JobStrip jobs={state.jobs} russian={requestIsRussian(state)} now={Date.now()} compact={workspacePage} />
         {state.running || metrics.thinking > 0 || metrics.tokensPerSecond ? (
           <div class="strip">

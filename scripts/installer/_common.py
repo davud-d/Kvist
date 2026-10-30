@@ -37,7 +37,7 @@ REPO_ROOT = INSTALLER_DIR.parent.parent
 ASSETS_DIR = REPO_ROOT / "branding"
 
 # The plugin id, kept in sync with frontends/ide/jetbrains/src/main/resources/META-INF/plugin.xml.
-JETBRAINS_PLUGIN_ID = "com.kvist.intellij"
+JETBRAINS_PLUGIN_ID = "com.kvist.agent"
 # electron-builder productName; the unpacked executable is named after `name`.
 GUI_APP_NAME = "Kvist"
 GUI_LINUX_DESKTOP_ID = "kvist"

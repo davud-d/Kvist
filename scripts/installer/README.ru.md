@@ -8,7 +8,7 @@
 | `install.py` | Главный вход: показывает установщики ниже списком со стрелками, все отмечены по умолчанию, и запускает оставленные вами. |
 | `install_rust.py` | Ставит то, чем собираются Kvist Glass и экран голоса: компилятор C (через apt-get, dnf, zypper или pacman от root или sudo без пароля; иначе печатает команды) и Rust официальным установщиком rustup (минимальный профиль; уже установленный Rust не трогается). На Windows не предлагается: Glass нужна графика kitty, которой нет в терминалах Windows. |
 | `install_cli.py` | Ставит команду `kvist` и автономный бинарник (собирает его через PyInstaller, если в `dist/` его нет). В сборку входят Ink-интерфейс, если есть npm, и Kvist Glass (`cargo build --release` в `frontends/tui/glass`), если есть cargo, и экран голоса (`cargo build --release` в `frontends/voice/screen`), в Linux и macOS; когда выбраны оба, ждёт `install_rust.py`. Раньше лежал в корне репозитория, потом в `install.py`. |
-| `install_jetbrains.py` | Находит все установленные IDE JetBrains и распаковывает плагин **Kvist Launcher** в папку `plugins/` каждой из них. |
+| `install_jetbrains.py` | Находит все установленные IDE JetBrains и распаковывает плагин **Kvist** в папку `plugins/` каждой из них. |
 | `install_vscode.py` | Находит команды запуска VS Code, VS Code Insiders и VSCodium и ставит `.vsix` Kvist в каждый редактор. |
 | `install_gui.py` | Ставит Electron-GUI как настольное приложение: ярлыки в меню «Пуск» и на рабочем столе в Windows, иконки hicolor и `.desktop` в Linux, копия `Kvist.app` в `~/Applications` в macOS. |
 | `install_zed.py` | Регистрирует установленный `kvist-core` как внешний ACP-агент Zed: одна запись `agent_servers` в файле настроек Zed, комментарии и всё остальное не трогаются. |
