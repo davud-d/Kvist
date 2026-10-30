@@ -19,6 +19,10 @@
     <p>Commands run without network access and with a private home folder. Files named .env are never
     read, and /revert undoes what the agent wrote. Source and issues:
     <a href="https://github.com/davud-d/Kvist">github.com/davud-d/Kvist</a>.</p>
+    <p><img src="https://raw.githubusercontent.com/davud-d/Kvist/main/frontends/ide/jetbrains/media/jetbrains-welcome.png" alt="The Kvist page in an editor tab" width="600"></p>
+    <p><img src="https://raw.githubusercontent.com/davud-d/Kvist/main/frontends/ide/jetbrains/media/jetbrains-answer.png" alt="Kvist explaining a project" width="600"></p>
+    <p><img src="https://raw.githubusercontent.com/davud-d/Kvist/main/frontends/ide/vscode/media/classic-ui.gif" alt="The Classic terminal interface" width="600"></p>
+    <p><img src="https://raw.githubusercontent.com/davud-d/Kvist/main/frontends/ide/vscode/media/claude-style-ui.gif" alt="The Claude-style terminal interface" width="600"></p>
     ]]></description>
 
     <change-notes><![CDATA[
