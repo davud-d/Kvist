@@ -21,7 +21,12 @@ def _runtime_directories() -> set[str]:
         cwd=_ROOT, capture_output=True, text=True, check=True,
     ).stdout.split()
     parents = {Path(name).parent for name in tracked}
-    return {".".join(parent.parts) for parent in parents if "tests" not in parent.parts}
+    registry_draft = Path("frontends/zed/registry")
+    return {
+        ".".join(parent.parts)
+        for parent in parents
+        if "tests" not in parent.parts and not parent.is_relative_to(registry_draft)
+    }
 
 
 def test_pyproject_lists_every_runtime_directory():
