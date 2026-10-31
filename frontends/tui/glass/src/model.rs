@@ -33,7 +33,12 @@ pub enum CoreEvent {
     Stream { id: String, text: String },
     Say(String),
     Step { call: String, kind: ToolKind, label: String },
+    /// A call the model has finished writing while it writes the next (`call_begin`); its `Step` follows later.
+    CallBegin { call: String, kind: ToolKind, label: String },
     Result { call: String, ok: bool, summary: String, diff: Option<(u32, u32)> },
+    /// Whole new lines of a write's text while the model is still typing it
+    /// (`call_stream`); `line` is where in `field` they begin.
+    CallStream { call: String, tool: String, path: String, field: String, line: u32, text: String },
     /// A successful write; `patch` is its unified diff when the core sent one.
     FileChanged { path: String, added: u32, removed: u32, patch: Option<String> },
     Screen { title: String, frame_url: String, stream_url: String, url: String },
@@ -117,6 +122,8 @@ pub struct Session {
     pub closed: Option<(String, Instant)>,
     /// Stream id -> index of its item in `items`.
     streams: HashMap<String, usize>,
+    /// Calls shown from `call_begin` that no `Step` has confirmed yet.
+    early: Vec<String>,
 }
 
 impl Session {
@@ -138,12 +145,34 @@ impl Session {
             CoreEvent::ThinkingDone => {}
             CoreEvent::Stream { id, text } => self.stream(id, text, now),
             CoreEvent::Say(text) => self.say(text, now),
+            CoreEvent::CallBegin { call, kind, label } => {
+                let known = self.items.iter().any(|item| matches!(item, Item::Tool { call: c, .. } if *c == call));
+                if !known {
+                    self.early.push(call.clone());
+                    self.items.push(Item::Tool { call, kind, label, state: CallState::Running });
+                }
+            }
+            CoreEvent::Step { call, kind, label } if self.early.contains(&call) => {
+                self.early.retain(|c| *c != call);
+                for item in self.items.iter_mut() {
+                    if let Item::Tool { call: c, kind: k, label: l, .. } = item {
+                        if *c == call {
+                            *k = kind;
+                            *l = label;
+                            break;
+                        }
+                    }
+                }
+                self.thinking_since = None;
+            }
             CoreEvent::Step { call, kind, label } => {
                 self.items.push(Item::Tool { call, kind, label, state: CallState::Running });
                 self.thinking_since = None;
             }
             CoreEvent::Result { call, ok, summary, diff } => self.finish_call(&call, CallState::Done { ok, summary, diff }, now),
             CoreEvent::FileChanged { path, added, removed, patch } => self.change_file(path, added, removed, patch, now),
+            // Only the side panel shows it (app.rs); the transcript waits for the result.
+            CoreEvent::CallStream { .. } => {}
             // The frames themselves are fetched by the interface (screen.rs).
             CoreEvent::Screen { title, .. } | CoreEvent::Image { title, .. } | CoreEvent::ImageDrawing { title } => {
                 self.browser = Some(Browser { title })
@@ -165,6 +194,7 @@ impl Session {
             CoreEvent::Error(text) => self.items.push(Item::Error(text)),
             CoreEvent::TurnEnd => {
                 self.busy = false;
+                self.early.clear();
                 self.thinking_since = None;
             }
         }
@@ -194,8 +224,17 @@ impl Session {
             Item::User(_) => Some(false),
             _ => None,
         });
-        if repeat != Some(true) {
-            self.items.push(Item::Agent { text, at: now });
+        if repeat == Some(true) {
+            return;
+        }
+        // The words introduce calls that may already be on screen from `call_begin`.
+        let first_early = self
+            .items
+            .iter()
+            .position(|item| matches!(item, Item::Tool { call, .. } if self.early.contains(call)));
+        match first_early {
+            Some(at) => self.items.insert(at, Item::Agent { text, at: now }),
+            None => self.items.push(Item::Agent { text, at: now }),
         }
     }
 
@@ -310,6 +349,18 @@ mod tests {
         session.apply(CoreEvent::FileChanged { path: "a.py".into(), added: 1, removed: 0, patch: None }, now);
         assert_eq!(session.files[0].added, 1);
         assert!(session.files[0].patches.is_empty());
+    }
+
+    #[test]
+    fn a_call_shown_early_is_filled_in_by_its_step_and_the_words_stay_above() {
+        let now = Instant::now();
+        let mut session = Session::default();
+        session.apply(CoreEvent::CallBegin { call: "c1".into(), kind: ToolKind::Read, label: "read".into() }, now);
+        session.apply(CoreEvent::CallBegin { call: "c2".into(), kind: ToolKind::Shell, label: "run".into() }, now);
+        session.apply(CoreEvent::CallBegin { call: "c1".into(), kind: ToolKind::Read, label: "again".into() }, now);
+        session.apply(CoreEvent::Say("Looking.".into()), now);
+        session.apply(CoreEvent::Step { call: "c1".into(), kind: ToolKind::Read, label: "reads a.py".into() }, now);
+        assert!(matches!(&session.items[..], [Item::Agent { .. }, Item::Tool { label, .. }, Item::Tool { .. }] if label == "reads a.py"));
     }
 
     #[test]

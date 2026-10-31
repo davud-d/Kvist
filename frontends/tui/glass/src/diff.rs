@@ -3,6 +3,8 @@
 // marked, and long lines wrapped. The core sends the diff of each write in
 // `action_result.patch` and of an overwrite in an approval's `subject.diff`.
 
+use std::time::Instant;
+
 use ratatui::style::{Color, Modifier, Style};
 use unicode_width::UnicodeWidthChar;
 
@@ -444,6 +446,80 @@ fn half(row: Option<&Row>, old_side: bool, nw: usize, width: usize) -> Vec<Line>
         .collect()
 }
 
+/// A write the model is still typing: the text of each streamed field so far.
+/// It reads as a patch, so the panel draws it like any other diff.
+pub struct Live {
+    pub call: String,
+    tool: String,
+    fields: Vec<(String, String)>,
+    /// Whether the side panel is showing this write; false once the person
+    /// closes it or opens something else there.
+    pub shown: bool,
+    /// When the call's result arrived; the panel folds away a while later.
+    pub finished: Option<Instant>,
+    /// The text grew since `patch` was last read.
+    pub changed: bool,
+    /// The width the panel's rows were last built for.
+    pub width: usize,
+}
+
+impl Live {
+    pub fn new(call: &str, tool: &str) -> Live {
+        Live { call: call.into(), tool: tool.into(), fields: Vec::new(), shown: true, finished: None, changed: true, width: 0 }
+    }
+
+    /// Adds the lines that begin at `line` of `field`; line 0 starts it over
+    /// (the request was retried), and lines that do not follow on are dropped.
+    pub fn feed(&mut self, field: &str, line: u32, text: &str) {
+        let index = self.fields.iter().position(|(name, _)| name == field).unwrap_or_else(|| {
+            self.fields.push((field.into(), String::new()));
+            self.fields.len() - 1
+        });
+        let have = &mut self.fields[index].1;
+        if line == 0 {
+            have.clear();
+        }
+        if line as usize != have.matches('\n').count() {
+            return;
+        }
+        have.push_str(text);
+        self.changed = true;
+    }
+
+    fn lines_of(&self, field: &str) -> Vec<&str> {
+        self.fields.iter().find(|(name, _)| name == field).map_or_else(Vec::new, |(_, text)| text.lines().collect())
+    }
+
+    /// The write as one hunk: a replacement shows what goes out and what comes
+    /// in, a write only what comes in.
+    pub fn patch(&self) -> String {
+        let (old, new) = if self.tool == "replace_in_file" {
+            (self.lines_of("old_text"), self.lines_of("new_text"))
+        } else {
+            (Vec::new(), self.lines_of("content"))
+        };
+        if old.is_empty() && new.is_empty() {
+            return String::new();
+        }
+        let from = if old.is_empty() { 0 } else { 1 };
+        let mut out = format!("@@ -{from},{} +1,{} @@\n", old.len(), new.len());
+        for (sign, lines) in [('-', &old), ('+', &new)] {
+            for line in lines {
+                out.push(sign);
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    /// Lines arriving and lines leaving, as the header counts them.
+    pub fn counts(&self) -> (u32, u32) {
+        let (old, new) = if self.tool == "replace_in_file" { ("old_text", "new_text") } else { ("", "content") };
+        (self.lines_of(new).len() as u32, self.lines_of(old).len() as u32)
+    }
+}
+
 /// A file's patches as the side panel shows them, rebuilt only when the
 /// patches or the width change.
 pub struct View {
@@ -473,6 +549,17 @@ impl View {
         self.built = Some((patches.len(), width));
     }
 
+    /// Rebuilds `lines` from one patch text, for a write that is still arriving.
+    pub fn show_text(&mut self, patch: &str, width: usize, cut: &str) {
+        self.lines = inline(&Patch::parse(patch, language(&self.path)), width, cut);
+        self.built = None;
+    }
+
+    /// Scrolls so the last row is the last of a view `rows` tall.
+    pub fn follow(&mut self, rows: usize) {
+        self.scroll = self.lines.len().saturating_sub(rows);
+    }
+
     /// Scrolls by `delta` rows, never past the last row of a view `rows` tall.
     pub fn scroll_by(&mut self, delta: i32, rows: usize) {
         let most = self.lines.len().saturating_sub(rows);
@@ -483,6 +570,30 @@ impl View {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_write_being_typed_reads_as_a_patch_and_a_retry_starts_over() {
+        let mut live = Live::new("c1", "write_file");
+        live.feed("content", 0, "a = 1\nb = 2\n");
+        live.feed("content", 2, "c = 3\n");
+        assert_eq!(live.patch(), "@@ -0,0 +1,3 @@\n+a = 1\n+b = 2\n+c = 3\n");
+        assert_eq!(live.counts(), (3, 0));
+        live.feed("content", 7, "skipped\n");
+        assert_eq!(live.counts(), (3, 0));
+        live.feed("content", 0, "z\n");
+        assert_eq!(live.patch(), "@@ -0,0 +1,1 @@\n+z\n");
+    }
+
+    #[test]
+    fn a_replacement_shows_what_goes_out_and_what_comes_in() {
+        let mut live = Live::new("c2", "replace_in_file");
+        live.feed("old_text", 0, "x = 1\n");
+        live.feed("new_text", 0, "x = 2\ny = 3\n");
+        let patch = Patch::parse(&live.patch(), "py");
+        let kinds: Vec<_> = rows(&patch).iter().map(|r| r.kind).collect();
+        assert_eq!(kinds, [Kind::Removed, Kind::Added, Kind::Added]);
+        assert_eq!(live.counts(), (2, 1));
+    }
 
     const PATCH: &str = "--- a/a.py\n+++ b/a.py\n@@ -10,4 +10,4 @@\n keep\n-total = price * 2\n+total = price * 3\n keep too\n";
 

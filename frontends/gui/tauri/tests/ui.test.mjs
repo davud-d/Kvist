@@ -163,6 +163,48 @@ test("a journal replays into the same feed without waking the agent", () => {
   assert.equal(agent.state, "asleep");
 });
 
+test("a write fills its card while the model types it, and the step that follows reuses the card", () => {
+  const agent = createAgent("a1", "/w");
+  const piece = (line, text, extra = {}) => ({ type: "call_stream", call_id: "w1", tool: "write_file", path: "a.py", field: "content", line, text, done: false, ...extra });
+  feed(agent, piece(0, "import os\nx = 1\n"), piece(2, "y = 2\n"), piece(9, "skipped\n"));
+  assert.deepEqual(kinds(agent), ["call"]);
+  const call = agent.items[0];
+  assert.equal(call.stream.content, "import os\nx = 1\ny = 2\n");
+  assert.equal(call.added, 3);
+  feed(agent, piece(0, "z\n"));
+  assert.equal(call.stream.content, "z\n", "line 0 starts the field over");
+
+  feed(agent, { type: "step", step: 1, call_id: "w1", user_message: "Writing it.", action_type: "write_file", action_description: "writes a.py" });
+  assert.deepEqual(kinds(agent), ["reply", "call"], "the model's words stay above the card");
+  assert.equal(call.label, "writes a.py");
+  feed(agent, { type: "action_result", step: 1, call_id: "w1", ok: true, summary: "done", path: "a.py", lines_added: 1, lines_removed: 0 });
+  assert.equal(call.phase, "ok");
+  assert.equal(call.added, 1);
+});
+
+test("calls show up one by one while the model is still writing the batch", () => {
+  const agent = createAgent("a1", "/w");
+  feed(
+    agent,
+    { type: "call_begin", call_id: "r1", tool: "read_file", path: "a.py", description: "reads a.py" },
+    { type: "call_begin", call_id: "r2", tool: "run_shell", path: "", description: "runs tests" },
+    { type: "call_begin", call_id: "r2", tool: "run_shell", path: "", description: "again" },
+    { type: "call_begin", call_id: "f1", tool: "final_answer", path: "", description: "" },
+  );
+  assert.deepEqual(kinds(agent), ["call", "call"], "a repeat and the answer make no card");
+  feed(agent, { type: "step", step: 1, call_id: "r1", user_message: "", action_type: "read_file", action_description: "reads a.py", action_args: { path: "a.py" } });
+  assert.deepEqual(kinds(agent), ["call", "call"], "the step fills the early card in");
+  assert.equal(agent.items[0].step, 1);
+});
+
+test("a replacement counts what goes out and what comes in", () => {
+  const agent = createAgent("a1", "/w");
+  const piece = (field, text) => ({ type: "call_stream", call_id: "r1", tool: "replace_in_file", path: "a.py", field, line: 0, text, done: true });
+  feed(agent, piece("old_text", "a\nb\n"), piece("new_text", "c\n"));
+  assert.equal(agent.items[0].removed, 2);
+  assert.equal(agent.items[0].added, 1);
+});
+
 test("unknown event types change nothing", () => {
   const agent = createAgent("a1", "/w");
   const before = agent.rev;

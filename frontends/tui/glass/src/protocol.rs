@@ -23,6 +23,19 @@ pub fn translate(event: &Value) -> Vec<CoreEvent> {
         "final" => vec![CoreEvent::Say(text("message"))],
         "step" => step(event),
         "action_result" => result(event),
+        "call_begin" if !ENDINGS.contains(&text("tool").as_str()) => {
+            let tool = text("tool");
+            let label = Some(text("description")).filter(|d| !d.trim().is_empty()).unwrap_or_else(|| tool.clone());
+            vec![CoreEvent::CallBegin { call: text("call_id"), kind: kind(&tool), label }]
+        }
+        "call_stream" => vec![CoreEvent::CallStream {
+            call: text("call_id"),
+            tool: text("tool"),
+            path: text("path"),
+            field: text("field"),
+            line: event.get("line").and_then(Value::as_u64).unwrap_or(0) as u32,
+            text: text("text"),
+        }],
         "error" => vec![CoreEvent::Error(text("message"))],
         "turn_end" => vec![CoreEvent::TurnEnd],
         "helper" => vec![CoreEvent::Helper {
@@ -148,6 +161,13 @@ fn helper_state(state: &str) -> HelperState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_call_begin_is_a_card_unless_it_is_the_answer() {
+        let begin = |tool: &str| json!({"type": "call_begin", "call_id": "c1", "tool": tool, "path": "a.py", "description": "reads a.py"});
+        assert_eq!(translate(&begin("read_file")).len(), 1);
+        assert!(translate(&begin("final_answer")).is_empty());
+    }
+
     use super::*;
     use serde_json::json;
 
@@ -234,6 +254,23 @@ mod tests {
     fn a_journaled_request_is_shown_unless_it_is_a_wake_up() {
         assert_eq!(translate(&json!({"type": "user", "text": "fix it"})), vec![CoreEvent::User("fix it".into())]);
         assert!(translate(&json!({"type": "user", "text": "", "woken": true})).is_empty());
+    }
+
+    #[test]
+    fn the_lines_of_a_call_being_written_are_passed_on() {
+        let piece = json!({"type": "call_stream", "call_id": "c1", "tool": "write_file", "path": "a.py",
+            "field": "content", "line": 4, "text": "x = 1\n", "done": false});
+        assert_eq!(
+            translate(&piece),
+            vec![CoreEvent::CallStream {
+                call: "c1".into(),
+                tool: "write_file".into(),
+                path: "a.py".into(),
+                field: "content".into(),
+                line: 4,
+                text: "x = 1\n".into()
+            }]
+        );
     }
 
     #[test]

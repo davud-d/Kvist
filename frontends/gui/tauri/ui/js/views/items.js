@@ -4,6 +4,11 @@
 import { fill, h, icon } from "../dom.js";
 import { t } from "../i18n.js";
 import { renderMarkdown } from "../markdown.js";
+import { animate, finished } from "../motion.js";
+
+// How long a finished write stays open before it folds, and how many of its lines are drawn while it arrives.
+const FOLD_AFTER_MS = 2000;
+const STREAM_LINES = 150;
 
 const CALL_ICONS = {
   read_file: "file", read_multiple_files: "file", list_dir: "folder", list_tree: "folder",
@@ -69,7 +74,22 @@ function diffLines(patch) {
   return h("div", { class: "diff" }, rows);
 }
 
+// What the model has typed so far, as the rows of a diff: what goes out, then what comes in.
+function streamLines(item) {
+  const rows = [];
+  const side = (text, kind, sign) => {
+    if (!text) return;
+    for (const line of text.replace(/\n$/, "").split("\n")) rows.push(h("div", { class: `diff-line ${kind}` }, `${sign}${line}`));
+  };
+  side(item.stream.old_text, "del", "-");
+  side(item.stream.new_text ?? item.stream.content, "add", "+");
+  const hidden = Math.max(0, rows.length - STREAM_LINES);
+  const above = hidden ? [h("div", { class: "diff-line hunk" }, `⋯ ${hidden}`)] : [];
+  return h("div", { class: "diff live" }, above, rows.slice(hidden));
+}
+
 function callDetail(item) {
+  if (item.stream && !item.folded) return streamLines(item);
   if (item.patch) return diffLines(item.patch);
   if (item.output) return h("pre", { class: "call-output" }, item.output);
   const args = Object.keys(item.args ?? {}).length ? JSON.stringify(item.args, null, 2) : "";
@@ -84,6 +104,33 @@ function paintCall(el, item) {
   const detail = callDetail(item);
   const tail = item.phase === "run" && item.output ? h("pre", { class: "call-tail" }, item.output.split("\n").slice(-3).join("\n")) : null;
   fill(el, head, tail, detail ? h("div", { class: "call-detail" }, detail) : null);
+  if (item.stream) followStream(el, item);
+}
+
+// A write opens as soon as its first line arrives and stays open while it fills; two seconds after its result it folds.
+function followStream(el, item) {
+  el.classList.toggle("streaming", !item.folded);
+  const box = el.querySelector(".diff.live");
+  if (box && item.phase === "run") box.scrollTop = box.scrollHeight;
+  if (item.phase === "run" || item.folded || el.foldTimer) return;
+  el.foldTimer = setTimeout(() => fold(el, item), FOLD_AFTER_MS);
+}
+
+async function fold(el, item) {
+  item.folded = true;
+  const detail = el.querySelector(".call-detail");
+  if (detail) {
+    detail.style.overflow = "hidden";
+    const run = animate(detail, [{ height: `${detail.offsetHeight}px`, opacity: 1 }, { height: "0px", opacity: 0 }], { curve: "emphasized", ms: 360, fill: "forwards" });
+    await finished(run);
+    // The folded card opens again on a click, so the animation's end state must not outlive the fold.
+    el.classList.remove("streaming");
+    run?.cancel();
+    detail.style.overflow = "";
+    detail.replaceChildren(callDetail(item) ?? "");
+    return;
+  }
+  el.classList.remove("streaming");
 }
 
 function paintPlan(el, item) {

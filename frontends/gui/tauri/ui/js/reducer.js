@@ -60,6 +60,12 @@ function touch(agent, item) {
   agent.rev++;
 }
 
+// The model's words belong above the card they introduce, which a stream may have opened already.
+function placeBefore(agent, item, anchor) {
+  agent.items.splice(agent.items.indexOf(item), 1);
+  agent.items.splice(agent.items.indexOf(anchor), 0, item);
+}
+
 export function addNote(agent, text, tone = "muted") {
   return push(agent, { kind: "note", text, tone });
 }
@@ -126,6 +132,19 @@ function repeatsLastReply(agent, message) {
 const TERMINAL_ACTIONS = new Set(["final_answer", "report_to_user", "refuse"]);
 
 const WRITES = new Set(["write_file", "append_file", "replace_in_file"]);
+
+const lineCount = (text) => (text ? text.split("\n").length - (text.endsWith("\n") ? 1 : 0) : 0);
+
+// call_stream carries whole new lines of a call's text while the model is still writing it; `line` is where they
+// begin, so a piece that does not follow on is dropped and line 0 starts the field over (a retried request).
+function feedStream(call, ev) {
+  const have = ev.line === 0 ? "" : (call.stream[ev.field] ?? "");
+  if (ev.line !== have.split("\n").length - 1) return;
+  call.stream[ev.field] = have + ev.text;
+  const replacing = call.actionType === "replace_in_file";
+  call.added = lineCount(call.stream[replacing ? "new_text" : "content"]);
+  call.removed = replacing ? lineCount(call.stream.old_text) : 0;
+}
 
 function noteWrite(agent, call) {
   if (!call.path) return;
@@ -210,7 +229,16 @@ export function reduce(agent, ev, { replay = false } = {}) {
       return;
     case "step": {
       settleStreams(agent);
-      if (ev.user_message) push(agent, { kind: "reply", text: ev.user_message, live: false, aside: true });
+      const early = agent.calls.get(ev.call_id || `step-${ev.step}`);
+      if (ev.user_message) {
+        const words = push(agent, { kind: "reply", text: ev.user_message, live: false, aside: true });
+        if (early) placeBefore(agent, words, early);
+      }
+      if (early) {
+        Object.assign(early, { step: ev.step, actionType: ev.action_type, label: ev.action_description || ev.action_type, args: ev.action_args ?? {} });
+        touch(agent, early);
+        return;
+      }
       if (TERMINAL_ACTIONS.has(ev.action_type)) return;
       const call = push(agent, {
         kind: "call",
@@ -240,6 +268,23 @@ export function reduce(agent, ev, { replay = false } = {}) {
       call.removed = ev.lines_removed ?? null;
       call.patch = ev.patch ?? null;
       if (ev.ok && WRITES.has(call.actionType)) noteWrite(agent, call);
+      touch(agent, call);
+      return;
+    }
+    case "call_begin": {
+      if (replay || agent.calls.has(ev.call_id) || TERMINAL_ACTIONS.has(ev.tool)) return;
+      const call = push(agent, { kind: "call", callId: ev.call_id, step: 0, actionType: ev.tool, label: ev.description || ev.path || ev.tool, args: { path: ev.path }, phase: "run", summary: "", output: "" });
+      agent.calls.set(ev.call_id, call);
+      return;
+    }
+    case "call_stream": {
+      let call = agent.calls.get(ev.call_id);
+      if (!call) {
+        call = push(agent, { kind: "call", callId: ev.call_id, step: 0, actionType: ev.tool, label: ev.path || ev.tool, args: { path: ev.path }, phase: "run", summary: "", output: "", stream: {} });
+        agent.calls.set(ev.call_id, call);
+      }
+      if (!call.stream || call.phase !== "run") return;
+      feedStream(call, ev);
       touch(agent, call);
       return;
     }

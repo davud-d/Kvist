@@ -58,6 +58,8 @@ const FRONTEND_REQUEST: &str = "local:frontend";
 const SWITCH_FRONTEND: u8 = 64;
 /// A second Esc within this time stops the running turn.
 const STOP_CONFIRM: Duration = Duration::from_secs(3);
+/// How long a finished write stays in the side panel before it folds away.
+const LIVE_LINGER: Duration = Duration::from_secs(2);
 /// Two presses on the same cell this close are a double click (a word), three a line.
 const MULTI_CLICK: Duration = Duration::from_millis(400);
 /// While a drag stays above or below the text, it scrolls one line this often.
@@ -160,6 +162,9 @@ pub struct App {
     /// The file whose diff is open on the right; it stays until the panel has slid out.
     pub diff: Option<diff::View>,
     pub diff_in: Tween,
+    /// The write the model is typing now, shown in the diff's place; kept after
+    /// its panel closes so the rest of the same call does not open it again.
+    pub live: Option<diff::Live>,
     pending_plan: Option<String>,
     pub modal: Option<Modal>,
     pub modal_p: Tween,
@@ -245,6 +250,7 @@ impl App {
             browser_in: Tween::settled(0.0),
             diff: None,
             diff_in: Tween::settled(0.0),
+            live: None,
             pending_plan: None,
             modal: None,
             modal_p: Tween::settled(0.0),
@@ -315,8 +321,19 @@ impl App {
         let Some(view) = self.diff.as_mut() else { return };
         let Some(panel) = self.layout.diff else {
             self.diff = None;
+            self.release_live();
             return;
         };
+        if let Some(live) = self.live.as_mut().filter(|live| live.shown) {
+            let width = panel.width.saturating_sub(4) as usize;
+            if live.changed || live.width != width {
+                view.show_text(&live.patch(), width, strings().diff_cut);
+                view.follow(panel.height.saturating_sub(5) as usize);
+                live.changed = false;
+                live.width = width;
+            }
+            return;
+        }
         let patches = self.session.files.iter().find(|f| f.path == view.path).map_or(&[][..], |f| f.patches.as_slice());
         view.sync(patches, panel.width.saturating_sub(4) as usize, strings().diff_cut);
     }
@@ -341,6 +358,7 @@ impl App {
         if self.modal.is_some() && self.modal_p.target() == 0.0 && !self.modal_p.running(now) {
             self.modal = None;
         }
+        self.fold_finished_write(now);
         self.drop_closed_diff(now);
         self.keep_pouring(now);
         if self.toast.as_ref().is_some_and(|t| now.saturating_duration_since(t.at) > TOAST) {
@@ -472,6 +490,9 @@ impl App {
                     self.close_modal(now);
                 }
             }
+            CoreEvent::CallStream { call, tool, path, field, line, text } => self.stream_write(call, tool, path, field, *line, text, now),
+            CoreEvent::Result { call, .. } => self.finish_live(Some(call), now),
+            CoreEvent::TurnEnd => self.finish_live(None, now),
             _ => {}
         }
         self.session.apply(event, now);
@@ -831,6 +852,7 @@ impl App {
             || tweens.iter().any(|t| t.running(now))
             || view::revealing(self, now)
             || self.image_pending
+            || self.live.as_ref().is_some_and(|live| live.shown)
             || self.develop_step(now) < DEVELOP_STEPS
             || self.pour.as_ref().is_some_and(|pour| pour.moving(now))
             || self.session.files.iter().any(|f| now.saturating_duration_since(f.touched) < Duration::from_millis(1700))
@@ -1431,10 +1453,13 @@ impl App {
     fn open_diff(&mut self, index: usize, now: Instant) {
         let Some(file) = self.session.files.get(index) else { return };
         let showing = self.diff_in.target() > 0.0;
-        if showing && self.diff.as_ref().is_some_and(|view| view.path == file.path) {
+        let typing = self.live.as_ref().is_some_and(|live| live.shown);
+        if showing && !typing && self.diff.as_ref().is_some_and(|view| view.path == file.path) {
             return self.close_diff(now);
         }
-        self.diff = Some(diff::View::new(file.path.clone()));
+        let path = file.path.clone();
+        self.release_live();
+        self.diff = Some(diff::View::new(path));
         self.helpers_in = Tween::settled(0.0);
         if !showing {
             self.diff_in.go(1.0, now, 420, Ease::Burst);
@@ -1442,7 +1467,48 @@ impl App {
     }
 
     fn close_diff(&mut self, now: Instant) {
+        self.release_live();
         self.diff_in.go(0.0, now, 300, Ease::Burst);
+    }
+
+    /// The panel no longer belongs to the write being typed.
+    fn release_live(&mut self) {
+        if let Some(live) = self.live.as_mut() {
+            live.shown = false;
+        }
+    }
+
+    /// Opens the side panel on a write that has just begun, or adds the lines
+    /// that arrived to the one it shows.
+    #[allow(clippy::too_many_arguments)]
+    fn stream_write(&mut self, call: &str, tool: &str, path: &str, field: &str, line: u32, text: &str, now: Instant) {
+        if self.live.as_ref().is_none_or(|live| live.call != call) {
+            self.live = Some(diff::Live::new(call, tool));
+            self.diff = Some(diff::View::new(path.to_string()));
+            self.helpers_in = Tween::settled(0.0);
+            self.diff_in.go(1.0, now, 420, Ease::Burst);
+        }
+        if let Some(live) = self.live.as_mut() {
+            live.feed(field, line, text);
+        }
+    }
+
+    /// Starts the countdown to folding the panel: the call's result (`call`),
+    /// or the end of the turn for a write that never got one.
+    fn finish_live(&mut self, call: Option<&str>, now: Instant) {
+        let Some(live) = self.live.as_mut().filter(|live| live.finished.is_none()) else { return };
+        if call.is_none_or(|call| live.call == call) {
+            live.finished = Some(now);
+        }
+    }
+
+    fn fold_finished_write(&mut self, now: Instant) {
+        let due = self.live.as_ref().is_some_and(|live| {
+            live.shown && live.finished.is_some_and(|at| now.saturating_duration_since(at) >= LIVE_LINGER)
+        });
+        if due {
+            self.close_diff(now);
+        }
     }
 
     /// Forgets the diff once its panel has slid out.
@@ -1453,6 +1519,7 @@ impl App {
     }
 
     fn toggle_helpers(&mut self, focus: Option<usize>, now: Instant) {
+        self.release_live();
         if self.diff.is_some() {
             self.diff = None;
             self.diff_in = Tween::settled(0.0);
@@ -2042,6 +2109,36 @@ mod tests {
         assert_eq!(app.diff_in.target(), 0.0);
         app.drop_closed_diff(now + Duration::from_secs(3));
         assert!(app.diff.is_none());
+    }
+
+    fn piece(call: &str, line: u32, text: &str) -> CoreEvent {
+        CoreEvent::CallStream { call: call.into(), tool: "write_file".into(), path: "app/main.py".into(), field: "content".into(), line, text: text.into() }
+    }
+
+    #[test]
+    fn a_write_fills_the_side_panel_as_it_is_typed_and_folds_two_seconds_after_its_result() {
+        let (mut app, now) = changed_app();
+        app.on_session(piece("w1", 0, "import os\nx = 1\n"), now);
+        assert!(app.diff_in.target() > 0.0);
+        draw_once(&mut app, now + Duration::from_millis(500));
+        let shown = |app: &App| -> String { app.diff.as_ref().unwrap().lines.iter().flatten().map(|(s, _)| s.as_str()).collect() };
+        assert!(shown(&app).contains("import os"));
+
+        app.on_session(piece("w1", 2, "y = 2\n"), now);
+        draw_once(&mut app, now + Duration::from_millis(600));
+        assert!(shown(&app).contains("y = 2"));
+
+        let done = now + Duration::from_secs(1);
+        app.on_session(CoreEvent::Result { call: "w1".into(), ok: true, summary: "ok".into(), diff: Some((3, 0)) }, done);
+        app.fold_finished_write(done + Duration::from_millis(1900));
+        assert!(app.diff_in.target() > 0.0, "still lingering");
+        app.fold_finished_write(done + Duration::from_millis(2100));
+        assert_eq!(app.diff_in.target(), 0.0);
+        app.drop_closed_diff(done + Duration::from_secs(4));
+        assert!(app.diff.is_none());
+
+        app.on_session(piece("w1", 3, "z = 3\n"), done + Duration::from_secs(5));
+        assert_eq!(app.diff_in.target(), 0.0, "the rest of a closed call does not reopen it");
     }
 
     #[test]

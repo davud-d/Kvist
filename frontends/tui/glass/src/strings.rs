@@ -70,6 +70,7 @@ pub struct Strings {
     pub diff_edits: &'static str,
     pub diff_scroll: &'static str,
     pub diff_close: &'static str,
+    pub live_writing: &'static str,
     pub copied: &'static str,
 }
 
@@ -140,6 +141,7 @@ const RU: Strings = Strings {
     diff_edits: "правок",
     diff_scroll: "колесо",
     diff_close: "закрыть",
+    live_writing: "пишет файл…",
     copied: "Скопировано",
 };
 
@@ -210,6 +212,7 @@ const EN: Strings = Strings {
     diff_edits: "edits",
     diff_scroll: "wheel",
     diff_close: "close",
+    live_writing: "writing the file…",
     copied: "Copied",
 };
 

@@ -293,7 +293,15 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     let close_hover = app.hover == Some(Hit::DiffClose);
     p.text(right - 1, top, theme::I_CLOSE, st(if close_hover { MOON } else { DUSK }));
     drawn.hits.push((Rect::new((right - 2).max(0) as u16, top.max(0) as u16, 3, 1), Hit::DiffClose));
-    let numbers = file.map(|file| counts(file.added, file.removed)).unwrap_or_default();
+    let live = app.live.as_ref().filter(|live| live.shown);
+    let numbers = match (live, file) {
+        (Some(live), _) => {
+            let (added, removed) = live.counts();
+            counts(added, removed)
+        }
+        (None, Some(file)) => counts(file.added, file.removed),
+        (None, None) => Line::default(),
+    };
     let numbers_w = text::line_width(&numbers) as i32;
     p.line_right(right - 3, top, &numbers);
 
@@ -309,6 +317,9 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
 
     let body_top = top + 2;
     let rows = app.diff_rows();
+    if view.lines.is_empty() && live.is_some() {
+        return;
+    }
     if view.lines.is_empty() {
         let width = (right - x).max(8) as usize;
         for (i, line) in text::wrap(&vec![span(s.diff_none, DUSK)], width).iter().enumerate() {
@@ -318,6 +329,13 @@ fn draw_diff(p: &mut Painter, app: &App, now: Instant, drawn: &mut Drawn) {
     }
     for (i, line) in view.lines.iter().skip(view.scroll).take(rows).enumerate() {
         p.line(x, body_top + i as i32, line);
+    }
+    let writing = live.is_some_and(|live| live.finished.is_none());
+    if writing {
+        let (mark, color) = helper_mark(HelperState::Running, now.saturating_duration_since(app.started).as_millis());
+        let cx = p.text(x, panel.bottom() as i32 - 2, mark, st(color));
+        p.text(cx + 1, panel.bottom() as i32 - 2, s.live_writing, st(MIST));
+        return;
     }
     let edits = file.map_or(0, |file| file.patches.len());
     let from = view.scroll + 1;
